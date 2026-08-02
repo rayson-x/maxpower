@@ -26,6 +26,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "harness": "tsc -p tools/harness/tsconfig.json && node .harness-build/tools/harness/analyze.js",
+    "validate:labeled-fixture": "tsc -p tools/labeled-set-fixture/tsconfig.json && node .labeled-fixture-build/tools/labeled-set-fixture/validate.js",
     "test": "tsc -p tsconfig.test.json && node .test-build/tools/runTests.js"
   },
   "private": true

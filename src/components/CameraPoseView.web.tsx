@@ -22,6 +22,7 @@ import {
 } from "../pose/canonicalPose";
 import { buildCanonicalPosePresentation } from "../pose/canonicalPosePresentation";
 import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
+import { buildLabeledSetFixtureTemplate } from "../pose/labeledSetFixture";
 import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
 import { buildRecordingFixture } from "../pose/recordingFixture";
 import {
@@ -203,6 +204,10 @@ export function CameraPoseView() {
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingStartMsRef = useRef(0);
   const recordingStopMsRef = useRef(0);
+  const recordingMetadataRef = useRef<{
+    exerciseChoice: string;
+    cameraView: CameraView;
+  } | null>(null);
 
   const [status, setStatus] = useState<EngineStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -244,6 +249,8 @@ export function CameraPoseView() {
     videoName: string;
     keypointsUrl: string;
     keypointsName: string;
+    annotationUrl: string | null;
+    annotationName: string | null;
     poseCount: number;
     durationSec: number;
   } | null>(null);
@@ -430,6 +437,7 @@ export function CameraPoseView() {
       if (previous) {
         URL.revokeObjectURL(previous.videoUrl);
         URL.revokeObjectURL(previous.keypointsUrl);
+        if (previous.annotationUrl) URL.revokeObjectURL(previous.annotationUrl);
       }
 
       const mimeType = mediaRecorderRef.current?.mimeType || "video/webm";
@@ -447,12 +455,40 @@ export function CameraPoseView() {
         poses,
       });
       const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
+      const recordingMetadata = recordingMetadataRef.current;
+      const selection =
+        recordingMetadata?.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
+          ? { mode: "user" as const, exerciseId: recordingMetadata.exerciseChoice }
+          : null;
+      const analysis = selection && recordingMetadata
+        ? analyzePoseSet({
+            poses: fixture[0].poses,
+            cameraView: recordingMetadata.cameraView,
+            exercise: selection,
+          })
+        : null;
+      const annotation =
+        analysis?.profile && analysis.segments.length > 0 && recordingMetadata
+          ? buildLabeledSetFixtureTemplate({
+              videoId: fixture[0].video,
+              keypointsFile: `${baseName}.json`,
+              exerciseId: analysis.profile.exerciseId,
+              cameraView: recordingMetadata.cameraView,
+              ruleVersion: analysis.versions.rule,
+              segments: analysis.segments,
+            })
+          : null;
+      const annotationBlob = annotation
+        ? new Blob([JSON.stringify(annotation, null, 2)], { type: "application/json" })
+        : null;
 
       return {
         videoUrl: URL.createObjectURL(videoBlob),
         videoName: `${baseName}.${videoExt}`,
         keypointsUrl: URL.createObjectURL(keypointsBlob),
         keypointsName: `${baseName}.json`,
+        annotationUrl: annotationBlob ? URL.createObjectURL(annotationBlob) : null,
+        annotationName: annotationBlob ? `${baseName}.labels.json` : null,
         poseCount: poses.length,
         durationSec: fixture[0].durationSec,
       };
@@ -514,6 +550,7 @@ export function CameraPoseView() {
       recordedChunksRef.current = [];
       recordingStartMsRef.current = Date.now();
       recordingStopMsRef.current = recordingStartMsRef.current;
+      recordingMetadataRef.current = { exerciseChoice, cameraView };
       const mimeType = pickRecorderMimeType();
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
@@ -530,7 +567,7 @@ export function CameraPoseView() {
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus("error");
     }
-  }, [ensureEngine, startLoop, finalizeRecording]);
+  }, [ensureEngine, startLoop, finalizeRecording, exerciseChoice, cameraView]);
 
   const startUrl = useCallback(
     async (url: string, name: string) => {
@@ -589,6 +626,7 @@ export function CameraPoseView() {
         if (previous) {
           URL.revokeObjectURL(previous.videoUrl);
           URL.revokeObjectURL(previous.keypointsUrl);
+          if (previous.annotationUrl) URL.revokeObjectURL(previous.annotationUrl);
         }
         return previous;
       });
@@ -1129,6 +1167,15 @@ export function CameraPoseView() {
                   >
                     ↓ 关键点(可直接喂 harness)
                   </a>
+                  {recordingResult.annotationUrl && recordingResult.annotationName && (
+                    <a
+                      href={recordingResult.annotationUrl}
+                      download={recordingResult.annotationName}
+                      style={{ ...styles.btnSmall, textDecoration: "none", textAlign: "center" }}
+                    >
+                      ↓ rep 标注模板
+                    </a>
+                  )}
                 </div>
               </div>
             )}
