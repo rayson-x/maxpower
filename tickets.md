@@ -7,7 +7,7 @@
 
 Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开工。每个 ticket 是一条可单独演示的 tracer bullet；实现时一次只取一票。
 
-## 恢复连续性测试前沿并登记高位下拉真值 `[ready-for-agent]`
+## 恢复连续性测试前沿并登记高位下拉真值
 
 **What to build:** 让现有全部测试重新通过统一入口运行，并把背面高位下拉的原视频、原始关键点和下拉到底挑战帧登记成可重复回放的连续性基线；本票不改变产品轨迹算法。
 
@@ -31,7 +31,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] Raw observation 只通过显式诊断入口保留，不静默替换 canonical
 - [ ] 旧调用方在 expand 阶段继续工作，测试保持绿色
 
-## 用弱观测融合保持高位下拉手臂连续 `[ready-for-agent]`
+## 用弱观测融合保持高位下拉手臂连续
 
 **What to build:** 当肩腕可靠、肘部低置信但轨迹和骨链连续时输出 fused 肘部，让高位下拉到底时手臂保持可信连线，同时让客户端与渲染使用同一坐标。
 
@@ -43,7 +43,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] 不通过全局降低 visibility 阈值或无限预测实现连续
 - [ ] 人工标注挑战帧的位置误差和 arm edge coverage 达到登记门槛
 
-## 让短预测按时间结束并诚实转为 Unknown `[ready-for-agent]`
+## 让短预测按时间结束并诚实转为 Unknown
 
 **What to build:** 短缺口使用真实毫秒做因果预测，超过证据上限时输出 unknown；不同帧率、seek、large dt 和会话切换不再改变或污染行为。
 
@@ -55,7 +55,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] Seek、时间倒退、large dt、sequence/model/schema 切换清理旧状态
 - [ ] 重新获得观测后不继承陈旧 One Euro/预测残影
 
-## 拒绝高置信飞点但保留真实快速动作 `[ready-for-agent]`
+## 拒绝高置信飞点但保留真实快速动作
 
 **What to build:** 用 aspect-correct motion、innovation、骨链和整体运动联合判断异常，使高置信错点不再豁免，同时保留真实快速动作的峰值和相位。
 
@@ -67,7 +67,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] 稳定窗口建立并重置骨长 baseline，不用坏首帧永久锁定
 - [ ] Provenance 记录 gate 原因，峰值幅度、相位与下游 rep 不退化
 
-## 将已验证的 Pose Continuity Session 迁移到 Rust `[ready-for-agent]`
+## 将已验证的 Pose Continuity Session 迁移到 Rust
 
 **What to build:** 用纯计算 Rust core 重现已验证的 canonical session 行为，并生成 Swift/Kotlin bindings，使相同 fixture 可以在 host 和未来移动 adapter 上得到一致结果。
 
@@ -79,7 +79,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] 非法长度、NaN/Infinity、时间倒退和未知 schema 返回结构化错误
 - [ ] Panic 不穿越 FFI，core 不依赖 Expo、相机、Python、OpenCV 或网络
 
-## Android 相机贯通 Canonical Rust Session `[ready-for-agent]`
+## Android 相机贯通 Canonical Rust Session
 
 **What to build:** Android 原生 MediaPipe 观测先通过 Rust continuity session，再以 canonical event 同时驱动屏幕、rep 计数和录制；用户可在真机复现高位下拉手臂连续性。
 
@@ -91,7 +91,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] 高位下拉真机/录像回放不再因弱肘部直接断臂，也不使用长时间假预测
 - [ ] 相机、UI 和 JavaScript runtime 不被 continuity core 阻塞
 
-## 提供可复用的 iOS SDK Adapter `[ready-for-agent]`
+## 提供可复用的 iOS SDK Adapter
 
 **What to build:** iOS 可以集成同一 Rust SDK、管理 session 并回放 fixtures，证明 Android/iOS 复用的是同一个算法核心；完整 iOS 相机界面留到后续。
 
@@ -102,7 +102,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] ABI、资源生命周期和错误映射有 contract tests
 - [ ] SDK 以可复用 Expo Module/Apple artifact 交付，不把算法复制到 Swift
 
-## 收缩旧 Raw/渲染分叉 `[ready-for-agent]`
+## 收缩旧 Raw/渲染分叉
 
 **What to build:** 完成 expand–contract 迁移，移除产品路径里的二次平滑、UI visibility gate 和 raw 默认消费，让所有业务消费者只认识 canonical，raw 只保留显式诊断用途。
 
@@ -114,7 +114,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] Raw diagnostic stream 明确标记且不会进入正常业务输出
 - [ ] 删除旧形态后类型检查、fixture 和应用 contract 全部绿色
 
-## 完成真机性能验收并发布 SDK V1 `[ready-for-agent]`
+## 完成真机性能验收并发布 SDK V1
 
 **What to build:** 在目标 Android/iPhone 上验证连续性 SDK 的延迟、资源和降级行为，并交付可重复构建的 V1 artifact，使其可以安全进入后续应用迭代。
 
