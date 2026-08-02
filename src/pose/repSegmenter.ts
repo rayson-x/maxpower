@@ -571,12 +571,3 @@ export function representativeCycle(cycles: RepCycle[]): RepCycle | null {
   const sorted = [...pool].sort((a, b) => a.amplitude - b.amplitude);
   return sorted[Math.floor(sorted.length / 2)];
 }
-
-/** Maps a free-text action name to a stable registry id when the recognizer knows one. */
-export function guessExerciseId(text: string): string {
-  if (text.includes("坐姿划船") || text.includes("seated_row")) return "seated_row";
-  if (text.includes("高位下拉") || text.includes("lat_pulldown")) return "lat_pulldown";
-  if (text.includes("引体") || text.includes("pull_up")) return "pull_up";
-  if (text.includes("直臂") || text.includes("straight_arm")) return "straight_arm_pulldown";
-  return "barbell_row";
-}

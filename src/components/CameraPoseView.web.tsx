@@ -29,7 +29,6 @@ import {
   type PoseSetAnalysisResult,
 } from "../pose/poseSetAnalysis";
 import {
-  guessExerciseId,
   representativeCycle,
   segmentRepsAuto,
   type AutoSegmentation,
@@ -1383,7 +1382,9 @@ function RecognitionCompare({
   if (!local && !open && !openError) return null;
 
   // 一致性:把 LLM 的自由文本名映射回内部 id 后比对
-  const openMappedId = open ? guessExerciseId(`${open.name} ${open.nameEn}`) : null;
+  const openMappedId = open
+    ? EXERCISE_REGISTRY.matchText(`${open.name} ${open.nameEn}`)?.id ?? null
+    : null;
   const agree = local && openMappedId ? local.id === openMappedId : null;
 
   return (

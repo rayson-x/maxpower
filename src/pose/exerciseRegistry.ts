@@ -142,6 +142,31 @@ export class ExerciseRegistry {
     return exercise;
   }
 
+  /** Resolves recognizer labels through catalog-owned names and aliases. */
+  matchText(text: string): ExerciseConcept | undefined {
+    const query = normalizeExerciseText(text);
+    if (!query) return undefined;
+    const matches = this.exercises
+      .flatMap((exercise) =>
+        [exercise.id, exercise.nameZh, exercise.nameEn, ...exercise.aliases].map((term) => ({
+          exercise,
+          term: normalizeExerciseText(term),
+        })),
+      )
+      .filter(({ term }) => term.length > 0 && query.includes(term));
+    const matchedExercises = new Set(matches.map(({ exercise }) => exercise.id));
+    // A recognizer can emit a specific Chinese variation name alongside a
+    // generic English parent name. A matched child is more informative than
+    // its matched parent, regardless of script-specific string length.
+    const specificMatches = matches.filter(
+      ({ exercise }) =>
+        exercise.variationOf !== null && matchedExercises.has(exercise.variationOf),
+    );
+    const candidates = specificMatches.length > 0 ? specificMatches : matches;
+    candidates.sort((a, b) => b.term.length - a.term.length);
+    return candidates[0]?.exercise;
+  }
+
   canRunSpecializedAnalysis(id: string): boolean {
     const maturity = this.get(id)?.maturity;
     return maturity === "experimental" || maturity === "validated";
@@ -242,4 +267,8 @@ function requiredStringArray(value: unknown, label: string): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeExerciseText(value: string): string {
+  return value.toLocaleLowerCase().replace(/[\s_-]+/g, "");
 }

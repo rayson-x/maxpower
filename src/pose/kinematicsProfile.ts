@@ -8,10 +8,24 @@ export interface KinematicsMetricDefinition {
   supportedViews: readonly CameraView[];
 }
 
+export type RecognitionTag =
+  | "arms_travel"
+  | "body_travel"
+  | "elbow_flexion"
+  | "forward_lean"
+  | "horizontal_path"
+  | "seated"
+  | "shoulder_dominant"
+  | "standing"
+  | "straight_arm"
+  | "upright"
+  | "vertical_path";
+
 export interface KinematicsProfile {
   exerciseId: string;
   version: string;
   movementPattern: "horizontal_pull" | "vertical_pull";
+  recognitionTags: readonly RecognitionTag[];
   preferredView: CameraView;
   supportedViews: readonly CameraView[];
   phaseSignal: {
@@ -40,6 +54,7 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     effortExtreme: "min",
     preferredView: "oblique45",
     amplitudeJoints: ["shoulder", "elbow", "wrist"],
+    recognitionTags: ["elbow_flexion", "arms_travel", "horizontal_path", "forward_lean", "standing"],
   }),
   profile({
     exerciseId: "pull_up",
@@ -49,6 +64,7 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     effortExtreme: "max",
     preferredView: "front",
     amplitudeJoints: ["shoulder", "wrist"],
+    recognitionTags: ["elbow_flexion", "body_travel", "vertical_path", "upright", "standing"],
   }),
   profile({
     exerciseId: "lat_pulldown",
@@ -58,6 +74,7 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     effortExtreme: "max",
     preferredView: "front",
     amplitudeJoints: ["shoulder", "wrist"],
+    recognitionTags: ["elbow_flexion", "arms_travel", "vertical_path", "upright", "seated"],
   }),
   profile({
     exerciseId: "seated_row",
@@ -67,6 +84,7 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     effortExtreme: "min",
     preferredView: "oblique45",
     amplitudeJoints: ["shoulder", "elbow", "wrist"],
+    recognitionTags: ["elbow_flexion", "arms_travel", "horizontal_path", "upright", "seated"],
   }),
   profile({
     exerciseId: "straight_arm_pulldown",
@@ -76,6 +94,7 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     effortExtreme: "min",
     preferredView: "side",
     amplitudeJoints: ["hip", "shoulder", "wrist"],
+    recognitionTags: ["straight_arm", "shoulder_dominant", "arms_travel", "vertical_path", "standing"],
   }),
 ];
 
@@ -97,12 +116,14 @@ function profile(input: {
   effortExtreme: "min" | "max";
   preferredView: CameraView;
   amplitudeJoints: readonly LogicalJoint[];
+  recognitionTags: readonly RecognitionTag[];
 }): KinematicsProfile {
   const definitionPrefix = `${input.exerciseId.replaceAll("_", "-")}/v1`;
   return {
     exerciseId: input.exerciseId,
     version: input.version,
     movementPattern: input.movementPattern,
+    recognitionTags: input.recognitionTags,
     preferredView: input.preferredView,
     supportedViews: COMMON_VIEWS,
     phaseSignal: {

@@ -52,3 +52,14 @@ test("registry rejects cycles in otherwise valid variation relationships", () =>
   ];
   assert.throws(() => loadExerciseRegistry(records), /Variation cycle/);
 });
+
+test("registry owns free-text matching and leaves unknown labels unresolved", () => {
+  assert.equal(EXERCISE_REGISTRY.matchText("宽握高位下拉")?.id, "wide_grip_lat_pulldown");
+  assert.equal(EXERCISE_REGISTRY.matchText("Lat_Pulldown")?.id, "lat_pulldown");
+  assert.equal(EXERCISE_REGISTRY.matchText("正手引体")?.id, "pull_up");
+  assert.equal(
+    EXERCISE_REGISTRY.matchText("宽握高位下拉 Lat pulldown")?.id,
+    "wide_grip_lat_pulldown",
+  );
+  assert.equal(EXERCISE_REGISTRY.matchText("unrecognised movement"), undefined);
+});

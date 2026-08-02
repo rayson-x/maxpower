@@ -1,5 +1,5 @@
 import type { AutoSegmentation } from "./repSegmenter";
-import { listKinematicsProfiles } from "./kinematicsProfile";
+import { listKinematicsProfiles, type RecognitionTag } from "./kinematicsProfile";
 import type { TrajectoryFeatures } from "./trajectory";
 
 /**
@@ -49,11 +49,11 @@ interface Rule {
   name: string;
   weight: number;
   /** 对哪些动作加分 */
-  supports: string[];
+  supports: readonly RecognitionTag[];
   evaluate: (input: ClassifierInput) => { hit: boolean; detail: string } | null;
 }
 
-const ALL = listKinematicsProfiles().map((profile) => profile.exerciseId);
+const CANDIDATES = listKinematicsProfiles();
 
 function elbowRange(t: TrajectoryFeatures): number | null {
   return t.jointRom.find((r) => r.joint === "elbow")?.rangeDeg ?? null;
@@ -67,7 +67,7 @@ const RULES: Rule[] = [
   {
     name: "手臂近乎伸直且肘角几乎不变",
     weight: 3,
-    supports: ["straight_arm_pulldown"],
+    supports: ["straight_arm"],
     evaluate: ({ trajectory }) => {
       const range = elbowRange(trajectory);
       const meanDeg = elbowMean(trajectory);
@@ -82,7 +82,7 @@ const RULES: Rule[] = [
   {
     name: "肘角大幅屈伸",
     weight: 2,
-    supports: ["barbell_row", "seated_row", "pull_up", "lat_pulldown"],
+    supports: ["elbow_flexion"],
     evaluate: ({ trajectory }) => {
       const range = elbowRange(trajectory);
       if (range === null) return null;
@@ -92,7 +92,7 @@ const RULES: Rule[] = [
   {
     name: "身体在动而非手臂在动",
     weight: 3,
-    supports: ["pull_up"],
+    supports: ["body_travel"],
     evaluate: ({ trajectory }) => {
       const r = trajectory.bodyTravelRatio;
       if (r === null) return null;
@@ -105,7 +105,7 @@ const RULES: Rule[] = [
   {
     name: "手臂在动而身体基本不动",
     weight: 2,
-    supports: ["lat_pulldown", "seated_row", "straight_arm_pulldown", "barbell_row"],
+    supports: ["arms_travel"],
     evaluate: ({ trajectory }) => {
       const r = trajectory.bodyTravelRatio;
       if (r === null) return null;
@@ -115,7 +115,7 @@ const RULES: Rule[] = [
   {
     name: "手腕轨迹以垂直方向为主",
     weight: 2,
-    supports: ["pull_up", "lat_pulldown", "straight_arm_pulldown"],
+    supports: ["vertical_path"],
     evaluate: ({ trajectory }) => {
       const axis = trajectory.wristPath?.principalAxisDeg;
       if (axis === undefined || axis === null) return null;
@@ -125,7 +125,7 @@ const RULES: Rule[] = [
   {
     name: "手腕轨迹以水平方向为主",
     weight: 2,
-    supports: ["barbell_row", "seated_row"],
+    supports: ["horizontal_path"],
     evaluate: ({ trajectory }) => {
       const axis = trajectory.wristPath?.principalAxisDeg;
       if (axis === undefined || axis === null) return null;
@@ -135,7 +135,7 @@ const RULES: Rule[] = [
   {
     name: "躯干明显前倾",
     weight: 3,
-    supports: ["barbell_row"],
+    supports: ["forward_lean"],
     evaluate: ({ trajectory }) => {
       const lean = trajectory.torsoAngle?.meanDeg;
       if (lean === undefined || lean === null) return null;
@@ -145,7 +145,7 @@ const RULES: Rule[] = [
   {
     name: "躯干接近直立",
     weight: 2,
-    supports: ["pull_up", "lat_pulldown", "seated_row"],
+    supports: ["upright"],
     evaluate: ({ trajectory }) => {
       const lean = trajectory.torsoAngle?.meanDeg;
       if (lean === undefined || lean === null) return null;
@@ -155,7 +155,7 @@ const RULES: Rule[] = [
   {
     name: "坐姿",
     weight: 2,
-    supports: ["seated_row", "lat_pulldown"],
+    supports: ["seated"],
     evaluate: ({ posture }) => {
       if (posture === "unknown") return null;
       return { hit: posture === "seated", detail: `姿势推断为 ${posture}` };
@@ -164,7 +164,7 @@ const RULES: Rule[] = [
   {
     name: "站姿/悬垂",
     weight: 1,
-    supports: ["barbell_row", "pull_up", "straight_arm_pulldown"],
+    supports: ["standing"],
     evaluate: ({ posture }) => {
       if (posture === "unknown") return null;
       return { hit: posture === "standing", detail: `姿势推断为 ${posture}` };
@@ -173,7 +173,7 @@ const RULES: Rule[] = [
   {
     name: "肩关节大幅张合(上臂相对躯干)",
     weight: 2,
-    supports: ["straight_arm_pulldown"],
+    supports: ["shoulder_dominant"],
     evaluate: ({ trajectory }) => {
       const shoulder = trajectory.jointRom.find((r) => r.joint === "shoulder");
       const elbow = trajectory.jointRom.find((r) => r.joint === "elbow");
@@ -213,14 +213,20 @@ function collectDataIssues(input: ClassifierInput): string[] {
 export function classifyLocally(input: ClassifierInput): LocalClassification {
   const dataIssues = collectDataIssues(input);
 
-  const scores: CandidateScore[] = ALL.map((id) => ({ id, score: 0, hits: [], misses: [] }));
+  const scores: CandidateScore[] = CANDIDATES.map(({ exerciseId: id }) => ({
+    id,
+    score: 0,
+    hits: [],
+    misses: [],
+  }));
   const byId = new Map(scores.map((s) => [s.id, s]));
 
   for (const rule of RULES) {
     const result = rule.evaluate(input);
     if (result === null) continue;
-    for (const id of rule.supports) {
-      const entry = byId.get(id);
+    for (const candidate of CANDIDATES) {
+      if (!rule.supports.some((tag) => candidate.recognitionTags.includes(tag))) continue;
+      const entry = byId.get(candidate.exerciseId);
       if (!entry) continue;
       if (result.hit) {
         entry.score += rule.weight;

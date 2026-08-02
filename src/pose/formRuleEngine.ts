@@ -465,6 +465,8 @@ interface ScoringRule {
   id: string;
   /** Empty means exercise-independent; otherwise this gate is mandatory. */
   requiresExercise: readonly RuleExerciseId[];
+  /** Requires a recognized profile even when the rule is not action-specific. */
+  requiresProfileSemantics?: boolean;
   supportedViews?: readonly CameraView[];
   approval?: AbsoluteThresholdRule["approval"];
   evaluate: () => RuleEvaluation;
@@ -515,7 +517,7 @@ function gateRule(
   if (rule.supportedViews && !rule.supportedViews.includes(context.cameraView)) {
     return refused(rule.id, `${context.cameraView} 机位不支持此规则`);
   }
-  if (rule.requiresExercise.length === 0) return null;
+  if (rule.requiresExercise.length === 0 && !rule.requiresProfileSemantics) return null;
   const selection = context.exercise;
   if (selection.mode === "auto") {
     if (
@@ -526,12 +528,19 @@ function gateRule(
       return refused(rule.id, "自动动作识别置信度不是有效的 0..1 数值，依赖动作的规则未判定");
     }
     if (!selection.exerciseId || selection.confidence < thresholds.minAutoExerciseConfidence) {
-      return refused(rule.id, "自动动作识别置信度不足，依赖动作的规则未判定");
+      return refused(
+        rule.id,
+        rule.requiresProfileSemantics
+          ? "自动动作识别置信度不足，依赖 profile 语义的规则未判定"
+          : "自动动作识别置信度不足，依赖动作的规则未判定",
+      );
     }
+    if (rule.requiresExercise.length === 0) return null;
     return rule.requiresExercise.includes(selection.exerciseId)
       ? null
       : notApplicable(rule.id, `规则不适用于 ${selection.exerciseId}`);
   }
+  if (rule.requiresExercise.length === 0) return null;
   return rule.requiresExercise.includes(selection.exerciseId)
     ? null
     : notApplicable(rule.id, `规则不适用于 ${selection.exerciseId}`);
@@ -552,12 +561,10 @@ function scoreRep(
     },
     {
       id: "relative_eccentric_acceleration",
-      // The phase belongs to a profile. In auto mode this rule must still pass
-      // the confidence gate before it can consume profile semantics.
-      requiresExercise:
-        context.exercise.mode === "auto"
-          ? [context.exercise.exerciseId ?? "__profile_required__"]
-          : [],
+      // The phase belongs to a profile. Auto mode must pass the confidence
+      // gate before this rule can consume profile semantics.
+      requiresExercise: [],
+      requiresProfileSemantics: true,
       evaluate: () => evaluateEccentricDuration(rep, baselines.eccentricMs, thresholds),
     },
     ...absoluteRules.map((rule) => ({

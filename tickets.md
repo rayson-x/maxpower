@@ -197,7 +197,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 **Blocked by:** 杠铃划船贯通组后报告.
 
 - [ ] 采集或登记一段带 rep 级半程标签的视频和关键点 fixture
-- [ ] Profile 为幅度提供稳定 definition id、单位和关节依赖
+- [x] Profile 为幅度提供稳定 definition id、单位和关节依赖
 - [ ] 已知半程 rep 的幅度显著低于同组稳定基线
 - [ ] 正常 rep 不触发对应幅度扣分
 - [ ] 扣分可展开到 rep 时间段、观测值、基线、比例、阈值和规则版本
@@ -210,9 +210,9 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 **Blocked by:** 看不清时给出诚实的部分结果.
 
 - [ ] 采集或登记带 rep 级躯干借力标签的正例和负例 fixture
-- [ ] Profile 定义躯干漂移所需关节、机位、坐标和 metric definition
+- [x] Profile 定义躯干漂移所需关节、机位、坐标和 metric definition
 - [ ] 支持机位的故意借力 rep 触发实验性 finding，稳定 rep 不触发
-- [ ] 正面等不支持机位返回 refused/not_applicable，而不是套用侧视阈值
+- [x] 正面等不支持机位返回 refused/not_applicable，而不是套用侧视阈值
 - [ ] Finding 展示时间段、漂移角、阈值、机位、质量和版本
 - [ ] Candidate 阈值在未进入实验模式时只能观察，不能静默扣分
 
@@ -223,11 +223,11 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 **Blocked by:** 看不清时给出诚实的部分结果.
 
 - [ ] 采集或登记带 rep 级不对称标签的正例和负例 fixture
-- [ ] Profile 定义双侧比较关节、路径、归一化和支持机位
+- [x] Profile 定义双侧比较关节、路径、归一化和支持机位
 - [ ] 故意不对称 rep 触发实验性 finding，双侧稳定 rep 不触发
 - [ ] 任一所需侧长期不可见时拒答，不使用单侧数据猜测
 - [ ] Finding 展示双侧运动量、差值比例、阈值、机位和质量
-- [ ] 对称性实现不再由全局逻辑固定比较手腕
+- [x] 对称性实现不再由全局逻辑固定比较手腕
 
 ## 在已知相位下检出离心失控
 
@@ -236,9 +236,9 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 **Blocked by:** 杠铃划船贯通组后报告, 看不清时给出诚实的部分结果.
 
 - [ ] 采集或登记带 rep 级离心失控标签的正例和负例 fixture
-- [ ] Profile 明确两个半程的向心/离心语义，不由提取器统一猜测
+- [x] Profile 明确两个半程的向心/离心语义，不由提取器统一猜测
 - [ ] 已知相位时故意失控 rep 触发实验性 finding，稳定 rep 不触发
-- [ ] 自动动作低置信或 profile 缺失时，相位为 unknown 且规则拒答
+- [x] 自动动作低置信或 profile 缺失时，相位为 unknown 且规则拒答
 - [ ] Finding 展示离心时长、组内基线、比例、阈值和版本
 - [ ] 不把普通较快节奏包装成受伤结论
 
@@ -251,9 +251,9 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] 引体向上、高位下拉、坐姿划船和直臂下压各有版本化 profile
 - [x] 每个动作至少一个现有 fixture 或明确记录的测试样本贯通高层分析入口
 - [ ] 五个动作的分期、相位和指标定义保持可解释的历史行为
-- [ ] 旧固定动作联合类型和重复动作信号映射完成 contract 删除
-- [ ] Registry/profile 是动作语义的唯一运行时来源
-- [ ] 全部测试和 Web 构建保持绿色
+- [x] 旧固定动作联合类型和重复动作信号映射完成 contract 删除
+- [x] Registry/profile 是动作语义的唯一运行时来源
+- [x] 全部测试和 Web 构建保持绿色
 
 ## 用深蹲证明非背部动作可扩展
 
