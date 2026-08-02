@@ -13,6 +13,7 @@ const template = () =>
     exerciseId: "barbell_row",
     cameraView: "oblique45",
     ruleVersion: "form-rules-experimental-v1",
+    thresholdVersion: "form-rules-experimental-v1",
     segments: [
       {
         repIndex: 0,
@@ -31,6 +32,11 @@ test("labeled template freezes profile semantics and requires an explicit cohort
   const fixture = template();
   assert.equal(fixture.profileVersion, "barbell-row-kinematics/v1");
   assert.equal(fixture.ruleVersion, "form-rules-experimental-v1");
+  assert.equal(fixture.thresholdVersion, "form-rules-experimental-v1");
+  assert.equal(
+    fixture.profileSnapshot.metricDefinitions.amplitude.definitionId,
+    "barbell-row/v1/amplitude/elbow_angle",
+  );
   assert.deepEqual(fixture.labels[0].labels, {
     amplitude: "unjudgeable",
     torsoCompensation: "unjudgeable",
@@ -47,15 +53,15 @@ test("labeled template freezes profile semantics and requires an explicit cohort
   );
 });
 
-test("labeled fixture validator catches profile drift, invalid labels, and overlapping reps", () => {
+test("labeled fixture validator rejects tampered profile snapshots and invalid or duplicate labels", () => {
   const fixture = template();
   fixture.subjectId = "subject-a";
   fixture.recordingBatchId = "batch-a";
-  fixture.profileVersion = "obsolete-profile";
+  fixture.profileSnapshot.fingerprint = "fnv1a32:forged";
   fixture.labels[0].labels.amplitude = "full";
   fixture.labels.push({
     ...fixture.labels[0],
-    repIndex: 1,
+    repIndex: 0,
     startMs: 1000,
     extremeMs: 1250,
     endMs: 1400,
@@ -66,9 +72,10 @@ test("labeled fixture validator catches profile drift, invalid labels, and overl
     keypointsFile: "different-recording.json",
     durationMs: 1500,
   });
-  assert.match(errors.join("\n"), /profileVersion/);
+  assert.match(errors.join("\n"), /profileSnapshot must match the archived/);
   assert.match(errors.join("\n"), /overlaps/);
   assert.match(errors.join("\n"), /bilateralAsymmetry/);
+  assert.match(errors.join("\n"), /repIndex must be unique/);
   assert.match(errors.join("\n"), /videoId/);
   assert.match(errors.join("\n"), /keypointsFile/);
 });

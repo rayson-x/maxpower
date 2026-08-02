@@ -72,7 +72,14 @@ export function validateIndependentSplits(
 ): string[] {
   const cohorts = new Map<
     string,
-    { tuningSubjects: Set<string>; validationSubjects: Set<string>; tuningBatches: Set<string>; validationBatches: Set<string> }
+    {
+      tuningSubjects: Set<string>;
+      validationSubjects: Set<string>;
+      tuningBatches: Set<string>;
+      validationBatches: Set<string>;
+      tuningDatasets: Set<string>;
+      validationDatasets: Set<string>;
+    }
   >();
   for (const example of examples) {
     assertExample(example);
@@ -81,15 +88,27 @@ export function validateIndependentSplits(
       validationSubjects: new Set<string>(),
       tuningBatches: new Set<string>(),
       validationBatches: new Set<string>(),
+      tuningDatasets: new Set<string>(),
+      validationDatasets: new Set<string>(),
     };
     cohorts.set(example.promotionCohortId, cohort);
     const subjects = example.split === "tuning" ? cohort.tuningSubjects : cohort.validationSubjects;
     const batches = example.split === "tuning" ? cohort.tuningBatches : cohort.validationBatches;
     subjects.add(example.subjectId);
     batches.add(example.recordingBatchId);
+    (example.split === "tuning" ? cohort.tuningDatasets : cohort.validationDatasets).add(
+      example.datasetId,
+    );
   }
   const errors: string[] = [];
   for (const [cohortId, cohort] of cohorts) {
+    if (cohort.tuningDatasets.size === 0) errors.push(`promotion cohort has no tuning dataset: ${cohortId}`);
+    if (cohort.validationDatasets.size === 0) errors.push(`promotion cohort has no validation dataset: ${cohortId}`);
+    for (const datasetId of cohort.tuningDatasets) {
+      if (cohort.validationDatasets.has(datasetId)) {
+        errors.push(`dataset appears in both splits for ${cohortId}: ${datasetId}`);
+      }
+    }
     for (const subjectId of cohort.tuningSubjects) {
       if (cohort.validationSubjects.has(subjectId)) {
         errors.push(`subject appears in both splits for ${cohortId}: ${subjectId}`);

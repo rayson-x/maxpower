@@ -475,6 +475,7 @@ export function CameraPoseView() {
               exerciseId: analysis.profile.exerciseId,
               cameraView: recordingMetadata.cameraView,
               ruleVersion: analysis.versions.rule,
+              thresholdVersion: analysis.versions.rule,
               segments: analysis.segments,
             })
           : null;

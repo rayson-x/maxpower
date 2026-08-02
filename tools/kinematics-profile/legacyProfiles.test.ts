@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getKinematicsProfile } from "../../src/pose/kinematicsProfile";
+import {
+  buildKinematicsProfileArchive,
+  getKinematicsProfile,
+} from "../../src/pose/kinematicsProfile";
 
 test("legacy exercise profiles preserve explicit segmentation, phase, and metric contracts", () => {
   const expected = {
@@ -43,4 +46,14 @@ test("legacy exercise profiles preserve explicit segmentation, phase, and metric
     assert.match(profile.metrics.amplitude.definitionId, new RegExp(`^${exerciseId.replaceAll("_", "-")}/v1/`));
     assert.match(profile.metrics.phaseDuration.definitionId, new RegExp(`^${exerciseId.replaceAll("_", "-")}/v1/`));
   }
+});
+
+test("profile archive retains a prior version after the current profile advances", () => {
+  const v1 = getKinematicsProfile("barbell_row");
+  assert.ok(v1);
+  const v2 = { ...v1, version: "barbell-row-kinematics/v2" };
+  const archive = buildKinematicsProfileArchive([v2], [v1]);
+
+  assert.equal(archive.get(`barbell_row:${v1.version}`), v1);
+  assert.equal(archive.get("barbell_row:barbell-row-kinematics/v2"), v2);
 });

@@ -121,12 +121,58 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
 
 const PROFILES = new Map(PROFILE_LIST.map((item) => [item.exerciseId, item]));
 
+/**
+ * Move a profile here (rather than deleting it) when a newer profile becomes
+ * current. Labeled recordings validate their complete frozen profile against
+ * this append-only archive instead of trusting a sidecar version string.
+ */
+const HISTORICAL_PROFILE_LIST: readonly KinematicsProfile[] = [];
+const PROFILE_VERSION_ARCHIVE = buildKinematicsProfileArchive(
+  PROFILE_LIST,
+  HISTORICAL_PROFILE_LIST,
+);
+
 export function getKinematicsProfile(exerciseId: string): KinematicsProfile | null {
   return PROFILES.get(exerciseId) ?? null;
 }
 
 export function listKinematicsProfiles(): readonly KinematicsProfile[] {
   return PROFILE_LIST;
+}
+
+export function getArchivedKinematicsProfile(
+  exerciseId: string,
+  version: string,
+): KinematicsProfile | null {
+  return PROFILE_VERSION_ARCHIVE.get(`${exerciseId}:${version}`) ?? null;
+}
+
+export function buildKinematicsProfileArchive(
+  current: readonly KinematicsProfile[],
+  historical: readonly KinematicsProfile[],
+): ReadonlyMap<string, KinematicsProfile> {
+  const archive = new Map<string, KinematicsProfile>();
+  for (const profile of [...historical, ...current]) {
+    const key = `${profile.exerciseId}:${profile.version}`;
+    if (archive.has(key)) throw new Error(`Duplicate archived kinematics profile: ${key}`);
+    archive.set(key, profile);
+  }
+  return archive;
+}
+
+/** Serializable, immutable-by-value profile evidence stored with a recording. */
+export function freezeKinematicsProfile(profile: KinematicsProfile): KinematicsProfile {
+  return JSON.parse(JSON.stringify(profile)) as KinematicsProfile;
+}
+
+/** A deterministic integrity marker for a complete profile snapshot. */
+export function kinematicsProfileFingerprint(profile: KinematicsProfile): string {
+  let hash = 0x811c9dc5;
+  for (const character of JSON.stringify(profile)) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 function profile(input: {

@@ -76,10 +76,22 @@ test("validation summary cannot mix metric or threshold versions", () => {
 
 test("independent promotion cohorts do not block one another", () => {
   const errors = validateIndependentSplits([
-    example({ promotionCohortId: "rule-a", split: "tuning", subjectId: "subject-01" }),
-    example({ promotionCohortId: "rule-b", split: "validation", subjectId: "subject-01" }),
+    example({ promotionCohortId: "rule-a", split: "tuning", subjectId: "subject-01", recordingBatchId: "rule-a-tuning" }),
+    example({ promotionCohortId: "rule-a", split: "validation", datasetId: "validation-rule-a", subjectId: "subject-02", recordingBatchId: "rule-a-validation" }),
+    example({ promotionCohortId: "rule-b", split: "tuning", datasetId: "tuning-rule-b", subjectId: "subject-01", recordingBatchId: "rule-b-tuning" }),
+    example({ promotionCohortId: "rule-b", split: "validation", datasetId: "validation-rule-b", subjectId: "subject-03", recordingBatchId: "rule-b-validation" }),
   ]);
   assert.deepEqual(errors, []);
+});
+
+test("promotion cohort requires distinct tuning and validation datasets", () => {
+  const errors = validateIndependentSplits([
+    example({ split: "tuning", datasetId: "same-dataset" }),
+    example({ split: "validation", datasetId: "same-dataset", subjectId: "subject-03" }),
+    example({ promotionCohortId: "missing-tuning", split: "validation", datasetId: "validation-only" }),
+  ]);
+  assert.match(errors.join("\n"), /dataset appears in both splits/);
+  assert.match(errors.join("\n"), /no tuning dataset/);
 });
 
 test("validation rejects enum values that could arrive from an untyped import", () => {
