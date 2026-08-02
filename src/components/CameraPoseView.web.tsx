@@ -98,6 +98,7 @@ const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
   { id: "rtmpose", label: "RTMPose-m" },
 ];
 const RTMPOSE_MODEL_PATH = "/models/rtmpose-m-simcc-256x192.onnx";
+const STAGE_ASPECT = 16 / 9;
 
 const EXERCISE_CHOICES: Array<{ id: ExerciseId; label: string }> = [
   { id: "barbell_row", label: "杠铃划船" },
@@ -144,6 +145,17 @@ function angleDeg(
   if (m1 < 1e-6 || m2 < 1e-6) return NaN;
   const cos = (v1.x * v2.x + v1.y * v2.y) / (m1 * m2);
   return (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
+}
+
+/** Fits a source video inside the fixed player while keeping the pose overlay aligned. */
+function fitVideoIntoStage(sourceAspect: number): React.CSSProperties {
+  const aspect = Number.isFinite(sourceAspect) && sourceAspect > 0 ? sourceAspect : STAGE_ASPECT;
+  if (aspect >= STAGE_ASPECT) {
+    const height = (STAGE_ASPECT / aspect) * 100;
+    return { position: "absolute", left: 0, top: `${(100 - height) / 2}%`, width: "100%", height: `${height}%` };
+  }
+  const width = (aspect / STAGE_ASPECT) * 100;
+  return { position: "absolute", left: `${(100 - width) / 2}%`, top: 0, width: `${width}%`, height: "100%" };
 }
 
 export function CameraPoseView() {
@@ -674,6 +686,7 @@ export function CameraPoseView() {
 
   const trackingOk = measuredLandmarks.size >= landmarkTotal * 0.6;
   const analyzing = analysisStage !== null && analysisStage !== "done";
+  const videoViewport = fitVideoIntoStage(videoAspect);
 
   return (
     <div style={styles.page}>
@@ -704,7 +717,7 @@ export function CameraPoseView() {
       <div style={styles.body} className="range-body">
         <main style={styles.main} className="range-main">
           <div style={styles.stageWrap} className="hud-reveal hud-reveal-1">
-            <div style={{ ...styles.stage, aspectRatio: String(videoAspect) }} className="hud-scanline">
+            <div style={{ ...styles.stage, aspectRatio: String(STAGE_ASPECT) }} className="hud-scanline">
               {cornerBrackets(trackingOk && status === "running" ? HUD.primary : HUD.lineBright).map(
                 (style, index) => (
                   <div key={index} style={style} />
@@ -721,10 +734,10 @@ export function CameraPoseView() {
                     setVideoAspect(v.videoWidth / v.videoHeight);
                   }
                 }}
-                style={{ ...styles.video, ...(mode === "camera" ? styles.mirror : null) }}
+                style={{ ...styles.video, ...videoViewport, ...(mode === "camera" ? styles.mirror : null) }}
               />
               <svg
-                style={{ ...styles.overlay, ...(mode === "camera" ? styles.mirror : null) }}
+                style={{ ...styles.overlay, ...videoViewport, ...(mode === "camera" ? styles.mirror : null) }}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
               >
@@ -1777,12 +1790,11 @@ const styles: Record<string, React.CSSProperties> = {
   video: {
     width: "100%",
     height: "100%",
-    objectFit: "cover",
+    objectFit: "fill",
+    display: "block",
   },
   mirror: { transform: "scaleX(-1)" },
   overlay: {
-    position: "absolute",
-    inset: 0,
     width: "100%",
     height: "100%",
   },
