@@ -641,7 +641,7 @@ export function CameraPoseView() {
       // 自动模式只使用本地分类器的结果，绝不借用 LLM 判断或猜测一个动作，避免把方向判反。
       // local.confidence 是三档字符串，这里的数值映射只是把本地分类结果适配到既有契约。
       if (exerciseChoice === "") {
-        throw new Error("请选择动作，或明确选择自动识别模式");
+        throw new Error("请先选择训练动作，或启用自动识别模式");
       }
       const localConfidenceValue = { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence];
       const exerciseSelection: ExerciseSelection =
@@ -961,6 +961,23 @@ export function CameraPoseView() {
 
           <div style={styles.sideSection} className="hud-reveal hud-reveal-2">
             <div style={styles.sideTitle}>02 · 动作配置</div>
+            <label style={styles.exerciseField}>
+              <span>训练动作</span>
+              <select
+                style={styles.exerciseSelect}
+                value={exerciseChoice}
+                onChange={(event) => setExerciseChoice(event.target.value as "" | "auto" | ExerciseId)}
+              >
+                <option value="">请选择本次训练动作</option>
+                {EXERCISE_CHOICES.map((exercise) => (
+                  <option key={exercise.id} value={exercise.id}>
+                    {exercise.label}
+                  </option>
+                ))}
+                <option value="auto">自动识别（不确定时仅输出数据）</option>
+              </select>
+            </label>
+            <div style={styles.subsectionLabel}>拍摄机位</div>
             <div style={styles.btnRow}>
               {CAMERA_VIEWS.map((view) => (
                 <button
@@ -981,21 +998,6 @@ export function CameraPoseView() {
             <p style={styles.guidance}>
               {CAMERA_VIEWS.find((view) => view.id === cameraView)?.guidance}
             </p>
-            <label style={styles.field}>
-              动作分期
-              <select
-                value={exerciseChoice}
-                onChange={(event) => setExerciseChoice(event.target.value as "" | "auto" | ExerciseId)}
-              >
-                <option value="">请选择动作（评分需要）</option>
-                {EXERCISE_CHOICES.map((exercise) => (
-                  <option key={exercise.id} value={exercise.id}>
-                    用户指定：{exercise.label}
-                  </option>
-                ))}
-                <option value="auto">自动识别（低置信度时不猜方向）</option>
-              </select>
-            </label>
             <div style={styles.telemetryRow}>
               <span>FPS <strong>{fps}</strong></span>
               <span>POINTS <strong>{measuredLandmarks.size}/{landmarkTotal}</strong></span>
@@ -1926,6 +1928,30 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.dim,
     marginBottom: 10,
     fontWeight: 600,
+  },
+  exerciseField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    marginBottom: 12,
+    color: HUD.text,
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: 1.2,
+  },
+  exerciseSelect: {
+    width: "100%",
+    minHeight: 38,
+    borderColor: HUD.primaryDim,
+    color: HUD.text,
+    fontWeight: 700,
+    background: "#0c1610",
+  },
+  subsectionLabel: {
+    color: HUD.dim,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    marginBottom: 7,
   },
   btnRow: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 },
   btn: {
