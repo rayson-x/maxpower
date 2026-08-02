@@ -12,6 +12,7 @@ import { BONES_COCO17, LandmarkTracker } from "../pose/landmarkTracker";
 import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
 import { PoseSmoother } from "../pose/oneEuro";
 import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
+import { buildRecordingFixture } from "../pose/recordingFixture";
 import { extractRepMetrics, type RepMetricsExtraction } from "../pose/repMetricsExtractor";
 import {
   guessExerciseId,
@@ -24,6 +25,7 @@ import {
 } from "../pose/repSegmenter";
 import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/trajectory";
 import { RtmposeEngine } from "../pose/RtmposeEngine";
+import { selectLandmarksByOriginalIndex } from "../pose/selectLandmarks";
 import {
   CAMERA_VIEWS,
   torsoLeanDeg,
@@ -173,6 +175,7 @@ export function CameraPoseView() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingStartMsRef = useRef(0);
+  const recordingStopMsRef = useRef(0);
 
   const [status, setStatus] = useState<EngineStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -356,13 +359,13 @@ export function CameraPoseView() {
     }
   };
 
-  /** 录制结束后把两个产物(视频、关键点)固化成可下载的 URL,并回收上一轮的旧 URL。 */
+  /** 录制结束后把视频和关键点 fixture 固化成可下载的 URL。 */
   const finalizeRecording = useCallback(() => {
     recordingActiveRef.current = false;
     const chunks = recordedChunksRef.current;
     const poses = recordedPosesRef.current;
     recordedChunksRef.current = [];
-    if (chunks.length === 0 || poses.length === 0) return;
+    if (chunks.length === 0) return;
 
     setRecordingResult((previous) => {
       if (previous) {
@@ -376,23 +379,14 @@ export function CameraPoseView() {
       const baseName = `field-capture-${stamp}`;
       const videoExt = mimeType.includes("mp4") ? "mp4" : "webm";
 
-      // 与 tools/harness/capture.html 产出的 fixture 同形状:时间戳重新从 0 起算,
-      // 这样这份 JSON 可以直接放进 tools/harness/fixtures/ 喂 `npm run harness`,不用做任何转换。
-      const firstTimestampMs = poses[0].timestampMs;
-      const rebasedPoses = poses.map((p) => ({
-        ...p,
-        timestampMs: p.timestampMs - firstTimestampMs,
-      }));
-      const durationSec = (poses[poses.length - 1].timestampMs - firstTimestampMs) / 1000;
-      const fixture = [
-        {
-          video: `${baseName}.${videoExt}`,
-          durationSec: Number(durationSec.toFixed(3)),
-          stepMs: poses.length > 1 ? Number((durationSec * 1000 / (poses.length - 1)).toFixed(1)) : 0,
-          model: `${engineKindRef.current}:${modelPathRef.current}`,
-          poses: rebasedPoses,
-        },
-      ];
+      // 与 tools/harness/capture.html 产出的 fixture 同形状。即使模型整段未检出姿态,
+      // 也导出一个空 poses fixture,保留原始视频以便排查机位或模型初始化问题。
+      const fixture = buildRecordingFixture({
+        video: `${baseName}.${videoExt}`,
+        fallbackDurationSec: (recordingStopMsRef.current - recordingStartMsRef.current) / 1000,
+        model: `${engineKindRef.current}:${modelPathRef.current}`,
+        poses,
+      });
       const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
 
       return {
@@ -401,7 +395,7 @@ export function CameraPoseView() {
         keypointsUrl: URL.createObjectURL(keypointsBlob),
         keypointsName: `${baseName}.json`,
         poseCount: poses.length,
-        durationSec,
+        durationSec: fixture[0].durationSec,
       };
     });
     recordedPosesRef.current = [];
@@ -409,6 +403,7 @@ export function CameraPoseView() {
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
+    if (recordingActiveRef.current) recordingStopMsRef.current = Date.now();
     if (recorder && recorder.state !== "inactive") {
       recorder.stop();
     } else {
@@ -458,6 +453,7 @@ export function CameraPoseView() {
       recordedPosesRef.current = [];
       recordedChunksRef.current = [];
       recordingStartMsRef.current = Date.now();
+      recordingStopMsRef.current = recordingStartMsRef.current;
       const mimeType = pickRecorderMimeType();
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
@@ -522,6 +518,7 @@ export function CameraPoseView() {
         video.srcObject.getTracks().forEach((track) => track.stop());
       }
       if (mediaRecorderRef.current?.state !== "inactive") {
+        recordingStopMsRef.current = Date.now();
         mediaRecorderRef.current?.stop();
       }
       engineRef.current?.close();
@@ -666,15 +663,13 @@ export function CameraPoseView() {
   const poseConnections = engineKind === "rtmpose" ? COCO17_CONNECTIONS : POSE_CONNECTIONS;
   const landmarkTotal = engineKind === "rtmpose" ? 17 : 33;
 
-  const measuredLandmarks = new Map(
-    (pose?.landmarks ?? [])
-      .filter((landmark) => landmark.visibility >= 0.5 && !landmark.predicted)
-      .map((landmark, index) => [index, landmark] as const),
+  const measuredLandmarks = selectLandmarksByOriginalIndex(
+    pose?.landmarks ?? [],
+    (landmark) => landmark.visibility >= 0.5 && !landmark.predicted,
   );
-  const predictedLandmarks = new Map(
-    (pose?.landmarks ?? [])
-      .filter((landmark) => landmark.predicted && landmark.visibility > 0)
-      .map((landmark, index) => [index, landmark] as const),
+  const predictedLandmarks = selectLandmarksByOriginalIndex(
+    pose?.landmarks ?? [],
+    (landmark) => landmark.predicted && landmark.visibility > 0,
   );
 
   const trackingOk = measuredLandmarks.size >= landmarkTotal * 0.6;
