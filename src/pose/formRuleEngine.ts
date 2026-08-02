@@ -627,6 +627,7 @@ export function scoreFormSet(
     (rep): rep is RepScore & { score: number } => rep.status === "scored" && rep.score !== null,
   );
   const hasPartial = scoredReps.some((rep) => rep.status === "partial");
+  const hasUnscoredRep = scoredReps.some((rep) => rep.status === "not_scored");
   if (valid.length === 0) {
     return {
       engineVersion: thresholds.version,
@@ -643,7 +644,7 @@ export function scoreFormSet(
   }
   const score = Number((valid.reduce((sum, rep) => sum + rep.score, 0) / valid.length).toFixed(1));
   const lowest = valid.reduce((current, rep) => (rep.score < current.score ? rep : current));
-  if (hasPartial) {
+  if (hasPartial || hasUnscoredRep) {
     return {
       engineVersion: thresholds.version,
       thresholdStatus: thresholds.status,

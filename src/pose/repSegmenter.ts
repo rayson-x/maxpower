@@ -39,6 +39,8 @@ export interface RepSegment {
   eccentricMs: number;
   /** 信号幅度(归一化) */
   amplitude: number;
+  /** Side used for both the phase signal and its downstream quality evidence. */
+  evidenceSide?: "left" | "right";
 }
 
 interface Sample {
@@ -56,12 +58,20 @@ function visible(l: PoseLandmark | undefined): l is PoseLandmark {
 }
 
 /** 每帧取可见性更高的一侧,返回该侧关节三元组 */
-function bestSide(p: PoseEstimate, a: number, b: number, c: number) {
+function bestSide(
+  p: PoseEstimate,
+  a: number,
+  b: number,
+  c: number,
+  forcedSide?: "left" | "right",
+) {
   const left = [p.landmarks[a], p.landmarks[b], p.landmarks[c]];
   // BlazePose 左右对称索引:11/12, 13/14, 15/16 — 调用方传左侧索引
   const right = [p.landmarks[a + 1], p.landmarks[b + 1], p.landmarks[c + 1]];
   const score = (triple: typeof left) =>
     triple.every(visible) ? Math.min(...triple.map((l) => l.visibility)) : -1;
+  if (forcedSide === "left") return left;
+  if (forcedSide === "right") return right;
   return score(left) >= score(right) ? left : right;
 }
 
@@ -107,20 +117,24 @@ export const SIGNAL_JOINTS: Record<SignalKind, readonly LogicalJoint[]> = {
   shoulder_angle: ["hip", "shoulder", "wrist"],
 };
 
-function extractSignal(poses: PoseEstimate[], kind: SignalKind): Sample[] {
+function extractSignal(
+  poses: PoseEstimate[],
+  kind: SignalKind,
+  forcedSide?: "left" | "right",
+): Sample[] {
   const samples: Sample[] = [];
   for (const p of poses) {
     if (p.landmarks.length < 25) continue;
     let v = NaN;
     if (kind === "elbow_angle") {
-      const [s, e, w] = bestSide(p, SHOULDER_L, ELBOW_L, WRIST_L);
+      const [s, e, w] = bestSide(p, SHOULDER_L, ELBOW_L, WRIST_L, forcedSide);
       if (visible(s) && visible(e) && visible(w)) v = angleDeg(s, e, w);
     } else if (kind === "wrist_height") {
-      const [s, , w] = bestSide(p, SHOULDER_L, ELBOW_L, WRIST_L);
+      const [s, , w] = bestSide(p, SHOULDER_L, ELBOW_L, WRIST_L, forcedSide);
       // 手腕低于肩的垂直距离(向下为正,下拉动作拉到最低时值最大)
       if (visible(s) && visible(w)) v = w.y - s.y;
     } else {
-      const [h, s, w] = bestSide(p, HIP_L, SHOULDER_L, WRIST_L);
+      const [h, s, w] = bestSide(p, HIP_L, SHOULDER_L, WRIST_L, forcedSide);
       if (visible(h) && visible(s) && visible(w)) v = angleDeg(h, s, w);
     }
     if (!isNaN(v)) samples.push({ t: p.timestampMs, v });
@@ -245,7 +259,8 @@ export function segmentRepsBySignal(
   kind: SignalKind,
   effortExtreme: "min" | "max",
 ): RepSegment[] {
-  const raw = extractSignal(poses, kind);
+  const evidenceSide = resolveSignalSide(poses, kind);
+  const raw = extractSignal(poses, kind, evidenceSide);
   if (raw.length < 10) return [];
   const samples = smooth(raw);
 
@@ -265,7 +280,28 @@ export function segmentRepsBySignal(
     concentricMs: c.peakMs - c.startMs,
     eccentricMs: c.endMs - c.peakMs,
     amplitude: c.amplitude,
+    evidenceSide,
   }));
+}
+
+function resolveSignalSide(
+  poses: readonly PoseEstimate[],
+  kind: SignalKind,
+): "left" | "right" {
+  const leftIndices =
+    kind === "elbow_angle"
+      ? [SHOULDER_L, ELBOW_L, WRIST_L]
+      : kind === "wrist_height"
+        ? [SHOULDER_L, WRIST_L]
+        : [HIP_L, SHOULDER_L, WRIST_L];
+  const score = (offset: 0 | 1) =>
+    Math.min(
+      ...leftIndices.map((index) => {
+        const values = poses.map((pose) => pose.landmarks[index + offset]?.visibility ?? 0);
+        return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+      }),
+    );
+  return score(1) > score(0) ? "right" : "left";
 }
 
 // ---------- 动作无关的自动分期 ----------

@@ -112,6 +112,7 @@ function resolveBestSideQuality(
   logicalJoints: readonly LogicalJoint[],
   windowPoses: readonly PoseEstimate[],
   idx: JointIndex,
+  evidenceSide?: "left" | "right",
 ): JointQuality {
   const meansForSide = (side: "left" | "right") =>
     logicalJoints.map((joint) =>
@@ -122,7 +123,7 @@ function resolveBestSideQuality(
   const rightMeans = meansForSide("right");
   const leftScore = leftMeans.length ? Math.min(...leftMeans) : 0;
   const rightScore = rightMeans.length ? Math.min(...rightMeans) : 0;
-  const useRight = rightScore > leftScore;
+  const useRight = evidenceSide ? evidenceSide === "right" : rightScore > leftScore;
   const chosenMeans = useRight ? rightMeans : leftMeans;
   const side: "left" | "right" = useRight ? "right" : "left";
 
@@ -232,6 +233,7 @@ interface NormalizedCycle {
   extremeMs: number;
   endMs: number;
   amplitude: number;
+  evidenceSide?: "left" | "right";
 }
 
 function fromKnownSegments(segments: readonly RepSegment[]): NormalizedCycle[] {
@@ -241,6 +243,7 @@ function fromKnownSegments(segments: readonly RepSegment[]): NormalizedCycle[] {
     extremeMs: s.peakMs,
     endMs: s.endMs,
     amplitude: s.amplitude,
+    evidenceSide: s.evidenceSide,
   }));
 }
 
@@ -265,7 +268,12 @@ function buildRepMetrics(
     (p) => p.timestampMs >= cycle.startMs && p.timestampMs <= cycle.endMs,
   );
 
-  const primaryQuality = resolveBestSideQuality(primaryJoints, windowPoses, idx);
+  const primaryQuality = resolveBestSideQuality(
+    primaryJoints,
+    windowPoses,
+    idx,
+    cycle.evidenceSide,
+  );
   const torsoQuality = resolveBestSideQuality(["shoulder", "hip"], windowPoses, idx);
   const wristQuality = resolveBilateralQuality("wrist", windowPoses, idx);
 

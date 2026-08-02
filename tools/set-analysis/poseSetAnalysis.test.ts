@@ -45,3 +45,30 @@ test("user selection records an override and catalog-only stays unscored", () =>
   assert.equal(catalogOnly.extraction, null);
   assert.match(catalogOnly.reason ?? "", /catalog_only/);
 });
+
+test("derived real occlusion returns partial without a misleading total score", () => {
+  const fixture = loadPoseFixture("ecc14b0bdcd3e1116465edfe08f33368.mp4");
+  const input = {
+    cameraView: "oblique45" as const,
+    exercise: { mode: "user" as const, exerciseId: "barbell_row" },
+  };
+  const baseline = analyzePoseSet({ ...input, poses: fixture.poses });
+  const lastRep = baseline.reps.at(-1);
+  assert.ok(lastRep, "fixture must contain a rep to derive an occlusion case");
+  const occluded = fixture.poses.map((pose) => {
+    if (pose.timestampMs < lastRep.startMs || pose.timestampMs > lastRep.endMs) return pose;
+    const landmarks = pose.landmarks.map((landmark, index) =>
+      index === 13 || index === 14 ? { ...landmark, visibility: 0.55 } : landmark,
+    );
+    return { ...pose, landmarks };
+  });
+
+  const result = analyzePoseSet({ ...input, poses: occluded });
+  assert.equal(result.status, "partial");
+  assert.equal(result.score?.score, null);
+  assert.ok(result.coverage.refused > 0);
+  const refusal = result.score?.reps
+    .flatMap((rep) => rep.evaluations)
+    .find((evaluation) => evaluation.status === "refused");
+  assert.match(refusal?.reason ?? "", /可见率|置信度|有效帧比例/);
+});

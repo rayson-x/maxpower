@@ -11,6 +11,7 @@ import {
 } from "../../src/pose/formRuleEngine";
 import type { PoseEstimate } from "../../src/pose/PoseEngine";
 import { extractRepMetrics } from "../../src/pose/repMetricsExtractor";
+import { segmentReps } from "../../src/pose/repSegmenter";
 import { loadPoseFixture } from "../harness/fixtureRepository";
 
 /**
@@ -260,4 +261,27 @@ test("low visibility on a required joint drives usableFrameRatio down and the en
     (e) => e.ruleId === "relative_amplitude_drop",
   );
   assert.equal(amplitudeEvaluation?.status, "refused", "引擎应因数据不可信而拒答,不是硬打分");
+});
+
+test("known segmentation and amplitude quality retain the same evidence side", () => {
+  const poses = syntheticElbowCycle(400, 2000, () => ({
+    11: 0.95,
+    13: 0.95,
+    15: 0.95,
+    12: 0.6,
+    14: 0.6,
+    16: 0.6,
+  }));
+  const segments = segmentReps(poses, "barbell_row");
+  const extraction = extractRepMetrics(poses, {
+    cameraView: CAMERA_VIEW,
+    exercise: { mode: "user", exerciseId: "barbell_row" },
+  });
+
+  assert.ok(segments.length > 0 && extraction.reps.length > 0);
+  assert.equal(segments[0].evidenceSide, "left");
+  assert.deepEqual(
+    extraction.reps[0].metrics[RULE_METRIC.amplitude]?.requiredJoints,
+    [RULE_JOINT.leftShoulder, RULE_JOINT.leftElbow, RULE_JOINT.leftWrist],
+  );
 });

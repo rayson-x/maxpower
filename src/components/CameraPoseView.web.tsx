@@ -1538,6 +1538,10 @@ function RepMetricsPanel({
         {score.scoredRepCount}/{score.totalRepCount} 个 rep 已评分 · 覆盖 {analysis.coverage.eligibleEvaluations}/
         {analysis.coverage.totalEvaluations} · 拒答 {analysis.coverage.refused}
       </p>
+      <p style={compareStyles.meta}>
+        规则四态：通过 {analysis.coverage.passed} · 扣分 {analysis.coverage.deducted} · 拒答{" "}
+        {analysis.coverage.refused} · 不适用 {analysis.coverage.notApplicable}
+      </p>
 
       {extraction.reps.length === 0 ? (
         <div style={compareStyles.muted}>本次未能切出 rep(检查分期信号是否选中、机位是否稳定)</div>
@@ -1612,13 +1616,20 @@ function RepMetricsPanel({
         <summary style={compareStyles.summary}>每条判据的详细依据(命中/拒答原因)</summary>
         <pre style={compareStyles.pre}>
           {score.reps
-            .map(
-              (repScore) =>
-                `rep ${repScore.repIndex} (${REP_STATUS_LABEL[repScore.status] ?? repScore.status}):\n` +
-                repScore.evaluations
-                  .map((e) => `  ${e.ruleId}: ${e.status}${e.reason ? ` — ${e.reason}` : ""}${e.deduction ? ` — ${e.deduction.message}(${e.deduction.evidence})` : ""}`)
-                  .join("\n"),
-            )
+            .map((repScore) => {
+              const rep = extraction.reps.find((candidate) => candidate.repIndex === repScore.repIndex);
+              const quality = Object.entries(rep?.metrics ?? {})
+                .map(
+                  ([metric, observation]) =>
+                    `  ${metric}: 可用帧 ${(observation.usableFrameRatio * 100).toFixed(0)}% · ` +
+                    `置信度 ${observation.confidence.toFixed(2)} · 所需关节 ${observation.requiredJoints.join(", ")}`,
+                )
+                .join("\n");
+              const rules = repScore.evaluations
+                .map((e) => `  ${e.ruleId}: ${e.status}${e.reason ? ` — ${e.reason}` : ""}${e.deduction ? ` — ${e.deduction.message}(${e.deduction.evidence})` : ""}`)
+                .join("\n");
+              return `rep ${repScore.repIndex} (${REP_STATUS_LABEL[repScore.status] ?? repScore.status}):\n${quality}\n${rules}`;
+            })
             .join("\n\n")}
         </pre>
       </details>

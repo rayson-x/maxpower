@@ -182,13 +182,13 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 **Blocked by:** 杠铃划船贯通组后报告.
 
-- [ ] 使用真实或派生的遮挡 fixture，从高层分析入口得到 `partial`
-- [ ] 应执行规则被拒答时不输出总分；`not_applicable` 不触发 partial
-- [ ] 数值计算与质量统计使用一致的选侧证据
-- [ ] 预测/外推关键点降低质量权重或不进入评分指标
-- [ ] UI 分开展示 passed、deducted、refused 和 not_applicable
-- [ ] UI 显示所需关节、可用帧比例和拒答原因，不以 0 或绿色对勾代替
-- [ ] Harness 与 UI 对同一拒答原因保持一致
+- [x] 使用真实或派生的遮挡 fixture，从高层分析入口得到 `partial`
+- [x] 应执行规则被拒答时不输出总分；`not_applicable` 不触发 partial
+- [x] 数值计算与质量统计使用一致的选侧证据
+- [x] 预测/外推关键点降低质量权重或不进入评分指标
+- [x] UI 分开展示 passed、deducted、refused 和 not_applicable
+- [x] UI 显示所需关节、可用帧比例和拒答原因，不以 0 或绿色对勾代替
+- [x] Harness 与 UI 对同一拒答原因保持一致
 
 ## 在真实半程 rep 上检出幅度下降
 
