@@ -51,6 +51,7 @@ import {
   type CameraView,
 } from "../pose/viewGating";
 import { CHAMFER, CHAMFER_SM, cornerBrackets, HUD, injectHudTheme } from "./hudTheme";
+import { CaptureApprovalPanel } from "./CaptureApprovalPanel.web";
 
 injectHudTheme();
 
@@ -1788,6 +1789,7 @@ export function CameraPoseView() {
           </div>
         </aside>
       </div>
+      <CaptureApprovalPanel />
     </div>
   );
 }
