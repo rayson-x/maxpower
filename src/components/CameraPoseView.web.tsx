@@ -960,13 +960,54 @@ export function CameraPoseView() {
                             : `${setAnalysis.score.score} 分`}
                         </p>
                       )}
-                      <ul style={styles.agentList}>
-                        {formExplanation.perRep.map((item) => (
-                          <li key={item.repIndex}>
-                            第 {item.repIndex} 下：{item.note}
-                          </li>
-                        ))}
-                      </ul>
+                      {(() => {
+                        // 有问题的 rep 直接列出来;没问题的收进折叠区,默认不占地方——
+                        // 不确定该归哪边时(比如查不到对应 repScore)算作"有问题",
+                        // 宁可多显示一条也不要把真正需要注意的 rep 藏起来。
+                        const repScoreByIndex = new Map(
+                          (setAnalysis?.score?.reps ?? []).map((r) => [r.repIndex, r]),
+                        );
+                        const needsAttention = (repIndex: number) => {
+                          const repScore = repScoreByIndex.get(repIndex);
+                          if (!repScore) return true;
+                          return repScore.deductions.length > 0 || repScore.status !== "scored";
+                        };
+                        const flagged = formExplanation.perRep.filter((item) =>
+                          needsAttention(item.repIndex),
+                        );
+                        const clear = formExplanation.perRep.filter(
+                          (item) => !needsAttention(item.repIndex),
+                        );
+                        return (
+                          <>
+                            {flagged.length > 0 && (
+                              <ul style={styles.agentList}>
+                                {flagged.map((item) => (
+                                  <li key={item.repIndex}>
+                                    第 {item.repIndex} 下：{item.note}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {clear.length > 0 && (
+                              <details style={{ marginTop: flagged.length > 0 ? 6 : 0 }}>
+                                <summary style={styles.reportMeta}>
+                                  {flagged.length > 0
+                                    ? `另外 ${clear.length} 下没问题（点击查看）`
+                                    : `查看每一下的点评（共 ${clear.length} 下）`}
+                                </summary>
+                                <ul style={styles.agentList}>
+                                  {clear.map((item) => (
+                                    <li key={item.repIndex}>
+                                      第 {item.repIndex} 下：{item.note}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
+                            )}
+                          </>
+                        );
+                      })()}
                     </>
                   ) : setAnalysis?.score ? (
                     // 大白话点评还没生成或生成失败时,先展示规则引擎已经算好的确定性分数——
