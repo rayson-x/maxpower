@@ -124,6 +124,17 @@ const EXERCISE_MATURITY_LABEL: Record<ExerciseMaturity, string> = {
 
 type AnyPoseEngine = PoseEngine | RtmposeEngine;
 
+interface RecordingResult {
+  videoUrl: string;
+  videoName: string;
+  keypointsUrl: string;
+  keypointsName: string;
+  annotationUrl: string | null;
+  annotationName: string | null;
+  poseCount: number;
+  durationSec: number;
+}
+
 function loadSettings(): AgentSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -172,6 +183,27 @@ function fitVideoIntoStage(sourceAspect: number): React.CSSProperties {
   return { position: "absolute", left: `${(100 - width) / 2}%`, top: 0, width: `${width}%`, height: "100%" };
 }
 
+/** Browser downloads stay as a fallback link in the UI if multi-download permission is denied. */
+function requestCaptureDownloads(files: ReadonlyArray<{ url: string; name: string }>): void {
+  for (const [index, file] of files.entries()) {
+    window.setTimeout(() => {
+      const download = document.createElement("a");
+      download.href = file.url;
+      download.download = file.name;
+      download.style.display = "none";
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+    }, index * 150);
+  }
+}
+
+function revokeRecordingResultUrls(result: RecordingResult): void {
+  URL.revokeObjectURL(result.videoUrl);
+  URL.revokeObjectURL(result.keypointsUrl);
+  if (result.annotationUrl) URL.revokeObjectURL(result.annotationUrl);
+}
+
 export function CameraPoseView() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const engineRef = useRef<AnyPoseEngine | null>(null);
@@ -199,6 +231,8 @@ export function CameraPoseView() {
   // 现场采集留存:与 poseBufferRef(实时分析用的滚动环形缓冲,有上限)不同,
   // 这里是录制期间不设上限的 canonical 会话缓冲,只在 recordingActiveRef 为 true 时累积。
   const recordingActiveRef = useRef(false);
+  const finalizingRecordingRef = useRef(false);
+  const isUnmountedRef = useRef(false);
   const recordedPosesRef = useRef<CanonicalPoseFrame[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -208,6 +242,7 @@ export function CameraPoseView() {
     exerciseChoice: string;
     cameraView: CameraView;
   } | null>(null);
+  const recordingResultRef = useRef<RecordingResult | null>(null);
 
   const [status, setStatus] = useState<EngineStatus>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -244,16 +279,8 @@ export function CameraPoseView() {
   const [formExplanationError, setFormExplanationError] = useState<string | null>(null);
   // 现场采集留存
   const [isRecording, setIsRecording] = useState(false);
-  const [recordingResult, setRecordingResult] = useState<{
-    videoUrl: string;
-    videoName: string;
-    keypointsUrl: string;
-    keypointsName: string;
-    annotationUrl: string | null;
-    annotationName: string | null;
-    poseCount: number;
-    durationSec: number;
-  } | null>(null);
+  const [isFinalizingRecording, setIsFinalizingRecording] = useState(false);
+  const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
 
   const ensureEngine = useCallback(async () => {
     if (!engineRef.current) {
@@ -345,15 +372,17 @@ export function CameraPoseView() {
       const engine = engineRef.current;
       const currentVideo = videoRef.current;
       if (engine && currentVideo) {
-        let timestampMs: number;
+        let sourceTimestampMs: number;
         if (modeRef.current === "file") {
-          timestampMs = epochRef.current + currentVideo.currentTime * 1000;
-          if (timestampMs <= lastTimestampRef.current) {
-            epochRef.current = lastTimestampRef.current + 1 - currentVideo.currentTime * 1000;
-            timestampMs = lastTimestampRef.current + 1;
-          }
+          sourceTimestampMs = epochRef.current + currentVideo.currentTime * 1000;
         } else {
-          timestampMs = performance.now();
+          sourceTimestampMs = performance.now();
+        }
+        // MediaPipe VIDEO mode compares integer millisecond packet timestamps.
+        // Round once and enforce monotonicity for both live and file sources.
+        const timestampMs = Math.max(Math.floor(sourceTimestampMs), lastTimestampRef.current + 1);
+        if (modeRef.current === "file" && timestampMs > Math.floor(sourceTimestampMs)) {
+          epochRef.current = timestampMs - currentVideo.currentTime * 1000;
         }
         lastTimestampRef.current = timestampMs;
         try {
@@ -428,72 +457,86 @@ export function CameraPoseView() {
   /** 录制结束后把视频和关键点 fixture 固化成可下载的 URL。 */
   const finalizeRecording = useCallback(() => {
     recordingActiveRef.current = false;
+    finalizingRecordingRef.current = false;
     const chunks = recordedChunksRef.current;
     const poses = recordedPosesRef.current;
     recordedChunksRef.current = [];
+    if (isUnmountedRef.current) {
+      recordedPosesRef.current = [];
+      return;
+    }
+    setIsFinalizingRecording(false);
     if (chunks.length === 0) return;
 
-    setRecordingResult((previous) => {
-      if (previous) {
-        URL.revokeObjectURL(previous.videoUrl);
-        URL.revokeObjectURL(previous.keypointsUrl);
-        if (previous.annotationUrl) URL.revokeObjectURL(previous.annotationUrl);
-      }
+    const previous = recordingResultRef.current;
+    if (previous) revokeRecordingResultUrls(previous);
 
-      const mimeType = mediaRecorderRef.current?.mimeType || "video/webm";
-      const videoBlob = new Blob(chunks, { type: mimeType });
-      const stamp = new Date(recordingStartMsRef.current).toISOString().replace(/[:.]/g, "-");
-      const baseName = `field-capture-${stamp}`;
-      const videoExt = mimeType.includes("mp4") ? "mp4" : "webm";
+    const mimeType = mediaRecorderRef.current?.mimeType || "video/webm";
+    const videoBlob = new Blob(chunks, { type: mimeType });
+    const stamp = new Date(recordingStartMsRef.current).toISOString().replace(/[:.]/g, "-");
+    const baseName = `field-capture-${stamp}`;
+    const videoExt = mimeType.includes("mp4") ? "mp4" : "webm";
 
-      // 与 tools/harness/capture.html 产出的 fixture 同形状。即使模型整段未检出姿态,
-      // 也导出一个空 poses fixture,保留原始视频以便排查机位或模型初始化问题。
-      const fixture = buildRecordingFixture({
-        video: `${baseName}.${videoExt}`,
-        fallbackDurationSec: (recordingStopMsRef.current - recordingStartMsRef.current) / 1000,
-        model: `${engineKindRef.current}:${modelPathRef.current}`,
-        poses,
-      });
-      const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
-      const recordingMetadata = recordingMetadataRef.current;
-      const selection =
-        recordingMetadata?.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
-          ? { mode: "user" as const, exerciseId: recordingMetadata.exerciseChoice }
-          : null;
-      const analysis = selection && recordingMetadata
-        ? analyzePoseSet({
-            poses: fixture[0].poses,
+    // 与 tools/harness/capture.html 产出的 fixture 同形状。即使模型整段未检出姿态,
+    // 也导出一个空 poses fixture,保留原始视频以便排查机位或模型初始化问题。
+    const fixture = buildRecordingFixture({
+      video: `${baseName}.${videoExt}`,
+      fallbackDurationSec: (recordingStopMsRef.current - recordingStartMsRef.current) / 1000,
+      model: `${engineKindRef.current}:${modelPathRef.current}`,
+      poses,
+    });
+    const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
+    const recordingMetadata = recordingMetadataRef.current;
+    const selection =
+      recordingMetadata?.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
+        ? { mode: "user" as const, exerciseId: recordingMetadata.exerciseChoice }
+        : null;
+    const analysis = selection && recordingMetadata
+      ? analyzePoseSet({
+          poses: fixture[0].poses,
+          cameraView: recordingMetadata.cameraView,
+          exercise: selection,
+        })
+      : null;
+    const annotation =
+      analysis?.profile && analysis.segments.length > 0 && recordingMetadata
+        ? buildLabeledSetFixtureTemplate({
+            videoId: fixture[0].video,
+            keypointsFile: `${baseName}.json`,
+            exerciseId: analysis.profile.exerciseId,
             cameraView: recordingMetadata.cameraView,
-            exercise: selection,
+            ruleVersion: analysis.versions.rule,
+            thresholdVersion: analysis.versions.rule,
+            segments: analysis.segments,
           })
         : null;
-      const annotation =
-        analysis?.profile && analysis.segments.length > 0 && recordingMetadata
-          ? buildLabeledSetFixtureTemplate({
-              videoId: fixture[0].video,
-              keypointsFile: `${baseName}.json`,
-              exerciseId: analysis.profile.exerciseId,
-              cameraView: recordingMetadata.cameraView,
-              ruleVersion: analysis.versions.rule,
-              thresholdVersion: analysis.versions.rule,
-              segments: analysis.segments,
-            })
-          : null;
-      const annotationBlob = annotation
-        ? new Blob([JSON.stringify(annotation, null, 2)], { type: "application/json" })
-        : null;
+    const annotationBlob = annotation
+      ? new Blob([JSON.stringify(annotation, null, 2)], { type: "application/json" })
+      : null;
+    const videoUrl = URL.createObjectURL(videoBlob);
+    const keypointsUrl = URL.createObjectURL(keypointsBlob);
+    const annotationUrl = annotationBlob ? URL.createObjectURL(annotationBlob) : null;
 
-      return {
-        videoUrl: URL.createObjectURL(videoBlob),
-        videoName: `${baseName}.${videoExt}`,
-        keypointsUrl: URL.createObjectURL(keypointsBlob),
-        keypointsName: `${baseName}.json`,
-        annotationUrl: annotationBlob ? URL.createObjectURL(annotationBlob) : null,
-        annotationName: annotationBlob ? `${baseName}.labels.json` : null,
-        poseCount: poses.length,
-        durationSec: fixture[0].durationSec,
-      };
-    });
+    const result: RecordingResult = {
+      videoUrl,
+      videoName: `${baseName}.${videoExt}`,
+      keypointsUrl,
+      keypointsName: `${baseName}.json`,
+      annotationUrl,
+      annotationName: annotationBlob ? `${baseName}.labels.json` : null,
+      poseCount: poses.length,
+      durationSec: fixture[0].durationSec,
+    };
+    recordingResultRef.current = result;
+    setRecordingResult(result);
+
+    requestCaptureDownloads([
+      { url: result.videoUrl, name: result.videoName },
+      { url: result.keypointsUrl, name: result.keypointsName },
+      ...(result.annotationUrl && result.annotationName
+        ? [{ url: result.annotationUrl, name: result.annotationName }]
+        : []),
+    ]);
     recordedPosesRef.current = [];
   }, []);
 
@@ -501,9 +544,13 @@ export function CameraPoseView() {
     const recorder = mediaRecorderRef.current;
     if (recordingActiveRef.current) recordingStopMsRef.current = Date.now();
     if (recorder && recorder.state !== "inactive") {
+      finalizingRecordingRef.current = true;
+      setIsFinalizingRecording(true);
       recorder.stop();
     } else {
       recordingActiveRef.current = false;
+      finalizingRecordingRef.current = false;
+      setIsFinalizingRecording(false);
     }
     setIsRecording(false);
   }, []);
@@ -528,6 +575,7 @@ export function CameraPoseView() {
   }, [stopRecording]);
 
   const start = useCallback(async () => {
+    if (recordingActiveRef.current || finalizingRecordingRef.current) return;
     setError(null);
     try {
       await ensureEngine();
@@ -543,7 +591,6 @@ export function CameraPoseView() {
       await video.play();
       modeRef.current = "camera";
       setMode("camera");
-      startLoop();
 
       // 录制与摄像头会话同生共死:开摄像头即开始录,关摄像头即结束录 —— 现场
       // 不会有人忘记单独按下"开始录制",这个动作本来就该和"打开相机"是同一件事。
@@ -564,7 +611,11 @@ export function CameraPoseView() {
       recordingActiveRef.current = true;
       recorder.start();
       setIsRecording(true);
+      // Start pose processing only after the recorder is active, so the saved
+      // canonical keypoints and the source video share the same session start.
+      startLoop();
     } catch (caught) {
+      stopCameraTracks();
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus("error");
     }
@@ -572,7 +623,7 @@ export function CameraPoseView() {
 
   const startUrl = useCallback(
     async (url: string, name: string) => {
-      if (recordingActiveRef.current) return;
+      if (recordingActiveRef.current || finalizingRecordingRef.current) return;
       setError(null);
       try {
         await ensureEngine();
@@ -603,8 +654,10 @@ export function CameraPoseView() {
     [startUrl],
   );
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    isUnmountedRef.current = false;
+    return () => {
+      isUnmountedRef.current = true;
       cancelAnimationFrame(rafRef.current);
       const video = videoRef.current;
       if (video?.srcObject instanceof MediaStream) {
@@ -614,26 +667,11 @@ export function CameraPoseView() {
         recordingStopMsRef.current = Date.now();
         mediaRecorderRef.current?.stop();
       }
+      if (recordingResultRef.current) revokeRecordingResultUrls(recordingResultRef.current);
       engineRef.current?.close();
       canonicalSessionRef.current = null;
-    },
-    [],
-  );
-
-  // 组件卸载时回收上一轮录制产物的 object URL,避免内存泄漏
-  useEffect(
-    () => () => {
-      setRecordingResult((previous) => {
-        if (previous) {
-          URL.revokeObjectURL(previous.videoUrl);
-          URL.revokeObjectURL(previous.keypointsUrl);
-          if (previous.annotationUrl) URL.revokeObjectURL(previous.annotationUrl);
-        }
-        return previous;
-      });
-    },
-    [],
-  );
+    };
+  }, []);
 
   const updateSettings = (patch: Partial<AgentSettings>) => {
     setSettings((previous) => {
@@ -1101,8 +1139,12 @@ export function CameraPoseView() {
                   ■ 停止
                 </button>
               ) : (
-                <button style={{ ...styles.btn, background: HUD.primaryDim, color: "#eafff2" }} onClick={start}>
-                  ▶ 相机
+                <button
+                  disabled={isFinalizingRecording}
+                  style={{ ...styles.btn, background: HUD.primaryDim, color: "#eafff2", opacity: isFinalizingRecording ? 0.45 : 1 }}
+                  onClick={start}
+                >
+                  {isFinalizingRecording ? "保存中…" : "▶ 相机"}
                 </button>
               )}
               <label
@@ -1111,14 +1153,14 @@ export function CameraPoseView() {
                   background: HUD.panel2,
                   border: `1px solid ${HUD.line}`,
                   textAlign: "center",
-                  opacity: isRecording ? 0.3 : 1,
-                  pointerEvents: isRecording ? "none" : "auto",
+                  opacity: isRecording || isFinalizingRecording ? 0.3 : 1,
+                  pointerEvents: isRecording || isFinalizingRecording ? "none" : "auto",
                 }}
               >
                 本地视频
                 <input
                   type="file"
-                  disabled={isRecording}
+                  disabled={isRecording || isFinalizingRecording}
                   accept="video/mp4,video/quicktime,.mp4,.mov"
                   style={{ display: "none" }}
                   onChange={(event) => {
@@ -1133,11 +1175,11 @@ export function CameraPoseView() {
               {SAMPLE_VIDEOS.map((sample, index) => (
                 <button
                   key={sample}
-                  disabled={isRecording}
+                  disabled={isRecording || isFinalizingRecording}
                   style={{
                     ...styles.btnSmall,
                     ...(videoName === `视频 ${index + 1}` ? styles.btnSmallActive : null),
-                    opacity: isRecording ? 0.3 : 1,
+                    opacity: isRecording || isFinalizingRecording ? 0.3 : 1,
                   }}
                   onClick={() => void startUrl(`/videos/${sample}`, `视频 ${index + 1}`)}
                 >
@@ -1146,12 +1188,18 @@ export function CameraPoseView() {
               ))}
             </div>
             {isRecording && (
-              <p style={styles.recordingBadge}>● 录制中 —— 停止相机即产出视频与关键点文件</p>
+              <p style={styles.recordingBadge}>● 录制中 —— 停止相机即自动保存视频、关键点与标注模板</p>
+            )}
+            {isFinalizingRecording && (
+              <p style={styles.recordingBadge}>● 正在保存本地采集文件…</p>
             )}
             {recordingResult && !isRecording && (
               <div style={styles.recordingResult}>
                 <p style={styles.recordingResultMeta}>
                   上次录制:{recordingResult.durationSec.toFixed(1)}s · {recordingResult.poseCount} 帧
+                </p>
+                <p style={styles.recordingResultMeta}>
+                  已请求浏览器自动保存；若浏览器询问，请允许本页下载多个文件。
                 </p>
                 <div style={styles.btnRow}>
                   <a
