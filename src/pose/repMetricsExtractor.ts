@@ -288,35 +288,51 @@ function buildRepMetrics(
   const torsoQuality = resolveBestSideQuality(torsoJoints, windowPoses, idx);
   const bilateralQuality = resolveBilateralQuality(bilateralJoints, windowPoses, idx);
   const isSupported = (views: readonly CameraView[]) => views.includes(cameraView);
+  const metricValue = <T>(
+    definition: KinematicsProfile["metrics"][keyof KinematicsProfile["metrics"]] | undefined,
+    value: T,
+  ): T | null => (definition && !isSupported(definition.supportedViews) ? null : value);
+  const unsupportedReason = (name: string) => `${cameraView} 机位不支持 ${name} 指标`;
 
   const metrics: Partial<Record<RuleMetricKey, MetricObservation>> = {
-    [RULE_METRIC.amplitude]: toObservation(cycle.amplitude, "normalized", primaryQuality, "无法计算幅度", profile?.metrics.amplitude.definitionId),
+    [RULE_METRIC.amplitude]: toObservation(
+      metricValue(profile?.metrics.amplitude, cycle.amplitude),
+      "normalized",
+      primaryQuality,
+      profile && !isSupported(profile.metrics.amplitude.supportedViews) ? unsupportedReason("幅度") : "无法计算幅度",
+      profile?.metrics.amplitude.definitionId,
+    ),
     [RULE_METRIC.toExtremeMs]: toObservation(
-      cycle.extremeMs - cycle.startMs,
+      metricValue(profile?.metrics.phaseDuration, cycle.extremeMs - cycle.startMs),
       "ms",
       primaryQuality,
-      "无法计算到极点耗时",
+      profile && !isSupported(profile.metrics.phaseDuration.supportedViews) ? unsupportedReason("相位时长") : "无法计算到极点耗时",
       profile?.metrics.phaseDuration.definitionId,
     ),
     [RULE_METRIC.fromExtremeMs]: toObservation(
-      cycle.endMs - cycle.extremeMs,
+      metricValue(profile?.metrics.phaseDuration, cycle.endMs - cycle.extremeMs),
       "ms",
       primaryQuality,
-      "无法计算自极点耗时",
+      profile && !isSupported(profile.metrics.phaseDuration.supportedViews) ? unsupportedReason("相位时长") : "无法计算自极点耗时",
       profile?.metrics.phaseDuration.definitionId,
     ),
     [RULE_METRIC.torsoDriftDeg]: toObservation(
       profile && !isSupported(profile.metrics.torsoDrift.supportedViews) ? null : computeTorsoDriftDeg(windowPoses, idx),
       "deg",
       torsoQuality,
-      "肩、髋关键点不足以计算躯干角度",
+      profile && !isSupported(profile.metrics.torsoDrift.supportedViews) ? unsupportedReason("躯干漂移") : "肩、髋关键点不足以计算躯干角度",
       profile?.metrics.torsoDrift.definitionId,
     ),
     [RULE_METRIC.bilateralAsymmetryRatio]: toObservation(
-      computeBilateralAsymmetryRatio(windowPoses, idx, bilateralJoints[0]),
+      metricValue(
+        profile?.metrics.bilateralAsymmetry,
+        computeBilateralAsymmetryRatio(windowPoses, idx, bilateralJoints[0]),
+      ),
       "ratio",
       bilateralQuality,
-      "手腕轨迹或躯干尺度不足以计算左右不对称",
+      profile && !isSupported(profile.metrics.bilateralAsymmetry.supportedViews)
+        ? unsupportedReason("左右不对称")
+        : "手腕轨迹或躯干尺度不足以计算左右不对称",
       profile?.metrics.bilateralAsymmetry.definitionId,
     ),
   };

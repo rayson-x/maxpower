@@ -93,3 +93,15 @@ test("derived real occlusion returns partial without a misleading total score", 
     .find((evaluation) => evaluation.status === "refused");
   assert.match(refusal?.reason ?? "", /可见率|置信度|有效帧比例/);
 });
+
+test("profile metric view restrictions become structured unavailable observations", () => {
+  const result = analyzePoseSet({
+    poses: loadPoseFixture("6e26dae721570a61cc5c9873d18c9380.mp4").poses,
+    cameraView: "front",
+    exercise: { mode: "user", exerciseId: "straight_arm_pulldown" },
+  });
+  const torso = result.reps[0]?.metrics.torsoDriftDeg;
+  assert.equal(torso?.value, null);
+  assert.match(torso?.refusalReason ?? "", /front 机位不支持 躯干漂移/);
+  assert.equal(torso?.definitionId, "straight-arm-pulldown/v1/torso-drift");
+});
