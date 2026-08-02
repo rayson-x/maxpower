@@ -8,7 +8,7 @@ export interface PoseLandmark {
   y: number;
   z: number;
   visibility: number;
-  /** true = 轨迹预测器外推的值,不是视觉测量(仅展示层使用) */
+  /** Legacy compatibility: true when the canonical adapter used tracker prediction. */
   predicted?: boolean;
 }
 

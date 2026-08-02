@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { LandmarkTracker } from "../../src/pose/landmarkTracker";
+import { createPoseContinuitySession } from "../../src/pose/canonicalPose";
+import { buildCanonicalPosePresentation } from "../../src/pose/canonicalPosePresentation";
 import {
   loadPoseFixture,
   loadPoseFixtureAnnotation,
@@ -79,5 +81,46 @@ test("lat-pulldown challenge frames preserve raw visibility and current predicte
         `${joint.name} tracker behavior changed at ${frame.timestampMs}ms`,
       );
     }
+  }
+});
+
+test("canonical rendering keeps both arm edges at the lat-pulldown challenge frames", () => {
+  const fixture = loadPoseFixture(LAT_PULLDOWN_VIDEO);
+  const session = createPoseContinuitySession({
+    sequenceId: `fixture:${LAT_PULLDOWN_VIDEO}`,
+    schema: "blazepose33",
+    image: {
+      widthPx: 720,
+      heightPx: 1280,
+      rotationDegrees: 0,
+      mirrored: false,
+    },
+    stabilization: "legacy",
+  });
+  const challengeFrames = new Map<number, ReturnType<typeof session.process>>();
+
+  for (const pose of fixture.poses) {
+    const frame = session.process(pose);
+    if (pose.timestampMs === 1950 || pose.timestampMs === 2000) {
+      challengeFrames.set(pose.timestampMs, frame);
+    }
+  }
+
+  for (const timestampMs of [1950, 2000]) {
+    const frame = challengeFrames.get(timestampMs);
+    assert.ok(frame, `missing canonical frame at ${timestampMs}ms`);
+    assert.equal(frame.landmarks[13].source, "predicted");
+    assert.equal(frame.landmarks[14].source, "predicted");
+    assert.equal(frame.landmarks[13].renderable, true);
+    assert.equal(frame.landmarks[14].renderable, true);
+
+    const presentation = buildCanonicalPosePresentation(frame, [
+      [11, 13],
+      [13, 15],
+      [12, 14],
+      [14, 16],
+    ]);
+    assert.equal(presentation.edges.length, 4);
+    assert.ok(presentation.edges.every((edge) => edge.repaired));
   }
 });

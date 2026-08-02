@@ -19,19 +19,19 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] 回归输出明确区分原始观测事实、当前实现行为和尚未具备人工坐标真值的指标
 - [x] 完整类型检查、聚焦测试和全量测试通过
 
-## 并行引入 Canonical Pose Frame `[ready-for-agent]`
+## 并行引入 Canonical Pose Frame
 
 **What to build:** 在保留旧 pose 形态的同时引入版本化 Canonical Pose Frame，并以 raw pass-through 完成第一条端到端路径，使 Web 渲染、动作计数、录制和分析首次消费同一 frame 而不改变算法结果。
 
 **Blocked by:** 恢复连续性测试前沿并登记高位下拉真值.
 
-- [ ] Canonical frame 携带版本、frame/sequence/timestamp、schema、坐标空间和图像变换元数据
-- [ ] 每关节可表达 measured/fused/predicted/unknown、repair flags、uncertainty、renderable 与 usable
-- [ ] 同一 canonical frame id 和 landmark 内容进入渲染、动作计数、录制与分析
-- [ ] Raw observation 只通过显式诊断入口保留，不静默替换 canonical
-- [ ] 旧调用方在 expand 阶段继续工作，测试保持绿色
+- [x] Canonical frame 携带版本、frame/sequence/timestamp、schema、坐标空间和图像变换元数据
+- [x] 每关节可表达 measured/fused/predicted/unknown、repair flags、uncertainty、renderable 与 usable
+- [x] 同一 canonical frame id 和 landmark 内容进入渲染、动作计数、录制与分析
+- [x] Raw observation 只通过显式诊断入口保留，不静默替换 canonical
+- [x] 旧调用方在 expand 阶段继续工作，测试保持绿色
 
-## 用弱观测融合保持高位下拉手臂连续
+## 用弱观测融合保持高位下拉手臂连续 `[ready-for-agent]`
 
 **What to build:** 当肩腕可靠、肘部低置信但轨迹和骨链连续时输出 fused 肘部，让高位下拉到底时手臂保持可信连线，同时让客户端与渲染使用同一坐标。
 
@@ -43,7 +43,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] 不通过全局降低 visibility 阈值或无限预测实现连续
 - [ ] 人工标注挑战帧的位置误差和 arm edge coverage 达到登记门槛
 
-## 让短预测按时间结束并诚实转为 Unknown
+## 让短预测按时间结束并诚实转为 Unknown `[ready-for-agent]`
 
 **What to build:** 短缺口使用真实毫秒做因果预测，超过证据上限时输出 unknown；不同帧率、seek、large dt 和会话切换不再改变或污染行为。
 
@@ -55,7 +55,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [ ] Seek、时间倒退、large dt、sequence/model/schema 切换清理旧状态
 - [ ] 重新获得观测后不继承陈旧 One Euro/预测残影
 
-## 拒绝高置信飞点但保留真实快速动作
+## 拒绝高置信飞点但保留真实快速动作 `[ready-for-agent]`
 
 **What to build:** 用 aspect-correct motion、innovation、骨链和整体运动联合判断异常，使高置信错点不再豁免，同时保留真实快速动作的峰值和相位。
 
@@ -132,7 +132,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] rep 分割和五项逐 rep 运动学指标
 - [x] 确定性规则引擎、字段级拒答、候选规则和版本化阈值
 - [x] 用户选择/低置信自动识别的规则门控
-- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 33 项通过
+- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 41 项通过
 - [x] 离线 harness 的信号诊断、轨迹摘要和 rep 输出
 
 ## 恢复可发布的 Web 基线

@@ -1,27 +1,27 @@
 import type { PoseEstimate } from "./PoseEngine";
 
-interface BuildRecordingFixtureInput {
+interface BuildRecordingFixtureInput<TPose extends PoseEstimate> {
   video: string;
   fallbackDurationSec: number;
   model: string;
-  poses: readonly PoseEstimate[];
+  poses: readonly TPose[];
 }
 
-export interface RecordingFixture {
+export interface RecordingFixture<TPose extends PoseEstimate = PoseEstimate> {
   video: string;
   durationSec: number;
   stepMs: number;
   model: string;
-  poses: PoseEstimate[];
+  poses: TPose[];
 }
 
 /** Builds the harness fixture shape, including valid zero-pose recordings. */
-export function buildRecordingFixture({
+export function buildRecordingFixture<TPose extends PoseEstimate>({
   video,
   fallbackDurationSec,
   model,
   poses,
-}: BuildRecordingFixtureInput): RecordingFixture[] {
+}: BuildRecordingFixtureInput<TPose>): RecordingFixture<TPose>[] {
   const firstTimestampMs = poses[0]?.timestampMs;
   const lastTimestampMs = poses[poses.length - 1]?.timestampMs;
   const hasPoseDuration =
@@ -32,7 +32,7 @@ export function buildRecordingFixture({
   const rebasedPoses =
     firstTimestampMs === undefined
       ? []
-      : poses.map((pose) => ({ ...pose, timestampMs: pose.timestampMs - firstTimestampMs }));
+      : poses.map((pose) => rebasePose(pose, firstTimestampMs));
 
   return [
     {
@@ -43,4 +43,26 @@ export function buildRecordingFixture({
       poses: rebasedPoses,
     },
   ];
+}
+
+function rebasePose<TPose extends PoseEstimate>(
+  pose: TPose,
+  firstTimestampMs: number,
+): TPose {
+  const rebased = {
+    ...pose,
+    timestampMs: pose.timestampMs - firstTimestampMs,
+  };
+
+  if (
+    "sourceTimestampMs" in pose &&
+    typeof pose.sourceTimestampMs === "number"
+  ) {
+    return {
+      ...rebased,
+      sourceTimestampMs: pose.sourceTimestampMs - firstTimestampMs,
+    } as TPose;
+  }
+
+  return rebased as TPose;
 }

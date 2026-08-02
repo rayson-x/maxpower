@@ -8,9 +8,15 @@ import {
   type ExerciseSelection,
   type SetScore,
 } from "../pose/formRuleEngine";
-import { BONES_COCO17, LandmarkTracker } from "../pose/landmarkTracker";
+import { routeCanonicalFrame } from "../pose/canonicalFrameRouter";
+import {
+  createPoseContinuitySession,
+  type CanonicalPoseFrame,
+  type PoseContinuitySession,
+  type PoseSchema,
+} from "../pose/canonicalPose";
+import { buildCanonicalPosePresentation } from "../pose/canonicalPosePresentation";
 import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
-import { PoseSmoother } from "../pose/oneEuro";
 import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
 import { buildRecordingFixture } from "../pose/recordingFixture";
 import { extractRepMetrics, type RepMetricsExtraction } from "../pose/repMetricsExtractor";
@@ -25,7 +31,6 @@ import {
 } from "../pose/repSegmenter";
 import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/trajectory";
 import { RtmposeEngine } from "../pose/RtmposeEngine";
-import { selectLandmarksByOriginalIndex } from "../pose/selectLandmarks";
 import {
   CAMERA_VIEWS,
   torsoLeanDeg,
@@ -100,6 +105,10 @@ const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
 const RTMPOSE_MODEL_PATH = "/models/rtmpose-m-simcc-256x192.onnx";
 const STAGE_ASPECT = 16 / 9;
 
+function poseSchemaForEngine(kind: EngineKind): PoseSchema {
+  return kind === "rtmpose" ? "coco17" : "blazepose33";
+}
+
 const EXERCISE_CHOICES: Array<{ id: ExerciseId; label: string }> = [
   { id: "barbell_row", label: "杠铃划船" },
   { id: "pull_up", label: "引体向上" },
@@ -169,21 +178,23 @@ export function CameraPoseView() {
   const lastTimestampRef = useRef(-1);
   const modelPathRef = useRef(POSE_MODELS[2].path);
   const cameraViewRef = useRef<CameraView>("oblique45");
-  const filterEnabledRef = useRef(true);
-  const poseBufferRef = useRef<PoseEstimate[]>([]);
+  // Canonical V1 first lands as raw pass-through; the legacy stabilizer remains opt-in
+  // during expand/contract until the evidence-based fusion ticket replaces it.
+  const filterEnabledRef = useRef(false);
+  const poseBufferRef = useRef<CanonicalPoseFrame[]>([]);
   const frameCountRef = useRef(0);
   const keyframesRef = useRef<Array<{ t: number; jpeg: string }>>([]);
   const lastCaptureRef = useRef(0);
   const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const smootherRef = useRef(new PoseSmoother());
-  const trackerRef = useRef(new LandmarkTracker());
+  const canonicalSessionRef = useRef<PoseContinuitySession | null>(null);
+  const sequenceCounterRef = useRef(0);
   // 实时信号曲线(肘角),驱动左下角曲线图
   const signalRef = useRef<SignalSample[]>([]);
 
   // 现场采集留存:与 poseBufferRef(实时分析用的滚动环形缓冲,有上限)不同,
-  // 这里是录制期间不设上限的完整会话缓冲,只在 recordingActiveRef 为 true 时累积。
+  // 这里是录制期间不设上限的 canonical 会话缓冲,只在 recordingActiveRef 为 true 时累积。
   const recordingActiveRef = useRef(false);
-  const recordedPosesRef = useRef<PoseEstimate[]>([]);
+  const recordedPosesRef = useRef<CanonicalPoseFrame[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingStartMsRef = useRef(0);
@@ -199,9 +210,9 @@ export function CameraPoseView() {
   const [modelLoading, setModelLoading] = useState(false);
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
   const [exerciseChoice, setExerciseChoice] = useState<"" | "auto" | ExerciseId>("");
-  const [filterEnabled, setFilterEnabled] = useState(true);
+  const [filterEnabled, setFilterEnabled] = useState(false);
   const [torsoLean, setTorsoLean] = useState<number | null>(null);
-  const [pose, setPose] = useState<PoseEstimate | null>(null);
+  const [pose, setPose] = useState<CanonicalPoseFrame | null>(null);
   const [fps, setFps] = useState(0);
   const [signalCurve, setSignalCurve] = useState<SignalSample[]>([]);
   const [segments, setSegments] = useState<RepSegment[]>([]);
@@ -246,6 +257,22 @@ export function CameraPoseView() {
     return engineRef.current;
   }, []);
 
+  const startCanonicalSequence = useCallback(() => {
+    const video = videoRef.current;
+    const sequenceNumber = sequenceCounterRef.current++;
+    canonicalSessionRef.current = createPoseContinuitySession({
+      sequenceId: `web:${engineKindRef.current}:${sequenceNumber}`,
+      schema: poseSchemaForEngine(engineKindRef.current),
+      image: {
+        widthPx: Math.max(1, video?.videoWidth ?? 0),
+        heightPx: Math.max(1, video?.videoHeight ?? 0),
+        rotationDegrees: 0,
+        mirrored: modeRef.current === "camera",
+      },
+      stabilization: filterEnabledRef.current ? "legacy" : "raw",
+    });
+  }, []);
+
   const switchEngine = useCallback(
     async (kind: EngineKind) => {
       if (kind === engineKindRef.current) return;
@@ -253,13 +280,13 @@ export function CameraPoseView() {
       setEngineKind(kind);
       engineRef.current?.close();
       engineRef.current = null;
-      smootherRef.current.reset();
-      trackerRef.current = new LandmarkTracker(
-        kind === "rtmpose" ? BONES_COCO17 : undefined,
-      );
-      if (status === "running") await ensureEngine();
+      canonicalSessionRef.current = null;
+      if (status === "running") {
+        await ensureEngine();
+        startCanonicalSequence();
+      }
     },
-    [ensureEngine, status],
+    [ensureEngine, startCanonicalSequence, status],
   );
 
   const switchModel = useCallback(
@@ -270,14 +297,19 @@ export function CameraPoseView() {
       modelPathRef.current = next.path;
       engineRef.current?.close();
       engineRef.current = null;
-      if (status === "running") await ensureEngine();
+      canonicalSessionRef.current = null;
+      if (status === "running") {
+        await ensureEngine();
+        startCanonicalSequence();
+      }
     },
-    [ensureEngine, status],
+    [ensureEngine, startCanonicalSequence, status],
   );
 
   const startLoop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     lastTimestampRef.current = -1;
+    startCanonicalSequence();
     let lastCurveUpdate = 0;
     const loop = () => {
       const engine = engineRef.current;
@@ -297,46 +329,38 @@ export function CameraPoseView() {
         try {
           const estimate = engine.estimate(currentVideo, timestampMs);
           if (estimate) {
-            if (filterEnabledRef.current) {
-              const tracked = trackerRef.current.update(estimate.landmarks, timestampMs);
-              const smoothed = smootherRef.current.smooth(tracked, timestampMs);
-              setPose({
-                ...estimate,
-                landmarks: estimate.landmarks.map((landmark, index) => ({
-                  ...landmark,
-                  x: smoothed[index]?.x ?? landmark.x,
-                  y: smoothed[index]?.y ?? landmark.y,
-                  visibility: tracked[index]?.visibility ?? landmark.visibility,
-                  predicted: tracked[index]?.predicted ?? false,
-                })),
-              });
-            } else {
-              setPose(estimate);
-            }
-            setTorsoLean(torsoLeanDeg(estimate.worldLandmarks));
-            // 特征缓冲:每 3 帧取 1
-            frameCountRef.current += 1;
-            if (frameCountRef.current % 3 === 0) {
-              const buffer = poseBufferRef.current;
-              buffer.push(estimate);
-              // 采集窗口拉长到 30s 后,每 3 帧取 1 约 15 样本/秒 → 至少要 450 才装得下整窗
-              if (buffer.length > 900) buffer.shift();
-            }
-            // 现场采集:录制期间原始帧全量留存,不做环形截断,配现场同步录下的视频文件
-            if (recordingActiveRef.current) {
-              recordedPosesRef.current.push(estimate);
-            }
-            // 肘角信号曲线
-            const elbow = bestElbowAngle(estimate, engineKindRef.current);
-            if (elbow !== null) {
-              const signal = signalRef.current;
-              signal.push({ t: timestampMs, v: elbow });
-              if (signal.length > 200) signal.shift();
-              if (timestampMs - lastCurveUpdate > 250) {
-                lastCurveUpdate = timestampMs;
-                setSignalCurve([...signal]);
-              }
-            }
+            if (!canonicalSessionRef.current) startCanonicalSequence();
+            const canonicalFrame = canonicalSessionRef.current!.process(estimate);
+            routeCanonicalFrame(canonicalFrame, {
+              render: (frame) => {
+                setPose(frame);
+              },
+              count: (frame) => {
+                const elbow = bestElbowAngle(frame, engineKindRef.current);
+                if (elbow === null) return;
+                const signal = signalRef.current;
+                signal.push({ t: frame.timestampMs, v: elbow });
+                if (signal.length > 200) signal.shift();
+                if (frame.timestampMs - lastCurveUpdate > 250) {
+                  lastCurveUpdate = frame.timestampMs;
+                  setSignalCurve([...signal]);
+                }
+              },
+              record: (frame) => {
+                if (recordingActiveRef.current) {
+                  recordedPosesRef.current.push(frame);
+                }
+              },
+              analyze: (frame) => {
+                frameCountRef.current += 1;
+                if (frameCountRef.current % 3 !== 0) return;
+                const buffer = poseBufferRef.current;
+                buffer.push(frame);
+                // 采集窗口拉长到 30s 后,每 3 帧取 1 约 15 样本/秒 → 至少要 450 才装得下整窗
+                if (buffer.length > 900) buffer.shift();
+              },
+            });
+            setTorsoLean(torsoLeanDeg(canonicalFrame.worldLandmarks));
           }
         } catch {
           // 单帧失败不致命
@@ -361,7 +385,7 @@ export function CameraPoseView() {
     };
     rafRef.current = requestAnimationFrame(loop);
     setStatus("running");
-  }, []);
+  }, [startCanonicalSequence]);
 
   const stopCameraTracks = () => {
     const video = videoRef.current;
@@ -440,6 +464,7 @@ export function CameraPoseView() {
     setVideoName(null);
     setSignalCurve([]);
     signalRef.current = [];
+    canonicalSessionRef.current = null;
   }, [stopRecording]);
 
   const start = useCallback(async () => {
@@ -504,8 +529,6 @@ export function CameraPoseView() {
         poseBufferRef.current = [];
         frameCountRef.current = 0;
         signalRef.current = [];
-        smootherRef.current.reset();
-        trackerRef.current.reset();
         startLoop();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -534,6 +557,7 @@ export function CameraPoseView() {
         mediaRecorderRef.current?.stop();
       }
       engineRef.current?.close();
+      canonicalSessionRef.current = null;
     },
     [],
   );
@@ -579,15 +603,16 @@ export function CameraPoseView() {
     setRepMetricsScore(null);
     try {
       const video = videoRef.current;
-      poseBufferRef.current = [];
-      frameCountRef.current = 0;
-      keyframesRef.current = [];
-      trackerRef.current.reset();
-      smootherRef.current.reset();
       if (video && modeRef.current === "file") {
         video.currentTime = 0;
         await video.play();
       }
+      // The await above may let the previous sequence publish one last frame.
+      // Clear consumers afterwards so one analysis run never mixes sequences.
+      poseBufferRef.current = [];
+      frameCountRef.current = 0;
+      keyframesRef.current = [];
+      startCanonicalSequence();
       // 采集窗口:原来固定 10s,装不下一个完整的慢速循环(实测慢速引体单次接近 8s,
       // 而分期需要"静息→极点→静息"整段,至少要两个静息端)。文件模式尽量放完整段视频,
       // 相机模式给 30s。
@@ -674,17 +699,15 @@ export function CameraPoseView() {
 
   const poseConnections = engineKind === "rtmpose" ? COCO17_CONNECTIONS : POSE_CONNECTIONS;
   const landmarkTotal = engineKind === "rtmpose" ? 17 : 33;
+  const posePresentation = buildCanonicalPosePresentation(pose, poseConnections);
+  const {
+    renderableLandmarks,
+    measuredLandmarks,
+    repairedLandmarks,
+    usableLandmarks,
+  } = posePresentation;
 
-  const measuredLandmarks = selectLandmarksByOriginalIndex(
-    pose?.landmarks ?? [],
-    (landmark) => landmark.visibility >= 0.5 && !landmark.predicted,
-  );
-  const predictedLandmarks = selectLandmarksByOriginalIndex(
-    pose?.landmarks ?? [],
-    (landmark) => landmark.predicted === true && landmark.visibility > 0,
-  );
-
-  const trackingOk = measuredLandmarks.size >= landmarkTotal * 0.6;
+  const trackingOk = usableLandmarks.size >= landmarkTotal * 0.6;
   const analyzing = analysisStage !== null && analysisStage !== "done";
   const videoViewport = fitVideoIntoStage(videoAspect);
 
@@ -741,19 +764,18 @@ export function CameraPoseView() {
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
               >
-                {poseConnections.map(([from, to]) => {
-                  const startPoint = measuredLandmarks.get(from);
-                  const endPoint = measuredLandmarks.get(to);
-                  if (!startPoint || !endPoint) return null;
+                {posePresentation.edges.map((edge) => {
                   return (
                     <line
-                      key={`${from}-${to}`}
-                      x1={startPoint.x * 100}
-                      y1={startPoint.y * 100}
-                      x2={endPoint.x * 100}
-                      y2={endPoint.y * 100}
-                      stroke={HUD.primary}
+                      key={`${edge.fromIndex}-${edge.toIndex}`}
+                      x1={edge.start.x * 100}
+                      y1={edge.start.y * 100}
+                      x2={edge.end.x * 100}
+                      y2={edge.end.y * 100}
+                      stroke={edge.repaired ? "#9ca3af" : HUD.primary}
                       strokeWidth="0.5"
+                      strokeDasharray={edge.repaired ? "1.5 1" : undefined}
+                      opacity={edge.repaired ? 0.7 : 1}
                     />
                   );
                 })}
@@ -764,17 +786,17 @@ export function CameraPoseView() {
                     cy={landmark.y * 100}
                     r="0.7"
                     fill={HUD.amber}
-                    opacity={Math.max(0.3, landmark.visibility)}
+                    opacity={Math.max(0.3, landmark.canonicalConfidence)}
                   />
                 ))}
-                {[...predictedLandmarks.entries()].map(([index, landmark]) => (
+                {[...repairedLandmarks.entries()].map(([index, landmark]) => (
                   <circle
-                    key={`p${index}`}
+                    key={`r${index}`}
                     cx={landmark.x * 100}
                     cy={landmark.y * 100}
                     r="0.6"
                     fill="#9ca3af"
-                    opacity="0.6"
+                    opacity={Math.max(0.35, landmark.canonicalConfidence)}
                   />
                 ))}
               </svg>
@@ -798,7 +820,7 @@ export function CameraPoseView() {
                 <span style={styles.hudItem}>
                   <span style={styles.hudLabel}>PTS</span>
                   <span style={styles.hudValue}>
-                    {measuredLandmarks.size}/{landmarkTotal}
+                    {renderableLandmarks.size}/{landmarkTotal}
                   </span>
                 </span>
                 {videoName && (
@@ -1046,17 +1068,13 @@ export function CameraPoseView() {
                   ...(filterEnabled ? styles.btnSmallActive : null),
                 }}
                 onClick={() => {
-                  setFilterEnabled((prev) => {
-                    filterEnabledRef.current = !prev;
-                    if (prev) {
-                      smootherRef.current.reset();
-                      trackerRef.current.reset();
-                    }
-                    return !prev;
-                  });
+                  const next = !filterEnabledRef.current;
+                  filterEnabledRef.current = next;
+                  setFilterEnabled(next);
+                  startCanonicalSequence();
                 }}
               >
-                稳定层{filterEnabled ? "✓" : "✗"}
+                旧稳定层{filterEnabled ? "✓" : "✗"}
               </button>
             </div>
           </div>

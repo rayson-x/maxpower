@@ -50,7 +50,7 @@ export interface SmoothedPoint {
   y: number;
 }
 
-/** 33 个关键点各一对 One Euro 滤波器(x/y)。只用于骨架展示层。 */
+/** 33 个关键点各一对 One Euro 滤波器(x/y)，由 legacy canonical adapter 使用。 */
 export class PoseSmoother {
   private filters: Array<{ x: OneEuroFilter; y: OneEuroFilter }> = [];
 
