@@ -1,5 +1,9 @@
 import type { PoseLandmark } from "./PoseEngine";
-import type { CanonicalImageMetadata, PoseSchema } from "./canonicalPose";
+import type {
+  CanonicalContinuityReason,
+  CanonicalImageMetadata,
+  PoseSchema,
+} from "./canonicalPose";
 
 const MEASURED_MIN_SCORE = 0.5;
 const WEAK_MIN_SCORE = 0.2;
@@ -33,19 +37,12 @@ interface MotionState {
 }
 
 export interface ContinuityJointEvidence {
-  index: number;
   x: number;
   y: number;
   source: "fused" | "predicted" | "unknown";
   canonicalConfidence: number;
   uncertainty: number;
-  reason:
-    | "weak-observation-bone-fusion"
-    | "short-gap-prediction"
-    | "outlier-rejected-prediction"
-    | "outlier-rejected-unknown"
-    | "prediction-timeout"
-    | "no-measurement-baseline";
+  reason: Exclude<CanonicalContinuityReason, "legacy-tracker-prediction" | null>;
 }
 
 const ARM_CHAINS: Record<PoseSchema, readonly ArmChain[]> = {
@@ -60,8 +57,8 @@ const ARM_CHAINS: Record<PoseSchema, readonly ArmChain[]> = {
 };
 
 /**
- * Fuses only weak, still-observed elbows. It never creates a point from a gap;
- * time-bounded prediction belongs to the separate gap-repair ticket.
+ * Reference continuity pipeline for the Web implementation: fuse weak observed
+ * elbows, reject isolated outliers, and repair only short evidence gaps.
  */
 export class WeakObservationFusion {
   private readonly states = new Map<number, ArmState>();
@@ -160,7 +157,6 @@ export class WeakObservationFusion {
 
       state.previousElbow = resultPx;
       repaired.set(chain.elbow, {
-        index: chain.elbow,
         x: resultPx.x / this.image.widthPx,
         y: resultPx.y / this.image.heightPx,
         source: "fused",
@@ -198,7 +194,6 @@ export class WeakObservationFusion {
           y: state.point.y + state.vyPxPerMs * elapsedMs,
         };
         repaired.set(index, {
-          index,
           x: predicted.x / this.image.widthPx,
           y: predicted.y / this.image.heightPx,
           source: "predicted",
@@ -212,7 +207,6 @@ export class WeakObservationFusion {
       }
 
       repaired.set(index, {
-        index,
         x: landmark?.x ?? 0,
         y: landmark?.y ?? 0,
         source: "unknown",
