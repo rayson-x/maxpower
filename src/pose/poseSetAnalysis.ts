@@ -115,6 +115,31 @@ export function analyzePoseSet(input: PoseSetAnalysisInput): PoseSetAnalysisResu
     };
   }
 
+  if (availableProfile && !availableProfile.supportedViews.includes(input.cameraView)) {
+    return {
+      status: "unsupported",
+      reason: `${requestedId} profile does not support ${input.cameraView} capture`,
+      exercise: {
+        id: requestedId,
+        nameZh: concept?.nameZh ?? null,
+        maturity: concept?.maturity ?? null,
+        selectionMode: input.exercise.mode,
+        userSelectionOverrodeAutoSuggestion: overridden,
+      },
+      profile: availableProfile,
+      extraction: null,
+      reps: [],
+      segments: [],
+      score: null,
+      coverage: EMPTY_COVERAGE,
+      versions: {
+        analysis: "pose-set-analysis/v1",
+        profile: availableProfile.version,
+        rule: EXPERIMENTAL_THRESHOLDS_V1.version,
+      },
+    };
+  }
+
   const exercise: ExerciseSelection =
     input.exercise.mode === "user"
       ? { mode: "user", exerciseId: profile!.exerciseId }

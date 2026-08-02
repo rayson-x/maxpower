@@ -123,6 +123,17 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     maturity: "catalog_only",
     source: PROJECT_SOURCE,
   },
+  {
+    id: "bodyweight_squat",
+    nameZh: "徒手深蹲",
+    nameEn: "Bodyweight squat",
+    aliases: ["深蹲", "自重深蹲"],
+    movementPattern: "squat",
+    equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
 ];
 
 export class ExerciseRegistry {

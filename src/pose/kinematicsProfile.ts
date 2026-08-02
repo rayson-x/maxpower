@@ -24,7 +24,7 @@ export type RecognitionTag =
 export interface KinematicsProfile {
   exerciseId: string;
   version: string;
-  movementPattern: "horizontal_pull" | "vertical_pull";
+  movementPattern: "horizontal_pull" | "vertical_pull" | "squat";
   recognitionTags: readonly RecognitionTag[];
   preferredView: CameraView;
   supportedViews: readonly CameraView[];
@@ -96,6 +96,27 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     amplitudeJoints: ["hip", "shoulder", "wrist"],
     recognitionTags: ["straight_arm", "shoulder_dominant", "arms_travel", "vertical_path", "standing"],
   }),
+  profile({
+    exerciseId: "bodyweight_squat",
+    version: "bodyweight-squat-kinematics/v1",
+    movementPattern: "squat",
+    signal: "knee_angle",
+    effortExtreme: "min",
+    toExtreme: "eccentric",
+    fromExtreme: "concentric",
+    preferredView: "side",
+    supportedViews: SIDE_VIEWS,
+    metricViews: SIDE_VIEWS,
+    amplitudeJoints: ["hip", "knee", "ankle"],
+    bilateralJoints: ["knee"],
+    // A sagittal capture can segment a squat but cannot support a reliable
+    // left/right comparison. Front captures are rejected before segmentation.
+    bilateralViews: [],
+    // Local recognition has no lower-body discriminators yet. Keep this empty
+    // instead of borrowing generic standing evidence and misclassifying a squat
+    // as an upper-body movement.
+    recognitionTags: [],
+  }),
 ];
 
 const PROFILES = new Map(PROFILE_LIST.map((item) => [item.exerciseId, item]));
@@ -114,8 +135,14 @@ function profile(input: {
   movementPattern: KinematicsProfile["movementPattern"];
   signal: SignalKind;
   effortExtreme: "min" | "max";
+  toExtreme?: PhaseMeaning;
+  fromExtreme?: PhaseMeaning;
   preferredView: CameraView;
+  supportedViews?: readonly CameraView[];
+  metricViews?: readonly CameraView[];
   amplitudeJoints: readonly LogicalJoint[];
+  bilateralJoints?: readonly LogicalJoint[];
+  bilateralViews?: readonly CameraView[];
   recognitionTags: readonly RecognitionTag[];
 }): KinematicsProfile {
   const definitionPrefix = `${input.exerciseId.replaceAll("_", "-")}/v1`;
@@ -125,25 +152,25 @@ function profile(input: {
     movementPattern: input.movementPattern,
     recognitionTags: input.recognitionTags,
     preferredView: input.preferredView,
-    supportedViews: COMMON_VIEWS,
+    supportedViews: input.supportedViews ?? COMMON_VIEWS,
     phaseSignal: {
       kind: input.signal,
       effortExtreme: input.effortExtreme,
-      toExtreme: "concentric",
-      fromExtreme: "eccentric",
+      toExtreme: input.toExtreme ?? "concentric",
+      fromExtreme: input.fromExtreme ?? "eccentric",
     },
     metrics: {
       amplitude: {
         definitionId: `${definitionPrefix}/amplitude/${input.signal}`,
         unit: "normalized",
         joints: input.amplitudeJoints,
-        supportedViews: COMMON_VIEWS,
+        supportedViews: input.metricViews ?? COMMON_VIEWS,
       },
       bilateralAsymmetry: {
         definitionId: `${definitionPrefix}/bilateral-path-asymmetry`,
         unit: "ratio",
-        joints: ["wrist"],
-        supportedViews: ["front", "oblique45"],
+        joints: input.bilateralJoints ?? ["wrist"],
+        supportedViews: input.bilateralViews ?? ["front", "oblique45"],
       },
       torsoDrift: {
         definitionId: `${definitionPrefix}/torso-drift`,
@@ -155,7 +182,7 @@ function profile(input: {
         definitionId: `${definitionPrefix}/phase-duration`,
         unit: "ms",
         joints: input.amplitudeJoints,
-        supportedViews: COMMON_VIEWS,
+        supportedViews: input.metricViews ?? COMMON_VIEWS,
       },
     },
   };

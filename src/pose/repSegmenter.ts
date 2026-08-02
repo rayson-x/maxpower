@@ -45,6 +45,8 @@ const SHOULDER_L = 11;
 const ELBOW_L = 13;
 const WRIST_L = 15;
 const HIP_L = 23;
+const KNEE_L = 25;
+const ANKLE_L = 27;
 
 function visible(l: PoseLandmark | undefined): l is PoseLandmark {
   return !!l && l.visibility >= 0.5;
@@ -78,7 +80,7 @@ function angleDeg(a: PoseLandmark, b: PoseLandmark, c: PoseLandmark): number {
   return (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
 }
 
-export type SignalKind = "elbow_angle" | "wrist_height" | "shoulder_angle";
+export type SignalKind = "elbow_angle" | "wrist_height" | "shoulder_angle" | "knee_angle";
 
 /** 不分左右的逻辑关节名,供需要报告"这个数值依赖哪些关节"的消费方使用。 */
 export type LogicalJoint = "shoulder" | "elbow" | "wrist" | "hip" | "knee" | "ankle";
@@ -94,6 +96,7 @@ export type LogicalJoint = "shoulder" | "elbow" | "wrist" | "hip" | "knee" | "an
  */
 export const SIGNAL_JOINTS: Record<SignalKind, readonly LogicalJoint[]> = {
   elbow_angle: ["shoulder", "elbow", "wrist"],
+  knee_angle: ["hip", "knee", "ankle"],
   wrist_height: ["shoulder", "wrist"],
   shoulder_angle: ["hip", "shoulder", "wrist"],
 };
@@ -114,6 +117,9 @@ function extractSignal(
       const [s, , w] = bestSide(p, SHOULDER_L, ELBOW_L, WRIST_L, forcedSide);
       // 手腕低于肩的垂直距离(向下为正,下拉动作拉到最低时值最大)
       if (visible(s) && visible(w)) v = w.y - s.y;
+    } else if (kind === "knee_angle") {
+      const [h, k, a] = bestSide(p, HIP_L, KNEE_L, ANKLE_L, forcedSide);
+      if (visible(h) && visible(k) && visible(a)) v = angleDeg(h, k, a);
     } else {
       const [h, s, w] = bestSide(p, HIP_L, SHOULDER_L, WRIST_L, forcedSide);
       if (visible(h) && visible(s) && visible(w)) v = angleDeg(h, s, w);
@@ -269,6 +275,8 @@ function resolveSignalSide(
       ? [SHOULDER_L, ELBOW_L, WRIST_L]
       : kind === "wrist_height"
         ? [SHOULDER_L, WRIST_L]
+        : kind === "knee_angle"
+          ? [HIP_L, KNEE_L, ANKLE_L]
         : [HIP_L, SHOULDER_L, WRIST_L];
   const score = (offset: 0 | 1) =>
     Math.min(

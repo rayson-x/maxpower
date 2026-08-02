@@ -105,3 +105,16 @@ test("profile metric view restrictions become structured unavailable observation
   assert.match(torso?.refusalReason ?? "", /front 机位不支持 躯干漂移/);
   assert.equal(torso?.definitionId, "straight-arm-pulldown/v1/torso-drift");
 });
+
+test("squat refuses a front capture before applying sagittal-plane segmentation", () => {
+  const poses = loadPoseFixture("6e26dae721570a61cc5c9873d18c9380.mp4").poses;
+  const result = analyzePoseSet({
+    poses,
+    cameraView: "front",
+    exercise: { mode: "user", exerciseId: "bodyweight_squat" },
+  });
+
+  assert.equal(result.status, "unsupported");
+  assert.match(result.reason ?? "", /does not support front capture/);
+  assert.equal(result.score, null);
+});
