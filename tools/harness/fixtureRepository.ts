@@ -19,7 +19,12 @@ export interface PoseFixtureAnnotation {
   evidence: {
     rawObservation: "recorded_fixture";
     currentImplementationBehavior: "characterization_only";
-    manualCoordinateGroundTruth: "not_annotated";
+    manualCoordinateGroundTruth: "annotated_video_frame";
+  };
+  acceptance: {
+    coordinateSpace: "image_normalized";
+    maxElbowErrorPx: number;
+    minArmEdgeCoverage: number;
   };
   challengeFrames: Array<{
     timestampMs: number;
@@ -28,6 +33,7 @@ export interface PoseFixtureAnnotation {
       landmarkIndex: number;
       rawVisibility: number;
       currentBehavior: "measured" | "predicted";
+      manualCoordinate?: { x: number; y: number };
     }>;
   }>;
 }

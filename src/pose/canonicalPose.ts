@@ -5,6 +5,10 @@ import {
   type TrackedLandmark,
 } from "./landmarkTracker";
 import { PoseSmoother, type SmoothedPoint } from "./oneEuro";
+import {
+  WeakObservationFusion,
+  type ContinuityJointEvidence,
+} from "./weakObservationFusion";
 
 export const CANONICAL_POSE_CONTRACT_VERSION =
   "canonical-pose-frame/v1" as const;
@@ -12,7 +16,10 @@ export const RAW_PASS_THROUGH_ALGORITHM_VERSION =
   "raw-pass-through/v1" as const;
 export const LEGACY_WEB_TRACKER_ALGORITHM_VERSION =
   "legacy-web-tracker/v1" as const;
+export const POSE_CONTINUITY_REFERENCE_ALGORITHM_VERSION =
+  "pose-continuity-reference/v1" as const;
 const RAW_PASS_THROUGH_MIN_VISIBILITY = 0.5;
+const MAX_CONTINUITY_DT_MS = 1000;
 
 export type PoseSchema = "blazepose33" | "coco17";
 export type CanonicalLandmarkSource =
@@ -25,6 +32,15 @@ export type CanonicalRepairFlag =
   | "smoothed"
   | "constrained"
   | "swap-corrected";
+export type CanonicalContinuityReason =
+  | "weak-observation-bone-fusion"
+  | "short-gap-prediction"
+  | "outlier-rejected-prediction"
+  | "outlier-rejected-unknown"
+  | "prediction-timeout"
+  | "no-measurement-baseline"
+  | "legacy-tracker-prediction"
+  | null;
 
 export interface CanonicalImageMetadata {
   widthPx: number;
@@ -41,6 +57,7 @@ export interface CanonicalLandmark extends PoseLandmark {
   uncertainty: number | null;
   source: CanonicalLandmarkSource;
   repairFlags: CanonicalRepairFlag[];
+  continuityReason: CanonicalContinuityReason;
   renderable: boolean;
   usable: boolean;
 }
@@ -49,7 +66,8 @@ export interface CanonicalPoseFrame extends PoseEstimate {
   contractVersion: typeof CANONICAL_POSE_CONTRACT_VERSION;
   algorithmVersion:
     | typeof RAW_PASS_THROUGH_ALGORITHM_VERSION
-    | typeof LEGACY_WEB_TRACKER_ALGORITHM_VERSION;
+    | typeof LEGACY_WEB_TRACKER_ALGORITHM_VERSION
+    | typeof POSE_CONTINUITY_REFERENCE_ALGORITHM_VERSION;
   frameId: number;
   sequenceId: string;
   sourceTimestampMs: number;
@@ -66,7 +84,7 @@ export interface PoseContinuitySessionConfig {
   sequenceId: string;
   schema: PoseSchema;
   image: CanonicalImageMetadata;
-  stabilization?: "raw" | "legacy";
+  stabilization?: "raw" | "legacy" | "fusion";
 }
 
 export interface PoseContinuitySession {
@@ -84,6 +102,8 @@ class TypeScriptPoseContinuitySession implements PoseContinuitySession {
   private nextFrameId = 0;
   private readonly tracker: LandmarkTracker | null;
   private readonly smoother: PoseSmoother | null;
+  private readonly fusion: WeakObservationFusion | null;
+  private lastSourceTimestampMs: number | null = null;
 
   constructor(private readonly config: PoseContinuitySessionConfig) {
     const stabilized = config.stabilization === "legacy";
@@ -93,9 +113,23 @@ class TypeScriptPoseContinuitySession implements PoseContinuitySession {
         )
       : null;
     this.smoother = stabilized ? new PoseSmoother() : null;
+    this.fusion =
+      config.stabilization === "fusion"
+        ? new WeakObservationFusion(config.schema, config.image)
+        : null;
   }
 
   process(observation: PoseEstimate): CanonicalPoseFrame {
+    if (
+      this.lastSourceTimestampMs !== null &&
+      (observation.timestampMs <= this.lastSourceTimestampMs ||
+        observation.timestampMs - this.lastSourceTimestampMs > MAX_CONTINUITY_DT_MS)
+    ) {
+      this.tracker?.reset();
+      this.smoother?.reset();
+      this.fusion?.reset();
+    }
+    this.lastSourceTimestampMs = observation.timestampMs;
     const tracked = this.tracker?.update(
       observation.landmarks,
       observation.timestampMs,
@@ -103,6 +137,10 @@ class TypeScriptPoseContinuitySession implements PoseContinuitySession {
     const smoothed = tracked
       ? this.smoother?.smooth(tracked, observation.timestampMs)
       : undefined;
+    const fused = this.fusion?.process(
+      observation.landmarks,
+      observation.timestampMs,
+    );
     const landmarks = tracked
       ? observation.landmarks.map((landmark, index) =>
           toLegacyCanonicalLandmark(
@@ -111,8 +149,12 @@ class TypeScriptPoseContinuitySession implements PoseContinuitySession {
             smoothed?.[index],
           ),
         )
-      : observation.landmarks.map(toCanonicalLandmark);
-    const worldLandmarks = observation.worldLandmarks.map(toCanonicalLandmark);
+      : observation.landmarks.map((landmark, index) =>
+          toCanonicalLandmark(landmark, fused?.get(index)),
+        );
+    const worldLandmarks = observation.worldLandmarks.map((landmark) =>
+      toCanonicalLandmark(landmark),
+    );
     const overallQuality =
       landmarks.length === 0
         ? 0
@@ -125,7 +167,9 @@ class TypeScriptPoseContinuitySession implements PoseContinuitySession {
       contractVersion: CANONICAL_POSE_CONTRACT_VERSION,
       algorithmVersion: tracked
         ? LEGACY_WEB_TRACKER_ALGORITHM_VERSION
-        : RAW_PASS_THROUGH_ALGORITHM_VERSION,
+        : fused
+          ? POSE_CONTINUITY_REFERENCE_ALGORITHM_VERSION
+          : RAW_PASS_THROUGH_ALGORITHM_VERSION,
       frameId: this.nextFrameId++,
       sequenceId: this.config.sequenceId,
       timestampMs: observation.timestampMs,
@@ -166,7 +210,28 @@ export function createPoseContinuityDiagnostic(
   };
 }
 
-function toCanonicalLandmark(landmark: PoseLandmark): CanonicalLandmark {
+function toCanonicalLandmark(
+  landmark: PoseLandmark,
+  fused?: ContinuityJointEvidence,
+): CanonicalLandmark {
+  if (fused) {
+    const renderable = fused.source !== "unknown";
+    return {
+      ...landmark,
+      x: fused.x,
+      y: fused.y,
+      visibility: fused.canonicalConfidence,
+      predicted: fused.source === "predicted",
+      observationScore: landmark.visibility,
+      canonicalConfidence: fused.canonicalConfidence,
+      uncertainty: fused.uncertainty,
+      source: fused.source,
+      repairFlags: fused.source === "fused" ? ["constrained"] : [],
+      continuityReason: fused.reason,
+      renderable,
+      usable: fused.source === "fused" && fused.uncertainty <= 0.04,
+    };
+  }
   const renderable =
     Number.isFinite(landmark.x) &&
     Number.isFinite(landmark.y) &&
@@ -180,6 +245,7 @@ function toCanonicalLandmark(landmark: PoseLandmark): CanonicalLandmark {
     uncertainty: null,
     source: "measured",
     repairFlags: [],
+    continuityReason: null,
     renderable,
     usable: renderable,
   };
@@ -207,6 +273,7 @@ function toLegacyCanonicalLandmark(
     uncertainty: null,
     source: tracked.predicted ? "predicted" : "measured",
     repairFlags: ["smoothed"],
+    continuityReason: tracked.predicted ? "legacy-tracker-prediction" : null,
     renderable,
     usable: renderable,
   };

@@ -31,41 +31,41 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] Raw observation 只通过显式诊断入口保留，不静默替换 canonical
 - [x] 旧调用方在 expand 阶段继续工作，测试保持绿色
 
-## 用弱观测融合保持高位下拉手臂连续 `[ready-for-agent]`
+## 用弱观测融合保持高位下拉手臂连续
 
 **What to build:** 当肩腕可靠、肘部低置信但轨迹和骨链连续时输出 fused 肘部，让高位下拉到底时手臂保持可信连线，同时让客户端与渲染使用同一坐标。
 
 **Blocked by:** 并行引入 Canonical Pose Frame.
 
-- [ ] 1950/2000 ms 可靠肩腕 + 弱肘部案例不因固定 0.5 visibility 直接断链
-- [ ] 弱 raw 肘部、历史方向和肩腕骨链共同决定 fused 坐标与 uncertainty
-- [ ] 两圆/骨链分支保持同侧连续，不把肘部翻到身体另一侧
-- [ ] 不通过全局降低 visibility 阈值或无限预测实现连续
-- [ ] 人工标注挑战帧的位置误差和 arm edge coverage 达到登记门槛
+- [x] 1950/2000 ms 可靠肩腕 + 弱肘部案例不因固定 0.5 visibility 直接断链
+- [x] 弱 raw 肘部、历史方向和肩腕骨链共同决定 fused 坐标与 uncertainty
+- [x] 两圆/骨链分支保持同侧连续，不把肘部翻到身体另一侧
+- [x] 不通过全局降低 visibility 阈值或无限预测实现连续
+- [x] 人工标注挑战帧的位置误差和 arm edge coverage 达到登记门槛
 
-## 让短预测按时间结束并诚实转为 Unknown `[ready-for-agent]`
+## 让短预测按时间结束并诚实转为 Unknown
 
 **What to build:** 短缺口使用真实毫秒做因果预测，超过证据上限时输出 unknown；不同帧率、seek、large dt 和会话切换不再改变或污染行为。
 
 **Blocked by:** 并行引入 Canonical Pose Frame.
 
-- [ ] 50/100/150/250/500 ms 缺口在 20/30/60 fps 下按时间表现一致
-- [ ] 纯预测超过配置上限后转为 unknown，且不更新 measurement baseline
-- [ ] Unknown 不进入骨段连线或动作指标，原因和 uncertainty 可审计
-- [ ] Seek、时间倒退、large dt、sequence/model/schema 切换清理旧状态
-- [ ] 重新获得观测后不继承陈旧 One Euro/预测残影
+- [x] 50/100/150/250/500 ms 缺口在 20/30/60 fps 下按时间表现一致
+- [x] 纯预测超过配置上限后转为 unknown，且不更新 measurement baseline
+- [x] Unknown 不进入骨段连线或动作指标，原因和 uncertainty 可审计
+- [x] Seek、时间倒退、large dt、sequence/model/schema 切换清理旧状态
+- [x] 重新获得观测后不继承陈旧 One Euro/预测残影
 
-## 拒绝高置信飞点但保留真实快速动作 `[ready-for-agent]`
+## 拒绝高置信飞点但保留真实快速动作
 
 **What to build:** 用 aspect-correct motion、innovation、骨链和整体运动联合判断异常，使高置信错点不再豁免，同时保留真实快速动作的峰值和相位。
 
 **Blocked by:** 并行引入 Canonical Pose Frame.
 
-- [ ] 高 confidence 瞬移在多证据异常时被拒绝或融合，不再直接采纳
-- [ ] 快速但连续的真实 hard negative 不被错误冻结
-- [ ] x/y 速度和骨长使用一致的图像尺度，不受视频长宽比扭曲
-- [ ] 稳定窗口建立并重置骨长 baseline，不用坏首帧永久锁定
-- [ ] Provenance 记录 gate 原因，峰值幅度、相位与下游 rep 不退化
+- [x] 高 confidence 瞬移在多证据异常时被拒绝或融合，不再直接采纳
+- [x] 快速但连续的真实 hard negative 不被错误冻结
+- [x] x/y 速度和骨长使用一致的图像尺度，不受视频长宽比扭曲
+- [x] 稳定窗口建立并重置骨长 baseline，不用坏首帧永久锁定
+- [x] Provenance 记录 gate 原因，峰值幅度、相位与下游 rep 不退化
 
 ## 将已验证的 Pose Continuity Session 迁移到 Rust
 
@@ -132,7 +132,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] rep 分割和五项逐 rep 运动学指标
 - [x] 确定性规则引擎、字段级拒答、候选规则和版本化阈值
 - [x] 用户选择/低置信自动识别的规则门控
-- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 41 项通过
+- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 47 项通过
 - [x] 离线 harness 的信号诊断、轨迹摘要和 rep 输出
 
 ## 恢复可发布的 Web 基线

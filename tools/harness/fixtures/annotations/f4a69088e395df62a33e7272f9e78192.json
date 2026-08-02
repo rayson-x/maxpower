@@ -6,7 +6,12 @@
   "evidence": {
     "rawObservation": "recorded_fixture",
     "currentImplementationBehavior": "characterization_only",
-    "manualCoordinateGroundTruth": "not_annotated"
+    "manualCoordinateGroundTruth": "annotated_video_frame"
+  },
+  "acceptance": {
+    "coordinateSpace": "image_normalized",
+    "maxElbowErrorPx": 12,
+    "minArmEdgeCoverage": 1
   },
   "challengeFrames": [
     {
@@ -22,7 +27,8 @@
           "name": "left_elbow",
           "landmarkIndex": 13,
           "rawVisibility": 0.4715,
-          "currentBehavior": "predicted"
+          "currentBehavior": "predicted",
+          "manualCoordinate": { "x": 0.370833, "y": 0.607813 }
         },
         {
           "name": "left_wrist",
@@ -40,7 +46,8 @@
           "name": "right_elbow",
           "landmarkIndex": 14,
           "rawVisibility": 0.4246,
-          "currentBehavior": "predicted"
+          "currentBehavior": "predicted",
+          "manualCoordinate": { "x": 0.798611, "y": 0.590625 }
         },
         {
           "name": "right_wrist",
@@ -63,7 +70,8 @@
           "name": "left_elbow",
           "landmarkIndex": 13,
           "rawVisibility": 0.4508,
-          "currentBehavior": "predicted"
+          "currentBehavior": "predicted",
+          "manualCoordinate": { "x": 0.368056, "y": 0.608594 }
         },
         {
           "name": "left_wrist",
@@ -81,7 +89,8 @@
           "name": "right_elbow",
           "landmarkIndex": 14,
           "rawVisibility": 0.4063,
-          "currentBehavior": "predicted"
+          "currentBehavior": "predicted",
+          "manualCoordinate": { "x": 0.798611, "y": 0.592188 }
         },
         {
           "name": "right_wrist",

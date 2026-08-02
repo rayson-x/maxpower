@@ -178,8 +178,8 @@ export function CameraPoseView() {
   const lastTimestampRef = useRef(-1);
   const modelPathRef = useRef(POSE_MODELS[2].path);
   const cameraViewRef = useRef<CameraView>("oblique45");
-  // Canonical V1 first lands as raw pass-through; the legacy stabilizer remains opt-in
-  // during expand/contract until the evidence-based fusion ticket replaces it.
+  // The evidence-based continuity fusion is the Web default. Keep the legacy
+  // tracker behind an explicit toggle while its product path is contracted.
   const filterEnabledRef = useRef(false);
   const poseBufferRef = useRef<CanonicalPoseFrame[]>([]);
   const frameCountRef = useRef(0);
@@ -269,7 +269,7 @@ export function CameraPoseView() {
         rotationDegrees: 0,
         mirrored: modeRef.current === "camera",
       },
-      stabilization: filterEnabledRef.current ? "legacy" : "raw",
+      stabilization: filterEnabledRef.current ? "legacy" : "fusion",
     });
   }, []);
 
@@ -780,11 +780,14 @@ export function CameraPoseView() {
                 style={{ ...styles.overlay, ...videoViewport, ...(mode === "camera" ? styles.mirror : null) }}
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
+                data-canonical-frame-id={pose?.frameId}
               >
                 {posePresentation.edges.map((edge) => {
                   return (
                     <line
                       key={`${edge.fromIndex}-${edge.toIndex}`}
+                      data-pose-edge={`${edge.fromIndex}-${edge.toIndex}`}
+                      data-pose-repaired={edge.repaired ? "true" : "false"}
                       x1={edge.start.x * 100}
                       y1={edge.start.y * 100}
                       x2={edge.end.x * 100}
@@ -1108,7 +1111,7 @@ export function CameraPoseView() {
                   rotateCanonicalSequence();
                 }}
               >
-                旧稳定层{filterEnabled ? "✓" : "✗"}
+                算法：{filterEnabled ? "旧版" : "融合"}
               </button>
             </div>
           </div>

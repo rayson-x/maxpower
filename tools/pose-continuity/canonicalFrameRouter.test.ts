@@ -7,6 +7,7 @@ import {
   type CanonicalPoseFrame,
 } from "../../src/pose/canonicalPose";
 import { buildRecordingFixture } from "../../src/pose/recordingFixture";
+import { RULE_METRIC } from "../../src/pose/formRuleEngine";
 import { extractRepMetrics } from "../../src/pose/repMetricsExtractor";
 import { loadPoseFixture } from "../harness/fixtureRepository";
 
@@ -157,4 +158,42 @@ test("raw pass-through canonical frames preserve the existing rep analysis resul
     extractRepMetrics(canonicalFrames, options),
     extractRepMetrics(fixture.poses, options),
   );
+});
+
+test("continuity repair preserves lat-pulldown rep phase and amplitude peaks", () => {
+  const fixture = loadPoseFixture("f4a69088e395df62a33e7272f9e78192.mp4");
+  const session = createPoseContinuitySession({
+    sequenceId: "fixture:continuity-regression",
+    schema: "blazepose33",
+    image: {
+      widthPx: 720,
+      heightPx: 1280,
+      rotationDegrees: 0,
+      mirrored: false,
+    },
+    stabilization: "fusion",
+  });
+  const canonicalFrames = fixture.poses.map((pose) => session.process(pose));
+  const options = {
+    cameraView: "oblique45" as const,
+    exercise: { mode: "user" as const, exerciseId: "lat_pulldown" as const },
+  };
+  const raw = extractRepMetrics(fixture.poses, options);
+  const canonical = extractRepMetrics(canonicalFrames, options);
+
+  assert.equal(canonical.signal, raw.signal);
+  assert.equal(canonical.reps.length, raw.reps.length);
+  canonical.reps.forEach((rep, index) => {
+    assert.equal(rep.startMs, raw.reps[index].startMs);
+    assert.equal(rep.endMs, raw.reps[index].endMs);
+    assert.ok(Math.abs(rep.extremeMs - raw.reps[index].extremeMs) <= 50);
+    const actual = rep.metrics[RULE_METRIC.amplitude]?.value;
+    const expected = raw.reps[index].metrics[RULE_METRIC.amplitude]?.value;
+    assert.ok(actual !== null && actual !== undefined);
+    assert.ok(expected !== null && expected !== undefined);
+    assert.ok(
+      Math.abs(actual - expected) <= Math.max(0.02, Math.abs(expected) * 0.08),
+      `rep ${index + 1} amplitude changed ${expected} → ${actual}`,
+    );
+  });
 });
