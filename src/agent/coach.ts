@@ -606,28 +606,43 @@ export async function explainFormScore(
     `动作: ${request.exerciseLabel}\n机位: ${request.cameraView}\n` +
     `规则引擎判定结果(已经是最终事实,不要重新判断,只翻译):\n${JSON.stringify(request.score, null, 2)}\n` +
     `只输出 JSON。`;
-  const response = await withTimeoutAndRetry("explainFormScore", () =>
-    complete(
+  // 完整的"请求 + 解析"都在重试范围内,不只是网络请求本身——
+  // complete() 对 provider 报错时并不 throw,而是 resolve 成一个 content 为空、
+  // stopReason 为 error/aborted 的 AssistantMessage(pi-ai 的 AssistantMessageEventStream
+  // 把 error 事件和 done 事件当成同一种"终止"来 resolve result())。之前这里只看
+  // content,漏检 stopReason,导致真实报错原因(errorMessage)被吞掉,用户只看到
+  // "未返回 JSON: (空)"这种毫无信息量的提示,而且这类失败也不会触发重试。
+  return withTimeoutAndRetry("explainFormScore", async () => {
+    const response = await complete(
       model,
       {
         systemPrompt: FORM_EXPLANATION_PROMPT,
         messages: [{ role: "user", content: text, timestamp: Date.now() }],
       },
       { apiKey: settings.apiKey },
-    ),
-  );
-  const raw = response.content
-    .filter((block) => block.type === "text")
-    .map((block) => (block as { type: "text"; text: string }).text)
-    .join("\n");
-  return parseFormScoreExplanation(raw, request.score);
+    );
+    if (response.stopReason === "error" || response.stopReason === "aborted") {
+      throw new Error(
+        `模型调用失败(${response.stopReason}): ${response.errorMessage ?? "无详细信息"}`,
+      );
+    }
+    const raw = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => (block as { type: "text"; text: string }).text)
+      .join("\n");
+    return parseFormScoreExplanation(raw, request.score);
+  });
 }
 
 function parseFormScoreExplanation(raw: string, score: SetScore): FormScoreExplanation {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start < 0 || end <= start) {
-    throw new Error(`大白话点评未返回 JSON: ${raw.slice(0, 120)}`);
+    throw new Error(
+      raw.length === 0
+        ? "大白话点评未返回 JSON:模型响应内容为空"
+        : `大白话点评未返回 JSON: ${raw.slice(0, 120)}`,
+    );
   }
   const parsed = JSON.parse(raw.slice(start, end + 1)) as {
     summary?: unknown;
