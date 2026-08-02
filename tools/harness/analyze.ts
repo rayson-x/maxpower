@@ -1,13 +1,13 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { computeExerciseFeatures } from "../../src/pose/exerciseFeatures";
 import { RULE_METRIC, scoreFormSet, type CameraView, type ExerciseSelection } from "../../src/pose/formRuleEngine";
 import { classifyLocally } from "../../src/pose/localClassifier";
-import type { PoseEstimate } from "../../src/pose/PoseEngine";
 import { extractRepMetrics } from "../../src/pose/repMetricsExtractor";
 import { diagnoseSignals, segmentRepsAuto, type ExerciseId } from "../../src/pose/repSegmenter";
 import { computeTrajectoryFeatures } from "../../src/pose/trajectory";
+import { loadPoseFixtures } from "./fixtureRepository";
 
 /**
  * 离线回放 harness · 分析端
@@ -24,14 +24,6 @@ import { computeTrajectoryFeatures } from "../../src/pose/trajectory";
 const ROOT = process.cwd();
 const FIXTURES = resolve(ROOT, "tools/harness/fixtures/fixtures.json");
 const OUT_DIR = resolve(ROOT, "tools/harness/out");
-
-interface Fixture {
-  video: string;
-  durationSec: number;
-  stepMs: number;
-  model: string;
-  poses: PoseEstimate[];
-}
 
 function pad(s: string, n: number): string {
   const w = [...s].reduce((a, c) => a + (c.charCodeAt(0) > 0x2e80 ? 2 : 1), 0);
@@ -55,7 +47,7 @@ function main(): void {
     process.exit(1);
   }
 
-  const fixtures = JSON.parse(readFileSync(FIXTURES, "utf8")) as Fixture[];
+  const fixtures = loadPoseFixtures(FIXTURES);
   mkdirSync(OUT_DIR, { recursive: true });
 
   for (const fx of fixtures) {

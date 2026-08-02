@@ -11,5 +11,9 @@
     "noEmitOnError": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["tools/**/*.test.ts"]
+  "include": [
+    "tools/**/*.test.ts",
+    "tools/runTests.ts",
+    "tools/testFrontier.ts"
+  ]
 }

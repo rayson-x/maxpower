@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "videoId": "f4a69088e395df62a33e7272f9e78192.mp4",
+  "exercise": "lat_pulldown",
+  "cameraView": "back",
+  "evidence": {
+    "rawObservation": "recorded_fixture",
+    "currentImplementationBehavior": "characterization_only",
+    "manualCoordinateGroundTruth": "not_annotated"
+  },
+  "challengeFrames": [
+    {
+      "timestampMs": 1950,
+      "joints": [
+        {
+          "name": "left_shoulder",
+          "landmarkIndex": 11,
+          "rawVisibility": 0.9997,
+          "currentBehavior": "measured"
+        },
+        {
+          "name": "left_elbow",
+          "landmarkIndex": 13,
+          "rawVisibility": 0.4715,
+          "currentBehavior": "predicted"
+        },
+        {
+          "name": "left_wrist",
+          "landmarkIndex": 15,
+          "rawVisibility": 0.6859,
+          "currentBehavior": "measured"
+        },
+        {
+          "name": "right_shoulder",
+          "landmarkIndex": 12,
+          "rawVisibility": 0.9995,
+          "currentBehavior": "measured"
+        },
+        {
+          "name": "right_elbow",
+          "landmarkIndex": 14,
+          "rawVisibility": 0.4246,
+          "currentBehavior": "predicted"
+        },
+        {
+          "name": "right_wrist",
+          "landmarkIndex": 16,
+          "rawVisibility": 0.7498,
+          "currentBehavior": "measured"
+        }
+      ]
+    },
+    {
+      "timestampMs": 2000,
+      "joints": [
+        {
+          "name": "left_shoulder",
+          "landmarkIndex": 11,
+          "rawVisibility": 0.9998,
+          "currentBehavior": "measured"
+        },
+        {
+          "name": "left_elbow",
+          "landmarkIndex": 13,
+          "rawVisibility": 0.4508,
+          "currentBehavior": "predicted"
+        },
+        {
+          "name": "left_wrist",
+          "landmarkIndex": 15,
+          "rawVisibility": 0.6568,
+          "currentBehavior": "measured"
+        },
+        {
+          "name": "right_shoulder",
+          "landmarkIndex": 12,
+          "rawVisibility": 0.9995,
+          "currentBehavior": "measured"
+        },
+        {
+          "name": "right_elbow",
+          "landmarkIndex": 14,
+          "rawVisibility": 0.4063,
+          "currentBehavior": "predicted"
+        },
+        {
+          "name": "right_wrist",
+          "landmarkIndex": 16,
+          "rawVisibility": 0.7352,
+          "currentBehavior": "measured"
+        }
+      ]
+    }
+  ]
+}

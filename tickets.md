@@ -1,8 +1,130 @@
-# Tickets: 骨架运动轨迹 + 规则引擎 V1
+# Tickets: Form Coach
 
-把用户选择的健身动作从骨架轨迹贯通到诚实、可审计的组后标准度报告。Source spec：[`../strength-cut-coach/docs/specs/2026-08-02-skeleton-trajectory-rule-engine-v1-spec.md`](../strength-cut-coach/docs/specs/2026-08-02-skeleton-trajectory-rule-engine-v1-spec.md)。
+当前 active specs：
+
+- Canonical 移动端骨架连续性 SDK：[`../strength-cut-coach/docs/specs/2026-08-02-canonical-mobile-pose-continuity-sdk-spec.md`](../strength-cut-coach/docs/specs/2026-08-02-canonical-mobile-pose-continuity-sdk-spec.md)
+- 骨架运动轨迹 + 规则引擎：[`../strength-cut-coach/docs/specs/2026-08-02-skeleton-trajectory-rule-engine-v1-spec.md`](../strength-cut-coach/docs/specs/2026-08-02-skeleton-trajectory-rule-engine-v1-spec.md)
 
 Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开工。每个 ticket 是一条可单独演示的 tracer bullet；实现时一次只取一票。
+
+## 恢复连续性测试前沿并登记高位下拉真值 `[ready-for-agent]`
+
+**What to build:** 让现有全部测试重新通过统一入口运行，并把背面高位下拉的原视频、原始关键点和下拉到底挑战帧登记成可重复回放的连续性基线；本票不改变产品轨迹算法。
+
+**Blocked by:** None — can start immediately.
+
+- [x] 统一测试入口实际执行当前所有测试文件，并在任何测试文件未被发现时失败
+- [x] 高位下拉 fixture 可通过公开的 fixture loader 按稳定视频 ID 读取，不依赖数组顺序
+- [x] 登记 1950/2000 ms 挑战帧及肩、肘、腕的原始 visibility 和当前 predicted 行为
+- [x] 回归输出明确区分原始观测事实、当前实现行为和尚未具备人工坐标真值的指标
+- [x] 完整类型检查、聚焦测试和全量测试通过
+
+## 并行引入 Canonical Pose Frame `[ready-for-agent]`
+
+**What to build:** 在保留旧 pose 形态的同时引入版本化 Canonical Pose Frame，并以 raw pass-through 完成第一条端到端路径，使 Web 渲染、动作计数、录制和分析首次消费同一 frame 而不改变算法结果。
+
+**Blocked by:** 恢复连续性测试前沿并登记高位下拉真值.
+
+- [ ] Canonical frame 携带版本、frame/sequence/timestamp、schema、坐标空间和图像变换元数据
+- [ ] 每关节可表达 measured/fused/predicted/unknown、repair flags、uncertainty、renderable 与 usable
+- [ ] 同一 canonical frame id 和 landmark 内容进入渲染、动作计数、录制与分析
+- [ ] Raw observation 只通过显式诊断入口保留，不静默替换 canonical
+- [ ] 旧调用方在 expand 阶段继续工作，测试保持绿色
+
+## 用弱观测融合保持高位下拉手臂连续 `[ready-for-agent]`
+
+**What to build:** 当肩腕可靠、肘部低置信但轨迹和骨链连续时输出 fused 肘部，让高位下拉到底时手臂保持可信连线，同时让客户端与渲染使用同一坐标。
+
+**Blocked by:** 并行引入 Canonical Pose Frame.
+
+- [ ] 1950/2000 ms 可靠肩腕 + 弱肘部案例不因固定 0.5 visibility 直接断链
+- [ ] 弱 raw 肘部、历史方向和肩腕骨链共同决定 fused 坐标与 uncertainty
+- [ ] 两圆/骨链分支保持同侧连续，不把肘部翻到身体另一侧
+- [ ] 不通过全局降低 visibility 阈值或无限预测实现连续
+- [ ] 人工标注挑战帧的位置误差和 arm edge coverage 达到登记门槛
+
+## 让短预测按时间结束并诚实转为 Unknown `[ready-for-agent]`
+
+**What to build:** 短缺口使用真实毫秒做因果预测，超过证据上限时输出 unknown；不同帧率、seek、large dt 和会话切换不再改变或污染行为。
+
+**Blocked by:** 并行引入 Canonical Pose Frame.
+
+- [ ] 50/100/150/250/500 ms 缺口在 20/30/60 fps 下按时间表现一致
+- [ ] 纯预测超过配置上限后转为 unknown，且不更新 measurement baseline
+- [ ] Unknown 不进入骨段连线或动作指标，原因和 uncertainty 可审计
+- [ ] Seek、时间倒退、large dt、sequence/model/schema 切换清理旧状态
+- [ ] 重新获得观测后不继承陈旧 One Euro/预测残影
+
+## 拒绝高置信飞点但保留真实快速动作 `[ready-for-agent]`
+
+**What to build:** 用 aspect-correct motion、innovation、骨链和整体运动联合判断异常，使高置信错点不再豁免，同时保留真实快速动作的峰值和相位。
+
+**Blocked by:** 并行引入 Canonical Pose Frame.
+
+- [ ] 高 confidence 瞬移在多证据异常时被拒绝或融合，不再直接采纳
+- [ ] 快速但连续的真实 hard negative 不被错误冻结
+- [ ] x/y 速度和骨长使用一致的图像尺度，不受视频长宽比扭曲
+- [ ] 稳定窗口建立并重置骨长 baseline，不用坏首帧永久锁定
+- [ ] Provenance 记录 gate 原因，峰值幅度、相位与下游 rep 不退化
+
+## 将已验证的 Pose Continuity Session 迁移到 Rust `[ready-for-agent]`
+
+**What to build:** 用纯计算 Rust core 重现已验证的 canonical session 行为，并生成 Swift/Kotlin bindings，使相同 fixture 可以在 host 和未来移动 adapter 上得到一致结果。
+
+**Blocked by:** 用弱观测融合保持高位下拉手臂连续, 让短预测按时间结束并诚实转为 Unknown, 拒绝高置信飞点但保留真实快速动作.
+
+- [ ] Rust host 回放全部 canonical fixtures，并在浮点容差内匹配 reference 行为
+- [ ] Session 支持 process frame、reset、close 和版本化配置
+- [ ] 版本化扁平 buffer 可由 TypeScript、Swift 和 Kotlin 安全解码
+- [ ] 非法长度、NaN/Infinity、时间倒退和未知 schema 返回结构化错误
+- [ ] Panic 不穿越 FFI，core 不依赖 Expo、相机、Python、OpenCV 或网络
+
+## Android 相机贯通 Canonical Rust Session `[ready-for-agent]`
+
+**What to build:** Android 原生 MediaPipe 观测先通过 Rust continuity session，再以 canonical event 同时驱动屏幕、rep 计数和录制；用户可在真机复现高位下拉手臂连续性。
+
+**Blocked by:** 将已验证的 Pose Continuity Session 迁移到 Rust.
+
+- [ ] Android 姿态分析工作线程在发 Expo event 前完成 canonical 处理
+- [ ] 屏幕、rep 计数和录制共享相同 frame id 与 landmark 内容
+- [ ] Measured/fused/predicted/unknown 使用同一坐标并以不同样式表达
+- [ ] 高位下拉真机/录像回放不再因弱肘部直接断臂，也不使用长时间假预测
+- [ ] 相机、UI 和 JavaScript runtime 不被 continuity core 阻塞
+
+## 提供可复用的 iOS SDK Adapter `[ready-for-agent]`
+
+**What to build:** iOS 可以集成同一 Rust SDK、管理 session 并回放 fixtures，证明 Android/iOS 复用的是同一个算法核心；完整 iOS 相机界面留到后续。
+
+**Blocked by:** 将已验证的 Pose Continuity Session 迁移到 Rust.
+
+- [ ] iOS adapter 能构建并创建、reset、close session
+- [ ] 同一 fixture 的 source/flags/frame 与 Rust host 一致，坐标和 uncertainty 在容差内一致
+- [ ] ABI、资源生命周期和错误映射有 contract tests
+- [ ] SDK 以可复用 Expo Module/Apple artifact 交付，不把算法复制到 Swift
+
+## 收缩旧 Raw/渲染分叉 `[ready-for-agent]`
+
+**What to build:** 完成 expand–contract 迁移，移除产品路径里的二次平滑、UI visibility gate 和 raw 默认消费，让所有业务消费者只认识 canonical，raw 只保留显式诊断用途。
+
+**Blocked by:** Android 相机贯通 Canonical Rust Session.
+
+- [ ] Web/Android 渲染只做 fit、rotation、mirror 等纯视口变换
+- [ ] 动作计数、轨迹缓冲、录制和规则分析不再默认消费 raw
+- [ ] 旧 tracker/One Euro 不与 canonical session 串联形成双重处理
+- [ ] Raw diagnostic stream 明确标记且不会进入正常业务输出
+- [ ] 删除旧形态后类型检查、fixture 和应用 contract 全部绿色
+
+## 完成真机性能验收并发布 SDK V1 `[ready-for-agent]`
+
+**What to build:** 在目标 Android/iPhone 上验证连续性 SDK 的延迟、资源和降级行为，并交付可重复构建的 V1 artifact，使其可以安全进入后续应用迭代。
+
+**Blocked by:** 提供可复用的 iOS SDK Adapter, 收缩旧 Raw/渲染分叉.
+
+- [ ] 最低档 Android、主流 Android 和受支持 iPhone 记录 core/端到端 P50/P95、fps 和内存
+- [ ] 真实相机连续运行 10–15 分钟记录掉帧、温升和系统降频
+- [ ] 超预算时降级不阻塞相机、UI 或 JS，不输出乱序/过期 frame
+- [ ] Android/iOS artifact、contract/config/algorithm version 和构建说明可复现
+- [ ] 高位下拉、合成 gap、高置信 spike 和快速 hard negative 构成 V1 发布回归集
 
 ## 已完成基线
 
@@ -10,7 +132,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] rep 分割和五项逐 rep 运动学指标
 - [x] 确定性规则引擎、字段级拒答、候选规则和版本化阈值
 - [x] 用户选择/低置信自动识别的规则门控
-- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 24 项通过
+- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 33 项通过
 - [x] 离线 harness 的信号诊断、轨迹摘要和 rep 输出
 
 ## 恢复可发布的 Web 基线

@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import test from "node:test";
 
 import {
@@ -13,25 +11,15 @@ import {
 } from "../../src/pose/formRuleEngine";
 import type { PoseEstimate } from "../../src/pose/PoseEngine";
 import { extractRepMetrics } from "../../src/pose/repMetricsExtractor";
+import { loadPoseFixture } from "../harness/fixtureRepository";
 
 /**
  * 主体断言用离线回放工具真实录制的关键点(带真实的跟丢、遮挡、抖动)。
  * 只在数据质量拒答那一条用了手写的合成数据——因为要对可见度做精确控制来验证
  * 拒答机制本身,真实素材里凑不出"恰好只有这一个关节被遮挡"的场景。
  */
-const ROOT = process.cwd();
-const FIXTURES_PATH = resolve(ROOT, "tools/harness/fixtures/fixtures.json");
-
-interface Fixture {
-  video: string;
-  poses: PoseEstimate[];
-}
-
 function loadFixture(name: string): PoseEstimate[] {
-  const all = JSON.parse(readFileSync(FIXTURES_PATH, "utf8")) as Fixture[];
-  const found = all.find((f) => f.video === name);
-  if (!found) throw new Error(`fixture 里找不到 ${name}`);
-  return found.poses.filter((p) => p.landmarks.length > 0);
+  return loadPoseFixture(name).poses.filter((pose) => pose.landmarks.length > 0);
 }
 
 const PULL_UP_VIDEO = "ecc14b0bdcd3e1116465edfe08f33368.mp4";

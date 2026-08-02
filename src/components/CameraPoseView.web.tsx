@@ -681,7 +681,7 @@ export function CameraPoseView() {
   );
   const predictedLandmarks = selectLandmarksByOriginalIndex(
     pose?.landmarks ?? [],
-    (landmark) => landmark.predicted && landmark.visibility > 0,
+    (landmark) => landmark.predicted === true && landmark.visibility > 0,
   );
 
   const trackingOk = measuredLandmarks.size >= landmarkTotal * 0.6;
