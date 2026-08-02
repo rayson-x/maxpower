@@ -580,11 +580,30 @@ const FORM_EXPLANATION_PROMPT = `你是一名力量训练教练。下面会给�
 }
 只为输入里 reps 数组中实际出现过的 repIndex 生成 perRep 条目,不要新增或跳过。`;
 
+/**
+ * 教练人格:同一份系统数据(SetScore),可以配不同语气/风格的教练来点评。
+ * 现在只注册"标准教练"一个人格,不做人格选择的 UI——这里先占位是为了以后
+ * 加新人格只是多写一个 CoachPersona 定义,不需要改 explainFormScore 的签名。
+ */
+export interface CoachPersona {
+  id: string;
+  name: string;
+  buildSystemPrompt: () => string;
+}
+
+export const STANDARD_COACH: CoachPersona = {
+  id: "standard",
+  name: "标准教练",
+  buildSystemPrompt: () => FORM_EXPLANATION_PROMPT,
+};
+
 export interface FormScoreExplanationRequest {
   /** 人话动作名,由调用方从内部 id 翻译好(如 "杠铃俯身划船"),不要传内部 ExerciseId */
   exerciseLabel: string;
   cameraView: string;
   score: SetScore;
+  /** 省略时用标准教练;调用方目前不需要传这个字段 */
+  persona?: CoachPersona;
 }
 
 export interface FormScoreExplanation {
@@ -593,7 +612,7 @@ export interface FormScoreExplanation {
 }
 
 /**
- * 表达层:规则引擎已经判定好的 SetScore → 大白话教练点评。
+ * 表达层:系统数据(规则引擎已经判定好的 SetScore) → 教练评价(默认标准教练人格)。
  * 与 renderFunReport() 是同一种分层(数据层判断、表达层只管说法),
  * 区别是这里的判断来自确定性的 formRuleEngine,而不是另一次 LLM 判断。
  */
@@ -612,11 +631,12 @@ export async function explainFormScore(
   // 把 error 事件和 done 事件当成同一种"终止"来 resolve result())。之前这里只看
   // content,漏检 stopReason,导致真实报错原因(errorMessage)被吞掉,用户只看到
   // "未返回 JSON: (空)"这种毫无信息量的提示,而且这类失败也不会触发重试。
+  const persona = request.persona ?? STANDARD_COACH;
   return withTimeoutAndRetry("explainFormScore", async () => {
     const response = await complete(
       model,
       {
-        systemPrompt: FORM_EXPLANATION_PROMPT,
+        systemPrompt: persona.buildSystemPrompt(),
         messages: [{ role: "user", content: text, timestamp: Date.now() }],
       },
       { apiKey: settings.apiKey },
