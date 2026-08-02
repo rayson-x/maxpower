@@ -329,7 +329,7 @@ export interface ScoreRequest {
 }
 
 /** Score form quality from trajectory + skeleton features. */
-export async function scoreForm(
+async function scoreForm(
   settings: AgentSettings,
   request: ScoreRequest,
 ): Promise<string> {
@@ -385,7 +385,7 @@ export interface CritiqueRequest {
 }
 
 /** 数据 + 关键帧截图的双重证据指正(需要视觉模型)。 */
-export async function critiqueForm(
+async function critiqueForm(
   settings: AgentSettings,
   request: CritiqueRequest,
 ): Promise<string> {
@@ -488,7 +488,7 @@ export interface StructuredAnalysisRequest {
 }
 
 /** 数据层:姿态数据 + 截图 → 结构化 JSON 报告(判断,确定性优先)。 */
-export async function analyzeStructured(
+async function analyzeStructured(
   settings: AgentSettings,
   request: StructuredAnalysisRequest,
 ): Promise<CoachReport> {
@@ -546,7 +546,7 @@ const FUN_REPORT_PROMPT = `你是健身房里最懂训练也最有梗的内容�
 5. 控制在 300 字以内,中文`;
 
 /** 表达层:结构化 JSON → 有趣报告(另一个 agent 调用,可独立换风格)。 */
-export async function renderFunReport(
+async function renderFunReport(
   settings: AgentSettings,
   report: CoachReport,
 ): Promise<string> {

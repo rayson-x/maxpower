@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ZHIPU_DEFAULTS, type AgentSettings } from "../agent/coach";
+import { ZHIPU_DEFAULTS, type AgentSettings, type OpenRecognition } from "../agent/coach";
 import { computeExerciseFeatures } from "../pose/exerciseFeatures";
 import {
   RULE_METRIC,
