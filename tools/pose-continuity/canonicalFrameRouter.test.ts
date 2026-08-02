@@ -105,6 +105,36 @@ test("recording preserves canonical identity while rebasing its source timeline"
   );
 });
 
+test("recording rejects canonical frames from different sequences", () => {
+  const config = {
+    schema: "blazepose33" as const,
+    image: {
+      widthPx: 1280,
+      heightPx: 720,
+      rotationDegrees: 0 as const,
+      mirrored: true,
+    },
+  };
+  const frames = ["camera:first", "camera:second"].map((sequenceId) =>
+    createPoseContinuitySession({ ...config, sequenceId }).process({
+      timestampMs: 100,
+      landmarks: [{ x: 0.5, y: 0.5, z: 0, visibility: 0.9 }],
+      worldLandmarks: [],
+    }),
+  );
+
+  assert.throws(
+    () =>
+      buildRecordingFixture({
+        video: "mixed.webm",
+        fallbackDurationSec: 1,
+        model: "mediapipe:heavy",
+        poses: frames,
+      }),
+    /mixed canonical sequences/,
+  );
+});
+
 test("raw pass-through canonical frames preserve the existing rep analysis result", () => {
   const fixture = loadPoseFixture("f4a69088e395df62a33e7272f9e78192.mp4");
   const session = createPoseContinuitySession({

@@ -1,4 +1,5 @@
 import type { PoseEstimate } from "./PoseEngine";
+import type { CanonicalPoseFrame } from "./canonicalPose";
 
 interface BuildRecordingFixtureInput<TPose extends PoseEstimate> {
   video: string;
@@ -16,12 +17,19 @@ export interface RecordingFixture<TPose extends PoseEstimate = PoseEstimate> {
 }
 
 /** Builds the harness fixture shape, including valid zero-pose recordings. */
-export function buildRecordingFixture<TPose extends PoseEstimate>({
+export function buildRecordingFixture(
+  input: BuildRecordingFixtureInput<CanonicalPoseFrame>,
+): RecordingFixture<CanonicalPoseFrame>[];
+export function buildRecordingFixture(
+  input: BuildRecordingFixtureInput<PoseEstimate>,
+): RecordingFixture<PoseEstimate>[];
+export function buildRecordingFixture({
   video,
   fallbackDurationSec,
   model,
   poses,
-}: BuildRecordingFixtureInput<TPose>): RecordingFixture<TPose>[] {
+}: BuildRecordingFixtureInput<PoseEstimate>): RecordingFixture<PoseEstimate>[] {
+  assertSingleCanonicalSequence(poses);
   const firstTimestampMs = poses[0]?.timestampMs;
   const lastTimestampMs = poses[poses.length - 1]?.timestampMs;
   const hasPoseDuration =
@@ -45,10 +53,18 @@ export function buildRecordingFixture<TPose extends PoseEstimate>({
   ];
 }
 
-function rebasePose<TPose extends PoseEstimate>(
-  pose: TPose,
+function rebasePose(
+  pose: CanonicalPoseFrame,
   firstTimestampMs: number,
-): TPose {
+): CanonicalPoseFrame;
+function rebasePose(
+  pose: PoseEstimate,
+  firstTimestampMs: number,
+): PoseEstimate;
+function rebasePose(
+  pose: PoseEstimate,
+  firstTimestampMs: number,
+): PoseEstimate {
   const rebased = {
     ...pose,
     timestampMs: pose.timestampMs - firstTimestampMs,
@@ -58,11 +74,37 @@ function rebasePose<TPose extends PoseEstimate>(
     "sourceTimestampMs" in pose &&
     typeof pose.sourceTimestampMs === "number"
   ) {
-    return {
+    const rebasedSourcePose = {
       ...rebased,
       sourceTimestampMs: pose.sourceTimestampMs - firstTimestampMs,
-    } as TPose;
+    };
+    return rebasedSourcePose;
   }
 
-  return rebased as TPose;
+  return rebased;
+}
+
+function assertSingleCanonicalSequence(poses: readonly PoseEstimate[]): void {
+  const canonicalFrames = poses.filter(isCanonicalPoseFrame);
+  if (canonicalFrames.length === 0) return;
+
+  const first = canonicalFrames[0];
+  const isMixed =
+    canonicalFrames.length !== poses.length ||
+    canonicalFrames.some(
+      (frame) =>
+        frame.sequenceId !== first.sequenceId ||
+        frame.schema !== first.schema ||
+        frame.algorithmVersion !== first.algorithmVersion,
+    );
+  if (isMixed) {
+    throw new Error("Recording contains mixed canonical sequences");
+  }
+}
+
+function isCanonicalPoseFrame(pose: PoseEstimate): pose is CanonicalPoseFrame {
+  return (
+    "contractVersion" in pose &&
+    pose.contractVersion === "canonical-pose-frame/v1"
+  );
 }

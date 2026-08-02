@@ -193,7 +193,8 @@ function toLegacyCanonicalLandmark(
   const renderable =
     Number.isFinite(smoothed?.x ?? tracked.x) &&
     Number.isFinite(smoothed?.y ?? tracked.y) &&
-    tracked.visibility > 0;
+    !tracked.predicted &&
+    tracked.visibility >= RAW_PASS_THROUGH_MIN_VISIBILITY;
 
   return {
     ...observation,
@@ -207,6 +208,6 @@ function toLegacyCanonicalLandmark(
     source: tracked.predicted ? "predicted" : "measured",
     repairFlags: ["smoothed"],
     renderable,
-    usable: renderable && !tracked.predicted && tracked.visibility >= 0.5,
+    usable: renderable,
   };
 }

@@ -273,9 +273,21 @@ export function CameraPoseView() {
     });
   }, []);
 
+  const rotateCanonicalSequence = useCallback(() => {
+    if (recordingActiveRef.current) return false;
+    poseBufferRef.current = [];
+    frameCountRef.current = 0;
+    signalRef.current = [];
+    setPose(null);
+    setSignalCurve([]);
+    startCanonicalSequence();
+    return true;
+  }, [startCanonicalSequence]);
+
   const switchEngine = useCallback(
     async (kind: EngineKind) => {
       if (kind === engineKindRef.current) return;
+      if (recordingActiveRef.current) return;
       engineKindRef.current = kind;
       setEngineKind(kind);
       engineRef.current?.close();
@@ -283,16 +295,17 @@ export function CameraPoseView() {
       canonicalSessionRef.current = null;
       if (status === "running") {
         await ensureEngine();
-        startCanonicalSequence();
+        rotateCanonicalSequence();
       }
     },
-    [ensureEngine, startCanonicalSequence, status],
+    [ensureEngine, rotateCanonicalSequence, status],
   );
 
   const switchModel = useCallback(
     async (id: string) => {
       const next = POSE_MODELS.find((model) => model.id === id);
       if (!next || next.path === modelPathRef.current) return;
+      if (recordingActiveRef.current) return;
       setModelId(id);
       modelPathRef.current = next.path;
       engineRef.current?.close();
@@ -300,16 +313,16 @@ export function CameraPoseView() {
       canonicalSessionRef.current = null;
       if (status === "running") {
         await ensureEngine();
-        startCanonicalSequence();
+        rotateCanonicalSequence();
       }
     },
-    [ensureEngine, startCanonicalSequence, status],
+    [ensureEngine, rotateCanonicalSequence, status],
   );
 
   const startLoop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     lastTimestampRef.current = -1;
-    startCanonicalSequence();
+    rotateCanonicalSequence();
     let lastCurveUpdate = 0;
     const loop = () => {
       const engine = engineRef.current;
@@ -385,7 +398,7 @@ export function CameraPoseView() {
     };
     rafRef.current = requestAnimationFrame(loop);
     setStatus("running");
-  }, [startCanonicalSequence]);
+  }, [rotateCanonicalSequence, startCanonicalSequence]);
 
   const stopCameraTracks = () => {
     const video = videoRef.current;
@@ -609,10 +622,8 @@ export function CameraPoseView() {
       }
       // The await above may let the previous sequence publish one last frame.
       // Clear consumers afterwards so one analysis run never mixes sequences.
-      poseBufferRef.current = [];
-      frameCountRef.current = 0;
       keyframesRef.current = [];
-      startCanonicalSequence();
+      rotateCanonicalSequence();
       // 采集窗口:原来固定 10s,装不下一个完整的慢速循环(实测慢速引体单次接近 8s,
       // 而分期需要"静息→极点→静息"整段,至少要两个静息端)。文件模式尽量放完整段视频,
       // 相机模式给 30s。
@@ -1033,9 +1044,11 @@ export function CameraPoseView() {
               {ENGINE_KINDS.map((engine) => (
                 <button
                   key={engine.id}
+                  disabled={isRecording}
                   style={{
                     ...styles.btnSmall,
                     ...(engineKind === engine.id ? styles.btnSmallActive : null),
+                    opacity: isRecording ? 0.3 : 1,
                   }}
                   onClick={() => void switchEngine(engine.id)}
                 >
@@ -1045,7 +1058,7 @@ export function CameraPoseView() {
             </div>
             <div style={styles.btnRow}>
               {POSE_MODELS.map((model) => {
-                const disabled = engineKind !== "mediapipe";
+                const disabled = engineKind !== "mediapipe" || isRecording;
                 const active = !disabled && modelId === model.id;
                 return (
                   <button
@@ -1063,15 +1076,18 @@ export function CameraPoseView() {
                 );
               })}
               <button
+                disabled={isRecording}
                 style={{
                   ...styles.btnSmall,
                   ...(filterEnabled ? styles.btnSmallActive : null),
+                  opacity: isRecording ? 0.3 : 1,
                 }}
                 onClick={() => {
+                  if (recordingActiveRef.current) return;
                   const next = !filterEnabledRef.current;
                   filterEnabledRef.current = next;
                   setFilterEnabled(next);
-                  startCanonicalSequence();
+                  rotateCanonicalSequence();
                 }}
               >
                 旧稳定层{filterEnabled ? "✓" : "✗"}
@@ -1085,7 +1101,7 @@ export function CameraPoseView() {
               ...(analyzing ? styles.analyzeBtnBusy : null),
             }}
             className={analyzing ? "hud-scanning" : undefined}
-            disabled={analyzing || status !== "running"}
+            disabled={analyzing || status !== "running" || isRecording}
             onClick={runFullAnalysis}
           >
             {analysisStage

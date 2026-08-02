@@ -65,7 +65,7 @@ test("raw observation becomes a versioned canonical frame without overwriting ra
   assert.notEqual(frame.landmarks[0], raw.landmarks[0]);
 });
 
-test("legacy stabilization exposes a predicted point as renderable canonical data", () => {
+test("legacy stabilization labels prediction without making it product-renderable", () => {
   const session = createPoseContinuitySession({
     sequenceId: "camera:1",
     schema: "blazepose33",
@@ -94,7 +94,7 @@ test("legacy stabilization exposes a predicted point as renderable canonical dat
   assert.equal(predictedFrame.landmarks[0].observationScore, 0.4);
   assert.equal(predictedFrame.landmarks[0].source, "predicted");
   assert.equal(predictedFrame.landmarks[0].predicted, true);
-  assert.equal(predictedFrame.landmarks[0].renderable, true);
+  assert.equal(predictedFrame.landmarks[0].renderable, false);
   assert.equal(predictedFrame.landmarks[0].usable, false);
   assert.deepEqual(predictedFrame.landmarks[0].repairFlags, ["smoothed"]);
 });
