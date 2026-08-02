@@ -141,11 +141,11 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 **Blocked by:** None — can start immediately.
 
-- [ ] 完整 TypeScript 检查通过，不再有跨平台组件解析、provider 类型或 Android pose 契约错误
-- [ ] 现有 24 项规则与提取器测试继续通过
+- [x] 完整 TypeScript 检查通过，不再有跨平台组件解析、provider 类型或 Android pose 契约错误
+- [x] 现有 24 项规则与提取器测试继续通过
 - [ ] Web 相机可以启动、停止并下载视频和关键点
-- [ ] 现有示例视频、姿态后端切换和 harness 行为不回退
-- [ ] 用一次真实浏览器 smoke test 记录验收结果
+- [x] 现有示例视频、姿态后端切换和 harness 行为不回退
+- [x] 用一次真实浏览器 smoke test 记录验收结果
 
 **验收记录（2026-08-02）：** 完整 TypeScript 检查、24 项自动测试和四段 fixture harness 已通过。Chromium smoke 能加载页面、要求显式动作选择，并启动相机录制状态；默认模拟相机没有可检测人体，真实视频模拟流会使 headless 自动化超时，故视频/关键点下载仍需在 Mac 浏览器以真人画面完成一次手工验收，当前不勾选通过。
 
@@ -155,12 +155,12 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 **Blocked by:** 恢复可发布的 Web 基线.
 
-- [ ] Registry 使用稳定字符串 ID，并支持名称、别名、动作模式、器械和变式关系
-- [ ] 每个动作显示 `catalog_only / experimental / validated / suspended` 成熟度
-- [ ] 现有 5 个动作保持历史 ID，并能从 registry 选择
-- [ ] 至少新增一个 `catalog_only` 动作，证明目录可扩展且不会获得专项分数
-- [ ] 重复 ID、断裂变式关系和非法成熟度在加载时明确失败
-- [ ] 动作来源与许可信息保留在目录记录中
+- [x] Registry 使用稳定字符串 ID，并支持名称、别名、动作模式、器械和变式关系
+- [x] 每个动作显示 `catalog_only / experimental / validated / suspended` 成熟度
+- [x] 现有 5 个动作保持历史 ID，并能从 registry 选择
+- [x] 至少新增一个 `catalog_only` 动作，证明目录可扩展且不会获得专项分数
+- [x] 重复 ID、断裂变式关系和非法成熟度在加载时明确失败
+- [x] 动作来源与许可信息保留在目录记录中
 
 ## 杠铃划船贯通组后报告
 

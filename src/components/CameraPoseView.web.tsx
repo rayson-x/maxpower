@@ -9,6 +9,10 @@ import {
 } from "../agent/coach";
 import { computeExerciseFeatures } from "../pose/exerciseFeatures";
 import {
+  EXERCISE_REGISTRY,
+  type ExerciseMaturity,
+} from "../pose/exerciseRegistry";
+import {
   RULE_METRIC,
   scoreFormSet,
   type ExerciseSelection,
@@ -27,6 +31,7 @@ import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
 import { buildRecordingFixture } from "../pose/recordingFixture";
 import { extractRepMetrics, type RepMetricsExtraction } from "../pose/repMetricsExtractor";
 import {
+  EXERCISE_SIGNAL,
   guessExerciseId,
   representativeCycle,
   segmentReps,
@@ -115,13 +120,16 @@ function poseSchemaForEngine(kind: EngineKind): PoseSchema {
   return kind === "rtmpose" ? "coco17" : "blazepose33";
 }
 
-const EXERCISE_CHOICES: Array<{ id: ExerciseId; label: string }> = [
-  { id: "barbell_row", label: "杠铃划船" },
-  { id: "pull_up", label: "引体向上" },
-  { id: "lat_pulldown", label: "高位下拉" },
-  { id: "seated_row", label: "坐姿划船" },
-  { id: "straight_arm_pulldown", label: "直臂下压" },
-];
+const EXERCISE_MATURITY_LABEL: Record<ExerciseMaturity, string> = {
+  catalog_only: "仅目录",
+  experimental: "实验评分",
+  validated: "已验证",
+  suspended: "已暂停",
+};
+
+function isProfiledExerciseId(id: string): id is ExerciseId {
+  return id in EXERCISE_SIGNAL;
+}
 
 type AnyPoseEngine = PoseEngine | RtmposeEngine;
 
@@ -215,7 +223,7 @@ export function CameraPoseView() {
   const [engineKind, setEngineKind] = useState<EngineKind>("mediapipe");
   const [modelLoading, setModelLoading] = useState(false);
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
-  const [exerciseChoice, setExerciseChoice] = useState<"" | "auto" | ExerciseId>("");
+  const [exerciseChoice, setExerciseChoice] = useState<string>("");
   const [filterEnabled, setFilterEnabled] = useState(false);
   const [torsoLean, setTorsoLean] = useState<number | null>(null);
   const [pose, setPose] = useState<CanonicalPoseFrame | null>(null);
@@ -697,12 +705,25 @@ export function CameraPoseView() {
         throw new Error("请先选择训练动作，或启用自动识别模式");
       }
       const localConfidenceValue = { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence];
-      const exerciseSelection: ExerciseSelection =
-        exerciseChoice === "auto"
-          ? local.id === "unknown"
+      let exerciseSelection: ExerciseSelection;
+      if (exerciseChoice === "auto") {
+        exerciseSelection =
+          local.id === "unknown"
             ? { mode: "auto", exerciseId: null, confidence: 0 }
-            : { mode: "auto", exerciseId: local.id as ExerciseId, confidence: localConfidenceValue }
-          : { mode: "user", exerciseId: exerciseChoice };
+            : { mode: "auto", exerciseId: local.id, confidence: localConfidenceValue };
+      } else {
+        const selectedExercise = EXERCISE_REGISTRY.require(exerciseChoice);
+        if (
+          !EXERCISE_REGISTRY.canRunSpecializedAnalysis(exerciseChoice) ||
+          !isProfiledExerciseId(exerciseChoice)
+        ) {
+          throw new Error(
+            `${selectedExercise.nameZh}目前是“${EXERCISE_MATURITY_LABEL[selectedExercise.maturity]}”，` +
+              "可以录制和导出，但不会生成未经验证的专项分数",
+          );
+        }
+        exerciseSelection = { mode: "user", exerciseId: exerciseChoice };
+      }
       const extraction = extractRepMetrics(buffer, { cameraView, exercise: exerciseSelection });
       setRepMetricsExtraction(extraction);
       const computedScore = scoreFormSet(extraction.reps, extraction.context);
@@ -716,7 +737,10 @@ export function CameraPoseView() {
         `本地建议: ${local.id}(${local.confidence}) | 分期采用: ${exerciseId === "unknown" ? "未确定" : exerciseId}`,
       );
 
-      const segs = exerciseId === "unknown" ? [] : segmentReps(buffer, exerciseId);
+      const segs =
+        exerciseId === "unknown" || !isProfiledExerciseId(exerciseId)
+          ? []
+          : segmentReps(buffer, exerciseId);
       setSegments(segs);
 
       // 表达层:把规则引擎已经判定好的结果翻译成大白话。这一步失败不影响上面已经
@@ -724,7 +748,8 @@ export function CameraPoseView() {
       if (computedScore.reps.length > 0) {
         setAnalysisStage("rendering");
         const exerciseLabel =
-          EXERCISE_CHOICES.find((c) => c.id === exerciseId)?.label ?? "力量训练动作";
+          (exerciseId === "unknown" ? undefined : EXERCISE_REGISTRY.get(exerciseId)?.nameZh) ??
+          "力量训练动作";
         try {
           const explanationStart = performance.now();
           const explanation = await explainFormScore(settings, {
@@ -1081,17 +1106,30 @@ export function CameraPoseView() {
               <select
                 style={styles.exerciseSelect}
                 value={exerciseChoice}
-                onChange={(event) => setExerciseChoice(event.target.value as "" | "auto" | ExerciseId)}
+                onChange={(event) => setExerciseChoice(event.target.value)}
               >
                 <option value="">请选择本次训练动作</option>
-                {EXERCISE_CHOICES.map((exercise) => (
+                {EXERCISE_REGISTRY.exercises.map((exercise) => (
                   <option key={exercise.id} value={exercise.id}>
-                    {exercise.label}
+                    {exercise.nameZh} · {EXERCISE_MATURITY_LABEL[exercise.maturity]}
                   </option>
                 ))}
                 <option value="auto">自动识别（不确定时仅输出数据）</option>
               </select>
             </label>
+            {exerciseChoice !== "" && exerciseChoice !== "auto" && (() => {
+              const selected = EXERCISE_REGISTRY.get(exerciseChoice);
+              return selected ? (
+                <p style={styles.catalogMeta}>
+                  {selected.nameEn} · {selected.movementPattern} · {selected.equipment.join(" / ")}
+                  <br />
+                  成熟度：{EXERCISE_MATURITY_LABEL[selected.maturity]}
+                  {selected.variationOf
+                    ? ` · 变式来源：${EXERCISE_REGISTRY.require(selected.variationOf).nameZh}`
+                    : ""}
+                </p>
+              ) : null;
+            })()}
             <div style={styles.subsectionLabel}>拍摄机位</div>
             <div style={styles.btnRow}>
               {CAMERA_VIEWS.map((view) => (
@@ -2062,6 +2100,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.text,
     fontWeight: 700,
     background: "#0c1610",
+  },
+  catalogMeta: {
+    margin: "-5px 0 12px",
+    color: HUD.dim,
+    fontFamily: HUD.mono,
+    fontSize: 10,
+    lineHeight: 1.6,
   },
   subsectionLabel: {
     color: HUD.dim,
