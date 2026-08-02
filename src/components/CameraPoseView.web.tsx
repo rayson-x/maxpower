@@ -12,12 +12,7 @@ import {
   EXERCISE_REGISTRY,
   type ExerciseMaturity,
 } from "../pose/exerciseRegistry";
-import {
-  RULE_METRIC,
-  scoreFormSet,
-  type ExerciseSelection,
-  type SetScore,
-} from "../pose/formRuleEngine";
+import { RULE_METRIC } from "../pose/formRuleEngine";
 import { routeCanonicalFrame } from "../pose/canonicalFrameRouter";
 import {
   createPoseContinuitySession,
@@ -29,15 +24,15 @@ import { buildCanonicalPosePresentation } from "../pose/canonicalPosePresentatio
 import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
 import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
 import { buildRecordingFixture } from "../pose/recordingFixture";
-import { extractRepMetrics, type RepMetricsExtraction } from "../pose/repMetricsExtractor";
 import {
-  EXERCISE_SIGNAL,
+  analyzePoseSet,
+  type PoseSetAnalysisResult,
+} from "../pose/poseSetAnalysis";
+import {
   guessExerciseId,
   representativeCycle,
-  segmentReps,
   segmentRepsAuto,
   type AutoSegmentation,
-  type ExerciseId,
   type RepSegment,
 } from "../pose/repSegmenter";
 import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/trajectory";
@@ -126,10 +121,6 @@ const EXERCISE_MATURITY_LABEL: Record<ExerciseMaturity, string> = {
   validated: "已验证",
   suspended: "已暂停",
 };
-
-function isProfiledExerciseId(id: string): id is ExerciseId {
-  return id in EXERCISE_SIGNAL;
-}
 
 type AnyPoseEngine = PoseEngine | RtmposeEngine;
 
@@ -243,8 +234,7 @@ export function CameraPoseView() {
   >([]);
   const [linkTimes, setLinkTimes] = useState<{ local: number; open: number } | null>(null);
   // 逐 rep 指标 + 规则引擎评分(现场标定:先看数值,不代表最终判定 UI 已经打磨)
-  const [repMetricsExtraction, setRepMetricsExtraction] = useState<RepMetricsExtraction | null>(null);
-  const [repMetricsScore, setRepMetricsScore] = useState<SetScore | null>(null);
+  const [setAnalysis, setSetAnalysis] = useState<PoseSetAnalysisResult | null>(null);
   // 大白话点评(表达层,失败不影响上面已经算好的分数)
   const [formExplanation, setFormExplanation] = useState<FormScoreExplanation | null>(null);
   const [formExplanationError, setFormExplanationError] = useState<string | null>(null);
@@ -630,8 +620,7 @@ export function CameraPoseView() {
     setAutoSeg(null);
     setPhaseFrames([]);
     setLinkTimes(null);
-    setRepMetricsExtraction(null);
-    setRepMetricsScore(null);
+    setSetAnalysis(null);
     setFormExplanation(null);
     setFormExplanationError(null);
     try {
@@ -705,29 +694,27 @@ export function CameraPoseView() {
         throw new Error("请先选择训练动作，或启用自动识别模式");
       }
       const localConfidenceValue = { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence];
-      let exerciseSelection: ExerciseSelection;
-      if (exerciseChoice === "auto") {
-        exerciseSelection =
-          local.id === "unknown"
-            ? { mode: "auto", exerciseId: null, confidence: 0 }
-            : { mode: "auto", exerciseId: local.id, confidence: localConfidenceValue };
-      } else {
-        const selectedExercise = EXERCISE_REGISTRY.require(exerciseChoice);
-        if (
-          !EXERCISE_REGISTRY.canRunSpecializedAnalysis(exerciseChoice) ||
-          !isProfiledExerciseId(exerciseChoice)
-        ) {
-          throw new Error(
-            `${selectedExercise.nameZh}目前是“${EXERCISE_MATURITY_LABEL[selectedExercise.maturity]}”，` +
-              "可以录制和导出，但不会生成未经验证的专项分数",
-          );
-        }
-        exerciseSelection = { mode: "user", exerciseId: exerciseChoice };
+      const analysis = analyzePoseSet({
+        poses: buffer,
+        cameraView,
+        exercise:
+          exerciseChoice === "auto"
+            ? {
+                mode: "auto",
+                exerciseId: local.id === "unknown" ? null : local.id,
+                confidence: localConfidenceValue,
+              }
+            : { mode: "user", exerciseId: exerciseChoice },
+        autoSuggestion: {
+          exerciseId: local.id === "unknown" ? null : local.id,
+          confidence: localConfidenceValue,
+        },
+      });
+      if (!analysis.extraction || !analysis.score) {
+        throw new Error(analysis.reason ?? "当前动作没有可运行的运动学 profile");
       }
-      const extraction = extractRepMetrics(buffer, { cameraView, exercise: exerciseSelection });
-      setRepMetricsExtraction(extraction);
-      const computedScore = scoreFormSet(extraction.reps, extraction.context);
-      setRepMetricsScore(computedScore);
+      setSetAnalysis(analysis);
+      const computedScore = analysis.score;
 
       setLinkTimes({ local: localMs, open: 0 });
       times["本地分期"] = performance.now() - stageStart;
@@ -737,11 +724,7 @@ export function CameraPoseView() {
         `本地建议: ${local.id}(${local.confidence}) | 分期采用: ${exerciseId === "unknown" ? "未确定" : exerciseId}`,
       );
 
-      const segs =
-        exerciseId === "unknown" || !isProfiledExerciseId(exerciseId)
-          ? []
-          : segmentReps(buffer, exerciseId);
-      setSegments(segs);
+      setSegments(analysis.segments);
 
       // 表达层:把规则引擎已经判定好的结果翻译成大白话。这一步失败不影响上面已经
       // 算好的分数和逐 rep 表——用户依然能看到技术性的原始数值,只是少一段点评。
@@ -919,7 +902,7 @@ export function CameraPoseView() {
                   <h2 style={styles.panelTitle}>动作数据</h2>
                 </div>
                 <span style={styles.panelStat}>
-                  {repMetricsExtraction?.reps.length ?? 0} REPS
+                  {setAnalysis?.reps.length ?? 0} REPS
                 </span>
               </div>
               <div style={styles.signalStrip}>
@@ -931,10 +914,12 @@ export function CameraPoseView() {
                 </div>
                 <SignalCurve samples={signalCurve} />
               </div>
-              {repMetricsExtraction && repMetricsScore ? (
+              {setAnalysis?.extraction && setAnalysis.score ? (
                 <RepMetricsPanel
-                  extraction={repMetricsExtraction}
-                  score={repMetricsScore}
+                  analysis={setAnalysis}
+                  onSeek={(timestampMs) => {
+                    if (videoRef.current) videoRef.current.currentTime = timestampMs / 1000;
+                  }}
                   embedded
                 />
               ) : (
@@ -968,9 +953,11 @@ export function CameraPoseView() {
                   {formExplanation ? (
                     <>
                       <div style={styles.agentHeadline}>{formExplanation.summary}</div>
-                      {repMetricsScore && (
+                      {setAnalysis?.score && (
                         <p style={styles.reportMeta}>
-                          {repMetricsScore.score === null ? repMetricsScore.label : `${repMetricsScore.score} 分`}
+                          {setAnalysis.score.score === null
+                            ? setAnalysis.score.label
+                            : `${setAnalysis.score.score} 分`}
                         </p>
                       )}
                       <ul style={styles.agentList}>
@@ -1515,14 +1502,15 @@ const REP_STATUS_LABEL: Record<string, string> = {
  * 显示成后者,否则用户会把"这条规则没跑"误读成"这条规则说你没问题"。
  */
 function RepMetricsPanel({
-  extraction,
-  score,
+  analysis,
+  onSeek,
   embedded = false,
 }: {
-  extraction: RepMetricsExtraction | null;
-  score: SetScore | null;
+  analysis: PoseSetAnalysisResult;
+  onSeek?: (timestampMs: number) => void;
   embedded?: boolean;
 }) {
+  const { extraction, score } = analysis;
   if (!extraction || !score) return null;
 
   return (
@@ -1541,8 +1529,14 @@ function RepMetricsPanel({
       </div>
 
       <p style={compareStyles.meta}>
+        {analysis.exercise.nameZh ?? analysis.exercise.id ?? "自动分期"} · 机位 {extraction.context.cameraView} ·
+        profile {analysis.versions.profile ?? "auto/unprofiled"} · rule {analysis.versions.rule}
+      </p>
+
+      <p style={compareStyles.meta}>
         整组:{score.score === null ? "—" : `${score.score} 分`} · {score.label} ·{" "}
-        {score.scoredRepCount}/{score.totalRepCount} 个 rep 已评分
+        {score.scoredRepCount}/{score.totalRepCount} 个 rep 已评分 · 覆盖 {analysis.coverage.eligibleEvaluations}/
+        {analysis.coverage.totalEvaluations} · 拒答 {analysis.coverage.refused}
       </p>
 
       {extraction.reps.length === 0 ? (
@@ -1552,7 +1546,7 @@ function RepMetricsPanel({
           <table style={repTableStyles.table}>
             <thead>
               <tr>
-                {["#", "幅度", "不对称", "躯干漂移°", "→极点ms", "极点→ms", "分数", "状态"].map((h) => (
+                {["#", "时间 / 定位", "幅度", "不对称", "躯干漂移°", "→极点ms", "极点→ms", "分数", "状态"].map((h) => (
                   <th key={h} style={repTableStyles.th}>
                     {h}
                   </th>
@@ -1565,6 +1559,16 @@ function RepMetricsPanel({
                 return (
                   <tr key={repScore.repIndex}>
                     <td style={repTableStyles.td}>{repScore.repIndex}</td>
+                    <td style={repTableStyles.td}>
+                      <button
+                        type="button"
+                        style={repTableStyles.seekButton}
+                        onClick={() => rep && onSeek?.(rep.startMs)}
+                        disabled={!rep || !onSeek}
+                      >
+                        {rep ? `${(rep.startMs / 1000).toFixed(1)}–${(rep.endMs / 1000).toFixed(1)}s` : "—"}
+                      </button>
+                    </td>
                     <td style={repTableStyles.td}>
                       {formatMetricValue(rep?.metrics[RULE_METRIC.amplitude]?.value, 3)}
                     </td>
@@ -1642,6 +1646,15 @@ const repTableStyles: Record<string, React.CSSProperties> = {
     color: HUD.text,
     borderBottom: `1px solid ${HUD.line}`,
     whiteSpace: "nowrap",
+  },
+  seekButton: {
+    border: `1px solid ${HUD.line}`,
+    background: "transparent",
+    color: HUD.primary,
+    fontFamily: HUD.mono,
+    fontSize: 10,
+    cursor: "pointer",
+    padding: "2px 5px",
   },
 };
 

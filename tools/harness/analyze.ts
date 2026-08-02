@@ -2,10 +2,10 @@ import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { computeExerciseFeatures } from "../../src/pose/exerciseFeatures";
-import { RULE_METRIC, scoreFormSet, type CameraView, type ExerciseSelection } from "../../src/pose/formRuleEngine";
+import { RULE_METRIC, type CameraView } from "../../src/pose/formRuleEngine";
 import { classifyLocally } from "../../src/pose/localClassifier";
-import { extractRepMetrics } from "../../src/pose/repMetricsExtractor";
-import { diagnoseSignals, segmentRepsAuto, type ExerciseId } from "../../src/pose/repSegmenter";
+import { analyzePoseSet } from "../../src/pose/poseSetAnalysis";
+import { diagnoseSignals, segmentRepsAuto } from "../../src/pose/repSegmenter";
 import { computeTrajectoryFeatures } from "../../src/pose/trajectory";
 import { loadPoseFixtures } from "./fixtureRepository";
 
@@ -142,17 +142,27 @@ function main(): void {
     // classifyLocally 的置信度是三档字符串,规则引擎要的是 0..1 数值门槛比较——
     // 这里的映射只是给 harness 一个可展示的近似值,不是任何地方的正式契约。
     const confidenceValue = { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence];
-    const exercise: ExerciseSelection =
-      local.id === "unknown"
-        ? { mode: "auto", exerciseId: null, confidence: confidenceValue }
-        : { mode: "auto", exerciseId: local.id as ExerciseId, confidence: confidenceValue };
-
-    const extraction = extractRepMetrics(poses, { cameraView, exercise });
-    const setScore = scoreFormSet(extraction.reps, extraction.context);
+    const analysis = analyzePoseSet({
+      poses,
+      cameraView,
+      exercise: {
+        mode: "auto",
+        exerciseId: local.id === "unknown" ? null : local.id,
+        confidence: confidenceValue,
+      },
+    });
+    const extraction = analysis.extraction;
+    const setScore = analysis.score;
+    if (!extraction || !setScore) {
+      console.log(`\n【逐 rep 评分】未运行：${analysis.reason ?? "当前动作不受支持"}`);
+      continue;
+    }
 
     console.log(
       `\n【逐 rep 评分】信号=${extraction.signal ?? "无"}  相位=${extraction.reps[0]?.phaseSemantics?.toExtreme ?? "-"}/${extraction.reps[0]?.phaseSemantics?.fromExtreme ?? "-"}  ` +
-        `总分=${setScore.score ?? "-"}(${setScore.status})  阈值版本=${setScore.engineVersion}(${setScore.thresholdStatus},验证样本=${setScore.validationSampleSize})`,
+        `总分=${setScore.score ?? "-"}(${setScore.status})  profile=${analysis.versions.profile ?? "auto"}  ` +
+        `阈值版本=${setScore.engineVersion}(${setScore.thresholdStatus},验证样本=${setScore.validationSampleSize})  ` +
+        `覆盖=${analysis.coverage.eligibleEvaluations}/${analysis.coverage.totalEvaluations}`,
     );
     if (extraction.reps.length > 0) {
       console.log(

@@ -236,6 +236,15 @@ function buildCycles(
  */
 export function segmentReps(poses: PoseEstimate[], exercise: ExerciseId): RepSegment[] {
   const kind = EXERCISE_SIGNAL[exercise];
+  return segmentRepsBySignal(poses, kind, kind === "wrist_height" ? "max" : "min");
+}
+
+/** Profile-driven segmentation seam; the legacy exercise-id API delegates here. */
+export function segmentRepsBySignal(
+  poses: PoseEstimate[],
+  kind: SignalKind,
+  effortExtreme: "min" | "max",
+): RepSegment[] {
   const raw = extractSignal(poses, kind);
   if (raw.length < 10) return [];
   const samples = smooth(raw);
@@ -246,9 +255,8 @@ export function segmentReps(poses: PoseEstimate[], exercise: ExerciseId): RepSeg
   if (range <= 0) return [];
 
   // effort 在信号低端(肘角小=收缩)还是高端(手腕低于肩最多=收缩)
-  const effortAtLow = kind !== "wrist_height";
   const extrema = findExtrema(samples, range * 0.2);
-  return buildCycles(extrema, effortAtLow ? "min" : "max", range).map((c, i) => ({
+  return buildCycles(extrema, effortExtreme, range).map((c, i) => ({
     repIndex: i + 1,
     startMs: c.startMs,
     peakMs: c.peakMs,

@@ -24,11 +24,13 @@ import {
   type RuleMetricKey,
 } from "./formRuleEngine";
 import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
+import type { KinematicsProfile } from "./kinematicsProfile";
 import {
   AUTO_SIGNAL_JOINTS,
   EXERCISE_SIGNAL,
   SIGNAL_JOINTS,
   segmentReps,
+  segmentRepsBySignal,
   segmentRepsAuto,
   type AutoSignalKind,
   type ExerciseId,
@@ -331,6 +333,7 @@ function resolveKnownExercise(
 export interface RepMetricsExtractionOptions {
   cameraView: CameraView;
   exercise: ExerciseSelection;
+  profile?: KinematicsProfile;
 }
 
 export interface RepMetricsExtraction {
@@ -363,13 +366,19 @@ export function extractRepMetrics(
 
   if (knownExercise) {
     const exerciseId = knownExercise as ExerciseId;
-    const segments = segmentReps(poses, exerciseId);
-    const signal = EXERCISE_SIGNAL[exerciseId];
+    const signal = options.profile?.phaseSignal.kind ?? EXERCISE_SIGNAL[exerciseId];
+    const segments = options.profile
+      ? segmentRepsBySignal(poses, signal, options.profile.phaseSignal.effortExtreme)
+      : segmentReps(poses, exerciseId);
+    const phaseSemantics = options.profile
+      ? {
+          toExtreme: options.profile.phaseSignal.toExtreme,
+          fromExtreme: options.profile.phaseSignal.fromExtreme,
+        }
+      : { toExtreme: "concentric" as const, fromExtreme: "eccentric" as const };
+    const primaryJoints = options.profile?.metrics.amplitude.joints ?? SIGNAL_JOINTS[signal];
     const reps = fromKnownSegments(segments).map((cycle) =>
-      buildRepMetrics(cycle, poses, idx, SIGNAL_JOINTS[signal], {
-        toExtreme: "concentric",
-        fromExtreme: "eccentric",
-      }),
+      buildRepMetrics(cycle, poses, idx, primaryJoints, phaseSemantics),
     );
     return { context, reps, signal };
   }
