@@ -23,8 +23,15 @@ import {
 import { buildCanonicalPosePresentation } from "../pose/canonicalPosePresentation";
 import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
 import { buildLabeledSetFixtureTemplate } from "../pose/labeledSetFixture";
+import {
+  loadLocalCapture,
+  listLocalCaptures,
+  saveLocalCapture,
+  type LocalCaptureSummary,
+} from "../pose/localCaptureStore";
 import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
 import { buildRecordingFixture } from "../pose/recordingFixture";
+import { selectTrainingWindow } from "../pose/trainingWindow";
 import {
   analyzePoseSet,
   type PoseSetAnalysisResult,
@@ -38,8 +45,9 @@ import {
 import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/trajectory";
 import { RtmposeEngine } from "../pose/RtmposeEngine";
 import {
-  CAMERA_VIEWS,
+  CAPTURE_POSITIONS,
   torsoLeanDeg,
+  type CapturePosition,
   type CameraView,
 } from "../pose/viewGating";
 import { CHAMFER, CHAMFER_SM, cornerBrackets, HUD, injectHudTheme } from "./hudTheme";
@@ -135,6 +143,12 @@ interface RecordingResult {
   durationSec: number;
 }
 
+interface CaptureFrameDiagnostic {
+  timestampMs: number;
+  hasPose: boolean;
+  inferenceMs: number;
+}
+
 function loadSettings(): AgentSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -164,6 +178,17 @@ type SourceMode = "camera" | "file";
 interface SignalSample {
   t: number;
   v: number;
+}
+
+interface VideoFrameMetadata {
+  mediaTime: number;
+}
+
+interface FrameCallbackVideo extends HTMLVideoElement {
+  requestVideoFrameCallback?: (
+    callback: (now: number, metadata: VideoFrameMetadata) => void,
+  ) => number;
+  cancelVideoFrameCallback?: (handle: number) => void;
 }
 
 function angleDeg(
@@ -206,6 +231,16 @@ function requestCaptureDownloads(files: ReadonlyArray<{ url: string; name: strin
   }
 }
 
+function recordingResultFiles(result: RecordingResult): Array<{ url: string; name: string }> {
+  return [
+    { url: result.videoUrl, name: result.videoName },
+    { url: result.keypointsUrl, name: result.keypointsName },
+    ...(result.annotationUrl && result.annotationName
+      ? [{ url: result.annotationUrl, name: result.annotationName }]
+      : []),
+  ];
+}
+
 function revokeRecordingResultUrls(result: RecordingResult): void {
   URL.revokeObjectURL(result.videoUrl);
   URL.revokeObjectURL(result.keypointsUrl);
@@ -217,10 +252,12 @@ export function CameraPoseView() {
   const engineRef = useRef<AnyPoseEngine | null>(null);
   const engineKindRef = useRef<EngineKind>("mediapipe");
   const rafRef = useRef(0);
+  const videoFrameCallbackRef = useRef<number | null>(null);
+  const loopGenerationRef = useRef(0);
   const fpsWindowRef = useRef<number[]>([]);
   const modeRef = useRef<SourceMode>("camera");
-  const epochRef = useRef(0);
   const lastTimestampRef = useRef(-1);
+  const lastProcessedMediaTimeRef = useRef(-1);
   const modelPathRef = useRef(POSE_MODELS[2].path);
   const cameraViewRef = useRef<CameraView>("oblique45");
   // The evidence-based continuity fusion is the Web default. Keep the legacy
@@ -242,6 +279,7 @@ export function CameraPoseView() {
   const finalizingRecordingRef = useRef(false);
   const isUnmountedRef = useRef(false);
   const recordedPosesRef = useRef<CanonicalPoseFrame[]>([]);
+  const captureDiagnosticsRef = useRef<CaptureFrameDiagnostic[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingStartMsRef = useRef(0);
@@ -249,6 +287,7 @@ export function CameraPoseView() {
   const recordingMetadataRef = useRef<{
     exerciseChoice: string;
     cameraView: CameraView;
+    capturePosition: CapturePosition;
   } | null>(null);
   const recordingResultRef = useRef<RecordingResult | null>(null);
 
@@ -261,6 +300,7 @@ export function CameraPoseView() {
   const [engineKind, setEngineKind] = useState<EngineKind>("mediapipe");
   const [modelLoading, setModelLoading] = useState(false);
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
+  const [capturePosition, setCapturePosition] = useState<CapturePosition>("frontLeft45");
   const [exerciseChoice, setExerciseChoice] = useState<string>("");
   const [filterEnabled, setFilterEnabled] = useState(false);
   const [torsoLean, setTorsoLean] = useState<number | null>(null);
@@ -289,6 +329,8 @@ export function CameraPoseView() {
   const [isRecording, setIsRecording] = useState(false);
   const [isFinalizingRecording, setIsFinalizingRecording] = useState(false);
   const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
+  const [localCaptures, setLocalCaptures] = useState<LocalCaptureSummary[]>([]);
+  const [localCaptureError, setLocalCaptureError] = useState<string | null>(null);
 
   const ensureEngine = useCallback(async () => {
     if (!engineRef.current) {
@@ -372,30 +414,33 @@ export function CameraPoseView() {
   );
 
   const startLoop = useCallback(() => {
+    const generation = ++loopGenerationRef.current;
     cancelAnimationFrame(rafRef.current);
+    const previousVideo = videoRef.current as FrameCallbackVideo | null;
+    if (videoFrameCallbackRef.current !== null) {
+      previousVideo?.cancelVideoFrameCallback?.(videoFrameCallbackRef.current);
+      videoFrameCallbackRef.current = null;
+    }
     lastTimestampRef.current = -1;
+    lastProcessedMediaTimeRef.current = -1;
     rotateCanonicalSequence();
     let lastCurveUpdate = 0;
-    const loop = () => {
+    const processDecodedFrame = (sourceTimestampMs: number, now: number) => {
       const engine = engineRef.current;
       const currentVideo = videoRef.current;
       if (engine && currentVideo) {
-        let sourceTimestampMs: number;
-        if (modeRef.current === "file") {
-          sourceTimestampMs = epochRef.current + currentVideo.currentTime * 1000;
-        } else {
-          sourceTimestampMs = performance.now();
-        }
-        // MediaPipe VIDEO mode compares integer millisecond packet timestamps.
-        // Round once and enforce monotonicity for both live and file sources.
-        const timestampMs = Math.max(Math.floor(sourceTimestampMs), lastTimestampRef.current + 1);
-        if (modeRef.current === "file" && timestampMs > Math.floor(sourceTimestampMs)) {
-          epochRef.current = timestampMs - currentVideo.currentTime * 1000;
-        }
-        lastTimestampRef.current = timestampMs;
+        // MediaPipe receives a strictly increasing packet timestamp, while
+        // canonical/render/export data keeps the source media time. This
+        // callback is reached once per decoded frame, not per display refresh.
+        const mediaTimestampMs = Math.max(0, Math.round(sourceTimestampMs));
+        const inferenceTimestampMs = Math.max(mediaTimestampMs, lastTimestampRef.current + 1);
+        lastTimestampRef.current = inferenceTimestampMs;
         try {
-          const estimate = engine.estimate(currentVideo, timestampMs);
+          const inferenceStartedAt = performance.now();
+          const estimate = engine.estimate(currentVideo, inferenceTimestampMs);
+          const inferenceMs = performance.now() - inferenceStartedAt;
           if (estimate) {
+            estimate.timestampMs = mediaTimestampMs;
             if (!canonicalSessionRef.current) startCanonicalSequence();
             const canonicalFrame = canonicalSessionRef.current!.process(estimate);
             routeCanonicalFrame(canonicalFrame, {
@@ -416,6 +461,11 @@ export function CameraPoseView() {
               record: (frame) => {
                 if (recordingActiveRef.current) {
                   recordedPosesRef.current.push(frame);
+                  captureDiagnosticsRef.current.push({
+                    timestampMs: frame.timestampMs,
+                    hasPose: frame.landmarks.length > 0,
+                    inferenceMs: Number(inferenceMs.toFixed(2)),
+                  });
                 }
               },
               analyze: (frame) => {
@@ -432,25 +482,66 @@ export function CameraPoseView() {
         } catch {
           // 单帧失败不致命
         }
-        const now = performance.now();
+        const frameNow = now;
         const window = fpsWindowRef.current;
-        window.push(now);
-        while (window.length > 0 && window[0] < now - 1000) window.shift();
+        window.push(frameNow);
+        while (window.length > 0 && window[0] < frameNow - 1000) window.shift();
         setFps(window.length);
-        if (now - lastCaptureRef.current > 400 && currentVideo.readyState >= 2) {
-          lastCaptureRef.current = now;
+        if (frameNow - lastCaptureRef.current > 400 && currentVideo.readyState >= 2) {
+          lastCaptureRef.current = frameNow;
           const jpeg = captureFrame(currentVideo, captureCanvasRef);
           if (jpeg) {
             const buffer = keyframesRef.current;
-            buffer.push({ t: timestampMs, jpeg });
+            buffer.push({ t: mediaTimestampMs, jpeg });
             // 每 400ms 一张,30s 窗口需要 75 张;留余量到 90,否则相位取图会落到窗口尾部
             if (buffer.length > 90) buffer.shift();
           }
         }
       }
-      rafRef.current = requestAnimationFrame(loop);
     };
-    rafRef.current = requestAnimationFrame(loop);
+    const scheduleNextFrame = () => {
+      if (loopGenerationRef.current !== generation) return;
+      const currentVideo = videoRef.current as FrameCallbackVideo | null;
+      if (!currentVideo) return;
+      if (currentVideo.requestVideoFrameCallback) {
+        videoFrameCallbackRef.current = currentVideo.requestVideoFrameCallback((now, metadata) => {
+          videoFrameCallbackRef.current = null;
+          if (loopGenerationRef.current !== generation) return;
+          const mediaTime = metadata.mediaTime;
+          // A looping file starts a new source sequence; never connect that
+          // repeated clip to the previous tracker history.
+          if (modeRef.current === "file" && mediaTime + 0.05 < lastProcessedMediaTimeRef.current) {
+            lastTimestampRef.current = -1;
+            rotateCanonicalSequence();
+          }
+          lastProcessedMediaTimeRef.current = mediaTime;
+          processDecodedFrame(mediaTime * 1000, now);
+          scheduleNextFrame();
+        });
+        return;
+      }
+
+      // Fallback for browsers without requestVideoFrameCallback: rAF is only
+      // a scheduler and dedupes on media time, so duplicate pixels never reach
+      // VIDEO-mode tracking with fabricated time advancement.
+      rafRef.current = requestAnimationFrame((now) => {
+        if (loopGenerationRef.current !== generation) return;
+        const fallbackVideo = videoRef.current;
+        if (fallbackVideo) {
+          const mediaTime = fallbackVideo.currentTime;
+          if (modeRef.current === "file" && mediaTime + 0.05 < lastProcessedMediaTimeRef.current) {
+            lastTimestampRef.current = -1;
+            rotateCanonicalSequence();
+          }
+          if (mediaTime !== lastProcessedMediaTimeRef.current) {
+            lastProcessedMediaTimeRef.current = mediaTime;
+            processDecodedFrame(mediaTime * 1000, now);
+          }
+        }
+        scheduleNextFrame();
+      });
+    };
+    scheduleNextFrame();
     setStatus("running");
   }, [rotateCanonicalSequence, startCanonicalSequence]);
 
@@ -462,19 +553,72 @@ export function CameraPoseView() {
     }
   };
 
-  /** 录制结束后把视频和关键点 fixture 固化成可下载的 URL。 */
-  const finalizeRecording = useCallback(() => {
+  /** Publishes the finished local capture to the same deterministic + coach path as manual analysis. */
+  const publishRecordedAnalysis = useCallback(
+    async (
+      analysis: PoseSetAnalysisResult | null,
+      local: LocalClassification | null,
+      auto: AutoSegmentation | null,
+      trajectoryResult: TrajectoryFeatures | null,
+      cameraViewForRecording: CameraView,
+    ) => {
+      setAnalysisStage("analyzing");
+      setError(null);
+      setLocalResult(local);
+      setAutoSeg(auto);
+      setTrajectory(trajectoryResult);
+      setFormExplanation(null);
+      setFormExplanationError(null);
+      if (!analysis || !analysis.extraction || !analysis.score) {
+        setSetAnalysis(analysis);
+        setSegments(analysis?.segments ?? []);
+        setFormExplanationError(analysis?.reason ?? "采集到的可用姿态数据不足，无法生成动作结论");
+        setAnalysisStage("done");
+        return;
+      }
+
+      setSetAnalysis(analysis);
+      setSegments(analysis.segments);
+      if (analysis.score.reps.length === 0) {
+        setAnalysisStage("done");
+        return;
+      }
+
+      setAnalysisStage("rendering");
+      const exerciseLabel = EXERCISE_REGISTRY.get(analysis.profile?.exerciseId ?? "")?.nameZh ?? "力量训练动作";
+      try {
+        setFormExplanation(
+          await explainFormScore(settings, {
+            exerciseLabel,
+            cameraView: cameraViewForRecording,
+            score: analysis.score,
+          }),
+        );
+      } catch (caught) {
+        setFormExplanationError(caught instanceof Error ? caught.message : String(caught));
+      }
+      setAnalysisStage("done");
+    },
+    [settings],
+  );
+
+  /** 录制结束后把视频和关键点 fixture 固化到本机采集库，并暴露导出链接。 */
+  const finalizeRecording = useCallback(async () => {
     recordingActiveRef.current = false;
-    finalizingRecordingRef.current = false;
     const chunks = recordedChunksRef.current;
     const poses = recordedPosesRef.current;
+    const diagnostics = captureDiagnosticsRef.current;
     recordedChunksRef.current = [];
+    captureDiagnosticsRef.current = [];
     if (isUnmountedRef.current) {
       recordedPosesRef.current = [];
       return;
     }
-    setIsFinalizingRecording(false);
-    if (chunks.length === 0) return;
+    if (chunks.length === 0) {
+      finalizingRecordingRef.current = false;
+      setIsFinalizingRecording(false);
+      return;
+    }
 
     const previous = recordingResultRef.current;
     if (previous) revokeRecordingResultUrls(previous);
@@ -492,18 +636,44 @@ export function CameraPoseView() {
       fallbackDurationSec: (recordingStopMsRef.current - recordingStartMsRef.current) / 1000,
       model: `${engineKindRef.current}:${modelPathRef.current}`,
       poses,
+      diagnostics,
     });
     const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
     const recordingMetadata = recordingMetadataRef.current;
-    const selection =
-      recordingMetadata?.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
+    const recordedPoses = fixture[0].poses;
+    // 原始关键点完整保留在 fixture；下游所有面向用户的推理共用这一段过滤后的
+    // canonical 序列，避免“渲染一个数据、导出/计数另一份数据”。
+    const trainingWindow = selectTrainingWindow(recordedPoses);
+    const analysisPoses = trainingWindow.poses;
+    const hasEnoughPoses = analysisPoses.length >= 20;
+    const auto = hasEnoughPoses ? segmentRepsAuto(analysisPoses) : null;
+    const trajectoryResult = auto ? computeTrajectoryFeatures(analysisPoses, auto.cycles) : null;
+    const local = trajectoryResult
+      ? classifyLocally({
+          trajectory: trajectoryResult,
+          segmentation: auto!,
+          posture: computeExerciseFeatures(analysisPoses).posture,
+        })
+      : null;
+    const localConfidenceValue = local ? { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence] : 0;
+    const exercise = recordingMetadata
+      ? recordingMetadata.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
         ? { mode: "user" as const, exerciseId: recordingMetadata.exerciseChoice }
-        : null;
-    const analysis = selection && recordingMetadata
+        : {
+            mode: "auto" as const,
+            exerciseId: local?.id === "unknown" ? null : local?.id ?? null,
+            confidence: localConfidenceValue,
+          }
+      : null;
+    const analysis = exercise && recordingMetadata
       ? analyzePoseSet({
-          poses: fixture[0].poses,
+          poses: analysisPoses,
           cameraView: recordingMetadata.cameraView,
-          exercise: selection,
+          exercise,
+          autoSuggestion: {
+            exerciseId: local?.id === "unknown" ? null : local?.id ?? null,
+            confidence: localConfidenceValue,
+          },
         })
       : null;
     const annotation =
@@ -538,15 +708,47 @@ export function CameraPoseView() {
     recordingResultRef.current = result;
     setRecordingResult(result);
 
-    requestCaptureDownloads([
-      { url: result.videoUrl, name: result.videoName },
-      { url: result.keypointsUrl, name: result.keypointsName },
-      ...(result.annotationUrl && result.annotationName
-        ? [{ url: result.annotationUrl, name: result.annotationName }]
-        : []),
-    ]);
+    void publishRecordedAnalysis(
+      analysis,
+      local,
+      auto,
+      trajectoryResult,
+      recordingMetadata?.cameraView ?? "oblique45",
+    );
+
+    try {
+      const saved = await saveLocalCapture({
+        id: baseName,
+        createdAt: new Date(recordingStartMsRef.current).toISOString(),
+        videoName: result.videoName,
+        keypointsName: result.keypointsName,
+        poseCount: result.poseCount,
+        durationSec: result.durationSec,
+        analysisStatus: analysis?.score ? "available" : "unavailable",
+        cameraView: recordingMetadata?.cameraView ?? "oblique45",
+        capturePosition: recordingMetadata?.capturePosition ?? "frontLeft45",
+        exerciseId: analysis?.profile?.exerciseId ?? null,
+        videoBlob,
+        keypointsJson: JSON.stringify(fixture),
+        labelTemplateJson: annotation ? JSON.stringify(annotation, null, 2) : null,
+        analysisJson: analysis ? JSON.stringify(analysis) : null,
+      });
+      if (!isUnmountedRef.current) {
+        setLocalCaptures((previousCaptures) => [saved, ...previousCaptures.filter((item) => item.id !== saved.id)]);
+        setLocalCaptureError(null);
+      }
+    } catch (caught) {
+      if (!isUnmountedRef.current) {
+        setLocalCaptureError(caught instanceof Error ? caught.message : String(caught));
+      }
+    } finally {
+      finalizingRecordingRef.current = false;
+      if (!isUnmountedRef.current) setIsFinalizingRecording(false);
+    }
+
+    requestCaptureDownloads(recordingResultFiles(result));
     recordedPosesRef.current = [];
-  }, []);
+  }, [publishRecordedAnalysis]);
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -564,7 +766,13 @@ export function CameraPoseView() {
   }, []);
 
   const stop = useCallback(() => {
+    loopGenerationRef.current += 1;
     cancelAnimationFrame(rafRef.current);
+    const frameCallbackVideo = videoRef.current as FrameCallbackVideo | null;
+    if (videoFrameCallbackRef.current !== null) {
+      frameCallbackVideo?.cancelVideoFrameCallback?.(videoFrameCallbackRef.current);
+      videoFrameCallbackRef.current = null;
+    }
     stopRecording();
     stopCameraTracks();
     const video = videoRef.current;
@@ -600,13 +808,40 @@ export function CameraPoseView() {
       modeRef.current = "camera";
       setMode("camera");
 
-      // 录制与摄像头会话同生共死:开摄像头即开始录,关摄像头即结束录 —— 现场
-      // 不会有人忘记单独按下"开始录制",这个动作本来就该和"打开相机"是同一件事。
+      // Preview/tracking is intentionally independent from recording: the user
+      // can walk into position with the camera already open, then start a clean
+      // set explicitly.  No preview frames are written to the capture artifact.
+      startLoop();
+    } catch (caught) {
+      stopCameraTracks();
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setStatus("error");
+    }
+  }, [ensureEngine, startLoop]);
+
+  const startRecording = useCallback(() => {
+    const video = videoRef.current;
+    const stream = video?.srcObject;
+    if (
+      status !== "running" ||
+      modeRef.current !== "camera" ||
+      !(stream instanceof MediaStream) ||
+      recordingActiveRef.current ||
+      finalizingRecordingRef.current
+    ) {
+      return;
+    }
+    try {
+      // This is the exact capture boundary. Resetting the canonical session
+      // prevents a pre-set walking frame from contributing smoothing history to
+      // a recorded rep, while render and exported data still share each frame.
+      rotateCanonicalSequence();
       recordedPosesRef.current = [];
+      captureDiagnosticsRef.current = [];
       recordedChunksRef.current = [];
       recordingStartMsRef.current = Date.now();
       recordingStopMsRef.current = recordingStartMsRef.current;
-      recordingMetadataRef.current = { exerciseChoice, cameraView };
+      recordingMetadataRef.current = { exerciseChoice, cameraView, capturePosition };
       const mimeType = pickRecorderMimeType();
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
@@ -614,20 +849,21 @@ export function CameraPoseView() {
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) recordedChunksRef.current.push(event.data);
       };
-      recorder.onstop = finalizeRecording;
+      recorder.onstop = () => {
+        void finalizeRecording();
+      };
       mediaRecorderRef.current = recorder;
       recordingActiveRef.current = true;
       recorder.start();
       setIsRecording(true);
-      // Start pose processing only after the recorder is active, so the saved
-      // canonical keypoints and the source video share the same session start.
-      startLoop();
+      setAnalysisStage("collecting");
+      setSetAnalysis(null);
+      setFormExplanation(null);
+      setFormExplanationError(null);
     } catch (caught) {
-      stopCameraTracks();
       setError(caught instanceof Error ? caught.message : String(caught));
-      setStatus("error");
     }
-  }, [ensureEngine, startLoop, finalizeRecording, exerciseChoice, cameraView]);
+  }, [cameraView, capturePosition, exerciseChoice, finalizeRecording, rotateCanonicalSequence, status]);
 
   const startUrl = useCallback(
     async (url: string, name: string) => {
@@ -643,7 +879,6 @@ export function CameraPoseView() {
         video.muted = true;
         await video.play();
         modeRef.current = "file";
-        epochRef.current = performance.now() - video.currentTime * 1000;
         setMode("file");
         setVideoName(name);
         startLoop();
@@ -662,12 +897,58 @@ export function CameraPoseView() {
     [startUrl],
   );
 
+  const reopenLocalAnalysis = useCallback(
+    async (captureId: string) => {
+      try {
+        const capture = await loadLocalCapture(captureId);
+        if (!capture?.analysisJson) throw new Error("该组录制没有可用的已保存分析数据");
+        const analysis = JSON.parse(capture.analysisJson) as PoseSetAnalysisResult;
+        await publishRecordedAnalysis(analysis, null, null, null, capture.cameraView);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+      }
+    },
+    [publishRecordedAnalysis],
+  );
+
+  const exportLocalCapture = useCallback(async (captureId: string) => {
+    try {
+      const capture = await loadLocalCapture(captureId);
+      if (!capture) throw new Error("找不到本地采集记录");
+      const videoUrl = URL.createObjectURL(capture.videoBlob);
+      const keypointsUrl = URL.createObjectURL(new Blob([capture.keypointsJson], { type: "application/json" }));
+      const analysisUrl = capture.analysisJson
+        ? URL.createObjectURL(new Blob([capture.analysisJson], { type: "application/json" }))
+        : null;
+      requestCaptureDownloads([
+        { url: videoUrl, name: capture.videoName },
+        { url: keypointsUrl, name: capture.keypointsName },
+        ...(analysisUrl ? [{ url: analysisUrl, name: `${capture.id}.analysis.json` }] : []),
+      ]);
+      window.setTimeout(() => {
+        URL.revokeObjectURL(videoUrl);
+        URL.revokeObjectURL(keypointsUrl);
+        if (analysisUrl) URL.revokeObjectURL(analysisUrl);
+      }, 10_000);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, []);
+
   useEffect(() => {
     isUnmountedRef.current = false;
+    void listLocalCaptures()
+      .then(setLocalCaptures)
+      .catch((caught) => setLocalCaptureError(caught instanceof Error ? caught.message : String(caught)));
     return () => {
       isUnmountedRef.current = true;
+      loopGenerationRef.current += 1;
       cancelAnimationFrame(rafRef.current);
       const video = videoRef.current;
+      if (videoFrameCallbackRef.current !== null) {
+        (video as FrameCallbackVideo | null)?.cancelVideoFrameCallback?.(videoFrameCallbackRef.current);
+        videoFrameCallbackRef.current = null;
+      }
       if (video?.srcObject instanceof MediaStream) {
         video.srcObject.getTracks().forEach((track) => track.stop());
       }
@@ -731,8 +1012,10 @@ export function CameraPoseView() {
           : COLLECT_MAX_MS;
       await new Promise((resolve) => setTimeout(resolve, Math.max(collectMs, 3000)));
 
-      const buffer = poseBufferRef.current;
-      if (buffer.length < 20) throw new Error("采集到的姿态数据太少,请确认画面中有人");
+      const rawBuffer = poseBufferRef.current;
+      const trainingWindow = selectTrainingWindow(rawBuffer);
+      const buffer = trainingWindow.poses;
+      if (buffer.length < 20) throw new Error("采集到的有效姿态数据太少,请确认画面中有人且已站定");
       const times: Record<string, number> = {};
       setStageTimes({});
 
@@ -805,7 +1088,7 @@ export function CameraPoseView() {
 
       const exerciseId = exerciseChoice === "auto" ? local.id : exerciseChoice;
       setClassified(
-        `本地建议: ${local.id}(${local.confidence}) | 分期采用: ${exerciseId === "unknown" ? "未确定" : exerciseId}`,
+        `本地建议: ${local.id}(${local.confidence}) | 分期采用: ${exerciseId === "unknown" ? "未确定" : exerciseId}${trainingWindow.trimmed ? ` | 已排除 ${trainingWindow.excludedPoseCount} 帧进/离场噪音` : ""}`,
       );
 
       setSegments(analysis.segments);
@@ -1144,7 +1427,7 @@ export function CameraPoseView() {
             <div style={styles.btnRow}>
               {status === "running" ? (
                 <button style={{ ...styles.btn, background: "#4c1d1d", color: "#fca5a5" }} onClick={stop}>
-                  ■ 停止
+                  ■ 关闭相机
                 </button>
               ) : (
                 <button
@@ -1169,7 +1452,7 @@ export function CameraPoseView() {
                 <input
                   type="file"
                   disabled={isRecording || isFinalizingRecording}
-                  accept="video/mp4,video/quicktime,.mp4,.mov"
+                  accept="video/webm,video/mp4,video/quicktime,.webm,.mp4,.mov"
                   style={{ display: "none" }}
                   onChange={(event) => {
                     const file = event.currentTarget.files?.[0];
@@ -1179,6 +1462,34 @@ export function CameraPoseView() {
                 />
               </label>
             </div>
+            {status === "running" && mode === "camera" && (
+              <div style={styles.btnRow}>
+                {isRecording ? (
+                  <button
+                    style={{ ...styles.btn, background: "#7f1d1d", color: "#fee2e2" }}
+                    onClick={stopRecording}
+                  >
+                    ■ 停止并保存本组
+                  </button>
+                ) : (
+                  <button
+                    disabled={isFinalizingRecording}
+                    style={{
+                      ...styles.btn,
+                      background: HUD.primaryDim,
+                      color: "#eafff2",
+                      opacity: isFinalizingRecording ? 0.45 : 1,
+                    }}
+                    onClick={startRecording}
+                  >
+                    {isFinalizingRecording ? "保存中…" : "● 开始本组录制"}
+                  </button>
+                )}
+                {!isRecording && !isFinalizingRecording && (
+                  <span style={styles.recordingResultMeta}>预览中，未写入本组数据</span>
+                )}
+              </div>
+            )}
             <div style={styles.btnRow}>
               {SAMPLE_VIDEOS.map((sample, index) => (
                 <button
@@ -1196,7 +1507,7 @@ export function CameraPoseView() {
               ))}
             </div>
             {isRecording && (
-              <p style={styles.recordingBadge}>● 录制中 —— 停止相机即自动保存视频、关键点与标注模板</p>
+              <p style={styles.recordingBadge}>● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板</p>
             )}
             {isFinalizingRecording && (
               <p style={styles.recordingBadge}>● 正在保存本地采集文件…</p>
@@ -1207,9 +1518,15 @@ export function CameraPoseView() {
                   上次录制:{recordingResult.durationSec.toFixed(1)}s · {recordingResult.poseCount} 帧
                 </p>
                 <p style={styles.recordingResultMeta}>
-                  已请求浏览器自动保存；若浏览器询问，请允许本页下载多个文件。
+                  文件只保留在本机；若未自动下载，可点“导出全部”或逐个保存。
                 </p>
                 <div style={styles.btnRow}>
+                  <button
+                    style={{ ...styles.btnSmall, background: HUD.primaryDim, color: "#eafff2" }}
+                    onClick={() => requestCaptureDownloads(recordingResultFiles(recordingResult))}
+                  >
+                    ⇩ 导出全部
+                  </button>
                   <a
                     href={recordingResult.videoUrl}
                     download={recordingResult.videoName}
@@ -1235,6 +1552,40 @@ export function CameraPoseView() {
                   )}
                 </div>
               </div>
+            )}
+            {localCaptureError && <p style={styles.agentWarning}>本地采集库：{localCaptureError}</p>}
+            {localCaptures.length > 0 && (
+              <details style={{ marginTop: 10 }}>
+                <summary style={styles.recordingResultMeta}>
+                  本机已保存 {localCaptures.length} 组采集记录
+                </summary>
+                <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                  {localCaptures.slice(0, 8).map((capture) => (
+                    <div key={capture.id} style={styles.recordingResult}>
+                      <p style={styles.recordingResultMeta}>
+                        {new Date(capture.createdAt).toLocaleString()} · {capture.durationSec.toFixed(1)}s · {capture.poseCount} 帧
+                        <br />
+                        {capture.exerciseId ?? "未确认动作"} · {capture.analysisStatus === "available" ? "已保存分析" : "仅原始数据"}
+                      </p>
+                      <div style={styles.btnRow}>
+                        <button
+                          disabled={capture.analysisStatus !== "available"}
+                          style={{ ...styles.btnSmall, opacity: capture.analysisStatus === "available" ? 1 : 0.35 }}
+                          onClick={() => void reopenLocalAnalysis(capture.id)}
+                        >
+                          继续分析
+                        </button>
+                        <button
+                          style={styles.btnSmall}
+                          onClick={() => void exportLocalCapture(capture.id)}
+                        >
+                          导出
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
           </div>
 
@@ -1271,24 +1622,25 @@ export function CameraPoseView() {
             })()}
             <div style={styles.subsectionLabel}>拍摄机位</div>
             <div style={styles.btnRow}>
-              {CAMERA_VIEWS.map((view) => (
+              {CAPTURE_POSITIONS.map((position) => (
                 <button
-                  key={view.id}
+                  key={position.id}
                   style={{
                     ...styles.btnSmall,
-                    ...(cameraView === view.id ? styles.btnSmallActiveAmber : null),
+                    ...(capturePosition === position.id ? styles.btnSmallActiveAmber : null),
                   }}
                   onClick={() => {
-                    setCameraView(view.id);
-                    cameraViewRef.current = view.id;
+                    setCapturePosition(position.id);
+                    setCameraView(position.analysisView);
+                    cameraViewRef.current = position.analysisView;
                   }}
                 >
-                  {view.label.replace("(推荐)", "")}
+                  {position.label}
                 </button>
               ))}
             </div>
             <p style={styles.guidance}>
-              {CAMERA_VIEWS.find((view) => view.id === cameraView)?.guidance}
+              {CAPTURE_POSITIONS.find((position) => position.id === capturePosition)?.guidance}
             </p>
             <div style={styles.telemetryRow}>
               <span>FPS <strong>{fps}</strong></span>

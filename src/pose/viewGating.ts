@@ -1,6 +1,37 @@
 import type { PoseLandmark } from "./PoseEngine";
 
 export type CameraView = "front" | "side" | "oblique45";
+export type CapturePosition =
+  | "front"
+  | "frontLeft45"
+  | "left"
+  | "rearLeft45"
+  | "rear"
+  | "rearRight45"
+  | "right"
+  | "frontRight45";
+
+/**
+ * Exact physical placements recorded with a set. `analysisView` deliberately
+ * maps to the smaller, validated geometry vocabulary used by the rule engine.
+ * Rear placements remain conservative: they do not unlock depth-dependent
+ * wrist-trajectory scoring merely because eight choices are exposed in the UI.
+ */
+export const CAPTURE_POSITIONS: Array<{
+  id: CapturePosition;
+  label: string;
+  analysisView: CameraView;
+  guidance: string;
+}> = [
+  { id: "front", label: "正前", analysisView: "front", guidance: "镜头正对身体前方，适合左右对称观察。" },
+  { id: "frontLeft45", label: "左前45°", analysisView: "oblique45", guidance: "左前方约45°，兼顾躯干与双侧可见性。" },
+  { id: "left", label: "左侧", analysisView: "side", guidance: "身体左侧，适合行程和躯干角度。" },
+  { id: "rearLeft45", label: "左后45°", analysisView: "front", guidance: "左后方：当前仅保守输出对称与躯干观察，不做纵深轨迹评分。" },
+  { id: "rear", label: "正后", analysisView: "front", guidance: "镜头正对背部：当前仅保守输出对称与躯干观察。" },
+  { id: "rearRight45", label: "右后45°", analysisView: "front", guidance: "右后方：当前仅保守输出对称与躯干观察，不做纵深轨迹评分。" },
+  { id: "right", label: "右侧", analysisView: "side", guidance: "身体右侧，适合行程和躯干角度。" },
+  { id: "frontRight45", label: "右前45°", analysisView: "oblique45", guidance: "右前方约45°，兼顾躯干与双侧可见性。" },
+];
 
 export const CAMERA_VIEWS: Array<{ id: CameraView; label: string; guidance: string }> = [
   {

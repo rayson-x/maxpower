@@ -1,11 +1,19 @@
 import type { PoseEstimate } from "./PoseEngine";
 import type { CanonicalPoseFrame } from "./canonicalPose";
 
+/** Compact inference evidence; landmark visibility remains on each pose frame. */
+export interface RecordingFrameDiagnostic {
+  timestampMs: number;
+  hasPose: boolean;
+  inferenceMs: number;
+}
+
 interface BuildRecordingFixtureInput<TPose extends PoseEstimate> {
   video: string;
   fallbackDurationSec: number;
   model: string;
   poses: readonly TPose[];
+  diagnostics?: readonly RecordingFrameDiagnostic[];
 }
 
 export interface RecordingFixture<TPose extends PoseEstimate = PoseEstimate> {
@@ -14,6 +22,7 @@ export interface RecordingFixture<TPose extends PoseEstimate = PoseEstimate> {
   stepMs: number;
   model: string;
   poses: TPose[];
+  diagnostics?: RecordingFrameDiagnostic[];
 }
 
 /** Builds the harness fixture shape, including valid zero-pose recordings. */
@@ -28,6 +37,7 @@ export function buildRecordingFixture({
   fallbackDurationSec,
   model,
   poses,
+  diagnostics = [],
 }: BuildRecordingFixtureInput<PoseEstimate>): RecordingFixture<PoseEstimate>[] {
   assertSingleCanonicalSequence(poses);
   const firstTimestampMs = poses[0]?.timestampMs;
@@ -49,6 +59,16 @@ export function buildRecordingFixture({
       stepMs: poses.length > 1 ? Number((durationSec * 1000 / (poses.length - 1)).toFixed(1)) : 0,
       model,
       poses: rebasedPoses,
+      ...(diagnostics.length > 0
+        ? {
+            diagnostics: diagnostics.map((diagnostic) => ({
+              ...diagnostic,
+              timestampMs: firstTimestampMs === undefined
+                ? diagnostic.timestampMs
+                : diagnostic.timestampMs - firstTimestampMs,
+            })),
+          }
+        : {}),
     },
   ];
 }
