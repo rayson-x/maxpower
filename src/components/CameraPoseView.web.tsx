@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ZHIPU_DEFAULTS, type AgentSettings, type OpenRecognition } from "../agent/coach";
+import {
+  explainFormScore,
+  ZHIPU_DEFAULTS,
+  type AgentSettings,
+  type FormScoreExplanation,
+  type OpenRecognition,
+} from "../agent/coach";
 import { computeExerciseFeatures } from "../pose/exerciseFeatures";
 import {
   RULE_METRIC,
@@ -231,6 +237,9 @@ export function CameraPoseView() {
   // 逐 rep 指标 + 规则引擎评分(现场标定:先看数值,不代表最终判定 UI 已经打磨)
   const [repMetricsExtraction, setRepMetricsExtraction] = useState<RepMetricsExtraction | null>(null);
   const [repMetricsScore, setRepMetricsScore] = useState<SetScore | null>(null);
+  // 大白话点评(表达层,失败不影响上面已经算好的分数)
+  const [formExplanation, setFormExplanation] = useState<FormScoreExplanation | null>(null);
+  const [formExplanationError, setFormExplanationError] = useState<string | null>(null);
   // 现场采集留存
   const [isRecording, setIsRecording] = useState(false);
   const [recordingResult, setRecordingResult] = useState<{
@@ -615,6 +624,8 @@ export function CameraPoseView() {
     setLinkTimes(null);
     setRepMetricsExtraction(null);
     setRepMetricsScore(null);
+    setFormExplanation(null);
+    setFormExplanationError(null);
     try {
       const video = videoRef.current;
       if (video && modeRef.current === "file") {
@@ -694,7 +705,8 @@ export function CameraPoseView() {
           : { mode: "user", exerciseId: exerciseChoice };
       const extraction = extractRepMetrics(buffer, { cameraView, exercise: exerciseSelection });
       setRepMetricsExtraction(extraction);
-      setRepMetricsScore(scoreFormSet(extraction.reps, extraction.context));
+      const computedScore = scoreFormSet(extraction.reps, extraction.context);
+      setRepMetricsScore(computedScore);
 
       setLinkTimes({ local: localMs, open: 0 });
       times["本地分期"] = performance.now() - stageStart;
@@ -706,6 +718,27 @@ export function CameraPoseView() {
 
       const segs = exerciseId === "unknown" ? [] : segmentReps(buffer, exerciseId);
       setSegments(segs);
+
+      // 表达层:把规则引擎已经判定好的结果翻译成大白话。这一步失败不影响上面已经
+      // 算好的分数和逐 rep 表——用户依然能看到技术性的原始数值,只是少一段点评。
+      if (computedScore.reps.length > 0) {
+        setAnalysisStage("rendering");
+        const exerciseLabel =
+          EXERCISE_CHOICES.find((c) => c.id === exerciseId)?.label ?? "力量训练动作";
+        try {
+          const explanationStart = performance.now();
+          const explanation = await explainFormScore(settings, {
+            exerciseLabel,
+            cameraView,
+            score: computedScore,
+          });
+          setFormExplanation(explanation);
+          times["大白话点评"] = performance.now() - explanationStart;
+        } catch (caught) {
+          setFormExplanationError(caught instanceof Error ? caught.message : String(caught));
+        }
+      }
+
       setStageTimes(times);
       setAnalysisStage("done");
     } catch (caught) {
@@ -907,18 +940,46 @@ export function CameraPoseView() {
                 <p style={styles.reportStage}>{ANALYSIS_STAGE_LABELS[analysisStage ?? ""] ?? "正在分析"}</p>
               ) : localResult ? (
                 <>
-                  <div style={styles.agentHeadline}>
-                    {classified?.split("|")[0].replace("本地建议:", "") ?? "动作分析完成"}
-                  </div>
-                  {classified && <p style={styles.reportMeta}>{classified}</p>}
-                  <ul style={styles.agentList}>
-                    {localResult.reasons.slice(0, 4).map((reason) => (
-                      <li key={reason}>{reason}</li>
-                    ))}
-                  </ul>
-                  {localResult.dataIssues.length > 0 && (
-                    <p style={styles.agentWarning}>数据提醒：{localResult.dataIssues.join("；")}</p>
+                  {formExplanation ? (
+                    <>
+                      <div style={styles.agentHeadline}>{formExplanation.summary}</div>
+                      {repMetricsScore && (
+                        <p style={styles.reportMeta}>
+                          {repMetricsScore.score === null ? repMetricsScore.label : `${repMetricsScore.score} 分`}
+                        </p>
+                      )}
+                      <ul style={styles.agentList}>
+                        {formExplanation.perRep.map((item) => (
+                          <li key={item.repIndex}>
+                            第 {item.repIndex} 下：{item.note}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <>
+                      <div style={styles.agentHeadline}>
+                        {classified?.split("|")[0].replace("本地建议:", "") ?? "动作分析完成"}
+                      </div>
+                      {classified && <p style={styles.reportMeta}>{classified}</p>}
+                    </>
                   )}
+                  {formExplanationError && (
+                    <p style={styles.agentWarning}>
+                      大白话点评暂时没生成（{formExplanationError}），下面仍是规则引擎算好的原始数值。
+                    </p>
+                  )}
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={styles.reportMeta}>本地识别依据（技术细节）</summary>
+                    <ul style={styles.agentList}>
+                      {localResult.reasons.slice(0, 4).map((reason) => (
+                        <li key={reason}>{reason}</li>
+                      ))}
+                    </ul>
+                    {localResult.dataIssues.length > 0 && (
+                      <p style={styles.agentWarning}>数据提醒：{localResult.dataIssues.join("；")}</p>
+                    )}
+                  </details>
                 </>
               ) : (
                 <p style={styles.emptyOutput}>选择动作并完成一段采集后，这里会固定呈现本地动作识别与训练提示。</p>

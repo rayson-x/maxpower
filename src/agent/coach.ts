@@ -1,5 +1,6 @@
 import { complete, getModel, type KnownProvider, type Model } from "@mariozechner/pi-ai";
 
+import type { SetScore } from "../pose/formRuleEngine";
 import {
   DEFAULT_ZHIPU_API_KEY,
   DEFAULT_ZHIPU_BASE_URL,
@@ -544,6 +545,108 @@ const FUN_REPORT_PROMPT = `你是健身房里最懂训练也最有梗的内容�
 3. 用健身圈能共鸣的语言和比喻,可以幽默但不说教、不恐吓
 4. 结构:开场一句话总评(含分数)→ 主要发现(每条带纠正和 cue)→ 数据质量说明 → 结尾一句鼓励
 5. 控制在 300 字以内,中文`;
+
+// ---------- 表达层:规则引擎的判定结果 → 大白话教练点评 ----------
+//
+// 判断已经在 formRuleEngine.scoreFormSet() 里做完了(哪个 rep、哪条规则、扣多少分)。
+// 这里的 LLM 调用只做一件事:把已经确定的事实换一种说法,面向完全不懂运动生物力学的用户。
+// 它不允许做任何新判断——这条边界不能只靠 prompt 约束嘴,parseFormScoreExplanation()
+// 会按真实存在的 repIndex 过滤模型返回的内容,编出一个不存在的 rep 会被直接丢弃。
+
+const FORM_EXPLANATION_PROMPT = `你是一名力量训练教练。下面会给你一份规则引擎已经算好的判定结果(JSON),
+你的任务只有一件事:把它翻译成普通健身爱好者能听懂的大白话点评。**你不做任何新的判断**——
+所有对错、扣分、数值都已经算好了,你只负责换一种说法。
+
+严格规则(违反任意一条都是错误输出):
+1. 不许添加数据里没有出现过的判断、原因或身体部位。看到 torsoDriftDeg 偏大就说"身体在晃/借力了",
+   不要编造成"背部肌肉激活不足"这类数据完全没提到的解释。
+2. 不许改变分数、扣分点数或规则判定结果——你只能重新措辞,不能重新评分。
+3. 语言要面向完全不懂运动生物力学的人:不要出现"幅度"、"离心阶段"、"躯干漂移角"、
+   "torsoDriftDeg"、百分比这类术语,换成"没拉到位"、"放得太快"、"身体在晃"这类效果描述。
+4. 纠正建议要指向动作效果而不是身体部位/肌肉(外部注意焦点),例如
+   说"把杠铃拉向肚脐"而不是"收紧背阔肌"。
+5. 每条 rep 的点评不超过一句话,不说教、不恐吓。
+6. 某个 rep 的 status 是 not_scored/partial,或某条判据是 refused 的,要如实说
+   "这一下没看清楚/没法判断",绝不能猜一个结论出来凑数。
+7. 全组都没有扣分(所有 rep 的 deductions 为空)时,给一句鼓励性总结,不要因为"没什么可说的"就随便找茬。
+
+请严格输出 JSON,不要输出 JSON 以外的任何文字:
+{
+  "summary": "一句话总体点评,可以提到分数,但不能用技术术语",
+  "perRep": [
+    {"repIndex": 数字, "note": "这一下的大白话点评;如果这个 rep 没有任何 finding 就说类似'这一下没问题'"}
+  ]
+}
+只为输入里 reps 数组中实际出现过的 repIndex 生成 perRep 条目,不要新增或跳过。`;
+
+export interface FormScoreExplanationRequest {
+  /** 人话动作名,由调用方从内部 id 翻译好(如 "杠铃俯身划船"),不要传内部 ExerciseId */
+  exerciseLabel: string;
+  cameraView: string;
+  score: SetScore;
+}
+
+export interface FormScoreExplanation {
+  summary: string;
+  perRep: Array<{ repIndex: number; note: string }>;
+}
+
+/**
+ * 表达层:规则引擎已经判定好的 SetScore → 大白话教练点评。
+ * 与 renderFunReport() 是同一种分层(数据层判断、表达层只管说法),
+ * 区别是这里的判断来自确定性的 formRuleEngine,而不是另一次 LLM 判断。
+ */
+export async function explainFormScore(
+  settings: AgentSettings,
+  request: FormScoreExplanationRequest,
+): Promise<FormScoreExplanation> {
+  const model = resolveModel(settings);
+  const text =
+    `动作: ${request.exerciseLabel}\n机位: ${request.cameraView}\n` +
+    `规则引擎判定结果(已经是最终事实,不要重新判断,只翻译):\n${JSON.stringify(request.score, null, 2)}\n` +
+    `只输出 JSON。`;
+  const response = await withTimeoutAndRetry("explainFormScore", () =>
+    complete(
+      model,
+      {
+        systemPrompt: FORM_EXPLANATION_PROMPT,
+        messages: [{ role: "user", content: text, timestamp: Date.now() }],
+      },
+      { apiKey: settings.apiKey },
+    ),
+  );
+  const raw = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => (block as { type: "text"; text: string }).text)
+    .join("\n");
+  return parseFormScoreExplanation(raw, request.score);
+}
+
+function parseFormScoreExplanation(raw: string, score: SetScore): FormScoreExplanation {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) {
+    throw new Error(`大白话点评未返回 JSON: ${raw.slice(0, 120)}`);
+  }
+  const parsed = JSON.parse(raw.slice(start, end + 1)) as {
+    summary?: unknown;
+    perRep?: unknown;
+  };
+  if (typeof parsed.summary !== "string" || !Array.isArray(parsed.perRep)) {
+    throw new Error(`大白话点评缺少必需字段: ${raw.slice(0, 120)}`);
+  }
+  // 代码级兜底,不只靠 prompt 约束:模型编出一个规则引擎里不存在的 rep 就直接丢弃,
+  // 而不是信它、显示给用户一个凭空多出来的判定。
+  const validRepIndexes = new Set(score.reps.map((r) => r.repIndex));
+  const perRep = parsed.perRep.filter(
+    (item): item is { repIndex: number; note: string } =>
+      !!item &&
+      typeof (item as { repIndex?: unknown }).repIndex === "number" &&
+      typeof (item as { note?: unknown }).note === "string" &&
+      validRepIndexes.has((item as { repIndex: number }).repIndex),
+  );
+  return { summary: parsed.summary, perRep };
+}
 
 /** 表达层:结构化 JSON → 有趣报告(另一个 agent 调用,可独立换风格)。 */
 async function renderFunReport(
