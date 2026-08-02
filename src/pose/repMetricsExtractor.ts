@@ -139,22 +139,31 @@ function resolveBestSideQuality(
 
 /** 两侧都是必需的(左右对称性天生就需要两侧同时在场),不做择优。 */
 function resolveBilateralQuality(
-  logicalJoint: LogicalJoint,
+  logicalJoints: readonly LogicalJoint[],
   windowPoses: readonly PoseEstimate[],
   idx: JointIndex,
 ): JointQuality {
-  const leftRuleJoint = LOGICAL_TO_RULE_JOINT[logicalJoint].left;
-  const rightRuleJoint = LOGICAL_TO_RULE_JOINT[logicalJoint].right;
-  const leftIndex = idx[LOGICAL_TO_INDEX_KEY[logicalJoint].left];
-  const rightIndex = idx[LOGICAL_TO_INDEX_KEY[logicalJoint].right];
-  const leftVis = jointMeanVisibility(windowPoses, leftIndex);
-  const rightVis = jointMeanVisibility(windowPoses, rightIndex);
+  const requiredJoints = logicalJoints.flatMap((joint) => [
+    LOGICAL_TO_RULE_JOINT[joint].left,
+    LOGICAL_TO_RULE_JOINT[joint].right,
+  ]);
+  const landmarkIndices = logicalJoints.flatMap((joint) => [
+    idx[LOGICAL_TO_INDEX_KEY[joint].left],
+    idx[LOGICAL_TO_INDEX_KEY[joint].right],
+  ]);
+  const jointVisibility = Object.fromEntries(
+    requiredJoints.map((joint, index) => [
+      joint,
+      jointMeanVisibility(windowPoses, landmarkIndices[index]),
+    ]),
+  );
+  const values = Object.values(jointVisibility);
 
   return {
-    requiredJoints: [leftRuleJoint, rightRuleJoint],
-    jointVisibility: { [leftRuleJoint]: leftVis, [rightRuleJoint]: rightVis },
-    confidence: Math.min(leftVis, rightVis),
-    usableFrameRatio: frameUsableRatio(windowPoses, [leftIndex, rightIndex]),
+    requiredJoints,
+    jointVisibility,
+    confidence: values.length ? Math.min(...values) : 0,
+    usableFrameRatio: frameUsableRatio(windowPoses, landmarkIndices),
   };
 }
 
@@ -163,6 +172,7 @@ function toObservation(
   unit: MetricUnit,
   quality: JointQuality,
   refusalReason: string,
+  definitionId?: string,
 ): MetricObservation {
   const observation: MetricObservation = {
     value,
@@ -172,6 +182,7 @@ function toObservation(
     requiredJoints: quality.requiredJoints,
     jointVisibility: quality.jointVisibility,
   };
+  if (definitionId) observation.definitionId = definitionId;
   if (value === null) observation.refusalReason = refusalReason;
   return observation;
 }
@@ -192,13 +203,13 @@ function computeTorsoDriftDeg(windowPoses: readonly PoseEstimate[], idx: JointIn
   return robustRange(series).range;
 }
 
-function wristMotionMagnitude(
+function motionMagnitude(
   windowPoses: readonly PoseEstimate[],
-  wristIndex: number,
+  jointIndex: number,
   scale: number,
 ): number | null {
   const points = windowPoses
-    .map((p) => p.landmarks[wristIndex])
+    .map((p) => p.landmarks[jointIndex])
     .filter((l): l is PoseLandmark => !!l && l.visibility >= VISIBILITY_THRESHOLD);
   if (points.length < 3 || scale <= 0) return null;
   const rangeX = robustRange(points.map((l) => l.x)).range;
@@ -209,11 +220,12 @@ function wristMotionMagnitude(
 function computeBilateralAsymmetryRatio(
   windowPoses: readonly PoseEstimate[],
   idx: JointIndex,
+  logicalJoint: LogicalJoint,
 ): number | null {
   const scale = meanTorsoScale(windowPoses, idx);
   if (scale === null) return null;
-  const left = wristMotionMagnitude(windowPoses, idx.wristL, scale);
-  const right = wristMotionMagnitude(windowPoses, idx.wristR, scale);
+  const left = motionMagnitude(windowPoses, idx[LOGICAL_TO_INDEX_KEY[logicalJoint].left], scale);
+  const right = motionMagnitude(windowPoses, idx[LOGICAL_TO_INDEX_KEY[logicalJoint].right], scale);
   if (left === null || right === null) return null;
   const maxMotion = Math.max(left, right);
   if (maxMotion < 1e-6) return 0;
@@ -258,6 +270,8 @@ function buildRepMetrics(
   idx: JointIndex,
   primaryJoints: readonly LogicalJoint[],
   phaseSemantics: { toExtreme: PhaseMeaning; fromExtreme: PhaseMeaning },
+  cameraView: CameraView,
+  profile?: KinematicsProfile,
 ): RuleEngineRepMetrics {
   const windowPoses = poses.filter(
     (p) => p.timestampMs >= cycle.startMs && p.timestampMs <= cycle.endMs,
@@ -269,34 +283,41 @@ function buildRepMetrics(
     idx,
     cycle.evidenceSide,
   );
-  const torsoQuality = resolveBestSideQuality(["shoulder", "hip"], windowPoses, idx);
-  const wristQuality = resolveBilateralQuality("wrist", windowPoses, idx);
+  const torsoJoints = profile?.metrics.torsoDrift.joints ?? ["shoulder", "hip"];
+  const bilateralJoints = profile?.metrics.bilateralAsymmetry.joints ?? ["wrist"];
+  const torsoQuality = resolveBestSideQuality(torsoJoints, windowPoses, idx);
+  const bilateralQuality = resolveBilateralQuality(bilateralJoints, windowPoses, idx);
+  const isSupported = (views: readonly CameraView[]) => views.includes(cameraView);
 
   const metrics: Partial<Record<RuleMetricKey, MetricObservation>> = {
-    [RULE_METRIC.amplitude]: toObservation(cycle.amplitude, "normalized", primaryQuality, "无法计算幅度"),
+    [RULE_METRIC.amplitude]: toObservation(cycle.amplitude, "normalized", primaryQuality, "无法计算幅度", profile?.metrics.amplitude.definitionId),
     [RULE_METRIC.toExtremeMs]: toObservation(
       cycle.extremeMs - cycle.startMs,
       "ms",
       primaryQuality,
       "无法计算到极点耗时",
+      profile?.metrics.phaseDuration.definitionId,
     ),
     [RULE_METRIC.fromExtremeMs]: toObservation(
       cycle.endMs - cycle.extremeMs,
       "ms",
       primaryQuality,
       "无法计算自极点耗时",
+      profile?.metrics.phaseDuration.definitionId,
     ),
     [RULE_METRIC.torsoDriftDeg]: toObservation(
-      computeTorsoDriftDeg(windowPoses, idx),
+      profile && !isSupported(profile.metrics.torsoDrift.supportedViews) ? null : computeTorsoDriftDeg(windowPoses, idx),
       "deg",
       torsoQuality,
       "肩、髋关键点不足以计算躯干角度",
+      profile?.metrics.torsoDrift.definitionId,
     ),
     [RULE_METRIC.bilateralAsymmetryRatio]: toObservation(
-      computeBilateralAsymmetryRatio(windowPoses, idx),
+      computeBilateralAsymmetryRatio(windowPoses, idx, bilateralJoints[0]),
       "ratio",
-      wristQuality,
+      bilateralQuality,
       "手腕轨迹或躯干尺度不足以计算左右不对称",
+      profile?.metrics.bilateralAsymmetry.definitionId,
     ),
   };
 
@@ -378,7 +399,7 @@ export function extractRepMetrics(
     };
     const primaryJoints = profile.metrics.amplitude.joints;
     const reps = fromKnownSegments(segments).map((cycle) =>
-      buildRepMetrics(cycle, poses, idx, primaryJoints, phaseSemantics),
+      buildRepMetrics(cycle, poses, idx, primaryJoints, phaseSemantics, options.cameraView, profile),
     );
     return { context, reps, signal };
   }
@@ -390,7 +411,7 @@ export function extractRepMetrics(
     buildRepMetrics(cycle, poses, idx, AUTO_SIGNAL_JOINTS[signal], {
       toExtreme: "unknown",
       fromExtreme: "unknown",
-    }),
+    }, options.cameraView),
   );
   return { context, reps, signal };
 }

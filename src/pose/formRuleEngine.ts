@@ -41,6 +41,7 @@ export const RULE_METRIC = {
 export type RuleMetricKey = (typeof RULE_METRIC)[keyof typeof RULE_METRIC];
 
 export interface MetricObservation {
+  definitionId?: string;
   value: number | null;
   unit: MetricUnit;
   /** Confidence in this derived field, 0..1. */
