@@ -25,6 +25,27 @@ test("barbell-row real fixture produces one versioned analysis result", () => {
     result.coverage.deducted + result.coverage.refused + result.coverage.notApplicable);
 });
 
+test("every migrated legacy profile reaches the shared analysis service", () => {
+  const samples = [
+    ["barbell_row", "6e26dae721570a61cc5c9873d18c9380.mp4"],
+    ["pull_up", "ecc14b0bdcd3e1116465edfe08f33368.mp4"],
+    ["lat_pulldown", "f4a69088e395df62a33e7272f9e78192.mp4"],
+    ["seated_row", "6e26dae721570a61cc5c9873d18c9380.mp4"],
+    ["straight_arm_pulldown", "6e26dae721570a61cc5c9873d18c9380.mp4"],
+  ] as const;
+
+  for (const [exerciseId, video] of samples) {
+    const result = analyzePoseSet({
+      poses: loadPoseFixture(video).poses,
+      cameraView: "oblique45",
+      exercise: { mode: "user", exerciseId },
+    });
+    assert.notEqual(result.status, "unsupported", exerciseId);
+    assert.equal(result.profile?.exerciseId, exerciseId);
+    assert.ok(result.extraction && result.reps.length > 0, exerciseId);
+  }
+});
+
 test("user selection records an override and catalog-only stays unscored", () => {
   const fixture = loadPoseFixture("6e26dae721570a61cc5c9873d18c9380.mp4");
   const selected = analyzePoseSet({
