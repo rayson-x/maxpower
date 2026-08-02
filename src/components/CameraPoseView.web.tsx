@@ -968,6 +968,14 @@ export function CameraPoseView() {
                         ))}
                       </ul>
                     </>
+                  ) : setAnalysis?.score ? (
+                    // 大白话点评还没生成或生成失败时,先展示规则引擎已经算好的确定性分数——
+                    // 这部分不依赖 LLM,不该因为点评那一步失败就让用户什么结论都看不到。
+                    <div style={styles.agentHeadline}>
+                      {setAnalysis.score.score === null
+                        ? setAnalysis.score.label
+                        : `${setAnalysis.score.score} 分`}
+                    </div>
                   ) : (
                     <>
                       <div style={styles.agentHeadline}>
@@ -978,7 +986,7 @@ export function CameraPoseView() {
                   )}
                   {formExplanationError && (
                     <p style={styles.agentWarning}>
-                      大白话点评暂时没生成（{formExplanationError}），下面仍是规则引擎算好的原始数值。
+                      大白话点评暂时没生成（{formExplanationError}），上面是规则引擎算好的分数，下面仍是原始数值。
                     </p>
                   )}
                   <details style={{ marginTop: 8 }}>
