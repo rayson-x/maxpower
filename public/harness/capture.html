@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>form-coach 采集端 · keypoint capture</title>
+    <style>
+      body { background:#0b1120; color:#e2e8f0; font:13px/1.6 ui-monospace,Menlo,monospace; padding:20px; }
+      button { background:#1d4ed8; color:#fff; border:0; border-radius:6px; padding:8px 14px; font:inherit; cursor:pointer; }
+      button:disabled { background:#334155; cursor:wait; }
+      pre { background:#020617; padding:10px; border-radius:6px; max-height:60vh; overflow:auto; }
+      video { width:320px; border-radius:6px; }
+    </style>
+  </head>
+  <body>
+    <h3>关键点采集端</h3>
+    <p>
+      逐帧 seek 抽样(不是实时播放),所以时间戳是确定的、可复现的,且与机器性能无关。<br />
+      产物交给 <code>tools/harness/analyze.ts</code> 离线分析,改算法不用再开浏览器。
+    </p>
+    <button id="run">开始采集</button>
+    <video id="v" muted playsinline></video>
+    <pre id="log"></pre>
+
+    <script type="module">
+      // 与 src/pose/PoseEngine.ts 保持一致的参数;这里直接吃 public/ 下的产物,
+      // 不经过 Metro,所以 harness 不受打包链变化影响。
+      const MODEL = "/models/pose_landmarker_heavy.task";
+      const VIDEOS = [
+        "ecc14b0bdcd3e1116465edfe08f33368.mp4",
+        "6e26dae721570a61cc5c9873d18c9380.mp4",
+        "ebcc8df556ca000ecf8c026d920f1daf.mp4",
+        "f4a69088e395df62a33e7272f9e78192.mp4",
+      ];
+      /** 抽样间隔。50ms=20Hz,与线上"每 3 帧取 1 @ ~50fps"同量级 */
+      const STEP_MS = 50;
+
+      const logEl = document.getElementById("log");
+      const video = document.getElementById("v");
+      const log = (m) => {
+        logEl.textContent += m + "\n";
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      const map = (l) => ({
+        x: +l.x.toFixed(5),
+        y: +l.y.toFixed(5),
+        z: +l.z.toFixed(5),
+        visibility: +(l.visibility ?? 0).toFixed(4),
+      });
+
+      function seekTo(v, t) {
+        return new Promise((resolve) => {
+          const done = () => { v.removeEventListener("seeked", done); resolve(); };
+          v.addEventListener("seeked", done);
+          v.currentTime = t;
+        });
+      }
+
+      function loadVideo(v, src) {
+        return new Promise((resolve, reject) => {
+          v.onloadedmetadata = () => resolve();
+          v.onerror = () => reject(new Error("视频加载失败: " + src));
+          v.src = src;
+        });
+      }
+
+      // detectForVideo 的时间戳必须**全局**单调递增(landmarker 跨视频复用),
+      // 所以喂给它的是这个只增不减的游标;而写进 fixture 的是每个视频自己的 0 基时间轴。
+      let feedTs = 0;
+
+      async function capture(landmarker, name) {
+        await loadVideo(video, `/videos/${name}`);
+        const duration = video.duration;
+        const poses = [];
+        let localTs = 0;
+        for (let t = 0; t < duration; t += STEP_MS / 1000) {
+          await seekTo(video, t);
+          feedTs += STEP_MS;
+          localTs += STEP_MS;
+          const r = landmarker.detectForVideo(video, feedTs);
+          const first = r.landmarks[0];
+          poses.push({
+            timestampMs: localTs,
+            landmarks: first ? first.map(map) : [],
+            worldLandmarks: (r.worldLandmarks[0] ?? []).map(map),
+          });
+        }
+        // 视频之间留一段空档,避免上一个视频的 tracking 状态串到下一个
+        feedTs += 1000;
+        return { video: name, durationSec: +duration.toFixed(3), stepMs: STEP_MS, model: MODEL, poses };
+      }
+
+      document.getElementById("run").onclick = async (e) => {
+        e.target.disabled = true;
+        try {
+          const { FilesetResolver, PoseLandmarker } = await import("/vendor/vision_bundle.mjs");
+          const vision = await FilesetResolver.forVisionTasks("/wasm");
+          const opts = (delegate) => ({
+            baseOptions: { modelAssetPath: MODEL, delegate },
+            runningMode: "VIDEO",
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.5,
+            minPosePresenceConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+          });
+          let landmarker;
+          try {
+            landmarker = await PoseLandmarker.createFromOptions(vision, opts("GPU"));
+          } catch {
+            landmarker = await PoseLandmarker.createFromOptions(vision, opts("CPU"));
+          }
+          log("模型就绪: " + MODEL);
+
+          const out = [];
+          for (const name of VIDEOS) {
+            log(`采集 ${name} …`);
+            const one = await capture(landmarker, name);
+            const withPose = one.poses.filter((p) => p.landmarks.length > 0).length;
+            log(`  ${one.poses.length} 帧, ${withPose} 帧检出人体, ${one.durationSec}s`);
+            out.push(one);
+          }
+          landmarker.close();
+
+          // 供 CDP / 自动化直接取走
+          window.__HARNESS_RESULT__ = out;
+          window.__HARNESS_DONE__ = true;
+          log("\n完成。结果已挂在 window.__HARNESS_RESULT__,也可点下方链接下载。");
+
+          const blob = new Blob([JSON.stringify(out)], { type: "application/json" });
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "fixtures.json";
+          a.textContent = "↓ 下载 fixtures.json";
+          a.style.color = "#60a5fa";
+          document.body.appendChild(a);
+        } catch (err) {
+          window.__HARNESS_ERROR__ = String(err);
+          log("失败: " + err);
+        } finally {
+          e.target.disabled = false;
+        }
+      };
+    </script>
+  </body>
+</html>

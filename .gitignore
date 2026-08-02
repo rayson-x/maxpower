@@ -39,3 +39,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+modules/*/android/build/
+src/agent/defaultCredentials.ts
+.harness-build/
+tools/harness/out/
+.test-build/
+.rule-engine-test-build/

@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["PoseCameraModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.posecamera.PoseCameraModule"]
+  }
+}

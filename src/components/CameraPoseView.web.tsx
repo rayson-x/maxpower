@@ -1,0 +1,2049 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { analyzeStructured, recognizeExerciseOpen, renderFunReport, ZHIPU_DEFAULTS, type AgentSettings, type CoachReport, type OpenRecognition } from "../agent/coach";
+import { computeExerciseFeatures } from "../pose/exerciseFeatures";
+import { computeSymmetryMetrics } from "../pose/formMetrics";
+import {
+  RULE_METRIC,
+  scoreFormSet,
+  type ExerciseSelection,
+  type SetScore,
+} from "../pose/formRuleEngine";
+import { BONES_COCO17, LandmarkTracker } from "../pose/landmarkTracker";
+import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
+import { PoseSmoother } from "../pose/oneEuro";
+import { PoseEngine, type PoseEstimate } from "../pose/PoseEngine";
+import { extractRepMetrics, type RepMetricsExtraction } from "../pose/repMetricsExtractor";
+import {
+  guessExerciseId,
+  representativeCycle,
+  segmentReps,
+  segmentRepsAuto,
+  type AutoSegmentation,
+  type ExerciseId,
+  type RepSegment,
+} from "../pose/repSegmenter";
+import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/trajectory";
+import { RtmposeEngine } from "../pose/RtmposeEngine";
+import {
+  CAMERA_VIEWS,
+  torsoLeanDeg,
+  type CameraView,
+} from "../pose/viewGating";
+import { CHAMFER, CHAMFER_SM, cornerBrackets, HUD, injectHudTheme } from "./hudTheme";
+
+injectHudTheme();
+
+// BlazePose-33 拓扑(MediaPipe)
+const POSE_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], [9, 10],
+  [11, 12], [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19],
+  [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
+  [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28],
+  [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32],
+];
+
+// COCO-17 拓扑(RTMPose):鼻/眼/耳/肩/肘/腕/髋/膝/踝
+const COCO17_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1], [0, 2], [1, 3], [2, 4], [0, 5], [0, 6],
+  [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+  [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+];
+
+// 肘角信号用的关节索引(肩/肘/腕),随拓扑切换
+const ELBOW_TRIPLETS = {
+  mediapipe: { left: [11, 13, 15], right: [12, 14, 16] },
+  rtmpose: { left: [5, 7, 9], right: [6, 8, 10] },
+} as const;
+
+const PROVIDER_DEFAULTS: Record<string, string> = {
+  zhipu: ZHIPU_DEFAULTS.modelId,
+  anthropic: "claude-3-5-haiku-20241022",
+  openai: "gpt-4.1-mini",
+  google: "gemini-2.0-flash",
+  deepseek: "deepseek-v4-flash",
+  openrouter: "openai/gpt-4.1-mini",
+};
+
+const STORAGE_KEY = "form-coach-agent-settings-v2";
+
+/** 单次分析的采集窗口上限。要装得下至少两个完整循环,分期才能切出 rep。 */
+const COLLECT_MAX_MS = 30_000;
+
+const SAMPLE_VIDEOS = [
+  "ecc14b0bdcd3e1116465edfe08f33368.mp4",
+  "6e26dae721570a61cc5c9873d18c9380.mp4",
+  "ebcc8df556ca000ecf8c026d920f1daf.mp4",
+  "f4a69088e395df62a33e7272f9e78192.mp4",
+];
+
+const ANALYSIS_STAGE_LABELS: Record<string, string> = {
+  collecting: "⏺ 采集动作数据中…",
+  classifying: "⏺ 识别动作中…",
+  analyzing: "⏺ 结构化分析中…",
+  rendering: "⏺ 生成报告中…",
+  done: "✓ 分析完成,重新分析",
+};
+
+const POSE_MODELS = [
+  { id: "lite", label: "lite", path: "/models/pose_landmarker_lite.task" },
+  { id: "full", label: "full", path: "/models/pose_landmarker_full.task" },
+  { id: "heavy", label: "heavy", path: "/models/pose_landmarker_heavy.task" },
+];
+
+type EngineKind = "mediapipe" | "rtmpose";
+const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
+  { id: "mediapipe", label: "MediaPipe" },
+  { id: "rtmpose", label: "RTMPose-m" },
+];
+const RTMPOSE_MODEL_PATH = "/models/rtmpose-m-simcc-256x192.onnx";
+
+const EXERCISE_CHOICES: Array<{ id: ExerciseId; label: string }> = [
+  { id: "barbell_row", label: "杠铃划船" },
+  { id: "pull_up", label: "引体向上" },
+  { id: "lat_pulldown", label: "高位下拉" },
+  { id: "seated_row", label: "坐姿划船" },
+  { id: "straight_arm_pulldown", label: "直臂下压" },
+];
+
+type AnyPoseEngine = PoseEngine | RtmposeEngine;
+
+function loadSettings(): AgentSettings {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as AgentSettings;
+  } catch {
+    /* ignore */
+  }
+  return {
+    provider: ZHIPU_DEFAULTS.provider,
+    modelId: ZHIPU_DEFAULTS.modelId,
+    baseUrl: ZHIPU_DEFAULTS.baseUrl,
+    apiKey: ZHIPU_DEFAULTS.apiKey,
+  };
+}
+
+type EngineStatus = "idle" | "loading-model" | "starting-camera" | "running" | "error";
+type SourceMode = "camera" | "file";
+
+interface SignalSample {
+  t: number;
+  v: number;
+}
+
+function angleDeg(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  c: { x: number; y: number },
+): number {
+  const v1 = { x: a.x - b.x, y: a.y - b.y };
+  const v2 = { x: c.x - b.x, y: c.y - b.y };
+  const m1 = Math.hypot(v1.x, v1.y);
+  const m2 = Math.hypot(v2.x, v2.y);
+  if (m1 < 1e-6 || m2 < 1e-6) return NaN;
+  const cos = (v1.x * v2.x + v1.y * v2.y) / (m1 * m2);
+  return (Math.acos(Math.min(1, Math.max(-1, cos))) * 180) / Math.PI;
+}
+
+export function CameraPoseView() {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const engineRef = useRef<AnyPoseEngine | null>(null);
+  const engineKindRef = useRef<EngineKind>("mediapipe");
+  const rafRef = useRef(0);
+  const fpsWindowRef = useRef<number[]>([]);
+  const modeRef = useRef<SourceMode>("camera");
+  const epochRef = useRef(0);
+  const lastTimestampRef = useRef(-1);
+  const modelPathRef = useRef(POSE_MODELS[2].path);
+  const cameraViewRef = useRef<CameraView>("oblique45");
+  const filterEnabledRef = useRef(true);
+  const poseBufferRef = useRef<PoseEstimate[]>([]);
+  const frameCountRef = useRef(0);
+  const keyframesRef = useRef<Array<{ t: number; jpeg: string }>>([]);
+  const lastCaptureRef = useRef(0);
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const smootherRef = useRef(new PoseSmoother());
+  const trackerRef = useRef(new LandmarkTracker());
+  // 实时信号曲线(肘角),驱动左下角曲线图
+  const signalRef = useRef<SignalSample[]>([]);
+
+  // 现场采集留存:与 poseBufferRef(实时分析用的滚动环形缓冲,有上限)不同,
+  // 这里是录制期间不设上限的完整会话缓冲,只在 recordingActiveRef 为 true 时累积。
+  const recordingActiveRef = useRef(false);
+  const recordedPosesRef = useRef<PoseEstimate[]>([]);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingStartMsRef = useRef(0);
+
+  const [status, setStatus] = useState<EngineStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<SourceMode>("camera");
+  const [videoName, setVideoName] = useState<string | null>(null);
+  const [videoAspect, setVideoAspect] = useState(16 / 9);
+  const [modelId, setModelId] = useState(POSE_MODELS[2].id);
+  const [engineKind, setEngineKind] = useState<EngineKind>("mediapipe");
+  const [modelLoading, setModelLoading] = useState(false);
+  const [cameraView, setCameraView] = useState<CameraView>("oblique45");
+  const [exerciseChoice, setExerciseChoice] = useState<"auto" | ExerciseId>("auto");
+  const [filterEnabled, setFilterEnabled] = useState(true);
+  const [torsoLean, setTorsoLean] = useState<number | null>(null);
+  const [pose, setPose] = useState<PoseEstimate | null>(null);
+  const [fps, setFps] = useState(0);
+  const [signalCurve, setSignalCurve] = useState<SignalSample[]>([]);
+  const [segments, setSegments] = useState<RepSegment[]>([]);
+  const [settings, setSettings] = useState<AgentSettings>(loadSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [analysisStage, setAnalysisStage] = useState<string | null>(null);
+  const [classified, setClassified] = useState<string | null>(null);
+  const [structuredReport, setStructuredReport] = useState<CoachReport | null>(null);
+  const [funReport, setFunReport] = useState<string | null>(null);
+  const [stageTimes, setStageTimes] = useState<Record<string, number>>({});
+  // 双链路识别对比
+  const [localResult, setLocalResult] = useState<LocalClassification | null>(null);
+  const [openResult, setOpenResult] = useState<OpenRecognition | null>(null);
+  const [openError, setOpenError] = useState<string | null>(null);
+  const [trajectory, setTrajectory] = useState<TrajectoryFeatures | null>(null);
+  const [autoSeg, setAutoSeg] = useState<AutoSegmentation | null>(null);
+  const [phaseFrames, setPhaseFrames] = useState<
+    Array<{ phase: string; dataUrl: string; timestampMs: number }>
+  >([]);
+  const [linkTimes, setLinkTimes] = useState<{ local: number; open: number } | null>(null);
+  // 逐 rep 指标 + 规则引擎评分(现场标定:先看数值,不代表最终判定 UI 已经打磨)
+  const [repMetricsExtraction, setRepMetricsExtraction] = useState<RepMetricsExtraction | null>(null);
+  const [repMetricsScore, setRepMetricsScore] = useState<SetScore | null>(null);
+  // 现场采集留存
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingResult, setRecordingResult] = useState<{
+    videoUrl: string;
+    videoName: string;
+    keypointsUrl: string;
+    keypointsName: string;
+    poseCount: number;
+    durationSec: number;
+  } | null>(null);
+
+  const ensureEngine = useCallback(async () => {
+    if (!engineRef.current) {
+      setModelLoading(true);
+      try {
+        engineRef.current =
+          engineKindRef.current === "rtmpose"
+            ? await RtmposeEngine.create(RTMPOSE_MODEL_PATH)
+            : await PoseEngine.create(modelPathRef.current);
+      } finally {
+        setModelLoading(false);
+      }
+    }
+    return engineRef.current;
+  }, []);
+
+  const switchEngine = useCallback(
+    async (kind: EngineKind) => {
+      if (kind === engineKindRef.current) return;
+      engineKindRef.current = kind;
+      setEngineKind(kind);
+      engineRef.current?.close();
+      engineRef.current = null;
+      smootherRef.current.reset();
+      trackerRef.current = new LandmarkTracker(
+        kind === "rtmpose" ? BONES_COCO17 : undefined,
+      );
+      if (status === "running") await ensureEngine();
+    },
+    [ensureEngine, status],
+  );
+
+  const switchModel = useCallback(
+    async (id: string) => {
+      const next = POSE_MODELS.find((model) => model.id === id);
+      if (!next || next.path === modelPathRef.current) return;
+      setModelId(id);
+      modelPathRef.current = next.path;
+      engineRef.current?.close();
+      engineRef.current = null;
+      if (status === "running") await ensureEngine();
+    },
+    [ensureEngine, status],
+  );
+
+  const startLoop = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    lastTimestampRef.current = -1;
+    let lastCurveUpdate = 0;
+    const loop = () => {
+      const engine = engineRef.current;
+      const currentVideo = videoRef.current;
+      if (engine && currentVideo) {
+        let timestampMs: number;
+        if (modeRef.current === "file") {
+          timestampMs = epochRef.current + currentVideo.currentTime * 1000;
+          if (timestampMs <= lastTimestampRef.current) {
+            epochRef.current = lastTimestampRef.current + 1 - currentVideo.currentTime * 1000;
+            timestampMs = lastTimestampRef.current + 1;
+          }
+        } else {
+          timestampMs = performance.now();
+        }
+        lastTimestampRef.current = timestampMs;
+        try {
+          const estimate = engine.estimate(currentVideo, timestampMs);
+          if (estimate) {
+            if (filterEnabledRef.current) {
+              const tracked = trackerRef.current.update(estimate.landmarks, timestampMs);
+              const smoothed = smootherRef.current.smooth(tracked, timestampMs);
+              setPose({
+                ...estimate,
+                landmarks: estimate.landmarks.map((landmark, index) => ({
+                  ...landmark,
+                  x: smoothed[index]?.x ?? landmark.x,
+                  y: smoothed[index]?.y ?? landmark.y,
+                  visibility: tracked[index]?.visibility ?? landmark.visibility,
+                  predicted: tracked[index]?.predicted ?? false,
+                })),
+              });
+            } else {
+              setPose(estimate);
+            }
+            setTorsoLean(torsoLeanDeg(estimate.worldLandmarks));
+            // 特征缓冲:每 3 帧取 1
+            frameCountRef.current += 1;
+            if (frameCountRef.current % 3 === 0) {
+              const buffer = poseBufferRef.current;
+              buffer.push(estimate);
+              // 采集窗口拉长到 30s 后,每 3 帧取 1 约 15 样本/秒 → 至少要 450 才装得下整窗
+              if (buffer.length > 900) buffer.shift();
+            }
+            // 现场采集:录制期间原始帧全量留存,不做环形截断,配现场同步录下的视频文件
+            if (recordingActiveRef.current) {
+              recordedPosesRef.current.push(estimate);
+            }
+            // 肘角信号曲线
+            const elbow = bestElbowAngle(estimate, engineKindRef.current);
+            if (elbow !== null) {
+              const signal = signalRef.current;
+              signal.push({ t: timestampMs, v: elbow });
+              if (signal.length > 200) signal.shift();
+              if (timestampMs - lastCurveUpdate > 250) {
+                lastCurveUpdate = timestampMs;
+                setSignalCurve([...signal]);
+              }
+            }
+          }
+        } catch {
+          // 单帧失败不致命
+        }
+        const now = performance.now();
+        const window = fpsWindowRef.current;
+        window.push(now);
+        while (window.length > 0 && window[0] < now - 1000) window.shift();
+        setFps(window.length);
+        if (now - lastCaptureRef.current > 400 && currentVideo.readyState >= 2) {
+          lastCaptureRef.current = now;
+          const jpeg = captureFrame(currentVideo, captureCanvasRef);
+          if (jpeg) {
+            const buffer = keyframesRef.current;
+            buffer.push({ t: timestampMs, jpeg });
+            // 每 400ms 一张,30s 窗口需要 75 张;留余量到 90,否则相位取图会落到窗口尾部
+            if (buffer.length > 90) buffer.shift();
+          }
+        }
+      }
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    setStatus("running");
+  }, []);
+
+  const stopCameraTracks = () => {
+    const video = videoRef.current;
+    if (video?.srcObject instanceof MediaStream) {
+      video.srcObject.getTracks().forEach((track) => track.stop());
+      video.srcObject = null;
+    }
+  };
+
+  /** 录制结束后把两个产物(视频、关键点)固化成可下载的 URL,并回收上一轮的旧 URL。 */
+  const finalizeRecording = useCallback(() => {
+    recordingActiveRef.current = false;
+    const chunks = recordedChunksRef.current;
+    const poses = recordedPosesRef.current;
+    recordedChunksRef.current = [];
+    if (chunks.length === 0 || poses.length === 0) return;
+
+    setRecordingResult((previous) => {
+      if (previous) {
+        URL.revokeObjectURL(previous.videoUrl);
+        URL.revokeObjectURL(previous.keypointsUrl);
+      }
+
+      const mimeType = mediaRecorderRef.current?.mimeType || "video/webm";
+      const videoBlob = new Blob(chunks, { type: mimeType });
+      const stamp = new Date(recordingStartMsRef.current).toISOString().replace(/[:.]/g, "-");
+      const baseName = `field-capture-${stamp}`;
+      const videoExt = mimeType.includes("mp4") ? "mp4" : "webm";
+
+      // 与 tools/harness/capture.html 产出的 fixture 同形状:时间戳重新从 0 起算,
+      // 这样这份 JSON 可以直接放进 tools/harness/fixtures/ 喂 `npm run harness`,不用做任何转换。
+      const firstTimestampMs = poses[0].timestampMs;
+      const rebasedPoses = poses.map((p) => ({
+        ...p,
+        timestampMs: p.timestampMs - firstTimestampMs,
+      }));
+      const durationSec = (poses[poses.length - 1].timestampMs - firstTimestampMs) / 1000;
+      const fixture = [
+        {
+          video: `${baseName}.${videoExt}`,
+          durationSec: Number(durationSec.toFixed(3)),
+          stepMs: poses.length > 1 ? Number((durationSec * 1000 / (poses.length - 1)).toFixed(1)) : 0,
+          model: `${engineKindRef.current}:${modelPathRef.current}`,
+          poses: rebasedPoses,
+        },
+      ];
+      const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
+
+      return {
+        videoUrl: URL.createObjectURL(videoBlob),
+        videoName: `${baseName}.${videoExt}`,
+        keypointsUrl: URL.createObjectURL(keypointsBlob),
+        keypointsName: `${baseName}.json`,
+        poseCount: poses.length,
+        durationSec,
+      };
+    });
+    recordedPosesRef.current = [];
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+    } else {
+      recordingActiveRef.current = false;
+    }
+    setIsRecording(false);
+  }, []);
+
+  const stop = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    stopRecording();
+    stopCameraTracks();
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    }
+    setStatus("idle");
+    setPose(null);
+    setFps(0);
+    setVideoName(null);
+    setSignalCurve([]);
+    signalRef.current = [];
+  }, [stopRecording]);
+
+  const start = useCallback(async () => {
+    setError(null);
+    try {
+      await ensureEngine();
+      setStatus("starting-camera");
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      const video = videoRef.current;
+      if (!video) throw new Error("video element missing");
+      video.srcObject = stream;
+      video.loop = false;
+      await video.play();
+      modeRef.current = "camera";
+      setMode("camera");
+      startLoop();
+
+      // 录制与摄像头会话同生共死:开摄像头即开始录,关摄像头即结束录 —— 现场
+      // 不会有人忘记单独按下"开始录制",这个动作本来就该和"打开相机"是同一件事。
+      recordedPosesRef.current = [];
+      recordedChunksRef.current = [];
+      recordingStartMsRef.current = Date.now();
+      const mimeType = pickRecorderMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordedChunksRef.current.push(event.data);
+      };
+      recorder.onstop = finalizeRecording;
+      mediaRecorderRef.current = recorder;
+      recordingActiveRef.current = true;
+      recorder.start();
+      setIsRecording(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setStatus("error");
+    }
+  }, [ensureEngine, startLoop, finalizeRecording]);
+
+  const startUrl = useCallback(
+    async (url: string, name: string) => {
+      setError(null);
+      try {
+        await ensureEngine();
+        const video = videoRef.current;
+        if (!video) throw new Error("video element missing");
+        stopCameraTracks();
+        video.src = url;
+        video.loop = true;
+        video.muted = true;
+        await video.play();
+        modeRef.current = "file";
+        epochRef.current = performance.now() - video.currentTime * 1000;
+        setMode("file");
+        setVideoName(name);
+        setPose(null);
+        poseBufferRef.current = [];
+        frameCountRef.current = 0;
+        signalRef.current = [];
+        smootherRef.current.reset();
+        trackerRef.current.reset();
+        startLoop();
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : String(caught));
+        setStatus("error");
+      }
+    },
+    [ensureEngine, startLoop],
+  );
+
+  const startFile = useCallback(
+    async (file: File) => {
+      await startUrl(URL.createObjectURL(file), file.name);
+    },
+    [startUrl],
+  );
+
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(rafRef.current);
+      const video = videoRef.current;
+      if (video?.srcObject instanceof MediaStream) {
+        video.srcObject.getTracks().forEach((track) => track.stop());
+      }
+      if (mediaRecorderRef.current?.state !== "inactive") {
+        mediaRecorderRef.current?.stop();
+      }
+      engineRef.current?.close();
+    },
+    [],
+  );
+
+  // 组件卸载时回收上一轮录制产物的 object URL,避免内存泄漏
+  useEffect(
+    () => () => {
+      setRecordingResult((previous) => {
+        if (previous) {
+          URL.revokeObjectURL(previous.videoUrl);
+          URL.revokeObjectURL(previous.keypointsUrl);
+        }
+        return previous;
+      });
+    },
+    [],
+  );
+
+  const updateSettings = (patch: Partial<AgentSettings>) => {
+    setSettings((previous) => {
+      const next = { ...previous, ...patch };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  /** 一键完整分析:采集 → 识别动作 → 真 rep 分割 → 结构化分析(JSON) → 有趣报告 */
+  const runFullAnalysis = async () => {
+    setAnalysisStage("collecting");
+    setClassified(null);
+    setStructuredReport(null);
+    setFunReport(null);
+    setSegments([]);
+    setError(null);
+    setLocalResult(null);
+    setOpenResult(null);
+    setOpenError(null);
+    setTrajectory(null);
+    setAutoSeg(null);
+    setPhaseFrames([]);
+    setLinkTimes(null);
+    setRepMetricsExtraction(null);
+    setRepMetricsScore(null);
+    try {
+      const video = videoRef.current;
+      poseBufferRef.current = [];
+      frameCountRef.current = 0;
+      keyframesRef.current = [];
+      trackerRef.current.reset();
+      smootherRef.current.reset();
+      if (video && modeRef.current === "file") {
+        video.currentTime = 0;
+        await video.play();
+      }
+      // 采集窗口:原来固定 10s,装不下一个完整的慢速循环(实测慢速引体单次接近 8s,
+      // 而分期需要"静息→极点→静息"整段,至少要两个静息端)。文件模式尽量放完整段视频,
+      // 相机模式给 30s。
+      const collectMs =
+        video && video.duration > 0
+          ? Math.min((video.duration - 0.2) * 1000, COLLECT_MAX_MS)
+          : COLLECT_MAX_MS;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(collectMs, 3000)));
+
+      const buffer = poseBufferRef.current;
+      if (buffer.length < 20) throw new Error("采集到的姿态数据太少,请确认画面中有人");
+      const times: Record<string, number> = {};
+      setStageTimes({});
+
+      setAnalysisStage("classifying");
+      let stageStart = performance.now();
+      const features = computeExerciseFeatures(buffer);
+
+      // 1) 动作无关的自动分期 —— 还不知道是什么动作,先把运动循环找出来
+      const auto = segmentRepsAuto(buffer);
+      setAutoSeg(auto);
+      const cycle = representativeCycle(auto.cycles);
+
+      // 2) 轨迹特征:两条链路共用同一份输入,保证对比是公平的
+      const traj = computeTrajectoryFeatures(buffer, auto.cycles);
+      setTrajectory(traj);
+
+      // 3) 按相位抽三张图:起始位 / 中间位 / 顶点
+      const picked = cycle
+        ? pickPhaseFrames(keyframesRef.current, cycle)
+        : pickEvenFrames(keyframesRef.current);
+      setPhaseFrames(
+        picked.map((p) => ({
+          phase: p.phase,
+          dataUrl: `data:image/jpeg;base64,${p.jpeg}`,
+          timestampMs: p.t,
+        })),
+      );
+
+      // 4) 两条链路跑同一份数据:A=本地规则(同步,无网络) B=LLM 开放式判断
+      const localStart = performance.now();
+      const local = classifyLocally({
+        trajectory: traj,
+        segmentation: auto,
+        posture: features.posture,
+      });
+      const localMs = performance.now() - localStart;
+      setLocalResult(local);
+
+      // 5) 逐 rep 指标提取 + 规则引擎评分。用户明确选择时直接采用它;
+      // 自动模式只使用本地分类器的结果，绝不借用 LLM 判断或猜测一个动作，避免把方向判反。
+      // local.confidence 是三档字符串，这里的数值映射只是把本地分类结果适配到既有契约。
+      const localConfidenceValue = { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence];
+      const exerciseSelection: ExerciseSelection =
+        exerciseChoice === "auto"
+          ? local.id === "unknown"
+            ? { mode: "auto", exerciseId: null, confidence: 0 }
+            : { mode: "auto", exerciseId: local.id as ExerciseId, confidence: localConfidenceValue }
+          : { mode: "user", exerciseId: exerciseChoice };
+      const extraction = extractRepMetrics(buffer, { cameraView, exercise: exerciseSelection });
+      setRepMetricsExtraction(extraction);
+      setRepMetricsScore(scoreFormSet(extraction.reps, extraction.context));
+
+      const openStart = performance.now();
+      const [openSettled] = await Promise.allSettled([
+        recognizeExerciseOpen(settings, {
+          cameraView,
+          trajectory: traj,
+          phaseFrames: picked.map((p) => ({
+            phase: p.phase,
+            jpeg: p.jpeg,
+            timestampMs: p.t,
+          })),
+        }),
+      ]);
+      const openMs = performance.now() - openStart;
+      setLinkTimes({ local: localMs, open: openMs });
+
+      let open: OpenRecognition | null = null;
+      if (openSettled.status === "fulfilled") {
+        open = openSettled.value;
+        setOpenResult(open);
+        setOpenError(null);
+      } else {
+        setOpenResult(null);
+        setOpenError(
+          openSettled.reason instanceof Error
+            ? openSettled.reason.message
+            : String(openSettled.reason),
+        );
+      }
+      times["识别(双链路)"] = performance.now() - stageStart;
+
+      // 下游用哪个:本地高置信优先(确定性、可解释),否则回落到 LLM 的判断
+      const exerciseId =
+        local.id !== "unknown" && local.confidence === "high"
+          ? local.id
+          : open
+            ? guessExerciseId(`${open.name} ${open.nameEn}`)
+            : local.id !== "unknown"
+              ? local.id
+              : "barbell_row";
+      setClassified(
+        `本地规则: ${local.id}(${local.confidence}) | LLM: ${open ? `${open.name}(${open.confidence})` : "失败"} | 下游采用: ${exerciseId}`,
+      );
+
+      const segs = segmentReps(buffer, exerciseId);
+      setSegments(segs);
+
+      setAnalysisStage("analyzing");
+      stageStart = performance.now();
+      const frames = picked.map((p) => ({ jpeg: p.jpeg }));
+      const report = await analyzeStructured(settings, {
+        cameraView,
+        features,
+        symmetry: computeSymmetryMetrics(buffer),
+        trajectory: traj,
+        reps: segs.map((seg) => ({
+          repIndex: seg.repIndex,
+          durationMs: seg.durationMs,
+          concentricMs: seg.concentricMs,
+          eccentricMs: seg.eccentricMs,
+          amplitude: seg.amplitude,
+        })),
+        frames: frames.map((f) => f.jpeg),
+      });
+      setStructuredReport(report);
+      times["结构化分析(带图)"] = performance.now() - stageStart;
+
+      setAnalysisStage("rendering");
+      stageStart = performance.now();
+      const fun = await renderFunReport(settings, report);
+      setFunReport(fun);
+      times["报告渲染"] = performance.now() - stageStart;
+      setStageTimes(times);
+      setAnalysisStage("done");
+    } catch (caught) {
+      setAnalysisStage(null);
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const poseConnections = engineKind === "rtmpose" ? COCO17_CONNECTIONS : POSE_CONNECTIONS;
+  const landmarkTotal = engineKind === "rtmpose" ? 17 : 33;
+
+  const measuredLandmarks = new Map(
+    (pose?.landmarks ?? [])
+      .filter((landmark) => landmark.visibility >= 0.5 && !landmark.predicted)
+      .map((landmark, index) => [index, landmark] as const),
+  );
+  const predictedLandmarks = new Map(
+    (pose?.landmarks ?? [])
+      .filter((landmark) => landmark.predicted && landmark.visibility > 0)
+      .map((landmark, index) => [index, landmark] as const),
+  );
+
+  const trackingOk = measuredLandmarks.size >= landmarkTotal * 0.6;
+  const analyzing = analysisStage !== null && analysisStage !== "done";
+
+  return (
+    <div style={styles.page}>
+      {/* ===== 顶部:品牌 + 全局状态 ===== */}
+      <header style={styles.header}>
+        <div style={styles.brand}>
+          <span style={styles.brandLogo}>FORM·RANGE</span>
+          <span style={styles.brandSub}>动作分析靶场 / POSE TELEMETRY CONSOLE</span>
+        </div>
+        <div style={styles.headerStatus}>
+          <span
+            style={{
+              ...styles.led,
+              background: status === "running" ? (trackingOk ? HUD.primary : HUD.amber) : HUD.dim,
+              animation: status === "running" ? "hud-blink 2.4s infinite" : "none",
+            }}
+          />
+          <span style={styles.headerStatusText}>
+            {status === "running"
+              ? trackingOk
+                ? "TRACKING · 追踪锁定"
+                : "WEAK LOCK · 追踪偏弱"
+              : "STANDBY · 待机"}
+          </span>
+        </div>
+      </header>
+
+      <div style={styles.body}>
+        {/* ===== 主区:取景器 + 示波器 + 报告 ===== */}
+        <div style={styles.main}>
+          <div style={styles.stageWrap} className="hud-reveal hud-reveal-1">
+            <div style={{ ...styles.stage, aspectRatio: String(videoAspect) }} className="hud-scanline">
+              {cornerBrackets(trackingOk && status === "running" ? HUD.primary : HUD.lineBright).map(
+                (style, index) => (
+                  <div key={index} style={style} />
+                ),
+              )}
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                onLoadedMetadata={(event) => {
+                  const v = event.currentTarget;
+                  if (v.videoWidth > 0 && v.videoHeight > 0) {
+                    setVideoAspect(v.videoWidth / v.videoHeight);
+                  }
+                }}
+                style={{ ...styles.video, ...(mode === "camera" ? styles.mirror : null) }}
+              />
+              <svg
+                style={{ ...styles.overlay, ...(mode === "camera" ? styles.mirror : null) }}
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+              >
+                {poseConnections.map(([from, to]) => {
+                  const startPoint = measuredLandmarks.get(from);
+                  const endPoint = measuredLandmarks.get(to);
+                  if (!startPoint || !endPoint) return null;
+                  return (
+                    <line
+                      key={`${from}-${to}`}
+                      x1={startPoint.x * 100}
+                      y1={startPoint.y * 100}
+                      x2={endPoint.x * 100}
+                      y2={endPoint.y * 100}
+                      stroke={HUD.primary}
+                      strokeWidth="0.5"
+                    />
+                  );
+                })}
+                {[...measuredLandmarks.entries()].map(([index, landmark]) => (
+                  <circle
+                    key={index}
+                    cx={landmark.x * 100}
+                    cy={landmark.y * 100}
+                    r="0.7"
+                    fill={HUD.amber}
+                    opacity={Math.max(0.3, landmark.visibility)}
+                  />
+                ))}
+                {[...predictedLandmarks.entries()].map(([index, landmark]) => (
+                  <circle
+                    key={`p${index}`}
+                    cx={landmark.x * 100}
+                    cy={landmark.y * 100}
+                    r="0.6"
+                    fill="#9ca3af"
+                    opacity="0.6"
+                  />
+                ))}
+              </svg>
+              {status !== "running" && (
+                <div style={styles.stagePlaceholder}>
+                  <div style={styles.placeholderReticle}>◎</div>
+                  <div>
+                    {status === "loading-model" || modelLoading
+                      ? "模型加载中…"
+                      : status === "starting-camera"
+                        ? "正在打开相机…"
+                        : "选择输入源,开始追踪"}
+                  </div>
+                </div>
+              )}
+              <div style={styles.hud}>
+                <span style={styles.hudItem}>
+                  <span style={styles.hudLabel}>FPS</span>
+                  <span style={styles.hudValue}>{fps}</span>
+                </span>
+                <span style={styles.hudItem}>
+                  <span style={styles.hudLabel}>PTS</span>
+                  <span style={styles.hudValue}>
+                    {measuredLandmarks.size}/{landmarkTotal}
+                  </span>
+                </span>
+                {videoName && (
+                  <span style={styles.hudItem}>
+                    <span style={styles.hudLabel}>SRC</span>
+                    <span style={styles.hudValue}>{videoName}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 示波器:肘角信号 */}
+          <div style={styles.curveCard} className="hud-reveal hud-reveal-2">
+            <div style={styles.curveTitle}>
+              <span>OSC · 肘角信号</span>
+              <span style={styles.curveValue}>
+                {signalCurve.length > 0 ? `${signalCurve[signalCurve.length - 1].v.toFixed(0)}°` : "——"}
+              </span>
+            </div>
+            <SignalCurve samples={signalCurve} />
+          </div>
+
+          {/* 分析报告 */}
+          {(funReport || structuredReport || analyzing || localResult || openResult) && (
+            <div
+              style={styles.reportCard}
+              className={`hud-reveal hud-reveal-3${analyzing ? " hud-scanning" : ""}`}
+            >
+              {analyzing && (
+                <p style={styles.reportStage}>
+                  {ANALYSIS_STAGE_LABELS[analysisStage ?? ""] ?? ""}
+                </p>
+              )}
+              <RecognitionCompare
+                local={localResult}
+                open={openResult}
+                openError={openError}
+                trajectory={trajectory}
+                autoSeg={autoSeg}
+                phaseFrames={phaseFrames}
+                linkTimes={linkTimes}
+              />
+              <RepMetricsPanel extraction={repMetricsExtraction} score={repMetricsScore} />
+              {classified && (
+                <p style={styles.reportMeta}>
+                  {classified.split("\n")[0].replace(/\*\*/g, "").slice(0, 60)}
+                  {segments.length > 0 && ` · ${segments.length} reps:`}
+                  {segments.length > 0 &&
+                    segments.map((s) => ` ${(s.durationMs / 1000).toFixed(1)}s`).join(" ·")}
+                </p>
+              )}
+              {funReport && <pre style={styles.funReport}>{funReport}</pre>}
+              {structuredReport && (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={styles.detailsSummary}>
+                    结构化 JSON(数据层,可交给其他 agent 再加工)
+                  </summary>
+                  <pre style={styles.jsonBlock}>
+                    {JSON.stringify(structuredReport, null, 2)}
+                  </pre>
+                </details>
+              )}
+              {Object.keys(stageTimes).length > 0 && (
+                <p style={styles.timingLine}>
+                  T+{" "}
+                  {Object.entries(stageTimes)
+                    .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`)
+                    .join(" | ")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ===== 右侧控制台 ===== */}
+        <div style={styles.sidebar}>
+          <div style={styles.sideSection} className="hud-reveal hud-reveal-1">
+            <div style={styles.sideTitle}>01 · 输入源</div>
+            <div style={styles.btnRow}>
+              {status === "running" ? (
+                <button style={{ ...styles.btn, background: "#4c1d1d", color: "#fca5a5" }} onClick={stop}>
+                  ■ 停止
+                </button>
+              ) : (
+                <button style={{ ...styles.btn, background: HUD.primaryDim, color: "#eafff2" }} onClick={start}>
+                  ▶ 相机
+                </button>
+              )}
+              <label style={{ ...styles.btn, background: HUD.panel2, border: `1px solid ${HUD.line}`, textAlign: "center" }}>
+                本地视频
+                <input
+                  type="file"
+                  accept="video/mp4,video/quicktime,.mp4,.mov"
+                  style={{ display: "none" }}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file) void startFile(file);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            <div style={styles.btnRow}>
+              {SAMPLE_VIDEOS.map((sample, index) => (
+                <button
+                  key={sample}
+                  style={{
+                    ...styles.btnSmall,
+                    ...(videoName === `视频 ${index + 1}` ? styles.btnSmallActive : null),
+                  }}
+                  onClick={() => void startUrl(`/videos/${sample}`, `视频 ${index + 1}`)}
+                >
+                  V{index + 1}
+                </button>
+              ))}
+            </div>
+            {isRecording && (
+              <p style={styles.recordingBadge}>● 录制中 —— 停止相机即产出视频与关键点文件</p>
+            )}
+            {recordingResult && !isRecording && (
+              <div style={styles.recordingResult}>
+                <p style={styles.recordingResultMeta}>
+                  上次录制:{recordingResult.durationSec.toFixed(1)}s · {recordingResult.poseCount} 帧
+                </p>
+                <div style={styles.btnRow}>
+                  <a
+                    href={recordingResult.videoUrl}
+                    download={recordingResult.videoName}
+                    style={{ ...styles.btnSmall, textDecoration: "none", textAlign: "center" }}
+                  >
+                    ↓ 视频
+                  </a>
+                  <a
+                    href={recordingResult.keypointsUrl}
+                    download={recordingResult.keypointsName}
+                    style={{ ...styles.btnSmall, textDecoration: "none", textAlign: "center" }}
+                  >
+                    ↓ 关键点(可直接喂 harness)
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={styles.sideSection} className="hud-reveal hud-reveal-2">
+            <div style={styles.sideTitle}>02 · 机位</div>
+            <div style={styles.btnRow}>
+              {CAMERA_VIEWS.map((view) => (
+                <button
+                  key={view.id}
+                  style={{
+                    ...styles.btnSmall,
+                    ...(cameraView === view.id ? styles.btnSmallActiveAmber : null),
+                  }}
+                  onClick={() => {
+                    setCameraView(view.id);
+                    cameraViewRef.current = view.id;
+                  }}
+                >
+                  {view.label.replace("(推荐)", "")}
+                </button>
+              ))}
+            </div>
+            <p style={styles.guidance}>
+              {CAMERA_VIEWS.find((view) => view.id === cameraView)?.guidance}
+            </p>
+            <label style={styles.field}>
+              动作分期
+              <select
+                value={exerciseChoice}
+                onChange={(event) => setExerciseChoice(event.target.value as "auto" | ExerciseId)}
+              >
+                <option value="auto">自动识别（低置信度时不猜方向）</option>
+                {EXERCISE_CHOICES.map((exercise) => (
+                  <option key={exercise.id} value={exercise.id}>
+                    用户指定：{exercise.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div style={styles.sideSection} className="hud-reveal hud-reveal-3">
+            <div style={styles.sideTitle}>03 · 识别引擎</div>
+            <div style={styles.btnRow}>
+              {ENGINE_KINDS.map((engine) => (
+                <button
+                  key={engine.id}
+                  style={{
+                    ...styles.btnSmall,
+                    ...(engineKind === engine.id ? styles.btnSmallActive : null),
+                  }}
+                  onClick={() => void switchEngine(engine.id)}
+                >
+                  {engine.label}
+                </button>
+              ))}
+            </div>
+            <div style={styles.btnRow}>
+              {POSE_MODELS.map((model) => {
+                const disabled = engineKind !== "mediapipe";
+                const active = !disabled && modelId === model.id;
+                return (
+                  <button
+                    key={model.id}
+                    disabled={disabled}
+                    style={{
+                      ...styles.btnSmall,
+                      ...(active ? styles.btnSmallActive : null),
+                      opacity: disabled ? 0.3 : 1,
+                    }}
+                    onClick={() => void switchModel(model.id)}
+                  >
+                    {model.label}
+                  </button>
+                );
+              })}
+              <button
+                style={{
+                  ...styles.btnSmall,
+                  ...(filterEnabled ? styles.btnSmallActive : null),
+                }}
+                onClick={() => {
+                  setFilterEnabled((prev) => {
+                    filterEnabledRef.current = !prev;
+                    if (prev) {
+                      smootherRef.current.reset();
+                      trackerRef.current.reset();
+                    }
+                    return !prev;
+                  });
+                }}
+              >
+                稳定层{filterEnabled ? "✓" : "✗"}
+              </button>
+            </div>
+          </div>
+
+          <div style={styles.sideSection} className="hud-reveal hud-reveal-3">
+            <div style={styles.sideTitle}>04 · 遥测</div>
+            <div style={styles.metricGrid}>
+              <div style={styles.metric}>
+                <div style={styles.metricValue}>{fps}</div>
+                <div style={styles.metricLabel}>FPS</div>
+              </div>
+              <div style={styles.metric}>
+                <div style={styles.metricValue}>
+                  {measuredLandmarks.size}
+                  <span style={styles.metricUnit}>/{landmarkTotal}</span>
+                </div>
+                <div style={styles.metricLabel}>POINTS</div>
+              </div>
+              <div style={styles.metric}>
+                <div style={styles.metricValue}>
+                  {torsoLean === null ? "——" : torsoLean.toFixed(0)}
+                  <span style={styles.metricUnit}>°</span>
+                </div>
+                <div style={styles.metricLabel}>TORSO</div>
+              </div>
+            </div>
+          </div>
+
+          <button
+            style={{
+              ...styles.analyzeBtn,
+              ...(analyzing ? styles.analyzeBtnBusy : null),
+            }}
+            className={analyzing ? "hud-scanning" : undefined}
+            disabled={analyzing || status !== "running" || !settings.apiKey}
+            onClick={runFullAnalysis}
+          >
+            {analysisStage
+              ? ANALYSIS_STAGE_LABELS[analysisStage] ?? analysisStage
+              : "▶ 一键完整分析"}
+          </button>
+
+          {error && <p style={styles.errorText}>{error}</p>}
+
+          <div style={styles.sideSection}>
+            <button
+              style={styles.settingsToggle}
+              onClick={() => setSettingsOpen((open) => !open)}
+            >
+              05 · LLM 设置 {settingsOpen ? "▲" : "▼"}
+              <span style={styles.settingsHint}>
+                {settings.provider}/{settings.modelId.slice(0, 16)}
+              </span>
+            </button>
+            {settingsOpen && (
+              <div style={{ marginTop: 8 }}>
+                <label style={styles.field}>
+                  PROVIDER
+                  <select
+                    value={settings.provider}
+                    onChange={(event) => {
+                      const provider = event.target.value;
+                      updateSettings({
+                        provider,
+                        modelId: PROVIDER_DEFAULTS[provider] ?? "",
+                        ...(provider === "zhipu"
+                          ? {
+                              baseUrl: ZHIPU_DEFAULTS.baseUrl,
+                              apiKey: settings.apiKey || ZHIPU_DEFAULTS.apiKey,
+                            }
+                          : { baseUrl: undefined }),
+                      });
+                    }}
+                  >
+                    {Object.keys(PROVIDER_DEFAULTS).map((provider) => (
+                      <option key={provider} value={provider}>
+                        {provider}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={styles.field}>
+                  MODEL
+                  <input
+                    value={settings.modelId}
+                    onChange={(event) => updateSettings({ modelId: event.target.value })}
+                  />
+                </label>
+                {settings.provider === "zhipu" && (
+                  <label style={styles.field}>
+                    BASE URL
+                    <input
+                      value={settings.baseUrl ?? ""}
+                      onChange={(event) => updateSettings({ baseUrl: event.target.value })}
+                    />
+                  </label>
+                )}
+                <label style={styles.field}>
+                  API KEY
+                  <input
+                    type="password"
+                    value={settings.apiKey}
+                    onChange={(event) => updateSettings({ apiKey: event.target.value })}
+                  />
+                </label>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 取可见性更高一侧的肘角 */
+function bestElbowAngle(pose: PoseEstimate, kind: EngineKind): number | null {
+  const triplets = ELBOW_TRIPLETS[kind === "rtmpose" ? "rtmpose" : "mediapipe"];
+  const sides = [triplets.left, triplets.right]
+    .map(([s, e, w]) => {
+      const shoulder = pose.landmarks[s];
+      const elbow = pose.landmarks[e];
+      const wrist = pose.landmarks[w];
+      if (!shoulder || !elbow || !wrist) return null;
+      const confidence = Math.min(shoulder.visibility, elbow.visibility, wrist.visibility);
+      if (confidence < 0.5) return null;
+      return { angle: angleDeg(shoulder, elbow, wrist), confidence };
+    })
+    .filter((v): v is { angle: number; confidence: number } => v !== null);
+  if (sides.length === 0) return null;
+  return sides.sort((a, b) => b.confidence - a.confidence)[0].angle;
+}
+
+/** 肘角信号曲线(SVG 折线) */
+const CONFIDENCE_COLOR: Record<string, string> = {
+  high: HUD.primary,
+  medium: HUD.amber,
+  low: HUD.danger,
+};
+
+/** 双链路识别对比:同一份数据,本地规则 vs LLM 自主判断 */
+function RecognitionCompare({
+  local,
+  open,
+  openError,
+  trajectory,
+  autoSeg,
+  phaseFrames,
+  linkTimes,
+}: {
+  local: LocalClassification | null;
+  open: OpenRecognition | null;
+  openError: string | null;
+  trajectory: TrajectoryFeatures | null;
+  autoSeg: AutoSegmentation | null;
+  phaseFrames: Array<{ phase: string; dataUrl: string; timestampMs: number }>;
+  linkTimes: { local: number; open: number } | null;
+}) {
+  if (!local && !open && !openError) return null;
+
+  // 一致性:把 LLM 的自由文本名映射回内部 id 后比对
+  const openMappedId = open ? guessExerciseId(`${open.name} ${open.nameEn}`) : null;
+  const agree = local && openMappedId ? local.id === openMappedId : null;
+
+  return (
+    <div style={compareStyles.wrap}>
+      <div style={compareStyles.header}>
+        <span style={compareStyles.headerTitle}>动作识别 · 双链路对比</span>
+        {agree !== null && (
+          <span
+            style={{
+              ...compareStyles.badge,
+              background: "transparent",
+              border: `1px solid ${agree ? HUD.primaryDim : HUD.danger}`,
+              color: agree ? HUD.primary : HUD.danger,
+            }}
+          >
+            {agree ? "✓ 两条链路一致" : "✗ 两条链路不一致"}
+          </span>
+        )}
+        {linkTimes && (
+          <span style={compareStyles.timing}>
+            本地 {linkTimes.local.toFixed(0)}ms · LLM {(linkTimes.open / 1000).toFixed(1)}s
+          </span>
+        )}
+      </div>
+
+      {/* 送给 LLM 的三张相位图 */}
+      {phaseFrames.length > 0 && (
+        <div style={compareStyles.frameRow}>
+          {phaseFrames.map((frame) => (
+            <div key={frame.phase} style={compareStyles.frameCell}>
+              <img src={frame.dataUrl} alt={frame.phase} style={compareStyles.frameImg} />
+              <div style={compareStyles.frameLabel}>
+                {frame.phase}
+                <span style={compareStyles.frameTime}>
+                  {(frame.timestampMs / 1000).toFixed(1)}s
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={compareStyles.columns}>
+        {/* ---- 链路 A ---- */}
+        <div style={compareStyles.col}>
+          <div style={compareStyles.colTitle}>链路 A · 本地规则(无网络)</div>
+          {local ? (
+            <>
+              <div style={compareStyles.answer}>
+                {local.id === "unknown" ? "无法确定" : local.id}
+                <span
+                  style={{
+                    ...compareStyles.conf,
+                    color: CONFIDENCE_COLOR[local.confidence],
+                  }}
+                >
+                  {local.confidence} · 领先度 {local.margin}
+                </span>
+              </div>
+              {local.dataIssues.length > 0 && (
+                <div style={compareStyles.issues}>
+                  ⚠ {local.dataIssues.join("；")}
+                </div>
+              )}
+              <ul style={compareStyles.list}>
+                {local.reasons.map((reason) => (
+                  <li key={reason} style={compareStyles.listItem}>
+                    {reason}
+                  </li>
+                ))}
+              </ul>
+              <details>
+                <summary style={compareStyles.summary}>各候选得分</summary>
+                <pre style={compareStyles.pre}>
+                  {local.scores
+                    .map((s) => `${s.score.toString().padStart(2)}  ${s.id}`)
+                    .join("\n")}
+                </pre>
+              </details>
+            </>
+          ) : (
+            <div style={compareStyles.muted}>未运行</div>
+          )}
+        </div>
+
+        {/* ---- 链路 B ---- */}
+        <div style={compareStyles.col}>
+          <div style={compareStyles.colTitle}>链路 B · LLM 自主判断(不给选项)</div>
+          {open ? (
+            <>
+              <div style={compareStyles.answer}>
+                {open.name}
+                <span
+                  style={{ ...compareStyles.conf, color: CONFIDENCE_COLOR[open.confidence] }}
+                >
+                  {open.confidence}
+                  {open.uncertain ? " · 自述不确定" : ""}
+                </span>
+              </div>
+              <div style={compareStyles.meta}>
+                {open.nameEn && `${open.nameEn} · `}
+                器械 {open.equipment} · 体位 {open.bodyPosition}
+                {openMappedId && ` · 映射到 ${openMappedId}`}
+              </div>
+              {open.reasoning && <p style={compareStyles.reasoning}>{open.reasoning}</p>}
+              <ul style={compareStyles.list}>
+                {open.evidence.map((e) => (
+                  <li key={e} style={compareStyles.listItem}>
+                    {e}
+                  </li>
+                ))}
+              </ul>
+              {open.alternatives.length > 0 && (
+                <details>
+                  <summary style={compareStyles.summary}>排除的候选</summary>
+                  <pre style={compareStyles.pre}>
+                    {open.alternatives.map((a) => `${a.name} — ${a.whyNot}`).join("\n")}
+                  </pre>
+                </details>
+              )}
+              {open.cannotTell.length > 0 && (
+                <div style={compareStyles.issues}>
+                  骨架看不出:{open.cannotTell.join("；")}
+                </div>
+              )}
+            </>
+          ) : (
+            <div style={compareStyles.muted}>{openError ? `失败:${openError}` : "未运行"}</div>
+          )}
+        </div>
+      </div>
+
+      <details style={{ marginTop: 8 }}>
+        <summary style={compareStyles.summary}>轨迹特征与自动分期(两条链路的共同输入)</summary>
+        {autoSeg && (
+          <pre style={compareStyles.pre}>
+            {`选中信号: ${autoSeg.signal ?? "无"}  周期 ${autoSeg.periodSec ?? "-"}s  强度 ${autoSeg.periodStrength ?? "-"}
+循环数: ${autoSeg.cycles.length}
+候选信号排名:
+${autoSeg.ranking.map((r) => `  ${r.signal.padEnd(15)} score=${r.score}  幅度=${r.normRange}  周期性=${r.strength}`).join("\n")}`}
+          </pre>
+        )}
+        <pre style={compareStyles.pre}>{JSON.stringify(trajectory, null, 2)}</pre>
+      </details>
+    </div>
+  );
+}
+
+/** 每个指标一列的格式化;value 为 null 时统一显示 "—"(与 0 区分开)。 */
+function formatMetricValue(value: number | null | undefined, digits: number): string {
+  return value === null || value === undefined ? "—" : value.toFixed(digits);
+}
+
+const REP_STATUS_LABEL: Record<string, string> = {
+  scored: "已评分",
+  partial: "部分未判定",
+  not_scored: "未评分",
+};
+
+/**
+ * 逐 rep 原始数值 + 规则引擎评分。
+ *
+ * 现场标定用:只展示测量值,不做任何"这算不算错"的额外包装——那是规则引擎的判断,
+ * 这里只是如实呈现它的输出。"未判定"与"判定为没问题"必须区分显示,不能把前者
+ * 显示成后者,否则用户会把"这条规则没跑"误读成"这条规则说你没问题"。
+ */
+function RepMetricsPanel({
+  extraction,
+  score,
+}: {
+  extraction: RepMetricsExtraction | null;
+  score: SetScore | null;
+}) {
+  if (!extraction || !score) return null;
+
+  return (
+    <div style={compareStyles.wrap}>
+      <div style={compareStyles.header}>
+        <span style={compareStyles.headerTitle}>逐 REP 指标 · 规则引擎评分</span>
+        <span style={compareStyles.timing}>
+          分期信号 {extraction.signal ?? "无"} · 阈值 {score.thresholdStatus}(验证样本 {score.validationSampleSize})
+        </span>
+      </div>
+
+      <p style={compareStyles.meta}>
+        整组:{score.score === null ? "—" : `${score.score} 分`} · {score.label} ·{" "}
+        {score.scoredRepCount}/{score.totalRepCount} 个 rep 已评分
+      </p>
+
+      {extraction.reps.length === 0 ? (
+        <div style={compareStyles.muted}>本次未能切出 rep(检查分期信号是否选中、机位是否稳定)</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={repTableStyles.table}>
+            <thead>
+              <tr>
+                {["#", "幅度", "不对称", "躯干漂移°", "→极点ms", "极点→ms", "分数", "状态"].map((h) => (
+                  <th key={h} style={repTableStyles.th}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {score.reps.map((repScore) => {
+                const rep = extraction.reps.find((r) => r.repIndex === repScore.repIndex);
+                return (
+                  <tr key={repScore.repIndex}>
+                    <td style={repTableStyles.td}>{repScore.repIndex}</td>
+                    <td style={repTableStyles.td}>
+                      {formatMetricValue(rep?.metrics[RULE_METRIC.amplitude]?.value, 3)}
+                    </td>
+                    <td style={repTableStyles.td}>
+                      {formatMetricValue(rep?.metrics[RULE_METRIC.bilateralAsymmetryRatio]?.value, 3)}
+                    </td>
+                    <td style={repTableStyles.td}>
+                      {formatMetricValue(rep?.metrics[RULE_METRIC.torsoDriftDeg]?.value, 1)}
+                    </td>
+                    <td style={repTableStyles.td}>
+                      {formatMetricValue(rep?.metrics[RULE_METRIC.toExtremeMs]?.value, 0)}
+                    </td>
+                    <td style={repTableStyles.td}>
+                      {formatMetricValue(rep?.metrics[RULE_METRIC.fromExtremeMs]?.value, 0)}
+                    </td>
+                    <td style={repTableStyles.td}>
+                      {repScore.score === null ? "—" : repScore.score}
+                    </td>
+                    <td
+                      style={{
+                        ...repTableStyles.td,
+                        color:
+                          repScore.status === "scored"
+                            ? HUD.primary
+                            : repScore.status === "partial"
+                              ? HUD.amber
+                              : HUD.dim,
+                      }}
+                    >
+                      {REP_STATUS_LABEL[repScore.status] ?? repScore.status}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <details style={{ marginTop: 8 }}>
+        <summary style={compareStyles.summary}>每条判据的详细依据(命中/拒答原因)</summary>
+        <pre style={compareStyles.pre}>
+          {score.reps
+            .map(
+              (repScore) =>
+                `rep ${repScore.repIndex} (${REP_STATUS_LABEL[repScore.status] ?? repScore.status}):\n` +
+                repScore.evaluations
+                  .map((e) => `  ${e.ruleId}: ${e.status}${e.reason ? ` — ${e.reason}` : ""}${e.deduction ? ` — ${e.deduction.message}(${e.deduction.evidence})` : ""}`)
+                  .join("\n"),
+            )
+            .join("\n\n")}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+const repTableStyles: Record<string, React.CSSProperties> = {
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    fontFamily: HUD.mono,
+    fontSize: 11,
+  },
+  th: {
+    textAlign: "left",
+    padding: "4px 8px",
+    color: HUD.dim,
+    borderBottom: `1px solid ${HUD.line}`,
+    fontWeight: 700,
+    letterSpacing: 1,
+  },
+  td: {
+    padding: "4px 8px",
+    color: HUD.text,
+    borderBottom: `1px solid ${HUD.line}`,
+    whiteSpace: "nowrap",
+  },
+};
+
+const compareStyles: Record<string, React.CSSProperties> = {
+  wrap: {
+    background: HUD.panel2,
+    border: `1px solid ${HUD.line}`,
+    padding: 12,
+    marginBottom: 12,
+  },
+  header: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
+  headerTitle: { fontSize: 12, fontWeight: 700, color: HUD.text, letterSpacing: 2 },
+  badge: { fontSize: 11, fontWeight: 700, padding: "2px 8px", fontFamily: HUD.mono },
+  timing: { marginLeft: "auto", fontSize: 11, color: HUD.dim, fontFamily: HUD.mono },
+  frameRow: { display: "flex", gap: 6, marginBottom: 10 },
+  frameCell: { flex: 1 },
+  frameImg: {
+    width: "100%",
+    // 竖屏视频不加高度约束会把整个对比面板撑到上千像素高。
+    // 这三张只是给人核对相位用的缩略图,不需要看清细节。
+    height: 190,
+    objectFit: "cover",
+    objectPosition: "center 30%",
+    display: "block",
+    border: `1px solid ${HUD.line}`,
+  },
+  frameLabel: {
+    fontSize: 10,
+    color: HUD.dim,
+    marginTop: 3,
+    display: "flex",
+    justifyContent: "space-between",
+    fontFamily: HUD.mono,
+  },
+  frameTime: { color: HUD.dim },
+  columns: { display: "flex", gap: 10, alignItems: "flex-start" },
+  col: {
+    flex: 1,
+    minWidth: 0,
+    background: "#050705",
+    border: `1px solid ${HUD.line}`,
+    padding: 10,
+  },
+  colTitle: { fontSize: 10, color: HUD.dim, marginBottom: 6, fontWeight: 700, letterSpacing: 1.5 },
+  answer: { fontSize: 16, fontWeight: 700, color: HUD.primary, lineHeight: 1.3, fontFamily: HUD.mono },
+  conf: { fontSize: 11, fontWeight: 600, marginLeft: 8 },
+  meta: { fontSize: 11, color: HUD.dim, marginTop: 4, fontFamily: HUD.mono },
+  reasoning: { fontSize: 12, color: HUD.text, margin: "6px 0", lineHeight: 1.55 },
+  list: { margin: "6px 0 0", paddingLeft: 16 },
+  listItem: { fontSize: 12, color: HUD.dim, marginBottom: 3, lineHeight: 1.5 },
+  issues: {
+    fontSize: 11,
+    color: HUD.amber,
+    marginTop: 6,
+    background: "#1c1405",
+    border: `1px solid #4a3510`,
+    padding: "5px 7px",
+    lineHeight: 1.5,
+  },
+  summary: { fontSize: 11, color: HUD.dim, cursor: "pointer", marginTop: 6 },
+  pre: {
+    fontSize: 11,
+    color: HUD.dim,
+    background: "#030503",
+    border: `1px solid ${HUD.line}`,
+    padding: 8,
+    overflowX: "auto",
+    maxHeight: 260,
+    margin: "4px 0 0",
+    fontFamily: HUD.mono,
+  },
+  muted: { fontSize: 12, color: HUD.danger },
+};
+
+function SignalCurve({ samples }: { samples: SignalSample[] }) {
+  if (samples.length < 2) {
+    return <div style={curveStyles.empty}>等待动作数据…</div>;
+  }
+  const w = 100;
+  const h = 100;
+  const values = samples.map((s) => s.v);
+  const min = Math.min(...values) - 5;
+  const max = Math.max(...values) + 5;
+  const range = Math.max(max - min, 1);
+  const points = samples
+    .map((s, i) => {
+      const x = (i / (samples.length - 1)) * w;
+      const y = h - ((s.v - min) / range) * h;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={curveStyles.svg}>
+      {[0.25, 0.5, 0.75].map((ratio) => (
+        <line
+          key={ratio}
+          x1="0"
+          y1={h * ratio}
+          x2={w}
+          y2={h * ratio}
+          stroke={HUD.line}
+          strokeWidth="0.4"
+        />
+      ))}
+      <polyline points={points} fill="none" stroke={HUD.primary} strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+const curveStyles: Record<string, React.CSSProperties> = {
+  svg: { width: "100%", height: 72, display: "block" },
+  empty: { color: HUD.dim, fontSize: 11, padding: "22px 0", textAlign: "center", letterSpacing: 2 },
+};
+
+/** 挑一个浏览器支持的录制格式;都不支持时回退给 MediaRecorder 自己的默认值。 */
+const RECORDER_MIME_CANDIDATES = [
+  "video/webm;codecs=vp9",
+  "video/webm;codecs=vp8",
+  "video/webm",
+  "video/mp4",
+];
+
+function pickRecorderMimeType(): string | null {
+  if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return null;
+  return RECORDER_MIME_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type)) ?? null;
+}
+
+/** 抓取视频当前帧为缩略 JPEG(base64,不带前缀)。 */
+function captureFrame(
+  video: HTMLVideoElement,
+  canvasRef: React.MutableRefObject<HTMLCanvasElement | null>,
+): string | null {
+  if (!canvasRef.current) {
+    canvasRef.current = document.createElement("canvas");
+  }
+  const canvas = canvasRef.current;
+  const maxW = 480;
+  const scale = Math.min(1, maxW / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+  return dataUrl.slice(dataUrl.indexOf(",") + 1);
+}
+
+/** 从环缓冲里均匀挑 N 张关键帧 */
+interface PhaseFrame {
+  phase: string;
+  jpeg: string;
+  t: number;
+}
+
+/** 从关键帧缓冲里取时间上最接近 targetMs 的一张 */
+function nearestFrame(
+  buffer: Array<{ t: number; jpeg: string }>,
+  targetMs: number,
+): { t: number; jpeg: string } | null {
+  if (buffer.length === 0) return null;
+  let best = buffer[0];
+  let bestDelta = Math.abs(buffer[0].t - targetMs);
+  for (const frame of buffer) {
+    const delta = Math.abs(frame.t - targetMs);
+    if (delta < bestDelta) {
+      best = frame;
+      bestDelta = delta;
+    }
+  }
+  return best;
+}
+
+/**
+ * 按动作相位取三张图:起始位 / 中间位 / 顶点。
+ * 中间位取起点到极点的中途 —— 三张图落在同一次行程上,才能看出动作方向。
+ */
+function pickPhaseFrames(
+  buffer: Array<{ t: number; jpeg: string }>,
+  cycle: { startMs: number; extremeMs: number },
+): PhaseFrame[] {
+  const targets: Array<{ phase: string; t: number }> = [
+    { phase: "起始位", t: cycle.startMs },
+    { phase: "中间位", t: (cycle.startMs + cycle.extremeMs) / 2 },
+    { phase: "顶点", t: cycle.extremeMs },
+  ];
+  const out: PhaseFrame[] = [];
+  for (const target of targets) {
+    const frame = nearestFrame(buffer, target.t);
+    if (frame) out.push({ phase: target.phase, jpeg: frame.jpeg, t: frame.t });
+  }
+  return out;
+}
+
+/** 分不出循环时的回落:整段均匀取三张,并如实标注相位未知 */
+function pickEvenFrames(buffer: Array<{ t: number; jpeg: string }>): PhaseFrame[] {
+  if (buffer.length === 0) return [];
+  const labels = ["片段开头(相位未知)", "片段中部(相位未知)", "片段结尾(相位未知)"];
+  const step = (buffer.length - 1) / 2;
+  return labels.map((phase, i) => {
+    const frame = buffer[Math.round(i * step)];
+    return { phase, jpeg: frame.jpeg, t: frame.t };
+  });
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    fontFamily: `${HUD.mono}, ${HUD.sans}`,
+    background: HUD.bg,
+    backgroundImage: `linear-gradient(${HUD.line}18 1px, transparent 1px), linear-gradient(90deg, ${HUD.line}18 1px, transparent 1px)`,
+    backgroundSize: "48px 48px",
+    color: HUD.text,
+    height: "100vh",
+    overflow: "hidden",
+  },
+  header: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "10px 18px",
+    borderBottom: `1px solid ${HUD.line}`,
+    background: HUD.panel,
+    flexShrink: 0,
+  },
+  brand: { display: "flex", alignItems: "baseline", gap: 12 },
+  brandLogo: {
+    fontFamily: HUD.display,
+    fontSize: 17,
+    letterSpacing: 3,
+    color: HUD.primary,
+    textShadow: `0 0 14px ${HUD.primary}55`,
+  },
+  brandSub: {
+    fontSize: 10,
+    letterSpacing: 2,
+    color: HUD.dim,
+  },
+  headerStatus: { display: "flex", alignItems: "center", gap: 8 },
+  led: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    display: "inline-block",
+  },
+  headerStatusText: {
+    fontSize: 11,
+    letterSpacing: 1.5,
+    color: HUD.text,
+  },
+  body: {
+    flex: 1,
+    display: "flex",
+    gap: 14,
+    padding: 14,
+    overflow: "hidden",
+    minHeight: 0,
+  },
+  main: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    minWidth: 0,
+    overflowY: "auto",
+  },
+  stageWrap: {
+    flexShrink: 0,
+    display: "flex",
+    justifyContent: "center",
+  },
+  stage: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 900,
+    background: "#000",
+    border: `1px solid ${HUD.line}`,
+    overflow: "hidden",
+  },
+  stagePlaceholder: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    color: HUD.dim,
+    fontSize: 13,
+    letterSpacing: 2,
+    background: HUD.panel,
+  },
+  placeholderReticle: {
+    fontSize: 44,
+    color: HUD.lineBright,
+    animation: "hud-blink 2.4s infinite",
+  },
+  video: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+  },
+  mirror: { transform: "scaleX(-1)" },
+  overlay: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+  },
+  hud: {
+    position: "absolute",
+    top: 10,
+    left: 14,
+    display: "flex",
+    gap: 18,
+    zIndex: 4,
+  },
+  hudItem: { display: "flex", alignItems: "baseline", gap: 6 },
+  hudLabel: {
+    fontSize: 9,
+    letterSpacing: 2,
+    color: HUD.dim,
+  },
+  hudValue: {
+    fontSize: 15,
+    fontWeight: 700,
+    fontFamily: HUD.mono,
+    color: HUD.primary,
+    textShadow: `0 0 10px ${HUD.primary}44`,
+  },
+  curveCard: {
+    background: HUD.panel,
+    border: `1px solid ${HUD.line}`,
+    padding: "8px 14px",
+    flexShrink: 0,
+  },
+  curveTitle: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 10,
+    letterSpacing: 2,
+    color: HUD.dim,
+    marginBottom: 4,
+  },
+  curveValue: {
+    fontFamily: HUD.mono,
+    fontSize: 14,
+    fontWeight: 700,
+    color: HUD.primary,
+  },
+  reportCard: {
+    background: HUD.panel,
+    border: `1px solid ${HUD.line}`,
+    padding: 16,
+    position: "relative",
+  },
+  reportStage: { color: HUD.amber, fontSize: 13, margin: 0, letterSpacing: 1 },
+  reportMeta: { color: HUD.dim, fontSize: 12, margin: "0 0 10px", fontFamily: HUD.mono },
+  funReport: {
+    margin: 0,
+    whiteSpace: "pre-wrap",
+    fontSize: 14,
+    lineHeight: 1.75,
+    fontFamily: HUD.sans,
+    color: HUD.text,
+  },
+  detailsSummary: { color: HUD.dim, fontSize: 11, cursor: "pointer", letterSpacing: 1 },
+  jsonBlock: {
+    background: "#050705",
+    border: `1px solid ${HUD.line}`,
+    padding: 10,
+    fontSize: 11,
+    overflowX: "auto",
+    whiteSpace: "pre-wrap",
+    fontFamily: HUD.mono,
+    color: HUD.dim,
+  },
+  timingLine: { color: HUD.dim, fontSize: 11, margin: "12px 0 0", fontFamily: HUD.mono },
+  sidebar: {
+    flex: "0 0 300px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    overflowY: "auto",
+  },
+  sideSection: {
+    background: HUD.panel,
+    border: `1px solid ${HUD.line}`,
+    padding: 12,
+  },
+  sideTitle: {
+    fontSize: 10,
+    letterSpacing: 2,
+    color: HUD.dim,
+    marginBottom: 10,
+    fontWeight: 600,
+  },
+  btnRow: { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 },
+  btn: {
+    flex: 1,
+    border: "none",
+    clipPath: CHAMFER,
+    padding: "13px 10px",
+    fontSize: 14,
+    fontWeight: 700,
+    fontFamily: HUD.mono,
+    color: HUD.text,
+    cursor: "pointer",
+    letterSpacing: 1,
+  },
+  btnSmall: {
+    border: `1px solid ${HUD.line}`,
+    background: HUD.panel2,
+    clipPath: CHAMFER_SM,
+    padding: "8px 13px",
+    fontSize: 12,
+    fontFamily: HUD.mono,
+    color: HUD.text,
+    cursor: "pointer",
+    letterSpacing: 0.5,
+  },
+  btnSmallActive: {
+    background: HUD.primaryDim,
+    borderColor: HUD.primary,
+    color: "#eafff2",
+  },
+  btnSmallActiveAmber: {
+    background: "#5c3d0a",
+    borderColor: HUD.amber,
+    color: "#ffe9c2",
+  },
+  guidance: { color: HUD.dim, fontSize: 11, margin: "2px 0 0", lineHeight: 1.55 },
+  recordingBadge: {
+    color: HUD.danger,
+    fontSize: 11,
+    margin: "6px 0 0",
+    letterSpacing: 1,
+  },
+  recordingResult: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTop: `1px solid ${HUD.line}`,
+  },
+  recordingResultMeta: {
+    color: HUD.dim,
+    fontSize: 11,
+    margin: "0 0 6px",
+    fontFamily: HUD.mono,
+  },
+  metricGrid: { display: "flex", gap: 8 },
+  metric: {
+    flex: 1,
+    background: HUD.panel2,
+    border: `1px solid ${HUD.line}`,
+    padding: "10px 4px",
+    textAlign: "center",
+  },
+  metricValue: {
+    fontSize: 24,
+    fontWeight: 700,
+    fontFamily: HUD.mono,
+    color: HUD.primary,
+    lineHeight: 1.1,
+    textShadow: `0 0 12px ${HUD.primary}33`,
+  },
+  metricUnit: { fontSize: 12, color: HUD.dim, fontWeight: 400 },
+  metricLabel: { fontSize: 9, color: HUD.dim, marginTop: 5, letterSpacing: 2 },
+  analyzeBtn: {
+    border: "none",
+    clipPath: CHAMFER,
+    padding: "17px 12px",
+    fontSize: 16,
+    fontWeight: 700,
+    fontFamily: HUD.mono,
+    letterSpacing: 2,
+    color: "#1a1000",
+    background: HUD.amber,
+    cursor: "pointer",
+    position: "relative",
+  },
+  analyzeBtnBusy: { background: "#8a6a1c", cursor: "wait", color: "#2b1f05" },
+  settingsToggle: {
+    width: "100%",
+    border: "none",
+    background: "none",
+    color: HUD.dim,
+    fontSize: 10,
+    letterSpacing: 2,
+    fontFamily: HUD.mono,
+    textAlign: "left",
+    cursor: "pointer",
+    padding: 0,
+  },
+  settingsHint: { float: "right", color: HUD.dim, fontSize: 10, letterSpacing: 0 },
+  field: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    fontSize: 10,
+    letterSpacing: 2,
+    marginBottom: 8,
+    color: HUD.dim,
+  },
+  errorText: { color: HUD.danger, fontSize: 12, margin: 0, fontFamily: HUD.mono },
+};
