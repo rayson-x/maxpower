@@ -138,7 +138,15 @@ interface RecordingResult {
 function loadSettings(): AgentSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as AgentSettings;
+    if (raw) {
+      const saved = JSON.parse(raw) as AgentSettings;
+      // 早前默认凭据是空字符串,当时保存过设置的浏览器会把这个空值存进 localStorage
+      // 并从此沿用下去——即使后来在 defaultCredentials.ts 里补上了真实 key 也不会生效,
+      // 因为这里只在"localStorage 里什么都没有"时才会去读默认值。只要保存的是空 key
+      // 就当作没配置,回退到当前默认值,不让一次性的空值被永久记住。
+      if (saved.apiKey) return saved;
+      return { ...saved, apiKey: ZHIPU_DEFAULTS.apiKey };
+    }
   } catch {
     /* ignore */
   }
