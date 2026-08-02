@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { analyzeStructured, recognizeExerciseOpen, renderFunReport, ZHIPU_DEFAULTS, type AgentSettings, type CoachReport, type OpenRecognition } from "../agent/coach";
+import { ZHIPU_DEFAULTS, type AgentSettings } from "../agent/coach";
 import { computeExerciseFeatures } from "../pose/exerciseFeatures";
-import { computeSymmetryMetrics } from "../pose/formMetrics";
 import {
   RULE_METRIC,
   scoreFormSet,
@@ -184,7 +183,7 @@ export function CameraPoseView() {
   const [engineKind, setEngineKind] = useState<EngineKind>("mediapipe");
   const [modelLoading, setModelLoading] = useState(false);
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
-  const [exerciseChoice, setExerciseChoice] = useState<"auto" | ExerciseId>("auto");
+  const [exerciseChoice, setExerciseChoice] = useState<"" | "auto" | ExerciseId>("");
   const [filterEnabled, setFilterEnabled] = useState(true);
   const [torsoLean, setTorsoLean] = useState<number | null>(null);
   const [pose, setPose] = useState<PoseEstimate | null>(null);
@@ -195,13 +194,8 @@ export function CameraPoseView() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [analysisStage, setAnalysisStage] = useState<string | null>(null);
   const [classified, setClassified] = useState<string | null>(null);
-  const [structuredReport, setStructuredReport] = useState<CoachReport | null>(null);
-  const [funReport, setFunReport] = useState<string | null>(null);
   const [stageTimes, setStageTimes] = useState<Record<string, number>>({});
-  // 双链路识别对比
   const [localResult, setLocalResult] = useState<LocalClassification | null>(null);
-  const [openResult, setOpenResult] = useState<OpenRecognition | null>(null);
-  const [openError, setOpenError] = useState<string | null>(null);
   const [trajectory, setTrajectory] = useState<TrajectoryFeatures | null>(null);
   const [autoSeg, setAutoSeg] = useState<AutoSegmentation | null>(null);
   const [phaseFrames, setPhaseFrames] = useState<
@@ -561,17 +555,13 @@ export function CameraPoseView() {
     });
   };
 
-  /** 一键完整分析:采集 → 识别动作 → 真 rep 分割 → 结构化分析(JSON) → 有趣报告 */
+  /** 一键完整分析:采集 → 本地分期 → 逐 rep 指标 → 确定性规则评分。 */
   const runFullAnalysis = async () => {
     setAnalysisStage("collecting");
     setClassified(null);
-    setStructuredReport(null);
-    setFunReport(null);
     setSegments([]);
     setError(null);
     setLocalResult(null);
-    setOpenResult(null);
-    setOpenError(null);
     setTrajectory(null);
     setAutoSeg(null);
     setPhaseFrames([]);
@@ -628,7 +618,7 @@ export function CameraPoseView() {
         })),
       );
 
-      // 4) 两条链路跑同一份数据:A=本地规则(同步,无网络) B=LLM 开放式判断
+      // 4) 本地动作建议只服务于分期；它不能替代用户选择，也不会决定评分。
       const localStart = performance.now();
       const local = classifyLocally({
         trajectory: traj,
@@ -641,6 +631,9 @@ export function CameraPoseView() {
       // 5) 逐 rep 指标提取 + 规则引擎评分。用户明确选择时直接采用它;
       // 自动模式只使用本地分类器的结果，绝不借用 LLM 判断或猜测一个动作，避免把方向判反。
       // local.confidence 是三档字符串，这里的数值映射只是把本地分类结果适配到既有契约。
+      if (exerciseChoice === "") {
+        throw new Error("请选择动作，或明确选择自动识别模式");
+      }
       const localConfidenceValue = { high: 0.9, medium: 0.6, low: 0.3 }[local.confidence];
       const exerciseSelection: ExerciseSelection =
         exerciseChoice === "auto"
@@ -652,77 +645,16 @@ export function CameraPoseView() {
       setRepMetricsExtraction(extraction);
       setRepMetricsScore(scoreFormSet(extraction.reps, extraction.context));
 
-      const openStart = performance.now();
-      const [openSettled] = await Promise.allSettled([
-        recognizeExerciseOpen(settings, {
-          cameraView,
-          trajectory: traj,
-          phaseFrames: picked.map((p) => ({
-            phase: p.phase,
-            jpeg: p.jpeg,
-            timestampMs: p.t,
-          })),
-        }),
-      ]);
-      const openMs = performance.now() - openStart;
-      setLinkTimes({ local: localMs, open: openMs });
+      setLinkTimes({ local: localMs, open: 0 });
+      times["本地分期"] = performance.now() - stageStart;
 
-      let open: OpenRecognition | null = null;
-      if (openSettled.status === "fulfilled") {
-        open = openSettled.value;
-        setOpenResult(open);
-        setOpenError(null);
-      } else {
-        setOpenResult(null);
-        setOpenError(
-          openSettled.reason instanceof Error
-            ? openSettled.reason.message
-            : String(openSettled.reason),
-        );
-      }
-      times["识别(双链路)"] = performance.now() - stageStart;
-
-      // 下游用哪个:本地高置信优先(确定性、可解释),否则回落到 LLM 的判断
-      const exerciseId =
-        local.id !== "unknown" && local.confidence === "high"
-          ? local.id
-          : open
-            ? guessExerciseId(`${open.name} ${open.nameEn}`)
-            : local.id !== "unknown"
-              ? local.id
-              : "barbell_row";
+      const exerciseId = exerciseChoice === "auto" ? local.id : exerciseChoice;
       setClassified(
-        `本地规则: ${local.id}(${local.confidence}) | LLM: ${open ? `${open.name}(${open.confidence})` : "失败"} | 下游采用: ${exerciseId}`,
+        `本地建议: ${local.id}(${local.confidence}) | 分期采用: ${exerciseId === "unknown" ? "未确定" : exerciseId}`,
       );
 
-      const segs = segmentReps(buffer, exerciseId);
+      const segs = exerciseId === "unknown" ? [] : segmentReps(buffer, exerciseId);
       setSegments(segs);
-
-      setAnalysisStage("analyzing");
-      stageStart = performance.now();
-      const frames = picked.map((p) => ({ jpeg: p.jpeg }));
-      const report = await analyzeStructured(settings, {
-        cameraView,
-        features,
-        symmetry: computeSymmetryMetrics(buffer),
-        trajectory: traj,
-        reps: segs.map((seg) => ({
-          repIndex: seg.repIndex,
-          durationMs: seg.durationMs,
-          concentricMs: seg.concentricMs,
-          eccentricMs: seg.eccentricMs,
-          amplitude: seg.amplitude,
-        })),
-        frames: frames.map((f) => f.jpeg),
-      });
-      setStructuredReport(report);
-      times["结构化分析(带图)"] = performance.now() - stageStart;
-
-      setAnalysisStage("rendering");
-      stageStart = performance.now();
-      const fun = await renderFunReport(settings, report);
-      setFunReport(fun);
-      times["报告渲染"] = performance.now() - stageStart;
       setStageTimes(times);
       setAnalysisStage("done");
     } catch (caught) {
@@ -884,7 +816,7 @@ export function CameraPoseView() {
           </div>
 
           {/* 分析报告 */}
-          {(funReport || structuredReport || analyzing || localResult || openResult) && (
+          {(analyzing || localResult) && (
             <div
               style={styles.reportCard}
               className={`hud-reveal hud-reveal-3${analyzing ? " hud-scanning" : ""}`}
@@ -894,15 +826,6 @@ export function CameraPoseView() {
                   {ANALYSIS_STAGE_LABELS[analysisStage ?? ""] ?? ""}
                 </p>
               )}
-              <RecognitionCompare
-                local={localResult}
-                open={openResult}
-                openError={openError}
-                trajectory={trajectory}
-                autoSeg={autoSeg}
-                phaseFrames={phaseFrames}
-                linkTimes={linkTimes}
-              />
               <RepMetricsPanel extraction={repMetricsExtraction} score={repMetricsScore} />
               {classified && (
                 <p style={styles.reportMeta}>
@@ -911,17 +834,6 @@ export function CameraPoseView() {
                   {segments.length > 0 &&
                     segments.map((s) => ` ${(s.durationMs / 1000).toFixed(1)}s`).join(" ·")}
                 </p>
-              )}
-              {funReport && <pre style={styles.funReport}>{funReport}</pre>}
-              {structuredReport && (
-                <details style={{ marginTop: 8 }}>
-                  <summary style={styles.detailsSummary}>
-                    结构化 JSON(数据层,可交给其他 agent 再加工)
-                  </summary>
-                  <pre style={styles.jsonBlock}>
-                    {JSON.stringify(structuredReport, null, 2)}
-                  </pre>
-                </details>
               )}
               {Object.keys(stageTimes).length > 0 && (
                 <p style={styles.timingLine}>
@@ -1031,14 +943,15 @@ export function CameraPoseView() {
               动作分期
               <select
                 value={exerciseChoice}
-                onChange={(event) => setExerciseChoice(event.target.value as "auto" | ExerciseId)}
+                onChange={(event) => setExerciseChoice(event.target.value as "" | "auto" | ExerciseId)}
               >
-                <option value="auto">自动识别（低置信度时不猜方向）</option>
+                <option value="">请选择动作（评分需要）</option>
                 {EXERCISE_CHOICES.map((exercise) => (
                   <option key={exercise.id} value={exercise.id}>
                     用户指定：{exercise.label}
                   </option>
                 ))}
+                <option value="auto">自动识别（低置信度时不猜方向）</option>
               </select>
             </label>
           </div>
@@ -1129,7 +1042,7 @@ export function CameraPoseView() {
               ...(analyzing ? styles.analyzeBtnBusy : null),
             }}
             className={analyzing ? "hud-scanning" : undefined}
-            disabled={analyzing || status !== "running" || !settings.apiKey}
+            disabled={analyzing || status !== "running"}
             onClick={runFullAnalysis}
           >
             {analysisStage
