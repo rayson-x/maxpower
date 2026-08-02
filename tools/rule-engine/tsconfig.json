@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../.rule-engine-test-build",
+    "rootDir": "../..",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "ruleEngine.test.ts",
+    "../../src/pose/formRuleEngine.ts"
+  ]
+}
