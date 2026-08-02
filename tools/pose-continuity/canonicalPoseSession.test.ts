@@ -224,6 +224,34 @@ test("seek and large dt clear stale prediction state before reacquisition", () =
   assert.equal(afterReacquisition.x, 0.8);
 });
 
+test("unknown timeout clears velocity before a later reacquisition", () => {
+  const session = createPoseContinuitySession({
+    sequenceId: "synthetic:unknown-reacquisition",
+    schema: "blazepose33",
+    image: {
+      widthPx: 1000,
+      heightPx: 1000,
+      rotationDegrees: 0,
+      mirrored: false,
+    },
+    stabilization: "fusion",
+  });
+  const frame = (timestampMs: number, x: number, visibility: number) => ({
+    timestampMs,
+    landmarks: [{ x, y: 0.5, z: 0, visibility }],
+    worldLandmarks: [],
+  });
+
+  session.process(frame(0, 0.3, 0.95));
+  session.process(frame(50, 0.4, 0.95));
+  assert.equal(session.process(frame(250, 0, 0)).landmarks[0].source, "unknown");
+  session.process(frame(300, 0.8, 0.95));
+  const shortGap = session.process(frame(350, 0, 0)).landmarks[0];
+
+  assert.equal(shortGap.source, "predicted");
+  assert.equal(shortGap.x, 0.8);
+});
+
 test("high-confidence isolated elbow spike is rejected without freezing coherent motion", () => {
   const createSession = (sequenceId: string) =>
     createPoseContinuitySession({
@@ -273,6 +301,39 @@ test("high-confidence isolated elbow spike is rejected without freezing coherent
   assert.equal(fast.source, "measured");
   assert.equal(fast.x, 0.65);
   assert.equal(fast.y, 0.55);
+});
+
+test("high-confidence wrist spike uses incident bone evidence", () => {
+  const session = createPoseContinuitySession({
+    sequenceId: "synthetic:wrist-spike",
+    schema: "blazepose33",
+    image: {
+      widthPx: 1000,
+      heightPx: 1000,
+      rotationDegrees: 0,
+      mirrored: false,
+    },
+    stabilization: "fusion",
+  });
+  const pose = (timestampMs: number, wrist = { x: 0.6, y: 0.4 }): PoseEstimate => {
+    const landmarks = Array.from({ length: 17 }, (_, index) => ({
+      x: 0.2 + (index % 5) * 0.08,
+      y: 0.2 + Math.floor(index / 5) * 0.08,
+      z: 0,
+      visibility: 0.99,
+    }));
+    landmarks[11] = { x: 0.4, y: 0.4, z: 0, visibility: 0.99 };
+    landmarks[13] = { x: 0.5, y: 0.55, z: 0, visibility: 0.99 };
+    landmarks[15] = { ...wrist, z: 0, visibility: 0.99 };
+    return { timestampMs, landmarks, worldLandmarks: [] };
+  };
+
+  for (let frame = 0; frame < 5; frame += 1) session.process(pose(frame * 50));
+  const rejected = session.process(pose(250, { x: 0.76, y: 0.32 })).landmarks[15];
+
+  assert.equal(rejected.source, "predicted");
+  assert.equal(rejected.continuityReason, "outlier-rejected-prediction");
+  assert.ok(Math.hypot(rejected.x - 0.6, rejected.y - 0.4) < 0.02);
 });
 
 test("raw observation is available only through the explicit diagnostic entry", () => {

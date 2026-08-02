@@ -24,9 +24,12 @@ interface PointPx {
 }
 
 interface ArmState {
-  upperLengths: number[];
-  lowerLengths: number[];
   previousElbow: PointPx | null;
+}
+
+interface BoneEdge {
+  from: number;
+  to: number;
 }
 
 interface MotionState {
@@ -56,6 +59,37 @@ const ARM_CHAINS: Record<PoseSchema, readonly ArmChain[]> = {
   ],
 };
 
+const SKELETON_BONES: Record<PoseSchema, readonly BoneEdge[]> = {
+  blazepose33: [
+    { from: 11, to: 12 },
+    { from: 11, to: 13 },
+    { from: 13, to: 15 },
+    { from: 12, to: 14 },
+    { from: 14, to: 16 },
+    { from: 11, to: 23 },
+    { from: 12, to: 24 },
+    { from: 23, to: 24 },
+    { from: 23, to: 25 },
+    { from: 25, to: 27 },
+    { from: 24, to: 26 },
+    { from: 26, to: 28 },
+  ],
+  coco17: [
+    { from: 5, to: 6 },
+    { from: 5, to: 7 },
+    { from: 7, to: 9 },
+    { from: 6, to: 8 },
+    { from: 8, to: 10 },
+    { from: 5, to: 11 },
+    { from: 6, to: 12 },
+    { from: 11, to: 12 },
+    { from: 11, to: 13 },
+    { from: 13, to: 15 },
+    { from: 12, to: 14 },
+    { from: 14, to: 16 },
+  ],
+};
+
 /**
  * Reference continuity pipeline for the Web implementation: fuse weak observed
  * elbows, reject isolated outliers, and repair only short evidence gaps.
@@ -63,6 +97,7 @@ const ARM_CHAINS: Record<PoseSchema, readonly ArmChain[]> = {
 export class WeakObservationFusion {
   private readonly states = new Map<number, ArmState>();
   private readonly motion = new Map<number, MotionState>();
+  private readonly boneLengths = new Map<string, number[]>();
 
   constructor(
     private readonly schema: PoseSchema,
@@ -75,6 +110,7 @@ export class WeakObservationFusion {
   ): Map<number, ContinuityJointEvidence> {
     const repaired = new Map<number, ContinuityJointEvidence>();
     const rejected = this.findOutliers(landmarks, timestampMs);
+    this.updateBoneBaselines(landmarks, rejected);
     for (const chain of ARM_CHAINS[this.schema]) {
       const shoulder = landmarks[chain.shoulder];
       const elbow = landmarks[chain.elbow];
@@ -84,6 +120,8 @@ export class WeakObservationFusion {
       }
 
       const state = this.stateFor(chain.elbow);
+      const upperLengths = this.boneLengths.get(boneKey(chain.shoulder, chain.elbow)) ?? [];
+      const lowerLengths = this.boneLengths.get(boneKey(chain.elbow, chain.wrist)) ?? [];
       const shoulderPx = this.toPixels(shoulder);
       const elbowPx = this.toPixels(elbow);
       const wristPx = this.toPixels(wrist);
@@ -98,8 +136,6 @@ export class WeakObservationFusion {
         !rejected.has(chain.elbow) &&
         elbow.visibility >= MEASURED_MIN_SCORE
       ) {
-        pushWindow(state.upperLengths, distance(shoulderPx, elbowPx));
-        pushWindow(state.lowerLengths, distance(elbowPx, wristPx));
         state.previousElbow = elbowPx;
         continue;
       }
@@ -108,14 +144,14 @@ export class WeakObservationFusion {
         !anchorsReliable ||
         rejected.has(chain.elbow) ||
         elbow.visibility < WEAK_MIN_SCORE ||
-        state.upperLengths.length < MIN_BASELINE_SAMPLES ||
-        state.lowerLengths.length < MIN_BASELINE_SAMPLES
+        upperLengths.length < MIN_BASELINE_SAMPLES ||
+        lowerLengths.length < MIN_BASELINE_SAMPLES
       ) {
         continue;
       }
 
-      const upperLength = median(state.upperLengths);
-      const lowerLength = median(state.lowerLengths);
+      const upperLength = median(upperLengths);
+      const lowerLength = median(lowerLengths);
       const upperResidual = Math.abs(distance(shoulderPx, elbowPx) - upperLength) / upperLength;
       const lowerResidual = Math.abs(distance(elbowPx, wristPx) - lowerLength) / lowerLength;
       if (Math.max(upperResidual, lowerResidual) > MAX_RAW_BONE_RESIDUAL) continue;
@@ -218,6 +254,7 @@ export class WeakObservationFusion {
             ? "prediction-timeout"
             : "no-measurement-baseline",
       });
+      this.motion.delete(index);
     });
 
     return repaired;
@@ -226,12 +263,13 @@ export class WeakObservationFusion {
   reset(): void {
     this.states.clear();
     this.motion.clear();
+    this.boneLengths.clear();
   }
 
   private stateFor(elbowIndex: number): ArmState {
     let state = this.states.get(elbowIndex);
     if (!state) {
-      state = { upperLengths: [], lowerLengths: [], previousElbow: null };
+      state = { previousElbow: null };
       this.states.set(elbowIndex, state);
     }
     return state;
@@ -298,7 +336,7 @@ export class WeakObservationFusion {
         candidate.dx - coherentDx,
         candidate.dy - coherentDy,
       );
-      const boneResidual = this.armBoneResidual(candidate.index, candidate.point, landmarks);
+      const boneResidual = this.topologyBoneResidual(candidate.index, candidate.point, landmarks);
       if (
         innovation > diagonal * 0.08 &&
         incoherent > diagonal * 0.06 &&
@@ -310,31 +348,54 @@ export class WeakObservationFusion {
     return rejected;
   }
 
-  private armBoneResidual(
+  private topologyBoneResidual(
     index: number,
     point: PointPx,
     landmarks: readonly PoseLandmark[],
   ): number {
-    const chain = ARM_CHAINS[this.schema].find(({ elbow }) => elbow === index);
-    if (!chain) return 0;
-    const state = this.states.get(index);
-    const shoulder = landmarks[chain.shoulder];
-    const wrist = landmarks[chain.wrist];
-    if (
-      !state ||
-      state.upperLengths.length < MIN_BASELINE_SAMPLES ||
-      state.lowerLengths.length < MIN_BASELINE_SAMPLES ||
-      !isFiniteLandmark(shoulder) ||
-      !isFiniteLandmark(wrist)
-    ) {
-      return 0;
+    const residuals = SKELETON_BONES[this.schema].flatMap((bone) => {
+      if (bone.from !== index && bone.to !== index) return [];
+      const samples = this.boneLengths.get(boneKey(bone.from, bone.to));
+      const otherIndex = bone.from === index ? bone.to : bone.from;
+      const other = landmarks[otherIndex];
+      if (!samples || samples.length < MIN_BASELINE_SAMPLES || !isFiniteLandmark(other)) {
+        return [];
+      }
+      const baseline = median(samples);
+      return [Math.abs(distance(point, this.toPixels(other)) - baseline) / baseline];
+    });
+    return residuals.length === 0 ? 0 : Math.max(...residuals);
+  }
+
+  private updateBoneBaselines(
+    landmarks: readonly PoseLandmark[],
+    rejected: ReadonlySet<number>,
+  ): void {
+    for (const bone of SKELETON_BONES[this.schema]) {
+      const from = landmarks[bone.from];
+      const to = landmarks[bone.to];
+      if (
+        rejected.has(bone.from) ||
+        rejected.has(bone.to) ||
+        !isFiniteLandmark(from) ||
+        !isFiniteLandmark(to) ||
+        from.visibility < MEASURED_MIN_SCORE ||
+        to.visibility < MEASURED_MIN_SCORE
+      ) {
+        continue;
+      }
+      const key = boneKey(bone.from, bone.to);
+      const samples = this.boneLengths.get(key) ?? [];
+      const length = distance(this.toPixels(from), this.toPixels(to));
+      if (
+        samples.length >= MIN_BASELINE_SAMPLES &&
+        Math.abs(length - median(samples)) / median(samples) > MAX_RAW_BONE_RESIDUAL
+      ) {
+        continue;
+      }
+      pushWindow(samples, length);
+      this.boneLengths.set(key, samples);
     }
-    const upper = median(state.upperLengths);
-    const lower = median(state.lowerLengths);
-    return Math.max(
-      Math.abs(distance(this.toPixels(shoulder), point) - upper) / upper,
-      Math.abs(distance(point, this.toPixels(wrist)) - lower) / lower,
-    );
   }
 }
 
@@ -393,6 +454,10 @@ function pushWindow(values: number[], value: number): void {
   if (!Number.isFinite(value) || value <= 1e-6) return;
   values.push(value);
   if (values.length > BASELINE_WINDOW) values.shift();
+}
+
+function boneKey(from: number, to: number): string {
+  return from < to ? `${from}-${to}` : `${to}-${from}`;
 }
 
 function median(values: readonly number[]): number {
