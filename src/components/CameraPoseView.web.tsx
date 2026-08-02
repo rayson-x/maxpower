@@ -273,16 +273,20 @@ export function CameraPoseView() {
     });
   }, []);
 
-  const rotateCanonicalSequence = useCallback(() => {
-    if (recordingActiveRef.current) return false;
+  const resetCanonicalConsumers = useCallback(() => {
     poseBufferRef.current = [];
     frameCountRef.current = 0;
     signalRef.current = [];
     setPose(null);
     setSignalCurve([]);
+  }, []);
+
+  const rotateCanonicalSequence = useCallback(() => {
+    if (recordingActiveRef.current) return false;
+    resetCanonicalConsumers();
     startCanonicalSequence();
     return true;
-  }, [startCanonicalSequence]);
+  }, [resetCanonicalConsumers, startCanonicalSequence]);
 
   const switchEngine = useCallback(
     async (kind: EngineKind) => {
@@ -524,6 +528,7 @@ export function CameraPoseView() {
 
   const startUrl = useCallback(
     async (url: string, name: string) => {
+      if (recordingActiveRef.current) return;
       setError(null);
       try {
         await ensureEngine();
@@ -538,10 +543,6 @@ export function CameraPoseView() {
         epochRef.current = performance.now() - video.currentTime * 1000;
         setMode("file");
         setVideoName(name);
-        setPose(null);
-        poseBufferRef.current = [];
-        frameCountRef.current = 0;
-        signalRef.current = [];
         startLoop();
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -621,9 +622,14 @@ export function CameraPoseView() {
         await video.play();
       }
       // The await above may let the previous sequence publish one last frame.
-      // Clear consumers afterwards so one analysis run never mixes sequences.
+      // File analysis starts a new sequence; live-camera analysis stays inside the
+      // recording sequence but gets a fresh analysis/signal window.
       keyframesRef.current = [];
-      rotateCanonicalSequence();
+      if (recordingActiveRef.current) {
+        resetCanonicalConsumers();
+      } else {
+        rotateCanonicalSequence();
+      }
       // 采集窗口:原来固定 10s,装不下一个完整的慢速循环(实测慢速引体单次接近 8s,
       // 而分期需要"静息→极点→静息"整段,至少要两个静息端)。文件模式尽量放完整段视频,
       // 相机模式给 30s。
@@ -936,10 +942,20 @@ export function CameraPoseView() {
                   ▶ 相机
                 </button>
               )}
-              <label style={{ ...styles.btn, background: HUD.panel2, border: `1px solid ${HUD.line}`, textAlign: "center" }}>
+              <label
+                style={{
+                  ...styles.btn,
+                  background: HUD.panel2,
+                  border: `1px solid ${HUD.line}`,
+                  textAlign: "center",
+                  opacity: isRecording ? 0.3 : 1,
+                  pointerEvents: isRecording ? "none" : "auto",
+                }}
+              >
                 本地视频
                 <input
                   type="file"
+                  disabled={isRecording}
                   accept="video/mp4,video/quicktime,.mp4,.mov"
                   style={{ display: "none" }}
                   onChange={(event) => {
@@ -954,9 +970,11 @@ export function CameraPoseView() {
               {SAMPLE_VIDEOS.map((sample, index) => (
                 <button
                   key={sample}
+                  disabled={isRecording}
                   style={{
                     ...styles.btnSmall,
                     ...(videoName === `视频 ${index + 1}` ? styles.btnSmallActive : null),
+                    opacity: isRecording ? 0.3 : 1,
                   }}
                   onClick={() => void startUrl(`/videos/${sample}`, `视频 ${index + 1}`)}
                 >
@@ -1101,7 +1119,7 @@ export function CameraPoseView() {
               ...(analyzing ? styles.analyzeBtnBusy : null),
             }}
             className={analyzing ? "hud-scanning" : undefined}
-            disabled={analyzing || status !== "running" || isRecording}
+            disabled={analyzing || status !== "running"}
             onClick={runFullAnalysis}
           >
             {analysisStage
