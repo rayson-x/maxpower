@@ -19,21 +19,16 @@ import {
   type PhaseMeaning,
   type RuleEngineContext,
   type RuleEngineRepMetrics,
-  type RuleExerciseId,
   type RuleJointId,
   type RuleMetricKey,
 } from "./formRuleEngine";
 import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
-import type { KinematicsProfile } from "./kinematicsProfile";
+import { getKinematicsProfile, type KinematicsProfile } from "./kinematicsProfile";
 import {
   AUTO_SIGNAL_JOINTS,
-  EXERCISE_SIGNAL,
-  SIGNAL_JOINTS,
-  segmentReps,
   segmentRepsBySignal,
   segmentRepsAuto,
   type AutoSignalKind,
-  type ExerciseId,
   type LogicalJoint,
   type RepCycle,
   type RepSegment,
@@ -326,7 +321,7 @@ function buildRepMetrics(
 function resolveKnownExercise(
   exercise: ExerciseSelection,
   minAutoExerciseConfidence: number,
-): RuleExerciseId | null {
+): string | null {
   if (exercise.mode === "user") return exercise.exerciseId;
   if (
     exercise.exerciseId &&
@@ -354,7 +349,7 @@ export interface RepMetricsExtraction {
 /**
  * 关键点序列 → 可直接喂 formRuleEngine.scoreFormSet() 的逐 rep 观测值。
  *
- * 动作已知(用户选定,或自动识别且置信度达标)时用 segmentReps(),相位方向确定;
+ * 动作已知(用户选定,或自动识别且置信度达标)时由其 profile 分期并提供相位语义;
  * 否则用 segmentRepsAuto(),相位方向恒为 unknown——两条路径产出的形状完全一致,
  * 下游不需要为两种模式分别写分支。
  */
@@ -373,18 +368,15 @@ export function extractRepMetrics(
   );
 
   if (knownExercise) {
-    const exerciseId = knownExercise as ExerciseId;
-    const signal = options.profile?.phaseSignal.kind ?? EXERCISE_SIGNAL[exerciseId];
-    const segments = options.profile
-      ? segmentRepsBySignal(poses, signal, options.profile.phaseSignal.effortExtreme)
-      : segmentReps(poses, exerciseId);
-    const phaseSemantics = options.profile
-      ? {
-          toExtreme: options.profile.phaseSignal.toExtreme,
-          fromExtreme: options.profile.phaseSignal.fromExtreme,
-        }
-      : { toExtreme: "concentric" as const, fromExtreme: "eccentric" as const };
-    const primaryJoints = options.profile?.metrics.amplitude.joints ?? SIGNAL_JOINTS[signal];
+    const profile = options.profile ?? getKinematicsProfile(knownExercise);
+    if (!profile) return { context, reps: [], signal: null };
+    const signal = profile.phaseSignal.kind;
+    const segments = segmentRepsBySignal(poses, signal, profile.phaseSignal.effortExtreme);
+    const phaseSemantics = {
+      toExtreme: profile.phaseSignal.toExtreme,
+      fromExtreme: profile.phaseSignal.fromExtreme,
+    };
+    const primaryJoints = profile.metrics.amplitude.joints;
     const reps = fromKnownSegments(segments).map((cycle) =>
       buildRepMetrics(cycle, poses, idx, primaryJoints, phaseSemantics),
     );

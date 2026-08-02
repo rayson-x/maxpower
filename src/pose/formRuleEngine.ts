@@ -27,16 +27,8 @@ export const RULE_JOINT = {
 
 export type RuleJointId = (typeof RULE_JOINT)[keyof typeof RULE_JOINT];
 
-export const RULE_EXERCISE = {
-  barbellRow: "barbell_row",
-  pullUp: "pull_up",
-  latPulldown: "lat_pulldown",
-  seatedRow: "seated_row",
-  straightArmPulldown: "straight_arm_pulldown",
-} as const;
-
-export type RuleExerciseId = (typeof RULE_EXERCISE)[keyof typeof RULE_EXERCISE];
-const ALL_RULE_EXERCISES = Object.values(RULE_EXERCISE);
+/** Stable registry id. The profile registry, not this engine, owns its vocabulary. */
+export type RuleExerciseId = string;
 
 export const RULE_METRIC = {
   amplitude: "amplitude",
@@ -174,7 +166,7 @@ export const CANDIDATE_ABSOLUTE_RULES_V1: readonly AbsoluteThresholdRule[] = [
     deduction: 15,
     severity: "major",
     message: "左右动作幅度严重不对称",
-    requiresExercise: ALL_RULE_EXERCISES,
+    requiresExercise: [],
     supportedViews: ["front", "oblique45"],
     approval: { status: "candidate", validationSampleSize: 0 },
   },
@@ -187,7 +179,7 @@ export const CANDIDATE_ABSOLUTE_RULES_V1: readonly AbsoluteThresholdRule[] = [
     deduction: 15,
     severity: "major",
     message: "躯干角度变化很大，疑似明显借力",
-    requiresExercise: ALL_RULE_EXERCISES,
+    requiresExercise: [],
     supportedViews: ["side", "oblique45"],
     approval: { status: "candidate", validationSampleSize: 0 },
   },
@@ -559,7 +551,12 @@ function scoreRep(
     },
     {
       id: "relative_eccentric_acceleration",
-      requiresExercise: ALL_RULE_EXERCISES,
+      // The phase belongs to a profile. In auto mode this rule must still pass
+      // the confidence gate before it can consume profile semantics.
+      requiresExercise:
+        context.exercise.mode === "auto"
+          ? [context.exercise.exerciseId ?? "__profile_required__"]
+          : [],
       evaluate: () => evaluateEccentricDuration(rep, baselines.eccentricMs, thresholds),
     },
     ...absoluteRules.map((rule) => ({

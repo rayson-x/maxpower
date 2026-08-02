@@ -14,17 +14,10 @@ import {
  * 替换之前"手腕 y 拐点"的占位计数器(它把视频循环都算成了 9-11s 的假 rep)。
  *
  * 两种用法:
- * - segmentReps(poses, exerciseId) —— 已知动作,信号写死,能标出向心/离心;
+ * - segmentRepsBySignal(poses, signal, extreme) —— profile 已知时分期;
  * - segmentRepsAuto(poses) —— 不知道动作,自动挑周期性最强的信号,
  *   只给出"一端极值 → 另一端极值 → 回到起点"的循环,**不声称哪半程是向心**。
  */
-
-export type ExerciseId =
-  | "barbell_row"
-  | "pull_up"
-  | "lat_pulldown"
-  | "seated_row"
-  | "straight_arm_pulldown";
 
 export interface RepSegment {
   repIndex: number;
@@ -86,18 +79,6 @@ function angleDeg(a: PoseLandmark, b: PoseLandmark, c: PoseLandmark): number {
 }
 
 export type SignalKind = "elbow_angle" | "wrist_height" | "shoulder_angle";
-
-/** 每个已知动作用哪个信号做分期。导出为唯一权威来源,消费方(如逐 rep 指标提取器)不得另建一份。 */
-export const EXERCISE_SIGNAL: Record<ExerciseId, SignalKind> = {
-  // 划船类:肘角屈伸是最稳的周期信号(收缩时角度最小)
-  barbell_row: "elbow_angle",
-  seated_row: "elbow_angle",
-  // 下拉/引体:手腕相对肩的垂直位置(拉到最低/最高时为极点)
-  lat_pulldown: "wrist_height",
-  pull_up: "wrist_height",
-  // 直臂下压:肩角(髋-肩-腕),手臂下压时角度变小
-  straight_arm_pulldown: "shoulder_angle",
-};
 
 /** 不分左右的逻辑关节名,供需要报告"这个数值依赖哪些关节"的消费方使用。 */
 export type LogicalJoint = "shoulder" | "elbow" | "wrist" | "hip" | "knee" | "ankle";
@@ -248,11 +229,6 @@ function buildCycles(
 /**
  * 分割 reps:收缩极点 = 信号最小值(肘角/肩角)或最大值(手腕高度)。
  */
-export function segmentReps(poses: PoseEstimate[], exercise: ExerciseId): RepSegment[] {
-  const kind = EXERCISE_SIGNAL[exercise];
-  return segmentRepsBySignal(poses, kind, kind === "wrist_height" ? "max" : "min");
-}
-
 /** Profile-driven segmentation seam; the legacy exercise-id API delegates here. */
 export function segmentRepsBySignal(
   poses: PoseEstimate[],
@@ -596,8 +572,8 @@ export function representativeCycle(cycles: RepCycle[]): RepCycle | null {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-/** 从 agent 的自由文本动作识别结果猜测 ExerciseId */
-export function guessExerciseId(text: string): ExerciseId {
+/** Maps a free-text action name to a stable registry id when the recognizer knows one. */
+export function guessExerciseId(text: string): string {
   if (text.includes("坐姿划船") || text.includes("seated_row")) return "seated_row";
   if (text.includes("高位下拉") || text.includes("lat_pulldown")) return "lat_pulldown";
   if (text.includes("引体") || text.includes("pull_up")) return "pull_up";

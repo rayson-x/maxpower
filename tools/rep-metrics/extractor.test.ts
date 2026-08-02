@@ -11,7 +11,7 @@ import {
 } from "../../src/pose/formRuleEngine";
 import type { PoseEstimate } from "../../src/pose/PoseEngine";
 import { extractRepMetrics } from "../../src/pose/repMetricsExtractor";
-import { segmentReps } from "../../src/pose/repSegmenter";
+import { segmentRepsBySignal } from "../../src/pose/repSegmenter";
 import { loadPoseFixture } from "../harness/fixtureRepository";
 
 /**
@@ -272,7 +272,7 @@ test("known segmentation and amplitude quality retain the same evidence side", (
     14: 0.6,
     16: 0.6,
   }));
-  const segments = segmentReps(poses, "barbell_row");
+  const segments = segmentRepsBySignal(poses, "elbow_angle", "min");
   const extraction = extractRepMetrics(poses, {
     cameraView: CAMERA_VIEW,
     exercise: { mode: "user", exerciseId: "barbell_row" },

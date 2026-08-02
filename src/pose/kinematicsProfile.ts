@@ -1,4 +1,4 @@
-import type { CameraView, PhaseMeaning, RuleExerciseId } from "./formRuleEngine";
+import type { CameraView, PhaseMeaning } from "./formRuleEngine";
 import type { LogicalJoint, SignalKind } from "./repSegmenter";
 
 export interface KinematicsMetricDefinition {
@@ -10,8 +10,6 @@ export interface KinematicsMetricDefinition {
 
 export interface KinematicsProfile {
   exerciseId: string;
-  /** Adapter field until the fixed rule-engine exercise union is contracted. */
-  ruleExerciseId: RuleExerciseId;
   version: string;
   movementPattern: "horizontal_pull" | "vertical_pull";
   preferredView: CameraView;
@@ -92,7 +90,7 @@ export function listKinematicsProfiles(): readonly KinematicsProfile[] {
 }
 
 function profile(input: {
-  exerciseId: RuleExerciseId;
+  exerciseId: string;
   version: string;
   movementPattern: KinematicsProfile["movementPattern"];
   signal: SignalKind;
@@ -103,7 +101,6 @@ function profile(input: {
   const definitionPrefix = `${input.exerciseId.replaceAll("_", "-")}/v1`;
   return {
     exerciseId: input.exerciseId,
-    ruleExerciseId: input.exerciseId,
     version: input.version,
     movementPattern: input.movementPattern,
     preferredView: input.preferredView,

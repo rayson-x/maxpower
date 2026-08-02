@@ -117,10 +117,10 @@ export function analyzePoseSet(input: PoseSetAnalysisInput): PoseSetAnalysisResu
 
   const exercise: ExerciseSelection =
     input.exercise.mode === "user"
-      ? { mode: "user", exerciseId: profile!.ruleExerciseId }
+      ? { mode: "user", exerciseId: profile!.exerciseId }
       : {
           mode: "auto",
-          exerciseId: availableProfile?.ruleExerciseId ?? null,
+          exerciseId: availableProfile?.exerciseId ?? null,
           confidence: input.exercise.confidence,
         };
   const extraction = extractRepMetrics(input.poses, {

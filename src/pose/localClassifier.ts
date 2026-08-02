@@ -1,5 +1,5 @@
 import type { AutoSegmentation } from "./repSegmenter";
-import type { ExerciseId } from "./repSegmenter";
+import { listKinematicsProfiles } from "./kinematicsProfile";
 import type { TrajectoryFeatures } from "./trajectory";
 
 /**
@@ -20,14 +20,14 @@ export interface RuleHit {
 }
 
 export interface CandidateScore {
-  id: ExerciseId;
+  id: string;
   score: number;
   hits: RuleHit[];
   misses: string[];
 }
 
 export interface LocalClassification {
-  id: ExerciseId | "unknown";
+  id: string | "unknown";
   confidence: "high" | "medium" | "low";
   /** 第一名与第二名的分差,归一化到 0-1 */
   margin: number;
@@ -49,17 +49,11 @@ interface Rule {
   name: string;
   weight: number;
   /** 对哪些动作加分 */
-  supports: ExerciseId[];
+  supports: string[];
   evaluate: (input: ClassifierInput) => { hit: boolean; detail: string } | null;
 }
 
-const ALL: ExerciseId[] = [
-  "barbell_row",
-  "pull_up",
-  "lat_pulldown",
-  "seated_row",
-  "straight_arm_pulldown",
-];
+const ALL = listKinematicsProfiles().map((profile) => profile.exerciseId);
 
 function elbowRange(t: TrajectoryFeatures): number | null {
   return t.jointRom.find((r) => r.joint === "elbow")?.rangeDeg ?? null;
