@@ -678,10 +678,10 @@ export function CameraPoseView() {
   return (
     <div style={styles.page}>
       {/* ===== 顶部:品牌 + 全局状态 ===== */}
-      <header style={styles.header}>
+      <header style={styles.header} className="range-header">
         <div style={styles.brand}>
           <span style={styles.brandLogo}>FORM·RANGE</span>
-          <span style={styles.brandSub}>动作分析靶场 / POSE TELEMETRY CONSOLE</span>
+          <span style={styles.brandSub} className="range-brand-sub">动作分析靶场 / POSE TELEMETRY CONSOLE</span>
         </div>
         <div style={styles.headerStatus}>
           <span
@@ -701,9 +701,8 @@ export function CameraPoseView() {
         </div>
       </header>
 
-      <div style={styles.body}>
-        {/* ===== 主区:取景器 + 示波器 + 报告 ===== */}
-        <div style={styles.main}>
+      <div style={styles.body} className="range-body">
+        <main style={styles.main} className="range-main">
           <div style={styles.stageWrap} className="hud-reveal hud-reveal-1">
             <div style={{ ...styles.stage, aspectRatio: String(videoAspect) }} className="hud-scanline">
               {cornerBrackets(trackingOk && status === "running" ? HUD.primary : HUD.lineBright).map(
@@ -799,53 +798,88 @@ export function CameraPoseView() {
             </div>
           </div>
 
-          {/* 示波器:肘角信号 */}
-          <div style={styles.curveCard} className="hud-reveal hud-reveal-2">
-            <div style={styles.curveTitle}>
-              <span>OSC · 肘角信号</span>
-              <span style={styles.curveValue}>
-                {signalCurve.length > 0 ? `${signalCurve[signalCurve.length - 1].v.toFixed(0)}°` : "——"}
-              </span>
-            </div>
-            <SignalCurve samples={signalCurve} />
-          </div>
+          <div style={styles.outputGrid} className="range-output-grid">
+            <section style={styles.dataPanel} className="hud-reveal hud-reveal-2">
+              <div style={styles.panelHeader}>
+                <div>
+                  <span style={styles.panelKicker}>DATA OUTPUT</span>
+                  <h2 style={styles.panelTitle}>动作数据</h2>
+                </div>
+                <span style={styles.panelStat}>
+                  {repMetricsExtraction?.reps.length ?? 0} REPS
+                </span>
+              </div>
+              <div style={styles.signalStrip}>
+                <div style={styles.curveTitle}>
+                  <span>OSC · 肘角信号</span>
+                  <span style={styles.curveValue}>
+                    {signalCurve.length > 0 ? `${signalCurve[signalCurve.length - 1].v.toFixed(0)}°` : "——"}
+                  </span>
+                </div>
+                <SignalCurve samples={signalCurve} />
+              </div>
+              {repMetricsExtraction && repMetricsScore ? (
+                <RepMetricsPanel
+                  extraction={repMetricsExtraction}
+                  score={repMetricsScore}
+                  embedded
+                />
+              ) : (
+                <p style={styles.emptyOutput}>等待采集后生成逐 rep 行程、左右差和规则评分。</p>
+              )}
+            </section>
 
-          {/* 分析报告 */}
-          {(analyzing || localResult) && (
-            <div
-              style={styles.reportCard}
+            <section
+              style={styles.agentPanel}
               className={`hud-reveal hud-reveal-3${analyzing ? " hud-scanning" : ""}`}
             >
-              {analyzing && (
-                <p style={styles.reportStage}>
-                  {ANALYSIS_STAGE_LABELS[analysisStage ?? ""] ?? ""}
-                </p>
-              )}
-              <RepMetricsPanel extraction={repMetricsExtraction} score={repMetricsScore} />
-              {classified && (
-                <p style={styles.reportMeta}>
-                  {classified.split("\n")[0].replace(/\*\*/g, "").slice(0, 60)}
-                  {segments.length > 0 && ` · ${segments.length} reps:`}
-                  {segments.length > 0 &&
-                    segments.map((s) => ` ${(s.durationMs / 1000).toFixed(1)}s`).join(" ·")}
-                </p>
+              <div style={styles.panelHeader}>
+                <div>
+                  <span style={styles.panelKicker}>COACH AGENT</span>
+                  <h2 style={styles.panelTitle}>训练观察</h2>
+                </div>
+                <span
+                  style={{
+                    ...styles.agentStatus,
+                    color: analyzing ? HUD.amber : localResult ? HUD.primary : HUD.dim,
+                    borderColor: analyzing ? HUD.amber : localResult ? HUD.primaryDim : HUD.line,
+                  }}
+                >
+                  {analyzing ? "ANALYZING" : localResult ? "READY" : "STANDBY"}
+                </span>
+              </div>
+              {analyzing ? (
+                <p style={styles.reportStage}>{ANALYSIS_STAGE_LABELS[analysisStage ?? ""] ?? "正在分析"}</p>
+              ) : localResult ? (
+                <>
+                  <div style={styles.agentHeadline}>
+                    {classified?.split("|")[0].replace("本地建议:", "") ?? "动作分析完成"}
+                  </div>
+                  {classified && <p style={styles.reportMeta}>{classified}</p>}
+                  <ul style={styles.agentList}>
+                    {localResult.reasons.slice(0, 4).map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                  {localResult.dataIssues.length > 0 && (
+                    <p style={styles.agentWarning}>数据提醒：{localResult.dataIssues.join("；")}</p>
+                  )}
+                </>
+              ) : (
+                <p style={styles.emptyOutput}>选择动作并完成一段采集后，这里会固定呈现本地动作识别与训练提示。</p>
               )}
               {Object.keys(stageTimes).length > 0 && (
                 <p style={styles.timingLine}>
-                  T+{" "}
-                  {Object.entries(stageTimes)
-                    .map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`)
-                    .join(" | ")}
+                  T+ {Object.entries(stageTimes).map(([key, value]) => `${key} ${(value / 1000).toFixed(1)}s`).join(" · ")}
                 </p>
               )}
-            </div>
-          )}
-        </div>
+            </section>
+          </div>
+        </main>
 
-        {/* ===== 右侧控制台 ===== */}
-        <div style={styles.sidebar}>
+        <aside style={styles.sidebar} className="range-sidebar">
           <div style={styles.sideSection} className="hud-reveal hud-reveal-1">
-            <div style={styles.sideTitle}>01 · 输入源</div>
+            <div style={styles.sideTitle}>01 · 采集输入</div>
             <div style={styles.btnRow}>
               {status === "running" ? (
                 <button style={{ ...styles.btn, background: "#4c1d1d", color: "#fca5a5" }} onClick={stop}>
@@ -913,7 +947,7 @@ export function CameraPoseView() {
           </div>
 
           <div style={styles.sideSection} className="hud-reveal hud-reveal-2">
-            <div style={styles.sideTitle}>02 · 机位</div>
+            <div style={styles.sideTitle}>02 · 动作配置</div>
             <div style={styles.btnRow}>
               {CAMERA_VIEWS.map((view) => (
                 <button
@@ -949,10 +983,15 @@ export function CameraPoseView() {
                 <option value="auto">自动识别（低置信度时不猜方向）</option>
               </select>
             </label>
+            <div style={styles.telemetryRow}>
+              <span>FPS <strong>{fps}</strong></span>
+              <span>POINTS <strong>{measuredLandmarks.size}/{landmarkTotal}</strong></span>
+              <span>LEAN <strong>{torsoLean === null ? "—" : `${torsoLean.toFixed(0)}°`}</strong></span>
+            </div>
           </div>
 
           <div style={styles.sideSection} className="hud-reveal hud-reveal-3">
-            <div style={styles.sideTitle}>03 · 识别引擎</div>
+            <div style={styles.sideTitle}>03 · 模型选择</div>
             <div style={styles.btnRow}>
               {ENGINE_KINDS.map((engine) => (
                 <button
@@ -1004,30 +1043,6 @@ export function CameraPoseView() {
               >
                 稳定层{filterEnabled ? "✓" : "✗"}
               </button>
-            </div>
-          </div>
-
-          <div style={styles.sideSection} className="hud-reveal hud-reveal-3">
-            <div style={styles.sideTitle}>04 · 遥测</div>
-            <div style={styles.metricGrid}>
-              <div style={styles.metric}>
-                <div style={styles.metricValue}>{fps}</div>
-                <div style={styles.metricLabel}>FPS</div>
-              </div>
-              <div style={styles.metric}>
-                <div style={styles.metricValue}>
-                  {measuredLandmarks.size}
-                  <span style={styles.metricUnit}>/{landmarkTotal}</span>
-                </div>
-                <div style={styles.metricLabel}>POINTS</div>
-              </div>
-              <div style={styles.metric}>
-                <div style={styles.metricValue}>
-                  {torsoLean === null ? "——" : torsoLean.toFixed(0)}
-                  <span style={styles.metricUnit}>°</span>
-                </div>
-                <div style={styles.metricLabel}>TORSO</div>
-              </div>
             </div>
           </div>
 
@@ -1111,7 +1126,7 @@ export function CameraPoseView() {
               </div>
             )}
           </div>
-        </div>
+        </aside>
       </div>
     </div>
   );
@@ -1333,14 +1348,22 @@ const REP_STATUS_LABEL: Record<string, string> = {
 function RepMetricsPanel({
   extraction,
   score,
+  embedded = false,
 }: {
   extraction: RepMetricsExtraction | null;
   score: SetScore | null;
+  embedded?: boolean;
 }) {
   if (!extraction || !score) return null;
 
   return (
-    <div style={compareStyles.wrap}>
+    <div
+      style={
+        embedded
+          ? { ...compareStyles.wrap, background: "transparent", border: "none", padding: 0, marginBottom: 0 }
+          : compareStyles.wrap
+      }
+    >
       <div style={compareStyles.header}>
         <span style={compareStyles.headerTitle}>逐 REP 指标 · 规则引擎评分</span>
         <span style={compareStyles.timing}>
@@ -1663,7 +1686,8 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundImage: `linear-gradient(${HUD.line}18 1px, transparent 1px), linear-gradient(90deg, ${HUD.line}18 1px, transparent 1px)`,
     backgroundSize: "48px 48px",
     color: HUD.text,
-    height: "100vh",
+    width: "100vw",
+    minHeight: "100vh",
     overflow: "hidden",
   },
   header: {
@@ -1702,9 +1726,10 @@ const styles: Record<string, React.CSSProperties> = {
   },
   body: {
     flex: 1,
-    display: "flex",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(300px, 340px)",
     gap: 14,
-    padding: 14,
+    padding: "14px clamp(14px, 2vw, 30px) 26px",
     overflow: "hidden",
     minHeight: 0,
   },
@@ -1714,7 +1739,9 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     gap: 10,
     minWidth: 0,
+    minHeight: 0,
     overflowY: "auto",
+    paddingRight: 2,
   },
   stageWrap: {
     flexShrink: 0,
@@ -1724,7 +1751,7 @@ const styles: Record<string, React.CSSProperties> = {
   stage: {
     position: "relative",
     width: "100%",
-    maxWidth: 900,
+    maxWidth: 1120,
     background: "#000",
     border: `1px solid ${HUD.line}`,
     overflow: "hidden",
@@ -1780,12 +1807,39 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.primary,
     textShadow: `0 0 10px ${HUD.primary}44`,
   },
-  curveCard: {
+  outputGrid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
+    gap: 12,
+    alignItems: "stretch",
+  },
+  dataPanel: {
+    minWidth: 0,
+    minHeight: 260,
     background: HUD.panel,
     border: `1px solid ${HUD.line}`,
-    padding: "8px 14px",
-    flexShrink: 0,
+    padding: 14,
   },
+  agentPanel: {
+    minWidth: 0,
+    minHeight: 260,
+    background: "#0a110d",
+    border: `1px solid ${HUD.lineBright}`,
+    padding: 14,
+  },
+  panelHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    paddingBottom: 11,
+    marginBottom: 10,
+    borderBottom: `1px solid ${HUD.line}`,
+  },
+  panelKicker: { display: "block", color: HUD.dim, fontSize: 9, letterSpacing: 2.2, marginBottom: 4 },
+  panelTitle: { margin: 0, color: HUD.text, fontSize: 16, fontWeight: 700, letterSpacing: 0 },
+  panelStat: { color: HUD.primary, fontSize: 10, letterSpacing: 1.3, fontFamily: HUD.mono, paddingTop: 8 },
+  signalStrip: { borderBottom: `1px solid ${HUD.line}`, marginBottom: 10, paddingBottom: 4 },
   curveTitle: {
     display: "flex",
     justifyContent: "space-between",
@@ -1800,14 +1854,27 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     color: HUD.primary,
   },
-  reportCard: {
-    background: HUD.panel,
-    border: `1px solid ${HUD.line}`,
-    padding: 16,
-    position: "relative",
-  },
   reportStage: { color: HUD.amber, fontSize: 13, margin: 0, letterSpacing: 1 },
   reportMeta: { color: HUD.dim, fontSize: 12, margin: "0 0 10px", fontFamily: HUD.mono },
+  emptyOutput: { color: HUD.dim, fontSize: 12, lineHeight: 1.7, margin: "28px 0 0", maxWidth: 360 },
+  agentStatus: {
+    border: "1px solid",
+    fontSize: 9,
+    fontFamily: HUD.mono,
+    letterSpacing: 1.3,
+    padding: "4px 6px",
+    whiteSpace: "nowrap",
+  },
+  agentHeadline: { color: HUD.primary, fontFamily: HUD.mono, fontWeight: 700, fontSize: 17, margin: "2px 0 8px" },
+  agentList: { margin: "10px 0 0", paddingLeft: 17, color: HUD.text },
+  agentWarning: {
+    color: HUD.amber,
+    borderTop: `1px solid #4a3510`,
+    margin: "12px 0 0",
+    paddingTop: 8,
+    fontSize: 11,
+    lineHeight: 1.6,
+  },
   funReport: {
     margin: 0,
     whiteSpace: "pre-wrap",
@@ -1829,11 +1896,12 @@ const styles: Record<string, React.CSSProperties> = {
   },
   timingLine: { color: HUD.dim, fontSize: 11, margin: "12px 0 0", fontFamily: HUD.mono },
   sidebar: {
-    flex: "0 0 300px",
     display: "flex",
     flexDirection: "column",
     gap: 10,
     overflowY: "auto",
+    minWidth: 0,
+    paddingRight: 2,
   },
   sideSection: {
     background: HUD.panel,
@@ -1899,24 +1967,15 @@ const styles: Record<string, React.CSSProperties> = {
     margin: "0 0 6px",
     fontFamily: HUD.mono,
   },
-  metricGrid: { display: "flex", gap: 8 },
-  metric: {
-    flex: 1,
-    background: HUD.panel2,
-    border: `1px solid ${HUD.line}`,
-    padding: "10px 4px",
-    textAlign: "center",
+  telemetryRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: 6,
+    marginTop: 10,
+    color: HUD.dim,
+    fontSize: 9,
+    letterSpacing: 0.7,
   },
-  metricValue: {
-    fontSize: 24,
-    fontWeight: 700,
-    fontFamily: HUD.mono,
-    color: HUD.primary,
-    lineHeight: 1.1,
-    textShadow: `0 0 12px ${HUD.primary}33`,
-  },
-  metricUnit: { fontSize: 12, color: HUD.dim, fontWeight: 400 },
-  metricLabel: { fontSize: 9, color: HUD.dim, marginTop: 5, letterSpacing: 2 },
   analyzeBtn: {
     border: "none",
     clipPath: CHAMFER,

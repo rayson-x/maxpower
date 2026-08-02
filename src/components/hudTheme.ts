@@ -73,6 +73,32 @@ export function injectHudTheme(): void {
       animation: hud-scan 1.6s linear infinite;
       pointer-events: none;
     }
+    .range-main, .range-sidebar { scrollbar-gutter: stable; }
+    @media (max-width: 1040px) {
+      .range-body {
+        display: flex !important;
+        flex-direction: column;
+        align-items: stretch;
+        overflow-y: auto !important;
+      }
+      .range-main { flex: none !important; overflow: visible !important; }
+      .range-sidebar {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: visible !important;
+      }
+      .range-sidebar > button { grid-column: 1 / -1; }
+    }
+    @media (max-width: 680px) {
+      .range-body { padding: 10px !important; gap: 10px !important; }
+      .range-output-grid, .range-sidebar { grid-template-columns: 1fr !important; }
+      .range-sidebar > button { grid-column: auto; }
+      .range-brand-sub { display: none; }
+      .range-header { padding: 10px 14px !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .hud-reveal, .hud-scanning::before, .placeholderReticle { animation: none !important; }
+    }
     select, input {
       font-family: ${HUD.mono};
       background: ${HUD.panel2};
