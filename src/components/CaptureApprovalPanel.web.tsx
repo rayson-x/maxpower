@@ -182,7 +182,10 @@ function downloadJson(value: unknown, filename: string): void {
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
+  link.style.display = "none";
+  document.body.append(link);
   link.click();
+  link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
@@ -458,6 +461,8 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   const [draftCandidateId, setDraftCandidateId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [directoryConnected, setDirectoryConnected] = useState(false);
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
   const quality = selected ? qualityOf(selected.fixture.poses) : null;
@@ -504,7 +509,10 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     };
     draftsRef.current = next;
     saveDrafts(next);
+    setDraftRevision((revision) => revision + 1);
   }, [cameraView, capturePosition, draftCandidateId, draftSegments, exerciseId, expectedCount, note, selectedId]);
+
+  const hasExportableLocalData = Object.keys(approvals).length > 0 || Object.keys(draftsRef.current).length > 0 || draftRevision > 0;
 
   useEffect(() => () => captures.forEach((capture) => {
     if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
@@ -752,6 +760,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
       approvals: loadApprovals(),
       drafts: loadDrafts(),
     }, `field-capture-approvals-${new Date().toISOString().slice(0, 10)}.json`);
+    setExportNotice("已从本机 localStorage 导出审批与草稿 JSON。请在浏览器下载列表查看。");
   };
 
   const exportLatPulldownTrajectoryDataset = () => {
@@ -778,6 +787,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         .filter((decision) => decision.decision === "quarantined")
         .map(({ reason, recordedAt, sample }) => ({ reason, recordedAt, sampleId: sample?.sampleId ?? null })),
     }, `lat-pulldown-trajectory-dataset-${new Date().toISOString().slice(0, 10)}.json`);
+    setExportNotice("已从本机 localStorage 导出高位下拉分段轨迹 JSON。请在浏览器下载列表查看。");
   };
 
   return (
@@ -791,7 +801,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           <button style={styles.importButton} onClick={() => void importDirectory()}>导入 Downloads 采集包</button>
           <button style={styles.manualImport} onClick={() => fileInputRef.current?.click()}>手动选择文件</button>
-          <button style={styles.manualImport} disabled={!Object.keys(approvals).length} onClick={exportApprovals}>导出审批真值</button>
+          <button style={styles.manualImport} disabled={!hasExportableLocalData} onClick={exportApprovals}>导出审批真值</button>
           <button style={styles.manualImport} disabled={!eligibleTrajectorySamples.length} onClick={exportLatPulldownTrajectoryDataset}>导出高位下拉分段轨迹数据</button>
         </div>
         <input
@@ -808,6 +818,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         />
       </header>
       {error && <p style={styles.error}>{error}</p>}
+      {exportNotice && <p style={styles.exportNotice}>{exportNotice}</p>}
       {!compact && !!replayReport.length && (
         <section style={styles.replayShell} aria-label="算法重放报告">
           <div style={styles.replayIntro}>
@@ -932,6 +943,7 @@ const styles: Record<string, React.CSSProperties> = {
   importButton: { border: "1px solid #72e6a8", background: "#123b2d", color: "#dffff0", padding: "10px 13px", cursor: "pointer", font: "inherit", fontSize: 12 },
   manualImport: { border: "1px solid #42685d", background: "#0b201a", color: "#b8d7cc", padding: "10px 11px", cursor: "pointer", font: "inherit", fontSize: 12 },
   error: { margin: 16, color: "#ff9b83" },
+  exportNotice: { margin: 16, color: "#7cffbc", fontSize: 12 },
   empty: { padding: 22, color: "#89aaa1" },
   replayShell: { borderBottom: "1px solid #24443e", background: "linear-gradient(90deg, rgba(17,51,42,.66), rgba(7,19,16,.32))" },
   replayIntro: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "end", padding: "16px 20px 12px" },
