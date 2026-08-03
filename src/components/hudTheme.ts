@@ -91,7 +91,7 @@ export function injectHudTheme(): void {
     }
     @media (max-width: 680px) {
       .range-body { padding: 10px !important; gap: 10px !important; }
-      .range-output-grid, .range-sidebar { grid-template-columns: 1fr !important; }
+      .range-output-grid, .range-sidebar, .range-training-readout { grid-template-columns: 1fr !important; }
       .range-sidebar > button { grid-column: auto; }
       .range-brand-sub { display: none; }
       .range-header { padding: 10px 14px !important; }

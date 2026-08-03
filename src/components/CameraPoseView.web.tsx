@@ -115,12 +115,20 @@ const POSE_MODELS = [
 ];
 
 type EngineKind = "mediapipe" | "rtmpose";
+type WorkspacePage = "training" | "console";
 const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
   { id: "mediapipe", label: "MediaPipe" },
   { id: "rtmpose", label: "RTMPose-m" },
 ];
 const RTMPOSE_MODEL_PATH = "/models/rtmpose-m-simcc-256x192.onnx";
 const STAGE_ASPECT = 16 / 9;
+
+function readWorkspacePage(): WorkspacePage {
+  if (typeof window === "undefined") return "training";
+  return new URLSearchParams(window.location.search).get("view") === "console"
+    ? "console"
+    : "training";
+}
 
 function poseSchemaForEngine(kind: EngineKind): PoseSchema {
   return kind === "rtmpose" ? "coco17" : "blazepose33";
@@ -307,6 +315,8 @@ export function CameraPoseView() {
   const recordingResultRef = useRef<RecordingResult | null>(null);
 
   const [status, setStatus] = useState<EngineStatus>("idle");
+  const [workspacePage, setWorkspacePage] = useState<WorkspacePage>(readWorkspacePage);
+  const [hasVisitedConsole, setHasVisitedConsole] = useState(() => readWorkspacePage() === "console");
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<SourceMode>("camera");
   const [videoName, setVideoName] = useState<string | null>(null);
@@ -348,6 +358,24 @@ export function CameraPoseView() {
   const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
   const [localCaptures, setLocalCaptures] = useState<LocalCaptureSummary[]>([]);
   const [localCaptureError, setLocalCaptureError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const syncWorkspacePage = () => setWorkspacePage(readWorkspacePage());
+    window.addEventListener("popstate", syncWorkspacePage);
+    return () => window.removeEventListener("popstate", syncWorkspacePage);
+  }, []);
+
+  useEffect(() => {
+    if (workspacePage === "console") setHasVisitedConsole(true);
+  }, [workspacePage]);
+
+  const selectWorkspacePage = (nextPage: WorkspacePage) => {
+    if (nextPage === "console") setHasVisitedConsole(true);
+    setWorkspacePage(nextPage);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", nextPage);
+    window.history.replaceState(null, "", url);
+  };
 
   const applyCapturePosition = (positionId: CapturePosition) => {
     const physicalPosition = CAPTURE_POSITIONS.find((position) => position.id === positionId);
@@ -1195,6 +1223,7 @@ export function CameraPoseView() {
 
   const trackingOk = usableLandmarks.size >= landmarkTotal * 0.6;
   const analyzing = analysisStage !== null && analysisStage !== "done";
+  const isConsole = workspacePage === "console";
   const videoViewport = fitVideoIntoStage(videoAspect);
 
   return (
@@ -1203,8 +1232,28 @@ export function CameraPoseView() {
       <header style={styles.header} className="range-header">
         <div style={styles.brand}>
           <span style={styles.brandLogo}>FORM·RANGE</span>
-          <span style={styles.brandSub} className="range-brand-sub">动作分析靶场 / POSE TELEMETRY CONSOLE</span>
+          <span style={styles.brandSub} className="range-brand-sub">
+            {workspacePage === "training" ? "训练页 / LIVE TRAINING" : "控制台 / POSE TELEMETRY CONSOLE"}
+          </span>
         </div>
+        <nav style={styles.pageSwitch} aria-label="页面模式">
+          <button
+            type="button"
+            style={{ ...styles.pageSwitchButton, ...(workspacePage === "training" ? styles.pageSwitchButtonActive : null) }}
+            aria-pressed={workspacePage === "training"}
+            onClick={() => selectWorkspacePage("training")}
+          >
+            训练页
+          </button>
+          <button
+            type="button"
+            style={{ ...styles.pageSwitchButton, ...(workspacePage === "console" ? styles.pageSwitchButtonActive : null) }}
+            aria-pressed={workspacePage === "console"}
+            onClick={() => selectWorkspacePage("console")}
+          >
+            控制台
+          </button>
+        </nav>
         <div style={styles.headerStatus}>
           <span
             style={{
@@ -1322,6 +1371,40 @@ export function CameraPoseView() {
             </div>
           </div>
 
+          {workspacePage === "training" ? (
+            <section style={styles.trainingReadout} className="range-training-readout hud-reveal hud-reveal-2">
+              <div>
+                <span style={styles.panelKicker}>LIVE SESSION</span>
+                <h2 style={styles.panelTitle}>
+                  {exerciseChoice && exerciseChoice !== "auto"
+                    ? EXERCISE_REGISTRY.require(exerciseChoice).nameZh
+                    : "选择动作后开始本组训练"}
+                </h2>
+              </div>
+              <div style={styles.trainingStats}>
+                <span style={styles.trainingStat}>
+                  <strong style={styles.trainingStatValue}>{setAnalysis?.reps.length ?? segments.length}</strong>
+                  已识别次数
+                </span>
+                <span style={styles.trainingStat}>
+                  <strong style={styles.trainingStatValue}>{fps || "—"}</strong>
+                  当前 FPS
+                </span>
+                <span style={styles.trainingStat}>
+                  <strong style={styles.trainingStatValue}>{isRecording ? "录制中" : status === "running" ? "预览中" : "待机"}</strong>
+                  本组状态
+                </span>
+              </div>
+              <p style={styles.trainingHint}>
+                点击“开始本组录制”才会写入视频、关键点和当前动作配置；切到控制台可查看逐次数据、回放和采集审批。
+              </p>
+              {setAnalysis?.score && (
+                <p style={styles.trainingScore}>
+                  最近结果：{setAnalysis.score.score === null ? setAnalysis.score.label : `${setAnalysis.score.score} 分`}
+                </p>
+              )}
+            </section>
+          ) : (
           <div style={styles.outputGrid} className="range-output-grid">
             <section style={styles.dataPanel} className="hud-reveal hud-reveal-2">
               <div style={styles.panelHeader}>
@@ -1480,6 +1563,7 @@ export function CameraPoseView() {
               )}
             </section>
           </div>
+          )}
         </main>
 
         <aside style={styles.sidebar} className="range-sidebar">
@@ -1621,8 +1705,8 @@ export function CameraPoseView() {
                 </div>
               </div>
             )}
-            {localCaptureError && <p style={styles.agentWarning}>本地采集库：{localCaptureError}</p>}
-            {localCaptures.length > 0 && (
+            {isConsole && localCaptureError && <p style={styles.agentWarning}>本地采集库：{localCaptureError}</p>}
+            {isConsole && localCaptures.length > 0 && (
               <details style={{ marginTop: 10 }}>
                 <summary style={styles.recordingResultMeta}>
                   本机已保存 {localCaptures.length} 组采集记录
@@ -1751,6 +1835,7 @@ export function CameraPoseView() {
             </div>
           </div>
 
+          {isConsole && (
           <div style={styles.sideSection} className="hud-reveal hud-reveal-3">
             <div style={styles.sideTitle}>03 · 模型选择</div>
             <div style={styles.btnRow}>
@@ -1807,8 +1892,9 @@ export function CameraPoseView() {
               </button>
             </div>
           </div>
+          )}
 
-          <button
+          {isConsole && <button
             style={{
               ...styles.analyzeBtn,
               ...(analyzing ? styles.analyzeBtnBusy : null),
@@ -1820,10 +1906,11 @@ export function CameraPoseView() {
             {analysisStage
               ? ANALYSIS_STAGE_LABELS[analysisStage] ?? analysisStage
               : "▶ 一键完整分析"}
-          </button>
+          </button>}
 
           {error && <p style={styles.errorText}>{error}</p>}
 
+          {isConsole && (
           <div style={styles.sideSection}>
             <button
               style={styles.settingsToggle}
@@ -1888,9 +1975,14 @@ export function CameraPoseView() {
               </div>
             )}
           </div>
+          )}
         </aside>
       </div>
-      <CaptureApprovalPanel />
+      {hasVisitedConsole && (
+        <div style={{ display: isConsole ? "block" : "none" }} aria-hidden={!isConsole}>
+          <CaptureApprovalPanel />
+        </div>
+      )}
     </div>
   );
 }
@@ -2514,6 +2606,28 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 2,
     color: HUD.dim,
   },
+  pageSwitch: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    padding: 3,
+    border: `1px solid ${HUD.line}`,
+    background: "#08100b",
+  },
+  pageSwitchButton: {
+    border: "none",
+    background: "transparent",
+    color: HUD.dim,
+    cursor: "pointer",
+    padding: "7px 10px",
+    fontFamily: HUD.mono,
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  pageSwitchButtonActive: {
+    background: HUD.primaryDim,
+    color: "#eafff2",
+  },
   headerStatus: { display: "flex", alignItems: "center", gap: 8 },
   led: {
     width: 8,
@@ -2613,6 +2727,52 @@ const styles: Record<string, React.CSSProperties> = {
     gridTemplateColumns: "minmax(0, 1.2fr) minmax(280px, 0.8fr)",
     gap: 12,
     alignItems: "stretch",
+  },
+  trainingReadout: {
+    display: "grid",
+    gridTemplateColumns: "minmax(220px, 1.15fr) repeat(3, minmax(110px, .55fr))",
+    gap: 14,
+    alignItems: "center",
+    background: "#09120d",
+    border: `1px solid ${HUD.primaryDim}`,
+    padding: 16,
+  },
+  trainingStats: {
+    display: "contents",
+  },
+  trainingStat: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    minWidth: 0,
+    color: HUD.dim,
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+  trainingStatValue: {
+    overflow: "hidden",
+    color: HUD.primary,
+    fontFamily: HUD.mono,
+    fontSize: 18,
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  trainingHint: {
+    gridColumn: "1 / -1",
+    margin: 0,
+    paddingTop: 10,
+    borderTop: `1px solid ${HUD.line}`,
+    color: HUD.dim,
+    fontSize: 11,
+    lineHeight: 1.55,
+  },
+  trainingScore: {
+    gridColumn: "1 / -1",
+    margin: 0,
+    color: HUD.primary,
+    fontSize: 13,
+    fontFamily: HUD.mono,
+    fontWeight: 700,
   },
   dataPanel: {
     minWidth: 0,
