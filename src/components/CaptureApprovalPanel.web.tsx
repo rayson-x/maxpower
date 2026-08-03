@@ -72,6 +72,7 @@ interface Approval {
   model: string;
   approvedSegments: Candidate["segments"];
   approvedAt: string;
+  note?: string;
   /** Exact physical placement, not only its reduced rule-engine view. */
   capturePosition?: CapturePosition | null;
   /** Stored at approval time so source reloads cannot silently rewrite a label. */
@@ -85,6 +86,7 @@ interface ReviewDraft {
   expectedCount: string;
   draftCandidateId: string | null;
   draftSegments: Candidate["segments"];
+  note: string;
   updatedAt: string;
 }
 
@@ -454,6 +456,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   const [expectedCount, setExpectedCount] = useState("");
   const [draftSegments, setDraftSegments] = useState<Candidate["segments"]>([]);
   const [draftCandidateId, setDraftCandidateId] = useState<string | null>(null);
+  const [note, setNote] = useState("");
   const [directoryConnected, setDirectoryConnected] = useState(false);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
@@ -495,12 +498,13 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         expectedCount,
         draftCandidateId,
         draftSegments,
+        note,
         updatedAt: new Date().toISOString(),
       },
     };
     draftsRef.current = next;
     saveDrafts(next);
-  }, [cameraView, capturePosition, draftCandidateId, draftSegments, exerciseId, expectedCount, selectedId]);
+  }, [cameraView, capturePosition, draftCandidateId, draftSegments, exerciseId, expectedCount, note, selectedId]);
 
   useEffect(() => () => captures.forEach((capture) => {
     if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
@@ -542,6 +546,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
       setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
       setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
       setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
+      setNote(storedApproval?.note ?? savedDraft?.note ?? "");
     }
     return true;
   };
@@ -615,6 +620,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
     setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
     setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
+    setNote(storedApproval?.note ?? savedDraft?.note ?? "");
   };
 
   const chooseAdjacentCapture = (direction: -1 | 1) => {
@@ -710,6 +716,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         model: selected.fixture.model ?? selected.labels?.model ?? "unknown",
         approvedSegments: draftSegments,
         approvedAt,
+        note: note.trim(),
         capturePosition: confirmedPosition,
         trajectoryDataset,
       },
@@ -868,6 +875,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                   <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select></label>
                   <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
+                  <label style={{ gridColumn: "1 / -1" }}>备注<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：底部有停顿、左臂被器械遮挡、这一组不作为动作质量标准" rows={2} /></label>
                 </div>
                 <div style={styles.candidates}>
                   {candidates.map((candidate) => (
@@ -898,7 +906,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                     </div>
                   </div>
                 )}
-                {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}</p>}
+                {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}{approvals[selected.id].note ? ` · 备注：${approvals[selected.id].note}` : ""}</p>}
                 {approvals[selected.id]?.exerciseId === "lat_pulldown" && (
                   selectedTrajectoryDecision?.sample ? (
                     <p style={selectedTrajectoryDecision.decision === "eligible" ? styles.trajectoryReady : styles.trajectoryWarning}>
