@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { EXERCISE_REGISTRY, MUSCLE_GROUPS } from "../pose/exerciseRegistry";
 import type { CameraView } from "../pose/formRuleEngine";
@@ -78,6 +78,16 @@ interface Approval {
   trajectoryDataset?: TrajectoryDatasetDecision | null;
 }
 
+interface ReviewDraft {
+  exerciseId: string;
+  cameraView: CameraView;
+  capturePosition: CapturePosition | "";
+  expectedCount: string;
+  draftCandidateId: string | null;
+  draftSegments: Candidate["segments"];
+  updatedAt: string;
+}
+
 interface Candidate {
   id: string;
   label: string;
@@ -112,6 +122,7 @@ interface DirectoryHandle {
 }
 
 const APPROVAL_KEY = "form-coach-capture-approvals/v1";
+const DRAFT_KEY = "form-coach-capture-review-drafts/v1";
 const SOURCE_DATABASE = "form-coach-review-source";
 const SOURCE_STORE = "settings";
 const SOURCE_KEY = "downloads-directory";
@@ -163,11 +174,37 @@ function baseName(name: string): string {
   return name.replace(/\.labels\.json$/i, "").replace(/\.(webm|mp4|mov|json)$/i, "");
 }
 
+function downloadJson(value: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 function loadApprovals(): Record<string, Approval> {
   try {
     return JSON.parse(localStorage.getItem(APPROVAL_KEY) ?? "{}") as Record<string, Approval>;
   } catch {
     return {};
+  }
+}
+
+function loadDrafts(): Record<string, ReviewDraft> {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "{}") as Record<string, ReviewDraft>;
+  } catch {
+    return {};
+  }
+}
+
+function saveDrafts(drafts: Record<string, ReviewDraft>): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts));
+  } catch {
+    // The approval flow remains usable if the browser has disabled local storage.
   }
 }
 
@@ -406,6 +443,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   const capturesRef = useRef<ReviewCapture[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
+  const draftsRef = useRef<Record<string, ReviewDraft>>(loadDrafts());
   const [captures, setCaptures] = useState<ReviewCapture[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -444,6 +482,26 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     ? approvals[selected.id]?.trajectoryDataset ?? null
     : null;
 
+  // Every edit is durable before the user can move to another capture. This is
+  // intentionally local-only and distinct from an approved ground-truth label.
+  useLayoutEffect(() => {
+    if (!selectedId) return;
+    const next: Record<string, ReviewDraft> = {
+      ...draftsRef.current,
+      [selectedId]: {
+        exerciseId,
+        cameraView,
+        capturePosition,
+        expectedCount,
+        draftCandidateId,
+        draftSegments,
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    draftsRef.current = next;
+    saveDrafts(next);
+  }, [cameraView, capturePosition, draftCandidateId, draftSegments, exerciseId, expectedCount, selectedId]);
+
   useEffect(() => () => captures.forEach((capture) => {
     if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
   }), [captures]);
@@ -476,13 +534,14 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
       selectedIdRef.current = next.id;
       setSelectedId(next.id);
       const storedApproval = approvalsRef.current[next.id];
-      setExerciseId(storedApproval?.exerciseId ?? next.labels?.exerciseId ?? "");
-      const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? next.labels?.capturePosition);
+      const savedDraft = draftsRef.current[next.id];
+      setExerciseId(storedApproval?.exerciseId ?? savedDraft?.exerciseId ?? next.labels?.exerciseId ?? "");
+      const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? savedDraft?.capturePosition ?? next.labels?.capturePosition);
       setCapturePosition(nextPosition);
-      setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? next.labels?.cameraView ?? "oblique45");
-      setExpectedCount(storedApproval?.expectedCount ?? "");
-      setDraftSegments(storedApproval?.approvedSegments ?? []);
-      setDraftCandidateId(storedApproval?.candidateId ?? null);
+      setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? savedDraft?.cameraView ?? next.labels?.cameraView ?? "oblique45");
+      setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
+      setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
+      setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
     }
     return true;
   };
@@ -546,15 +605,16 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
 
   const chooseCapture = (capture: ReviewCapture) => {
     const storedApproval = approvalsRef.current[capture.id];
+    const savedDraft = draftsRef.current[capture.id];
     selectedIdRef.current = capture.id;
     setSelectedId(capture.id);
-    setExerciseId(storedApproval?.exerciseId ?? capture.labels?.exerciseId ?? "");
-    const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? capture.labels?.capturePosition);
+    setExerciseId(storedApproval?.exerciseId ?? savedDraft?.exerciseId ?? capture.labels?.exerciseId ?? "");
+    const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? savedDraft?.capturePosition ?? capture.labels?.capturePosition);
     setCapturePosition(nextPosition);
-    setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? capture.labels?.cameraView ?? "oblique45");
-    setExpectedCount(storedApproval?.expectedCount ?? "");
-    setDraftSegments(storedApproval?.approvedSegments ?? []);
-    setDraftCandidateId(storedApproval?.candidateId ?? null);
+    setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? savedDraft?.cameraView ?? capture.labels?.cameraView ?? "oblique45");
+    setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
+    setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
+    setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
   };
 
   const chooseAdjacentCapture = (direction: -1 | 1) => {
@@ -657,40 +717,60 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     approvalsRef.current = next;
     setApprovals(next);
     localStorage.setItem(APPROVAL_KEY, JSON.stringify(next));
+    // Approval is a deliberate user click, so save a portable copy immediately
+    // rather than making the athlete remember a second export step.
+    downloadJson(
+      { version: "capture-approval/v1", approvals: next },
+      `field-capture-approval-${selected.id}.json`,
+    );
+    if (trajectoryDataset?.decision === "eligible" && trajectoryDataset.sample) {
+      downloadJson({
+        schemaVersion: "form-coach-trajectory-dataset/v1",
+        exerciseId: "lat_pulldown",
+        intendedUse: "rep_segmentation_observation",
+        formReference: "not_labeled",
+        generatedAt: approvedAt,
+        samples: [trajectoryDataset.sample],
+        quarantined: [],
+      }, `lat-pulldown-segmentation-trajectory-${selected.id}.json`);
+    }
   };
 
   const exportApprovals = () => {
-    const blob = new Blob([JSON.stringify({ version: "capture-approval/v1", approvals }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `field-capture-approvals-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    // Read at click time: exports must survive a page remount and must include
+    // the unapproved local drafts the athlete is actively editing.
+    downloadJson({
+      version: "capture-approval/v2",
+      exportedAt: new Date().toISOString(),
+      approvals: loadApprovals(),
+      drafts: loadDrafts(),
+    }, `field-capture-approvals-${new Date().toISOString().slice(0, 10)}.json`);
   };
 
   const exportLatPulldownTrajectoryDataset = () => {
-    if (!eligibleTrajectorySamples.length) {
+    const storedDecisions = Object.values(loadApprovals()).flatMap((approval) =>
+      approval.exerciseId === "lat_pulldown" && approval.trajectoryDataset
+        ? [approval.trajectoryDataset]
+        : [],
+    );
+    const storedEligibleSamples = storedDecisions.flatMap((decision) =>
+      decision.decision === "eligible" && decision.sample ? [decision.sample] : [],
+    );
+    if (!storedEligibleSamples.length) {
       setError("还没有可训练的高位下拉样本：需审批动作、填写实际次数，并让批准边界与次数一致。");
       return;
     }
-    const blob = new Blob([JSON.stringify({
+    downloadJson({
       schemaVersion: "form-coach-trajectory-dataset/v1",
       exerciseId: "lat_pulldown",
       intendedUse: "rep_segmentation_observation",
       formReference: "not_labeled",
       generatedAt: new Date().toISOString(),
-      samples: eligibleTrajectorySamples,
-      quarantined: trajectoryDecisions
+      samples: storedEligibleSamples,
+      quarantined: storedDecisions
         .filter((decision) => decision.decision === "quarantined")
         .map(({ reason, recordedAt, sample }) => ({ reason, recordedAt, sampleId: sample?.sampleId ?? null })),
-    }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `lat-pulldown-trajectory-dataset-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    }, `lat-pulldown-trajectory-dataset-${new Date().toISOString().slice(0, 10)}.json`);
   };
 
   return (
