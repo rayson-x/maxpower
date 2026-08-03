@@ -129,6 +129,29 @@ function extractSignal(
   return samples;
 }
 
+/** Uses the exact landmark contract consumed by extractSignal(). */
+export function isSignalFrameVisible(
+  pose: PoseEstimate,
+  kind: SignalKind,
+  side: "left" | "right",
+): boolean {
+  if (pose.landmarks.length < 25) return false;
+  if (kind === "elbow_angle") {
+    const [shoulder, elbow, wrist] = bestSide(pose, SHOULDER_L, ELBOW_L, WRIST_L, side);
+    return visible(shoulder) && visible(elbow) && visible(wrist);
+  }
+  if (kind === "wrist_height") {
+    const [shoulder, , wrist] = bestSide(pose, SHOULDER_L, ELBOW_L, WRIST_L, side);
+    return visible(shoulder) && visible(wrist);
+  }
+  if (kind === "knee_angle") {
+    const [hip, knee, ankle] = bestSide(pose, HIP_L, KNEE_L, ANKLE_L, side);
+    return visible(hip) && visible(knee) && visible(ankle);
+  }
+  const [hip, shoulder, wrist] = bestSide(pose, HIP_L, SHOULDER_L, WRIST_L, side);
+  return visible(hip) && visible(shoulder) && visible(wrist);
+}
+
 function smooth(samples: Sample[], alpha = 0.35): Sample[] {
   if (samples.length === 0) return samples;
   const out: Sample[] = [{ ...samples[0] }];
@@ -141,12 +164,27 @@ function smooth(samples: Sample[], alpha = 0.35): Sample[] {
   return out;
 }
 
-const MIN_REP_MS = 700;
+export interface RepSegmentationConfig {
+  smoothingAlpha: number;
+  hysteresisRatio: number;
+  minRepMs: number;
+  maxRepMs: number;
+  /** Rejects small local cycles relative to the capture's robust signal range. */
+  minCycleAmplitudeRatio: number;
+}
+
+export const DEFAULT_REP_SEGMENTATION_CONFIG: Readonly<RepSegmentationConfig> = Object.freeze({
+  smoothingAlpha: 0.35,
+  hysteresisRatio: 0.2,
+  minRepMs: 700,
+  maxRepMs: 12_000,
+  minCycleAmplitudeRatio: 0,
+});
+
 /**
  * 一个循环的时长上限。原来 8s 太紧:慢速引体/下拉单次接近甚至超过 8s,
  * 循环会被整个丢弃,分期结果为空(实测视频 1 就是这样)。放宽到 12s。
  */
-const MAX_REP_MS = 12_000;
 
 interface Extremum {
   t: number;
@@ -210,6 +248,7 @@ function buildCycles(
   extrema: Extremum[],
   effortType: "min" | "max",
   range: number,
+  config: Readonly<RepSegmentationConfig>,
 ): Array<{ startMs: number; peakMs: number; endMs: number; amplitude: number }> {
   const restType = effortType === "min" ? "max" : "min";
   const out: Array<{ startMs: number; peakMs: number; endMs: number; amplitude: number }> = [];
@@ -221,12 +260,14 @@ function buildCycles(
       continue;
     }
     const durationMs = next.t - prev.t;
-    if (durationMs < MIN_REP_MS || durationMs > MAX_REP_MS) continue;
+    if (durationMs < config.minRepMs || durationMs > config.maxRepMs) continue;
+    const amplitude = Math.abs(curr.v - (prev.v + next.v) / 2) / range;
+    if (amplitude < config.minCycleAmplitudeRatio) continue;
     out.push({
       startMs: prev.t,
       peakMs: curr.t,
       endMs: next.t,
-      amplitude: Number((Math.abs(curr.v - (prev.v + next.v) / 2) / range).toFixed(3)),
+      amplitude: Number(amplitude.toFixed(3)),
     });
   }
   return out;
@@ -241,10 +282,25 @@ export function segmentRepsBySignal(
   kind: SignalKind,
   effortExtreme: "min" | "max",
 ): RepSegment[] {
+  return segmentRepsBySignalWithConfig(
+    poses,
+    kind,
+    effortExtreme,
+    DEFAULT_REP_SEGMENTATION_CONFIG,
+  );
+}
+
+/** Explicit calibration seam; production callers use the frozen default. */
+export function segmentRepsBySignalWithConfig(
+  poses: PoseEstimate[],
+  kind: SignalKind,
+  effortExtreme: "min" | "max",
+  config: Readonly<RepSegmentationConfig>,
+): RepSegment[] {
   const evidenceSide = resolveSignalSide(poses, kind);
   const raw = extractSignal(poses, kind, evidenceSide);
   if (raw.length < 10) return [];
-  const samples = smooth(raw);
+  const samples = smooth(raw, config.smoothingAlpha);
 
   const values = samples.map((s) => s.v);
   // 稳健幅度:单帧跟丢会把 max-min 撑满,滞回带随之过宽,真实 rep 反而跨不过去
@@ -252,8 +308,8 @@ export function segmentRepsBySignal(
   if (range <= 0) return [];
 
   // effort 在信号低端(肘角小=收缩)还是高端(手腕低于肩最多=收缩)
-  const extrema = findExtrema(samples, range * 0.2);
-  return buildCycles(extrema, effortExtreme, range).map((c, i) => ({
+  const extrema = findExtrema(samples, range * config.hysteresisRatio);
+  return buildCycles(extrema, effortExtreme, range, config).map((c, i) => ({
     repIndex: i + 1,
     startMs: c.startMs,
     peakMs: c.peakMs,
@@ -266,7 +322,7 @@ export function segmentRepsBySignal(
   }));
 }
 
-function resolveSignalSide(
+export function resolveSignalSide(
   poses: readonly PoseEstimate[],
   kind: SignalKind,
 ): "left" | "right" {
@@ -463,7 +519,12 @@ function buildCyclesFor(samples: Sample[]): {
   const minCount = extrema.filter((e) => e.type === "min").length;
   const maxCount = extrema.filter((e) => e.type === "max").length;
   const extremeAtLow = minCount >= maxCount;
-  const cycles = buildCycles(extrema, extremeAtLow ? "min" : "max", range).map((c, i) => ({
+  const cycles = buildCycles(
+    extrema,
+    extremeAtLow ? "min" : "max",
+    range,
+    DEFAULT_REP_SEGMENTATION_CONFIG,
+  ).map((c, i) => ({
     index: i + 1,
     startMs: c.startMs,
     extremeMs: c.peakMs,

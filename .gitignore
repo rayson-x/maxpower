@@ -45,6 +45,8 @@ src/agent/defaultCredentials.ts
 tools/harness/out/
 .test-build/
 .rule-engine-test-build/
+.segmentation-training-build/
 
 # Private field recordings are served locally for review, never committed.
 /public/field-captures/
+/data/training/
