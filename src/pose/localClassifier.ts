@@ -53,7 +53,10 @@ interface Rule {
   evaluate: (input: ClassifierInput) => { hit: boolean; detail: string } | null;
 }
 
-const CANDIDATES = listKinematicsProfiles();
+// Profiles with no field-validated discriminators remain available to manual
+// selection and replay, but must not win auto recognition by a coincidental
+// generic trajectory match.
+const CANDIDATES = listKinematicsProfiles().filter((profile) => profile.autoRecognizable !== false);
 
 function elbowRange(t: TrajectoryFeatures): number | null {
   return t.jointRom.find((r) => r.joint === "elbow")?.rangeDeg ?? null;

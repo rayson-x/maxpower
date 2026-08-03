@@ -11,6 +11,8 @@ export type MovementPattern =
   | "hip_hinge"
   | "horizontal_push"
   | "vertical_push"
+  | "shoulder_abduction"
+  | "shoulder_horizontal_abduction"
   | "elbow_flexion"
   | "elbow_extension";
 
@@ -46,6 +48,8 @@ const MOVEMENT_PATTERNS = new Set<MovementPattern>([
   "hip_hinge",
   "horizontal_push",
   "vertical_push",
+  "shoulder_abduction",
+  "shoulder_horizontal_abduction",
   "elbow_flexion",
   "elbow_extension",
 ]);
@@ -130,6 +134,52 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     aliases: ["深蹲", "自重深蹲"],
     movementPattern: "squat",
     equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "seated_shoulder_press",
+    nameZh: "坐姿推肩",
+    nameEn: "Seated shoulder press",
+    aliases: ["坐姿哑铃推肩", "坐姿器械推肩", "肩上推举"],
+    movementPattern: "vertical_push",
+    equipment: ["dumbbell or shoulder press machine", "bench"],
+    variationOf: null,
+    // The segmentation contract is ready for field capture, but its scores
+    // must first be approved against the athlete's recordings.
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "lateral_raise",
+    nameZh: "侧平举",
+    nameEn: "Lateral raise",
+    aliases: ["哑铃侧平举", "器械侧平举", "绳索侧平举"],
+    movementPattern: "shoulder_abduction",
+    equipment: ["dumbbell or cable"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "rear_delt_fly",
+    nameZh: "后束飞鸟",
+    nameEn: "Rear delt fly",
+    aliases: ["反向飞鸟", "反向蝴蝶机", "俯身飞鸟"],
+    movementPattern: "shoulder_horizontal_abduction",
+    equipment: ["reverse pec deck or dumbbell"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "face_pull",
+    nameZh: "绳索面拉",
+    nameEn: "Cable face pull",
+    aliases: ["面拉", "绳索面部拉"],
+    movementPattern: "horizontal_pull",
+    equipment: ["cable machine", "rope attachment"],
     variationOf: null,
     maturity: "experimental",
     source: PROJECT_SOURCE,

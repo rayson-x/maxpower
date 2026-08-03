@@ -24,7 +24,19 @@ export type RecognitionTag =
 export interface KinematicsProfile {
   exerciseId: string;
   version: string;
-  movementPattern: "horizontal_pull" | "vertical_pull" | "squat";
+  movementPattern:
+    | "horizontal_pull"
+    | "vertical_pull"
+    | "vertical_push"
+    | "shoulder_abduction"
+    | "shoulder_horizontal_abduction"
+    | "squat";
+  /**
+   * False means a user may select this experimental profile, but the local
+   * auto-classifier must leave it unknown until field recordings establish a
+   * discriminative signature. This prevents a press being guessed as a pull.
+   */
+  autoRecognizable?: boolean;
   recognitionTags: readonly RecognitionTag[];
   preferredView: CameraView;
   supportedViews: readonly CameraView[];
@@ -44,6 +56,8 @@ export interface KinematicsProfile {
 
 const COMMON_VIEWS: readonly CameraView[] = ["front", "side", "oblique45"];
 const SIDE_VIEWS: readonly CameraView[] = ["side", "oblique45"];
+const FRONT_OBLIQUE_VIEWS: readonly CameraView[] = ["front", "oblique45"];
+const OBLIQUE_ONLY_VIEWS: readonly CameraView[] = ["oblique45"];
 
 const PROFILE_LIST: readonly KinematicsProfile[] = [
   profile({
@@ -116,6 +130,61 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     // instead of borrowing generic standing evidence and misclassifying a squat
     // as an upper-body movement.
     recognitionTags: [],
+  }),
+  // Shoulder profiles are intentionally user-selected during the first field
+  // collection. A single 2D wrist path cannot safely distinguish a seated
+  // press from a pulldown, or a lateral raise from nearby cable variations.
+  profile({
+    exerciseId: "seated_shoulder_press",
+    version: "seated-shoulder-press-kinematics/v1",
+    movementPattern: "vertical_push",
+    signal: "wrist_height",
+    effortExtreme: "min",
+    preferredView: "oblique45",
+    supportedViews: FRONT_OBLIQUE_VIEWS,
+    metricViews: FRONT_OBLIQUE_VIEWS,
+    amplitudeJoints: ["shoulder", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
+  }),
+  profile({
+    exerciseId: "lateral_raise",
+    version: "lateral-raise-kinematics/v1",
+    movementPattern: "shoulder_abduction",
+    signal: "shoulder_angle",
+    effortExtreme: "max",
+    preferredView: "front",
+    supportedViews: FRONT_OBLIQUE_VIEWS,
+    metricViews: FRONT_OBLIQUE_VIEWS,
+    amplitudeJoints: ["hip", "shoulder", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
+  }),
+  profile({
+    exerciseId: "rear_delt_fly",
+    version: "rear-delt-fly-kinematics/v1",
+    movementPattern: "shoulder_horizontal_abduction",
+    signal: "shoulder_angle",
+    effortExtreme: "max",
+    preferredView: "oblique45",
+    supportedViews: OBLIQUE_ONLY_VIEWS,
+    metricViews: OBLIQUE_ONLY_VIEWS,
+    amplitudeJoints: ["hip", "shoulder", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
+  }),
+  profile({
+    exerciseId: "face_pull",
+    version: "face-pull-kinematics/v1",
+    movementPattern: "horizontal_pull",
+    signal: "elbow_angle",
+    effortExtreme: "min",
+    preferredView: "oblique45",
+    supportedViews: FRONT_OBLIQUE_VIEWS,
+    metricViews: FRONT_OBLIQUE_VIEWS,
+    amplitudeJoints: ["shoulder", "elbow", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
   }),
 ];
 
@@ -190,12 +259,14 @@ function profile(input: {
   bilateralJoints?: readonly LogicalJoint[];
   bilateralViews?: readonly CameraView[];
   recognitionTags: readonly RecognitionTag[];
+  autoRecognizable?: boolean;
 }): KinematicsProfile {
   const definitionPrefix = `${input.exerciseId.replaceAll("_", "-")}/v1`;
   return {
     exerciseId: input.exerciseId,
     version: input.version,
     movementPattern: input.movementPattern,
+    autoRecognizable: input.autoRecognizable ?? true,
     recognitionTags: input.recognitionTags,
     preferredView: input.preferredView,
     supportedViews: input.supportedViews ?? COMMON_VIEWS,
