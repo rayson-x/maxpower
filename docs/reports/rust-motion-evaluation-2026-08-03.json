@@ -1,10 +1,14 @@
 {
   "schemaVersion": "form-coach-rust-motion-evaluation/v1",
-  "generatedAt": "2026-08-03T18:10:52.030Z",
+  "generatedAt": "2026-08-03T19:51:11.363Z",
   "algorithmVersion": "rust-canonical-wasm/v1 + generic-rep-state-machine/v1",
+  "evaluationMode": "canonical-sidecar-compatibility-replay",
+  "accuracyClaim": "Rep-engine compatibility only; not MediaPipe-to-Rust end-to-end accuracy",
+  "profileContextAssumption": "Approval rows omit training side and equipment variation; replay assumes bilateral default variation and cannot promote profiles",
   "scope": {
     "sourceCaptureCount": 39,
     "sourceSegmentCount": 375,
+    "sourceReviewedNegativeWindowCount": 179,
     "supportedCaptureCount": 10,
     "supportedExercises": [
       "lat_pulldown",
@@ -16,7 +20,7 @@
   "splitAudit": {
     "leakageFreeForPromotion": false,
     "reason": "The first Rust thresholds were explored while the full local corpus was visible; held-out metrics are descriptive, not a valid promotion claim.",
-    "gateMetricsPassed": true,
+    "gateMetricsPassed": false,
     "allCaptureAssignments": [
       {
         "captureId": "field-capture-2026-08-02T18-15-03-101Z",
@@ -24,7 +28,7 @@
         "capturePosition": "rearLeft45",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": false,
@@ -39,7 +43,7 @@
         "capturePosition": "rearRight45",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -54,7 +58,7 @@
         "capturePosition": "rearRight45",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -72,7 +76,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": false,
@@ -87,7 +91,7 @@
         "capturePosition": "frontRight45",
         "analysisView": "oblique45",
         "split": "held_out",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -102,7 +106,7 @@
         "capturePosition": "rearLeft45",
         "analysisView": "front",
         "split": "held_out",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -117,7 +121,7 @@
         "capturePosition": "frontLeft45",
         "analysisView": "oblique45",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": false,
@@ -132,7 +136,7 @@
         "capturePosition": "frontLeft45",
         "analysisView": "oblique45",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -207,7 +211,7 @@
         "capturePosition": "right",
         "analysisView": "side",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -225,7 +229,7 @@
         "capturePosition": "rearLeft45",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": false,
@@ -242,7 +246,7 @@
         "capturePosition": "frontLeft45",
         "analysisView": "oblique45",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -257,7 +261,7 @@
         "capturePosition": "frontRight45",
         "analysisView": "oblique45",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -272,7 +276,7 @@
         "capturePosition": "frontRight45",
         "analysisView": "oblique45",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -287,7 +291,7 @@
         "capturePosition": "frontLeft45",
         "analysisView": "oblique45",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -377,7 +381,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -392,7 +396,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -407,7 +411,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "held_out",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -422,7 +426,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": false,
@@ -439,7 +443,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -454,7 +458,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": true,
@@ -469,7 +473,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": true,
           "tuning": false,
@@ -484,7 +488,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -501,7 +505,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -518,7 +522,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "held_out",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -535,7 +539,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "held_out",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -553,7 +557,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "tuning",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -570,7 +574,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -587,7 +591,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "held_out",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -604,7 +608,7 @@
         "capturePosition": "front",
         "analysisView": "front",
         "split": "challenge",
-        "rustProfileStatus": "unsupported_profile",
+        "rustProfileStatus": "unsupported_profile_or_context",
         "eligibility": {
           "evaluation": false,
           "tuning": false,
@@ -635,34 +639,56 @@
   "summary": {
     "captureCount": 10,
     "truthCount": 72,
-    "predictedCount": 60,
-    "exactCountCaptures": 6,
-    "exactCountRatio": 0.6,
-    "matchedReps": 59,
-    "falsePositiveReps": 1,
-    "missedReps": 13,
-    "precision": 0.9833333333333333,
-    "recall": 0.8194444444444444,
-    "f1": 0.893939393939394,
-    "negativeWindowFalsePositives": 2,
-    "coreReplayFpsP50": 6507.7,
-    "coreReplayFpsP95": 9197.3
+    "predictedCount": 51,
+    "exactCountCaptures": 2,
+    "exactCountRatio": 0.2,
+    "matchedReps": 42,
+    "falsePositiveReps": 9,
+    "missedReps": 30,
+    "precision": 0.8235294117647058,
+    "recall": 0.5833333333333334,
+    "f1": 0.6829268292682927,
+    "negativeWindowFalsePositives": 8,
+    "rawTriggerCount": 79,
+    "rawMatchedTriggers": 51,
+    "rawFalsePositiveTriggers": 28,
+    "rawMissedReps": 21,
+    "rawPrecision": 0.6455696202531646,
+    "rawRecall": 0.7083333333333334,
+    "rawF1": 0.6754966887417219,
+    "rawExactCountRatio": 0,
+    "rawNegativeWindowFalsePositives": 20,
+    "productFilteredTriggerCount": 28,
+    "meanBoundaryErrorMs": 483.7142857142857,
+    "coreReplayFpsP50": 4645.9,
+    "coreReplayFpsP95": 6695.8
   },
   "heldOut": {
     "captureCount": 3,
     "truthCount": 22,
-    "predictedCount": 22,
-    "exactCountCaptures": 3,
-    "exactCountRatio": 1,
-    "matchedReps": 22,
-    "falsePositiveReps": 0,
-    "missedReps": 0,
-    "precision": 1,
-    "recall": 1,
-    "f1": 1,
-    "negativeWindowFalsePositives": 0,
-    "coreReplayFpsP50": 3662.7,
-    "coreReplayFpsP95": 3662.7
+    "predictedCount": 20,
+    "exactCountCaptures": 2,
+    "exactCountRatio": 0.6666666666666666,
+    "matchedReps": 17,
+    "falsePositiveReps": 3,
+    "missedReps": 5,
+    "precision": 0.85,
+    "recall": 0.7727272727272727,
+    "f1": 0.8095238095238095,
+    "negativeWindowFalsePositives": 2,
+    "rawTriggerCount": 26,
+    "rawMatchedTriggers": 18,
+    "rawFalsePositiveTriggers": 8,
+    "rawMissedReps": 4,
+    "rawPrecision": 0.6923076923076923,
+    "rawRecall": 0.8181818181818182,
+    "rawF1": 0.7500000000000001,
+    "rawExactCountRatio": 0,
+    "rawNegativeWindowFalsePositives": 4,
+    "productFilteredTriggerCount": 6,
+    "meanBoundaryErrorMs": 514.3333333333334,
+    "coreReplayFpsP50": 3445.9,
+    "coreReplayFpsP95": 3445.9
   },
   "challenge": {
     "captureCount": 1,
@@ -677,8 +703,158 @@
     "recall": 0.8333333333333334,
     "f1": 0.9090909090909091,
     "negativeWindowFalsePositives": 0,
-    "coreReplayFpsP50": 2597.8,
-    "coreReplayFpsP95": 2597.8
+    "rawTriggerCount": 9,
+    "rawMatchedTriggers": 6,
+    "rawFalsePositiveTriggers": 3,
+    "rawMissedReps": 0,
+    "rawPrecision": 0.6666666666666666,
+    "rawRecall": 1,
+    "rawF1": 0.8,
+    "rawExactCountRatio": 0,
+    "rawNegativeWindowFalsePositives": 3,
+    "productFilteredTriggerCount": 4,
+    "meanBoundaryErrorMs": 288,
+    "coreReplayFpsP50": 2702.8,
+    "coreReplayFpsP95": 2702.8
+  },
+  "byExercise": {
+    "lat_pulldown": {
+      "captureCount": 4,
+      "truthCount": 28,
+      "predictedCount": 28,
+      "exactCountCaptures": 2,
+      "exactCountRatio": 0.5,
+      "matchedReps": 27,
+      "falsePositiveReps": 1,
+      "missedReps": 1,
+      "precision": 0.9642857142857143,
+      "recall": 0.9642857142857143,
+      "f1": 0.9642857142857143,
+      "negativeWindowFalsePositives": 1,
+      "rawTriggerCount": 36,
+      "rawMatchedTriggers": 28,
+      "rawFalsePositiveTriggers": 8,
+      "rawMissedReps": 0,
+      "rawPrecision": 0.7777777777777778,
+      "rawRecall": 1,
+      "rawF1": 0.8750000000000001,
+      "rawExactCountRatio": 0,
+      "rawNegativeWindowFalsePositives": 7,
+      "productFilteredTriggerCount": 8,
+      "meanBoundaryErrorMs": 295,
+      "coreReplayFpsP50": 2702.8,
+      "coreReplayFpsP95": 3445.9
+    },
+    "seated_shoulder_press": {
+      "captureCount": 6,
+      "truthCount": 44,
+      "predictedCount": 23,
+      "exactCountCaptures": 0,
+      "exactCountRatio": 0,
+      "matchedReps": 15,
+      "falsePositiveReps": 8,
+      "missedReps": 29,
+      "precision": 0.6521739130434783,
+      "recall": 0.3409090909090909,
+      "f1": 0.44776119402985076,
+      "negativeWindowFalsePositives": 7,
+      "rawTriggerCount": 43,
+      "rawMatchedTriggers": 23,
+      "rawFalsePositiveTriggers": 20,
+      "rawMissedReps": 21,
+      "rawPrecision": 0.5348837209302325,
+      "rawRecall": 0.5227272727272727,
+      "rawF1": 0.5287356321839081,
+      "rawExactCountRatio": 0,
+      "rawNegativeWindowFalsePositives": 13,
+      "productFilteredTriggerCount": 20,
+      "meanBoundaryErrorMs": 735.3333333333334,
+      "coreReplayFpsP50": 5235,
+      "coreReplayFpsP95": 6695.8
+    }
+  },
+  "byCapturePosition": {
+    "front": {
+      "captureCount": 6,
+      "truthCount": 44,
+      "predictedCount": 23,
+      "exactCountCaptures": 0,
+      "exactCountRatio": 0,
+      "matchedReps": 15,
+      "falsePositiveReps": 8,
+      "missedReps": 29,
+      "precision": 0.6521739130434783,
+      "recall": 0.3409090909090909,
+      "f1": 0.44776119402985076,
+      "negativeWindowFalsePositives": 7,
+      "rawTriggerCount": 43,
+      "rawMatchedTriggers": 23,
+      "rawFalsePositiveTriggers": 20,
+      "rawMissedReps": 21,
+      "rawPrecision": 0.5348837209302325,
+      "rawRecall": 0.5227272727272727,
+      "rawF1": 0.5287356321839081,
+      "rawExactCountRatio": 0,
+      "rawNegativeWindowFalsePositives": 13,
+      "productFilteredTriggerCount": 20,
+      "meanBoundaryErrorMs": 735.3333333333334,
+      "coreReplayFpsP50": 5235,
+      "coreReplayFpsP95": 6695.8
+    },
+    "rear": {
+      "captureCount": 1,
+      "truthCount": 8,
+      "predictedCount": 8,
+      "exactCountCaptures": 1,
+      "exactCountRatio": 1,
+      "matchedReps": 8,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "negativeWindowFalsePositives": 0,
+      "rawTriggerCount": 9,
+      "rawMatchedTriggers": 8,
+      "rawFalsePositiveTriggers": 1,
+      "rawMissedReps": 0,
+      "rawPrecision": 0.8888888888888888,
+      "rawRecall": 1,
+      "rawF1": 0.9411764705882353,
+      "rawExactCountRatio": 0,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 1,
+      "meanBoundaryErrorMs": 236,
+      "coreReplayFpsP50": 675.7,
+      "coreReplayFpsP95": 675.7
+    },
+    "rearLeft45": {
+      "captureCount": 3,
+      "truthCount": 20,
+      "predictedCount": 20,
+      "exactCountCaptures": 1,
+      "exactCountRatio": 0.3333333333333333,
+      "matchedReps": 19,
+      "falsePositiveReps": 1,
+      "missedReps": 1,
+      "precision": 0.95,
+      "recall": 0.95,
+      "f1": 0.9500000000000001,
+      "negativeWindowFalsePositives": 1,
+      "rawTriggerCount": 27,
+      "rawMatchedTriggers": 20,
+      "rawFalsePositiveTriggers": 7,
+      "rawMissedReps": 0,
+      "rawPrecision": 0.7407407407407407,
+      "rawRecall": 1,
+      "rawF1": 0.851063829787234,
+      "rawExactCountRatio": 0,
+      "rawNegativeWindowFalsePositives": 6,
+      "productFilteredTriggerCount": 7,
+      "meanBoundaryErrorMs": 314.6666666666667,
+      "coreReplayFpsP50": 3445.9,
+      "coreReplayFpsP95": 3445.9
+    }
   },
   "promotion": {
     "passed": false,
@@ -701,14 +877,229 @@
       "split": "held_out",
       "truthCount": 8,
       "predictedCount": 8,
+      "rawTriggerCount": 9,
+      "rawMatchedTriggers": 8,
+      "rawFalsePositiveTriggers": 1,
+      "rawMissedReps": 0,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 1,
+      "tsPredictedCount": 8,
+      "tsMatchedReps": 8,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 6581,
+        "boundary": "endMs",
+        "deltaMs": 262
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4748,
+        "boundary": "startMs",
+        "deltaMs": 463
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4843,
+        "boundary": "startMs",
+        "deltaMs": 368
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4748,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 5211,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 2,
+          "expected": {
+            "timestampMs": 6581,
+            "phase": "ready"
+          },
+          "actual": {
+            "timestampMs": 6843,
+            "phase": "ready"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4843,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 5211,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 5265,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 5561,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 5961,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 6170,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 7191,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 7515,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 7919,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 8123,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 9018,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 9381,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 9810,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 10009,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 10899,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 11244,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 11659,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 11853,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 12717,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 13100,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 13509,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 13636,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 14623,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 14907,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 15242,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 15396,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 16295,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 16569,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 17057,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 17183,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 18108,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 18401,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 18814,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 18960,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 20412,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 20492,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 21109,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 22064,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 22398,
+          "phase": "frozen"
+        }
+      ],
       "exactCount": true,
       "matchedReps": 8,
       "falsePositiveReps": 0,
       "missedReps": 0,
       "meanBoundaryErrorMs": 236,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 394.81,
-      "processingFps": 894.1,
+      "processingMs": 522.38,
+      "processingFps": 675.7,
       "predicted": [
         {
           "startMs": 5211,
@@ -765,18 +1156,241 @@
       "exerciseId": "lat_pulldown",
       "capturePosition": "rearLeft45",
       "analysisView": "front",
-      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "profileVersion": "lat-pulldown/rear-left-45/bilateral/cable/v1",
       "split": "held_out",
       "truthCount": 8,
       "predictedCount": 8,
+      "rawTriggerCount": 10,
+      "rawMatchedTriggers": 8,
+      "rawFalsePositiveTriggers": 2,
+      "rawMissedReps": 0,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 2,
+      "productFilteredTriggerCount": 2,
+      "tsPredictedCount": 9,
+      "tsMatchedReps": 8,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4466,
+        "boundary": "startMs",
+        "deltaMs": 1234
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4466,
+        "boundary": "startMs",
+        "deltaMs": 1505
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 5700,
+        "boundary": "startMs",
+        "deltaMs": 271
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4466,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 5971,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4466,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 5700,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 5700,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 5971,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 3315,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 3587,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 6069,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 6487,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 6894,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 7086,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 8202,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 8618,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 9015,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 9143,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 10242,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 10601,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 10994,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 11253,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 12226,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 12611,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 13102,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 13236,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 14351,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 14743,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 15093,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 15297,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 16487,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 16838,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 17182,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 17302,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 18504,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 18854,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 19195,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 19394,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 20617,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 21095,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 21441,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 21561,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 23247,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 23380,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 23713,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 25733,
+          "phase": "frozen"
+        },
+        {
+          "timestampMs": 25992,
+          "phase": "return"
+        }
+      ],
       "exactCount": true,
       "matchedReps": 8,
       "falsePositiveReps": 0,
       "missedReps": 0,
       "meanBoundaryErrorMs": 351,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 104.29,
-      "processingFps": 3662.7,
+      "processingMs": 110.85,
+      "processingFps": 3445.9,
       "predicted": [
         {
           "startMs": 5971,
@@ -833,18 +1447,209 @@
       "exerciseId": "lat_pulldown",
       "capturePosition": "rearLeft45",
       "analysisView": "front",
-      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "profileVersion": "lat-pulldown/rear-left-45/bilateral/cable/v1",
       "split": "challenge",
       "truthCount": 6,
       "predictedCount": 5,
+      "rawTriggerCount": 9,
+      "rawMatchedTriggers": 6,
+      "rawFalsePositiveTriggers": 3,
+      "rawMissedReps": 0,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 3,
+      "productFilteredTriggerCount": 4,
+      "tsPredictedCount": 6,
+      "tsMatchedReps": 6,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4980,
+        "boundary": "startMs",
+        "deltaMs": -1546
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 7925,
+        "boundary": "endMs",
+        "deltaMs": -374
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4980,
+        "boundary": "startMs",
+        "deltaMs": 1786
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 2,
+          "expected": {
+            "timestampMs": 8299,
+            "phase": "ready"
+          },
+          "actual": {
+            "timestampMs": 7925,
+            "phase": "ready"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 6526,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 4980,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4980,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 6766,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 6835,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 7173,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 7713,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 7925,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 9025,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 9496,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 9904,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 10211,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 11265,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 11668,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 12054,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 12271,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 13361,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 13693,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 14175,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 14329,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 15260,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 15782,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 16129,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 16262,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 17222,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 18236,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 20134,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 20193,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 20327,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 22718,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 22796,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 22861,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 22934,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 23062,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 23143,
+          "phase": "frozen"
+        }
+      ],
       "exactCount": false,
       "matchedReps": 5,
       "falsePositiveReps": 0,
       "missedReps": 1,
       "meanBoundaryErrorMs": 288,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 132.42,
-      "processingFps": 2597.8,
+      "processingMs": 127.27,
+      "processingFps": 2702.8,
       "predicted": [
         {
           "startMs": 6766,
@@ -883,18 +1688,213 @@
       "exerciseId": "lat_pulldown",
       "capturePosition": "rearLeft45",
       "analysisView": "front",
-      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "profileVersion": "lat-pulldown/rear-left-45/bilateral/cable/v1",
       "split": "tuning",
       "truthCount": 6,
       "predictedCount": 7,
+      "rawTriggerCount": 8,
+      "rawMatchedTriggers": 6,
+      "rawFalsePositiveTriggers": 2,
+      "rawMissedReps": 0,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 1,
+      "tsPredictedCount": 7,
+      "tsMatchedReps": 6,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4467,
+        "boundary": "startMs",
+        "deltaMs": -1106
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 5573,
+        "boundary": "startMs",
+        "deltaMs": 704
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 4467,
+        "boundary": "startMs",
+        "deltaMs": 1810
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 5573,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 6277,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 5573,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 4467,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4467,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 6277,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 6337,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 6656,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 7081,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 7275,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 8340,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 8617,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 9065,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 9327,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 10268,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 10634,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 11154,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 11347,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 12266,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 12626,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 13060,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 13202,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 14119,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 14178,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 14253,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 14570,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 14908,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 15091,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 16041,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 16381,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 16774,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 16983,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 18889,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 19086,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 19495,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 21816,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 21895,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 22032,
+          "phase": "ready"
+        }
+      ],
       "exactCount": false,
       "matchedReps": 6,
       "falsePositiveReps": 1,
       "missedReps": 0,
       "meanBoundaryErrorMs": 305,
       "negativeWindowFalsePositives": 1,
-      "processingMs": 47.81,
-      "processingFps": 7048.9,
+      "processingMs": 70.28,
+      "processingFps": 4794.9,
       "predicted": [
         {
           "startMs": 6277,
@@ -945,90 +1945,371 @@
       "exerciseId": "seated_shoulder_press",
       "capturePosition": "front",
       "analysisView": "front",
-      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 12,
-      "predictedCount": 12,
-      "exactCount": true,
-      "matchedReps": 12,
-      "falsePositiveReps": 0,
-      "missedReps": 0,
-      "meanBoundaryErrorMs": 306,
-      "negativeWindowFalsePositives": 0,
-      "processingMs": 74.38,
-      "processingFps": 5901.8,
+      "predictedCount": 13,
+      "rawTriggerCount": 13,
+      "rawMatchedTriggers": 11,
+      "rawFalsePositiveTriggers": 2,
+      "rawMissedReps": 1,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 0,
+      "tsPredictedCount": 14,
+      "tsMatchedReps": 11,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 700,
+        "boundary": "startMs",
+        "deltaMs": -3446
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 1334,
+        "boundary": "startMs",
+        "deltaMs": -2812
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 700,
+        "boundary": "startMs",
+        "deltaMs": 634
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4146,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 1334,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 4146,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 700,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 700,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 1334,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 1400,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 1600,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 4334,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 4634,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 5701,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 5901,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 6668,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 7034,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 7668,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 7901,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 8768,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 9101,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 9735,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 9868,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 10635,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 10835,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 11535,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 11735,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 12502,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 12768,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 13535,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 13668,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 14368,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 14635,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 15235,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 15402,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 16235,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 16469,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 17102,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 17235,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 18069,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 18269,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 18969,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 19236,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 20202,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 20336,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 21002,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 21236,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 21903,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 22169,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 22869,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 23036,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 23769,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 24036,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 24670,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 24870,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 25603,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 26036,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 26770,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 26936,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 29503,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 29770,
+          "phase": "ready"
+        }
+      ],
+      "exactCount": false,
+      "matchedReps": 11,
+      "falsePositiveReps": 2,
+      "missedReps": 1,
+      "meanBoundaryErrorMs": 785,
+      "negativeWindowFalsePositives": 2,
+      "processingMs": 111.18,
+      "processingFps": 3948.4,
       "predicted": [
         {
-          "startMs": 4567,
-          "peakMs": 5434,
-          "endMs": 5901,
-          "canonicalSliceHash": "7824471308481339333"
+          "startMs": 1334,
+          "peakMs": 3801,
+          "endMs": 4634,
+          "canonicalSliceHash": "14952474908076795925"
         },
         {
-          "startMs": 6734,
-          "peakMs": 7401,
-          "endMs": 7801,
-          "canonicalSliceHash": "5877610103054312147"
+          "startMs": 5601,
+          "peakMs": 6201,
+          "endMs": 7034,
+          "canonicalSliceHash": "5819079754154438366"
         },
         {
-          "startMs": 8801,
-          "peakMs": 9501,
-          "endMs": 9801,
-          "canonicalSliceHash": "6972406184630916663"
+          "startMs": 7634,
+          "peakMs": 8234,
+          "endMs": 9101,
+          "canonicalSliceHash": "15696990420119122025"
         },
         {
-          "startMs": 10668,
-          "peakMs": 11301,
-          "endMs": 11568,
-          "canonicalSliceHash": "5844786407573855312"
+          "startMs": 9635,
+          "peakMs": 10068,
+          "endMs": 10835,
+          "canonicalSliceHash": "7651987200295441278"
         },
         {
-          "startMs": 12568,
-          "peakMs": 13235,
-          "endMs": 13568,
-          "canonicalSliceHash": "4791004328346094666"
+          "startMs": 11335,
+          "peakMs": 12002,
+          "endMs": 12768,
+          "canonicalSliceHash": "13201987171736801296"
         },
         {
-          "startMs": 14402,
-          "peakMs": 14935,
-          "endMs": 15402,
-          "canonicalSliceHash": "16189365104656436107"
+          "startMs": 13435,
+          "peakMs": 13902,
+          "endMs": 14635,
+          "canonicalSliceHash": "243633572854462861"
         },
         {
-          "startMs": 16269,
-          "peakMs": 16802,
-          "endMs": 17135,
-          "canonicalSliceHash": "7186874597825892961"
+          "startMs": 15135,
+          "peakMs": 15702,
+          "endMs": 16469,
+          "canonicalSliceHash": "628099331104425216"
         },
         {
-          "startMs": 18069,
-          "peakMs": 18636,
-          "endMs": 19069,
-          "canonicalSliceHash": "578050471528136408"
+          "startMs": 17002,
+          "peakMs": 17469,
+          "endMs": 18269,
+          "canonicalSliceHash": "8133155371365260638"
         },
         {
-          "startMs": 20002,
-          "peakMs": 20636,
-          "endMs": 21069,
-          "canonicalSliceHash": "7707465601976471976"
+          "startMs": 18936,
+          "peakMs": 19436,
+          "endMs": 20336,
+          "canonicalSliceHash": "145140172557084621"
         },
         {
-          "startMs": 21936,
-          "peakMs": 22603,
-          "endMs": 23036,
-          "canonicalSliceHash": "1754469547219869789"
+          "startMs": 20936,
+          "peakMs": 21436,
+          "endMs": 22169,
+          "canonicalSliceHash": "2930181324558031982"
         },
         {
-          "startMs": 23836,
-          "peakMs": 24403,
-          "endMs": 24770,
-          "canonicalSliceHash": "16633475243127640596"
+          "startMs": 22736,
+          "peakMs": 23269,
+          "endMs": 24036,
+          "canonicalSliceHash": "10202458352554278006"
         },
         {
-          "startMs": 25836,
-          "peakMs": 26403,
-          "endMs": 26836,
-          "canonicalSliceHash": "18191394073554467964"
+          "startMs": 24603,
+          "peakMs": 25103,
+          "endMs": 26036,
+          "canonicalSliceHash": "16664981681740718272"
+        },
+        {
+          "startMs": 26636,
+          "peakMs": 28837,
+          "endMs": 29770,
+          "canonicalSliceHash": "6189078650351672545"
         }
       ]
     },
@@ -1037,54 +2318,205 @@
       "exerciseId": "seated_shoulder_press",
       "capturePosition": "front",
       "analysisView": "front",
-      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "held_out",
       "truthCount": 6,
-      "predictedCount": 6,
-      "exactCount": true,
-      "matchedReps": 6,
-      "falsePositiveReps": 0,
-      "missedReps": 0,
-      "meanBoundaryErrorMs": 755,
-      "negativeWindowFalsePositives": 0,
-      "processingMs": 42.62,
-      "processingFps": 9197.3,
+      "predictedCount": 4,
+      "rawTriggerCount": 7,
+      "rawMatchedTriggers": 2,
+      "rawFalsePositiveTriggers": 5,
+      "rawMissedReps": 4,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 3,
+      "tsPredictedCount": 7,
+      "tsMatchedReps": 3,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 700,
+        "boundary": "startMs",
+        "deltaMs": -4346
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 567,
+        "boundary": "startMs",
+        "deltaMs": -4479
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 7101,
+        "boundary": "endMs",
+        "deltaMs": 8734
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 5046,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 567,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 5046,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 700,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 2,
+          "expected": {
+            "timestampMs": 7101,
+            "phase": "ready"
+          },
+          "actual": {
+            "timestampMs": 15835,
+            "phase": "ready"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 700,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 733,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 4267,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 15835,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 15968,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 16268,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 17868,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 18369,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 19302,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 19735,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 20935,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 21135,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 22302,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 22369,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 22402,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 22469,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 22536,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 22569,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 22636,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 23836,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 24069,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 24102,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 26103,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 26269,
+          "phase": "ready"
+        }
+      ],
+      "exactCount": false,
+      "matchedReps": 1,
+      "falsePositiveReps": 3,
+      "missedReps": 5,
+      "meanBoundaryErrorMs": 956,
+      "negativeWindowFalsePositives": 2,
+      "processingMs": 63.79,
+      "processingFps": 6145.6,
       "predicted": [
         {
-          "startMs": 4334,
-          "peakMs": 7101,
-          "endMs": 7834,
-          "canonicalSliceHash": "17547445698711019527"
+          "startMs": 567,
+          "peakMs": 3967,
+          "endMs": 15835,
+          "canonicalSliceHash": "10263345576870027269"
         },
         {
-          "startMs": 9134,
-          "peakMs": 9868,
-          "endMs": 10434,
-          "canonicalSliceHash": "11667710091277271808"
+          "startMs": 15835,
+          "peakMs": 17035,
+          "endMs": 18369,
+          "canonicalSliceHash": "15805813961528169281"
         },
         {
-          "startMs": 11734,
-          "peakMs": 12535,
-          "endMs": 13335,
-          "canonicalSliceHash": "8002340142333593003"
+          "startMs": 19269,
+          "peakMs": 20002,
+          "endMs": 21135,
+          "canonicalSliceHash": "17484272128651326926"
         },
         {
-          "startMs": 15135,
-          "peakMs": 15835,
-          "endMs": 16268,
-          "canonicalSliceHash": "6503630752544955825"
-        },
-        {
-          "startMs": 18102,
-          "peakMs": 18835,
-          "endMs": 19302,
-          "canonicalSliceHash": "4407344274445786046"
-        },
-        {
-          "startMs": 21035,
-          "peakMs": 21602,
-          "endMs": 22302,
-          "canonicalSliceHash": "4804916055975099368"
+          "startMs": 22569,
+          "peakMs": 25136,
+          "endMs": 26269,
+          "canonicalSliceHash": "6606449035032116746"
         }
       ]
     },
@@ -1093,48 +2525,115 @@
       "exerciseId": "seated_shoulder_press",
       "capturePosition": "front",
       "analysisView": "front",
-      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 5,
-      "predictedCount": 5,
-      "exactCount": true,
-      "matchedReps": 5,
-      "falsePositiveReps": 0,
-      "missedReps": 0,
-      "meanBoundaryErrorMs": 748,
-      "negativeWindowFalsePositives": 0,
-      "processingMs": 65.54,
-      "processingFps": 7049.5,
+      "predictedCount": 1,
+      "rawTriggerCount": 1,
+      "rawMatchedTriggers": 0,
+      "rawFalsePositiveTriggers": 1,
+      "rawMissedReps": 5,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 0,
+      "tsPredictedCount": 6,
+      "tsMatchedReps": 2,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 534,
+        "boundary": "startMs",
+        "deltaMs": -6415
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 867,
+        "boundary": "startMs",
+        "deltaMs": -6082
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 534,
+        "boundary": "startMs",
+        "deltaMs": 333
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 6949,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 867,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 6949,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 534,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 534,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 867,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 934,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 1067,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 5634,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 26436,
+          "phase": "frozen"
+        },
+        {
+          "timestampMs": 26936,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 27670,
+          "phase": "ready"
+        }
+      ],
+      "exactCount": false,
+      "matchedReps": 0,
+      "falsePositiveReps": 1,
+      "missedReps": 5,
+      "meanBoundaryErrorMs": null,
+      "negativeWindowFalsePositives": 1,
+      "processingMs": 69,
+      "processingFps": 6695.8,
       "predicted": [
         {
-          "startMs": 5801,
-          "peakMs": 8568,
-          "endMs": 9335,
-          "canonicalSliceHash": "16284231245123285020"
-        },
-        {
-          "startMs": 10601,
-          "peakMs": 11335,
-          "endMs": 12235,
-          "canonicalSliceHash": "17249932797949710502"
-        },
-        {
-          "startMs": 14035,
-          "peakMs": 14902,
-          "endMs": 15602,
-          "canonicalSliceHash": "1634612433874480094"
-        },
-        {
-          "startMs": 17802,
-          "peakMs": 18702,
-          "endMs": 19669,
-          "canonicalSliceHash": "4704097249526924352"
-        },
-        {
-          "startMs": 22703,
-          "peakMs": 23436,
-          "endMs": 24136,
-          "canonicalSliceHash": "17749298686885852473"
+          "startMs": 867,
+          "peakMs": 5267,
+          "endMs": 27670,
+          "canonicalSliceHash": "1700438312431975300"
         }
       ]
     },
@@ -1143,85 +2642,216 @@
       "exerciseId": "seated_shoulder_press",
       "capturePosition": "front",
       "analysisView": "front",
-      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 3,
-      "predictedCount": 0,
+      "predictedCount": 1,
+      "rawTriggerCount": 1,
+      "rawMatchedTriggers": 0,
+      "rawFalsePositiveTriggers": 1,
+      "rawMissedReps": 3,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 0,
+      "tsPredictedCount": 3,
+      "tsMatchedReps": 0,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 9816,
+        "boundary": "startMs",
+        "deltaMs": 2919
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 667,
+        "boundary": "startMs",
+        "deltaMs": -9149
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 667,
+        "boundary": "startMs",
+        "deltaMs": -12068
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 9816,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 667,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 9816,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 12735,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 12735,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 667,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 700,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 867,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 5700,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 27969,
+          "phase": "ready"
+        }
+      ],
       "exactCount": false,
       "matchedReps": 0,
-      "falsePositiveReps": 0,
+      "falsePositiveReps": 1,
       "missedReps": 3,
       "meanBoundaryErrorMs": null,
-      "negativeWindowFalsePositives": 0,
-      "processingMs": 76.22,
-      "processingFps": 6507.7,
-      "predicted": []
+      "negativeWindowFalsePositives": 1,
+      "processingMs": 106.76,
+      "processingFps": 4645.9,
+      "predicted": [
+        {
+          "startMs": 667,
+          "peakMs": 5100,
+          "endMs": 27969,
+          "canonicalSliceHash": "14117527490071101561"
+        }
+      ]
     },
     {
       "captureId": "field-capture-2026-08-03T08-15-35-147Z",
       "exerciseId": "seated_shoulder_press",
       "capturePosition": "front",
       "analysisView": "front",
-      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 8,
-      "predictedCount": 8,
-      "exactCount": true,
-      "matchedReps": 8,
-      "falsePositiveReps": 0,
-      "missedReps": 0,
-      "meanBoundaryErrorMs": 672,
-      "negativeWindowFalsePositives": 0,
-      "processingMs": 50.57,
-      "processingFps": 9729.5,
+      "predictedCount": 1,
+      "rawTriggerCount": 1,
+      "rawMatchedTriggers": 0,
+      "rawFalsePositiveTriggers": 1,
+      "rawMissedReps": 8,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 1,
+      "productFilteredTriggerCount": 0,
+      "tsPredictedCount": 10,
+      "tsMatchedReps": 7,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 833,
+        "boundary": "startMs",
+        "deltaMs": -5639
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 500,
+        "boundary": "startMs",
+        "deltaMs": -5972
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 500,
+        "boundary": "startMs",
+        "deltaMs": -333
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 6472,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 500,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 6472,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 833,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 833,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 500,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 667,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 700,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 4767,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 32137,
+          "phase": "ready"
+        }
+      ],
+      "exactCount": false,
+      "matchedReps": 0,
+      "falsePositiveReps": 1,
+      "missedReps": 8,
+      "meanBoundaryErrorMs": null,
+      "negativeWindowFalsePositives": 1,
+      "processingMs": 57.56,
+      "processingFps": 8548.2,
       "predicted": [
         {
-          "startMs": 4767,
-          "peakMs": 7934,
-          "endMs": 8768,
-          "canonicalSliceHash": "6065303562347413248"
-        },
-        {
-          "startMs": 9834,
-          "peakMs": 10434,
-          "endMs": 11001,
-          "canonicalSliceHash": "2519152219526825369"
-        },
-        {
-          "startMs": 12768,
-          "peakMs": 13335,
-          "endMs": 13935,
-          "canonicalSliceHash": "739696498207051671"
-        },
-        {
-          "startMs": 15168,
-          "peakMs": 15668,
-          "endMs": 16268,
-          "canonicalSliceHash": "3960685071975824805"
-        },
-        {
-          "startMs": 17602,
-          "peakMs": 18202,
-          "endMs": 18835,
-          "canonicalSliceHash": "17752856783294154450"
-        },
-        {
-          "startMs": 21002,
-          "peakMs": 21536,
-          "endMs": 21969,
-          "canonicalSliceHash": "9536917309850583880"
-        },
-        {
-          "startMs": 24936,
-          "peakMs": 25603,
-          "endMs": 26236,
-          "canonicalSliceHash": "11630213105834611938"
-        },
-        {
-          "startMs": 28103,
-          "peakMs": 28936,
-          "endMs": 29436,
-          "canonicalSliceHash": "9201567959433804696"
+          "startMs": 500,
+          "peakMs": 4434,
+          "endMs": 32137,
+          "canonicalSliceHash": "6263765688312463719"
         }
       ]
     },
@@ -1230,24 +2860,295 @@
       "exerciseId": "seated_shoulder_press",
       "capturePosition": "front",
       "analysisView": "front",
-      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 10,
-      "predictedCount": 1,
+      "predictedCount": 3,
+      "rawTriggerCount": 20,
+      "rawMatchedTriggers": 10,
+      "rawFalsePositiveTriggers": 10,
+      "rawMissedReps": 0,
+      "rawExactCount": false,
+      "rawNegativeWindowFalsePositives": 8,
+      "productFilteredTriggerCount": 17,
+      "tsPredictedCount": 1,
+      "tsMatchedReps": 1,
+      "tsFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 600,
+        "boundary": "startMs",
+        "deltaMs": -2749
+      },
+      "rustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 3349,
+        "boundary": "startMs",
+        "deltaMs": 1518
+      },
+      "tsRustFirstDivergence": {
+        "repIndex": 1,
+        "timestampMs": 600,
+        "boundary": "startMs",
+        "deltaMs": 4267
+      },
+      "firstStateFork": {
+        "rustVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 3349,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 4867,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsTruth": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 3349,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 600,
+            "phase": "effort"
+          },
+          "reason": "time"
+        },
+        "tsVsRust": {
+          "eventIndex": 0,
+          "expected": {
+            "timestampMs": 600,
+            "phase": "effort"
+          },
+          "actual": {
+            "timestampMs": 4867,
+            "phase": "effort"
+          },
+          "reason": "time"
+        }
+      },
+      "rustPhaseTimeline": [
+        {
+          "timestampMs": 733,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 767,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 867,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 967,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 1433,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 2467,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 2734,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 2800,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 2867,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 3134,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 3234,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 3267,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 4834,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 4867,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 4967,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 5434,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 6301,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 6734,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 7834,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 9068,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 10068,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 10734,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 11034,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 11168,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 12235,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 12668,
+          "phase": "peak"
+        },
+        {
+          "timestampMs": 13301,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 13468,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 14702,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 14735,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 14835,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 15635,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 17035,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 18002,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 19235,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 20235,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 21369,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 21402,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 21502,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 22702,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 23936,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 23969,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 24069,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 25003,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 26769,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 26803,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 30537,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 30703,
+          "phase": "ready"
+        }
+      ],
       "exactCount": false,
-      "matchedReps": 1,
+      "matchedReps": 3,
       "falsePositiveReps": 0,
-      "missedReps": 9,
-      "meanBoundaryErrorMs": 910,
-      "negativeWindowFalsePositives": 1,
-      "processingMs": 64.66,
-      "processingFps": 7160.8,
+      "missedReps": 7,
+      "meanBoundaryErrorMs": 465,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 88.44,
+      "processingFps": 5235,
       "predicted": [
         {
-          "startMs": 10934,
-          "peakMs": 11635,
-          "endMs": 12235,
-          "canonicalSliceHash": "10565130021780210816"
+          "startMs": 4867,
+          "peakMs": 5667,
+          "endMs": 6734,
+          "canonicalSliceHash": "4886693985253181102"
+        },
+        {
+          "startMs": 10001,
+          "peakMs": 10734,
+          "endMs": 11168,
+          "canonicalSliceHash": "14340636700509410638"
+        },
+        {
+          "startMs": 12035,
+          "peakMs": 12868,
+          "endMs": 13468,
+          "canonicalSliceHash": "3740067404549752079"
         }
       ]
     }

@@ -18,7 +18,7 @@ fn body_relative_phase_registration_removes_translation_and_scale() {
     assert_eq!(a.nodes[5].phase, PhaseName::Return);
     for (left, right) in a.nodes.iter().zip(&b.nodes) {
         for (lv, rv) in left.values.iter().zip(&right.values) {
-            assert!((lv - rv).abs() < 1e-5, "{lv} != {rv}");
+            assert!((lv.unwrap() - rv.unwrap()).abs() < 1e-5);
         }
     }
     assert_eq!(a.effort_duration_ms, 200);
@@ -54,14 +54,34 @@ fn explicit_mirror_metadata_controls_orientation_and_values_are_not_clipped() {
         3,
     )
     .unwrap();
-    assert_eq!(normal.nodes[0].values[0], -mirrored.nodes[0].values[0]);
+    assert_eq!(
+        normal.nodes[0].values[0],
+        mirrored.nodes[0].values[0].map(|value| -value)
+    );
     assert!(
         normal
             .nodes
             .iter()
             .flat_map(|node| &node.values)
-            .any(|value| value.abs() > 1.0)
+            .any(|value| value.is_some_and(|value| value.abs() > 1.0))
     );
+}
+
+#[test]
+fn missing_feature_stays_local_instead_of_rejecting_the_rep() {
+    let rep = sealed(0, 2, 4);
+    let mut source = frames(0.0, 1.0, &[0, 100, 200, 300, 400]);
+    source[2].canonical[14] = CanonicalLandmark::unknown(0.0, None);
+    let normalized = normalize_rep_trajectory(
+        &rep,
+        &source,
+        &BodyNormalizationConfig::rear_bilateral(false),
+        5,
+    )
+    .unwrap();
+    assert!(normalized.nodes[4].values[2].is_none());
+    assert_eq!(normalized.nodes[4].confidence[2], 0.0);
+    assert!(normalized.nodes[4].values[0].is_some());
 }
 
 #[test]

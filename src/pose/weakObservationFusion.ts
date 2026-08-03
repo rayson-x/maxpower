@@ -243,8 +243,10 @@ export class WeakObservationFusion {
       }
 
       repaired.set(index, {
-        x: landmark?.x ?? 0,
-        y: landmark?.y ?? 0,
+        // Unknown has no business coordinate. Preserve the raw observation
+        // only in the explicit diagnostic stream, never in canonical output.
+        x: Number.NaN,
+        y: Number.NaN,
         source: "unknown",
         canonicalConfidence: 0,
         uncertainty: 0.05 + (Number.isFinite(elapsedMs) ? Math.min(elapsedMs, 1000) / 1000 : 1) * 0.05,

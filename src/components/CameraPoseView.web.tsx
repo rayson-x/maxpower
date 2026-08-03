@@ -16,6 +16,15 @@ import {
 import { RULE_METRIC } from "../pose/formRuleEngine";
 import { createWebMotionPacket, routeWebMotionPacket } from "../motion/webMotionPacket";
 import {
+  InferenceCompletionGate,
+  type InferenceCompletionDropReason,
+} from "../motion/inferenceCompletionGate";
+import {
+  MotionPerformanceDegradationController,
+  type MotionDegradationLevel,
+} from "../motion/performanceDegradation";
+import { resolveRustExerciseProfile } from "../motion/rustProfileResolver";
+import {
   createPoseContinuitySession,
   type CanonicalPoseFrame,
   type PoseContinuitySession,
@@ -59,11 +68,38 @@ import {
   RustCanonicalWasmSession,
   type MotionWasmExports,
   type RustCandidateDiagnostic,
+  type RustReferenceComparison,
+  type RustReferenceComparisonEvidence,
+  type RustReferenceRuntimeContext,
   type RustSealedRep,
   type RustTargetSnapshot,
 } from "../motion/rustCanonicalWasm";
 
 injectHudTheme();
+
+const NO_REVIEWED_REFERENCE: RustReferenceComparison = Object.freeze({
+  status: "unavailable",
+  reason: "no-installed-reviewed-profile",
+  profileIdentity: null,
+  qualityVerdict: null,
+});
+
+function referenceComparisonKey(comparison: RustReferenceComparison): string {
+  return comparison.status === "unavailable"
+    ? `${comparison.status}:${comparison.reason}:${comparison.profileIdentity ?? "none"}`
+    : `${comparison.status}:${comparison.repId}:${comparison.canonicalSliceHash}:${comparison.profileHash}`;
+}
+
+function serializeReferenceComparison(comparison: RustReferenceComparison) {
+  if (comparison.status === "unavailable") return { ...comparison };
+  return {
+    ...comparison,
+    repId: comparison.repId.toString(),
+    profileHash: comparison.profileHash.toString(),
+    canonicalSliceHash: comparison.canonicalSliceHash.toString(),
+    features: comparison.features.map((feature) => ({ ...feature })),
+  };
+}
 
 // BlazePose-33 拓扑(MediaPipe)
 const POSE_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
@@ -141,12 +177,71 @@ function poseSchemaForEngine(kind: EngineKind): PoseSchema {
   return kind === "rtmpose" ? "coco17" : "blazepose33";
 }
 
-function rustProfileForExercise(
+function rustProfileForContext(
   exerciseId: string,
-): "lat_pulldown" | "seated_shoulder_press" | null {
-  if (exerciseId === "lat_pulldown") return "lat_pulldown";
-  if (exerciseId === "seated_shoulder_press") return "seated_shoulder_press";
-  return null;
+  capturePosition: CapturePosition,
+  trainingSide: TrainingSide,
+  variation: string,
+): ReturnType<typeof resolveRustExerciseProfile> {
+  return resolveRustExerciseProfile({ exerciseId, capturePosition, trainingSide, variation });
+}
+
+function referenceRuntimeContextFor(
+  exerciseId: string,
+  capturePosition: CapturePosition,
+  trainingSide: TrainingSide,
+  variation: string,
+  modelPath: string,
+): RustReferenceRuntimeContext | null {
+  const activeProfile = rustProfileForContext(
+    exerciseId,
+    capturePosition,
+    trainingSide,
+    variation,
+  );
+  const explicitStraightBar = ["cable straight bar", "绳索直杆", "直杆"]
+    .includes(variation.trim().toLowerCase());
+  if (
+    !["lat_pulldown", "lat_pulldown_rear_left_45"].includes(activeProfile ?? "")
+    || !explicitStraightBar
+    || modelPath !== "/models/pose_landmarker_heavy.task"
+  ) {
+    return null;
+  }
+  return {
+    exerciseId: "lat_pulldown",
+    capturePosition: activeProfile === "lat_pulldown" ? "rear" : "rearLeft45",
+    variation: "front_bar_pronated",
+    trainingSide: "bilateral",
+    equipment: "cable_lat_pulldown/straight_bar",
+    coordinateSystem: "source-image/v1",
+    featureSchemaId: "lat_pulldown/source-image-piecewise-32/v2",
+    poseModelVersion: "mediapipe-pose-heavy",
+  };
+}
+
+function configureRustExerciseProfile(
+  session: RustCanonicalWasmSession,
+  exerciseId: string,
+  capturePosition: CapturePosition,
+  trainingSide: TrainingSide,
+  variation: string,
+  modelPath: string,
+): void {
+  session.setExerciseProfile(rustProfileForContext(
+    exerciseId,
+    capturePosition,
+    trainingSide,
+    variation,
+  ));
+  const referenceContext = referenceRuntimeContextFor(
+    exerciseId,
+    capturePosition,
+    trainingSide,
+    variation,
+    modelPath,
+  );
+  if (referenceContext) session.setReferenceRuntimeContext(referenceContext);
 }
 
 const EXERCISE_MATURITY_LABEL: Record<ExerciseMaturity, string> = {
@@ -176,12 +271,16 @@ interface CaptureFrameDiagnostic {
   hasPose: boolean;
   inferenceMs: number;
   rustCoreMs?: number;
+  decodeMs?: number;
+  routeMs?: number;
   repPhase?: string | null;
   sealedRepCount?: number;
+  completedRepCount?: number;
   schedulerDecision?: "acquire-multi" | "track-target" | "refresh-candidates" | "skip-frame";
   dataGap?: boolean;
   canonicalContentHash?: string;
   processingError?: string;
+  staleCompletionReason?: InferenceCompletionDropReason;
 }
 
 interface MotionFrameDiagnostic {
@@ -204,11 +303,89 @@ interface MotionFrameDiagnostic {
   unknown: number;
   inferenceMs: number;
   rustCoreMs: number;
+  decodeMs: number;
+  routeMs: number;
+  renderMs: number;
+  recordMs: number;
+  analyzeMs: number;
+  packetAgeMs: number;
+  processingMultiplier: number;
+  diagnosticMode: "normal" | "full";
+  droppedFrames: number;
+  usedJsHeapBytes: number | null;
   repPhase: string | null;
   sealedRepCount: number;
+  completedRepCount: number;
+  completedRepIds: readonly string[];
   tsRustFirstSourceDivergence: number | null;
   tsRustMaxCoordinateDelta: number | null;
   canonicalContentHash: string;
+  degradationLevel: MotionDegradationLevel;
+  degradationReason: string;
+}
+
+interface RustReferenceEvidenceRecord {
+  readonly subjectEpoch: bigint;
+  readonly comparison: RustReferenceComparisonEvidence;
+}
+
+interface MotionPerformanceModeSummary {
+  frameCount: number;
+  inferenceMsP50: number | null;
+  inferenceMsP95: number | null;
+  rustCoreMsP50: number | null;
+  rustCoreMsP95: number | null;
+  decodeMsP50: number | null;
+  decodeMsP95: number | null;
+  routeMsP50: number | null;
+  routeMsP95: number | null;
+  packetAgeMsP50: number | null;
+  packetAgeMsP95: number | null;
+  processingMultiplierP50: number | null;
+  processingMultiplierP95: number | null;
+  droppedFrames: number;
+  maxUsedJsHeapBytes: number | null;
+}
+
+function readUsedJsHeapBytes(): number | null {
+  const memory = (performance as Performance & {
+    memory?: { usedJSHeapSize?: number };
+  }).memory;
+  return Number.isFinite(memory?.usedJSHeapSize) ? memory!.usedJSHeapSize! : null;
+}
+
+function summarizeMotionPerformance(
+  frames: readonly MotionFrameDiagnostic[],
+): Record<"normal" | "full", MotionPerformanceModeSummary> {
+  const summarize = (mode: "normal" | "full"): MotionPerformanceModeSummary => {
+    const values = frames.filter((frame) => frame.diagnosticMode === mode);
+    const percentile = (select: (frame: MotionFrameDiagnostic) => number, ratio: number) => {
+      if (values.length === 0) return null;
+      const sorted = values.map(select).sort((left, right) => left - right);
+      return sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))];
+    };
+    const heap = values
+      .map((frame) => frame.usedJsHeapBytes)
+      .filter((value): value is number => value !== null);
+    return {
+      frameCount: values.length,
+      inferenceMsP50: percentile((frame) => frame.inferenceMs, 0.5),
+      inferenceMsP95: percentile((frame) => frame.inferenceMs, 0.95),
+      rustCoreMsP50: percentile((frame) => frame.rustCoreMs, 0.5),
+      rustCoreMsP95: percentile((frame) => frame.rustCoreMs, 0.95),
+      decodeMsP50: percentile((frame) => frame.decodeMs, 0.5),
+      decodeMsP95: percentile((frame) => frame.decodeMs, 0.95),
+      routeMsP50: percentile((frame) => frame.routeMs, 0.5),
+      routeMsP95: percentile((frame) => frame.routeMs, 0.95),
+      packetAgeMsP50: percentile((frame) => frame.packetAgeMs, 0.5),
+      packetAgeMsP95: percentile((frame) => frame.packetAgeMs, 0.95),
+      processingMultiplierP50: percentile((frame) => frame.processingMultiplier, 0.5),
+      processingMultiplierP95: percentile((frame) => frame.processingMultiplier, 0.95),
+      droppedFrames: values.at(-1)?.droppedFrames ?? 0,
+      maxUsedJsHeapBytes: heap.length > 0 ? Math.max(...heap) : null,
+    };
+  };
+  return { normal: summarize("normal"), full: summarize("full") };
 }
 
 function loadSettings(): AgentSettings {
@@ -331,6 +508,9 @@ export function CameraPoseView() {
   const modelPathRef = useRef(POSE_MODELS[2].path);
   const cameraViewRef = useRef<CameraView>("oblique45");
   const exerciseChoiceRef = useRef("");
+  const capturePositionRef = useRef<CapturePosition>("frontLeft45");
+  const variationRef = useRef("");
+  const trainingSideRef = useRef<TrainingSide>("bilateral");
   // The evidence-based continuity fusion is the Web default. Keep the legacy
   // tracker behind an explicit toggle while its product path is contracted.
   const filterEnabledRef = useRef(false);
@@ -343,6 +523,7 @@ export function CameraPoseView() {
   const canonicalShadowRef = useRef<PoseContinuitySession | null>(null);
   const rustWasmRef = useRef<MotionWasmExports | null>(null);
   const rustTargetRef = useRef<RustTargetSnapshot | null>(null);
+  const referenceComparisonKeyRef = useRef(referenceComparisonKey(NO_REVIEWED_REFERENCE));
   const sequenceCounterRef = useRef(0);
   // 实时信号曲线(肘角),驱动左下角曲线图
   const signalRef = useRef<SignalSample[]>([]);
@@ -356,6 +537,20 @@ export function CameraPoseView() {
   const captureDiagnosticsRef = useRef<CaptureFrameDiagnostic[]>([]);
   const motionDiagnosticsRef = useRef<MotionFrameDiagnostic[]>([]);
   const rustSealedRepsRef = useRef<RustSealedRep[]>([]);
+  const rustReferenceEvidenceRef = useRef<RustReferenceEvidenceRecord[]>([]);
+  const droppedFramesRef = useRef(0);
+  const inferenceCompletionGateRef = useRef(new InferenceCompletionGate());
+  const staleCompletionDiagnosticsRef = useRef<Array<{
+    timestampMs: number;
+    reason: InferenceCompletionDropReason;
+  }>>([]);
+  const degradationControllerRef = useRef(new MotionPerformanceDegradationController());
+  const droppedFramesByModeRef = useRef<Record<"normal" | "full", number>>({
+    normal: 0,
+    full: 0,
+  });
+  const engineLoadEpochRef = useRef(0);
+  const engineLoadPromiseRef = useRef<Promise<AnyPoseEngine> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const recordingStartMsRef = useRef(0);
@@ -371,6 +566,7 @@ export function CameraPoseView() {
 
   const [status, setStatus] = useState<EngineStatus>("idle");
   const [workspacePage, setWorkspacePage] = useState<WorkspacePage>(readWorkspacePage);
+  const workspacePageRef = useRef<WorkspacePage>(workspacePage);
   const [hasVisitedReview, setHasVisitedReview] = useState(() => readWorkspacePage() === "review");
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<SourceMode>("camera");
@@ -416,6 +612,10 @@ export function CameraPoseView() {
   const [rustSdkStatus, setRustSdkStatus] = useState<"loading" | "ready" | "fallback">("loading");
   const [rustTarget, setRustTarget] = useState<RustTargetSnapshot | null>(null);
   const [diagnosticsVersion, setDiagnosticsVersion] = useState(0);
+  const [referenceComparison, setReferenceComparison] = useState<RustReferenceComparison>(
+    NO_REVIEWED_REFERENCE,
+  );
+  const [referenceEvidenceVersion, setReferenceEvidenceVersion] = useState(0);
   const [rustSealedRepCount, setRustSealedRepCount] = useState(0);
   const stopRef = useRef<() => void>(() => undefined);
 
@@ -423,6 +623,7 @@ export function CameraPoseView() {
     const syncWorkspacePage = () => {
       const nextPage = readWorkspacePage();
       if (nextPage === "review") stopRef.current();
+      workspacePageRef.current = nextPage;
       setWorkspacePage(nextPage);
     };
     window.addEventListener("popstate", syncWorkspacePage);
@@ -453,6 +654,7 @@ export function CameraPoseView() {
 
   const selectWorkspacePage = (nextPage: WorkspacePage) => {
     if (nextPage === "review") stopRef.current();
+    workspacePageRef.current = nextPage;
     setWorkspacePage(nextPage);
     const url = new URL(window.location.href);
     url.searchParams.set("view", nextPage);
@@ -463,26 +665,58 @@ export function CameraPoseView() {
     const physicalPosition = CAPTURE_POSITIONS.find((position) => position.id === positionId);
     if (!physicalPosition) return;
     setCapturePosition(physicalPosition.id);
+    capturePositionRef.current = physicalPosition.id;
     setCameraView(physicalPosition.analysisView);
     cameraViewRef.current = physicalPosition.analysisView;
+    if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+      configureRustExerciseProfile(
+        canonicalSessionRef.current,
+        exerciseChoiceRef.current,
+        capturePositionRef.current,
+        trainingSideRef.current,
+        variationRef.current,
+        modelPathRef.current,
+      );
+      rustSealedRepsRef.current = [];
+      setRustSealedRepCount(0);
+    }
   };
 
   const ensureEngine = useCallback(async () => {
-    if (!engineRef.current) {
-      setModelLoading(true);
-      try {
-        engineRef.current =
-          engineKindRef.current === "rtmpose"
-            ? await RtmposeEngine.create(RTMPOSE_MODEL_PATH)
-            : await PoseEngine.create(modelPathRef.current);
-      } finally {
-        setModelLoading(false);
+    if (engineRef.current) return engineRef.current;
+    if (engineLoadPromiseRef.current) return engineLoadPromiseRef.current;
+    const epoch = engineLoadEpochRef.current;
+    const engineKindAtDispatch = engineKindRef.current;
+    const modelPathAtDispatch = modelPathRef.current;
+    setModelLoading(true);
+    const pending = engineKindAtDispatch === "rtmpose"
+      ? RtmposeEngine.create(RTMPOSE_MODEL_PATH)
+      : PoseEngine.create(modelPathAtDispatch);
+    engineLoadPromiseRef.current = pending;
+    try {
+      const created = await pending;
+      if (
+        epoch !== engineLoadEpochRef.current
+        || engineKindAtDispatch !== engineKindRef.current
+        || modelPathAtDispatch !== modelPathRef.current
+      ) {
+        created.close();
+        throw new Error("stale model completion dropped");
       }
+      engineRef.current = created;
+      return created;
+    } finally {
+      if (engineLoadPromiseRef.current === pending) {
+        engineLoadPromiseRef.current = null;
+      }
+      if (epoch === engineLoadEpochRef.current) setModelLoading(false);
     }
-    return engineRef.current;
   }, []);
 
   const startCanonicalSequence = useCallback(() => {
+    inferenceCompletionGateRef.current.resetSequence();
+    referenceComparisonKeyRef.current = referenceComparisonKey(NO_REVIEWED_REFERENCE);
+    setReferenceComparison(NO_REVIEWED_REFERENCE);
     if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
       canonicalSessionRef.current.close();
     }
@@ -501,7 +735,15 @@ export function CameraPoseView() {
     } as const;
     if (rustWasmRef.current) {
       const session = new RustCanonicalWasmSession(config, rustWasmRef.current);
-      session.setExerciseProfile(rustProfileForExercise(exerciseChoiceRef.current));
+      session.setDegradationLevel(degradationControllerRef.current.currentLevel());
+      configureRustExerciseProfile(
+        session,
+        exerciseChoiceRef.current,
+        capturePositionRef.current,
+        trainingSideRef.current,
+        variationRef.current,
+        modelPathRef.current,
+      );
       canonicalSessionRef.current = session;
       canonicalShadowRef.current = createPoseContinuitySession({ ...config, stabilization: "fusion" });
     } else {
@@ -520,7 +762,9 @@ export function CameraPoseView() {
     setPose(null);
     setSignalCurve([]);
     rustSealedRepsRef.current = [];
+    rustReferenceEvidenceRef.current = [];
     setRustSealedRepCount(0);
+    setReferenceEvidenceVersion((version) => version + 1);
   }, []);
 
   const rotateCanonicalSequence = useCallback(() => {
@@ -539,6 +783,9 @@ export function CameraPoseView() {
         return;
       }
       engineKindRef.current = kind;
+      engineLoadEpochRef.current += 1;
+      engineLoadPromiseRef.current = null;
+      inferenceCompletionGateRef.current.replaceModel();
       setEngineKind(kind);
       engineRef.current?.close();
       engineRef.current = null;
@@ -560,6 +807,9 @@ export function CameraPoseView() {
       const next = POSE_MODELS.find((model) => model.id === id);
       if (!next || next.path === modelPathRef.current) return;
       if (recordingActiveRef.current) return;
+      engineLoadEpochRef.current += 1;
+      engineLoadPromiseRef.current = null;
+      inferenceCompletionGateRef.current.replaceModel();
       setModelId(id);
       modelPathRef.current = next.path;
       engineRef.current?.close();
@@ -593,6 +843,14 @@ export function CameraPoseView() {
     let lastCurveUpdate = 0;
     let lastDiagnosticUpdate = 0;
     const processDecodedFrame = (sourceTimestampMs: number, now: number) => {
+      const frameProcessingStartedAt = performance.now();
+      const diagnosticMode = recordingActiveRef.current || workspacePageRef.current === "console"
+        ? "full" as const
+        : "normal" as const;
+      const recordDroppedFrame = () => {
+        droppedFramesRef.current += 1;
+        droppedFramesByModeRef.current[diagnosticMode] += 1;
+      };
       const engine = engineRef.current;
       const currentVideo = videoRef.current;
       if (engine && currentVideo) {
@@ -621,6 +879,7 @@ export function CameraPoseView() {
             ? canonicalSessionRef.current.schedule(mediaTimestampMs)
             : "track-target";
           if (schedulerDecision === "skip-frame") {
+            recordDroppedFrame();
             if (recordingActiveRef.current) {
               captureDiagnosticsRef.current.push({
                 timestampMs: mediaTimestampMs,
@@ -633,6 +892,7 @@ export function CameraPoseView() {
             return;
           }
           const inferenceStartedAt = performance.now();
+          const inferenceToken = inferenceCompletionGateRef.current.begin();
           const candidates = engine instanceof PoseEngine
             ? engine.estimateCandidates(currentVideo, inferenceTimestampMs)
             : null;
@@ -644,6 +904,27 @@ export function CameraPoseView() {
               }
             : engine.estimate(currentVideo, inferenceTimestampMs);
           const inferenceMs = performance.now() - inferenceStartedAt;
+          const completion = inferenceCompletionGateRef.current.accept(inferenceToken);
+          if (!completion.accepted) {
+            recordDroppedFrame();
+            staleCompletionDiagnosticsRef.current.push({
+              timestampMs: mediaTimestampMs,
+              reason: completion.reason!,
+            });
+            if (staleCompletionDiagnosticsRef.current.length > 100) {
+              staleCompletionDiagnosticsRef.current.shift();
+            }
+            if (recordingActiveRef.current) {
+              captureDiagnosticsRef.current.push({
+                timestampMs: mediaTimestampMs,
+                hasPose: false,
+                inferenceMs: Number(inferenceMs.toFixed(2)),
+                dataGap: true,
+                staleCompletionReason: completion.reason!,
+              });
+            }
+            return;
+          }
           if (estimate) {
             estimate.timestampMs = mediaTimestampMs;
             processingStage = "rust-core";
@@ -652,7 +933,12 @@ export function CameraPoseView() {
               canonicalSessionRef.current instanceof RustCanonicalWasmSession && candidates
                 ? canonicalSessionRef.current.processCandidates(candidates, mediaTimestampMs)
                 : canonicalSessionRef.current!.process(estimate);
-            const rustCoreMs = performance.now() - rustStartedAt;
+            const rustTotalMs = performance.now() - rustStartedAt;
+            const rustTiming = canonicalSessionRef.current instanceof RustCanonicalWasmSession
+              ? canonicalSessionRef.current.lastTiming
+              : { coreMs: rustTotalMs, decodeMs: 0 };
+            const rustCoreMs = rustTiming.coreMs;
+            const decodeMs = rustTiming.decodeMs;
             if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
               const nextTarget = canonicalSessionRef.current.lastTarget;
               const previousTarget = rustTargetRef.current;
@@ -714,7 +1000,12 @@ export function CameraPoseView() {
               candidates: canonicalSessionRef.current instanceof RustCanonicalWasmSession
                 ? canonicalSessionRef.current.lastCandidateDiagnostics
                 : [],
-              activeProfile: rustProfileForExercise(exerciseChoiceRef.current),
+              activeProfile: rustProfileForContext(
+                exerciseChoiceRef.current,
+                capturePositionRef.current,
+                trainingSideRef.current,
+                variationRef.current,
+              ),
               landmarkIssues: canonicalFrame.landmarks
                 .map((landmark, index) => ({
                   index,
@@ -729,15 +1020,37 @@ export function CameraPoseView() {
               unknown: canonicalFrame.landmarks.filter((landmark) => landmark.source === "unknown").length,
               inferenceMs: Number(inferenceMs.toFixed(2)),
               rustCoreMs: Number(rustCoreMs.toFixed(3)),
+              decodeMs: Number(decodeMs.toFixed(3)),
+              routeMs: 0,
+              renderMs: 0,
+              recordMs: 0,
+              analyzeMs: 0,
+              packetAgeMs: performance.now() - frameProcessingStartedAt,
+              processingMultiplier: 0,
+              diagnosticMode,
+              droppedFrames: droppedFramesByModeRef.current[diagnosticMode],
+              usedJsHeapBytes: readUsedJsHeapBytes(),
               repPhase: canonicalSessionRef.current instanceof RustCanonicalWasmSession
                 ? canonicalSessionRef.current.lastRepState.phase
                 : null,
-              sealedRepCount: rustSealedRepsRef.current.length,
+              sealedRepCount: rustSealedRepsRef.current.length + (
+                canonicalSessionRef.current instanceof RustCanonicalWasmSession
+                  ? canonicalSessionRef.current.lastCompletedReps.length
+                  : 0
+              ),
+              completedRepCount: canonicalSessionRef.current instanceof RustCanonicalWasmSession
+                ? canonicalSessionRef.current.lastCompletedReps.length
+                : 0,
+              completedRepIds: canonicalSessionRef.current instanceof RustCanonicalWasmSession
+                ? canonicalSessionRef.current.lastCompletedReps.map((rep) => rep.repId.toString())
+                : [],
               tsRustFirstSourceDivergence,
               tsRustMaxCoordinateDelta,
               canonicalContentHash: canonicalSessionRef.current instanceof RustCanonicalWasmSession
                 ? canonicalSessionRef.current.lastCanonicalHash.toString()
                 : "0",
+              degradationLevel: degradationControllerRef.current.currentLevel(),
+              degradationReason: "within-budget",
             };
             motionDiagnosticsRef.current.push(diagnostic);
             if (!recordingActiveRef.current && motionDiagnosticsRef.current.length > 500) {
@@ -764,8 +1077,13 @@ export function CameraPoseView() {
                 qualityVerdict: null,
               },
             });
+            const nextReferenceKey = referenceComparisonKey(motionPacket.referenceComparison);
+            if (nextReferenceKey !== referenceComparisonKeyRef.current) {
+              referenceComparisonKeyRef.current = nextReferenceKey;
+              setReferenceComparison(motionPacket.referenceComparison);
+            }
             processingStage = "packet-routing";
-            routeWebMotionPacket(motionPacket, {
+            const routeTiming = routeWebMotionPacket(motionPacket, {
               render: (packet) => {
                 const frame = packet.canonical;
                 setPose(frame);
@@ -775,6 +1093,20 @@ export function CameraPoseView() {
                 if (packet.completedReps.length > 0) {
                   rustSealedRepsRef.current.push(...packet.completedReps);
                   setRustSealedRepCount(rustSealedRepsRef.current.length);
+                  if (packet.target && packet.referenceComparison.status !== "unavailable") {
+                    const record: RustReferenceEvidenceRecord = Object.freeze({
+                      subjectEpoch: packet.target.subjectEpoch,
+                      comparison: packet.referenceComparison,
+                    });
+                    const key = `${record.subjectEpoch}:${record.comparison.repId}:${record.comparison.repRevision}`;
+                    const exists = rustReferenceEvidenceRef.current.some((existing) =>
+                      `${existing.subjectEpoch}:${existing.comparison.repId}:${existing.comparison.repRevision}` === key,
+                    );
+                    if (!exists) {
+                      rustReferenceEvidenceRef.current.push(record);
+                      setReferenceEvidenceVersion((version) => version + 1);
+                    }
+                  }
                 }
                 const elbow = bestElbowAngle(frame, engineKindRef.current);
                 if (elbow === null) return;
@@ -795,8 +1127,10 @@ export function CameraPoseView() {
                     hasPose: frame.landmarks.length > 0,
                     inferenceMs: Number(inferenceMs.toFixed(2)),
                     rustCoreMs: Number(rustCoreMs.toFixed(3)),
+                    decodeMs: Number(decodeMs.toFixed(3)),
                     repPhase: packet.repState?.phase ?? null,
                     sealedRepCount: rustSealedRepsRef.current.length,
+                    completedRepCount: packet.completedReps.length,
                     schedulerDecision,
                     canonicalContentHash: packet.canonicalContentHash.toString(),
                   });
@@ -812,6 +1146,26 @@ export function CameraPoseView() {
                 if (buffer.length > 900) buffer.shift();
               },
             });
+            diagnostic.routeMs = Number(routeTiming.totalMs.toFixed(3));
+            diagnostic.renderMs = Number(routeTiming.renderMs.toFixed(3));
+            diagnostic.recordMs = Number(routeTiming.recordMs.toFixed(3));
+            diagnostic.analyzeMs = Number(routeTiming.analyzeMs.toFixed(3));
+            diagnostic.packetAgeMs = Number((performance.now() - frameProcessingStartedAt).toFixed(3));
+            diagnostic.processingMultiplier = Number((
+              (inferenceMs + rustCoreMs + decodeMs + routeTiming.totalMs) / (1_000 / 30)
+            ).toFixed(3));
+            const degradation = degradationControllerRef.current.observe(
+              diagnostic.processingMultiplier,
+            );
+            diagnostic.degradationLevel = degradation.level;
+            diagnostic.degradationReason = degradation.reason;
+            if (degradation.changed && rustSession) {
+              rustSession.setDegradationLevel(degradation.level);
+            }
+            const lastCaptureDiagnostic = captureDiagnosticsRef.current.at(-1);
+            if (lastCaptureDiagnostic?.timestampMs === canonicalFrame.timestampMs) {
+              lastCaptureDiagnostic.routeMs = diagnostic.routeMs;
+            }
             setTorsoLean(torsoLeanDeg(canonicalFrame.worldLandmarks));
           }
         } catch (caught) {
@@ -1015,10 +1369,18 @@ export function CameraPoseView() {
       poses,
       diagnostics,
     });
-    const keypointsBlob = new Blob([JSON.stringify(fixture)], { type: "application/json" });
+    const keypointsWriteStartedAt = performance.now();
+    const keypointsJson = JSON.stringify(fixture);
+    const keypointsBlob = new Blob([keypointsJson], { type: "application/json" });
+    const keypointsWritePreparationMs = performance.now() - keypointsWriteStartedAt;
     const recordingMetadata = recordingMetadataRef.current;
     const recordedPoses = fixture[0].poses;
-    const rustProductProfile = rustProfileForExercise(recordingMetadata?.exerciseChoice ?? "");
+    const rustProductProfile = rustProfileForContext(
+      recordingMetadata?.exerciseChoice ?? "",
+      recordingMetadata?.capturePosition ?? "frontLeft45",
+      recordingMetadata?.trainingSide ?? "bilateral",
+      recordingMetadata?.variation ?? "",
+    );
     const usesRustSealedBoundaries = rustProductProfile !== null;
     const rustSegments: RepSegment[] = rustSealedReps.map((rep, index) => ({
       repIndex: index + 1,
@@ -1100,6 +1462,9 @@ export function CameraPoseView() {
     const selectedExercise = recordingMetadata?.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
       ? EXERCISE_REGISTRY.get(recordingMetadata.exerciseChoice) ?? null
       : analysis?.profile ? EXERCISE_REGISTRY.get(analysis.profile.exerciseId) ?? null : null;
+    const rustLineage = canonicalSessionRef.current instanceof RustCanonicalWasmSession
+      ? canonicalSessionRef.current.lastDecodedPacket?.lineage ?? null
+      : null;
     // This sidecar exists even for catalog-only exercises, unlike the labelled
     // rep template which correctly requires a validated-by-sampling profile.
     const captureMetadata = {
@@ -1117,13 +1482,30 @@ export function CameraPoseView() {
       profileVersion: analysis?.profile?.version ?? null,
       model: fixture[0].model,
       authoritativeMotionAlgorithm: poses[0]?.algorithmVersion ?? "rust-canonical-wasm/v1",
-      rustSealedReps,
-      referenceComparison: {
-        status: "unavailable",
-        reason: "no-installed-reviewed-profile",
-        profileIdentity: null,
-        qualityVerdict: null,
+      motionVersions: rustLineage ? {
+        contract: rustLineage.contract,
+        algorithm: rustLineage.algorithmVersion,
+        config: rustLineage.configVersion,
+        inference: rustLineage.inferenceVersion,
+        diagnostic: rustLineage.diagnosticVersion,
+        activeProfileIdentity: rustLineage.activeProfileIdentity,
+        activeProfileHash: rustLineage.activeProfileHash?.toString() ?? null,
+      } : null,
+      browserWriteTelemetry: {
+        keypointsSerializationAndBlobMs: Number(keypointsWritePreparationMs.toFixed(3)),
+        diskCompletionObservable: false,
+        reason: "Browser download APIs do not expose OS disk-flush completion",
       },
+      rustSealedReps,
+      referenceComparison: serializeReferenceComparison(
+        canonicalSessionRef.current instanceof RustCanonicalWasmSession
+          ? canonicalSessionRef.current.referenceComparison
+          : NO_REVIEWED_REFERENCE,
+      ),
+      referenceComparisons: rustReferenceEvidenceRef.current.map((record) => ({
+        subjectEpoch: record.subjectEpoch.toString(),
+        comparison: serializeReferenceComparison(record.comparison),
+      })),
     };
     const metadataBlob = new Blob([JSON.stringify(captureMetadata, null, 2)], { type: "application/json" });
     const videoUrl = URL.createObjectURL(videoBlob);
@@ -2161,16 +2543,26 @@ export function CameraPoseView() {
                   const nextExerciseId = event.target.value;
                   exerciseChoiceRef.current = nextExerciseId;
                   setExerciseChoice(nextExerciseId);
-                  if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
-                    canonicalSessionRef.current.setExerciseProfile(
-                      rustProfileForExercise(nextExerciseId),
+                  // Variation/equipment is action-specific. Carrying the
+                  // previous action's free text into a new action can select
+                  // the wrong profile even when every other field matches.
+                  variationRef.current = "";
+                  setVariation("");
+                  const recommendation = recommendCapturePosition(nextExerciseId);
+                  if (recommendation) {
+                    applyCapturePosition(recommendation.position);
+                  } else if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+                    configureRustExerciseProfile(
+                      canonicalSessionRef.current,
+                      nextExerciseId,
+                      capturePositionRef.current,
+                      trainingSideRef.current,
+                      variationRef.current,
+                      modelPathRef.current,
                     );
                     rustSealedRepsRef.current = [];
                     setRustSealedRepCount(0);
                   }
-                  const recommendation = recommendCapturePosition(nextExerciseId);
-                  if (!recommendation) return;
-                  applyCapturePosition(recommendation.position);
                 }}
               >
                 <option value="">请选择本次训练动作</option>
@@ -2208,7 +2600,23 @@ export function CameraPoseView() {
                   style={styles.exerciseSelect}
                   value={variation}
                   disabled={isRecording || isFinalizingRecording}
-                  onChange={(event) => setVariation(event.target.value)}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    variationRef.current = next;
+                    setVariation(next);
+                    if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+                      configureRustExerciseProfile(
+                        canonicalSessionRef.current,
+                        exerciseChoiceRef.current,
+                        capturePositionRef.current,
+                        trainingSideRef.current,
+                        next,
+                        modelPathRef.current,
+                      );
+                      rustSealedRepsRef.current = [];
+                      setRustSealedRepCount(0);
+                    }
+                  }}
                   placeholder="例如：哑铃、单臂、宽握"
                 />
               </label>
@@ -2218,7 +2626,23 @@ export function CameraPoseView() {
                   style={styles.exerciseSelect}
                   value={trainingSide}
                   disabled={isRecording || isFinalizingRecording}
-                  onChange={(event) => setTrainingSide(event.target.value as TrainingSide)}
+                  onChange={(event) => {
+                    const next = event.target.value as TrainingSide;
+                    trainingSideRef.current = next;
+                    setTrainingSide(next);
+                    if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+                      configureRustExerciseProfile(
+                        canonicalSessionRef.current,
+                        exerciseChoiceRef.current,
+                        capturePositionRef.current,
+                        next,
+                        variationRef.current,
+                        modelPathRef.current,
+                      );
+                      rustSealedRepsRef.current = [];
+                      setRustSealedRepCount(0);
+                    }
+                  }}
                 >
                   <option value="bilateral">双侧 / 同步</option>
                   <option value="left">左侧</option>
@@ -2283,7 +2707,7 @@ export function CameraPoseView() {
             </div>
             <div style={styles.btnRow}>
               {POSE_MODELS.map((model) => {
-                const disabled = engineKind !== "mediapipe" || isRecording;
+                const disabled = engineKind !== "mediapipe" || isRecording || modelLoading;
                 const active = !disabled && modelId === model.id;
                 return (
                   <button
@@ -2323,12 +2747,16 @@ export function CameraPoseView() {
 
           {isConsole && (() => {
             const latest = motionDiagnosticsRef.current.at(-1);
+            const performanceSummary = summarizeMotionPerformance(motionDiagnosticsRef.current);
+            const activePerformance = performanceSummary.full.frameCount > 0
+              ? performanceSummary.full
+              : performanceSummary.normal;
             const events = motionDiagnosticsRef.current
               .filter((frame) =>
                 frame.unknown > 0
                 || frame.tsRustFirstSourceDivergence !== null
                 || (frame.target !== null && frame.target.state !== "locked")
-                || frame.sealedRepCount > 0,
+                || frame.completedRepCount > 0,
               )
               .slice(-8)
               .reverse();
@@ -2350,10 +2778,37 @@ export function CameraPoseView() {
                   <span>TS/RUST Δ <strong>{latest?.tsRustMaxCoordinateDelta?.toFixed(4) ?? "—"}</strong></span>
                 </div>
                 <p style={styles.catalogMeta}>
-                  {latest?.algorithmVersion ?? "等待帧"} · {latest?.schedulerDecision ?? "—"} · MediaPipe {latest?.inferenceMs ?? 0}ms · Rust {latest?.rustCoreMs ?? 0}ms
+                  {latest?.algorithmVersion ?? "等待帧"} · {latest?.schedulerDecision ?? "—"} · MediaPipe {latest?.inferenceMs ?? 0}ms · Rust {latest?.rustCoreMs ?? 0}ms · decode {latest?.decodeMs ?? 0}ms · route {latest?.routeMs ?? 0}ms
+                  <br />P95 MediaPipe {activePerformance.inferenceMsP95?.toFixed(1) ?? "—"}ms / Rust {activePerformance.rustCoreMsP95?.toFixed(2) ?? "—"}ms / decode {activePerformance.decodeMsP95?.toFixed(2) ?? "—"}ms · age {activePerformance.packetAgeMsP95?.toFixed(1) ?? "—"}ms · drop {activePerformance.droppedFrames}
                   <br />PROFILE {latest?.activeProfile ?? "none"} · provisional
-                  <br />REFERENCE unavailable · no-installed-reviewed-profile · verdict null
+                  <br />REFERENCE {referenceComparison.status} · {referenceComparison.reason ?? "descriptive evidence"} · verdict null
                 </p>
+                {referenceComparison.status !== "unavailable" && (
+                  <div style={styles.catalogMeta}>
+                    <div>
+                      REF REP {referenceComparison.repId.toString()} r{referenceComparison.repRevision}
+                      {` · slice ${referenceComparison.canonicalSliceHash.toString()} · profile ${referenceComparison.profileHash.toString()}`}
+                    </div>
+                    {referenceComparison.features.map((feature) => (
+                      <div key={feature.feature}>
+                        {feature.feature}: comparable {feature.comparableNodeCount}
+                        {` · unknown ${feature.unknownNodeCount} · outside ${feature.outsideNodeCount}`}
+                        {` · max-run ${feature.maximumConsecutiveOutsideNodes}`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {rustReferenceEvidenceRef.current.length > 0 && (
+                  <div style={styles.catalogMeta} key={referenceEvidenceVersion}>
+                    SAVED REFERENCE EVIDENCE {rustReferenceEvidenceRef.current.length}
+                    {rustReferenceEvidenceRef.current.slice(-5).reverse().map((record) => (
+                      <div key={`${record.subjectEpoch}:${record.comparison.repId}:${record.comparison.repRevision}`}>
+                        epoch {record.subjectEpoch.toString()} · rep {record.comparison.repId.toString()}
+                        {` r${record.comparison.repRevision} · ${record.comparison.status}`}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {latest?.candidates.map((candidate) => (
                   <p key={candidate.candidateId} style={styles.catalogMeta}>
                     C{candidate.candidateId}{candidate.selected ? " · SELECTED" : ""} · bbox [{candidate.bbox.x.toFixed(2)}, {candidate.bbox.y.toFixed(2)}, {candidate.bbox.width.toFixed(2)}, {candidate.bbox.height.toFixed(2)}]
@@ -2384,6 +2839,7 @@ export function CameraPoseView() {
                       {frame.tsRustFirstSourceDivergence !== null
                         ? ` · ΔJ${frame.tsRustFirstSourceDivergence}`
                         : ""}
+                      {frame.completedRepIds.length > 0 ? ` · S${frame.completedRepIds.join(",")}` : ""}
                     </button>
                   ))}
                 </div>
@@ -2394,6 +2850,8 @@ export function CameraPoseView() {
                     const blob = new Blob([JSON.stringify({
                       schemaVersion: "form-coach-motion-diagnostics/v1",
                       exportedAt: new Date().toISOString(),
+                      performance: summarizeMotionPerformance(motionDiagnosticsRef.current),
+                      staleInferenceCompletions: staleCompletionDiagnosticsRef.current,
                       frames: motionDiagnosticsRef.current,
                     }, (_key, value) => typeof value === "bigint" ? value.toString() : value, 2)], { type: "application/json" });
                     const url = URL.createObjectURL(blob);

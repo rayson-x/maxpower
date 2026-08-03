@@ -27,6 +27,8 @@
     "build:motion-wasm": "sh tools/motion-sdk/build-wasm.sh",
     "web": "npm run build:motion-wasm && expo start --web",
     "test:rust": "RUSTC=/Users/Ruihan/.cargo/bin/rustc RUSTDOC=/Users/Ruihan/.cargo/bin/rustdoc CARGO_TARGET_DIR=target-native /Users/Ruihan/.cargo/bin/cargo test -p form-coach-motion-sdk",
+    "test:motion-parity": "npm run build:motion-wasm && tsc -p tools/motion-sdk/tsconfig.eval.json && node .motion-sdk-eval-build/tools/motion-sdk/parity.js",
+    "benchmark:rust-motion": "cargo run --release --manifest-path rust/motion-sdk/Cargo.toml --bin motion_benchmark",
     "evaluate:rust-motion": "npm run build:motion-wasm && tsc -p tools/motion-sdk/tsconfig.eval.json && node .motion-sdk-eval-build/tools/motion-sdk/evaluate.js",
     "harness": "tsc -p tools/harness/tsconfig.json && node .harness-build/tools/harness/analyze.js",
     "validate:labeled-fixture": "tsc -p tools/labeled-set-fixture/tsconfig.json && node .labeled-fixture-build/tools/labeled-set-fixture/validate.js",

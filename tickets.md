@@ -24,7 +24,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 **Blocked by:** 贯通 Rust MotionSession 回放链路。
 
 - [x] 冻结 TypeScript canonical fixture、算法版本、离散字段与浮点容差，避免迁移中改变参考行为
-- [ ] measured、fused、predicted、unknown、repair reason、reset 和 refusal 逐帧 parity
+- [x] measured、fused、predicted、unknown、repair reason、reset 和 refusal 逐帧 parity
 - [x] 50、100、150、250、500、700ms 丢点在 20/30/60fps 下按时间而非帧数产生一致语义
 - [x] 高位下拉弱肘、飞点、快速动作、seek、large dt 与乱序 fixture 均可通过 MotionSession 重放
 - [x] 无坐标真值的真实 fixture 只断言行为不变量，不包装成准确率结论
@@ -63,9 +63,9 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 - [x] Adapter 在 open 时声明多人、ROI、时间戳、格式和并发能力，不支持能力时显式拒绝或安全降级
 - [x] 在途推理、待处理帧和输出队列均有固定上限，未推理旧帧遵循 latest-frame-wins
 - [x] 已生成 canonical frame 不重排、不覆盖，所有跳帧和 data gap 显式记录
-- [ ] 旧 completion、reset 前 completion 和模型 epoch 过期结果被诊断并丢弃
+- [x] 旧 completion、reset 前 completion 和模型 epoch 过期结果被诊断并丢弃
 - [x] close during inference、慢输出、队列溢出和 Adapter failure 均释放资源且返回稳定摘要
-- [ ] MediaPipe、Rust core、跨语言解码和写盘耗时分别统计
+- [x] MediaPipe、Rust core、跨语言解码和写盘耗时分别统计
 
 ## 自动锁定中央稳定主体
 
@@ -99,7 +99,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 **Blocked by:** 主体保持、重捕获与手动换人。
 
-- [ ] Profile bundle 校验 schema、identity、hash、关节、单位、状态可达性、冲突转移和 required capabilities
+- [x] Profile bundle 校验 schema、identity、hash、关节、单位、状态可达性、冲突转移和 required capabilities
 - [x] ExerciseProfile 与 ReferenceTrajectoryProfile 使用独立 schema、identity 和 maturity
 - [x] 高位下拉由多关节方向、幅度、持续时间、迟滞和顺序形成完整周期，不由单一角度决定
 - [x] candidate rep 在有限窗口内可修正边界或否决；sealed rep 携带稳定 ID、start/peak/end、revision 和 canonical slice hash
@@ -127,7 +127,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 - [x] UI、录像 sidecar、导出、控制台和后续 matcher 接收相同 rep ID、revision 和 boundary content
 - [x] matcher 与评分模块没有修改 sealed boundary 或删除完整 rep 的接口
-- [ ] 人工修订创建新 revision，不原地覆盖 sealed rep 和历史算法结果
+- [x] 人工修订创建新 revision，不原地覆盖 sealed rep 和历史算法结果
 - [x] TS/Rust 影子报告解释逐 capture 数量与首次边界分歧，达到批准门后才切换正式输出
 - [x] 切换后删除迁移动作的 TS 产品计数/分段调用，保留人工真值和跨语言 golden fixtures
 
@@ -163,7 +163,7 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 **Blocked by:** 统一身体坐标与阶段轨迹注册。
 
-- [ ] 保持现有 piecewise normalization、固定特征顺序、nearest-source tie-break、translation/scale separation 和 JSON null 语义
+- [x] 保持现有 piecewise normalization、固定特征顺序、nearest-source tie-break、translation/scale separation 和 JSON null 语义
 - [x] 动作、机位、变式、训练侧、器械、坐标系、feature schema 或 pose model 不匹配即 profile_mismatch
 - [x] 远侧肘等局部缺失只拒答依赖特征，其他可观察特征继续比较
 - [x] 未校准 reference 只输出 coverage、outside nodes、excess 和连续偏离证据，qualityVerdict 必须为空
@@ -189,9 +189,9 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 
 **Blocked by:** 通过数据 Profile 增加坐姿推肩；迁移高位下拉 provisional reference matcher；联通错误分析面板与差异导出。
 
-- [ ] 39 组、375 个标注区间按 capture 分离调参、held-out 和 challenge，禁止同组泄漏
-- [ ] reviewed negative windows 参与 raw trigger、产品过滤后 FP、FN、F1、exact count 和边界误差统计
-- [ ] 报告逐动作、机位、profile/version 和 capture 展示 TS/Rust/人工差异及首次状态分叉
+- [x] 39 组、375 个标注区间按 capture 分离调参、held-out 和 challenge，禁止同组泄漏
+- [x] reviewed negative windows 参与 raw trigger、产品过滤后 FP、FN、F1、exact count 和边界误差统计
+- [x] 报告逐动作、机位、profile/version 和 capture 展示 TS/Rust/人工差异及首次状态分叉
 - [x] 没有坐标或质量真值的数据只用于允许的行为指标，不声明标准轨迹准确率
 - [x] promotion gate 未通过时输出零 promotion，并继续保留上一条正式路径或 provisional 标记
 - [x] 重复运行同一视频只验证确定性，不冒充新增验证样本
@@ -203,11 +203,11 @@ Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开�
 **Blocked by:** 运行真实标注数据的独立评估与 promotion gate。
 
 - [x] 损坏 packet、非法长度、NaN/Infinity、时间倒退、未知 schema、重复释放和 Adapter failure 返回稳定错误
-- [ ] contract/profile/algorithm/config/inference/diagnostic 版本进入 packet 与导出，major 不兼容拒绝打开
+- [x] contract/profile/algorithm/config/inference/diagnostic 版本进入 packet 与导出，major 不兼容拒绝打开
 - [x] Host benchmark 分离 core、sealed-rep matcher；PC Web 分离 MediaPipe、Rust、解码、渲染与写盘
-- [ ] 正常模式和 full diagnostics 分开报告 P50/P95、packet age、drop、内存与处理倍率
-- [ ] 超预算时只降低多人刷新、输入分辨率或模型等级，不关闭身份、时间顺序、unknown 和 refusal
-- [ ] 清除剩余重复 TS 产品算法与双重状态，完整类型检查、全量测试、代码审查和本地演示通过
+- [x] 正常模式和 full diagnostics 分开报告 P50/P95、packet age、drop、内存与处理倍率
+- [x] 超预算时只降低多人刷新、输入分辨率或模型等级，不关闭身份、时间顺序、unknown 和 refusal
+- [x] 清除剩余重复 TS 产品算法与双重状态，完整类型检查、全量测试、代码审查和本地演示通过
 - [x] 报告明确 PC Web 实测结果；Android、iOS 和真机温升/降频仍标记未实施、未验证
 
 ## Historical tickets

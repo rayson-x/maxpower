@@ -12,5 +12,5 @@
     "noEmitOnError": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["evaluate.ts"]
+  "include": ["evaluate.ts", "parity.ts"]
 }

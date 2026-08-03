@@ -2,5 +2,16 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    ".test-build",
+    ".motion-sdk-eval-build",
+    ".harness-build",
+    ".labeled-fixture-build",
+    ".reference-trajectory-build",
+    ".segmentation-training-build",
+    "target",
+    "target-native"
+  ]
 }

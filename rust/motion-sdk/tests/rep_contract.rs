@@ -3,7 +3,7 @@ use std::sync::{Arc, atomic::AtomicUsize};
 use form_coach_motion_sdk::{
     AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseProfile,
     FixtureInferenceAdapter, FrameLease, MotionSession, PoseObservation, RecordingOutputAdapter,
-    RepPhase, SessionConfig, SubjectPolicy,
+    RepBoundaryRevision, RepPhase, SessionConfig, SubjectPolicy,
 };
 
 fn config() -> SessionConfig {
@@ -64,6 +64,67 @@ fn full_multi_joint_cycle_seals_one_immutable_rep_with_shared_boundaries() {
     assert_eq!(rep.profile_maturity, "provisional");
     assert!(rep.quality_verdict.is_none());
     assert_eq!(packets.last().unwrap().rep_state.phase, RepPhase::Ready);
+
+    let original = rep.clone();
+    let revised = session
+        .revise_sealed_rep(
+            &original,
+            RepBoundaryRevision {
+                start_frame_id: 2,
+                start_timestamp_ms: 200,
+                peak_frame_id: 5,
+                peak_timestamp_ms: 500,
+                end_frame_id: 9,
+                end_timestamp_ms: 900,
+                canonical_slice_hash: 0xfeed_beef,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        original.revision, 0,
+        "historical algorithm result is unchanged"
+    );
+    assert_eq!(original.start_frame_id, 1);
+    assert_eq!(revised.rep_id, original.rep_id);
+    assert_eq!(revised.revision, 1);
+    assert_eq!(revised.start_frame_id, 2);
+    assert_eq!(revised.profile_hash, original.profile_hash);
+    assert!(revised.quality_verdict.is_none());
+}
+
+#[test]
+fn profile_bundle_rejects_tampering_and_unsupported_contract_fields() {
+    for mutation in 0..5 {
+        let mut profile = ExerciseProfile::lat_pulldown_provisional();
+        match mutation {
+            0 => profile.start_amplitude += 0.01, // stale hash
+            1 => {
+                profile.coordinate_unit = "pixels".into();
+                profile.content_hash = profile.computed_content_hash();
+            }
+            2 => {
+                profile.required_capabilities = 1;
+                profile.content_hash = profile.computed_content_hash();
+            }
+            3 => {
+                profile.state_machine_id = "arbitrary-code/v1".into();
+                profile.content_hash = profile.computed_content_hash();
+            }
+            _ => {
+                profile.primary_landmarks = vec![15, 15];
+                profile.content_hash = profile.computed_content_hash();
+            }
+        }
+        let result = MotionSession::open(
+            config(),
+            AdapterCapabilities::fixture(),
+            FixtureInferenceAdapter::sequence(Vec::new()),
+            RecordingOutputAdapter::default(),
+        )
+        .unwrap()
+        .install_exercise_profile(profile);
+        assert!(result.is_err(), "mutation {mutation} must fail closed");
+    }
 }
 
 #[test]
@@ -129,10 +190,10 @@ fn short_unknown_gap_recovers_but_long_gap_aborts_without_fabricated_coordinates
 #[test]
 fn shoulder_press_is_added_by_profile_data_without_a_new_state_machine() {
     let wrist_y = [
-        0.20, 0.24, 0.35, 0.50, 0.65, 0.72, 0.68, 0.55, 0.40, 0.25, 0.20,
+        0.72, 0.68, 0.56, 0.42, 0.28, 0.20, 0.24, 0.34, 0.48, 0.63, 0.71,
     ];
     let elbow_y = [
-        0.28, 0.30, 0.36, 0.44, 0.53, 0.58, 0.56, 0.49, 0.41, 0.32, 0.28,
+        0.58, 0.56, 0.50, 0.43, 0.35, 0.29, 0.31, 0.38, 0.46, 0.53, 0.58,
     ];
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(

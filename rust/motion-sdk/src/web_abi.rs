@@ -1,5 +1,7 @@
 use std::sync::{Mutex, OnceLock};
 
+use serde::Deserialize;
+
 use super::{
     CanonicalLandmark, ContinuityEngine, ContinuityMode, NormalizedRect, PoseCandidate,
     PoseObservation, SubjectPolicy, SubjectTracker, TargetSnapshot, TargetState,
@@ -24,6 +26,107 @@ struct WebRuntime {
     packet_bytes: Vec<u8>,
     sequence_id: String,
     sequence_buffer: Vec<u8>,
+    profile_identity_buffer: Vec<u8>,
+    reference_context_buffer: Vec<u8>,
+    reference_profile_buffer: Vec<u8>,
+    reference_profile: Option<super::ReferenceTrajectoryProfile>,
+    reference_context: Option<super::ReferenceIdentity>,
+    reference_exercise_profile_binding: Option<(String, u64)>,
+    reference_state: ReferenceRuntimeState,
+    frame_history: Vec<super::CanonicalFrameSample>,
+}
+
+#[derive(Default)]
+enum ReferenceRuntimeState {
+    #[default]
+    Unavailable,
+    AwaitingSealedRep,
+    ExtractionRefused,
+    Evidence(super::TrajectoryMatchEvidence),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReferenceEnvelopeDto {
+    profile: ReferenceProfileDto,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferenceProfileDto {
+    schema_version: String,
+    profile_status: String,
+    identity: ReferenceIdentityDto,
+    phase_model: ReferencePhaseModelDto,
+    feature_names: Vec<String>,
+    corridor: ReferenceCorridorDto,
+    matching_policy: ReferenceMatchingPolicyDto,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferenceIdentityDto {
+    exercise_id: String,
+    capture_position: String,
+    variation: String,
+    training_side: String,
+    equipment: String,
+    coordinate_system: String,
+    feature_schema_id: String,
+    pose_model_version: String,
+}
+
+#[derive(Deserialize)]
+struct ReferenceCorridorDto {
+    nodes: Vec<ReferenceNodeDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferenceNodeDto {
+    phase: String,
+    phase_percent: f32,
+    features: Vec<ReferencePointDto>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferencePointDto {
+    q_low: Option<f32>,
+    q_high: Option<f32>,
+    median_absolute_deviation: Option<f32>,
+    n_observed: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferenceMatchingPolicyDto {
+    minimum_observation_confidence: f32,
+    unrestricted_dtw_allowed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReferencePhaseModelDto {
+    normalization: String,
+    pull_nodes: u32,
+    return_nodes: u32,
+    unrestricted_dtw_allowed: bool,
+}
+
+impl From<ReferenceIdentityDto> for super::ReferenceIdentity {
+    fn from(value: ReferenceIdentityDto) -> Self {
+        Self {
+            exercise_id: value.exercise_id,
+            capture_position: value.capture_position,
+            variation: value.variation,
+            training_side: value.training_side,
+            equipment: value.equipment,
+            coordinate_system: value.coordinate_system,
+            feature_schema_id: value.feature_schema_id,
+            pose_model_version: value.pose_model_version,
+        }
+    }
 }
 
 static RUNTIME: OnceLock<Mutex<WebRuntime>> = OnceLock::new();
@@ -115,6 +218,12 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
     runtime.packet_bytes.clear();
+    runtime.reference_profile = None;
+    runtime.reference_context_buffer.clear();
+    runtime.reference_context = None;
+    runtime.reference_exercise_profile_binding = None;
+    runtime.reference_state = ReferenceRuntimeState::Unavailable;
+    runtime.frame_history.clear();
     0
 }
 
@@ -266,6 +375,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
         if let Some(rep_engine) = runtime.rep_engine.as_mut() {
             rep_engine.abort_active();
         }
+        reset_reference_subject(&mut runtime);
     }
     let landmark_count = runtime
         .subject_tracker
@@ -293,6 +403,27 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
 
 fn process_rep(runtime: &mut WebRuntime) {
     runtime.completed_reps.clear();
+    if runtime.reference_profile.is_some() {
+        runtime.frame_history.push(super::CanonicalFrameSample {
+            frame_id: runtime.frame_id,
+            timestamp_ms: runtime.timestamp_ms,
+            canonical: runtime.output.clone(),
+        });
+        if runtime.rep_state.phase == super::RepPhase::Ready && runtime.frame_history.len() > 2 {
+            let remove = runtime.frame_history.len() - 2;
+            runtime.frame_history.drain(..remove);
+        } else {
+            let history_floor = runtime.timestamp_ms.saturating_sub(30_000);
+            let first_retained = runtime
+                .frame_history
+                .partition_point(|frame| frame.timestamp_ms < history_floor);
+            if first_retained > 0 {
+                runtime.frame_history.drain(..first_retained);
+            }
+        }
+    } else {
+        runtime.frame_history.clear();
+    }
     let Some(target) = runtime.target.as_ref() else {
         return;
     };
@@ -307,12 +438,45 @@ fn process_rep(runtime: &mut WebRuntime) {
     } else {
         runtime.rep_state = super::RepStateSnapshot::default();
     }
+    if let (Some(profile), Some(identity), Some((bound_identity, bound_hash)), Some(rep)) = (
+        runtime.reference_profile.as_ref(),
+        runtime.reference_context.as_ref(),
+        runtime.reference_exercise_profile_binding.as_ref(),
+        runtime.completed_reps.last(),
+    ) {
+        runtime.reference_state =
+            if rep.profile_identity != *bound_identity || rep.profile_hash != *bound_hash {
+                ReferenceRuntimeState::ExtractionRefused
+            } else {
+                match super::extract_lat_pulldown_reference_rep(
+                    identity.clone(),
+                    rep,
+                    &runtime.frame_history,
+                ) {
+                    Ok(observed) => ReferenceRuntimeState::Evidence(
+                        super::match_reference_trajectory(profile, &observed),
+                    ),
+                    Err(_) => ReferenceRuntimeState::ExtractionRefused,
+                }
+            };
+    }
     if let Some(target) = runtime.target.clone() {
         let packet = super::MotionPacket {
             lineage: super::PacketLineage {
                 sequence_id: runtime.sequence_id.clone(),
-                contract: super::ContractVersion { major: 1, minor: 1 },
+                contract: super::ContractVersion { major: 1, minor: 2 },
                 algorithm_version: "rust-canonical-wasm/v1".into(),
+                config_version: "web-motion-config/v1".into(),
+                inference_version: "mediapipe-host-adapter/v1".into(),
+                diagnostic_version: "web-motion-diagnostics/v1".into(),
+                active_profile_identity: runtime
+                    .rep_engine
+                    .as_ref()
+                    .map(|engine| engine.profile.identity.clone()),
+                active_profile_hash: runtime
+                    .rep_engine
+                    .as_ref()
+                    .map(|engine| engine.profile.content_hash),
             },
             frame_id: runtime.frame_id,
             source_timestamp_ms: runtime.timestamp_ms,
@@ -352,11 +516,41 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
         0 => None,
         1 => Some(super::ExerciseProfile::lat_pulldown_provisional()),
         2 => Some(super::ExerciseProfile::seated_shoulder_press_provisional()),
+        3 => Some(super::ExerciseProfile::lat_pulldown_rear_left_45_provisional()),
+        4 => Some(super::ExerciseProfile::seated_shoulder_press_front_provisional()),
         _ => return -2,
     };
     runtime.rep_engine = profile.map(super::RepEngine::new);
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
+    clear_reference(&mut runtime);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_profile_identity(length: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if length == 0 || length > 512 {
+        return -2;
+    }
+    runtime.profile_identity_buffer = vec![0; length as usize];
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_profile_identity_byte(index: u32, value: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Some(slot) = runtime.profile_identity_buffer.get_mut(index as usize) else {
+        return -2;
+    };
+    let Ok(value) = u8::try_from(value) else {
+        return -3;
+    };
+    *slot = value;
     0
 }
 
@@ -364,6 +558,11 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
 pub extern "C" fn motion_sdk_install_profile(
     hash_low: u32,
     hash_high: u32,
+    maturity: u32,
+    schema: u32,
+    coordinate_unit: u32,
+    state_machine: u32,
+    required_capabilities: u32,
     direction: u32,
     primary_0: u32,
     primary_1: u32,
@@ -376,26 +575,357 @@ pub extern "C" fn motion_sdk_install_profile(
     ready_tolerance: f32,
     max_gap_ms: u32,
 ) -> i32 {
-    // This numeric prototype cannot carry or authenticate the complete
-    // schema/identity/capability bundle. Fail closed rather than treating a
-    // caller-supplied hash as proof of content. Versioned built-in data
-    // profiles remain available through motion_sdk_set_profile.
-    let _ = (
-        hash_low,
-        hash_high,
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Ok(identity) = String::from_utf8(std::mem::take(&mut runtime.profile_identity_buffer))
+    else {
+        return -4;
+    };
+    let maturity = match maturity {
+        0 => super::ExerciseMaturity::Provisional,
+        _ => return -5,
+    };
+    let schema = match schema {
+        0 => super::PoseSchemaId::BlazePose33,
+        _ => return -5,
+    };
+    let coordinate_unit = match coordinate_unit {
+        0 => "image-normalized-y",
+        _ => return -5,
+    };
+    let state_machine_id = match state_machine {
+        0 => "ready-effort-peak-return/v1",
+        _ => return -5,
+    };
+    let direction = match direction {
+        0 => super::MovementDirection::IncreasingY,
+        1 => super::MovementDirection::DecreasingY,
+        _ => return -5,
+    };
+    let joints = |left: u32, right: u32| {
+        [left, right]
+            .into_iter()
+            .filter(|value| *value != u32::MAX)
+            .map(|value| value as usize)
+            .collect::<Vec<_>>()
+    };
+    let profile = super::ExerciseProfile {
+        identity,
+        content_hash: (u64::from(hash_high) << 32) | u64::from(hash_low),
+        maturity,
+        schema,
+        coordinate_unit: coordinate_unit.into(),
+        state_machine_id: state_machine_id.into(),
+        required_capabilities,
+        primary_landmarks: joints(primary_0, primary_1),
+        secondary_landmarks: joints(secondary_0, secondary_1),
         direction,
-        primary_0,
-        primary_1,
-        secondary_0,
-        secondary_1,
         start_amplitude,
         min_primary_amplitude,
         min_secondary_amplitude,
         return_hysteresis,
         ready_tolerance,
-        max_gap_ms,
+        max_gap_ms: u64::from(max_gap_ms),
+    };
+    if profile.validate().is_err() {
+        return -6;
+    }
+    runtime.rep_engine = Some(super::RepEngine::new(profile));
+    runtime.rep_state = super::RepStateSnapshot::default();
+    runtime.completed_reps.clear();
+    clear_reference(&mut runtime);
+    0
+}
+
+fn clear_reference(runtime: &mut WebRuntime) {
+    runtime.reference_profile = None;
+    runtime.reference_context_buffer.clear();
+    runtime.reference_context = None;
+    runtime.reference_exercise_profile_binding = None;
+    runtime.reference_state = ReferenceRuntimeState::Unavailable;
+    runtime.frame_history.clear();
+}
+
+fn reset_reference_subject(runtime: &mut WebRuntime) {
+    runtime.frame_history.clear();
+    runtime.reference_state = if runtime.reference_profile.is_some() {
+        ReferenceRuntimeState::AwaitingSealedRep
+    } else {
+        ReferenceRuntimeState::Unavailable
+    };
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_reference_profile(length: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if length == 0 || length > 1_048_576 {
+        return -2;
+    }
+    runtime.reference_profile_buffer = vec![0; length as usize];
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_reference_context(length: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if length == 0 || length > 4_096 {
+        return -2;
+    }
+    // Runtime context is immutable for the active ExerciseProfile. Changing
+    // model, action, camera position, side, or equipment must rotate/reset the
+    // profile first so a reviewed reference can never follow stale context.
+    if runtime.reference_context.is_some() || runtime.reference_profile.is_some() {
+        return -3;
+    }
+    runtime.reference_context_buffer = vec![0; length as usize];
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_reference_context_byte(index: u32, value: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Some(slot) = runtime.reference_context_buffer.get_mut(index as usize) else {
+        return -2;
+    };
+    let Ok(value) = u8::try_from(value) else {
+        return -3;
+    };
+    *slot = value;
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_commit_reference_context() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let bytes = std::mem::take(&mut runtime.reference_context_buffer);
+    let Ok(dto) = serde_json::from_slice::<ReferenceIdentityDto>(&bytes) else {
+        return -2;
+    };
+    let identity: super::ReferenceIdentity = dto.into();
+    let Some(expected_profile_identity) =
+        super::supported_reference_exercise_profile_identity(&identity)
+    else {
+        return -4;
+    };
+    let Some(active_profile) = runtime.rep_engine.as_ref().map(|engine| &engine.profile) else {
+        return -5;
+    };
+    if active_profile.identity != expected_profile_identity {
+        return -5;
+    }
+    runtime.reference_context = Some(identity);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_reference_profile_byte(index: u32, value: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Some(slot) = runtime.reference_profile_buffer.get_mut(index as usize) else {
+        return -2;
+    };
+    let Ok(value) = u8::try_from(value) else {
+        return -3;
+    };
+    *slot = value;
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_commit_reference_profile() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let bytes = std::mem::take(&mut runtime.reference_profile_buffer);
+    let profile_hash = bytes.iter().fold(super::FNV_OFFSET, |mut hash, byte| {
+        hash ^= u64::from(*byte);
+        hash.wrapping_mul(super::FNV_PRIME)
+    });
+    let Ok(envelope) = serde_json::from_slice::<ReferenceEnvelopeDto>(&bytes) else {
+        return -2;
+    };
+    let ReferenceProfileDto {
+        schema_version,
+        profile_status,
+        identity,
+        phase_model,
+        feature_names,
+        corridor,
+        matching_policy,
+    } = envelope.profile;
+    if schema_version != "form-coach-provisional-reference-profile/v1"
+        || profile_status != "personal_provisional_expert_reviewed"
+        || phase_model.normalization != "piecewise_linear_start_bottom_end"
+        || phase_model.pull_nodes != 16
+        || phase_model.return_nodes != 16
+        || phase_model.unrestricted_dtw_allowed
+        || matching_policy.unrestricted_dtw_allowed
+        || !matching_policy.minimum_observation_confidence.is_finite()
+        || !(0.0..=1.0).contains(&matching_policy.minimum_observation_confidence)
+        || feature_names
+            != super::LAT_PULLDOWN_REFERENCE_FEATURES
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+    {
+        return -3;
+    }
+    let profile_identity: super::ReferenceIdentity = identity.into();
+    let Some(trusted_context) = runtime.reference_context.clone() else {
+        return -7;
+    };
+    if super::identity_mismatch(&profile_identity, &trusted_context).is_some() {
+        return -4;
+    }
+    let Some(expected_exercise_profile) =
+        super::supported_reference_exercise_profile_identity(&profile_identity)
+    else {
+        return -6;
+    };
+    let Some(active_exercise_profile) = runtime.rep_engine.as_ref().map(|engine| &engine.profile)
+    else {
+        return -6;
+    };
+    if active_exercise_profile.identity != expected_exercise_profile {
+        return -6;
+    }
+    let exercise_profile_binding = (
+        active_exercise_profile.identity.clone(),
+        active_exercise_profile.content_hash,
     );
-    -4
+    let profile = super::ReferenceTrajectoryProfile {
+        identity: profile_identity,
+        profile_hash,
+        profile_status,
+        feature_names,
+        minimum_observation_confidence: matching_policy.minimum_observation_confidence,
+        nodes: corridor
+            .nodes
+            .into_iter()
+            .map(|node| super::ReferenceCorridorNode {
+                phase: node.phase,
+                phase_progress: node.phase_percent / 100.0,
+                features: node
+                    .features
+                    .into_iter()
+                    .map(|point| super::CorridorPoint {
+                        q_low: point.q_low,
+                        q_high: point.q_high,
+                        median_absolute_deviation: point.median_absolute_deviation,
+                        n_observed: point.n_observed,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    if !valid_fixed_reference_layout(&profile.nodes)
+        || profile.nodes.iter().any(|node| {
+            node.features.len() != profile.feature_names.len()
+                || node
+                    .features
+                    .iter()
+                    .any(|point| !super::valid_corridor_point(point))
+        })
+    {
+        return -5;
+    }
+    runtime.reference_profile = Some(profile);
+    runtime.reference_exercise_profile_binding = Some(exercise_profile_binding);
+    runtime.reference_state = ReferenceRuntimeState::AwaitingSealedRep;
+    0
+}
+
+fn valid_fixed_reference_layout(nodes: &[super::ReferenceCorridorNode]) -> bool {
+    nodes.len() == 32
+        && nodes.iter().enumerate().all(|(index, node)| {
+            let phase_index = index % 16;
+            let expected_phase = if index < 16 { "pull" } else { "return" };
+            let expected_progress = phase_index as f32 / 15.0;
+            node.phase == expected_phase && (node.phase_progress - expected_progress).abs() <= 1e-4
+        })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_reference_status() -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return u32::MAX;
+    };
+    match &runtime.reference_state {
+        ReferenceRuntimeState::Unavailable => 0,
+        ReferenceRuntimeState::AwaitingSealedRep => 1,
+        ReferenceRuntimeState::ExtractionRefused => 2,
+        ReferenceRuntimeState::Evidence(evidence) => match evidence.status {
+            super::TrajectoryComparisonStatus::ComparisonAvailable => 3,
+            super::TrajectoryComparisonStatus::InsufficientObservation => 4,
+            super::TrajectoryComparisonStatus::ProfileMismatch => 5,
+            super::TrajectoryComparisonStatus::InvalidProfile => 6,
+        },
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_reference_field(field: u32, high: u32) -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return u32::MAX;
+    };
+    let ReferenceRuntimeState::Evidence(evidence) = &runtime.reference_state else {
+        return 0;
+    };
+    let value = match field {
+        0 => evidence.rep_id,
+        1 => u64::from(evidence.rep_revision),
+        2 => evidence.canonical_slice_hash,
+        3 => evidence.profile_hash,
+        _ => return u32::MAX,
+    };
+    if high == 0 {
+        value as u32
+    } else {
+        (value >> 32) as u32
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_reference_feature_count() -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return 0;
+    };
+    match &runtime.reference_state {
+        ReferenceRuntimeState::Evidence(evidence) => evidence.features.len() as u32,
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_reference_feature_number(index: u32, field: u32) -> f32 {
+    let Ok(runtime) = runtime().lock() else {
+        return f32::NAN;
+    };
+    let ReferenceRuntimeState::Evidence(evidence) = &runtime.reference_state else {
+        return f32::NAN;
+    };
+    let Some(feature) = evidence.features.get(index as usize) else {
+        return f32::NAN;
+    };
+    match field {
+        0 => feature.comparable_node_count as f32,
+        1 => feature.unknown_node_count as f32,
+        2 => feature.outside_node_count as f32,
+        3 => feature.outside_node_ratio.unwrap_or(f32::NAN),
+        4 => feature.maximum_consecutive_outside_nodes as f32,
+        5 => feature.total_normalized_excess,
+        _ => f32::NAN,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -572,6 +1102,7 @@ pub extern "C" fn motion_sdk_select_subject(x: f32, y: f32) -> i32 {
     if let Some(rep_engine) = runtime.rep_engine.as_mut() {
         rep_engine.abort_active();
     }
+    reset_reference_subject(&mut runtime);
     0
 }
 
@@ -589,12 +1120,32 @@ pub extern "C" fn motion_sdk_schedule(
     let Some(scheduler) = runtime.scheduler.as_mut() else {
         return u32::MAX;
     };
-    match scheduler.decide(timestamp_ms, target, inference_in_flight != 0) {
+    // MediaPipe Tasks Web does not expose a target ROI tracking call. Refuse
+    // to pretend TrackTarget is supported: every accepted request remains a
+    // multi-person refresh, while safe degradation reduces its cadence.
+    match scheduler.decide_with_roi_capability(
+        timestamp_ms,
+        target,
+        inference_in_flight != 0,
+        false,
+    ) {
         super::InferenceRequest::AcquireMulti => 0,
         super::InferenceRequest::TrackTarget => 1,
         super::InferenceRequest::RefreshCandidates => 2,
         super::InferenceRequest::SkipFrame => 3,
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_degradation(level: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Some(scheduler) = runtime.scheduler.as_mut() else {
+        return -2;
+    };
+    scheduler.apply_safe_degradation(level.min(2) as u8);
+    0
 }
 
 #[unsafe(no_mangle)]

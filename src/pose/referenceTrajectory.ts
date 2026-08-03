@@ -131,7 +131,7 @@ export interface PersonalProvisionalReferenceProfile {
   identity: PersonalReferenceIdentity & {
     exerciseId: "lat_pulldown";
     capturePosition: CapturePosition;
-    featureSchemaId: "lat_pulldown/source-image-piecewise-32/v1";
+    featureSchemaId: "lat_pulldown/source-image-piecewise-32/v2";
     poseModelVersion: string;
   };
   intendedUse: "compare_observed_reps_to_personal_provisional_corridor";
@@ -307,6 +307,9 @@ export function extractNormalizedLatPulldownRep(
       current !== null && baselineTorso?.torsoCenterX !== null && baselineTorso?.torsoScale
       ? round((current - baselineTorso.torsoCenterX) / baselineTorso.torsoScale)
       : null;
+    node.confidence[torsoShiftIndex] = node.values[torsoShiftIndex] === null
+      ? 0
+      : vectors[index].confidence[LAT_PULLDOWN_REFERENCE_FEATURES.indexOf("torsoLateralTiltDeg")];
   });
 
   const featureCoverage = Object.fromEntries(
@@ -436,7 +439,7 @@ export function buildPersonalProvisionalReference(
         exerciseId: "lat_pulldown",
         capturePosition: input.capturePosition,
         ...input.identity,
-        featureSchemaId: "lat_pulldown/source-image-piecewise-32/v1",
+        featureSchemaId: "lat_pulldown/source-image-piecewise-32/v2",
         poseModelVersion: poseModels[0],
       },
       intendedUse: "compare_observed_reps_to_personal_provisional_corridor",
@@ -560,6 +563,25 @@ export function matchLatPulldownTrajectory(
       mismatchReason: "相位节点或 feature schema 不匹配。",
     };
   }
+  if (
+    !validReferencePhaseLayout(profile.corridor.nodes) ||
+    profile.corridor.nodes.some((node) =>
+      node.features.length !== profile.featureNames.length ||
+      node.features.some((point) => !validReferenceCorridorPoint(point)),
+    ) ||
+    profile.corridor.nodes.some((node, index) => {
+      const actual = observed.nodes[index];
+      return node.phase !== actual.phase || Math.abs(node.phasePercent - actual.phasePercent) > 1e-4;
+    })
+  ) {
+    return {
+      ...base,
+      status: "profile_mismatch",
+      features: [],
+      comparableFeatureCount: 0,
+      mismatchReason: "相位顺序或阶段进度不匹配。",
+    };
+  }
 
   const features = LAT_PULLDOWN_REFERENCE_FEATURES.map((feature, featureIndex) => {
     const nodeComparisons: TrajectoryNodeComparison[] = [];
@@ -578,9 +600,14 @@ export function matchLatPulldownTrajectory(
       previousPhase = observedNode.phase;
       const comparable =
         value !== null &&
+        Number.isFinite(value) &&
+        Number.isFinite(confidence) &&
         confidence >= profile.matchingPolicy.minimumObservationConfidence &&
         point.qLow !== null &&
-        point.qHigh !== null;
+        point.qHigh !== null &&
+        Number.isFinite(point.qLow) &&
+        Number.isFinite(point.qHigh) &&
+        point.qLow <= point.qHigh;
       if (!comparable) {
         currentOutsideRun = 0;
         nodeComparisons.push({
@@ -651,6 +678,40 @@ export function matchLatPulldownTrajectory(
     comparableFeatureCount: comparable.length,
     mismatchReason: null,
   };
+}
+
+function validReferenceCorridorPoint(point: ReferenceCorridorPoint): boolean {
+  const quantilesValid = point.qLow === null && point.qHigh === null
+    ? true
+    : point.qLow !== null &&
+      point.qHigh !== null &&
+      Number.isFinite(point.qLow) &&
+      Number.isFinite(point.qHigh) &&
+      point.qLow <= point.qHigh &&
+      point.nObserved > 0;
+  return quantilesValid && (
+    point.medianAbsoluteDeviation === null ||
+    (Number.isFinite(point.medianAbsoluteDeviation) && point.medianAbsoluteDeviation >= 0)
+  );
+}
+
+function validReferencePhaseLayout(
+  nodes: readonly Pick<ReferenceCorridorNode, "phase" | "phasePercent">[],
+): boolean {
+  const split = nodes.findIndex((node) => node.phase === "return");
+  if (split < 2 || nodes.length - split < 2) return false;
+  const valid = (
+    phaseNodes: readonly Pick<ReferenceCorridorNode, "phase" | "phasePercent">[],
+    phase: "pull" | "return",
+  ) => phaseNodes.every((node, index) =>
+    node.phase === phase &&
+    Number.isFinite(node.phasePercent) &&
+    node.phasePercent >= 0 &&
+    node.phasePercent <= 100 &&
+    (index === 0 || phaseNodes[index - 1].phasePercent <= node.phasePercent),
+  ) && Math.abs(phaseNodes[0].phasePercent) <= 1e-4
+    && Math.abs(phaseNodes[phaseNodes.length - 1].phasePercent - 100) <= 1e-4;
+  return valid(nodes.slice(0, split), "pull") && valid(nodes.slice(split), "return");
 }
 
 function phaseTargets(

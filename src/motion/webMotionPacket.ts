@@ -1,7 +1,7 @@
 import type { CanonicalPoseFrame } from "../pose/canonicalPose";
 import type {
   RustRepState,
-  RustReferenceComparisonUnavailable,
+  RustReferenceComparison,
   RustSealedRep,
   RustTargetSnapshot,
 } from "./rustCanonicalWasm";
@@ -15,7 +15,7 @@ export interface WebMotionPacket {
   readonly completedReps: readonly RustSealedRep[];
   /** The once-decoded binary packet emitted by Rust; null only in diagnostic TS shadow mode. */
   readonly rustPacket: DecodedMotionPacket | null;
-  readonly referenceComparison: RustReferenceComparisonUnavailable;
+  readonly referenceComparison: RustReferenceComparison;
 }
 
 export interface WebMotionPacketConsumers {
@@ -23,6 +23,14 @@ export interface WebMotionPacketConsumers {
   count(packet: WebMotionPacket): void;
   record(packet: WebMotionPacket): void;
   analyze(packet: WebMotionPacket): void;
+}
+
+export interface WebMotionRouteTiming {
+  readonly renderMs: number;
+  readonly countMs: number;
+  readonly recordMs: number;
+  readonly analyzeMs: number;
+  readonly totalMs: number;
 }
 
 export function createWebMotionPacket(input: WebMotionPacket): WebMotionPacket {
@@ -36,9 +44,25 @@ export function createWebMotionPacket(input: WebMotionPacket): WebMotionPacket {
 export function routeWebMotionPacket(
   packet: WebMotionPacket,
   consumers: WebMotionPacketConsumers,
-): void {
+): WebMotionRouteTiming {
+  const routeStartedAt = performance.now();
+  let stageStartedAt = routeStartedAt;
   consumers.render(packet);
+  const renderMs = performance.now() - stageStartedAt;
+  stageStartedAt = performance.now();
   consumers.count(packet);
+  const countMs = performance.now() - stageStartedAt;
+  stageStartedAt = performance.now();
   consumers.record(packet);
+  const recordMs = performance.now() - stageStartedAt;
+  stageStartedAt = performance.now();
   consumers.analyze(packet);
+  const analyzeMs = performance.now() - stageStartedAt;
+  return Object.freeze({
+    renderMs,
+    countMs,
+    recordMs,
+    analyzeMs,
+    totalMs: performance.now() - routeStartedAt,
+  });
 }

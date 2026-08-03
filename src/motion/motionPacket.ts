@@ -51,6 +51,11 @@ export interface DecodedMotionPacket {
     sequenceId: string;
     contract: Readonly<{ major: number; minor: number }>;
     algorithmVersion: string;
+    configVersion: string;
+    inferenceVersion: string;
+    diagnosticVersion: string;
+    activeProfileIdentity: string | null;
+    activeProfileHash: bigint | null;
   }>;
   readonly frameId: bigint;
   readonly sourceTimestampMs: bigint;
@@ -154,6 +159,11 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
   let partialAttempts = 0n;
   let activeRepId: bigint | null = null;
   let recoveredAcrossGap = false;
+  let configVersion = "unspecified";
+  let inferenceVersion = "unspecified";
+  let diagnosticVersion = "unspecified";
+  let activeProfileIdentity: string | null = null;
+  let activeProfileHash: bigint | null = null;
   const completedReps: Readonly<DecodedSealedRep>[] = [];
   if (offset < declaredLength) {
     ensureAvailable(offset, 4, declaredLength, "rep extension marker");
@@ -230,6 +240,44 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
         recoveredAcrossGap: (flags & (1 << 1)) !== 0,
       }));
     }
+    if (offset < declaredLength) {
+      ensureAvailable(offset, 4, declaredLength, "version extension marker");
+      const versionMarker = textDecoder.decode(bytes.subarray(offset, offset + 4));
+      if (versionMarker !== "VER1") {
+        throw new Error(`Unknown MotionPacket version extension ${versionMarker}`);
+      }
+      offset += 4;
+      const readVersionString = (label: string) => {
+        ensureAvailable(offset, 2, declaredLength, `${label} length`);
+        const length = view.getUint16(offset, true);
+        offset += 2;
+        const value = readString(bytes, offset, length, declaredLength, label);
+        offset += length;
+        return value;
+      };
+      configVersion = readVersionString("config version");
+      inferenceVersion = readVersionString("inference version");
+      diagnosticVersion = readVersionString("diagnostic version");
+      ensureAvailable(offset, 11, declaredLength, "active profile version");
+      const profilePresent = view.getUint8(offset) !== 0;
+      offset += 1;
+      const profileHash = view.getBigUint64(offset, true);
+      offset += 8;
+      const identityLength = view.getUint16(offset, true);
+      offset += 2;
+      const profileIdentity = readString(
+        bytes,
+        offset,
+        identityLength,
+        declaredLength,
+        "active profile identity",
+      );
+      offset += identityLength;
+      if (profilePresent) {
+        activeProfileIdentity = profileIdentity;
+        activeProfileHash = profileHash;
+      }
+    }
   }
 
   return Object.freeze({
@@ -237,6 +285,11 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
       sequenceId,
       contract: Object.freeze({ major, minor }),
       algorithmVersion,
+      configVersion,
+      inferenceVersion,
+      diagnosticVersion,
+      activeProfileIdentity,
+      activeProfileHash,
     }),
     frameId,
     sourceTimestampMs,

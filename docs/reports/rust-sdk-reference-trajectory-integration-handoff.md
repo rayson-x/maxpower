@@ -118,8 +118,10 @@ poseModelVersion
 当前 feature schema：
 
 ```text
-lat_pulldown/source-image-piecewise-32/v1
+lat_pulldown/source-image-piecewise-32/v2
 ```
+
+`v2` 修正了 `torsoLateralShift` 只有数值、没有 confidence 而永远不可比较的问题；旧 `v1` profile 不得静默套用。
 
 任一字段不匹配，返回：
 
@@ -127,6 +129,10 @@ lat_pulldown/source-image-piecewise-32/v1
 status = profile_mismatch
 mismatchReason = <field> 不匹配
 ```
+
+Web/WASM 接入时，以上“observed identity”不能由 reference profile 自证。宿主必须先从当前实际运行状态独立安装并冻结 runtime context：当前 MediaPipe model、动作 profile、机位、训练侧、明确器械/变式和坐标系。reference profile envelope 只允许携带 profile；额外的 `observedIdentity` 字段直接拒绝。换模型、动作 profile、机位或变式会清除旧 context，随后必须重新安装，缺少 context 时 matcher fail closed。
+
+当前 provisional matcher 只允许 `MediaPipe heavy + 双侧 + 直杆正握 + rear/rearLeft45 + source-image/v1` 的完整 tuple。`lite/full`、未填写直杆变式或其他器械仍可使用通用计数 profile，但不得安装这份轨迹参考。
 
 禁止自动搜索“最像”的其他机位 profile。`rear` 和 `rearLeft45` 共享特征名称，不共享数值走廊。
 
@@ -415,7 +421,7 @@ qualityVerdict = null
 2. **Pointwise comparison without DTW**
    连续改变若干左腕节点后，`outsideNodeCount` 和 `maximumConsecutiveOutsideNodes` 增加，但 `qualityVerdict` 仍为 null。
 3. **Strict profile identity**
-   改变 `capturePosition` 或 `equipment` 返回 `profile_mismatch`。
+   改变 `capturePosition` 或 `equipment` 返回 `profile_mismatch`；profile 自带的 observed identity 被拒绝，lite runtime 不能安装 heavy reference。
 4. **Translation/scale separation**
    身体中心 x 不变、躯干尺度变化时，`torsoLateralShift` 必须保持0。
 
@@ -426,10 +432,11 @@ qualityVerdict = null
 - 输出中无 NaN/Infinity。
 - percentile worked example 与 TypeScript 完全一致。
 - 相同输入的 Rust/TypeScript JSON 数值误差在预先声明的浮点容差内。
+- 32×11 特征必须通过由 TypeScript 提取值生成的窄/偏移 corridor 覆盖 inside、outside、unknown 与 normalized excess；不能使用全包宽走廊冒充数值 parity。
 - profile mismatch 不得降级为“尝试其他 profile”。
 - unknown 不得因重新归一化权重而提高所谓总分。
 
-TypeScript 当前全量验证：98项测试全部通过。
+TypeScript 当前全量验证：109项测试全部通过；WASM parity 额外重放45帧。
 
 ## 13. Rust Agent 推荐实施顺序
 

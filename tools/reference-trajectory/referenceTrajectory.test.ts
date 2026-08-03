@@ -175,6 +175,58 @@ test("matching refuses a physical camera-position mismatch", () => {
   assert.equal(equipmentMatch.status, "profile_mismatch");
 });
 
+test("matching refuses swapped or corrupt phase metadata", () => {
+  const rep = normalizedRep("phase-seed", 0);
+  const built = buildPersonalProvisionalReference({
+    capturePosition: "rear",
+    reps: [rep, normalizedRep("phase-seed-2", 0.01), normalizedRep("phase-seed-3", -0.01)],
+    identity: {
+      variation: "unrecorded",
+      trainingSide: "bilateral",
+      equipment: "local_cable_lat_pulldown_unrecorded",
+      coordinateSystem: "source-image/v1",
+    },
+  });
+  assert.equal(built.status, "ready");
+  if (built.status !== "ready") return;
+
+  const swapped = structuredClone(rep);
+  [swapped.nodes[15], swapped.nodes[16]] = [swapped.nodes[16], swapped.nodes[15]];
+  assert.equal(matchLatPulldownTrajectory(built.profile, swapped).status, "profile_mismatch");
+
+  const corruptProfile = structuredClone(built.profile);
+  corruptProfile.corridor.nodes[0].phasePercent = 42;
+  assert.equal(matchLatPulldownTrajectory(corruptProfile, rep).status, "profile_mismatch");
+});
+
+test("matching treats non-finite observations as unknown and rejects invalid corridors", () => {
+  const rep = normalizedRep("finite-seed", 0);
+  const built = buildPersonalProvisionalReference({
+    capturePosition: "rear",
+    reps: [rep, normalizedRep("finite-seed-2", 0.01), normalizedRep("finite-seed-3", -0.01)],
+    identity: {
+      variation: "unrecorded",
+      trainingSide: "bilateral",
+      equipment: "local_cable_lat_pulldown_unrecorded",
+      coordinateSystem: "source-image/v1",
+    },
+  });
+  assert.equal(built.status, "ready");
+  if (built.status !== "ready") return;
+  const nonFinite = structuredClone(rep);
+  nonFinite.nodes[0].values[0] = Number.NaN;
+  nonFinite.nodes[1].confidence[0] = Number.POSITIVE_INFINITY;
+  const result = matchLatPulldownTrajectory(built.profile, nonFinite);
+  assert.equal(result.status, "comparison_available");
+  assert.equal(result.features[0].comparableNodeCount, rep.nodes.length - 2);
+  assert.equal(result.features[0].nodes[0].status, "unknown");
+  assert.equal(result.features[0].nodes[1].status, "unknown");
+
+  const invalidProfile = structuredClone(built.profile);
+  invalidProfile.corridor.nodes[0].features[0].qLow = Number.NaN;
+  assert.equal(matchLatPulldownTrajectory(invalidProfile, rep).status, "profile_mismatch");
+});
+
 test("torso lateral shift is translation relative to the start, not a scale-change artifact", () => {
   const scaleChanging = [
     pose(0, 0.2),

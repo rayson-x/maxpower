@@ -5,12 +5,26 @@ mod web_abi;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
+use std::hint::black_box;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 pub const SUPPORTED_CONTRACT_MAJOR: u16 = 1;
+
+/// Reproducible host-only benchmark seam. It deliberately exposes only an
+/// elapsed duration rather than the private continuity engine API.
+#[doc(hidden)]
+pub fn benchmark_canonical_core(iterations: usize) -> std::time::Duration {
+    let mut core = ContinuityEngine::new(ContinuityMode::Fusion, 1280, 720);
+    let observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.99); 33];
+    let started = std::time::Instant::now();
+    for index in 0..iterations {
+        black_box(core.process(&observations, index as u64 * 33));
+    }
+    started.elapsed()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ContractVersion {
@@ -60,6 +74,46 @@ pub struct InferenceScheduler {
     refresh_interval_ms: u64,
     acquire_interval_ms: u64,
     last_multi_ms: Option<u64>,
+    minimum_inference_interval_ms: u64,
+    last_inference_ms: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SafeDegradationPolicy {
+    pub level: u8,
+    pub candidate_refresh_interval_ms: u64,
+    pub acquire_interval_ms: u64,
+    /// Reserved for a host adapter that can resize before inference. Rust does
+    /// not silently change the canonical coordinate or identity contracts.
+    pub suggested_input_scale_percent: u8,
+    /// Reserved for host model selection; zero keeps the configured tier.
+    pub suggested_model_tier_step: u8,
+}
+
+pub const fn safe_degradation_policy(level: u8) -> SafeDegradationPolicy {
+    match level {
+        0 => SafeDegradationPolicy {
+            level: 0,
+            candidate_refresh_interval_ms: 500,
+            acquire_interval_ms: 100,
+            suggested_input_scale_percent: 100,
+            suggested_model_tier_step: 0,
+        },
+        1 => SafeDegradationPolicy {
+            level: 1,
+            candidate_refresh_interval_ms: 900,
+            acquire_interval_ms: 150,
+            suggested_input_scale_percent: 100,
+            suggested_model_tier_step: 0,
+        },
+        _ => SafeDegradationPolicy {
+            level: 2,
+            candidate_refresh_interval_ms: 1_500,
+            acquire_interval_ms: 250,
+            suggested_input_scale_percent: 100,
+            suggested_model_tier_step: 0,
+        },
+    }
 }
 
 impl InferenceScheduler {
@@ -68,6 +122,8 @@ impl InferenceScheduler {
             refresh_interval_ms,
             acquire_interval_ms,
             last_multi_ms: None,
+            minimum_inference_interval_ms: 0,
+            last_inference_ms: None,
         }
     }
 
@@ -77,18 +133,35 @@ impl InferenceScheduler {
         target: Option<TargetState>,
         inference_in_flight: bool,
     ) -> InferenceRequest {
+        self.decide_with_roi_capability(timestamp_ms, target, inference_in_flight, true)
+    }
+
+    pub fn decide_with_roi_capability(
+        &mut self,
+        timestamp_ms: u64,
+        target: Option<TargetState>,
+        inference_in_flight: bool,
+        roi_tracking: bool,
+    ) -> InferenceRequest {
         if inference_in_flight {
+            return InferenceRequest::SkipFrame;
+        }
+        if self.last_inference_ms.is_some_and(|last| {
+            timestamp_ms.saturating_sub(last) < self.minimum_inference_interval_ms
+        }) {
             return InferenceRequest::SkipFrame;
         }
         let since_multi = self
             .last_multi_ms
             .map_or(u64::MAX, |last| timestamp_ms.saturating_sub(last));
         match target {
-            Some(TargetState::Locked) if since_multi < self.refresh_interval_ms => {
+            Some(TargetState::Locked) if roi_tracking && since_multi < self.refresh_interval_ms => {
+                self.last_inference_ms = Some(timestamp_ms);
                 InferenceRequest::TrackTarget
             }
             Some(TargetState::Locked) => {
                 self.last_multi_ms = Some(timestamp_ms);
+                self.last_inference_ms = Some(timestamp_ms);
                 InferenceRequest::RefreshCandidates
             }
             Some(TargetState::Uncertain | TargetState::Lost | TargetState::Reacquiring)
@@ -101,9 +174,22 @@ impl InferenceScheduler {
             }
             _ => {
                 self.last_multi_ms = Some(timestamp_ms);
+                self.last_inference_ms = Some(timestamp_ms);
                 InferenceRequest::AcquireMulti
             }
         }
+    }
+
+    pub fn apply_safe_degradation(&mut self, level: u8) -> SafeDegradationPolicy {
+        let policy = safe_degradation_policy(level);
+        self.refresh_interval_ms = policy.candidate_refresh_interval_ms;
+        self.acquire_interval_ms = policy.acquire_interval_ms;
+        self.minimum_inference_interval_ms = match policy.level {
+            0 => 0,
+            1 => 50,
+            _ => 100,
+        };
+        policy
     }
 }
 
@@ -164,6 +250,8 @@ pub enum MotionError {
     ProfileAlreadyActive,
     ProfileInstallAfterFrames,
     InvalidExerciseProfile(&'static str),
+    InvalidRepRevision(&'static str),
+    RepProfileMismatch,
 }
 
 impl fmt::Display for MotionError {
@@ -359,6 +447,11 @@ pub struct PacketLineage {
     pub sequence_id: String,
     pub contract: ContractVersion,
     pub algorithm_version: String,
+    pub config_version: String,
+    pub inference_version: String,
+    pub diagnostic_version: String,
+    pub active_profile_identity: Option<String>,
+    pub active_profile_hash: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -382,6 +475,16 @@ pub enum MovementDirection {
     DecreasingY,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PoseSchemaId {
+    BlazePose33,
+}
+
+pub const PROFILE_CAP_CANONICAL_LANDMARKS: u32 = 1 << 0;
+pub const PROFILE_CAP_SUBJECT_LOCK: u32 = 1 << 1;
+const PROFILE_REQUIRED_CAPABILITIES: u32 =
+    PROFILE_CAP_CANONICAL_LANDMARKS | PROFILE_CAP_SUBJECT_LOCK;
+
 /// Validated data profile consumed by the generic rep state machine. Adding an
 /// exercise is data-only when the movement can be represented by these gates.
 #[derive(Clone, Debug, PartialEq)]
@@ -389,6 +492,10 @@ pub struct ExerciseProfile {
     pub identity: String,
     pub content_hash: u64,
     pub maturity: ExerciseMaturity,
+    pub schema: PoseSchemaId,
+    pub coordinate_unit: String,
+    pub state_machine_id: String,
+    pub required_capabilities: u32,
     pub primary_landmarks: Vec<usize>,
     pub secondary_landmarks: Vec<usize>,
     pub direction: MovementDirection,
@@ -402,10 +509,14 @@ pub struct ExerciseProfile {
 
 impl ExerciseProfile {
     pub fn lat_pulldown_provisional() -> Self {
-        Self {
+        Self::with_computed_hash(Self {
             identity: "lat-pulldown/rear/bilateral/cable/v1".into(),
-            content_hash: 0x6f2b_3af2_4dd2_8c11,
+            content_hash: 0,
             maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::BlazePose33,
+            coordinate_unit: "image-normalized-y".into(),
+            state_machine_id: "ready-effort-peak-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
             primary_landmarks: vec![15, 16],
             secondary_landmarks: vec![13, 14],
             direction: MovementDirection::IncreasingY,
@@ -415,32 +526,136 @@ impl ExerciseProfile {
             return_hysteresis: 0.05,
             ready_tolerance: 0.06,
             max_gap_ms: 700,
-        }
+        })
+    }
+
+    pub fn lat_pulldown_rear_left_45_provisional() -> Self {
+        Self::with_identity(
+            Self::lat_pulldown_provisional(),
+            "lat-pulldown/rear-left-45/bilateral/cable/v1",
+        )
     }
 
     pub fn seated_shoulder_press_provisional() -> Self {
-        Self {
+        Self::with_computed_hash(Self {
             identity: "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1".into(),
-            content_hash: 0x114e_d28b_a763_54c9,
+            content_hash: 0,
             maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::BlazePose33,
+            coordinate_unit: "image-normalized-y".into(),
+            state_machine_id: "ready-effort-peak-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
             primary_landmarks: vec![15, 16],
             secondary_landmarks: vec![13, 14],
-            direction: MovementDirection::IncreasingY,
+            direction: MovementDirection::DecreasingY,
             start_amplitude: 0.04,
             min_primary_amplitude: 0.14,
             min_secondary_amplitude: 0.12,
             return_hysteresis: 0.04,
             ready_tolerance: 0.06,
             max_gap_ms: 700,
+        })
+    }
+
+    pub fn seated_shoulder_press_front_provisional() -> Self {
+        Self::with_identity(
+            Self::seated_shoulder_press_provisional(),
+            "seated-shoulder-press/front/bilateral/dumbbell/v1",
+        )
+    }
+
+    fn with_identity(mut profile: Self, identity: &str) -> Self {
+        profile.identity = identity.into();
+        Self::with_computed_hash(profile)
+    }
+
+    fn with_computed_hash(mut profile: Self) -> Self {
+        profile.content_hash = profile.computed_content_hash();
+        profile
+    }
+
+    pub fn computed_content_hash(&self) -> u64 {
+        let mut hash = FNV_OFFSET;
+        for bytes in [
+            self.identity.as_bytes(),
+            self.coordinate_unit.as_bytes(),
+            self.state_machine_id.as_bytes(),
+        ] {
+            hash = fnv_bytes(hash, bytes.iter().copied());
+            hash = fnv_bytes(hash, [0]);
         }
+        hash = fnv_bytes(hash, self.required_capabilities.to_le_bytes());
+        hash = fnv_bytes(
+            hash,
+            [match self.maturity {
+                ExerciseMaturity::Provisional => 0,
+                ExerciseMaturity::Calibrated => 1,
+            }],
+        );
+        hash = fnv_bytes(hash, [0]); // BlazePose33 schema code.
+        hash = fnv_bytes(
+            hash,
+            [match self.direction {
+                MovementDirection::IncreasingY => 0,
+                MovementDirection::DecreasingY => 1,
+            }],
+        );
+        hash = fnv_bytes(hash, [self.primary_landmarks.len() as u8]);
+        hash = fnv_bytes(
+            hash,
+            self.primary_landmarks.iter().map(|value| *value as u8),
+        );
+        hash = fnv_bytes(hash, [self.secondary_landmarks.len() as u8]);
+        hash = fnv_bytes(
+            hash,
+            self.secondary_landmarks.iter().map(|value| *value as u8),
+        );
+        for gate in [
+            self.start_amplitude,
+            self.min_primary_amplitude,
+            self.min_secondary_amplitude,
+            self.return_hysteresis,
+            self.ready_tolerance,
+        ] {
+            hash = fnv_bytes(hash, gate.to_bits().to_le_bytes());
+        }
+        fnv_bytes(hash, self.max_gap_ms.to_le_bytes())
     }
 
     fn validate(&self) -> Result<(), MotionError> {
-        if self.identity.trim().is_empty() {
+        if self.identity.trim().is_empty()
+            || self.identity.split('/').count() < 5
+            || self.identity.chars().any(char::is_whitespace)
+        {
             return Err(MotionError::InvalidExerciseProfile("empty identity"));
         }
-        if self.content_hash == 0 {
-            return Err(MotionError::InvalidExerciseProfile("zero content hash"));
+        if self.content_hash == 0 || self.content_hash != self.computed_content_hash() {
+            return Err(MotionError::InvalidExerciseProfile("content hash mismatch"));
+        }
+        if self.schema != PoseSchemaId::BlazePose33 {
+            return Err(MotionError::InvalidExerciseProfile(
+                "unsupported pose schema",
+            ));
+        }
+        if self.coordinate_unit != "image-normalized-y" {
+            return Err(MotionError::InvalidExerciseProfile(
+                "unsupported coordinate unit",
+            ));
+        }
+        if self.state_machine_id != "ready-effort-peak-return/v1" {
+            return Err(MotionError::InvalidExerciseProfile(
+                "unsupported state graph",
+            ));
+        }
+        if self.required_capabilities != PROFILE_REQUIRED_CAPABILITIES {
+            return Err(MotionError::InvalidExerciseProfile(
+                "required capabilities mismatch",
+            ));
+        }
+        if self.maturity != ExerciseMaturity::Provisional {
+            return Err(MotionError::InvalidExerciseProfile(
+                "calibrated profile requires an evidence manifest",
+            ));
         }
         if self.primary_landmarks.is_empty() || self.secondary_landmarks.is_empty() {
             return Err(MotionError::InvalidExerciseProfile("missing joint group"));
@@ -528,6 +743,17 @@ pub struct SealedRep {
     pub recovered_across_gap: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RepBoundaryRevision {
+    pub start_frame_id: u64,
+    pub start_timestamp_ms: u64,
+    pub peak_frame_id: u64,
+    pub peak_timestamp_ms: u64,
+    pub end_frame_id: u64,
+    pub end_timestamp_ms: u64,
+    pub canonical_slice_hash: u64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MotionPacket {
     pub lineage: PacketLineage,
@@ -564,10 +790,27 @@ impl std::error::Error for PacketEncodeError {}
 pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEncodeError> {
     let sequence = packet.lineage.sequence_id.as_bytes();
     let algorithm = packet.lineage.algorithm_version.as_bytes();
+    let config_version = packet.lineage.config_version.as_bytes();
+    let inference_version = packet.lineage.inference_version.as_bytes();
+    let diagnostic_version = packet.lineage.diagnostic_version.as_bytes();
     let sequence_len = u16::try_from(sequence.len())
         .map_err(|_| PacketEncodeError::FieldTooLong("sequence_id"))?;
     let algorithm_len = u16::try_from(algorithm.len())
         .map_err(|_| PacketEncodeError::FieldTooLong("algorithm_version"))?;
+    let config_version_len = u16::try_from(config_version.len())
+        .map_err(|_| PacketEncodeError::FieldTooLong("config_version"))?;
+    let inference_version_len = u16::try_from(inference_version.len())
+        .map_err(|_| PacketEncodeError::FieldTooLong("inference_version"))?;
+    let diagnostic_version_len = u16::try_from(diagnostic_version.len())
+        .map_err(|_| PacketEncodeError::FieldTooLong("diagnostic_version"))?;
+    let profile_identity = packet
+        .lineage
+        .active_profile_identity
+        .as_deref()
+        .unwrap_or("")
+        .as_bytes();
+    let profile_identity_len = u16::try_from(profile_identity.len())
+        .map_err(|_| PacketEncodeError::FieldTooLong("active_profile_identity"))?;
     let landmark_count =
         u16::try_from(packet.canonical.len()).map_err(|_| PacketEncodeError::TooManyLandmarks)?;
 
@@ -686,6 +929,29 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
         bytes.extend_from_slice(&verdict_len.to_le_bytes());
         bytes.extend_from_slice(verdict);
     }
+
+    bytes.extend_from_slice(b"VER1");
+    for (length, value) in [
+        (config_version_len, config_version),
+        (inference_version_len, inference_version),
+        (diagnostic_version_len, diagnostic_version),
+    ] {
+        bytes.extend_from_slice(&length.to_le_bytes());
+        bytes.extend_from_slice(value);
+    }
+    bytes.push(u8::from(
+        packet.lineage.active_profile_identity.is_some()
+            && packet.lineage.active_profile_hash.is_some(),
+    ));
+    bytes.extend_from_slice(
+        &packet
+            .lineage
+            .active_profile_hash
+            .unwrap_or(0)
+            .to_le_bytes(),
+    );
+    bytes.extend_from_slice(&profile_identity_len.to_le_bytes());
+    bytes.extend_from_slice(profile_identity);
 
     let packet_len = u32::try_from(bytes.len()).map_err(|_| PacketEncodeError::PacketTooLarge)?;
     bytes[8..12].copy_from_slice(&packet_len.to_le_bytes());
@@ -1495,6 +1761,14 @@ fn update_ready_baseline(direction: MovementDirection, baseline: &mut Option<f32
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
+fn fnv_bytes(mut hash: u64, bytes: impl IntoIterator<Item = u8>) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
 fn hash_sample(mut hash: u64, sample: RepSample) -> u64 {
     for byte in sample
         .frame_id
@@ -1593,6 +1867,54 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         Ok(())
     }
 
+    pub fn revise_sealed_rep(
+        &self,
+        original: &SealedRep,
+        revision: RepBoundaryRevision,
+    ) -> Result<SealedRep, MotionError> {
+        let Some(profile) = self.rep_engine.as_ref().map(|engine| &engine.profile) else {
+            return Err(MotionError::RepProfileMismatch);
+        };
+        if original.profile_identity != profile.identity
+            || original.profile_hash != profile.content_hash
+        {
+            return Err(MotionError::RepProfileMismatch);
+        }
+        if revision.start_frame_id > revision.peak_frame_id
+            || revision.peak_frame_id > revision.end_frame_id
+            || revision.start_timestamp_ms > revision.peak_timestamp_ms
+            || revision.peak_timestamp_ms > revision.end_timestamp_ms
+            || revision.canonical_slice_hash == 0
+        {
+            return Err(MotionError::InvalidRepRevision(
+                "invalid boundary order or hash",
+            ));
+        }
+        let next_revision = original
+            .revision
+            .checked_add(1)
+            .ok_or(MotionError::InvalidRepRevision("revision overflow"))?;
+        Ok(SealedRep {
+            rep_id: original.rep_id,
+            start_frame_id: revision.start_frame_id,
+            start_timestamp_ms: revision.start_timestamp_ms,
+            peak_frame_id: revision.peak_frame_id,
+            peak_timestamp_ms: revision.peak_timestamp_ms,
+            end_frame_id: revision.end_frame_id,
+            end_timestamp_ms: revision.end_timestamp_ms,
+            revision: next_revision,
+            canonical_slice_hash: revision.canonical_slice_hash,
+            profile_identity: original.profile_identity.clone(),
+            profile_hash: original.profile_hash,
+            profile_maturity: original.profile_maturity,
+            // A boundary edit invalidates any old derived verdict. The matcher
+            // may compute new evidence for this revision without mutating the
+            // historical algorithm result.
+            quality_verdict: None,
+            recovered_across_gap: original.recovered_across_gap,
+        })
+    }
+
     pub fn offer(&mut self, lease: FrameLease) -> Result<(), MotionError> {
         if self.closed {
             return Err(MotionError::SessionClosed);
@@ -1648,11 +1970,22 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             .rep_engine
             .as_ref()
             .map_or_else(RepStateSnapshot::default, |engine| engine.state.clone());
+        let active_profile = self.rep_engine.as_ref().map(|engine| &engine.profile);
         let packet = MotionPacket {
             lineage: PacketLineage {
                 sequence_id: self.config.sequence_id.clone(),
                 contract: self.config.contract,
                 algorithm_version: "motion-session-replay/v1".into(),
+                config_version: "motion-session-config/v1".into(),
+                inference_version: "inference-adapter-contract/v1".into(),
+                diagnostic_version: match self.config.diagnostics {
+                    DiagnosticLevel::Off => "diagnostics-off/v1",
+                    DiagnosticLevel::Summary => "diagnostics-summary/v1",
+                    DiagnosticLevel::Full => "diagnostics-full/v1",
+                }
+                .into(),
+                active_profile_identity: active_profile.map(|profile| profile.identity.clone()),
+                active_profile_hash: active_profile.map(|profile| profile.content_hash),
             },
             frame_id,
             source_timestamp_ms,
@@ -2270,7 +2603,8 @@ pub struct RegisteredTrajectoryNode {
     pub source_timestamp_ms: u64,
     /// Interleaved x/y values in `feature_landmarks` order. Coordinates are
     /// deliberately not clipped to preserve amplitude errors.
-    pub values: Vec<f32>,
+    pub values: Vec<Option<f32>>,
+    pub confidence: Vec<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2303,7 +2637,8 @@ pub enum TrajectoryRefusal {
 #[derive(Clone)]
 struct BodyFrame {
     timestamp_ms: u64,
-    values: Vec<f32>,
+    values: Vec<Option<f32>>,
+    confidence: Vec<f32>,
 }
 
 pub fn normalize_rep_trajectory(
@@ -2403,22 +2738,27 @@ fn normalize_body_frame(
         });
     }
     let mut values = Vec::with_capacity(config.feature_landmarks.len() * 2);
+    let mut confidence = Vec::with_capacity(config.feature_landmarks.len() * 2);
     for &index in &config.feature_landmarks {
-        let (x, y) = xy(frame, index).ok_or(TrajectoryRefusal::MissingFeature {
-            frame_id: frame.frame_id,
-            landmark: index,
-        })?;
-        let normalized_x = (x - origin.0) / scale;
-        values.push(if config.source_is_mirrored {
-            -normalized_x
+        if let Some((x, y)) = xy(frame, index) {
+            let normalized_x = (x - origin.0) / scale;
+            values.push(Some(if config.source_is_mirrored {
+                -normalized_x
+            } else {
+                normalized_x
+            }));
+            values.push(Some((y - origin.1) / scale));
+            let score = frame.canonical[index].canonical_confidence.clamp(0.0, 1.0);
+            confidence.extend([score, score]);
         } else {
-            normalized_x
-        });
-        values.push((y - origin.1) / scale);
+            values.extend([None, None]);
+            confidence.extend([0.0, 0.0]);
+        }
     }
     Ok(BodyFrame {
         timestamp_ms: frame.timestamp_ms,
         values,
+        confidence,
     })
 }
 
@@ -2442,23 +2782,26 @@ fn resample_phase(
         .map(|index| {
             let progress = index as f32 / (node_count - 1) as f32;
             let timestamp_ms = start_ms + ((end_ms - start_ms) as f32 * progress).round() as u64;
+            let (values, confidence) = interpolate_body_frame(frames, timestamp_ms);
             RegisteredTrajectoryNode {
                 phase,
                 phase_progress: progress,
                 source_timestamp_ms: timestamp_ms,
-                values: interpolate_body_frame(frames, timestamp_ms),
+                values,
+                confidence,
             }
         })
         .collect()
 }
 
-fn interpolate_body_frame(frames: &[BodyFrame], timestamp_ms: u64) -> Vec<f32> {
+fn interpolate_body_frame(frames: &[BodyFrame], timestamp_ms: u64) -> (Vec<Option<f32>>, Vec<f32>) {
     let upper = frames.partition_point(|frame| frame.timestamp_ms < timestamp_ms);
     if upper == 0 {
-        return frames[0].values.clone();
+        return (frames[0].values.clone(), frames[0].confidence.clone());
     }
     if upper >= frames.len() {
-        return frames[frames.len() - 1].values.clone();
+        let last = &frames[frames.len() - 1];
+        return (last.values.clone(), last.confidence.clone());
     }
     let left = &frames[upper - 1];
     let right = &frames[upper];
@@ -2468,11 +2811,22 @@ fn interpolate_body_frame(frames: &[BodyFrame], timestamp_ms: u64) -> Vec<f32> {
     } else {
         timestamp_ms.saturating_sub(left.timestamp_ms) as f32 / span as f32
     };
-    left.values
+    let values = left
+        .values
         .iter()
         .zip(&right.values)
-        .map(|(left, right)| left + (right - left) * ratio)
-        .collect()
+        .map(|(left, right)| match (left, right) {
+            (Some(left), Some(right)) => Some(left + (right - left) * ratio),
+            _ => None,
+        })
+        .collect();
+    let confidence = left
+        .confidence
+        .iter()
+        .zip(&right.confidence)
+        .map(|(left, right)| (left + (right - left) * ratio).clamp(0.0, 1.0))
+        .collect();
+    (values, confidence)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2491,6 +2845,7 @@ pub struct ReferenceIdentity {
 pub struct CorridorPoint {
     pub q_low: Option<f32>,
     pub q_high: Option<f32>,
+    pub median_absolute_deviation: Option<f32>,
     pub n_observed: u32,
 }
 
@@ -2508,6 +2863,7 @@ pub struct ReferenceTrajectoryProfile {
     pub profile_status: String,
     pub feature_names: Vec<String>,
     pub nodes: Vec<ReferenceCorridorNode>,
+    pub minimum_observation_confidence: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2515,6 +2871,7 @@ pub struct ObservedReferenceNode {
     pub phase: String,
     pub phase_progress: f32,
     pub values: Vec<Option<f32>>,
+    pub confidence: Vec<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2524,6 +2881,273 @@ pub struct ObservedReferenceRep {
     pub rep_revision: u32,
     pub canonical_slice_hash: u64,
     pub nodes: Vec<ObservedReferenceNode>,
+}
+
+pub const LAT_PULLDOWN_REFERENCE_FEATURES: [&str; 11] = [
+    "leftWristHeight",
+    "rightWristHeight",
+    "leftElbowAngleDeg",
+    "rightElbowAngleDeg",
+    "leftUpperArmToTorsoDeg",
+    "rightUpperArmToTorsoDeg",
+    "leftWristLateral",
+    "rightWristLateral",
+    "bilateralWristHeightDelta",
+    "torsoLateralShift",
+    "torsoLateralTiltDeg",
+];
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReferenceExtractionError {
+    InvalidBoundary,
+    MissingBoundaryFrame,
+    UnsortedFrames,
+}
+
+#[derive(Clone)]
+struct ReferenceFeatureVector {
+    values: Vec<Option<f32>>,
+    confidence: Vec<f32>,
+    torso_center_x: Option<f32>,
+    torso_scale: Option<f32>,
+}
+
+/// Frozen TypeScript-compatible 16 pull + 16 return extraction. This is
+/// intentionally distinct from the generic body-normalized trajectory: the
+/// reference profile schema fixes nearest-source sampling and 11 feature
+/// meanings, including the duplicated peak node at the phase boundary.
+pub fn extract_lat_pulldown_reference_rep(
+    identity: ReferenceIdentity,
+    rep: &SealedRep,
+    frames: &[CanonicalFrameSample],
+) -> Result<ObservedReferenceRep, ReferenceExtractionError> {
+    if rep.start_timestamp_ms >= rep.peak_timestamp_ms
+        || rep.peak_timestamp_ms >= rep.end_timestamp_ms
+    {
+        return Err(ReferenceExtractionError::InvalidBoundary);
+    }
+    if frames
+        .windows(2)
+        .any(|pair| pair[0].timestamp_ms > pair[1].timestamp_ms)
+    {
+        return Err(ReferenceExtractionError::UnsortedFrames);
+    }
+    if frames
+        .first()
+        .is_none_or(|frame| frame.timestamp_ms > rep.start_timestamp_ms)
+        || frames
+            .last()
+            .is_none_or(|frame| frame.timestamp_ms < rep.end_timestamp_ms)
+    {
+        return Err(ReferenceExtractionError::MissingBoundaryFrame);
+    }
+
+    let mut vectors = Vec::with_capacity(32);
+    let mut nodes = Vec::with_capacity(32);
+    for (phase, start_ms, end_ms) in [
+        ("pull", rep.start_timestamp_ms, rep.peak_timestamp_ms),
+        ("return", rep.peak_timestamp_ms, rep.end_timestamp_ms),
+    ] {
+        for index in 0..16 {
+            let progress = index as f32 / 15.0;
+            let target_ms = start_ms as f64 + (end_ms - start_ms) as f64 * f64::from(progress);
+            let nearest = frames.iter().min_by(|left, right| {
+                ((left.timestamp_ms as f64 - target_ms).abs())
+                    .total_cmp(&(right.timestamp_ms as f64 - target_ms).abs())
+            });
+            let vector = nearest
+                .filter(|frame| (frame.timestamp_ms as f64 - target_ms).abs() <= 180.0)
+                .map(reference_feature_vector)
+                .unwrap_or_else(empty_reference_feature_vector);
+            vectors.push(vector.clone());
+            nodes.push(ObservedReferenceNode {
+                phase: phase.into(),
+                phase_progress: round5(progress),
+                values: vector.values,
+                confidence: vector.confidence,
+            });
+        }
+    }
+
+    let baseline = vectors
+        .iter()
+        .find_map(|vector| Some((vector.torso_center_x?, vector.torso_scale?)));
+    for (node, vector) in nodes.iter_mut().zip(&vectors) {
+        node.values[9] = match (vector.torso_center_x, baseline) {
+            (Some(current), Some((center, scale))) if scale >= 1e-3 => {
+                Some(round5((current - center) / scale))
+            }
+            _ => None,
+        };
+        node.confidence[9] = if node.values[9].is_some() {
+            vector.confidence[10]
+        } else {
+            0.0
+        };
+    }
+
+    Ok(ObservedReferenceRep {
+        identity,
+        rep_id: rep.rep_id,
+        rep_revision: rep.revision,
+        canonical_slice_hash: rep.canonical_slice_hash,
+        nodes,
+    })
+}
+
+fn reference_feature_vector(frame: &CanonicalFrameSample) -> ReferenceFeatureVector {
+    let mut output = empty_reference_feature_vector();
+    let shoulders = pair_measurement(frame, 11, 12);
+    let hips = pair_measurement(frame, 23, 24);
+    let torso =
+        shoulders
+            .zip(hips)
+            .map(|((left_shoulder, right_shoulder), (left_hip, right_hip))| {
+                let shoulder = midpoint_xy(left_shoulder.0, right_shoulder.0);
+                let hip = midpoint_xy(left_hip.0, right_hip.0);
+                let confidence = left_shoulder
+                    .1
+                    .min(right_shoulder.1)
+                    .min(left_hip.1)
+                    .min(right_hip.1);
+                (shoulder, hip, confidence)
+            });
+    if let Some((shoulder, hip, torso_confidence)) = torso {
+        let scale = (shoulder.0 - hip.0).hypot(shoulder.1 - hip.1);
+        if scale >= 1e-3 && scale.is_finite() {
+            output.torso_center_x = Some(shoulder.0);
+            output.torso_scale = Some(scale);
+            for (wrist_index, height_index, lateral_index) in [(15, 0, 6), (16, 1, 7)] {
+                if let Some(((x, y), confidence)) = point_measurement(frame, wrist_index) {
+                    let feature_confidence = torso_confidence.min(confidence);
+                    set_reference_feature(
+                        &mut output,
+                        height_index,
+                        Some((y - shoulder.1) / scale),
+                        feature_confidence,
+                    );
+                    set_reference_feature(
+                        &mut output,
+                        lateral_index,
+                        Some((x - shoulder.0) / scale),
+                        feature_confidence,
+                    );
+                }
+            }
+            if let (Some(left), Some(right)) = (output.values[0], output.values[1]) {
+                let wrist_confidence = output.confidence[0].min(output.confidence[1]);
+                set_reference_feature(&mut output, 8, Some(left - right), wrist_confidence);
+            }
+            let tilt = (shoulder.0 - hip.0).atan2(hip.1 - shoulder.1).to_degrees();
+            set_reference_feature(&mut output, 10, Some(tilt), torso_confidence);
+        }
+    }
+    for (feature, indices) in [
+        (2, [11, 13, 15]),
+        (3, [12, 14, 16]),
+        (4, [23, 11, 13]),
+        (5, [24, 12, 14]),
+    ] {
+        if let Some((value, confidence)) = reference_angle(frame, indices) {
+            set_reference_feature(&mut output, feature, Some(value), confidence);
+        }
+    }
+    output
+}
+
+fn empty_reference_feature_vector() -> ReferenceFeatureVector {
+    ReferenceFeatureVector {
+        values: vec![None; LAT_PULLDOWN_REFERENCE_FEATURES.len()],
+        confidence: vec![0.0; LAT_PULLDOWN_REFERENCE_FEATURES.len()],
+        torso_center_x: None,
+        torso_scale: None,
+    }
+}
+
+fn point_measurement(frame: &CanonicalFrameSample, index: usize) -> Option<((f32, f32), f32)> {
+    let landmark = frame.canonical.get(index)?;
+    let confidence = landmark.canonical_confidence;
+    if landmark.source == LandmarkSource::Unknown || !confidence.is_finite() || confidence < 0.5 {
+        return None;
+    }
+    let (x, y) = (landmark.x?, landmark.y?);
+    (x.is_finite() && y.is_finite()).then_some(((x, y), confidence.clamp(0.0, 1.0)))
+}
+
+fn pair_measurement(
+    frame: &CanonicalFrameSample,
+    left: usize,
+    right: usize,
+) -> Option<(((f32, f32), f32), ((f32, f32), f32))> {
+    Some((
+        point_measurement(frame, left)?,
+        point_measurement(frame, right)?,
+    ))
+}
+
+fn midpoint_xy(left: (f32, f32), right: (f32, f32)) -> (f32, f32) {
+    ((left.0 + right.0) * 0.5, (left.1 + right.1) * 0.5)
+}
+
+fn reference_angle(frame: &CanonicalFrameSample, indices: [usize; 3]) -> Option<(f32, f32)> {
+    let (a, a_confidence) = point_measurement(frame, indices[0])?;
+    let (b, b_confidence) = point_measurement(frame, indices[1])?;
+    let (c, c_confidence) = point_measurement(frame, indices[2])?;
+    let first = (a.0 - b.0, a.1 - b.1);
+    let second = (c.0 - b.0, c.1 - b.1);
+    let denominator = first.0.hypot(first.1) * second.0.hypot(second.1);
+    if denominator < 1e-6 {
+        return None;
+    }
+    let cosine = ((first.0 * second.0 + first.1 * second.1) / denominator).clamp(-1.0, 1.0);
+    Some((
+        cosine.acos().to_degrees(),
+        a_confidence.min(b_confidence).min(c_confidence),
+    ))
+}
+
+fn set_reference_feature(
+    output: &mut ReferenceFeatureVector,
+    index: usize,
+    value: Option<f32>,
+    confidence: f32,
+) {
+    output.values[index] = value.filter(|value| value.is_finite()).map(round5);
+    output.confidence[index] = if output.values[index].is_some() {
+        round5(confidence.clamp(0.0, 1.0))
+    } else {
+        0.0
+    };
+}
+
+fn round5(value: f32) -> f32 {
+    (value * 100_000.0).round() / 100_000.0
+}
+
+pub fn observed_reference_rep_from_normalized(
+    identity: ReferenceIdentity,
+    trajectory: &NormalizedRepTrajectory,
+) -> ObservedReferenceRep {
+    ObservedReferenceRep {
+        identity,
+        rep_id: trajectory.rep_id,
+        rep_revision: trajectory.rep_revision,
+        canonical_slice_hash: trajectory.canonical_slice_hash,
+        nodes: trajectory
+            .nodes
+            .iter()
+            .map(|node| ObservedReferenceNode {
+                phase: match node.phase {
+                    PhaseName::Effort => "pull",
+                    PhaseName::Return => "return",
+                }
+                .into(),
+                phase_progress: node.phase_progress,
+                values: node.values.clone(),
+                confidence: node.confidence.clone(),
+            })
+            .collect(),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2573,29 +3197,44 @@ pub fn match_reference_trajectory(
         );
     }
     if profile.feature_names.is_empty()
-        || profile.nodes.len() != observed.nodes.len()
-        || profile
-            .nodes
-            .iter()
-            .any(|node| node.features.len() != profile.feature_names.len())
-        || observed
-            .nodes
-            .iter()
-            .any(|node| node.values.len() != profile.feature_names.len())
-        || profile
-            .nodes
-            .iter()
-            .zip(&observed.nodes)
-            .any(|(reference, value)| {
-                reference.phase != value.phase
-                    || (reference.phase_progress - value.phase_progress).abs() > 1e-4
-            })
+        || !profile.minimum_observation_confidence.is_finite()
+        || !(0.0..=1.0).contains(&profile.minimum_observation_confidence)
+        || profile.nodes.iter().any(|node| {
+            node.features.len() != profile.feature_names.len()
+                || node
+                    .features
+                    .iter()
+                    .any(|point| !valid_corridor_point(point))
+        })
+        || !valid_reference_phase_layout(&profile.nodes)
     {
         return trajectory_refusal(
             profile,
             observed,
             TrajectoryComparisonStatus::InvalidProfile,
-            Some("phase or feature schema mismatch".into()),
+            Some("invalid profile feature schema or phase layout".into()),
+        );
+    }
+    if profile.nodes.len() != observed.nodes.len()
+        || observed.nodes.iter().any(|node| {
+            node.values.len() != profile.feature_names.len()
+                || node.confidence.len() != profile.feature_names.len()
+        })
+        || profile
+            .nodes
+            .iter()
+            .zip(&observed.nodes)
+            .any(|(expected, actual)| {
+                expected.phase != actual.phase
+                    || !actual.phase_progress.is_finite()
+                    || (expected.phase_progress - actual.phase_progress).abs() > 1e-4
+            })
+    {
+        return trajectory_refusal(
+            profile,
+            observed,
+            TrajectoryComparisonStatus::ProfileMismatch,
+            Some("node count or feature schema mismatch".into()),
         );
     }
 
@@ -2610,14 +3249,25 @@ pub fn match_reference_trajectory(
             let mut consecutive = 0;
             let mut maximum_consecutive = 0;
             let mut total_normalized_excess = 0.0;
+            let mut previous_phase: Option<&str> = None;
             for (reference, value) in profile.nodes.iter().zip(&observed.nodes) {
+                if previous_phase != Some(value.phase.as_str()) {
+                    consecutive = 0;
+                }
+                previous_phase = Some(value.phase.as_str());
                 let corridor = &reference.features[feature_index];
+                let confidence = value.confidence[feature_index];
                 let Some(value) = value.values[feature_index].filter(|value| value.is_finite())
                 else {
                     unknown += 1;
                     consecutive = 0;
                     continue;
                 };
+                if !confidence.is_finite() || confidence < profile.minimum_observation_confidence {
+                    unknown += 1;
+                    consecutive = 0;
+                    continue;
+                }
                 let (Some(low), Some(high)) = (corridor.q_low, corridor.q_high) else {
                     unknown += 1;
                     consecutive = 0;
@@ -2640,7 +3290,15 @@ pub fn match_reference_trajectory(
                     outside += 1;
                     consecutive += 1;
                     maximum_consecutive = maximum_consecutive.max(consecutive);
-                    total_normalized_excess += excess / (high - low).max(1e-6);
+                    let corridor_width = high - low;
+                    let robust_scale = corridor
+                        .median_absolute_deviation
+                        .filter(|value| value.is_finite() && *value >= 0.0)
+                        .map_or(0.0, |value| value * 1.4826);
+                    let scale = corridor_width.max(robust_scale);
+                    if scale > 1e-9 {
+                        total_normalized_excess += excess / scale;
+                    }
                 } else {
                     consecutive = 0;
                 }
@@ -2675,6 +3333,48 @@ pub fn match_reference_trajectory(
         features,
         quality_verdict: None,
     }
+}
+
+fn valid_corridor_point(point: &CorridorPoint) -> bool {
+    let corridor = match (point.q_low, point.q_high) {
+        (None, None) => true,
+        (Some(low), Some(high)) => {
+            low.is_finite() && high.is_finite() && low <= high && point.n_observed > 0
+        }
+        _ => false,
+    };
+    corridor
+        && point
+            .median_absolute_deviation
+            .is_none_or(|value| value.is_finite() && value >= 0.0)
+}
+
+fn valid_reference_phase_layout(nodes: &[ReferenceCorridorNode]) -> bool {
+    if nodes.len() < 4 {
+        return false;
+    }
+    let Some(split) = nodes.iter().position(|node| node.phase == "return") else {
+        return false;
+    };
+    if split < 2 || nodes.len() - split < 2 {
+        return false;
+    }
+    let valid_phase = |phase_nodes: &[ReferenceCorridorNode], phase: &str| {
+        phase_nodes.iter().all(|node| {
+            node.phase == phase
+                && node.phase_progress.is_finite()
+                && (0.0..=1.0).contains(&node.phase_progress)
+        }) && phase_nodes
+            .windows(2)
+            .all(|pair| pair[0].phase_progress <= pair[1].phase_progress)
+            && phase_nodes
+                .first()
+                .is_some_and(|node| node.phase_progress.abs() <= 1e-4)
+            && phase_nodes
+                .last()
+                .is_some_and(|node| (node.phase_progress - 1.0).abs() <= 1e-4)
+    };
+    valid_phase(&nodes[..split], "pull") && valid_phase(&nodes[split..], "return")
 }
 
 fn identity_mismatch(expected: &ReferenceIdentity, observed: &ReferenceIdentity) -> Option<String> {
@@ -2713,6 +3413,69 @@ fn identity_mismatch(expected: &ReferenceIdentity, observed: &ReferenceIdentity)
         }
     }
     None
+}
+
+/// Maps a complete, trusted runtime context to the one ExerciseProfile it is
+/// allowed to bind. This is deliberately an exact tuple: a reference captured
+/// with another model, coordinate system, attachment, grip, or side must be
+/// refused rather than silently compared.
+#[cfg(any(target_arch = "wasm32", test))]
+fn supported_reference_exercise_profile_identity(
+    identity: &ReferenceIdentity,
+) -> Option<&'static str> {
+    if identity.exercise_id != "lat_pulldown"
+        || identity.variation != "front_bar_pronated"
+        || identity.training_side != "bilateral"
+        || identity.equipment != "cable_lat_pulldown/straight_bar"
+        || identity.coordinate_system != "source-image/v1"
+        || identity.feature_schema_id != "lat_pulldown/source-image-piecewise-32/v2"
+        || identity.pose_model_version != "mediapipe-pose-heavy"
+    {
+        return None;
+    }
+    match identity.capture_position.as_str() {
+        "rear" => Some("lat-pulldown/rear/bilateral/cable/v1"),
+        "rearLeft45" => Some("lat-pulldown/rear-left-45/bilateral/cable/v1"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod reference_identity_tests {
+    use super::{ReferenceIdentity, supported_reference_exercise_profile_identity};
+
+    fn reviewed_rear_identity() -> ReferenceIdentity {
+        ReferenceIdentity {
+            exercise_id: "lat_pulldown".into(),
+            capture_position: "rear".into(),
+            variation: "front_bar_pronated".into(),
+            training_side: "bilateral".into(),
+            equipment: "cable_lat_pulldown/straight_bar".into(),
+            coordinate_system: "source-image/v1".into(),
+            feature_schema_id: "lat_pulldown/source-image-piecewise-32/v2".into(),
+            pose_model_version: "mediapipe-pose-heavy".into(),
+        }
+    }
+
+    #[test]
+    fn reference_binding_accepts_only_the_complete_supported_identity() {
+        assert_eq!(
+            supported_reference_exercise_profile_identity(&reviewed_rear_identity()),
+            Some("lat-pulldown/rear/bilateral/cable/v1")
+        );
+
+        let mutations: [fn(&mut ReferenceIdentity); 4] = [
+            |identity| identity.variation = "behind_neck".into(),
+            |identity| identity.equipment = "plate_loaded_lat_pulldown".into(),
+            |identity| identity.coordinate_system = "world-space/v1".into(),
+            |identity| identity.pose_model_version = "mediapipe-pose-lite".into(),
+        ];
+        for mutation in mutations {
+            let mut spoofed = reviewed_rear_identity();
+            mutation(&mut spoofed);
+            assert_eq!(supported_reference_exercise_profile_identity(&spoofed), None);
+        }
+    }
 }
 
 fn trajectory_refusal(

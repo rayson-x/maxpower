@@ -7,6 +7,7 @@ import {
   type PoseContinuitySessionConfig,
 } from "../pose/canonicalPose";
 import type { PoseCandidateEstimate, PoseEstimate, PoseLandmark } from "../pose/PoseEngine";
+import type { PersonalProvisionalReferenceProfile } from "../pose/referenceTrajectory";
 import {
   decodeMotionPacket,
   type DecodedMotionLandmark,
@@ -36,7 +37,12 @@ export interface RustCandidateDiagnostic {
   decision: "selected" | "no-lock" | "slot-continuity" | "requires-confirmation" | "identity-rejected";
   selected: boolean;
 }
-export type RustExerciseProfile = "lat_pulldown" | "seated_shoulder_press" | null;
+export type RustExerciseProfile =
+  | "lat_pulldown"
+  | "lat_pulldown_rear_left_45"
+  | "seated_shoulder_press"
+  | "seated_shoulder_press_front"
+  | null;
 export interface RustRepState {
   phase: "ready" | "effort" | "peak" | "return" | "frozen";
   partialAttempts: bigint;
@@ -60,7 +66,13 @@ export interface RustSealedRep {
   recoveredAcrossGap: boolean;
 }
 export interface RustExerciseProfileData {
+  identity: string;
   contentHash: bigint;
+  maturity: "provisional";
+  schema: "blazepose33";
+  coordinateUnit: "image-normalized-y";
+  stateMachineId: "ready-effort-peak-return/v1";
+  requiredCapabilities: readonly ["canonical-landmarks", "subject-lock"];
   direction: "increasing-y" | "decreasing-y";
   primaryLandmarks: readonly [number, number?];
   secondaryLandmarks: readonly [number, number?];
@@ -73,9 +85,48 @@ export interface RustExerciseProfileData {
 }
 export interface RustReferenceComparisonUnavailable {
   readonly status: "unavailable";
-  readonly reason: "no-installed-reviewed-profile";
-  readonly profileIdentity: null;
+  readonly reason:
+    | "no-installed-reviewed-profile"
+    | "awaiting-sealed-rep"
+    | "reference-extraction-refused";
+  readonly profileIdentity: string | null;
   readonly qualityVerdict: null;
+}
+export interface RustReferenceFeatureEvidence {
+  readonly feature: string;
+  readonly comparableNodeCount: number;
+  readonly unknownNodeCount: number;
+  readonly outsideNodeCount: number;
+  readonly outsideNodeRatio: number | null;
+  readonly maximumConsecutiveOutsideNodes: number;
+  readonly totalNormalizedExcess: number;
+}
+export interface RustReferenceComparisonEvidence {
+  readonly status:
+    | "comparison_available"
+    | "insufficient_observation"
+    | "profile_mismatch"
+    | "invalid_profile";
+  readonly reason: string | null;
+  readonly profileIdentity: string;
+  readonly profileHash: bigint;
+  readonly repId: bigint;
+  readonly repRevision: number;
+  readonly canonicalSliceHash: bigint;
+  readonly features: readonly RustReferenceFeatureEvidence[];
+  readonly qualityVerdict: null;
+}
+export type RustReferenceComparison =
+  | RustReferenceComparisonUnavailable
+  | RustReferenceComparisonEvidence;
+export type RustReferenceRuntimeContext =
+  PersonalProvisionalReferenceProfile["identity"];
+export interface RustReferenceProfileInstallation {
+  readonly profile: PersonalProvisionalReferenceProfile;
+}
+export interface RustWasmTiming {
+  readonly coreMs: number;
+  readonly decodeMs: number;
 }
 
 export interface MotionWasmExports extends WebAssembly.Exports {
@@ -114,10 +165,18 @@ export interface MotionWasmExports extends WebAssembly.Exports {
   motion_sdk_candidate_number(index: number, field: number): number;
   motion_sdk_select_subject(x: number, y: number): number;
   motion_sdk_schedule(timestampLow: number, timestampHigh: number, inFlight: number): number;
+  motion_sdk_set_degradation(level: number): number;
   motion_sdk_set_profile(profileCode: number): number;
+  motion_sdk_begin_profile_identity(length: number): number;
+  motion_sdk_set_profile_identity_byte(index: number, value: number): number;
   motion_sdk_install_profile(
     hashLow: number,
     hashHigh: number,
+    maturity: number,
+    schema: number,
+    coordinateUnit: number,
+    stateMachine: number,
+    requiredCapabilities: number,
     direction: number,
     primary0: number,
     primary1: number,
@@ -130,6 +189,16 @@ export interface MotionWasmExports extends WebAssembly.Exports {
     readyTolerance: number,
     maxGapMs: number,
   ): number;
+  motion_sdk_begin_reference_profile(length: number): number;
+  motion_sdk_set_reference_profile_byte(index: number, value: number): number;
+  motion_sdk_commit_reference_profile(): number;
+  motion_sdk_begin_reference_context(length: number): number;
+  motion_sdk_set_reference_context_byte(index: number, value: number): number;
+  motion_sdk_commit_reference_context(): number;
+  motion_sdk_reference_status(): number;
+  motion_sdk_reference_field(field: number, high: number): number;
+  motion_sdk_reference_feature_count(): number;
+  motion_sdk_reference_feature_number(index: number, field: number): number;
   motion_sdk_rep_state_field(field: number): number;
   motion_sdk_completed_rep_count(): number;
   motion_sdk_completed_rep_field(index: number, field: number): number;
@@ -181,12 +250,15 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   lastCanonicalHash = 0n;
   lastDecodedPacket: DecodedMotionPacket | null = null;
   lastCandidateDiagnostics: readonly RustCandidateDiagnostic[] = [];
-  readonly referenceComparison: RustReferenceComparisonUnavailable = Object.freeze({
+  lastTiming: RustWasmTiming = Object.freeze({ coreMs: 0, decodeMs: 0 });
+  referenceComparison: RustReferenceComparison = Object.freeze({
     status: "unavailable",
     reason: "no-installed-reviewed-profile",
     profileIdentity: null,
     qualityVerdict: null,
   });
+  private installedReferenceIdentity: string | null = null;
+  private installedReferenceFeatureNames: readonly string[] = [];
 
   constructor(
     private readonly config: PoseContinuitySessionConfig,
@@ -213,6 +285,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   }
 
   process(observation: PoseEstimate): CanonicalPoseFrame {
+    const coreStartedAt = performance.now();
     const timestamp = BigInt(Math.max(0, Math.round(observation.timestampMs)));
     ensureOk(
       this.wasm.motion_sdk_begin_frame(
@@ -239,8 +312,13 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       this.wasm.motion_sdk_output_hash(0),
       this.wasm.motion_sdk_output_hash(1),
     );
+    const coreMs = performance.now() - coreStartedAt;
+    const decodeStartedAt = performance.now();
     this.lastDecodedPacket = this.readPacket();
+    const decodeMs = performance.now() - decodeStartedAt;
+    this.lastTiming = Object.freeze({ coreMs, decodeMs });
     this.applyDecodedPacket(this.lastDecodedPacket);
+    this.referenceComparison = this.readReferenceComparison();
     this.lastCandidateDiagnostics = this.readCandidateDiagnostics();
     return this.readFrame(observation, observation.landmarks, observation.worldLandmarks);
   }
@@ -249,6 +327,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     candidates: readonly PoseCandidateEstimate[],
     timestampMs: number,
   ): CanonicalPoseFrame {
+    const coreStartedAt = performance.now();
     const timestamp = BigInt(Math.max(0, Math.round(timestampMs)));
     ensureOk(
       this.wasm.motion_sdk_begin_multi(
@@ -293,8 +372,13 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       this.wasm.motion_sdk_output_hash(0),
       this.wasm.motion_sdk_output_hash(1),
     );
+    const coreMs = performance.now() - coreStartedAt;
+    const decodeStartedAt = performance.now();
     this.lastDecodedPacket = this.readPacket();
+    const decodeMs = performance.now() - decodeStartedAt;
+    this.lastTiming = Object.freeze({ coreMs, decodeMs });
     this.applyDecodedPacket(this.lastDecodedPacket);
+    this.referenceComparison = this.readReferenceComparison();
     this.lastCandidateDiagnostics = this.readCandidateDiagnostics();
     const selected = this.lastTarget.state !== "locked" || this.lastTarget.selectedCandidateId === null
       ? undefined
@@ -316,10 +400,19 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     ensureOk(this.wasm.motion_sdk_close(), "close");
     this.lastDecodedPacket = null;
     this.lastCandidateDiagnostics = [];
+    this.resetReferenceComparison();
   }
 
   setExerciseProfile(profile: RustExerciseProfile): void {
-    const code = profile === "lat_pulldown" ? 1 : profile === "seated_shoulder_press" ? 2 : 0;
+    const code = profile === "lat_pulldown"
+      ? 1
+      : profile === "seated_shoulder_press"
+        ? 2
+        : profile === "lat_pulldown_rear_left_45"
+          ? 3
+          : profile === "seated_shoulder_press_front"
+            ? 4
+            : 0;
     ensureOk(this.wasm.motion_sdk_set_profile(code), "set_profile");
     this.lastRepState = {
       phase: "ready",
@@ -328,12 +421,97 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       recoveredAcrossGap: false,
     };
     this.lastCompletedReps = [];
+    this.resetReferenceComparison();
   }
 
   installExerciseProfileData(profile: RustExerciseProfileData): void {
-    void profile;
-    throw new Error(
-      "Custom profile install is closed until the full identity/capability bundle ABI is available",
+    const identity = new TextEncoder().encode(profile.identity);
+    ensureOk(this.wasm.motion_sdk_begin_profile_identity(identity.length), "begin_profile_identity");
+    identity.forEach((value, index) => {
+      ensureOk(
+        this.wasm.motion_sdk_set_profile_identity_byte(index, value),
+        `profile_identity_byte_${index}`,
+      );
+    });
+    if (computeRustExerciseProfileHash(profile) !== profile.contentHash) {
+      throw new Error("Exercise profile content hash does not match its canonical bundle");
+    }
+    ensureOk(
+      this.wasm.motion_sdk_install_profile(
+        Number(profile.contentHash & 0xffff_ffffn),
+        Number(profile.contentHash >> 32n),
+        0,
+        0,
+        0,
+        0,
+        Number(profile.requiredCapabilities.includes("canonical-landmarks"))
+          | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1),
+        profile.direction === "increasing-y" ? 0 : 1,
+        profile.primaryLandmarks[0],
+        profile.primaryLandmarks[1] ?? 0xffff_ffff,
+        profile.secondaryLandmarks[0],
+        profile.secondaryLandmarks[1] ?? 0xffff_ffff,
+        profile.startAmplitude,
+        profile.minPrimaryAmplitude,
+        profile.minSecondaryAmplitude,
+        profile.returnHysteresis,
+        profile.readyTolerance,
+        profile.maxGapMs,
+      ),
+      "install_profile",
+    );
+    this.lastRepState = {
+      phase: "ready",
+      partialAttempts: 0n,
+      activeRepId: null,
+      recoveredAcrossGap: false,
+    };
+    this.lastCompletedReps = [];
+    this.resetReferenceComparison();
+  }
+
+  installReferenceProfile(input: RustReferenceProfileInstallation): void {
+    if (input.profile.profileStatus !== "personal_provisional_expert_reviewed") {
+      throw new Error("Product reference profiles must be expert reviewed before installation");
+    }
+    const envelope = new TextEncoder().encode(JSON.stringify(input));
+    ensureOk(
+      this.wasm.motion_sdk_begin_reference_profile(envelope.length),
+      "begin_reference_profile",
+    );
+    envelope.forEach((value, index) => {
+      ensureOk(
+        this.wasm.motion_sdk_set_reference_profile_byte(index, value),
+        `reference_profile_byte_${index}`,
+      );
+    });
+    ensureOk(this.wasm.motion_sdk_commit_reference_profile(), "commit_reference_profile");
+    this.installedReferenceIdentity = referenceIdentityKey(input.profile.identity);
+    this.installedReferenceFeatureNames = Object.freeze([...input.profile.featureNames]);
+    this.referenceComparison = this.readReferenceComparison();
+  }
+
+  /**
+   * Installs the host-derived model/action/camera context independently from
+   * reference-profile bytes. Rust freezes this context until the active
+   * ExerciseProfile changes, preventing a profile from self-attesting that it
+   * matches the currently running MediaPipe model or equipment variation.
+   */
+  setReferenceRuntimeContext(context: RustReferenceRuntimeContext): void {
+    const bytes = new TextEncoder().encode(JSON.stringify(context));
+    ensureOk(
+      this.wasm.motion_sdk_begin_reference_context(bytes.length),
+      "begin_reference_context",
+    );
+    bytes.forEach((value, index) => {
+      ensureOk(
+        this.wasm.motion_sdk_set_reference_context_byte(index, value),
+        `reference_context_byte_${index}`,
+      );
+    });
+    ensureOk(
+      this.wasm.motion_sdk_commit_reference_context(),
+      "commit_reference_context",
     );
   }
 
@@ -355,6 +533,10 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     ] as const)[code];
     if (!request) throw new Error(`Rust scheduler returned ${code}`);
     return request;
+  }
+
+  setDegradationLevel(level: 0 | 1 | 2): void {
+    ensureOk(this.wasm.motion_sdk_set_degradation(level), "set_degradation");
   }
 
   private readFrame(
@@ -435,6 +617,80 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     })));
   }
 
+  private resetReferenceComparison(): void {
+    this.installedReferenceIdentity = null;
+    this.installedReferenceFeatureNames = [];
+    this.referenceComparison = Object.freeze({
+      status: "unavailable",
+      reason: "no-installed-reviewed-profile",
+      profileIdentity: null,
+      qualityVerdict: null,
+    });
+  }
+
+  private readReferenceComparison(): RustReferenceComparison {
+    const status = this.wasm.motion_sdk_reference_status();
+    if (status <= 2) {
+      return Object.freeze({
+        status: "unavailable",
+        reason: status === 1
+          ? "awaiting-sealed-rep"
+          : status === 2
+            ? "reference-extraction-refused"
+            : "no-installed-reviewed-profile",
+        profileIdentity: this.installedReferenceIdentity,
+        qualityVerdict: null,
+      });
+    }
+    if (status > 6 || !this.installedReferenceIdentity) {
+      throw new Error(`Rust reference matcher returned invalid state ${status}`);
+    }
+    const field64 = (field: number) => combineU64(
+      this.wasm.motion_sdk_reference_field(field, 0),
+      this.wasm.motion_sdk_reference_field(field, 1),
+    );
+    const featureCount = this.wasm.motion_sdk_reference_feature_count();
+    const expectedFeatureCount = status >= 5 ? 0 : this.installedReferenceFeatureNames.length;
+    if (featureCount !== expectedFeatureCount) {
+      throw new Error("Rust reference matcher feature schema changed after installation");
+    }
+    const features = Object.freeze(this.installedReferenceFeatureNames
+      .slice(0, featureCount)
+      .map((feature, index) => {
+      const value = (field: number) => this.wasm.motion_sdk_reference_feature_number(index, field);
+      const outsideRatio = value(3);
+      return Object.freeze({
+        feature,
+        comparableNodeCount: value(0),
+        unknownNodeCount: value(1),
+        outsideNodeCount: value(2),
+        outsideNodeRatio: Number.isFinite(outsideRatio) ? outsideRatio : null,
+        maximumConsecutiveOutsideNodes: value(4),
+        totalNormalizedExcess: value(5),
+      });
+      }));
+    return Object.freeze({
+      status: ([
+        "comparison_available",
+        "insufficient_observation",
+        "profile_mismatch",
+        "invalid_profile",
+      ] as const)[status - 3],
+      reason: status === 5
+        ? "strict reference identity or phase mismatch"
+        : status === 6
+          ? "invalid reference profile"
+          : null,
+      profileIdentity: this.installedReferenceIdentity,
+      profileHash: field64(3),
+      repId: field64(0),
+      repRevision: Number(field64(1)),
+      canonicalSliceHash: field64(2),
+      features,
+      qualityVerdict: null,
+    });
+  }
+
   private readCandidateDiagnostics(): readonly RustCandidateDiagnostic[] {
     return Object.freeze(Array.from(
       { length: this.wasm.motion_sdk_candidate_count() },
@@ -497,6 +753,65 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       usable: renderable && source !== "predicted",
     };
   }
+}
+
+function referenceIdentityKey(
+  identity: PersonalProvisionalReferenceProfile["identity"],
+): string {
+  return [
+    identity.exerciseId,
+    identity.capturePosition,
+    identity.variation,
+    identity.trainingSide,
+    identity.equipment,
+    identity.coordinateSystem,
+    identity.featureSchemaId,
+    identity.poseModelVersion,
+  ].join("|");
+}
+
+export function computeRustExerciseProfileHash(
+  profile: Omit<RustExerciseProfileData, "contentHash">,
+): bigint {
+  let hash = 0xcbf2_9ce4_8422_2325n;
+  const update = (bytes: Iterable<number>) => {
+    for (const byte of bytes) {
+      hash ^= BigInt(byte);
+      hash = BigInt.asUintN(64, hash * 0x0000_0100_0000_01b3n);
+    }
+  };
+  const encoder = new TextEncoder();
+  for (const value of [profile.identity, profile.coordinateUnit, profile.stateMachineId]) {
+    update(encoder.encode(value));
+    update([0]);
+  }
+  const scratch = new ArrayBuffer(8);
+  const view = new DataView(scratch);
+  const updateU32 = (value: number) => {
+    view.setUint32(0, value, true);
+    update(new Uint8Array(scratch, 0, 4));
+  };
+  const capabilities = Number(profile.requiredCapabilities.includes("canonical-landmarks"))
+    | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1);
+  updateU32(capabilities);
+  update([0, 0, profile.direction === "increasing-y" ? 0 : 1]);
+  const primary = profile.primaryLandmarks.filter((value): value is number => value !== undefined);
+  const secondary = profile.secondaryLandmarks.filter((value): value is number => value !== undefined);
+  update([primary.length, ...primary]);
+  update([secondary.length, ...secondary]);
+  for (const value of [
+    profile.startAmplitude,
+    profile.minPrimaryAmplitude,
+    profile.minSecondaryAmplitude,
+    profile.returnHysteresis,
+    profile.readyTolerance,
+  ]) {
+    view.setFloat32(0, value, true);
+    update(new Uint8Array(scratch, 0, 4));
+  }
+  view.setBigUint64(0, BigInt(profile.maxGapMs), true);
+  update(new Uint8Array(scratch));
+  return hash;
 }
 
 function combineU64(low: number, high: number): bigint {
