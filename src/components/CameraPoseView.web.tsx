@@ -349,6 +349,14 @@ export function CameraPoseView() {
   const [localCaptures, setLocalCaptures] = useState<LocalCaptureSummary[]>([]);
   const [localCaptureError, setLocalCaptureError] = useState<string | null>(null);
 
+  const applyCapturePosition = (positionId: CapturePosition) => {
+    const physicalPosition = CAPTURE_POSITIONS.find((position) => position.id === positionId);
+    if (!physicalPosition) return;
+    setCapturePosition(physicalPosition.id);
+    setCameraView(physicalPosition.analysisView);
+    cameraViewRef.current = physicalPosition.analysisView;
+  };
+
   const ensureEngine = useCallback(async () => {
     if (!engineRef.current) {
       setModelLoading(true);
@@ -1661,13 +1669,7 @@ export function CameraPoseView() {
                   setExerciseChoice(nextExerciseId);
                   const recommendation = recommendCapturePosition(nextExerciseId);
                   if (!recommendation) return;
-                  const physicalPosition = CAPTURE_POSITIONS.find(
-                    (position) => position.id === recommendation.position,
-                  );
-                  if (!physicalPosition) return;
-                  setCapturePosition(physicalPosition.id);
-                  setCameraView(physicalPosition.analysisView);
-                  cameraViewRef.current = physicalPosition.analysisView;
+                  applyCapturePosition(recommendation.position);
                 }}
               >
                 <option value="">请选择本次训练动作</option>
@@ -1727,9 +1729,7 @@ export function CameraPoseView() {
                     ...(capturePosition === position.id ? styles.btnSmallActiveAmber : null),
                   }}
                   onClick={() => {
-                    setCapturePosition(position.id);
-                    setCameraView(position.analysisView);
-                    cameraViewRef.current = position.analysisView;
+                    applyCapturePosition(position.id);
                   }}
                 >
                   {position.label}
