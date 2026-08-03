@@ -5,6 +5,13 @@ import type { CameraView } from "../pose/formRuleEngine";
 import { analyzePoseSet } from "../pose/poseSetAnalysis";
 import type { PoseEstimate } from "../pose/PoseEngine";
 import { segmentRepsAuto } from "../pose/repSegmenter";
+import {
+  addReviewRange,
+  editReviewRange,
+  restoreReviewRangeSnapshot,
+  timelineTimeAt,
+  type ReviewRangeEditMode,
+} from "../pose/reviewTimeline";
 import { selectTrainingWindow } from "../pose/trainingWindow";
 import {
   buildApprovedLatPulldownTrajectorySample,
@@ -86,6 +93,7 @@ interface ReviewDraft {
   expectedCount: string;
   draftCandidateId: string | null;
   draftSegments: Candidate["segments"];
+  segmentUndoStack?: Candidate["segments"][];
   note: string;
   updatedAt: string;
 }
@@ -96,8 +104,23 @@ interface Candidate {
   count: number;
   score: string;
   reason: string;
-  segments: Array<{ repIndex: number; startMs: number; peakMs: number; endMs: number }>;
+  segments: Array<{ repIndex: number; startMs: number; peakMs: number; endMs: number; note?: string }>;
   tone: "recorded" | "current" | "caution";
+}
+
+interface ReviewRangeDrag {
+  pointerId: number;
+  anchorMs: number;
+  focusMs: number;
+}
+
+interface ReviewSegmentEdit {
+  pointerId: number;
+  repIndex: number;
+  mode: ReviewRangeEditMode;
+  pointerOriginMs: number;
+  original: Candidate["segments"][number];
+  historyCaptured: boolean;
 }
 
 interface ReplayReportRow {
@@ -174,6 +197,13 @@ function approvalValidationError(input: {
 
 function baseName(name: string): string {
   return name.replace(/\.labels\.json$/i, "").replace(/\.(webm|mp4|mov|json)$/i, "");
+}
+
+function formatTimelineTime(timestampMs: number): string {
+  const totalSeconds = Math.max(0, timestampMs) / 1000;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = (totalSeconds % 60).toFixed(1).padStart(4, "0");
+  return `${minutes}:${seconds}`;
 }
 
 function downloadJson(value: unknown, filename: string): void {
@@ -445,6 +475,10 @@ async function filesFromDirectory(directory: DirectoryHandle): Promise<File[]> {
  */
 export function CaptureApprovalPanel({ compact = false }: { compact?: boolean }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const timelineTrackRef = useRef<HTMLDivElement | null>(null);
+  const rangeDragRef = useRef<ReviewRangeDrag | null>(null);
+  const segmentEditRef = useRef<ReviewSegmentEdit | null>(null);
   const capturesRef = useRef<ReviewCapture[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
@@ -459,12 +493,23 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   const [expectedCount, setExpectedCount] = useState("");
   const [draftSegments, setDraftSegments] = useState<Candidate["segments"]>([]);
   const [draftCandidateId, setDraftCandidateId] = useState<string | null>(null);
+  const [segmentUndoStack, setSegmentUndoStack] = useState<Candidate["segments"][]>([]);
   const [note, setNote] = useState("");
   const [directoryConnected, setDirectoryConnected] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [currentVideoTimeMs, setCurrentVideoTimeMs] = useState(0);
+  const [rangeDrag, setRangeDrag] = useState<ReviewRangeDrag | null>(null);
+  const [selectedSegmentRepIndex, setSelectedSegmentRepIndex] = useState<number | null>(null);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
+  const selectedDurationMs = selected
+    ? Math.max(
+        1,
+        Math.round(selected.fixture.durationSec * 1000),
+        selected.fixture.poses.at(-1)?.timestampMs ?? 0,
+      )
+    : 1;
   const quality = selected ? qualityOf(selected.fixture.poses) : null;
   const candidates = useMemo(
     () => selected ? candidatesFor(selected, exerciseId, cameraView) : [],
@@ -503,6 +548,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         expectedCount,
         draftCandidateId,
         draftSegments,
+        segmentUndoStack,
         note,
         updatedAt: new Date().toISOString(),
       },
@@ -510,7 +556,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     draftsRef.current = next;
     saveDrafts(next);
     setDraftRevision((revision) => revision + 1);
-  }, [cameraView, capturePosition, draftCandidateId, draftSegments, exerciseId, expectedCount, note, selectedId]);
+  }, [cameraView, capturePosition, draftCandidateId, draftSegments, exerciseId, expectedCount, note, segmentUndoStack, selectedId]);
 
   const hasExportableLocalData = Object.keys(approvals).length > 0 || Object.keys(draftsRef.current).length > 0 || draftRevision > 0;
 
@@ -554,7 +600,13 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
       setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
       setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
       setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
+      setSegmentUndoStack(storedApproval ? [] : savedDraft?.segmentUndoStack ?? []);
       setNote(storedApproval?.note ?? savedDraft?.note ?? "");
+      setCurrentVideoTimeMs(0);
+      rangeDragRef.current = null;
+      setRangeDrag(null);
+      setSelectedSegmentRepIndex(null);
+      segmentEditRef.current = null;
     }
     return true;
   };
@@ -628,7 +680,13 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
     setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
     setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
+    setSegmentUndoStack(storedApproval ? [] : savedDraft?.segmentUndoStack ?? []);
     setNote(storedApproval?.note ?? savedDraft?.note ?? "");
+    setCurrentVideoTimeMs(0);
+    rangeDragRef.current = null;
+    setRangeDrag(null);
+    setSelectedSegmentRepIndex(null);
+    segmentEditRef.current = null;
   };
 
   const chooseAdjacentCapture = (direction: -1 | 1) => {
@@ -640,8 +698,10 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
 
   const selectDraftSegments = (candidate: Candidate) => {
     setError(null);
+    setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
     setDraftCandidateId(candidate.id);
     setDraftSegments(candidate.segments.map((segment) => ({ ...segment })));
+    setSelectedSegmentRepIndex(null);
   };
 
   const updateDraftSegment = (
@@ -654,15 +714,136 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     ));
   };
 
+  const updateDraftSegmentNote = (repIndex: number, segmentNote: string) => {
+    setDraftSegments((current) => current.map((segment) =>
+      segment.repIndex === repIndex ? { ...segment, note: segmentNote } : segment,
+    ));
+  };
+
   const addDraftSegment = () => {
     const last = draftSegments.at(-1);
     const startMs = last ? last.endMs + 1 : selected?.fixture.poses[0]?.timestampMs ?? 0;
+    setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
     setDraftSegments((current) => [...current, {
       repIndex: (last?.repIndex ?? 0) + 1,
       startMs,
       peakMs: startMs + 250,
       endMs: startMs + 500,
     }]);
+    setDraftCandidateId("manual_range");
+    setSelectedSegmentRepIndex((last?.repIndex ?? 0) + 1);
+  };
+
+  const clearTimelineSegments = () => {
+    if (!draftSegments.length) return;
+    setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
+    setDraftSegments([]);
+    setDraftCandidateId(null);
+    setSelectedSegmentRepIndex(null);
+    setError(null);
+  };
+
+  const undoTimelineSegments = () => {
+    const previous = segmentUndoStack.at(-1);
+    if (!previous) return;
+    setSegmentUndoStack((current) => current.slice(0, -1));
+    setDraftSegments(restoreReviewRangeSnapshot(previous, draftSegments));
+    setDraftCandidateId(previous.length ? "manual_range" : null);
+    setSelectedSegmentRepIndex(null);
+    setError(null);
+  };
+
+  const removeDraftSegment = (repIndex: number) => {
+    setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
+    setDraftSegments((current) => current
+      .filter((item) => item.repIndex !== repIndex)
+      .map((item, index) => ({ ...item, repIndex: index + 1 })));
+    setSelectedSegmentRepIndex(null);
+  };
+
+  const seekReviewVideo = (timestampMs: number) => {
+    const nextMs = Math.min(selectedDurationMs, Math.max(0, timestampMs));
+    if (reviewVideoRef.current) reviewVideoRef.current.currentTime = nextMs / 1000;
+    setCurrentVideoTimeMs(nextMs);
+  };
+
+  const timelineMsForPointer = (clientX: number, element: HTMLDivElement) => {
+    const bounds = element.getBoundingClientRect();
+    return timelineTimeAt(clientX, bounds.left, bounds.width, selectedDurationMs);
+  };
+
+  const finishRangeDrag = (drag: ReviewRangeDrag, focusMs: number) => {
+    const result = addReviewRange({
+      existing: draftSegments,
+      candidateSegments: candidates.flatMap((candidate) => candidate.segments),
+      anchorMs: drag.anchorMs,
+      focusMs,
+      durationMs: selectedDurationMs,
+    });
+    rangeDragRef.current = null;
+    setRangeDrag(null);
+    seekReviewVideo(focusMs);
+    if (result.status === "added") {
+      setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
+      setDraftCandidateId("manual_range");
+      setDraftSegments(result.segments);
+      setSelectedSegmentRepIndex(result.added.repIndex);
+      setError(null);
+    } else if (result.status === "rejected") {
+      setError(result.reason);
+    }
+  };
+
+  const beginSegmentEdit = (
+    event: React.PointerEvent<HTMLElement>,
+    segment: Candidate["segments"][number],
+    mode: ReviewRangeEditMode,
+  ) => {
+    event.stopPropagation();
+    const track = timelineTrackRef.current;
+    const captureElement = (event.currentTarget as HTMLElement).closest("[data-timeline-rep]") as HTMLElement | null;
+    if (!track || !captureElement) return;
+    captureElement.setPointerCapture(event.pointerId);
+    const bounds = track.getBoundingClientRect();
+    setSelectedSegmentRepIndex(segment.repIndex);
+    const edit: ReviewSegmentEdit = {
+      pointerId: event.pointerId,
+      repIndex: segment.repIndex,
+      mode,
+      pointerOriginMs: timelineTimeAt(event.clientX, bounds.left, bounds.width, selectedDurationMs),
+      original: { ...segment },
+      historyCaptured: false,
+    };
+    segmentEditRef.current = edit;
+  };
+
+  const continueSegmentEdit = (event: React.PointerEvent<HTMLElement>) => {
+    const edit = segmentEditRef.current;
+    if (!edit || edit.pointerId !== event.pointerId || !timelineTrackRef.current) return;
+    event.stopPropagation();
+    const bounds = timelineTrackRef.current.getBoundingClientRect();
+    const pointerMs = timelineTimeAt(event.clientX, bounds.left, bounds.width, selectedDurationMs);
+    const ordered = [...draftSegments].sort((left, right) => left.startMs - right.startMs);
+    const segmentIndex = ordered.findIndex((segment) => segment.repIndex === edit.repIndex);
+    if (segmentIndex < 0) return;
+    const updated = editReviewRange({
+      segment: edit.original,
+      mode: edit.mode,
+      pointerMs,
+      pointerOriginMs: edit.pointerOriginMs,
+      previousEndMs: ordered[segmentIndex - 1]?.endMs ?? 0,
+      nextStartMs: ordered[segmentIndex + 1]?.startMs ?? selectedDurationMs,
+    });
+    const changed = updated.startMs !== edit.original.startMs || updated.endMs !== edit.original.endMs;
+    if (!changed) return;
+    if (!edit.historyCaptured) {
+      setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
+      segmentEditRef.current = { ...edit, historyCaptured: true };
+    }
+    setDraftSegments((current) => current.map((segment) =>
+      segment.repIndex === updated.repIndex ? updated : segment,
+    ));
+    seekReviewVideo(edit.mode === "resize-end" ? updated.endMs : updated.startMs);
   };
 
   const approve = () => {
@@ -869,7 +1050,128 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
           {selected && quality && (
             <div style={styles.detail}>
               <div style={styles.videoColumn}>
-                <video data-capture-review-video key={selected.id} src={selected.videoUrl} controls preload="metadata" style={styles.video} />
+                <video
+                  data-capture-review-video
+                  ref={reviewVideoRef}
+                  key={selected.id}
+                  src={selected.videoUrl}
+                  controls
+                  preload="metadata"
+                  style={styles.video}
+                  onTimeUpdate={(event) => setCurrentVideoTimeMs(event.currentTarget.currentTime * 1000)}
+                />
+                <div style={styles.timelineShell}>
+                  <div style={styles.timelineHeader}>
+                    <div>
+                      <strong>REP RANGE / 拖选一次动作范围</strong>
+                      <span>空白处拖选新增；拖动色块移动；选中后拖两侧缩放</span>
+                    </div>
+                    <div style={styles.timelineHeaderActions}>
+                      <div style={styles.timelineCounter}><b>{draftSegments.length}</b> / {expectedCount || "?"} REPS</div>
+                      <button type="button" disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回</button>
+                      <button type="button" disabled={!draftSegments.length} onClick={clearTimelineSegments}>清空</button>
+                    </div>
+                  </div>
+                  <div
+                    data-review-range-timeline
+                    ref={timelineTrackRef}
+                    role="slider"
+                    tabIndex={0}
+                    aria-label="rep 范围标注时间轴"
+                    aria-valuemin={0}
+                    aria-valuemax={selectedDurationMs}
+                    aria-valuenow={Math.round(currentVideoTimeMs)}
+                    style={styles.timelineTrack}
+                    onPointerDown={(event) => {
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      const timestampMs = timelineMsForPointer(event.clientX, event.currentTarget);
+                      const drag = { pointerId: event.pointerId, anchorMs: timestampMs, focusMs: timestampMs };
+                      rangeDragRef.current = drag;
+                      setRangeDrag(drag);
+                      seekReviewVideo(timestampMs);
+                    }}
+                    onPointerMove={(event) => {
+                      const drag = rangeDragRef.current;
+                      if (!drag || drag.pointerId !== event.pointerId) return;
+                      const focusMs = timelineMsForPointer(event.clientX, event.currentTarget);
+                      const nextDrag = { ...drag, focusMs };
+                      rangeDragRef.current = nextDrag;
+                      setRangeDrag(nextDrag);
+                      seekReviewVideo(focusMs);
+                    }}
+                    onPointerUp={(event) => {
+                      const drag = rangeDragRef.current;
+                      if (!drag || drag.pointerId !== event.pointerId) return;
+                      finishRangeDrag(drag, timelineMsForPointer(event.clientX, event.currentTarget));
+                    }}
+                    onPointerCancel={() => { rangeDragRef.current = null; setRangeDrag(null); }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+                      event.preventDefault();
+                      seekReviewVideo(currentVideoTimeMs + (event.key === "ArrowLeft" ? -250 : 250));
+                    }}
+                  >
+                    {[0, 25, 50, 75, 100].map((tick) => <i key={tick} style={{ ...styles.timelineTick, left: `${tick}%` }} />)}
+                    {draftSegments.map((segment) => {
+                      const left = (segment.startMs / selectedDurationMs) * 100;
+                      const width = Math.max(.45, ((segment.endMs - segment.startMs) / selectedDurationMs) * 100);
+                      const peak = ((segment.peakMs - segment.startMs) / Math.max(1, segment.endMs - segment.startMs)) * 100;
+                      return (
+                        <div
+                          key={segment.repIndex}
+                          data-timeline-rep
+                          role="button"
+                          tabIndex={0}
+                          title={`#${segment.repIndex} ${formatTimelineTime(segment.startMs)}–${formatTimelineTime(segment.endMs)}`}
+                          style={{
+                            ...styles.timelineRep,
+                            ...(selectedSegmentRepIndex === segment.repIndex ? styles.timelineRepSelected : null),
+                            left: `${left}%`,
+                            width: `${width}%`,
+                          }}
+                          onPointerDown={(event) => beginSegmentEdit(event, segment, "move")}
+                          onPointerMove={continueSegmentEdit}
+                          onPointerUp={(event) => { event.stopPropagation(); segmentEditRef.current = null; }}
+                          onPointerCancel={() => { segmentEditRef.current = null; }}
+                          onClick={() => seekReviewVideo(segment.startMs)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") seekReviewVideo(segment.startMs);
+                          }}
+                        >
+                          {selectedSegmentRepIndex === segment.repIndex && (
+                            <span
+                              aria-label="调整 rep 开始"
+                              style={{ ...styles.timelineHandle, left: 0 }}
+                              onPointerDown={(event) => beginSegmentEdit(event, segment, "resize-start")}
+                            />
+                          )}
+                          <span>#{segment.repIndex}</span>
+                          <i style={{ ...styles.timelinePeak, left: `${peak}%` }} />
+                          {selectedSegmentRepIndex === segment.repIndex && (
+                            <span
+                              aria-label="调整 rep 结束"
+                              style={{ ...styles.timelineHandle, right: 0 }}
+                              onPointerDown={(event) => beginSegmentEdit(event, segment, "resize-end")}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    {rangeDrag && (
+                      <div style={{
+                        ...styles.timelineSelection,
+                        left: `${(Math.min(rangeDrag.anchorMs, rangeDrag.focusMs) / selectedDurationMs) * 100}%`,
+                        width: `${(Math.abs(rangeDrag.focusMs - rangeDrag.anchorMs) / selectedDurationMs) * 100}%`,
+                      }} />
+                    )}
+                    <i style={{ ...styles.timelinePlayhead, left: `${(currentVideoTimeMs / selectedDurationMs) * 100}%` }} />
+                  </div>
+                  <div style={styles.timelineFooter}>
+                    <span>0:00.0</span>
+                    <span>当前 {formatTimelineTime(currentVideoTimeMs)}</span>
+                    <span>{formatTimelineTime(selectedDurationMs)}</span>
+                  </div>
+                </div>
                 <div style={styles.qualityStrip}>
                   <span>POSE {quality.posePercent}%</span><span>躯干完整 {quality.torsoPercent}%</span><span>{quality.frames} 帧</span>
                 </div>
@@ -893,26 +1195,42 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                     <article key={candidate.id} style={{ ...styles.candidate, ...(candidate.tone === "current" ? styles.current : candidate.tone === "caution" ? styles.caution : {}) }}>
                       <div><small>{candidate.label}</small><strong>{candidate.count} REPS</strong></div>
                       <p>{candidate.score} · {candidate.reason}</p>
-                      <div style={styles.repButtons}>{candidate.segments.map((segment) => <button key={segment.repIndex} onClick={() => { const video = document.querySelector<HTMLVideoElement>("[data-capture-review-video]"); if (video) video.currentTime = segment.startMs / 1000; }}>#{segment.repIndex}</button>)}</div>
+                      <div style={styles.repButtons}>{candidate.segments.map((segment) => <button key={segment.repIndex} onClick={() => seekReviewVideo(segment.startMs)}>#{segment.repIndex}</button>)}</div>
                       <button style={styles.approve} onClick={() => selectDraftSegments(candidate)}>{draftCandidateId === candidate.id ? "当前待审核分段" : "选择此分段进行逐 rep 审核"}</button>
                     </article>
                   ))}
                 </div>
                 {draftCandidateId && (
                   <div style={styles.segmentEditor}>
-                    <strong>逐 rep 边界审核 · {draftCandidateId}</strong>
-                    <p>对照视频逐个确认；可直接修正 start / 拉到底峰值 / end（毫秒）。未选择候选不能批准入库。</p>
-                    {draftSegments.map((segment) => (
-                      <div key={segment.repIndex} style={styles.segmentRow}>
-                        <b>#{segment.repIndex}</b>
-                        <label>start<input inputMode="numeric" value={segment.startMs} onChange={(event) => updateDraftSegment(segment.repIndex, "startMs", Number(event.target.value))} /></label>
-                        <label>peak<input inputMode="numeric" value={segment.peakMs} onChange={(event) => updateDraftSegment(segment.repIndex, "peakMs", Number(event.target.value))} /></label>
-                        <label>end<input inputMode="numeric" value={segment.endMs} onChange={(event) => updateDraftSegment(segment.repIndex, "endMs", Number(event.target.value))} /></label>
-                        <button onClick={() => setDraftSegments((current) => current.filter((item) => item.repIndex !== segment.repIndex))}>移除</button>
-                      </div>
-                    ))}
+                    <strong>逐 rep 审核 · {draftSegments.length} 段</strong>
+                    <p>绿色范围已经自动保存。优先在视频下方时间轴拖选；只有需要逐毫秒修正时再展开下面的高级编辑。</p>
+                    <div style={styles.segmentNotes}>
+                      {draftSegments.map((segment) => (
+                        <label key={`note-${segment.repIndex}`} style={styles.segmentNoteRow}>
+                          <span>#{segment.repIndex} · {formatTimelineTime(segment.startMs)}–{formatTimelineTime(segment.endMs)}</span>
+                          <input
+                            value={segment.note ?? ""}
+                            onChange={(event) => updateDraftSegmentNote(segment.repIndex, event.target.value)}
+                            placeholder="描述这一段：换边、遮挡、借力、力竭……"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <details>
+                      <summary style={styles.segmentSummary}>精确时间微调（可选）</summary>
+                      {draftSegments.map((segment) => (
+                        <div key={segment.repIndex} style={styles.segmentRow}>
+                          <b>#{segment.repIndex}</b>
+                          <label>start<input inputMode="numeric" value={segment.startMs} onChange={(event) => updateDraftSegment(segment.repIndex, "startMs", Number(event.target.value))} /></label>
+                          <label>peak<input inputMode="numeric" value={segment.peakMs} onChange={(event) => updateDraftSegment(segment.repIndex, "peakMs", Number(event.target.value))} /></label>
+                          <label>end<input inputMode="numeric" value={segment.endMs} onChange={(event) => updateDraftSegment(segment.repIndex, "endMs", Number(event.target.value))} /></label>
+                          <button onClick={() => removeDraftSegment(segment.repIndex)}>移除</button>
+                        </div>
+                      ))}
+                    </details>
                     <div style={styles.segmentActions}>
                       <button onClick={addDraftSegment}>+ 添加 rep</button>
+                      <button disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回</button>
                       <button style={styles.approve} onClick={approve}>批准此逐 rep 真值</button>
                     </div>
                   </div>
@@ -970,6 +1288,19 @@ const styles: Record<string, React.CSSProperties> = {
   detail: { display: "grid", gridTemplateColumns: "minmax(270px, 1fr) minmax(350px, 1.25fr)", gap: 16, padding: 16 },
   videoColumn: { minWidth: 0 },
   video: { width: "100%", maxHeight: 430, background: "#000", border: "1px solid #30564b" },
+  timelineShell: { marginTop: 8, padding: "11px 12px 9px", border: "1px solid #345f54", background: "linear-gradient(180deg,#0a1b17,#07110f)", boxShadow: "inset 0 0 24px rgba(0,0,0,.36)" },
+  timelineHeader: { display: "flex", justifyContent: "space-between", alignItems: "end", gap: 10, marginBottom: 9, color: "#d8eee4", fontSize: 10, letterSpacing: .7 },
+  timelineHeaderActions: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 },
+  timelineCounter: { flexShrink: 0, color: "#ffbd6f", fontSize: 10 },
+  timelineTrack: { position: "relative", height: 58, overflow: "hidden", border: "1px solid #4b7569", background: "repeating-linear-gradient(90deg,rgba(124,255,188,.04) 0,rgba(124,255,188,.04) 1px,transparent 1px,transparent 12px),linear-gradient(180deg,#0c2920,#081713)", cursor: "crosshair", touchAction: "none", userSelect: "none" },
+  timelineTick: { position: "absolute", top: 0, bottom: 0, width: 1, background: "rgba(137,170,161,.22)", pointerEvents: "none" },
+  timelineRep: { position: "absolute", top: 10, bottom: 10, minWidth: 5, overflow: "hidden", border: "1px solid #75e2aa", background: "linear-gradient(90deg,rgba(31,142,92,.78),rgba(89,211,148,.58))", color: "#effff6", font: "700 9px ui-monospace,monospace", cursor: "pointer", zIndex: 3, boxShadow: "0 0 12px rgba(85,225,153,.18)" },
+  timelineRepSelected: { top: 6, bottom: 6, overflow: "visible", border: "1px solid #ffe09a", cursor: "grab", zIndex: 6, boxShadow: "0 0 0 1px rgba(255,224,154,.55),0 0 18px rgba(255,189,111,.28)" },
+  timelineHandle: { position: "absolute", top: -5, bottom: -5, width: 12, background: "#ffcf83", border: "1px solid #fff0c7", cursor: "ew-resize", zIndex: 7, boxShadow: "0 0 7px rgba(255,189,111,.5)" },
+  timelinePeak: { position: "absolute", top: 0, bottom: 0, width: 2, background: "#ffe099", boxShadow: "0 0 6px #ffbd6f", pointerEvents: "none" },
+  timelineSelection: { position: "absolute", top: 5, bottom: 5, minWidth: 2, border: "1px solid #ffca83", background: "rgba(255,177,76,.28)", boxShadow: "0 0 16px rgba(255,177,76,.25)", pointerEvents: "none", zIndex: 4 },
+  timelinePlayhead: { position: "absolute", top: 0, bottom: 0, width: 2, marginLeft: -1, background: "#f3f6f4", boxShadow: "0 0 7px rgba(255,255,255,.8)", pointerEvents: "none", zIndex: 5 },
+  timelineFooter: { display: "flex", justifyContent: "space-between", marginTop: 6, color: "#729287", fontSize: 9, fontVariantNumeric: "tabular-nums" },
   qualityStrip: { display: "flex", gap: 13, flexWrap: "wrap", padding: "8px 0", color: "#80aa9a", fontSize: 11 },
   reviewNavigation: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, color: "#89aaa1", fontSize: 10 },
   reviewColumn: { minWidth: 0 },
@@ -979,6 +1310,9 @@ const styles: Record<string, React.CSSProperties> = {
   current: { borderColor: "#61cd99", background: "#0c261e" },
   caution: { borderColor: "#87623b", background: "#211a11" },
   segmentEditor: { marginTop: 11, border: "1px solid #4a806a", background: "#0a211a", padding: 10, color: "#cce8dc", fontSize: 11 },
+  segmentNotes: { display: "grid", gap: 5, maxHeight: 210, overflowY: "auto", paddingRight: 3 },
+  segmentNoteRow: { display: "grid", gridTemplateColumns: "130px minmax(0,1fr)", alignItems: "center", gap: 7, color: "#89aaa1", fontSize: 10 },
+  segmentSummary: { margin: "8px 0", color: "#89aaa1", cursor: "pointer" },
   segmentRow: { display: "grid", gridTemplateColumns: "34px repeat(3, minmax(75px, 1fr)) 42px", gap: 5, alignItems: "end", padding: "7px 0", borderBottom: "1px solid #24443e" },
   segmentActions: { display: "flex", gap: 8, marginTop: 9 },
   repButtons: { display: "flex", gap: 4, flexWrap: "wrap", margin: "8px 0" },
