@@ -185,12 +185,17 @@ interface VideoFrameMetadata {
   mediaTime: number;
 }
 
-interface FrameCallbackVideo extends HTMLVideoElement {
+interface VideoFrameCallbackSupport {
   requestVideoFrameCallback?: (
     callback: (now: number, metadata: VideoFrameMetadata) => void,
   ) => number;
   cancelVideoFrameCallback?: (handle: number) => void;
 }
+
+type FrameCallbackVideo = Omit<
+  HTMLVideoElement,
+  "requestVideoFrameCallback" | "cancelVideoFrameCallback"
+> & VideoFrameCallbackSupport;
 
 function angleDeg(
   a: { x: number; y: number },

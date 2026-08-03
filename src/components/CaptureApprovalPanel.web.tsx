@@ -54,9 +54,13 @@ interface DirectoryFileHandle {
 
 interface DirectoryHandle {
   values(): AsyncIterableIterator<DirectoryFileHandle>;
+  queryPermission?: (descriptor?: { mode: "read" }) => Promise<"granted" | "denied" | "prompt">;
 }
 
 const APPROVAL_KEY = "form-coach-capture-approvals/v1";
+const SOURCE_DATABASE = "form-coach-review-source";
+const SOURCE_STORE = "settings";
+const SOURCE_KEY = "downloads-directory";
 const VIEW_OPTIONS: Array<{ id: CameraView; label: string }> = [
   { id: "front", label: "正前" },
   { id: "oblique45", label: "45°" },
@@ -173,19 +177,68 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
   return captures.sort((a, b) => b.id.localeCompare(a.id));
 }
 
+function openSourceDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SOURCE_DATABASE, 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains(SOURCE_STORE)) {
+        request.result.createObjectStore(SOURCE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("无法读取本机采集目录授权"));
+  });
+}
+
+async function persistDirectory(directory: DirectoryHandle): Promise<void> {
+  const database = await openSourceDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(SOURCE_STORE, "readwrite");
+    transaction.objectStore(SOURCE_STORE).put(directory, SOURCE_KEY);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error("无法保存本机采集目录授权"));
+  });
+  database.close();
+}
+
+async function restoreDirectory(): Promise<DirectoryHandle | null> {
+  const database = await openSourceDatabase();
+  const handle = await new Promise<DirectoryHandle | null>((resolve, reject) => {
+    const request = database.transaction(SOURCE_STORE, "readonly").objectStore(SOURCE_STORE).get(SOURCE_KEY);
+    request.onsuccess = () => resolve((request.result as DirectoryHandle | undefined) ?? null);
+    request.onerror = () => reject(request.error ?? new Error("无法恢复本机采集目录授权"));
+  });
+  database.close();
+  return handle;
+}
+
+async function filesFromDirectory(directory: DirectoryHandle): Promise<File[]> {
+  const files: File[] = [];
+  for await (const entry of directory.values()) {
+    if (entry.kind === "file" && /field-capture-.*\.(json|webm|mp4|mov)$/i.test(entry.name)) {
+      files.push(await entry.getFile());
+    }
+  }
+  return files;
+}
+
 /**
  * Local-only evidence board. The athlete compares deterministic replays and
  * explicitly approves a ground-truth count; nothing is uploaded.
  */
 export function CaptureApprovalPanel() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const capturesRef = useRef<ReviewCapture[]>([]);
+  const selectedIdRef = useRef<string | null>(null);
+  const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
   const [captures, setCaptures] = useState<ReviewCapture[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [approvals, setApprovals] = useState<Record<string, Approval>>(loadApprovals);
+  const [approvals, setApprovals] = useState<Record<string, Approval>>(approvalsRef.current);
   const [exerciseId, setExerciseId] = useState("");
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
   const [expectedCount, setExpectedCount] = useState("");
+  const [directoryConnected, setDirectoryConnected] = useState(false);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
   const quality = selected ? qualityOf(selected.fixture.poses) : null;
@@ -196,24 +249,68 @@ export function CaptureApprovalPanel() {
 
   useEffect(() => () => captures.forEach((capture) => URL.revokeObjectURL(capture.videoUrl)), [captures]);
 
+  const installCaptures = (loaded: ReviewCapture[]) => {
+    if (!loaded.length) return false;
+    const unchanged =
+      capturesRef.current.length === loaded.length &&
+      capturesRef.current.every((capture, index) =>
+        capture.id === loaded[index]?.id &&
+        capture.videoFile.lastModified === loaded[index]?.videoFile.lastModified &&
+        capture.fixture.poses.length === loaded[index]?.fixture.poses.length,
+      );
+    if (unchanged) {
+      loaded.forEach((capture) => URL.revokeObjectURL(capture.videoUrl));
+      return true;
+    }
+    capturesRef.current.forEach((capture) => URL.revokeObjectURL(capture.videoUrl));
+    capturesRef.current = loaded;
+    setCaptures(loaded);
+    const retained = loaded.find((capture) => capture.id === selectedIdRef.current);
+    const next = retained ?? loaded[0];
+    if (!retained) {
+      selectedIdRef.current = next.id;
+      setSelectedId(next.id);
+      setExerciseId(next.labels?.exerciseId ?? "");
+      setCameraView(next.labels?.cameraView ?? "oblique45");
+      setExpectedCount(approvalsRef.current[next.id]?.expectedCount ?? "");
+    }
+    return true;
+  };
+
   const importFiles = async (files: File[]) => {
     setError(null);
     const loaded = await parseCaptureFiles(files);
-    if (!loaded.length) {
+    if (!installCaptures(loaded)) {
       setError("没有找到完整采集包：每组需要同名的 .webm/.mp4/.mov 与 .json 文件。");
-      return;
     }
-    setCaptures((previous) => {
-      previous.forEach((capture) => URL.revokeObjectURL(capture.videoUrl));
-      return loaded;
-    });
-    const first = loaded[0];
-    setSelectedId(first.id);
-    setExerciseId(first.labels?.exerciseId ?? "");
-    setCameraView(first.labels?.cameraView ?? "oblique45");
-    const approval = approvals[first.id];
-    setExpectedCount(approval?.expectedCount ?? "");
   };
+
+  const refreshConnectedDirectory = async (directory?: DirectoryHandle) => {
+    try {
+      const saved = directory ?? await restoreDirectory();
+      if (!saved) return;
+      const permission = saved.queryPermission ? await saved.queryPermission({ mode: "read" }) : "granted";
+      if (permission !== "granted") {
+        setDirectoryConnected(false);
+        return;
+      }
+      const loaded = await parseCaptureFiles(await filesFromDirectory(saved));
+      if (installCaptures(loaded)) setDirectoryConnected(true);
+    } catch {
+      // A browser can revoke a persisted handle. The manual import control
+      // remains available and is the recovery path.
+      setDirectoryConnected(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshConnectedDirectory();
+    const timer = window.setInterval(() => void refreshConnectedDirectory(), 10_000);
+    return () => window.clearInterval(timer);
+  // Only establish the background directory watcher once; user selections
+  // remain local state and must not restart it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const importDirectory = async () => {
     const picker = (window as unknown as { showDirectoryPicker?: () => Promise<DirectoryHandle> }).showDirectoryPicker;
@@ -223,13 +320,8 @@ export function CaptureApprovalPanel() {
     }
     try {
       const directory = await picker();
-      const files: File[] = [];
-      for await (const entry of directory.values()) {
-        if (entry.kind === "file" && /field-capture-.*\.(json|webm|mp4|mov)$/i.test(entry.name)) {
-          files.push(await entry.getFile());
-        }
-      }
-      await importFiles(files);
+      await persistDirectory(directory);
+      await refreshConnectedDirectory(directory);
     } catch (caught) {
       if ((caught as DOMException)?.name !== "AbortError") {
         setError(caught instanceof Error ? caught.message : String(caught));
@@ -238,6 +330,7 @@ export function CaptureApprovalPanel() {
   };
 
   const chooseCapture = (capture: ReviewCapture) => {
+    selectedIdRef.current = capture.id;
     setSelectedId(capture.id);
     setExerciseId(capture.labels?.exerciseId ?? "");
     setCameraView(capture.labels?.cameraView ?? "oblique45");
@@ -258,6 +351,7 @@ export function CaptureApprovalPanel() {
         approvedAt: new Date().toISOString(),
       },
     };
+    approvalsRef.current = next;
     setApprovals(next);
     localStorage.setItem(APPROVAL_KEY, JSON.stringify(next));
   };
@@ -278,7 +372,7 @@ export function CaptureApprovalPanel() {
         <div>
           <div style={styles.kicker}>FIELD EVIDENCE / 本机审核</div>
           <h2 style={styles.title}>训练录像审批台</h2>
-          <p style={styles.subtitle}>同一关键点序列的固定回放对比；审批结果只保存在这台设备。</p>
+          <p style={styles.subtitle}>{directoryConnected ? "Downloads 已连接 · 每 10 秒自动加载新的导出包" : "同一关键点序列的固定回放对比；审批结果只保存在这台设备。"}</p>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           <button style={styles.importButton} onClick={() => void importDirectory()}>导入 Downloads 采集包</button>
