@@ -51,6 +51,18 @@ interface Candidate {
   tone: "recorded" | "current" | "caution";
 }
 
+interface ReplayReportRow {
+  capture: ReviewCapture;
+  quality: ReturnType<typeof qualityOf>;
+  historicalCount: number | null;
+  currentCount: number | null;
+  stableCount: number | null;
+  automaticCount: number;
+  excludedFrames: number;
+  priority: "high" | "normal" | "low";
+  reason: string;
+}
+
 interface DirectoryFileHandle {
   kind: "file";
   name: string;
@@ -156,6 +168,41 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
       tone: "caution",
     },
   ];
+}
+
+/**
+ * A compact, live version of the offline replay report.  It deliberately runs
+ * the exact candidate builder used by the approval cards, so the dashboard
+ * never shows a count that differs from the one an athlete can approve.
+ */
+function replayReportFor(captures: ReviewCapture[]): ReplayReportRow[] {
+  return captures.map((capture) => {
+    const quality = qualityOf(capture.fixture.poses);
+    const exerciseId = capture.labels?.exerciseId ?? "";
+    const cameraView = capture.labels?.cameraView ?? "oblique45";
+    const candidates = candidatesFor(capture, exerciseId, cameraView);
+    const historical = candidates.find((candidate) => candidate.id === "recorded")?.count ?? null;
+    const current = candidates.find((candidate) => candidate.id === "raw")?.count ?? null;
+    const stable = candidates.find((candidate) => candidate.id === "stable")?.count ?? null;
+    const automatic = candidates.find((candidate) => candidate.id === "auto")?.count ?? 0;
+    const excludedFrames = selectTrainingWindow(capture.fixture.poses).excludedPoseCount;
+    if (!exerciseId) {
+      return { capture, quality, historicalCount: null, currentCount: null, stableCount: null, automaticCount: automatic, excludedFrames, priority: "high", reason: "缺少动作标签，专项规则未运行。" };
+    }
+    if (quality.posePercent < 90 || quality.torsoPercent < 85) {
+      return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "high", reason: "骨架或躯干覆盖不足，候选不能直接当真值。" };
+    }
+    if (stable !== historical || stable !== automatic) {
+      return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "high", reason: "候选计数不一致，需要播放视频裁决。" };
+    }
+    if (excludedFrames > 0) {
+      return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "normal", reason: "稳定窗口已排除进出机位帧。" };
+    }
+    return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "low", reason: "三种候选一致；仍请确认实际次数。" };
+  }).sort((a, b) => {
+    const weight = { high: 0, normal: 1, low: 2 };
+    return weight[a.priority] - weight[b.priority] || b.capture.id.localeCompare(a.capture.id);
+  });
 }
 
 async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
@@ -287,6 +334,9 @@ export function CaptureApprovalPanel() {
     () => selected ? candidatesFor(selected, exerciseId, cameraView) : [],
     [selected, exerciseId, cameraView],
   );
+  const replayReport = useMemo(() => replayReportFor(captures), [captures]);
+  const highPriorityCount = replayReport.filter((row) => row.priority === "high").length;
+  const consistentCount = replayReport.filter((row) => row.priority === "low").length;
 
   useEffect(() => () => captures.forEach((capture) => {
     if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
@@ -313,7 +363,9 @@ export function CaptureApprovalPanel() {
     capturesRef.current = loaded;
     setCaptures(loaded);
     const retained = loaded.find((capture) => capture.id === selectedIdRef.current);
-    const next = retained ?? loaded[0];
+    // Start an unattended review session with the riskiest evidence, not simply
+    // the newest recording. The same priority order is visible in the report.
+    const next = retained ?? replayReportFor(loaded)[0]?.capture ?? loaded[0];
     if (!retained) {
       selectedIdRef.current = next.id;
       setSelectedId(next.id);
@@ -445,6 +497,34 @@ export function CaptureApprovalPanel() {
         />
       </header>
       {error && <p style={styles.error}>{error}</p>}
+      {!!replayReport.length && (
+        <section style={styles.replayShell} aria-label="算法重放报告">
+          <div style={styles.replayIntro}>
+            <div>
+              <div style={styles.kicker}>ALGORITHM REPLAY / 当前骨架回放</div>
+              <h3 style={styles.replayTitle}>本机算法重放报告</h3>
+              <p style={styles.replayCopy}>同一份 canonical 骨架数据，同时驱动这里的候选计数、视频标记与最终审批。</p>
+            </div>
+            <div style={styles.metrics}>
+              <span><b>{replayReport.length}</b> 组已重放</span>
+              <span style={{ color: highPriorityCount ? "#ffbd6f" : "#7cffbc" }}><b>{highPriorityCount}</b> 组优先审核</span>
+              <span><b>{consistentCount}</b> 组候选一致</span>
+            </div>
+          </div>
+          <div style={styles.replayRows}>
+            {replayReport.map((row) => (
+              <button key={row.capture.id} onClick={() => chooseCapture(row.capture)} style={{ ...styles.replayRow, ...(row.capture.id === selected?.id ? styles.replayRowActive : {}) }}>
+                <span style={{ ...styles.priority, ...(row.priority === "high" ? styles.priorityHigh : row.priority === "normal" ? styles.priorityNormal : styles.priorityLow) }}>{row.priority === "high" ? "优先" : row.priority === "normal" ? "复核" : "一致"}</span>
+                <span style={styles.replayStamp}>{row.capture.id.replace("field-capture-2026-08-02T", "").replace("Z", "")}</span>
+                <span style={styles.replayAction}>{row.capture.labels?.exerciseId ?? "未标动作"}</span>
+                <span style={styles.replayNumbers}>历史 {row.historicalCount ?? "—"} · 全帧 {row.currentCount ?? "—"} · 稳定段 {row.stableCount ?? "—"} · 周期 {row.automaticCount}</span>
+                <span style={styles.replayQuality}>POSE {row.quality.posePercent}% / 躯干 {row.quality.torsoPercent}%</span>
+                <span style={styles.replayReason}>{row.reason}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
       {!captures.length ? (
         <p style={styles.empty}>选择 Downloads 文件夹。面板会自动配对同名的视频、关键点和 labels 文件。</p>
       ) : (
@@ -507,6 +587,23 @@ const styles: Record<string, React.CSSProperties> = {
   manualImport: { border: "1px solid #42685d", background: "#0b201a", color: "#b8d7cc", padding: "10px 11px", cursor: "pointer", font: "inherit", fontSize: 12 },
   error: { margin: 16, color: "#ff9b83" },
   empty: { padding: 22, color: "#89aaa1" },
+  replayShell: { borderBottom: "1px solid #24443e", background: "linear-gradient(90deg, rgba(17,51,42,.66), rgba(7,19,16,.32))" },
+  replayIntro: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "end", padding: "16px 20px 12px" },
+  replayTitle: { margin: "5px 0", fontSize: 16, letterSpacing: .6 },
+  replayCopy: { margin: 0, maxWidth: 640, color: "#89aaa1", fontSize: 11, lineHeight: 1.5 },
+  metrics: { display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 10, color: "#b8d7cc", fontSize: 11, textAlign: "right" },
+  replayRows: { maxHeight: 260, overflowY: "auto", borderTop: "1px solid #24443e", padding: 7, display: "grid", gap: 4 },
+  replayRow: { display: "grid", gridTemplateColumns: "44px 104px 128px minmax(172px, .8fr) minmax(126px, .68fr) minmax(190px, 1fr)", alignItems: "center", gap: 8, width: "100%", padding: "8px 9px", color: "#b8d7cc", background: "rgba(5,15,13,.3)", border: "1px solid transparent", cursor: "pointer", textAlign: "left", font: "inherit", fontSize: 10 },
+  replayRowActive: { borderColor: "#5bc795", background: "#12342c", color: "#effff6" },
+  priority: { padding: "3px 4px", textAlign: "center", fontSize: 9, letterSpacing: .5 },
+  priorityHigh: { color: "#1a1000", background: "#ffbd6f" },
+  priorityNormal: { color: "#101c1a", background: "#a8d6c0" },
+  priorityLow: { color: "#042215", background: "#7cffbc" },
+  replayStamp: { color: "#d8eee4" },
+  replayAction: { color: "#84d8ad" },
+  replayNumbers: { color: "#e5c78a" },
+  replayQuality: { color: "#91b9aa" },
+  replayReason: { color: "#78988d", lineHeight: 1.35 },
   grid: { display: "grid", gridTemplateColumns: "minmax(200px, .55fr) minmax(0, 1.8fr)", minHeight: 440 },
   ledger: { borderRight: "1px solid #24443e", maxHeight: 610, overflowY: "auto", padding: 8 },
   capture: { width: "100%", display: "grid", gap: 5, padding: 11, marginBottom: 5, textAlign: "left", color: "#abc7be", background: "transparent", border: "1px solid transparent", cursor: "pointer", font: "inherit", fontSize: 11 },
