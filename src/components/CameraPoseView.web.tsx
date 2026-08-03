@@ -47,6 +47,7 @@ import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/traj
 import { RtmposeEngine } from "../pose/RtmposeEngine";
 import {
   CAPTURE_POSITIONS,
+  recommendCapturePosition,
   torsoLeanDeg,
   type CapturePosition,
   type CameraView,
@@ -1655,7 +1656,19 @@ export function CameraPoseView() {
               <select
                 style={styles.exerciseSelect}
                 value={exerciseChoice}
-                onChange={(event) => setExerciseChoice(event.target.value)}
+                onChange={(event) => {
+                  const nextExerciseId = event.target.value;
+                  setExerciseChoice(nextExerciseId);
+                  const recommendation = recommendCapturePosition(nextExerciseId);
+                  if (!recommendation) return;
+                  const physicalPosition = CAPTURE_POSITIONS.find(
+                    (position) => position.id === recommendation.position,
+                  );
+                  if (!physicalPosition) return;
+                  setCapturePosition(physicalPosition.id);
+                  setCameraView(physicalPosition.analysisView);
+                  cameraViewRef.current = physicalPosition.analysisView;
+                }}
               >
                 <option value="">请选择本次训练动作</option>
                 {MUSCLE_GROUPS.map((group) => (
@@ -1726,6 +1739,11 @@ export function CameraPoseView() {
             <p style={styles.guidance}>
               {CAPTURE_POSITIONS.find((position) => position.id === capturePosition)?.guidance}
             </p>
+            {exerciseChoice && exerciseChoice !== "auto" && recommendCapturePosition(exerciseChoice) && (
+              <p style={styles.recommendation}>
+                已按 {EXERCISE_REGISTRY.require(exerciseChoice).nameZh} 自动推荐：{CAPTURE_POSITIONS.find((position) => position.id === recommendCapturePosition(exerciseChoice)?.position)?.label} · {recommendCapturePosition(exerciseChoice)?.reason}
+              </p>
+            )}
             <div style={styles.telemetryRow}>
               <span>FPS <strong>{fps}</strong></span>
               <span>POINTS <strong>{measuredLandmarks.size}/{landmarkTotal}</strong></span>
@@ -2727,6 +2745,16 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: HUD.mono,
     fontSize: 10,
     lineHeight: 1.6,
+  },
+  recommendation: {
+    margin: "-4px 0 12px",
+    padding: "7px 8px",
+    borderLeft: `2px solid ${HUD.amber}`,
+    background: "rgba(255, 181, 67, .07)",
+    color: HUD.amber,
+    fontFamily: HUD.mono,
+    fontSize: 10,
+    lineHeight: 1.55,
   },
   subsectionLabel: {
     color: HUD.dim,
