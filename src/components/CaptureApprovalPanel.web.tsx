@@ -6,14 +6,20 @@ import { analyzePoseSet } from "../pose/poseSetAnalysis";
 import type { PoseEstimate } from "../pose/PoseEngine";
 import { segmentRepsAuto } from "../pose/repSegmenter";
 import { selectTrainingWindow } from "../pose/trainingWindow";
+import {
+  buildApprovedLatPulldownTrajectorySample,
+  type LatPulldownTrajectorySample,
+} from "../pose/trajectoryDataset";
+import { CAPTURE_POSITIONS, type CapturePosition } from "../pose/viewGating";
 
 interface ImportedLabels {
-  exerciseId?: string;
+  exerciseId?: string | null;
   cameraView?: CameraView;
   variation?: string | null;
   trainingSide?: "bilateral" | "left" | "right";
   profileVersion?: string | null;
   model?: string | null;
+  capturePosition?: CapturePosition | null;
   labels?: Array<{ repIndex: number; startMs: number; extremeMs: number; endMs: number }>;
 }
 
@@ -24,11 +30,13 @@ interface ImportedCaptureMetadata {
   trainingSide?: "bilateral" | "left" | "right";
   profileVersion?: string | null;
   model?: string | null;
+  capturePosition?: CapturePosition | null;
 }
 
 interface ImportedFixture {
   video: string;
   durationSec: number;
+  model?: string;
   poses: PoseEstimate[];
 }
 
@@ -42,7 +50,14 @@ interface ReviewCapture {
 }
 
 interface ProjectManifest {
-  captures: Array<{ id: string; video: string; keypoints: string; labels: string }>;
+  captures: Array<{ id: string; video: string; keypoints: string; labels?: string; metadata?: string }>;
+}
+
+interface TrajectoryDatasetDecision {
+  decision: "eligible" | "quarantined";
+  reason: string | null;
+  sample: LatPulldownTrajectorySample | null;
+  recordedAt: string;
 }
 
 interface Approval {
@@ -57,6 +72,10 @@ interface Approval {
   model: string;
   approvedSegments: Candidate["segments"];
   approvedAt: string;
+  /** Exact physical placement, not only its reduced rule-engine view. */
+  capturePosition?: CapturePosition | null;
+  /** Stored at approval time so source reloads cannot silently rewrite a label. */
+  trajectoryDataset?: TrajectoryDatasetDecision | null;
 }
 
 interface Candidate {
@@ -96,11 +115,13 @@ const APPROVAL_KEY = "form-coach-capture-approvals/v1";
 const SOURCE_DATABASE = "form-coach-review-source";
 const SOURCE_STORE = "settings";
 const SOURCE_KEY = "downloads-directory";
-const VIEW_OPTIONS: Array<{ id: CameraView; label: string }> = [
-  { id: "front", label: "正前" },
-  { id: "oblique45", label: "45°" },
-  { id: "side", label: "侧面" },
-];
+function analysisViewFor(position: CapturePosition | ""): CameraView | null {
+  return CAPTURE_POSITIONS.find((item) => item.id === position)?.analysisView ?? null;
+}
+
+function importedCapturePosition(value: unknown): CapturePosition | "" {
+  return CAPTURE_POSITIONS.some((item) => item.id === value) ? value as CapturePosition : "";
+}
 
 function baseName(name: string): string {
   return name.replace(/\.labels\.json$/i, "").replace(/\.(webm|mp4|mov|json)$/i, "");
@@ -194,7 +215,7 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
  * never shows a count that differs from the one an athlete can approve.
  */
 function replayReportFor(captures: ReviewCapture[]): ReplayReportRow[] {
-  return captures.map((capture) => {
+  return captures.map((capture): ReplayReportRow => {
     const quality = qualityOf(capture.fixture.poses);
     const exerciseId = capture.labels?.exerciseId ?? "";
     const cameraView = capture.labels?.cameraView ?? "oblique45";
@@ -275,6 +296,11 @@ async function loadProjectCaptures(): Promise<ReviewCapture[]> {
             response.ok ? await response.json() as ImportedLabels : null,
           )
         : null;
+      const metadata = entry.metadata
+        ? await fetch(`/field-captures/${entry.metadata}`, { cache: "no-store" }).then(async (response) =>
+            response.ok ? await response.json() as ImportedCaptureMetadata : null,
+          )
+        : null;
       const fixture = parsed[0];
       if (!fixture || !Array.isArray(fixture.poses)) throw new Error(`采集关键点格式无效: ${entry.id}`);
       return {
@@ -283,7 +309,7 @@ async function loadProjectCaptures(): Promise<ReviewCapture[]> {
         sourceSignature: entry.id,
         revokeVideoUrl: false,
         fixture,
-        labels,
+        labels: labels ? { ...metadata, ...labels } : metadata?.exerciseId ? metadata : null,
       } satisfies ReviewCapture;
     }),
   );
@@ -350,7 +376,10 @@ export function CaptureApprovalPanel() {
   const [approvals, setApprovals] = useState<Record<string, Approval>>(approvalsRef.current);
   const [exerciseId, setExerciseId] = useState("");
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
+  const [capturePosition, setCapturePosition] = useState<CapturePosition | "">("");
   const [expectedCount, setExpectedCount] = useState("");
+  const [draftSegments, setDraftSegments] = useState<Candidate["segments"]>([]);
+  const [draftCandidateId, setDraftCandidateId] = useState<string | null>(null);
   const [directoryConnected, setDirectoryConnected] = useState(false);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
@@ -362,6 +391,22 @@ export function CaptureApprovalPanel() {
   const replayReport = useMemo(() => replayReportFor(captures), [captures]);
   const highPriorityCount = replayReport.filter((row) => row.priority === "high").length;
   const consistentCount = replayReport.filter((row) => row.priority === "low").length;
+  // A trajectory is materialized while the athlete approves it. We never
+  // rebuild an accepted record from a different import later, because that
+  // would make the same approval mean different data.
+  const trajectoryDecisions = useMemo(
+    () => Object.values(approvals).flatMap((approval) =>
+      approval.exerciseId === "lat_pulldown" && approval.trajectoryDataset
+        ? [approval.trajectoryDataset]
+        : []),
+    [approvals],
+  );
+  const eligibleTrajectorySamples = trajectoryDecisions.flatMap((decision) =>
+    decision.decision === "eligible" && decision.sample ? [decision.sample] : [],
+  );
+  const selectedTrajectoryDecision = selected
+    ? approvals[selected.id]?.trajectoryDataset ?? null
+    : null;
 
   useEffect(() => () => captures.forEach((capture) => {
     if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
@@ -395,8 +440,12 @@ export function CaptureApprovalPanel() {
       selectedIdRef.current = next.id;
       setSelectedId(next.id);
       setExerciseId(next.labels?.exerciseId ?? "");
-      setCameraView(next.labels?.cameraView ?? "oblique45");
+      const nextPosition = importedCapturePosition(next.labels?.capturePosition);
+      setCapturePosition(nextPosition);
+      setCameraView(analysisViewFor(nextPosition) ?? next.labels?.cameraView ?? "oblique45");
       setExpectedCount(approvalsRef.current[next.id]?.expectedCount ?? "");
+      setDraftSegments([]);
+      setDraftCandidateId(null);
     }
     return true;
   };
@@ -462,27 +511,91 @@ export function CaptureApprovalPanel() {
     selectedIdRef.current = capture.id;
     setSelectedId(capture.id);
     setExerciseId(capture.labels?.exerciseId ?? "");
-    setCameraView(capture.labels?.cameraView ?? "oblique45");
+    const nextPosition = importedCapturePosition(capture.labels?.capturePosition);
+    setCapturePosition(nextPosition);
+    setCameraView(analysisViewFor(nextPosition) ?? capture.labels?.cameraView ?? "oblique45");
     setExpectedCount(approvals[capture.id]?.expectedCount ?? "");
+    setDraftSegments([]);
+    setDraftCandidateId(null);
   };
 
-  const approve = (candidateId: string) => {
+  const selectDraftSegments = (candidate: Candidate) => {
+    setError(null);
+    setDraftCandidateId(candidate.id);
+    setDraftSegments(candidate.segments.map((segment) => ({ ...segment })));
+  };
+
+  const updateDraftSegment = (
+    repIndex: number,
+    field: "startMs" | "peakMs" | "endMs",
+    value: number,
+  ) => {
+    setDraftSegments((current) => current.map((segment) =>
+      segment.repIndex === repIndex ? { ...segment, [field]: value } : segment,
+    ));
+  };
+
+  const addDraftSegment = () => {
+    const last = draftSegments.at(-1);
+    const startMs = last ? last.endMs + 1 : selected?.fixture.poses[0]?.timestampMs ?? 0;
+    setDraftSegments((current) => [...current, {
+      repIndex: (last?.repIndex ?? 0) + 1,
+      startMs,
+      peakMs: startMs + 250,
+      endMs: startMs + 500,
+    }]);
+  };
+
+  const approve = () => {
     if (!selected) return;
-    const candidate = candidates.find((item) => item.id === candidateId);
-    const next = {
+    if (!draftCandidateId) {
+      setError("先选择一个候选分段，并逐 rep 检查或修正 start / peak / end 边界。");
+      return;
+    }
+    const approvedAt = new Date().toISOString();
+    const confirmedPosition = capturePosition || null;
+    // The physical placement is the source of truth. The smaller CameraView
+    // vocabulary is derived from it rather than being independently editable.
+    const approvedCameraView = analysisViewFor(capturePosition) ?? cameraView;
+    const trajectoryBuild = exerciseId === "lat_pulldown"
+      ? buildApprovedLatPulldownTrajectorySample({
+          captureId: selected.id,
+          exerciseId,
+          cameraView: approvedCameraView,
+          capturePosition: confirmedPosition,
+          approvedAt,
+          expectedCount,
+          approvedSegments: draftSegments,
+          poses: selected.fixture.poses,
+          model: selected.fixture.model ?? selected.labels?.model ?? null,
+        })
+      : null;
+    const trajectoryDataset: TrajectoryDatasetDecision | null = trajectoryBuild
+      ? trajectoryBuild.status === "ready"
+        ? {
+            decision: trajectoryBuild.sample.quality.eligibleForSegmentationTraining ? "eligible" : "quarantined",
+            reason: trajectoryBuild.sample.quality.reason,
+            sample: trajectoryBuild.sample,
+            recordedAt: approvedAt,
+          }
+        : { decision: "quarantined", reason: trajectoryBuild.reason, sample: null, recordedAt: approvedAt }
+      : null;
+    const next: Record<string, Approval> = {
       ...approvals,
       [selected.id]: {
         expectedCount,
-        candidateId,
-        candidateCount: candidate?.count ?? 0,
+        candidateId: draftCandidateId,
+        candidateCount: draftSegments.length,
         exerciseId,
-        cameraView,
+        cameraView: approvedCameraView,
         variation: selected.labels?.variation ?? null,
         trainingSide: selected.labels?.trainingSide ?? null,
         profileVersion: selected.labels?.profileVersion ?? null,
-        model: selected.fixture.model,
-        approvedSegments: candidate?.segments ?? [],
-        approvedAt: new Date().toISOString(),
+        model: selected.fixture.model ?? selected.labels?.model ?? "unknown",
+        approvedSegments: draftSegments,
+        approvedAt,
+        capturePosition: confirmedPosition,
+        trajectoryDataset,
       },
     };
     approvalsRef.current = next;
@@ -500,18 +613,43 @@ export function CaptureApprovalPanel() {
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
+  const exportLatPulldownTrajectoryDataset = () => {
+    if (!eligibleTrajectorySamples.length) {
+      setError("还没有可训练的高位下拉样本：需审批动作、填写实际次数，并让批准边界与次数一致。");
+      return;
+    }
+    const blob = new Blob([JSON.stringify({
+      schemaVersion: "form-coach-trajectory-dataset/v1",
+      exerciseId: "lat_pulldown",
+      intendedUse: "rep_segmentation_observation",
+      formReference: "not_labeled",
+      generatedAt: new Date().toISOString(),
+      samples: eligibleTrajectorySamples,
+      quarantined: trajectoryDecisions
+        .filter((decision) => decision.decision === "quarantined")
+        .map(({ reason, recordedAt, sample }) => ({ reason, recordedAt, sampleId: sample?.sampleId ?? null })),
+    }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `lat-pulldown-trajectory-dataset-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  };
+
   return (
     <section style={styles.shell}>
       <header style={styles.header}>
         <div>
           <div style={styles.kicker}>FIELD EVIDENCE / 本机审核</div>
           <h2 style={styles.title}>训练录像审批台</h2>
-          <p style={styles.subtitle}>{directoryConnected ? "Downloads 已连接 · 每 10 秒自动加载新的导出包" : "同一关键点序列的固定回放对比；审批结果只保存在这台设备。"}</p>
+          <p style={styles.subtitle}>{directoryConnected ? "Downloads 已连接 · 每 10 秒自动加载新的导出包" : "同一关键点序列的固定回放对比；审批结果只保存在这台设备。"} 审批只标注动作、次数与边界，不把你的训练动作当成标准姿势。</p>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           <button style={styles.importButton} onClick={() => void importDirectory()}>导入 Downloads 采集包</button>
           <button style={styles.manualImport} onClick={() => fileInputRef.current?.click()}>手动选择文件</button>
           <button style={styles.manualImport} disabled={!Object.keys(approvals).length} onClick={exportApprovals}>导出审批真值</button>
+          <button style={styles.manualImport} disabled={!eligibleTrajectorySamples.length} onClick={exportLatPulldownTrajectoryDataset}>导出高位下拉分段轨迹数据</button>
         </div>
         <input
           data-testid="capture-review-files"
@@ -539,6 +677,7 @@ export function CaptureApprovalPanel() {
               <span><b>{replayReport.length}</b> 组已重放</span>
               <span style={{ color: highPriorityCount ? "#ffbd6f" : "#7cffbc" }}><b>{highPriorityCount}</b> 组优先审核</span>
               <span><b>{consistentCount}</b> 组候选一致</span>
+              <span style={{ color: eligibleTrajectorySamples.length ? "#7cffbc" : "#89aaa1" }}><b>{eligibleTrajectorySamples.length}</b> 组高位下拉分段观察</span>
             </div>
           </div>
           <div style={styles.replayRows}>
@@ -583,8 +722,8 @@ export function CaptureApprovalPanel() {
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
-                  <label>动作<select value={exerciseId} onChange={(event) => setExerciseId(event.target.value)}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select></label>
-                  <label>机位<select value={cameraView} onChange={(event) => setCameraView(event.target.value as CameraView)}>{VIEW_OPTIONS.map((view) => <option key={view.id} value={view.id}>{view.label}</option>)}</select></label>
+                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select></label>
+                  <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
                 </div>
                 <div style={styles.candidates}>
@@ -593,11 +732,37 @@ export function CaptureApprovalPanel() {
                       <div><small>{candidate.label}</small><strong>{candidate.count} REPS</strong></div>
                       <p>{candidate.score} · {candidate.reason}</p>
                       <div style={styles.repButtons}>{candidate.segments.map((segment) => <button key={segment.repIndex} onClick={() => { const video = document.querySelector<HTMLVideoElement>("[data-capture-review-video]"); if (video) video.currentTime = segment.startMs / 1000; }}>#{segment.repIndex}</button>)}</div>
-                      <button style={styles.approve} onClick={() => approve(candidate.id)}>批准为本组真值</button>
+                      <button style={styles.approve} onClick={() => selectDraftSegments(candidate)}>{draftCandidateId === candidate.id ? "当前待审核分段" : "选择此分段进行逐 rep 审核"}</button>
                     </article>
                   ))}
                 </div>
+                {draftCandidateId && (
+                  <div style={styles.segmentEditor}>
+                    <strong>逐 rep 边界审核 · {draftCandidateId}</strong>
+                    <p>对照视频逐个确认；可直接修正 start / 拉到底峰值 / end（毫秒）。未选择候选不能批准入库。</p>
+                    {draftSegments.map((segment) => (
+                      <div key={segment.repIndex} style={styles.segmentRow}>
+                        <b>#{segment.repIndex}</b>
+                        <label>start<input inputMode="numeric" value={segment.startMs} onChange={(event) => updateDraftSegment(segment.repIndex, "startMs", Number(event.target.value))} /></label>
+                        <label>peak<input inputMode="numeric" value={segment.peakMs} onChange={(event) => updateDraftSegment(segment.repIndex, "peakMs", Number(event.target.value))} /></label>
+                        <label>end<input inputMode="numeric" value={segment.endMs} onChange={(event) => updateDraftSegment(segment.repIndex, "endMs", Number(event.target.value))} /></label>
+                        <button onClick={() => setDraftSegments((current) => current.filter((item) => item.repIndex !== segment.repIndex))}>移除</button>
+                      </div>
+                    ))}
+                    <div style={styles.segmentActions}>
+                      <button onClick={addDraftSegment}>+ 添加 rep</button>
+                      <button style={styles.approve} onClick={approve}>批准此逐 rep 真值</button>
+                    </div>
+                  </div>
+                )}
                 {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}</p>}
+                {approvals[selected.id]?.exerciseId === "lat_pulldown" && (
+                  selectedTrajectoryDecision?.sample ? (
+                    <p style={selectedTrajectoryDecision.decision === "eligible" ? styles.trajectoryReady : styles.trajectoryWarning}>
+                      轨迹库：{selectedTrajectoryDecision.decision === "eligible" ? "可用于分段训练（非标准动作模板）" : "已隔离，不参与训练"} · 特征覆盖 {Math.round(selectedTrajectoryDecision.sample.quality.meanFeatureCoverage * 100)}%
+                    </p>
+                  ) : selectedTrajectoryDecision ? <p style={styles.trajectoryWarning}>轨迹库：已隔离 · {selectedTrajectoryDecision.reason}</p> : <p style={styles.trajectoryWarning}>轨迹库：旧审批尚未固化轨迹，请重新批准一次。</p>
+                )}
               </div>
             </div>
           )}
@@ -648,7 +813,12 @@ const styles: Record<string, React.CSSProperties> = {
   candidate: { border: "1px solid #315149", padding: 10, background: "#0c1c19" },
   current: { borderColor: "#61cd99", background: "#0c261e" },
   caution: { borderColor: "#87623b", background: "#211a11" },
+  segmentEditor: { marginTop: 11, border: "1px solid #4a806a", background: "#0a211a", padding: 10, color: "#cce8dc", fontSize: 11 },
+  segmentRow: { display: "grid", gridTemplateColumns: "34px repeat(3, minmax(75px, 1fr)) 42px", gap: 5, alignItems: "end", padding: "7px 0", borderBottom: "1px solid #24443e" },
+  segmentActions: { display: "flex", gap: 8, marginTop: 9 },
   repButtons: { display: "flex", gap: 4, flexWrap: "wrap", margin: "8px 0" },
   approve: { border: "1px solid #69df9f", background: "#174631", color: "#e6fff0", padding: "5px 8px", cursor: "pointer", font: "inherit", fontSize: 11 },
   approved: { color: "#8affbd", fontSize: 12 },
+  trajectoryReady: { margin: "7px 0 0", color: "#7cffbc", fontSize: 12 },
+  trajectoryWarning: { margin: "7px 0 0", color: "#ffbd6f", fontSize: 12, lineHeight: 1.5 },
 };
