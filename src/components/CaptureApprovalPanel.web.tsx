@@ -123,6 +123,42 @@ function importedCapturePosition(value: unknown): CapturePosition | "" {
   return CAPTURE_POSITIONS.some((item) => item.id === value) ? value as CapturePosition : "";
 }
 
+function approvalValidationError(input: {
+  exerciseId: string;
+  capturePosition: CapturePosition | "";
+  expectedCount: string;
+  segments: readonly Candidate["segments"][number][];
+  poses: readonly PoseEstimate[];
+}): string | null {
+  if (!input.exerciseId) return "请先确认本组动作。";
+  if (!input.capturePosition) return "请确认实际八向机位。";
+  const actualCount = Number(input.expectedCount);
+  if (!Number.isInteger(actualCount) || actualCount <= 0) return "实际次数必须是大于 0 的整数。";
+  if (actualCount !== input.segments.length) return `实际次数 ${actualCount} 与逐 rep 边界数 ${input.segments.length} 不一致。`;
+  if (input.poses.length < 2) return "关键点帧不足，不能批准本组真值。";
+  const startBound = input.poses[0].timestampMs;
+  const endBound = input.poses[input.poses.length - 1].timestampMs;
+  let previousEnd = -Infinity;
+  let previousRepIndex = 0;
+  for (const segment of input.segments) {
+    if (
+      !Number.isInteger(segment.repIndex) ||
+      segment.repIndex <= previousRepIndex ||
+      ![segment.startMs, segment.peakMs, segment.endMs].every(Number.isFinite) ||
+      segment.startMs < startBound ||
+      segment.startMs > segment.peakMs ||
+      segment.peakMs > segment.endMs ||
+      segment.endMs > endBound ||
+      segment.startMs < previousEnd
+    ) {
+      return "逐 rep 边界必须按时间和 rep 编号严格递增，并落在录像范围内。";
+    }
+    previousEnd = segment.endMs;
+    previousRepIndex = segment.repIndex;
+  }
+  return null;
+}
+
 function baseName(name: string): string {
   return name.replace(/\.labels\.json$/i, "").replace(/\.(webm|mp4|mov|json)$/i, "");
 }
@@ -365,7 +401,7 @@ async function filesFromDirectory(directory: DirectoryHandle): Promise<File[]> {
  * Local-only evidence board. The athlete compares deterministic replays and
  * explicitly approves a ground-truth count; nothing is uploaded.
  */
-export function CaptureApprovalPanel() {
+export function CaptureApprovalPanel({ compact = false }: { compact?: boolean }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const capturesRef = useRef<ReviewCapture[]>([]);
   const selectedIdRef = useRef<string | null>(null);
@@ -439,13 +475,14 @@ export function CaptureApprovalPanel() {
     if (!retained) {
       selectedIdRef.current = next.id;
       setSelectedId(next.id);
-      setExerciseId(next.labels?.exerciseId ?? "");
-      const nextPosition = importedCapturePosition(next.labels?.capturePosition);
+      const storedApproval = approvalsRef.current[next.id];
+      setExerciseId(storedApproval?.exerciseId ?? next.labels?.exerciseId ?? "");
+      const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? next.labels?.capturePosition);
       setCapturePosition(nextPosition);
-      setCameraView(analysisViewFor(nextPosition) ?? next.labels?.cameraView ?? "oblique45");
-      setExpectedCount(approvalsRef.current[next.id]?.expectedCount ?? "");
-      setDraftSegments([]);
-      setDraftCandidateId(null);
+      setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? next.labels?.cameraView ?? "oblique45");
+      setExpectedCount(storedApproval?.expectedCount ?? "");
+      setDraftSegments(storedApproval?.approvedSegments ?? []);
+      setDraftCandidateId(storedApproval?.candidateId ?? null);
     }
     return true;
   };
@@ -508,15 +545,23 @@ export function CaptureApprovalPanel() {
   };
 
   const chooseCapture = (capture: ReviewCapture) => {
+    const storedApproval = approvalsRef.current[capture.id];
     selectedIdRef.current = capture.id;
     setSelectedId(capture.id);
-    setExerciseId(capture.labels?.exerciseId ?? "");
-    const nextPosition = importedCapturePosition(capture.labels?.capturePosition);
+    setExerciseId(storedApproval?.exerciseId ?? capture.labels?.exerciseId ?? "");
+    const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? capture.labels?.capturePosition);
     setCapturePosition(nextPosition);
-    setCameraView(analysisViewFor(nextPosition) ?? capture.labels?.cameraView ?? "oblique45");
-    setExpectedCount(approvals[capture.id]?.expectedCount ?? "");
-    setDraftSegments([]);
-    setDraftCandidateId(null);
+    setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? capture.labels?.cameraView ?? "oblique45");
+    setExpectedCount(storedApproval?.expectedCount ?? "");
+    setDraftSegments(storedApproval?.approvedSegments ?? []);
+    setDraftCandidateId(storedApproval?.candidateId ?? null);
+  };
+
+  const chooseAdjacentCapture = (direction: -1 | 1) => {
+    if (!captures.length) return;
+    const currentIndex = Math.max(0, captures.findIndex((capture) => capture.id === selected?.id));
+    const nextIndex = Math.min(captures.length - 1, Math.max(0, currentIndex + direction));
+    chooseCapture(captures[nextIndex]);
   };
 
   const selectDraftSegments = (candidate: Candidate) => {
@@ -550,6 +595,17 @@ export function CaptureApprovalPanel() {
     if (!selected) return;
     if (!draftCandidateId) {
       setError("先选择一个候选分段，并逐 rep 检查或修正 start / peak / end 边界。");
+      return;
+    }
+    const validationError = approvalValidationError({
+      exerciseId,
+      capturePosition,
+      expectedCount,
+      segments: draftSegments,
+      poses: selected.fixture.poses,
+    });
+    if (validationError) {
+      setError(validationError);
       return;
     }
     const approvedAt = new Date().toISOString();
@@ -642,7 +698,7 @@ export function CaptureApprovalPanel() {
       <header style={styles.header}>
         <div>
           <div style={styles.kicker}>FIELD EVIDENCE / 本机审核</div>
-          <h2 style={styles.title}>训练录像审批台</h2>
+          <h2 style={styles.title}>{compact ? "逐组视频审核标注" : "训练录像审批台"}</h2>
           <p style={styles.subtitle}>{directoryConnected ? "Downloads 已连接 · 每 10 秒自动加载新的导出包" : "同一关键点序列的固定回放对比；审批结果只保存在这台设备。"} 审批只标注动作、次数与边界，不把你的训练动作当成标准姿势。</p>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
@@ -665,7 +721,7 @@ export function CaptureApprovalPanel() {
         />
       </header>
       {error && <p style={styles.error}>{error}</p>}
-      {!!replayReport.length && (
+      {!compact && !!replayReport.length && (
         <section style={styles.replayShell} aria-label="算法重放报告">
           <div style={styles.replayIntro}>
             <div>
@@ -697,8 +753,8 @@ export function CaptureApprovalPanel() {
       {!captures.length ? (
         <p style={styles.empty}>选择 Downloads 文件夹。面板会自动配对同名的视频、关键点和 labels 文件。</p>
       ) : (
-        <div style={styles.grid}>
-          <nav style={styles.ledger} aria-label="采集组列表">
+        <div style={compact ? styles.compactGrid : styles.grid}>
+          {!compact && <nav style={styles.ledger} aria-label="采集组列表">
             {captures.map((capture) => {
               const report = qualityOf(capture.fixture.poses);
               const approved = approvals[capture.id];
@@ -711,7 +767,7 @@ export function CaptureApprovalPanel() {
                 </button>
               );
             })}
-          </nav>
+          </nav>}
           {selected && quality && (
             <div style={styles.detail}>
               <div style={styles.videoColumn}>
@@ -719,6 +775,13 @@ export function CaptureApprovalPanel() {
                 <div style={styles.qualityStrip}>
                   <span>POSE {quality.posePercent}%</span><span>躯干完整 {quality.torsoPercent}%</span><span>{quality.frames} 帧</span>
                 </div>
+                {compact && (
+                  <div style={styles.reviewNavigation}>
+                    <button disabled={captures.findIndex((capture) => capture.id === selected.id) <= 0} onClick={() => chooseAdjacentCapture(-1)}>← 上一组</button>
+                    <span>{captures.findIndex((capture) => capture.id === selected.id) + 1} / {captures.length} · {selected.id.replace("field-capture-", "")}</span>
+                    <button disabled={captures.findIndex((capture) => capture.id === selected.id) >= captures.length - 1} onClick={() => chooseAdjacentCapture(1)}>下一组 →</button>
+                  </div>
+                )}
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
@@ -800,6 +863,7 @@ const styles: Record<string, React.CSSProperties> = {
   replayQuality: { color: "#91b9aa" },
   replayReason: { color: "#78988d", lineHeight: 1.35 },
   grid: { display: "grid", gridTemplateColumns: "minmax(200px, .55fr) minmax(0, 1.8fr)", minHeight: 440 },
+  compactGrid: { minHeight: 440 },
   ledger: { borderRight: "1px solid #24443e", maxHeight: 610, overflowY: "auto", padding: 8 },
   capture: { width: "100%", display: "grid", gap: 5, padding: 11, marginBottom: 5, textAlign: "left", color: "#abc7be", background: "transparent", border: "1px solid transparent", cursor: "pointer", font: "inherit", fontSize: 11 },
   captureActive: { background: "#12342c", borderColor: "#4ca97a", color: "#ecfff5" },
@@ -807,6 +871,7 @@ const styles: Record<string, React.CSSProperties> = {
   videoColumn: { minWidth: 0 },
   video: { width: "100%", maxHeight: 430, background: "#000", border: "1px solid #30564b" },
   qualityStrip: { display: "flex", gap: 13, flexWrap: "wrap", padding: "8px 0", color: "#80aa9a", fontSize: 11 },
+  reviewNavigation: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, color: "#89aaa1", fontSize: 10 },
   reviewColumn: { minWidth: 0 },
   controls: { display: "grid", gridTemplateColumns: "1.4fr .8fr .9fr", gap: 8, marginBottom: 10 },
   candidates: { display: "grid", gap: 8 },

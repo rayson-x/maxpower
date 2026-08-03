@@ -115,7 +115,7 @@ const POSE_MODELS = [
 ];
 
 type EngineKind = "mediapipe" | "rtmpose";
-type WorkspacePage = "training" | "console";
+type WorkspacePage = "training" | "console" | "review";
 const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
   { id: "mediapipe", label: "MediaPipe" },
   { id: "rtmpose", label: "RTMPose-m" },
@@ -125,9 +125,8 @@ const STAGE_ASPECT = 16 / 9;
 
 function readWorkspacePage(): WorkspacePage {
   if (typeof window === "undefined") return "training";
-  return new URLSearchParams(window.location.search).get("view") === "console"
-    ? "console"
-    : "training";
+  const view = new URLSearchParams(window.location.search).get("view");
+  return view === "console" || view === "review" ? view : "training";
 }
 
 function poseSchemaForEngine(kind: EngineKind): PoseSchema {
@@ -316,7 +315,7 @@ export function CameraPoseView() {
 
   const [status, setStatus] = useState<EngineStatus>("idle");
   const [workspacePage, setWorkspacePage] = useState<WorkspacePage>(readWorkspacePage);
-  const [hasVisitedConsole, setHasVisitedConsole] = useState(() => readWorkspacePage() === "console");
+  const [hasVisitedReview, setHasVisitedReview] = useState(() => readWorkspacePage() === "review");
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<SourceMode>("camera");
   const [videoName, setVideoName] = useState<string | null>(null);
@@ -358,19 +357,24 @@ export function CameraPoseView() {
   const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
   const [localCaptures, setLocalCaptures] = useState<LocalCaptureSummary[]>([]);
   const [localCaptureError, setLocalCaptureError] = useState<string | null>(null);
+  const stopRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    const syncWorkspacePage = () => setWorkspacePage(readWorkspacePage());
+    const syncWorkspacePage = () => {
+      const nextPage = readWorkspacePage();
+      if (nextPage === "review") stopRef.current();
+      setWorkspacePage(nextPage);
+    };
     window.addEventListener("popstate", syncWorkspacePage);
     return () => window.removeEventListener("popstate", syncWorkspacePage);
   }, []);
 
   useEffect(() => {
-    if (workspacePage === "console") setHasVisitedConsole(true);
+    if (workspacePage === "review") setHasVisitedReview(true);
   }, [workspacePage]);
 
   const selectWorkspacePage = (nextPage: WorkspacePage) => {
-    if (nextPage === "console") setHasVisitedConsole(true);
+    if (nextPage === "review") stopRef.current();
     setWorkspacePage(nextPage);
     const url = new URL(window.location.href);
     url.searchParams.set("view", nextPage);
@@ -868,6 +872,7 @@ export function CameraPoseView() {
     signalRef.current = [];
     canonicalSessionRef.current = null;
   }, [stopRecording]);
+  stopRef.current = stop;
 
   const start = useCallback(async () => {
     if (recordingActiveRef.current || finalizingRecordingRef.current) return;
@@ -1224,16 +1229,21 @@ export function CameraPoseView() {
   const trackingOk = usableLandmarks.size >= landmarkTotal * 0.6;
   const analyzing = analysisStage !== null && analysisStage !== "done";
   const isConsole = workspacePage === "console";
+  const isReview = workspacePage === "review";
   const videoViewport = fitVideoIntoStage(videoAspect);
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, ...(isReview ? styles.reviewRoot : null) }}>
       {/* ===== 顶部:品牌 + 全局状态 ===== */}
       <header style={styles.header} className="range-header">
         <div style={styles.brand}>
           <span style={styles.brandLogo}>FORM·RANGE</span>
           <span style={styles.brandSub} className="range-brand-sub">
-            {workspacePage === "training" ? "训练页 / LIVE TRAINING" : "控制台 / POSE TELEMETRY CONSOLE"}
+            {workspacePage === "training"
+              ? "训练页 / LIVE TRAINING"
+              : workspacePage === "console"
+                ? "控制台 / POSE TELEMETRY CONSOLE"
+                : "审核标注 / VIDEO ANNOTATION"}
           </span>
         </div>
         <nav style={styles.pageSwitch} aria-label="页面模式">
@@ -1252,6 +1262,14 @@ export function CameraPoseView() {
             onClick={() => selectWorkspacePage("console")}
           >
             控制台
+          </button>
+          <button
+            type="button"
+            style={{ ...styles.pageSwitchButton, ...(workspacePage === "review" ? styles.pageSwitchButtonActive : null) }}
+            aria-pressed={workspacePage === "review"}
+            onClick={() => selectWorkspacePage("review")}
+          >
+            审核标注
           </button>
         </nav>
         <div style={styles.headerStatus}>
@@ -1272,6 +1290,8 @@ export function CameraPoseView() {
         </div>
       </header>
 
+      {!isReview && (
+        <>
       <div style={styles.body} className="range-body">
         <main style={styles.main} className="range-main">
           <div style={styles.stageWrap} className="hud-reveal hud-reveal-1">
@@ -1978,9 +1998,13 @@ export function CameraPoseView() {
           )}
         </aside>
       </div>
-      {hasVisitedConsole && (
-        <div style={{ display: isConsole ? "block" : "none" }} aria-hidden={!isConsole}>
-          <CaptureApprovalPanel />
+        </>
+      )}
+      {hasVisitedReview && (
+        <div style={{ display: isReview ? "block" : "none" }} aria-hidden={!isReview}>
+          <div style={styles.reviewPage}>
+            <CaptureApprovalPanel compact />
+          </div>
         </div>
       )}
     </div>
@@ -2584,6 +2608,8 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh",
     overflow: "hidden",
   },
+  reviewRoot: { overflow: "auto" },
+  reviewPage: { width: "min(1180px, 100%)", margin: "0 auto", padding: "18px 22px 34px", boxSizing: "border-box" },
   header: {
     display: "flex",
     alignItems: "center",
