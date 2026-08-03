@@ -21,10 +21,15 @@ interface ImportedFixture {
 
 interface ReviewCapture {
   id: string;
-  videoFile: File;
   videoUrl: string;
+  sourceSignature: string;
+  revokeVideoUrl: boolean;
   fixture: ImportedFixture;
   labels: ImportedLabels | null;
+}
+
+interface ProjectManifest {
+  captures: Array<{ id: string; video: string; keypoints: string; labels: string }>;
 }
 
 interface Approval {
@@ -169,11 +174,47 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
       if (!videoFile) continue;
       const labelsFile = byName.get(`${id}.labels.json`);
       const labels = labelsFile ? JSON.parse(await labelsFile.text()) as ImportedLabels : null;
-      captures.push({ id, videoFile, videoUrl: URL.createObjectURL(videoFile), fixture, labels });
+      captures.push({
+        id,
+        videoUrl: URL.createObjectURL(videoFile),
+        sourceSignature: `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`,
+        revokeVideoUrl: true,
+        fixture,
+        labels,
+      });
     } catch {
       // A non-capture JSON in Downloads is not a review failure.
     }
   }
+  return captures.sort((a, b) => b.id.localeCompare(a.id));
+}
+
+async function loadProjectCaptures(): Promise<ReviewCapture[]> {
+  const manifestResponse = await fetch("/field-captures/manifest.json", { cache: "no-store" });
+  if (!manifestResponse.ok) throw new Error("项目采集库清单不可用");
+  const manifest = await manifestResponse.json() as ProjectManifest;
+  const captures = await Promise.all(
+    manifest.captures.map(async (entry) => {
+      const fixtureResponse = await fetch(`/field-captures/${entry.keypoints}`, { cache: "no-store" });
+      if (!fixtureResponse.ok) throw new Error(`无法读取 ${entry.keypoints}`);
+      const parsed = await fixtureResponse.json() as ImportedFixture[];
+      const labels = entry.labels
+        ? await fetch(`/field-captures/${entry.labels}`, { cache: "no-store" }).then(async (response) =>
+            response.ok ? await response.json() as ImportedLabels : null,
+          )
+        : null;
+      const fixture = parsed[0];
+      if (!fixture || !Array.isArray(fixture.poses)) throw new Error(`采集关键点格式无效: ${entry.id}`);
+      return {
+        id: entry.id,
+        videoUrl: `/field-captures/${entry.video}`,
+        sourceSignature: entry.id,
+        revokeVideoUrl: false,
+        fixture,
+        labels,
+      } satisfies ReviewCapture;
+    }),
+  );
   return captures.sort((a, b) => b.id.localeCompare(a.id));
 }
 
@@ -247,7 +288,9 @@ export function CaptureApprovalPanel() {
     [selected, exerciseId, cameraView],
   );
 
-  useEffect(() => () => captures.forEach((capture) => URL.revokeObjectURL(capture.videoUrl)), [captures]);
+  useEffect(() => () => captures.forEach((capture) => {
+    if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
+  }), [captures]);
 
   const installCaptures = (loaded: ReviewCapture[]) => {
     if (!loaded.length) return false;
@@ -255,14 +298,18 @@ export function CaptureApprovalPanel() {
       capturesRef.current.length === loaded.length &&
       capturesRef.current.every((capture, index) =>
         capture.id === loaded[index]?.id &&
-        capture.videoFile.lastModified === loaded[index]?.videoFile.lastModified &&
+        capture.sourceSignature === loaded[index]?.sourceSignature &&
         capture.fixture.poses.length === loaded[index]?.fixture.poses.length,
       );
     if (unchanged) {
-      loaded.forEach((capture) => URL.revokeObjectURL(capture.videoUrl));
+      loaded.forEach((capture) => {
+        if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
+      });
       return true;
     }
-    capturesRef.current.forEach((capture) => URL.revokeObjectURL(capture.videoUrl));
+    capturesRef.current.forEach((capture) => {
+      if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
+    });
     capturesRef.current = loaded;
     setCaptures(loaded);
     const retained = loaded.find((capture) => capture.id === selectedIdRef.current);
@@ -304,6 +351,11 @@ export function CaptureApprovalPanel() {
   };
 
   useEffect(() => {
+    void loadProjectCaptures()
+      .then((loaded) => {
+        if (!installCaptures(loaded)) setError("项目采集库中没有完整采集包。");
+      })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
     void refreshConnectedDirectory();
     const timer = window.setInterval(() => void refreshConnectedDirectory(), 10_000);
     return () => window.clearInterval(timer);

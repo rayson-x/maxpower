@@ -1,0 +1,694 @@
+{
+  "version": "field-capture-algorithm-replay/v1",
+  "generatedAt": "2026-08-03T05:47:22.888Z",
+  "source": {
+    "manifest": "public/field-captures/manifest.json",
+    "algorithm": "pose-set-analysis/v1 + training-window/v1 + segment-reps-auto/v1"
+  },
+  "rows": [
+    {
+      "id": "field-capture-2026-08-02T18-15-03-101Z",
+      "durationSec": 24.667,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "pull_up",
+      "cameraView": "front",
+      "historicalRecordedCount": 6,
+      "quality": {
+        "frameCount": 170,
+        "posePercent": 80,
+        "torsoPercent": 77,
+        "stableFrameCount": 170,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 24.667
+      },
+      "currentRuleAllFrames": {
+        "count": 6,
+        "status": "scored",
+        "score": 99,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 6,
+        "status": "scored",
+        "score": 99,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 5,
+        "signal": "wrist_height",
+        "periodStrength": 0,
+        "periodSec": null
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-16-42-757Z",
+      "durationSec": 28.723,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "pull_up",
+      "cameraView": "front",
+      "historicalRecordedCount": 13,
+      "quality": {
+        "frameCount": 194,
+        "posePercent": 83,
+        "torsoPercent": 81,
+        "stableFrameCount": 194,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 28.723
+      },
+      "currentRuleAllFrames": {
+        "count": 13,
+        "status": "scored",
+        "score": 98.9,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 13,
+        "status": "scored",
+        "score": 98.9,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 13,
+        "signal": "wrist_height",
+        "periodStrength": 0.482,
+        "periodSec": 1.1
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-19-26-633Z",
+      "durationSec": 27.66,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 4,
+      "quality": {
+        "frameCount": 240,
+        "posePercent": 86,
+        "torsoPercent": 85,
+        "stableFrameCount": 240,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 27.66
+      },
+      "currentRuleAllFrames": {
+        "count": 4,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 4,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 6,
+        "signal": "wrist_height",
+        "periodStrength": 0,
+        "periodSec": null
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-24-38-253Z",
+      "durationSec": 27.586,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 13,
+      "quality": {
+        "frameCount": 483,
+        "posePercent": 79,
+        "torsoPercent": 78,
+        "stableFrameCount": 483,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 27.586
+      },
+      "currentRuleAllFrames": {
+        "count": 13,
+        "status": "scored",
+        "score": 96.3,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 13,
+        "status": "scored",
+        "score": 96.3,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 13,
+        "signal": "wrist_height",
+        "periodStrength": 0.409,
+        "periodSec": 1.27
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-26-54-722Z",
+      "durationSec": 30.757,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "oblique45",
+      "historicalRecordedCount": 13,
+      "quality": {
+        "frameCount": 474,
+        "posePercent": 87,
+        "torsoPercent": 80,
+        "stableFrameCount": 474,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 30.757
+      },
+      "currentRuleAllFrames": {
+        "count": 13,
+        "status": "scored",
+        "score": 99.2,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 13,
+        "status": "scored",
+        "score": 99.2,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 14,
+        "signal": "wrist_height",
+        "periodStrength": 0.415,
+        "periodSec": 1.44
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-30-30-478Z",
+      "durationSec": 28.639,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 9,
+      "quality": {
+        "frameCount": 480,
+        "posePercent": 75,
+        "torsoPercent": 71,
+        "stableFrameCount": 480,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 28.639
+      },
+      "currentRuleAllFrames": {
+        "count": 9,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 9,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 10,
+        "signal": "wrist_height",
+        "periodStrength": 0.061,
+        "periodSec": 1.85
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-34-19-006Z",
+      "durationSec": 30.024,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 10,
+      "quality": {
+        "frameCount": 455,
+        "posePercent": 94,
+        "torsoPercent": 87,
+        "stableFrameCount": 455,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 30.024
+      },
+      "currentRuleAllFrames": {
+        "count": 10,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 10,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 11,
+        "signal": "wrist_height",
+        "periodStrength": 0.316,
+        "periodSec": 2.7
+      },
+      "reviewPriority": "high",
+      "reviewReason": "当前专项规则、历史录制结果或动作无关周期交叉核验不一致。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-37-19-691Z",
+      "durationSec": 28.193,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 1,
+      "quality": {
+        "frameCount": 449,
+        "posePercent": 87,
+        "torsoPercent": 83,
+        "stableFrameCount": 39,
+        "excludedFrameCount": 410,
+        "stableDurationSec": 2.521
+      },
+      "currentRuleAllFrames": {
+        "count": 7,
+        "status": "scored",
+        "score": 97.9,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 1,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 0,
+        "signal": null,
+        "periodStrength": null,
+        "periodSec": null
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-41-05-284Z",
+      "durationSec": 23.015,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "barbell_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 9,
+      "quality": {
+        "frameCount": 353,
+        "posePercent": 85,
+        "torsoPercent": 85,
+        "stableFrameCount": 353,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 23.015
+      },
+      "currentRuleAllFrames": {
+        "count": 9,
+        "status": "scored",
+        "score": 98.3,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 9,
+        "status": "scored",
+        "score": 98.3,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 8,
+        "signal": "wrist_height",
+        "periodStrength": 0.166,
+        "periodSec": 1.45
+      },
+      "reviewPriority": "high",
+      "reviewReason": "骨架或躯干覆盖不足，不能把候选计数当作真值。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-41-55-780Z",
+      "durationSec": 25.992,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "lat_pulldown",
+      "cameraView": "front",
+      "historicalRecordedCount": 9,
+      "quality": {
+        "frameCount": 382,
+        "posePercent": 93,
+        "torsoPercent": 88,
+        "stableFrameCount": 382,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 25.992
+      },
+      "currentRuleAllFrames": {
+        "count": 9,
+        "status": "scored",
+        "score": 99.3,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 9,
+        "status": "scored",
+        "score": 99.3,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 8,
+        "signal": "wrist_height",
+        "periodStrength": 0.083,
+        "periodSec": 4.25
+      },
+      "reviewPriority": "high",
+      "reviewReason": "当前专项规则、历史录制结果或动作无关周期交叉核验不一致。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-44-00-128Z",
+      "durationSec": 23.143,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "lat_pulldown",
+      "cameraView": "front",
+      "historicalRecordedCount": 6,
+      "quality": {
+        "frameCount": 344,
+        "posePercent": 91,
+        "torsoPercent": 89,
+        "stableFrameCount": 344,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 23.143
+      },
+      "currentRuleAllFrames": {
+        "count": 6,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 6,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 7,
+        "signal": "wrist_height",
+        "periodStrength": 0.006,
+        "periodSec": 4.57
+      },
+      "reviewPriority": "high",
+      "reviewReason": "当前专项规则、历史录制结果或动作无关周期交叉核验不一致。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-46-52-295Z",
+      "durationSec": 22.032,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "lat_pulldown",
+      "cameraView": "front",
+      "historicalRecordedCount": 7,
+      "quality": {
+        "frameCount": 337,
+        "posePercent": 93,
+        "torsoPercent": 89,
+        "stableFrameCount": 337,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 22.032
+      },
+      "currentRuleAllFrames": {
+        "count": 7,
+        "status": "scored",
+        "score": 98.6,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 7,
+        "status": "scored",
+        "score": 98.6,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 6,
+        "signal": "wrist_height",
+        "periodStrength": 0,
+        "periodSec": null
+      },
+      "reviewPriority": "high",
+      "reviewReason": "当前专项规则、历史录制结果或动作无关周期交叉核验不一致。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-52-28-679Z",
+      "durationSec": 25.736,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": null,
+      "cameraView": "oblique45",
+      "historicalRecordedCount": null,
+      "quality": {
+        "frameCount": 374,
+        "posePercent": 94,
+        "torsoPercent": 93,
+        "stableFrameCount": 33,
+        "excludedFrameCount": 341,
+        "stableDurationSec": 2.301
+      },
+      "currentRuleAllFrames": {
+        "count": null,
+        "status": "waiting_for_exercise",
+        "score": null,
+        "label": null,
+        "reason": "未指定动作，不能安全套用专项规则。"
+      },
+      "currentRuleStableWindow": {
+        "count": null,
+        "status": "waiting_for_exercise",
+        "score": null,
+        "label": null,
+        "reason": "未指定动作，不能安全套用专项规则。"
+      },
+      "automaticCycleCrossCheck": {
+        "count": 0,
+        "signal": "elbow_angle",
+        "periodStrength": 0,
+        "periodSec": null
+      },
+      "reviewPriority": "high",
+      "reviewReason": "缺少动作标签；专项算法尚未运行。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-55-17-537Z",
+      "durationSec": 30.803,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "seated_row",
+      "cameraView": "front",
+      "historicalRecordedCount": 12,
+      "quality": {
+        "frameCount": 439,
+        "posePercent": 95,
+        "torsoPercent": 92,
+        "stableFrameCount": 439,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 30.803
+      },
+      "currentRuleAllFrames": {
+        "count": 12,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 12,
+        "status": "not_scored",
+        "score": null,
+        "label": "数据不可信，整组未评分",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 12,
+        "signal": "elbow_angle",
+        "periodStrength": 0.579,
+        "periodSec": 1.47
+      },
+      "reviewPriority": "low",
+      "reviewReason": "三种候选一致且关键点覆盖充足，仍需人工确认实际次数。"
+    },
+    {
+      "id": "field-capture-2026-08-02T18-59-00-009Z",
+      "durationSec": 20.869,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "seated_row",
+      "cameraView": "oblique45",
+      "historicalRecordedCount": 7,
+      "quality": {
+        "frameCount": 313,
+        "posePercent": 90,
+        "torsoPercent": 88,
+        "stableFrameCount": 313,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 20.869
+      },
+      "currentRuleAllFrames": {
+        "count": 7,
+        "status": "scored",
+        "score": 97.9,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 7,
+        "status": "scored",
+        "score": 97.9,
+        "label": "检出可复核的动作偏差",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 6,
+        "signal": "elbow_angle",
+        "periodStrength": 0.53,
+        "periodSec": 1.8
+      },
+      "reviewPriority": "high",
+      "reviewReason": "当前专项规则、历史录制结果或动作无关周期交叉核验不一致。"
+    },
+    {
+      "id": "field-capture-2026-08-02T19-02-41-183Z",
+      "durationSec": 24.236,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "straight_arm_pulldown",
+      "cameraView": "oblique45",
+      "historicalRecordedCount": 8,
+      "quality": {
+        "frameCount": 354,
+        "posePercent": 99,
+        "torsoPercent": 95,
+        "stableFrameCount": 354,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 24.236
+      },
+      "currentRuleAllFrames": {
+        "count": 8,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 8,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 8,
+        "signal": "wrist_height",
+        "periodStrength": 0.291,
+        "periodSec": 2.16
+      },
+      "reviewPriority": "low",
+      "reviewReason": "三种候选一致且关键点覆盖充足，仍需人工确认实际次数。"
+    },
+    {
+      "id": "field-capture-2026-08-02T19-05-43-889Z",
+      "durationSec": 24.303,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "straight_arm_pulldown",
+      "cameraView": "side",
+      "historicalRecordedCount": 8,
+      "quality": {
+        "frameCount": 290,
+        "posePercent": 100,
+        "torsoPercent": 92,
+        "stableFrameCount": 290,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 24.303
+      },
+      "currentRuleAllFrames": {
+        "count": 8,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 8,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 8,
+        "signal": "wrist_height",
+        "periodStrength": 0.48,
+        "periodSec": 1.99
+      },
+      "reviewPriority": "low",
+      "reviewReason": "三种候选一致且关键点覆盖充足，仍需人工确认实际次数。"
+    },
+    {
+      "id": "field-capture-2026-08-02T19-08-40-178Z",
+      "durationSec": 30.07,
+      "model": "mediapipe:/models/pose_landmarker_heavy.task",
+      "exerciseId": "straight_arm_pulldown",
+      "cameraView": "oblique45",
+      "historicalRecordedCount": 8,
+      "quality": {
+        "frameCount": 298,
+        "posePercent": 100,
+        "torsoPercent": 89,
+        "stableFrameCount": 298,
+        "excludedFrameCount": 0,
+        "stableDurationSec": 30.07
+      },
+      "currentRuleAllFrames": {
+        "count": 8,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "currentRuleStableWindow": {
+        "count": 8,
+        "status": "scored",
+        "score": 100,
+        "label": "未检出明显问题",
+        "reason": null
+      },
+      "automaticCycleCrossCheck": {
+        "count": 8,
+        "signal": "wrist_height",
+        "periodStrength": 0.444,
+        "periodSec": 2.48
+      },
+      "reviewPriority": "low",
+      "reviewReason": "三种候选一致且关键点覆盖充足，仍需人工确认实际次数。"
+    }
+  ]
+}
