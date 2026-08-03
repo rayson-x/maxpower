@@ -246,15 +246,27 @@ export function classifyLocally(input: ClassifierInput): LocalClassification {
   const totalWeight = RULES.reduce((s, r) => s + r.weight, 0);
   const margin = totalWeight > 0 ? (top.score - (second?.score ?? 0)) / totalWeight : 0;
 
-  const confidence = confidenceOf(margin, dataIssues);
+  // A seated vertical arm trajectory matches both a press and a pulldown in a
+  // single 2D view. The shoulder-press profile is deliberately manual-only,
+  // so returning a confident pulldown here would be an unsafe false label.
+  // Until approved shoulder examples create a discriminative feature, reject
+  // this ambiguous branch rather than silently choosing the pull candidate.
+  const ambiguousSeatedVertical =
+    input.posture === "seated" &&
+    top.id === "lat_pulldown" &&
+    top.hits.some((hit) => hit.rule === "手腕轨迹以垂直方向为主");
+  const allDataIssues = ambiguousSeatedVertical
+    ? [...dataIssues, "坐姿垂直轨迹无法区分推肩与高位下拉，请手动选择动作"]
+    : dataIssues;
+  const confidence = confidenceOf(margin, allDataIssues);
   const noEvidence = top.score <= 0;
 
   return {
-    id: noEvidence || dataIssues.includes("没有可用的骨架数据") ? "unknown" : top.id,
-    confidence: noEvidence ? "low" : confidence,
+    id: noEvidence || ambiguousSeatedVertical || allDataIssues.includes("没有可用的骨架数据") ? "unknown" : top.id,
+    confidence: noEvidence || ambiguousSeatedVertical ? "low" : confidence,
     margin: Number(margin.toFixed(3)),
     reasons: top.hits.map((h) => `${h.rule} — ${h.detail}`),
     scores,
-    dataIssues,
+    dataIssues: allDataIssues,
   };
 }
