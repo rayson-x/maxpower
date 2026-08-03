@@ -24,6 +24,8 @@ export interface PoseSetAnalysisInput {
   cameraView: CameraView;
   exercise: AnalysisExerciseSelection;
   autoSuggestion?: { exerciseId: string | null; confidence: number };
+  /** Rust SealedRep boundaries; when present TS only measures inside them. */
+  sealedSegments?: readonly RepSegment[];
 }
 
 export interface RuleCoverage {
@@ -152,6 +154,7 @@ export function analyzePoseSet(input: PoseSetAnalysisInput): PoseSetAnalysisResu
     cameraView: input.cameraView,
     exercise,
     profile: profile ?? undefined,
+    sealedSegments: input.sealedSegments,
   });
   const score = scoreFormSet(extraction.reps, extraction.context);
   return {

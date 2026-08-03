@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Example instance and field contract for an auditable reference corridor. Null numeric values are intentional: no reviewed high-pulldown reference cohort has established them.",
+  "schemaVersion": "form-coach-reference-trajectory-profile/v1",
+  "profileStatus": "research_only_unpopulated",
+  "identity": {
+    "exerciseId": "lat_pulldown",
+    "capturePosition": "rear",
+    "cameraView": "front",
+    "variation": "front_bar__pronated__protocol_defined_width",
+    "trainingSide": "bilateral",
+    "equipment": {
+      "family": "cable_lat_pulldown",
+      "manufacturer": null,
+      "model": null,
+      "handle": "straight_bar",
+      "pathConstraint": null,
+      "seatSettingProtocol": null,
+      "evidenceStatus": "inferred",
+      "evidence": [
+        "https://doi.org/10.1007/s00421-010-1421-y"
+      ]
+    },
+    "coordinateSystem": "source-image/v1",
+    "featureSchemaId": "lat_pulldown/rear/front_bar_pronated/v1"
+  },
+  "intendedUse": "compare_observed_reps_to_expert_approved_reference_corridor",
+  "prohibitedUses": [
+    "medical_diagnosis",
+    "injury_risk_prediction",
+    "treating_segmentation_ground_truth_as_form_reference",
+    "treating_ordinary_user_video_as_form_reference"
+  ],
+  "referencePopulation": {
+    "definition": "Reps independently accepted under a versioned rubric by two qualified reviewers, with disagreements adjudicated.",
+    "participantCount": null,
+    "repCount": null,
+    "siteCount": null,
+    "reviewerCount": null,
+    "evidenceStatus": "hypothesis",
+    "evidence": []
+  },
+  "phaseModel": {
+    "events": [
+      {
+        "id": "start",
+        "normalizedPercent": 0,
+        "definition": "Approved upper endpoint immediately before sustained pull onset.",
+        "evidenceStatus": "inferred",
+        "evidence": [
+          "https://doi.org/10.1249/FIT.0000000000000469"
+        ]
+      },
+      {
+        "id": "bottom",
+        "normalizedPercent": 50,
+        "definition": "Approved concentric endpoint before return.",
+        "evidenceStatus": "inferred",
+        "evidence": [
+          "https://doi.org/10.1249/FIT.0000000000000469"
+        ]
+      },
+      {
+        "id": "end",
+        "normalizedPercent": 100,
+        "definition": "Approved return to the upper endpoint, completing one cycle.",
+        "evidenceStatus": "inferred",
+        "evidence": [
+          "https://doi.org/10.1249/FIT.0000000000000469"
+        ]
+      }
+    ],
+    "normalization": "piecewise_linear_start_bottom_end",
+    "pullNodes": 16,
+    "returnNodes": 16,
+    "unrestrictedDtwAllowed": false,
+    "retainRawTiming": true,
+    "evidenceStatus": "inferred",
+    "evidence": [
+      "https://doi.org/10.1109/TASSP.1978.1163055"
+    ]
+  },
+  "featureContract": [
+    {
+      "id": "wrist_relative_to_shoulder_xy",
+      "landmarks": [
+        "left_shoulder",
+        "right_shoulder",
+        "left_wrist",
+        "right_wrist",
+        "left_hip",
+        "right_hip"
+      ],
+      "unit": "torso_length",
+      "valueSpace": "source_image_2d",
+      "expectedPullDirection": "wrist_y_increases_in_source_image_when_camera_is_upright",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "inferred",
+      "evidence": [
+        "https://doi.org/10.1007/s00421-010-1421-y"
+      ]
+    },
+    {
+      "id": "elbow_angle_2d",
+      "landmarks": [
+        "shoulder",
+        "elbow",
+        "wrist"
+      ],
+      "unit": "degree",
+      "expectedPullDirection": "decreasing_overall",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "evidence_backed",
+      "evidence": [
+        "https://doi.org/10.1249/FIT.0000000000000469",
+        "https://doi.org/10.1007/s00421-010-1421-y"
+      ]
+    },
+    {
+      "id": "upper_arm_to_torso_2d",
+      "landmarks": [
+        "shoulder",
+        "elbow",
+        "hip"
+      ],
+      "unit": "degree",
+      "expectedPullDirection": "decreasing_overall_for_frontal_plane_proxy",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "inferred",
+      "evidence": [
+        "https://doi.org/10.1249/FIT.0000000000000469"
+      ]
+    },
+    {
+      "id": "bilateral_wrist_phase_lag",
+      "unit": "millisecond",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "hypothesis",
+      "evidence": []
+    },
+    {
+      "id": "torso_lateral_shift",
+      "unit": "torso_length",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "hypothesis",
+      "evidence": []
+    },
+    {
+      "id": "torso_backward_lean_from_rear_view",
+      "unit": "degree",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "unavailable",
+      "evidence": []
+    },
+    {
+      "id": "scapular_3d_kinematics",
+      "unit": "degree",
+      "acceptanceThreshold": null,
+      "evidenceStatus": "unavailable",
+      "evidence": []
+    }
+  ],
+  "corridor": {
+    "method": "per_phase_pointwise_median_quantile",
+    "quantileLow": null,
+    "quantileHigh": null,
+    "minimumParticipants": null,
+    "minimumReps": null,
+    "features": [],
+    "robustCovariance": {
+      "enabled": false,
+      "method": null,
+      "distanceThreshold": null,
+      "evidenceStatus": "hypothesis",
+      "evidence": [
+        "https://doi.org/10.1007/s11222-019-09869-x"
+      ]
+    },
+    "evidenceStatus": "hypothesis",
+    "evidence": []
+  },
+  "observationPolicy": {
+    "requiredPerMetric": true,
+    "minimumVisibility": null,
+    "minimumConfidence": null,
+    "missingValue": null,
+    "missingStatus": "unknown",
+    "interpolateOccludedLimbs": false,
+    "unknownReasons": [
+      "low_visibility",
+      "out_of_frame",
+      "self_occlusion",
+      "equipment_occlusion",
+      "far_side_occlusion",
+      "timestamp_gap",
+      "scale_unavailable",
+      "view_unsupported",
+      "model_disagreement",
+      "not_annotated"
+    ],
+    "evidenceStatus": "evidence_backed",
+    "evidence": [
+      "https://ai.google.dev/edge/api/mediapipe/python/mp/tasks/components/containers/Landmark",
+      "https://arxiv.org/abs/2006.10204"
+    ]
+  },
+  "provenance": {
+    "referenceSampleIds": [],
+    "referenceSampleHashes": [],
+    "reviewRubricVersion": null,
+    "adjudicationProtocolVersion": null,
+    "poseModel": "MediaPipe Pose Landmarker",
+    "poseModelVersion": null,
+    "poseModelHash": null,
+    "featureCodeVersion": null,
+    "createdAt": null,
+    "frozenAt": null
+  }
+}

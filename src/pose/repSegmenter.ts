@@ -344,6 +344,23 @@ export function resolveSignalSide(
   return score(1) > score(0) ? "right" : "left";
 }
 
+/** Measures a profile signal inside externally sealed boundaries without re-segmenting it. */
+export function measureSignalAmplitude(
+  poses: PoseEstimate[],
+  kind: SignalKind,
+  startMs: number,
+  endMs: number,
+): { amplitude: number; evidenceSide: "left" | "right" } {
+  const evidenceSide = resolveSignalSide(poses, kind);
+  const values = extractSignal(poses, kind, evidenceSide)
+    .filter((sample) => sample.t >= startMs && sample.t <= endMs)
+    .map((sample) => sample.v);
+  return {
+    amplitude: values.length >= 2 ? robustRange(values).range : 0,
+    evidenceSide,
+  };
+}
+
 // ---------- 动作无关的自动分期 ----------
 
 /**

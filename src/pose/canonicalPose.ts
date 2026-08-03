@@ -18,6 +18,8 @@ export const LEGACY_WEB_TRACKER_ALGORITHM_VERSION =
   "legacy-web-tracker/v1" as const;
 export const POSE_CONTINUITY_REFERENCE_ALGORITHM_VERSION =
   "pose-continuity-reference/v1" as const;
+export const RUST_CANONICAL_ALGORITHM_VERSION =
+  "rust-canonical-wasm/v1" as const;
 const RAW_PASS_THROUGH_MIN_VISIBILITY = 0.5;
 const MAX_CONTINUITY_DT_MS = 1000;
 
@@ -67,7 +69,8 @@ export interface CanonicalPoseFrame extends PoseEstimate {
   algorithmVersion:
     | typeof RAW_PASS_THROUGH_ALGORITHM_VERSION
     | typeof LEGACY_WEB_TRACKER_ALGORITHM_VERSION
-    | typeof POSE_CONTINUITY_REFERENCE_ALGORITHM_VERSION;
+    | typeof POSE_CONTINUITY_REFERENCE_ALGORITHM_VERSION
+    | typeof RUST_CANONICAL_ALGORITHM_VERSION;
   frameId: number;
   sequenceId: string;
   sourceTimestampMs: number;

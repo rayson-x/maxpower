@@ -26,6 +26,7 @@ import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
 import { getKinematicsProfile, type KinematicsProfile } from "./kinematicsProfile";
 import {
   AUTO_SIGNAL_JOINTS,
+  measureSignalAmplitude,
   segmentRepsBySignal,
   segmentRepsAuto,
   type AutoSignalKind,
@@ -374,6 +375,8 @@ export interface RepMetricsExtractionOptions {
   cameraView: CameraView;
   exercise: ExerciseSelection;
   profile?: KinematicsProfile;
+  /** Authoritative immutable boundaries supplied by Rust SealedRep. */
+  sealedSegments?: readonly RepSegment[];
 }
 
 export interface RepMetricsExtraction {
@@ -408,7 +411,17 @@ export function extractRepMetrics(
     const profile = options.profile ?? getKinematicsProfile(knownExercise);
     if (!profile) return { context, reps: [], signal: null };
     const signal = profile.phaseSignal.kind;
-    const segments = segmentRepsBySignal(poses, signal, profile.phaseSignal.effortExtreme);
+    const segments = options.sealedSegments
+      ? options.sealedSegments.map((segment) => {
+          const measured = measureSignalAmplitude(
+            poses,
+            signal,
+            segment.startMs,
+            segment.endMs,
+          );
+          return { ...segment, amplitude: measured.amplitude, evidenceSide: measured.evidenceSide };
+        })
+      : segmentRepsBySignal(poses, signal, profile.phaseSignal.effortExtreme);
     const phaseSemantics = {
       toExtreme: profile.phaseSignal.toExtreme,
       fromExtreme: profile.phaseSignal.fromExtreme,

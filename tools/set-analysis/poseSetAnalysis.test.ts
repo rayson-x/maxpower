@@ -118,3 +118,28 @@ test("squat refuses a front capture before applying sagittal-plane segmentation"
   assert.match(result.reason ?? "", /does not support front capture/);
   assert.equal(result.score, null);
 });
+
+test("Rust sealed boundaries replace TypeScript segmentation for product analysis", () => {
+  const poses = loadPoseFixture("f4a69088e395df62a33e7272f9e78192.mp4").poses;
+  const sealed = [{
+    repIndex: 1,
+    startMs: poses[10].timestampMs,
+    peakMs: poses[20].timestampMs,
+    endMs: poses[30].timestampMs,
+    durationMs: poses[30].timestampMs - poses[10].timestampMs,
+    concentricMs: poses[20].timestampMs - poses[10].timestampMs,
+    eccentricMs: poses[30].timestampMs - poses[20].timestampMs,
+    amplitude: 0,
+  }];
+  const result = analyzePoseSet({
+    poses,
+    cameraView: "oblique45",
+    exercise: { mode: "user", exerciseId: "lat_pulldown" },
+    sealedSegments: sealed,
+  });
+
+  assert.equal(result.segments.length, 1);
+  assert.equal(result.segments[0].startMs, sealed[0].startMs);
+  assert.equal(result.segments[0].peakMs, sealed[0].peakMs);
+  assert.equal(result.segments[0].endMs, sealed[0].endMs);
+});

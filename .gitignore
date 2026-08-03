@@ -46,6 +46,16 @@ tools/harness/out/
 .test-build/
 .rule-engine-test-build/
 .segmentation-training-build/
+.reference-trajectory-build/
+.motion-sdk-eval-build/
+/target/
+/target-arm64/
+/target-native/
+/target-wasm/
+/public/motion-sdk/
+
+# Derived skeletal trajectories remain local unless explicitly de-identified.
+/data/reference/private/
 
 # Private field recordings are served locally for review, never committed.
 /public/field-captures/

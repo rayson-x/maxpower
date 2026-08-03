@@ -1,336 +1,215 @@
-# Tickets: Form Coach
+# Tickets: Rust Motion Recognition SDK V1（PC Web）
 
-当前 active specs：
+将 [`Rust Motion Recognition SDK V1`](../strength-cut-coach/docs/specs/2026-08-03-rust-motion-recognition-sdk-spec.md) 迁移为 PC Web 的唯一动作识别数据链；Android、iOS 与真机性能不在本轮。
 
-- Canonical 移动端骨架连续性 SDK：[`../strength-cut-coach/docs/specs/2026-08-02-canonical-mobile-pose-continuity-sdk-spec.md`](../strength-cut-coach/docs/specs/2026-08-02-canonical-mobile-pose-continuity-sdk-spec.md)
-- 骨架运动轨迹 + 规则引擎：[`../strength-cut-coach/docs/specs/2026-08-02-skeleton-trajectory-rule-engine-v1-spec.md`](../strength-cut-coach/docs/specs/2026-08-02-skeleton-trajectory-rule-engine-v1-spec.md)
+Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开工。每票必须通过 `MotionSession` 或真实 Web 产品路径形成可独立验证的 tracer bullet。
 
-Work the **frontier**：任何 blockers 已全部完成的 ticket 都可以开工。每个 ticket 是一条可单独演示的 tracer bullet；实现时一次只取一票。
+## 贯通 Rust MotionSession 回放链路
 
-## 恢复连续性测试前沿并登记高位下拉真值
-
-**What to build:** 让现有全部测试重新通过统一入口运行，并把背面高位下拉的原视频、原始关键点和下拉到底挑战帧登记成可重复回放的连续性基线；本票不改变产品轨迹算法。
+**What to build:** 让固定录像数据可以经 Fixture Adapter 进入 Rust MotionSession，输出版本化二进制 MotionPacket，再由 TypeScript 解码并展示会话摘要，形成首条可运行的跨语言纵向路径。
 
 **Blocked by:** None — can start immediately.
 
-- [x] 统一测试入口实际执行当前所有测试文件，并在任何测试文件未被发现时失败
-- [x] 高位下拉 fixture 可通过公开的 fixture loader 按稳定视频 ID 读取，不依赖数组顺序
-- [x] 登记 1950/2000 ms 挑战帧及肩、肘、腕的原始 visibility 和当前 predicted 行为
-- [x] 回归输出明确区分原始观测事实、当前实现行为和尚未具备人工坐标真值的指标
-- [x] 完整类型检查、聚焦测试和全量测试通过
+- [x] MotionSession 支持 open、控制命令、帧输入与 close summary，调用方不编排内部算法阶段
+- [x] Fixture Frame、Recorded Inference 与 Collecting Output Adapter 可通过同一公开 seam 替换
+- [x] TypeScript 能解码带 lineage、版本、frame ID、target snapshot 和 canonical payload 的二进制 packet
+- [x] Adapter capability 与 contract major 不兼容时 open 明确失败，minor 墑字段可被旧解码器忽略
+- [x] FrameLease 在接受、丢弃、失败和关闭路径上都只释放一次
+- [x] 非法输入与 Rust panic 被转换为稳定结构化错误，不跨越跨语言边界
 
-## 并行引入 Canonical Pose Frame
+## 迁移 Canonical continuity 并达到 TypeScript parity
 
-**What to build:** 在保留旧 pose 形态的同时引入版本化 Canonical Pose Frame，并以 raw pass-through 完成第一条端到端路径，使 Web 渲染、动作计数、录制和分析首次消费同一 frame 而不改变算法结果。
+**What to build:** 让 Rust MotionSession 重放同一真实与合成输入时，生成与冻结 TypeScript 参考行为一致的 Canonical Pose，覆盖高位下拉底部弱肘和按真实毫秒定义的丢点边界。
 
-**Blocked by:** 恢复连续性测试前沿并登记高位下拉真值.
+**Blocked by:** 贯通 Rust MotionSession 回放链路。
 
-- [x] Canonical frame 携带版本、frame/sequence/timestamp、schema、坐标空间和图像变换元数据
-- [x] 每关节可表达 measured/fused/predicted/unknown、repair flags、uncertainty、renderable 与 usable
-- [x] 同一 canonical frame id 和 landmark 内容进入渲染、动作计数、录制与分析
-- [x] Raw observation 只通过显式诊断入口保留，不静默替换 canonical
-- [x] 旧调用方在 expand 阶段继续工作，测试保持绿色
+- [x] 冻结 TypeScript canonical fixture、算法版本、离散字段与浮点容差，避免迁移中改变参考行为
+- [ ] measured、fused、predicted、unknown、repair reason、reset 和 refusal 逐帧 parity
+- [x] 50、100、150、250、500、700ms 丢点在 20/30/60fps 下按时间而非帧数产生一致语义
+- [x] 高位下拉弱肘、飞点、快速动作、seek、large dt 与乱序 fixture 均可通过 MotionSession 重放
+- [x] 无坐标真值的真实 fixture 只断言行为不变量，不包装成准确率结论
+- [x] 迁移阶段未切换 Web 正式输出，Rust 先作为对照路径验证；随后由原子切换票接管
 
-## 用弱观测融合保持高位下拉手臂连续
+## PC Web 影子双跑 Rust Canonical
 
-**What to build:** 当肩腕可靠、肘部低置信但轨迹和骨链连续时输出 fused 肘部，让高位下拉到底时手臂保持可信连线，同时让客户端与渲染使用同一坐标。
+**What to build:** 让 PC Web 的实时摄像头与已录录像同时运行 TS 和 Rust Canonical，保持 TS 为正式输出，并保存每一帧可解释的 parity 分歧。
 
-**Blocked by:** 并行引入 Canonical Pose Frame.
+**Blocked by:** 迁移 Canonical continuity 并达到 TypeScript parity。
 
-- [x] 1950/2000 ms 可靠肩腕 + 弱肘部案例不因固定 0.5 visibility 直接断链
-- [x] 弱 raw 肘部、历史方向和肩腕骨链共同决定 fused 坐标与 uncertainty
-- [x] 两圆/骨链分支保持同侧连续，不把肘部翻到身体另一侧
-- [x] 不通过全局降低 visibility 阈值或无限预测实现连续
-- [x] 人工标注挑战帧的位置误差和 arm edge coverage 达到登记门槛
+- [x] 实时摄像头和本地录像回放都可把同一 observation 输入 Rust shadow session
+- [x] 影子阶段产品渲染、计数与录制仍只消费 TS 正式输出；随后由原子切换票接管
+- [x] shadow 记录首次离散语义分叉、连续数值差异、算法版本和 fixture/capture 标识
+- [x] 正常预览只保留有界摘要，完整诊断仅在录制或显式调试时落盘
+- [x] Rust 失败不会打断正式 TS 路径，并产生可定位的结构化故障事件
 
-## 让短预测按时间结束并诚实转为 Unknown
+## 原子切换 Web 到统一 MotionPacket
 
-**What to build:** 短缺口使用真实毫秒做因果预测，超过证据上限时输出 unknown；不同帧率、seek、large dt 和会话切换不再改变或污染行为。
+**What to build:** 将 PC Web 的 Canonical seam 原子切换到 Rust，使渲染、录像、计数和分析消费同一个不可变 MotionPacket，并删除对应的 TS 产品 continuity 路径。
 
-**Blocked by:** 并行引入 Canonical Pose Frame.
+**Blocked by:** PC Web 影子双跑 Rust Canonical。
 
-- [x] 50/100/150/250/500 ms 缺口在 20/30/60 fps 下按时间表现一致
-- [x] 纯预测超过配置上限后转为 unknown，且不更新 measurement baseline
-- [x] Unknown 不进入骨段连线或动作指标，原因和 uncertainty 可审计
-- [x] Seek、时间倒退、large dt、sequence/model/schema 切换清理旧状态
-- [x] 重新获得观测后不继承陈旧 One Euro/预测残影
+- [x] 同一 packet 的 frame ID 与 canonical content hash 进入 renderer、recorder、counter 和 analyzer
+- [x] measured、fused、predicted、unknown 在画面上使用可区分样式，unknown 不被绘制为旧坐标
+- [x] 录像 sidecar 与导出数据保存屏幕实际使用的 canonical 点位和版本
+- [x] 客户端只做旋转、镜像和视口映射，不再次平滑或修复点位
+- [x] Rust authoritative 后删除 Web 产品中的旧 continuity 调用与重复状态，保留 golden fixture decoder
 
-## 拒绝高置信飞点但保留真实快速动作
+## 由 Rust 调度 Web MediaPipe 与背压
 
-**What to build:** 用 aspect-correct motion、innovation、骨链和整体运动联合判断异常，使高置信错点不再豁免，同时保留真实快速动作的峰值和相位。
+**What to build:** 让 Rust 决定 AcquireMulti、TrackTarget、RefreshCandidates 和 SkipFrame，Web MediaPipe Adapter 只执行请求；慢推理时保持实时且不污染已发布数据。
 
-**Blocked by:** 并行引入 Canonical Pose Frame.
+**Blocked by:** 原子切换 Web 到统一 MotionPacket。
 
-- [x] 高 confidence 瞬移在多证据异常时被拒绝或融合，不再直接采纳
-- [x] 快速但连续的真实 hard negative 不被错误冻结
-- [x] x/y 速度和骨长使用一致的图像尺度，不受视频长宽比扭曲
-- [x] 稳定窗口建立并重置骨长 baseline，不用坏首帧永久锁定
-- [x] Provenance 记录 gate 原因，峰值幅度、相位与下游 rep 不退化
+- [x] Adapter 在 open 时声明多人、ROI、时间戳、格式和并发能力，不支持能力时显式拒绝或安全降级
+- [x] 在途推理、待处理帧和输出队列均有固定上限，未推理旧帧遵循 latest-frame-wins
+- [x] 已生成 canonical frame 不重排、不覆盖，所有跳帧和 data gap 显式记录
+- [ ] 旧 completion、reset 前 completion 和模型 epoch 过期结果被诊断并丢弃
+- [x] close during inference、慢输出、队列溢出和 Adapter failure 均释放资源且返回稳定摘要
+- [ ] MediaPipe、Rust core、跨语言解码和写盘耗时分别统计
 
-## 将已验证的 Pose Continuity Session 迁移到 Rust
+## 自动锁定中央稳定主体
 
-**What to build:** 用纯计算 Rust core 重现已验证的 canonical session 行为，并生成 Swift/Kotlin bindings，使相同 fixture 可以在 host 和未来移动 adapter 上得到一致结果。
+**What to build:** 让录制开始后 Rust 从最多四名候选中锁定中央、较大且短时稳定的主体；无法确定身份时输出明确状态并暂停业务骨架与计数。
 
-**Blocked by:** 用弱观测融合保持高位下拉手臂连续, 让短预测按时间结束并诚实转为 Unknown, 拒绝高置信飞点但保留真实快速动作.
+**Blocked by:** 由 Rust 调度 Web MediaPipe 与背压。
 
-- [ ] Rust host 回放全部 canonical fixtures，并在浮点容差内匹配 reference 行为
-- [ ] Session 支持 process frame、reset、close 和版本化配置
-- [ ] 版本化扁平 buffer 可由 TypeScript、Swift 和 Kotlin 安全解码
-- [ ] 非法长度、NaN/Infinity、时间倒退和未知 schema 返回结构化错误
-- [ ] Panic 不穿越 FFI，core 不依赖 Expo、相机、Python、OpenCV 或网络
+- [x] Web MediaPipe 多人获取与刷新返回候选集合，不再直接使用模型第一人
+- [x] 初始锁定联合中央距离、躯干面积和约 500ms 稳定性，不要求脸朝镜头
+- [x] target 状态至少覆盖 acquiring、locked、uncertain、lost、reacquiring
+- [x] uncertain/lost 期间正式 canonical 业务点为 unknown，不能形成业务 rep
+- [x] 调试流显示候选人数、bbox、评分分量、选择与拒绝原因，正式流只发布锁定主体
+- [x] 合成中央主体、边缘路人、主体离开和错误候选场景通过 MotionSession seam
 
-## Android 相机贯通 Canonical Rust Session
+## 主体保持、重捕获与手动换人
 
-**What to build:** Android 原生 MediaPipe 观测先通过 Rust continuity session，再以 canonical event 同时驱动屏幕、rep 计数和录制；用户可在真机复现高位下拉手臂连续性。
+**What to build:** 让已锁定主体在路人穿越和短暂离开时保持身份；自动恢复失败时用户可点击人物换人，并获得可追溯的新 subject epoch。
 
-**Blocked by:** 将已验证的 Pose Continuity Session 迁移到 Rust.
+**Blocked by:** 自动锁定中央稳定主体。
 
-- [ ] Android 姿态分析工作线程在发 Expo event 前完成 canonical 处理
-- [ ] 屏幕、rep 计数和录制共享相同 frame id 与 landmark 内容
-- [ ] Measured/fused/predicted/unknown 使用同一坐标并以不同样式表达
-- [ ] 高位下拉真机/录像回放不再因弱肘部直接断臂，也不使用长时间假预测
-- [ ] 相机、UI 和 JavaScript runtime 不被 continuity core 阻塞
+- [x] 身份保持联合位置、尺度、身体比例、运动连续性和会话内临时躯干颜色证据
+- [x] 两人交叉、相似衣服 hard negative 和路人遮挡不会仅凭单一特征切换主体
+- [x] 目标返回后先确认身份再恢复 canonical 和计数，不使用最近候选兜底
+- [x] 归一化点击坐标可选择候选；空区域或歧义点击返回结构化拒绝原因
+- [x] 成功换人创建 subject epoch、中止未完成 rep，并保留旧 epoch 已 sealed reps
+- [x] reset/close 清除临时外观描述符，正式 packet 和长期存储不包含人脸或衣服档案
 
-## 提供可复用的 iOS SDK Adapter
+## 用 ExerciseProfile 驱动高位下拉 RepTrajectory
 
-**What to build:** iOS 可以集成同一 Rust SDK、管理 session 并回放 fixtures，证明 Android/iOS 复用的是同一个算法核心；完整 iOS 相机界面留到后续。
+**What to build:** 让版本化 provisional ExerciseProfile 经 Rust 校验后驱动高位下拉准备、下拉、底部、还原和 sealed rep，在 Web 中先作为影子计数显示。
 
-**Blocked by:** 将已验证的 Pose Continuity Session 迁移到 Rust.
+**Blocked by:** 主体保持、重捕获与手动换人。
 
-- [ ] iOS adapter 能构建并创建、reset、close session
-- [ ] 同一 fixture 的 source/flags/frame 与 Rust host 一致，坐标和 uncertainty 在容差内一致
-- [ ] ABI、资源生命周期和错误映射有 contract tests
-- [ ] SDK 以可复用 Expo Module/Apple artifact 交付，不把算法复制到 Swift
+- [ ] Profile bundle 校验 schema、identity、hash、关节、单位、状态可达性、冲突转移和 required capabilities
+- [x] ExerciseProfile 与 ReferenceTrajectoryProfile 使用独立 schema、identity 和 maturity
+- [x] 高位下拉由多关节方向、幅度、持续时间、迟滞和顺序形成完整周期，不由单一角度决定
+- [x] candidate rep 在有限窗口内可修正边界或否决；sealed rep 携带稳定 ID、start/peak/end、revision 和 canonical slice hash
+- [x] provisional profile 只能输出明确实验标记的分段与计数，不能产生正式动作质量结论
+- [x] 同一组冻结 profile bundle hash，更新 profile 不修改历史版本
 
-## 收缩旧 Raw/渲染分叉
+## 处理丢点、半程与非动作干扰
 
-**What to build:** 完成 expand–contract 迁移，移除产品路径里的二次平滑、UI visibility gate 和 raw 默认消费，让所有业务消费者只认识 canonical，raw 只保留显式诊断用途。
+**What to build:** 让高位下拉 RepTrajectory 在关键点短暂消失时正确恢复，在长遮挡、半程、底部抖动、走动和器械调整时拒绝错误计数。
 
-**Blocked by:** Android 相机贯通 Canonical Rust Session.
+**Blocked by:** 用 ExerciseProfile 驱动高位下拉 RepTrajectory。
 
-- [ ] Web/Android 渲染只做 fit、rotation、mirror 等纯视口变换
-- [ ] 动作计数、轨迹缓冲、录制和规则分析不再默认消费 raw
-- [ ] 旧 tracker/One Euro 不与 canonical session 串联形成双重处理
-- [ ] Raw diagnostic stream 明确标记且不会进入正常业务输出
-- [ ] 删除旧形态后类型检查、fixture 和应用 contract 全部绿色
+- [x] 不超过约 150ms 的连续性预测可参与轨迹并保留 source/uncertainty
+- [x] 150–700ms 不虚构坐标；身份可信时相位可冻结，恢复闭合的 rep 带 recovered-gap evidence
+- [x] 超过恢复上限、身份歧义或 subject epoch 变化会中止未完成 rep
+- [x] 半程记录为 partial attempt；完整但偏离参考的动作仍计入正式 rep
+- [x] 走动、拿器械、调整握把、停顿、底部抖动和快速正常动作拥有成对回归场景
+- [x] 测试覆盖不同帧率、肩肘腕局部缺失和整人缺失，不能通过永远暂停获得虚假高准确率
 
-## 完成真机性能验收并发布 SDK V1
+## 切换 Web 计数到唯一 SealedRep
 
-**What to build:** 在目标 Android/iPhone 上验证连续性 SDK 的延迟、资源和降级行为，并交付可重复构建的 V1 artifact，使其可以安全进入后续应用迭代。
+**What to build:** 将 Web 正式次数切换到 Rust SealedRep，使画面次数、视频区间、控制台、sidecar 和导出使用完全一致的 rep 对象，并删除对应 TS 产品分段路径。
 
-**Blocked by:** 提供可复用的 iOS SDK Adapter, 收缩旧 Raw/渲染分叉.
+**Blocked by:** 处理丢点、半程与非动作干扰。
 
-- [ ] 最低档 Android、主流 Android 和受支持 iPhone 记录 core/端到端 P50/P95、fps 和内存
-- [ ] 真实相机连续运行 10–15 分钟记录掉帧、温升和系统降频
-- [ ] 超预算时降级不阻塞相机、UI 或 JS，不输出乱序/过期 frame
-- [ ] Android/iOS artifact、contract/config/algorithm version 和构建说明可复现
-- [ ] 高位下拉、合成 gap、高置信 spike 和快速 hard negative 构成 V1 发布回归集
+- [x] UI、录像 sidecar、导出、控制台和后续 matcher 接收相同 rep ID、revision 和 boundary content
+- [x] matcher 与评分模块没有修改 sealed boundary 或删除完整 rep 的接口
+- [ ] 人工修订创建新 revision，不原地覆盖 sealed rep 和历史算法结果
+- [x] TS/Rust 影子报告解释逐 capture 数量与首次边界分歧，达到批准门后才切换正式输出
+- [x] 切换后删除迁移动作的 TS 产品计数/分段调用，保留人工真值和跨语言 golden fixtures
 
-## 已完成基线
+## 通过数据 Profile 增加坐姿推肩
 
-- [x] Web 端骨架提取、录像和同会话关键点导出
-- [x] rep 分割和五项逐 rep 运动学指标
-- [x] 确定性规则引擎、字段级拒答、候选规则和版本化阈值
-- [x] 用户选择/低置信自动识别的规则门控
-- [x] 真实 fixture 测试与统一 `npm test` 入口，当前 47 项通过
-- [x] 离线 harness 的信号诊断、轨迹摘要和 rep 输出
+**What to build:** 通过新的 Evidence Manifest 与 provisional ExerciseProfile 增加坐姿推肩实验计数，证明普通新动作无需修改 Rust interface 或新增硬编码状态机。
 
-## 恢复可发布的 Web 基线
+**Blocked by:** 切换 Web 计数到唯一 SealedRep。
 
-**What to build:** 用户能打开 Web 应用、启动相机并完成一次录像与关键点导出；代码库同时恢复完整类型检查，为后续每条垂直切片提供绿色起点。
+- [x] 坐姿推肩 profile 明确动作、机位、器械、变式、训练侧、pose model、来源和工程假设
+- [x] 安装大量 profile 不增加当前每帧复杂度；一组只激活用户选中的动作 profile
+- [x] 已有标注用于分段与抗干扰评估，不被包装成标准姿势轨迹
+- [x] 输出始终标记 provisional/experimental，quality verdict 为空
+- [x] 无法由有限状态图表达的配置在加载时拒绝，而不是执行任意动态代码
+- [x] 新版本以新 identity/hash 安装，旧录像仍可绑定原 profile 重放
 
-**Blocked by:** None — can start immediately.
+## 统一身体坐标与阶段轨迹注册
 
-- [x] 完整 TypeScript 检查通过，不再有跨平台组件解析、provider 类型或 Android pose 契约错误
-- [x] 现有 24 项规则与提取器测试继续通过
-- [ ] Web 相机可以启动、停止并下载视频和关键点
-- [x] 现有示例视频、姿态后端切换和 harness 行为不回退
-- [x] 用一次真实浏览器 smoke test 记录验收结果
+**What to build:** 从同一 sealed canonical slice 生成可审计的身体相对轨迹，在 Web 叠加标准化前后结果，为参考比较消除可解释的画面平移、尺度、方向和速度差异。
 
-**验收记录（2026-08-02）：** 完整 TypeScript 检查、24 项自动测试和四段 fixture harness 已通过。Chromium smoke 能加载页面、要求显式动作选择，并启动相机录制状态；默认模拟相机没有可检测人体，真实视频模拟流会使 headless 自动化超时，故视频/关键点下载仍需在 Mac 浏览器以真人画面完成一次手工验收，当前不勾选通过。
+**Blocked by:** 切换 Web 计数到唯一 SealedRep。
 
-## 从开放目录选择动作
+- [x] 归一化明确记录 body origin、profile 指定的稳定 body scale、镜像决策、坐标系和算法版本
+- [x] 平移与尺度分开处理；单位化坐标允许超出 ±1，不能裁剪掉真实幅度偏差
+- [x] 相机 mirrored、实际机位与 training side 优先于骨架方向推断；歧义时拒绝而非静默翻转
+- [x] start→peak 与 peak→end 分阶段固定节点重采样，原始向心、离心、停顿和总时长同时保留
+- [x] 正式 V1 不使用无限制 DTW；受约束 DTW 只能在同阶段 shadow 诊断，限制 warp window 并输出 warp ratio/cost
+- [x] 归一化是同一 canonical 轨迹的派生证据，不创建第二套可修改 rep boundary 的来源
 
-**What to build:** 用户可以从开放 registry 选择现有动作或仅目录动作，并在分析前看到动作变式、器械和评分成熟度；新增目录动作不再需要修改引擎的固定动作类型。
+## 迁移高位下拉 provisional reference matcher
 
-**Blocked by:** 恢复可发布的 Web 基线.
+**What to build:** 让 Rust 只读取 sealed 高位下拉轨迹，通过严格 profile identity 和分阶段节点比较输出描述性偏离证据或拒答，与现有 TypeScript golden behavior 一致。
 
-- [x] Registry 使用稳定字符串 ID，并支持名称、别名、动作模式、器械和变式关系
-- [x] 每个动作显示 `catalog_only / experimental / validated / suspended` 成熟度
-- [x] 现有 5 个动作保持历史 ID，并能从 registry 选择
-- [x] 至少新增一个 `catalog_only` 动作，证明目录可扩展且不会获得专项分数
-- [x] 重复 ID、断裂变式关系和非法成熟度在加载时明确失败
-- [x] 动作来源与许可信息保留在目录记录中
+**Blocked by:** 统一身体坐标与阶段轨迹注册。
 
-## 杠铃划船贯通组后报告
+- [ ] 保持现有 piecewise normalization、固定特征顺序、nearest-source tie-break、translation/scale separation 和 JSON null 语义
+- [x] 动作、机位、变式、训练侧、器械、坐标系、feature schema 或 pose model 不匹配即 profile_mismatch
+- [x] 远侧肘等局部缺失只拒答依赖特征，其他可观察特征继续比较
+- [x] 未校准 reference 只输出 coverage、outside nodes、excess 和连续偏离证据，qualityVerdict 必须为空
+- [x] matcher 不能修改 rep ID、revision、start、peak、end 或 canonical slice hash
+- [x] TypeScript/Rust golden parity 覆盖 partial unknown、percentile、非法数值和禁止无限制 DTW
 
-**What to build:** 用户选择杠铃划船并分析一段关键点后，能在一个组后页面看到 rep 边界、五项原始指标、实验性规则结果、覆盖和版本；UI 与 harness 消费同一个分析结果。
+## 联通错误分析面板与差异导出
 
-**Blocked by:** 从开放目录选择动作.
+**What to build:** 让调试使用者在一个本地 Web 面板中同步查看视频、人工真值、TS/Rust 输出和完整诊断，并跳转到主体或轨迹首次出错的位置。
 
-- [x] 杠铃划船使用版本化运动学 profile 声明分期信号、极点、相位、指标关节和支持机位
-- [x] 一个高层分析入口组合 rep 分割、指标提取和规则评分
-- [x] 输出包含 rep、逐字段质量、规则四态、分数/partial、覆盖、profile 和 rule 版本
-- [x] 组后 UI 展示动作、机位、逐 rep 指标、实验状态和“未检出明显问题”文案
-- [x] 每个 rep 可以定位到对应视频时间段
-- [x] 同一真实 fixture 在 UI 数据层与 harness 得到相同结构化结果
-- [x] 用户选择杠铃划船时覆盖低置信自动识别建议
+**Blocked by:** 主体保持、重捕获与手动换人；切换 Web 计数到唯一 SealedRep；迁移高位下拉 provisional reference matcher。
 
-## 看不清时给出诚实的部分结果
+- [x] 时间轴可跳转 acquiring、uncertain、lost、reacquiring、repair、partial、sealed 和首次 TS/Rust 分叉事件
+- [x] 面板显示候选 bbox/评分、subject epoch、关节 source/uncertainty/reason、phase 和 profile/version
+- [x] 视频、人工边界、旧计数、Rust 计数和 reference evidence 使用同一时间基准
+- [x] 完整诊断仅在录制或显式调试时保存；普通预览只保留有界摘要
+- [x] 导出使用本地序号并隐藏可枚举训练时间，原始 capture 路径和个人 bundle 留在 Git 忽略目录
+- [x] 面板不把 provisional comparison 展示成标准分、正确概率或医疗结论
 
-**What to build:** 当杠铃划船所需关节被遮挡或轨迹证据不一致时，用户看到具体字段和规则为何没有判断，系统不输出误导性总分。
+## 运行真实标注数据的独立评估与 promotion gate
 
-**Blocked by:** 杠铃划船贯通组后报告.
+**What to build:** 使用现有人工逐 rep 数据和审核后的非 rep 窗口评估 Rust 分段、计数、抗干扰与 matcher parity，并生成用户可审批的本地报告。
 
-- [x] 使用真实或派生的遮挡 fixture，从高层分析入口得到 `partial`
-- [x] 应执行规则被拒答时不输出总分；`not_applicable` 不触发 partial
-- [x] 数值计算与质量统计使用一致的选侧证据
-- [x] 预测/外推关键点降低质量权重或不进入评分指标
-- [x] UI 分开展示 passed、deducted、refused 和 not_applicable
-- [x] UI 显示所需关节、可用帧比例和拒答原因，不以 0 或绿色对勾代替
-- [x] Harness 与 UI 对同一拒答原因保持一致
+**Blocked by:** 通过数据 Profile 增加坐姿推肩；迁移高位下拉 provisional reference matcher；联通错误分析面板与差异导出。
 
-## 在真实半程 rep 上检出幅度下降
+- [ ] 39 组、375 个标注区间按 capture 分离调参、held-out 和 challenge，禁止同组泄漏
+- [ ] reviewed negative windows 参与 raw trigger、产品过滤后 FP、FN、F1、exact count 和边界误差统计
+- [ ] 报告逐动作、机位、profile/version 和 capture 展示 TS/Rust/人工差异及首次状态分叉
+- [x] 没有坐标或质量真值的数据只用于允许的行为指标，不声明标准轨迹准确率
+- [x] promotion gate 未通过时输出零 promotion，并继续保留上一条正式路径或 provisional 标记
+- [x] 重复运行同一视频只验证确定性，不冒充新增验证样本
 
-**What to build:** 用户录制一组前几次完整、后一次故意半程的杠铃划船后，报告准确定位半程 rep、展示幅度证据并按实验性相对规则扣分。
+## 收口 PC Web V1 契约与性能
 
-**Blocked by:** 杠铃划船贯通组后报告.
+**What to build:** 完成 PC Web 范围内的错误、资源、版本、性能与 replace-don't-layer 验收，使 Rust SDK 可以稳定用于真实本地录像与摄像头测试，同时不宣称未测移动端能力。
 
-- [ ] 采集或登记一段带 rep 级半程标签的视频和关键点 fixture
-- [x] Profile 为幅度提供稳定 definition id、单位和关节依赖
-- [ ] 已知半程 rep 的幅度显著低于同组稳定基线
-- [ ] 正常 rep 不触发对应幅度扣分
-- [ ] 扣分可展开到 rep 时间段、观测值、基线、比例、阈值和规则版本
-- [ ] 报告注明 experimental 和真实样本量，不将单 fixture 包装成准确率
+**Blocked by:** 运行真实标注数据的独立评估与 promotion gate。
 
-## 在支持机位上检出明显躯干借力
+- [x] 损坏 packet、非法长度、NaN/Infinity、时间倒退、未知 schema、重复释放和 Adapter failure 返回稳定错误
+- [ ] contract/profile/algorithm/config/inference/diagnostic 版本进入 packet 与导出，major 不兼容拒绝打开
+- [x] Host benchmark 分离 core、sealed-rep matcher；PC Web 分离 MediaPipe、Rust、解码、渲染与写盘
+- [ ] 正常模式和 full diagnostics 分开报告 P50/P95、packet age、drop、内存与处理倍率
+- [ ] 超预算时只降低多人刷新、输入分辨率或模型等级，不关闭身份、时间顺序、unknown 和 refusal
+- [ ] 清除剩余重复 TS 产品算法与双重状态，完整类型检查、全量测试、代码审查和本地演示通过
+- [x] 报告明确 PC Web 实测结果；Android、iOS 和真机温升/降频仍标记未实施、未验证
 
-**What to build:** 用户从规定侧面或斜侧机位录制一组含明显甩动的杠铃划船后，报告定位对应 rep；不支持机位则明确不判。
+## Historical tickets
 
-**Blocked by:** 看不清时给出诚实的部分结果.
-
-- [ ] 采集或登记带 rep 级躯干借力标签的正例和负例 fixture
-- [x] Profile 定义躯干漂移所需关节、机位、坐标和 metric definition
-- [ ] 支持机位的故意借力 rep 触发实验性 finding，稳定 rep 不触发
-- [x] 正面等不支持机位返回 refused/not_applicable，而不是套用侧视阈值
-- [ ] Finding 展示时间段、漂移角、阈值、机位、质量和版本
-- [ ] Candidate 阈值在未进入实验模式时只能观察，不能静默扣分
-
-## 在正面机位检出明显双侧不对称
-
-**What to build:** 用户从正面或规定斜侧机位录制一组含单侧明显偷懒的杠铃划船后，报告定位对应 rep，并在任一侧不可见时拒答。
-
-**Blocked by:** 看不清时给出诚实的部分结果.
-
-- [ ] 采集或登记带 rep 级不对称标签的正例和负例 fixture
-- [x] Profile 定义双侧比较关节、路径、归一化和支持机位
-- [ ] 故意不对称 rep 触发实验性 finding，双侧稳定 rep 不触发
-- [ ] 任一所需侧长期不可见时拒答，不使用单侧数据猜测
-- [ ] Finding 展示双侧运动量、差值比例、阈值、机位和质量
-- [x] 对称性实现不再由全局逻辑固定比较手腕
-
-## 在已知相位下检出离心失控
-
-**What to build:** 用户选择动作并录制一组含明显快速回放重量的 rep 后，报告根据 profile 的相位语义定位失控 rep；相位未知时不做该判断。
-
-**Blocked by:** 杠铃划船贯通组后报告, 看不清时给出诚实的部分结果.
-
-- [ ] 采集或登记带 rep 级离心失控标签的正例和负例 fixture
-- [x] Profile 明确两个半程的向心/离心语义，不由提取器统一猜测
-- [ ] 已知相位时故意失控 rep 触发实验性 finding，稳定 rep 不触发
-- [x] 自动动作低置信或 profile 缺失时，相位为 unknown 且规则拒答
-- [ ] Finding 展示离心时长、组内基线、比例、阈值和版本
-- [ ] 不把普通较快节奏包装成受伤结论
-
-## 迁移旧五动作并移除固定动作映射
-
-**What to build:** 用户可以用相同的 profile 驱动链分析原有五个背部动作；迁移完成后，新增动作不再经过旧固定联合类型或重复信号表。
-
-**Blocked by:** 杠铃划船贯通组后报告, 看不清时给出诚实的部分结果.
-
-- [x] 引体向上、高位下拉、坐姿划船和直臂下压各有版本化 profile
-- [x] 每个动作至少一个现有 fixture 或明确记录的测试样本贯通高层分析入口
-- [x] 五个动作的分期、相位和指标定义保持可解释的历史行为
-- [x] 旧固定动作联合类型和重复动作信号映射完成 contract 删除
-- [x] Registry/profile 是动作语义的唯一运行时来源
-- [x] 全部测试和 Web 构建保持绿色
-
-## 用深蹲证明非背部动作可扩展
-
-**What to build:** 用户从目录选择深蹲并录制一组动作后，系统使用新的关节、相位和机位定义生成组后原始指标与实验性报告，证明架构不依赖背部动作假设。
-
-**Blocked by:** 迁移旧五动作并移除固定动作映射.
-
-- [x] 深蹲 profile 使用适合下肢的主信号和关节依赖
-- [x] 站立到最低点标为离心，返回站立标为向心
-- [x] 对称性不使用手腕，机位不支持的三维问题明确不判
-- [ ] 正确、故意半程和不可判断各有一个真实 fixture 行为测试
-- [ ] 用户能在同一组后 UI 查看深蹲 rep、指标、覆盖和实验状态
-- [ ] 杠铃划船与原有四动作结果不回退
-
-## 用独立样本晋级一条绝对规则
-
-**What to build:** 用户能看到至少一条动作专项规则从 experimental 晋级 validated，其验证样本、准确性和拒答率可审计，旧版本历史结果仍可解释。
-
-**Blocked by:** 在支持机位上检出明显躯干借力, 用深蹲证明非背部动作可扩展.
-
-- [ ] 调参集和验证集使用不同受试者或不同采集批次
-- [ ] 验证前冻结 profile、metric definition、rule 和 threshold version
-- [ ] 逐规则报告样本量、precision、recall、误报率和拒答率
-- [ ] 保存 tuning dataset id、validation dataset id、日期和晋级决策
-- [ ] 未达到准入门槛时保持 experimental，不为完成 ticket 强行晋级
-- [ ] UI 显示 validated 状态、样本量和规则版本
-- [ ] 历史 experimental 结果继续引用旧版本，不被重算冒充已验证结果
-
-## 扩展首批下肢动作包
-
-**What to build:** 用户可以选择并分析一组代表深蹲、髋铰链和弓步模式的常见动作；每个动作至少提供诚实的实验性轨迹报告，无法测量的问题保持未覆盖。
-
-**Blocked by:** 用深蹲证明非背部动作可扩展.
-
-- [ ] 增加 4–6 个下肢动作或关键变式
-- [ ] 每个动作规定一个首选机位、profile 和至少一段真实 fixture
-- [ ] 每个动作从用户选择贯通到同一组后 UI
-- [ ] 只复用 metric definition 和规则前提相同的动作模式逻辑
-- [ ] 不可可靠判断的膝内扣、脊柱分节或器械阻力问题明确列为未覆盖
-- [ ] 每个动作公开 experimental/validated 规则数和验证样本量
-
-## 扩展首批上肢推动作包
-
-**What to build:** 用户可以选择并分析一组代表水平推、垂直推和基础伸肘模式的常见动作，并获得与当前证据范围一致的组后报告。
-
-**Blocked by:** 迁移旧五动作并移除固定动作映射, 用深蹲证明非背部动作可扩展.
-
-- [ ] 增加 4–6 个上肢推动作或关键变式
-- [ ] 每个动作规定一个首选机位、profile 和至少一段真实 fixture
-- [ ] 每个动作从用户选择贯通到同一组后 UI
-- [ ] 器械、凳面和遮挡导致的不可测字段结构化拒答
-- [ ] 不从普通骨架声称肩胛或真实负载结论
-- [ ] 每个动作公开 experimental/validated 规则数和验证样本量
-
-## 扩展首批上肢拉与单关节动作包
-
-**What to build:** 用户可以选择并分析常见上肢拉、屈肘和肩部单关节动作，使 V1 达到 12–20 个代表性动作的透明覆盖。
-
-**Blocked by:** 迁移旧五动作并移除固定动作映射, 用深蹲证明非背部动作可扩展.
-
-- [ ] 在原有五动作之外增加足量动作，使总覆盖达到 12–20 个
-- [ ] 每个新增动作规定一个首选机位、profile 和至少一段真实 fixture
-- [ ] 每个动作从用户选择贯通到同一组后 UI
-- [ ] 单侧/交替动作使用显式策略，不套用双侧同步规则
-- [ ] 肩胛运动和肌肉激活不进入 V1 评分声明
-- [ ] 每个动作公开 experimental/validated 规则数和验证样本量
-
-## 发布 V1 覆盖与验证报告
-
-**What to build:** 用户拿到一个可长期个人使用的 V1，并能在产品内外清楚看到每个动作能判断什么、不能判断什么、依据多少样本以及当前版本。
-
-**Blocked by:** 用独立样本晋级一条绝对规则, 扩展首批下肢动作包, 扩展首批上肢推动作包, 扩展首批上肢拉与单关节动作包.
-
-- [ ] Web 构建、完整类型检查和全部自动测试通过
-- [ ] 12–20 个动作的 profile、首选机位、规则覆盖和成熟度清单完整
-- [ ] 每个动作显示未覆盖问题，不以目录数量冒充标准度能力
-- [ ] 发布逐规则样本量、precision、recall、误报率和拒答率
-- [ ] 满分、partial、拒答和 experimental/validated 文案符合 source spec
-- [ ] 本地视频/关键点/报告导出和删除流程通过手工验收
-- [ ] 3D、肌肉模型、实时纠错和伤害判断继续明确标为后续范围
+清理前票据已归档至 [`docs/archive/tickets/2026-08-03-pre-rust-motion-sdk-tickets.md`](./docs/archive/tickets/2026-08-03-pre-rust-motion-sdk-tickets.md)，仅供追溯，不得作为当前 frontier。

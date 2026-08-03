@@ -337,9 +337,26 @@ export class WeakObservationFusion {
         candidate.dy - coherentDy,
       );
       const boneResidual = this.topologyBoneResidual(candidate.index, candidate.point, landmarks);
+      const candidateMotion = Math.hypot(candidate.dx, candidate.dy);
+      const hasCoherentNeighbor = SKELETON_BONES[this.schema].some((bone) => {
+        const neighborIndex = bone.from === candidate.index
+          ? bone.to
+          : bone.to === candidate.index
+            ? bone.from
+            : null;
+        if (neighborIndex === null) return false;
+        const neighbor = candidates.find(({ index }) => index === neighborIndex);
+        if (!neighbor) return false;
+        const neighborMotion = Math.hypot(neighbor.dx, neighbor.dy);
+        const cosine =
+          (candidate.dx * neighbor.dx + candidate.dy * neighbor.dy) /
+          Math.max(1e-6, candidateMotion * neighborMotion);
+        return neighborMotion >= candidateMotion * 0.3 && cosine >= 0.7;
+      });
       if (
         innovation > diagonal * 0.08 &&
         incoherent > diagonal * 0.06 &&
+        !hasCoherentNeighbor &&
         (boneResidual > 0.35 || innovation > diagonal * 0.25)
       ) {
         rejected.add(candidate.index);

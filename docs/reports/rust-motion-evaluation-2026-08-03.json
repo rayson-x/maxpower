@@ -1,0 +1,1255 @@
+{
+  "schemaVersion": "form-coach-rust-motion-evaluation/v1",
+  "generatedAt": "2026-08-03T18:10:52.030Z",
+  "algorithmVersion": "rust-canonical-wasm/v1 + generic-rep-state-machine/v1",
+  "scope": {
+    "sourceCaptureCount": 39,
+    "sourceSegmentCount": 375,
+    "supportedCaptureCount": 10,
+    "supportedExercises": [
+      "lat_pulldown",
+      "seated_shoulder_press"
+    ],
+    "unsupportedCapturesAreNotTreatedAsFailures": true
+  },
+  "splitPolicy": "capture-id deterministic hash; no rep from one capture crosses a split",
+  "splitAudit": {
+    "leakageFreeForPromotion": false,
+    "reason": "The first Rust thresholds were explored while the full local corpus was visible; held-out metrics are descriptive, not a valid promotion claim.",
+    "gateMetricsPassed": true,
+    "allCaptureAssignments": [
+      {
+        "captureId": "field-capture-2026-08-02T18-15-03-101Z",
+        "exerciseId": "pull_up",
+        "capturePosition": "rearLeft45",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-16-42-757Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "rearRight45",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-19-26-633Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "rearRight45",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": false,
+          "challenge": true,
+          "reasons": [
+            "count_boundary_mismatch",
+            "low_rep_signal_coverage"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-24-38-253Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-26-54-722Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "frontRight45",
+        "analysisView": "oblique45",
+        "split": "held_out",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-30-30-478Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "rearLeft45",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-34-19-006Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "frontLeft45",
+        "analysisView": "oblique45",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-37-19-691Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "frontLeft45",
+        "analysisView": "oblique45",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-41-05-284Z",
+        "exerciseId": "lat_pulldown",
+        "capturePosition": "rear",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-41-55-780Z",
+        "exerciseId": "lat_pulldown",
+        "capturePosition": "rearLeft45",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-44-00-128Z",
+        "exerciseId": "lat_pulldown",
+        "capturePosition": "rearLeft45",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-46-52-295Z",
+        "exerciseId": "lat_pulldown",
+        "capturePosition": "rearLeft45",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-52-28-679Z",
+        "exerciseId": null,
+        "capturePosition": "right",
+        "analysisView": "side",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": false,
+          "challenge": false,
+          "reasons": [
+            "missing_exercise",
+            "missing_kinematics_profile"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-55-17-537Z",
+        "exerciseId": "seated_row",
+        "capturePosition": "rearLeft45",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "low_rep_signal_coverage"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T18-59-00-009Z",
+        "exerciseId": "seated_row",
+        "capturePosition": "frontLeft45",
+        "analysisView": "oblique45",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T19-02-41-183Z",
+        "exerciseId": "straight_arm_pulldown",
+        "capturePosition": "frontRight45",
+        "analysisView": "oblique45",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T19-05-43-889Z",
+        "exerciseId": "straight_arm_pulldown",
+        "capturePosition": "frontRight45",
+        "analysisView": "oblique45",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-02T19-08-40-178Z",
+        "exerciseId": "straight_arm_pulldown",
+        "capturePosition": "frontLeft45",
+        "analysisView": "oblique45",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T07-57-28-214Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T07-59-35-213Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-04-11-681Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-09-44-714Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-15-35-147Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-22-48-938Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-24-48-386Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-27-17-330Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-30-12-186Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "low_rep_signal_coverage"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-34-27-223Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-36-58-723Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-38-55-907Z",
+        "exerciseId": "lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": []
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-42-27-544Z",
+        "exerciseId": "rear_delt_fly",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "unsupported_profile_view"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-45-04-435Z",
+        "exerciseId": "rear_delt_fly",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "unsupported_profile_view"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-47-22-074Z",
+        "exerciseId": "rear_delt_fly",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": [
+            "unsupported_profile_view"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-49-51-012Z",
+        "exerciseId": "rear_delt_fly",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "unsupported_profile_view",
+            "low_rep_signal_coverage"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-51-49-681Z",
+        "exerciseId": "single_arm_cable_lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "missing_kinematics_profile"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-54-25-014Z",
+        "exerciseId": "single_arm_cable_lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "missing_kinematics_profile"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T08-57-26-212Z",
+        "exerciseId": "single_arm_cable_lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "held_out",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "missing_kinematics_profile"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T09-00-01-198Z",
+        "exerciseId": "single_arm_cable_lateral_raise",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "challenge",
+        "rustProfileStatus": "unsupported_profile",
+        "eligibility": {
+          "evaluation": false,
+          "tuning": false,
+          "antiInterference": true,
+          "challenge": true,
+          "reasons": [
+            "missing_kinematics_profile"
+          ]
+        }
+      },
+      {
+        "captureId": "field-capture-2026-08-03T09-03-30-328Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "analysisView": "front",
+        "split": "tuning",
+        "rustProfileStatus": "evaluated",
+        "eligibility": {
+          "evaluation": true,
+          "tuning": true,
+          "antiInterference": true,
+          "challenge": false,
+          "reasons": []
+        }
+      }
+    ]
+  },
+  "summary": {
+    "captureCount": 10,
+    "truthCount": 72,
+    "predictedCount": 60,
+    "exactCountCaptures": 6,
+    "exactCountRatio": 0.6,
+    "matchedReps": 59,
+    "falsePositiveReps": 1,
+    "missedReps": 13,
+    "precision": 0.9833333333333333,
+    "recall": 0.8194444444444444,
+    "f1": 0.893939393939394,
+    "negativeWindowFalsePositives": 2,
+    "coreReplayFpsP50": 6507.7,
+    "coreReplayFpsP95": 9197.3
+  },
+  "heldOut": {
+    "captureCount": 3,
+    "truthCount": 22,
+    "predictedCount": 22,
+    "exactCountCaptures": 3,
+    "exactCountRatio": 1,
+    "matchedReps": 22,
+    "falsePositiveReps": 0,
+    "missedReps": 0,
+    "precision": 1,
+    "recall": 1,
+    "f1": 1,
+    "negativeWindowFalsePositives": 0,
+    "coreReplayFpsP50": 3662.7,
+    "coreReplayFpsP95": 3662.7
+  },
+  "challenge": {
+    "captureCount": 1,
+    "truthCount": 6,
+    "predictedCount": 5,
+    "exactCountCaptures": 0,
+    "exactCountRatio": 0,
+    "matchedReps": 5,
+    "falsePositiveReps": 0,
+    "missedReps": 1,
+    "precision": 1,
+    "recall": 0.8333333333333334,
+    "f1": 0.9090909090909091,
+    "negativeWindowFalsePositives": 0,
+    "coreReplayFpsP50": 2597.8,
+    "coreReplayFpsP95": 2597.8
+  },
+  "promotion": {
+    "passed": false,
+    "promotedProfileCount": 0,
+    "gate": {
+      "minimumHeldOutCaptures": 2,
+      "minimumF1": 0.9,
+      "minimumExactCountRatio": 0.8,
+      "maximumNegativeWindowFalsePositives": 0
+    },
+    "reason": "Promotion refused: exploratory tuning had visibility into this corpus. Both profiles remain provisional and qualityVerdict stays null until a genuinely untouched capture set is collected."
+  },
+  "rows": [
+    {
+      "captureId": "field-capture-2026-08-02T18-41-05-284Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rear",
+      "analysisView": "front",
+      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "split": "held_out",
+      "truthCount": 8,
+      "predictedCount": 8,
+      "exactCount": true,
+      "matchedReps": 8,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 236,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 394.81,
+      "processingFps": 894.1,
+      "predicted": [
+        {
+          "startMs": 5211,
+          "peakMs": 5758,
+          "endMs": 6170,
+          "canonicalSliceHash": "4575849154095405185"
+        },
+        {
+          "startMs": 7110,
+          "peakMs": 7719,
+          "endMs": 8123,
+          "canonicalSliceHash": "3774993292354470603"
+        },
+        {
+          "startMs": 8951,
+          "peakMs": 9647,
+          "endMs": 10009,
+          "canonicalSliceHash": "14931328137176563080"
+        },
+        {
+          "startMs": 10834,
+          "peakMs": 11456,
+          "endMs": 11853,
+          "canonicalSliceHash": "14592331433625833423"
+        },
+        {
+          "startMs": 12660,
+          "peakMs": 13307,
+          "endMs": 13636,
+          "canonicalSliceHash": "1275887164555299051"
+        },
+        {
+          "startMs": 14564,
+          "peakMs": 15100,
+          "endMs": 15396,
+          "canonicalSliceHash": "16596733163695766500"
+        },
+        {
+          "startMs": 16208,
+          "peakMs": 16781,
+          "endMs": 17183,
+          "canonicalSliceHash": "2355510109687497934"
+        },
+        {
+          "startMs": 18044,
+          "peakMs": 18609,
+          "endMs": 18960,
+          "canonicalSliceHash": "4684100201576345618"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-41-55-780Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rearLeft45",
+      "analysisView": "front",
+      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "split": "held_out",
+      "truthCount": 8,
+      "predictedCount": 8,
+      "exactCount": true,
+      "matchedReps": 8,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 351,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 104.29,
+      "processingFps": 3662.7,
+      "predicted": [
+        {
+          "startMs": 5971,
+          "peakMs": 6632,
+          "endMs": 7086,
+          "canonicalSliceHash": "3823526931380645515"
+        },
+        {
+          "startMs": 8142,
+          "peakMs": 8815,
+          "endMs": 9143,
+          "canonicalSliceHash": "2122786966855598633"
+        },
+        {
+          "startMs": 10183,
+          "peakMs": 10786,
+          "endMs": 11253,
+          "canonicalSliceHash": "8489358170836457952"
+        },
+        {
+          "startMs": 12153,
+          "peakMs": 12813,
+          "endMs": 13236,
+          "canonicalSliceHash": "7883747085791531742"
+        },
+        {
+          "startMs": 14277,
+          "peakMs": 14881,
+          "endMs": 15297,
+          "canonicalSliceHash": "6214664484324313762"
+        },
+        {
+          "startMs": 16432,
+          "peakMs": 16902,
+          "endMs": 17302,
+          "canonicalSliceHash": "8661311755197689039"
+        },
+        {
+          "startMs": 18436,
+          "peakMs": 18984,
+          "endMs": 19394,
+          "canonicalSliceHash": "11061548323569992434"
+        },
+        {
+          "startMs": 20549,
+          "peakMs": 21166,
+          "endMs": 21561,
+          "canonicalSliceHash": "11950505885795419929"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-44-00-128Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rearLeft45",
+      "analysisView": "front",
+      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "split": "challenge",
+      "truthCount": 6,
+      "predictedCount": 5,
+      "exactCount": false,
+      "matchedReps": 5,
+      "falsePositiveReps": 0,
+      "missedReps": 1,
+      "meanBoundaryErrorMs": 288,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 132.42,
+      "processingFps": 2597.8,
+      "predicted": [
+        {
+          "startMs": 6766,
+          "peakMs": 7437,
+          "endMs": 7925,
+          "canonicalSliceHash": "9471853446872227110"
+        },
+        {
+          "startMs": 8955,
+          "peakMs": 9700,
+          "endMs": 10211,
+          "canonicalSliceHash": "16718560545810440435"
+        },
+        {
+          "startMs": 11199,
+          "peakMs": 11862,
+          "endMs": 12271,
+          "canonicalSliceHash": "8853083590750032294"
+        },
+        {
+          "startMs": 13283,
+          "peakMs": 13904,
+          "endMs": 14329,
+          "canonicalSliceHash": "17598187431518434668"
+        },
+        {
+          "startMs": 15199,
+          "peakMs": 15782,
+          "endMs": 16262,
+          "canonicalSliceHash": "4921529938847500739"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-46-52-295Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rearLeft45",
+      "analysisView": "front",
+      "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
+      "split": "tuning",
+      "truthCount": 6,
+      "predictedCount": 7,
+      "exactCount": false,
+      "matchedReps": 6,
+      "falsePositiveReps": 1,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 305,
+      "negativeWindowFalsePositives": 1,
+      "processingMs": 47.81,
+      "processingFps": 7048.9,
+      "predicted": [
+        {
+          "startMs": 6277,
+          "peakMs": 6867,
+          "endMs": 7275,
+          "canonicalSliceHash": "16771942989278616757"
+        },
+        {
+          "startMs": 8276,
+          "peakMs": 8870,
+          "endMs": 9327,
+          "canonicalSliceHash": "15513999540455955686"
+        },
+        {
+          "startMs": 10208,
+          "peakMs": 10833,
+          "endMs": 11347,
+          "canonicalSliceHash": "12123317002033622423"
+        },
+        {
+          "startMs": 12198,
+          "peakMs": 12860,
+          "endMs": 13202,
+          "canonicalSliceHash": "4030829819262723015"
+        },
+        {
+          "startMs": 14178,
+          "peakMs": 14635,
+          "endMs": 15091,
+          "canonicalSliceHash": "2048382199594822726"
+        },
+        {
+          "startMs": 15976,
+          "peakMs": 16439,
+          "endMs": 16983,
+          "canonicalSliceHash": "1835637783357018880"
+        },
+        {
+          "startMs": 18826,
+          "peakMs": 21816,
+          "endMs": 22032,
+          "canonicalSliceHash": "15896922502791845377"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-03T07-57-28-214Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "analysisView": "front",
+      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "split": "tuning",
+      "truthCount": 12,
+      "predictedCount": 12,
+      "exactCount": true,
+      "matchedReps": 12,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 306,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 74.38,
+      "processingFps": 5901.8,
+      "predicted": [
+        {
+          "startMs": 4567,
+          "peakMs": 5434,
+          "endMs": 5901,
+          "canonicalSliceHash": "7824471308481339333"
+        },
+        {
+          "startMs": 6734,
+          "peakMs": 7401,
+          "endMs": 7801,
+          "canonicalSliceHash": "5877610103054312147"
+        },
+        {
+          "startMs": 8801,
+          "peakMs": 9501,
+          "endMs": 9801,
+          "canonicalSliceHash": "6972406184630916663"
+        },
+        {
+          "startMs": 10668,
+          "peakMs": 11301,
+          "endMs": 11568,
+          "canonicalSliceHash": "5844786407573855312"
+        },
+        {
+          "startMs": 12568,
+          "peakMs": 13235,
+          "endMs": 13568,
+          "canonicalSliceHash": "4791004328346094666"
+        },
+        {
+          "startMs": 14402,
+          "peakMs": 14935,
+          "endMs": 15402,
+          "canonicalSliceHash": "16189365104656436107"
+        },
+        {
+          "startMs": 16269,
+          "peakMs": 16802,
+          "endMs": 17135,
+          "canonicalSliceHash": "7186874597825892961"
+        },
+        {
+          "startMs": 18069,
+          "peakMs": 18636,
+          "endMs": 19069,
+          "canonicalSliceHash": "578050471528136408"
+        },
+        {
+          "startMs": 20002,
+          "peakMs": 20636,
+          "endMs": 21069,
+          "canonicalSliceHash": "7707465601976471976"
+        },
+        {
+          "startMs": 21936,
+          "peakMs": 22603,
+          "endMs": 23036,
+          "canonicalSliceHash": "1754469547219869789"
+        },
+        {
+          "startMs": 23836,
+          "peakMs": 24403,
+          "endMs": 24770,
+          "canonicalSliceHash": "16633475243127640596"
+        },
+        {
+          "startMs": 25836,
+          "peakMs": 26403,
+          "endMs": 26836,
+          "canonicalSliceHash": "18191394073554467964"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-03T07-59-35-213Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "analysisView": "front",
+      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "split": "held_out",
+      "truthCount": 6,
+      "predictedCount": 6,
+      "exactCount": true,
+      "matchedReps": 6,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 755,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 42.62,
+      "processingFps": 9197.3,
+      "predicted": [
+        {
+          "startMs": 4334,
+          "peakMs": 7101,
+          "endMs": 7834,
+          "canonicalSliceHash": "17547445698711019527"
+        },
+        {
+          "startMs": 9134,
+          "peakMs": 9868,
+          "endMs": 10434,
+          "canonicalSliceHash": "11667710091277271808"
+        },
+        {
+          "startMs": 11734,
+          "peakMs": 12535,
+          "endMs": 13335,
+          "canonicalSliceHash": "8002340142333593003"
+        },
+        {
+          "startMs": 15135,
+          "peakMs": 15835,
+          "endMs": 16268,
+          "canonicalSliceHash": "6503630752544955825"
+        },
+        {
+          "startMs": 18102,
+          "peakMs": 18835,
+          "endMs": 19302,
+          "canonicalSliceHash": "4407344274445786046"
+        },
+        {
+          "startMs": 21035,
+          "peakMs": 21602,
+          "endMs": 22302,
+          "canonicalSliceHash": "4804916055975099368"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-04-11-681Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "analysisView": "front",
+      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "split": "tuning",
+      "truthCount": 5,
+      "predictedCount": 5,
+      "exactCount": true,
+      "matchedReps": 5,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 748,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 65.54,
+      "processingFps": 7049.5,
+      "predicted": [
+        {
+          "startMs": 5801,
+          "peakMs": 8568,
+          "endMs": 9335,
+          "canonicalSliceHash": "16284231245123285020"
+        },
+        {
+          "startMs": 10601,
+          "peakMs": 11335,
+          "endMs": 12235,
+          "canonicalSliceHash": "17249932797949710502"
+        },
+        {
+          "startMs": 14035,
+          "peakMs": 14902,
+          "endMs": 15602,
+          "canonicalSliceHash": "1634612433874480094"
+        },
+        {
+          "startMs": 17802,
+          "peakMs": 18702,
+          "endMs": 19669,
+          "canonicalSliceHash": "4704097249526924352"
+        },
+        {
+          "startMs": 22703,
+          "peakMs": 23436,
+          "endMs": 24136,
+          "canonicalSliceHash": "17749298686885852473"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-09-44-714Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "analysisView": "front",
+      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "split": "tuning",
+      "truthCount": 3,
+      "predictedCount": 0,
+      "exactCount": false,
+      "matchedReps": 0,
+      "falsePositiveReps": 0,
+      "missedReps": 3,
+      "meanBoundaryErrorMs": null,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 76.22,
+      "processingFps": 6507.7,
+      "predicted": []
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-15-35-147Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "analysisView": "front",
+      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "split": "tuning",
+      "truthCount": 8,
+      "predictedCount": 8,
+      "exactCount": true,
+      "matchedReps": 8,
+      "falsePositiveReps": 0,
+      "missedReps": 0,
+      "meanBoundaryErrorMs": 672,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 50.57,
+      "processingFps": 9729.5,
+      "predicted": [
+        {
+          "startMs": 4767,
+          "peakMs": 7934,
+          "endMs": 8768,
+          "canonicalSliceHash": "6065303562347413248"
+        },
+        {
+          "startMs": 9834,
+          "peakMs": 10434,
+          "endMs": 11001,
+          "canonicalSliceHash": "2519152219526825369"
+        },
+        {
+          "startMs": 12768,
+          "peakMs": 13335,
+          "endMs": 13935,
+          "canonicalSliceHash": "739696498207051671"
+        },
+        {
+          "startMs": 15168,
+          "peakMs": 15668,
+          "endMs": 16268,
+          "canonicalSliceHash": "3960685071975824805"
+        },
+        {
+          "startMs": 17602,
+          "peakMs": 18202,
+          "endMs": 18835,
+          "canonicalSliceHash": "17752856783294154450"
+        },
+        {
+          "startMs": 21002,
+          "peakMs": 21536,
+          "endMs": 21969,
+          "canonicalSliceHash": "9536917309850583880"
+        },
+        {
+          "startMs": 24936,
+          "peakMs": 25603,
+          "endMs": 26236,
+          "canonicalSliceHash": "11630213105834611938"
+        },
+        {
+          "startMs": 28103,
+          "peakMs": 28936,
+          "endMs": 29436,
+          "canonicalSliceHash": "9201567959433804696"
+        }
+      ]
+    },
+    {
+      "captureId": "field-capture-2026-08-03T09-03-30-328Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "analysisView": "front",
+      "profileVersion": "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
+      "split": "tuning",
+      "truthCount": 10,
+      "predictedCount": 1,
+      "exactCount": false,
+      "matchedReps": 1,
+      "falsePositiveReps": 0,
+      "missedReps": 9,
+      "meanBoundaryErrorMs": 910,
+      "negativeWindowFalsePositives": 1,
+      "processingMs": 64.66,
+      "processingFps": 7160.8,
+      "predicted": [
+        {
+          "startMs": 10934,
+          "peakMs": 11635,
+          "endMs": 12235,
+          "canonicalSliceHash": "10565130021780210816"
+        }
+      ]
+    }
+  ]
+}
