@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   EXERCISE_REGISTRY,
   loadExerciseRegistry,
+  MUSCLE_GROUPS,
   type ExerciseConcept,
 } from "../../src/pose/exerciseRegistry";
 
@@ -28,6 +29,18 @@ test("seed registry keeps historical ids and exposes catalog-only variants", () 
   assert.ok(catalogOnly.source.license);
 });
 
+test("catalog covers every training muscle group and carries the group in each record", () => {
+  for (const group of MUSCLE_GROUPS) {
+    assert.ok(
+      EXERCISE_REGISTRY.exercises.some((exercise) => exercise.muscleGroup === group.id),
+      `${group.labelZh} must have at least one catalog exercise`,
+    );
+  }
+  assert.equal(EXERCISE_REGISTRY.require("barbell_bench_press").muscleGroup, "chest");
+  assert.equal(EXERCISE_REGISTRY.require("romanian_deadlift").muscleGroup, "legs");
+  assert.equal(EXERCISE_REGISTRY.require("triceps_pushdown").muscleGroup, "arms");
+});
+
 test("registry rejects duplicate ids, broken variants, and illegal maturity", () => {
   const base = EXERCISE_REGISTRY.require("barbell_row");
   assert.throws(
@@ -37,6 +50,10 @@ test("registry rejects duplicate ids, broken variants, and illegal maturity", ()
   assert.throws(
     () => loadExerciseRegistry([{ ...base, id: "broken_child", variationOf: "missing" }]),
     /references missing variation parent/,
+  );
+  assert.throws(
+    () => loadExerciseRegistry([{ ...base, muscleGroup: "core" }]),
+    /invalid muscleGroup/,
   );
   assert.throws(
     () => loadExerciseRegistry([{ ...base, maturity: "production" }]),

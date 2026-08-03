@@ -1,3 +1,5 @@
+import type { MuscleGroup } from "./exerciseRegistry";
+
 export interface LocalCaptureSummary {
   id: string;
   createdAt: string;
@@ -9,6 +11,7 @@ export interface LocalCaptureSummary {
   cameraView: "front" | "side" | "oblique45";
   capturePosition: string;
   exerciseId: string | null;
+  muscleGroup: MuscleGroup | null;
 }
 
 export interface LocalCaptureWrite extends LocalCaptureSummary {
@@ -88,5 +91,6 @@ function requestResult<T>(request: IDBRequest<T>): Promise<T> {
 
 function toSummary(capture: LocalCaptureSummary): LocalCaptureSummary {
   const { id, createdAt, videoName, keypointsName, poseCount, durationSec, analysisStatus, cameraView, capturePosition, exerciseId } = capture;
-  return { id, createdAt, videoName, keypointsName, poseCount, durationSec, analysisStatus, cameraView, capturePosition, exerciseId };
+  // Records written before muscleGroup existed remain readable in IndexedDB.
+  return { id, createdAt, videoName, keypointsName, poseCount, durationSec, analysisStatus, cameraView, capturePosition, exerciseId, muscleGroup: capture.muscleGroup ?? null };
 }

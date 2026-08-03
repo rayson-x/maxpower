@@ -10,6 +10,7 @@ import {
 import { computeExerciseFeatures } from "../pose/exerciseFeatures";
 import {
   EXERCISE_REGISTRY,
+  MUSCLE_GROUPS,
   type ExerciseMaturity,
 } from "../pose/exerciseRegistry";
 import { RULE_METRIC } from "../pose/formRuleEngine";
@@ -140,6 +141,8 @@ interface RecordingResult {
   keypointsName: string;
   annotationUrl: string | null;
   annotationName: string | null;
+  metadataUrl: string;
+  metadataName: string;
   poseCount: number;
   durationSec: number;
 }
@@ -244,6 +247,7 @@ function recordingResultFiles(result: RecordingResult): Array<{ url: string; nam
     ...(result.annotationUrl && result.annotationName
       ? [{ url: result.annotationUrl, name: result.annotationName }]
       : []),
+    { url: result.metadataUrl, name: result.metadataName },
   ];
 }
 
@@ -251,6 +255,7 @@ function revokeRecordingResultUrls(result: RecordingResult): void {
   URL.revokeObjectURL(result.videoUrl);
   URL.revokeObjectURL(result.keypointsUrl);
   if (result.annotationUrl) URL.revokeObjectURL(result.annotationUrl);
+  URL.revokeObjectURL(result.metadataUrl);
 }
 
 export function CameraPoseView() {
@@ -697,9 +702,27 @@ export function CameraPoseView() {
     const annotationBlob = annotation
       ? new Blob([JSON.stringify(annotation, null, 2)], { type: "application/json" })
       : null;
+    const selectedExercise = recordingMetadata?.exerciseChoice && recordingMetadata.exerciseChoice !== "auto"
+      ? EXERCISE_REGISTRY.get(recordingMetadata.exerciseChoice) ?? null
+      : analysis?.profile ? EXERCISE_REGISTRY.get(analysis.profile.exerciseId) ?? null : null;
+    // This sidecar exists even for catalog-only exercises, unlike the labelled
+    // rep template which correctly requires a validated-by-sampling profile.
+    const captureMetadata = {
+      schemaVersion: "form-coach-capture-metadata/v1",
+      videoId: fixture[0].video,
+      keypointsFile: `${baseName}.json`,
+      exerciseId: selectedExercise?.id ?? null,
+      muscleGroup: selectedExercise?.muscleGroup ?? null,
+      exerciseMaturity: selectedExercise?.maturity ?? null,
+      cameraView: recordingMetadata?.cameraView ?? "oblique45",
+      capturePosition: recordingMetadata?.capturePosition ?? "frontLeft45",
+      analysisStatus: analysis?.score ? "available" : "unavailable",
+    };
+    const metadataBlob = new Blob([JSON.stringify(captureMetadata, null, 2)], { type: "application/json" });
     const videoUrl = URL.createObjectURL(videoBlob);
     const keypointsUrl = URL.createObjectURL(keypointsBlob);
     const annotationUrl = annotationBlob ? URL.createObjectURL(annotationBlob) : null;
+    const metadataUrl = URL.createObjectURL(metadataBlob);
 
     const result: RecordingResult = {
       videoUrl,
@@ -708,6 +731,8 @@ export function CameraPoseView() {
       keypointsName: `${baseName}.json`,
       annotationUrl,
       annotationName: annotationBlob ? `${baseName}.labels.json` : null,
+      metadataUrl,
+      metadataName: `${baseName}.metadata.json`,
       poseCount: poses.length,
       durationSec: fixture[0].durationSec,
     };
@@ -733,7 +758,8 @@ export function CameraPoseView() {
         analysisStatus: analysis?.score ? "available" : "unavailable",
         cameraView: recordingMetadata?.cameraView ?? "oblique45",
         capturePosition: recordingMetadata?.capturePosition ?? "frontLeft45",
-        exerciseId: analysis?.profile?.exerciseId ?? null,
+        exerciseId: selectedExercise?.id ?? null,
+        muscleGroup: selectedExercise?.muscleGroup ?? null,
         videoBlob,
         keypointsJson: JSON.stringify(fixture),
         labelTemplateJson: annotation ? JSON.stringify(annotation, null, 2) : null,
@@ -1556,6 +1582,13 @@ export function CameraPoseView() {
                       ↓ rep 标注模板
                     </a>
                   )}
+                  <a
+                    href={recordingResult.metadataUrl}
+                    download={recordingResult.metadataName}
+                    style={{ ...styles.btnSmall, textDecoration: "none", textAlign: "center" }}
+                  >
+                    ↓ 动作元数据
+                  </a>
                 </div>
               </div>
             )}
@@ -1605,10 +1638,16 @@ export function CameraPoseView() {
                 onChange={(event) => setExerciseChoice(event.target.value)}
               >
                 <option value="">请选择本次训练动作</option>
-                {EXERCISE_REGISTRY.exercises.map((exercise) => (
-                  <option key={exercise.id} value={exercise.id}>
-                    {exercise.nameZh} · {EXERCISE_MATURITY_LABEL[exercise.maturity]}
-                  </option>
+                {MUSCLE_GROUPS.map((group) => (
+                  <optgroup key={group.id} label={`${group.labelZh}部`}>
+                    {EXERCISE_REGISTRY.exercises
+                      .filter((exercise) => exercise.muscleGroup === group.id)
+                      .map((exercise) => (
+                        <option key={exercise.id} value={exercise.id}>
+                          {exercise.nameZh} · {EXERCISE_MATURITY_LABEL[exercise.maturity]}
+                        </option>
+                      ))}
+                  </optgroup>
                 ))}
                 <option value="auto">自动识别（不确定时仅输出数据）</option>
               </select>
@@ -1619,7 +1658,7 @@ export function CameraPoseView() {
                 <p style={styles.catalogMeta}>
                   {selected.nameEn} · {selected.movementPattern} · {selected.equipment.join(" / ")}
                   <br />
-                  成熟度：{EXERCISE_MATURITY_LABEL[selected.maturity]}
+                  肌群：{MUSCLE_GROUPS.find((group) => group.id === selected.muscleGroup)?.labelZh} · 成熟度：{EXERCISE_MATURITY_LABEL[selected.maturity]}
                   {selected.variationOf
                     ? ` · 变式来源：${EXERCISE_REGISTRY.require(selected.variationOf).nameZh}`
                     : ""}

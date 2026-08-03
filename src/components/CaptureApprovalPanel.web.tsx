@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { EXERCISE_REGISTRY } from "../pose/exerciseRegistry";
+import { EXERCISE_REGISTRY, MUSCLE_GROUPS } from "../pose/exerciseRegistry";
 import type { CameraView } from "../pose/formRuleEngine";
 import { analyzePoseSet } from "../pose/poseSetAnalysis";
 import type { PoseEstimate } from "../pose/PoseEngine";
@@ -11,6 +11,11 @@ interface ImportedLabels {
   exerciseId?: string;
   cameraView?: CameraView;
   labels?: Array<{ repIndex: number; startMs: number; extremeMs: number; endMs: number }>;
+}
+
+interface ImportedCaptureMetadata {
+  exerciseId?: string | null;
+  cameraView?: CameraView;
 }
 
 interface ImportedFixture {
@@ -207,7 +212,7 @@ function replayReportFor(captures: ReviewCapture[]): ReplayReportRow[] {
 
 async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
   const byName = new Map(files.map((file) => [file.name, file]));
-  const fixtures = files.filter((file) => /\.json$/i.test(file.name) && !/\.labels\.json$/i.test(file.name));
+  const fixtures = files.filter((file) => /\.json$/i.test(file.name) && !/\.(labels|metadata)\.json$/i.test(file.name));
   const captures: ReviewCapture[] = [];
   for (const fixtureFile of fixtures) {
     try {
@@ -220,7 +225,13 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
         .find((file): file is File => !!file);
       if (!videoFile) continue;
       const labelsFile = byName.get(`${id}.labels.json`);
-      const labels = labelsFile ? JSON.parse(await labelsFile.text()) as ImportedLabels : null;
+      const metadataFile = byName.get(`${id}.metadata.json`);
+      const metadata = metadataFile ? JSON.parse(await metadataFile.text()) as ImportedCaptureMetadata : null;
+      const labels = labelsFile
+        ? JSON.parse(await labelsFile.text()) as ImportedLabels
+        : metadata?.exerciseId
+          ? { exerciseId: metadata.exerciseId, cameraView: metadata.cameraView }
+          : null;
       captures.push({
         id,
         videoUrl: URL.createObjectURL(videoFile),
@@ -553,7 +564,7 @@ export function CaptureApprovalPanel() {
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
-                  <label>动作<select value={exerciseId} onChange={(event) => setExerciseId(event.target.value)}>{EXERCISE_REGISTRY.exercises.filter((exercise) => EXERCISE_REGISTRY.canRunSpecializedAnalysis(exercise.id)).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh}</option>)}</select></label>
+                  <label>动作<select value={exerciseId} onChange={(event) => setExerciseId(event.target.value)}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select></label>
                   <label>机位<select value={cameraView} onChange={(event) => setCameraView(event.target.value as CameraView)}>{VIEW_OPTIONS.map((view) => <option key={view.id} value={view.id}>{view.label}</option>)}</select></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
                 </div>
