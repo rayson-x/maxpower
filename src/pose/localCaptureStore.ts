@@ -19,6 +19,8 @@ export interface LocalCaptureWrite extends LocalCaptureSummary {
   keypointsJson: string;
   labelTemplateJson: string | null;
   analysisJson: string | null;
+  /** Exists for every new recording, including catalog-only exercises. */
+  metadataJson?: string | null;
 }
 
 export interface LocalCapture extends LocalCaptureWrite {}

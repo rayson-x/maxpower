@@ -10,12 +10,20 @@ import { selectTrainingWindow } from "../pose/trainingWindow";
 interface ImportedLabels {
   exerciseId?: string;
   cameraView?: CameraView;
+  variation?: string | null;
+  trainingSide?: "bilateral" | "left" | "right";
+  profileVersion?: string | null;
+  model?: string | null;
   labels?: Array<{ repIndex: number; startMs: number; extremeMs: number; endMs: number }>;
 }
 
 interface ImportedCaptureMetadata {
   exerciseId?: string | null;
   cameraView?: CameraView;
+  variation?: string | null;
+  trainingSide?: "bilateral" | "left" | "right";
+  profileVersion?: string | null;
+  model?: string | null;
 }
 
 interface ImportedFixture {
@@ -43,6 +51,11 @@ interface Approval {
   candidateCount: number;
   exerciseId: string;
   cameraView: CameraView;
+  variation: string | null;
+  trainingSide: "bilateral" | "left" | "right" | null;
+  profileVersion: string | null;
+  model: string;
+  approvedSegments: Candidate["segments"];
   approvedAt: string;
 }
 
@@ -227,10 +240,11 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
       const labelsFile = byName.get(`${id}.labels.json`);
       const metadataFile = byName.get(`${id}.metadata.json`);
       const metadata = metadataFile ? JSON.parse(await metadataFile.text()) as ImportedCaptureMetadata : null;
-      const labels = labelsFile
-        ? JSON.parse(await labelsFile.text()) as ImportedLabels
+      const importedLabels = labelsFile ? JSON.parse(await labelsFile.text()) as ImportedLabels : null;
+      const labels = importedLabels
+        ? { ...metadata, ...importedLabels }
         : metadata?.exerciseId
-          ? { exerciseId: metadata.exerciseId, cameraView: metadata.cameraView }
+          ? { ...metadata, exerciseId: metadata.exerciseId }
           : null;
       captures.push({
         id,
@@ -463,6 +477,11 @@ export function CaptureApprovalPanel() {
         candidateCount: candidate?.count ?? 0,
         exerciseId,
         cameraView,
+        variation: selected.labels?.variation ?? null,
+        trainingSide: selected.labels?.trainingSide ?? null,
+        profileVersion: selected.labels?.profileVersion ?? null,
+        model: selected.fixture.model,
+        approvedSegments: candidate?.segments ?? [],
         approvedAt: new Date().toISOString(),
       },
     };
@@ -578,7 +597,7 @@ export function CaptureApprovalPanel() {
                     </article>
                   ))}
                 </div>
-                {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次</p>}
+                {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}</p>}
               </div>
             </div>
           )}

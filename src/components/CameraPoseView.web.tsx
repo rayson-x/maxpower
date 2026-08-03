@@ -178,6 +178,7 @@ function loadSettings(): AgentSettings {
 
 type EngineStatus = "idle" | "loading-model" | "starting-camera" | "running" | "error";
 type SourceMode = "camera" | "file";
+type TrainingSide = "bilateral" | "left" | "right";
 
 interface SignalSample {
   t: number;
@@ -299,6 +300,8 @@ export function CameraPoseView() {
     exerciseChoice: string;
     cameraView: CameraView;
     capturePosition: CapturePosition;
+    variation: string;
+    trainingSide: TrainingSide;
   } | null>(null);
   const recordingResultRef = useRef<RecordingResult | null>(null);
 
@@ -313,6 +316,8 @@ export function CameraPoseView() {
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
   const [capturePosition, setCapturePosition] = useState<CapturePosition>("frontLeft45");
   const [exerciseChoice, setExerciseChoice] = useState<string>("");
+  const [variation, setVariation] = useState("");
+  const [trainingSide, setTrainingSide] = useState<TrainingSide>("bilateral");
   const [filterEnabled, setFilterEnabled] = useState(false);
   const [torsoLean, setTorsoLean] = useState<number | null>(null);
   const [pose, setPose] = useState<CanonicalPoseFrame | null>(null);
@@ -714,9 +719,13 @@ export function CameraPoseView() {
       exerciseId: selectedExercise?.id ?? null,
       muscleGroup: selectedExercise?.muscleGroup ?? null,
       exerciseMaturity: selectedExercise?.maturity ?? null,
+      variation: recordingMetadata?.variation || null,
+      trainingSide: recordingMetadata?.trainingSide ?? "bilateral",
       cameraView: recordingMetadata?.cameraView ?? "oblique45",
       capturePosition: recordingMetadata?.capturePosition ?? "frontLeft45",
       analysisStatus: analysis?.score ? "available" : "unavailable",
+      profileVersion: analysis?.profile?.version ?? null,
+      model: fixture[0].model,
     };
     const metadataBlob = new Blob([JSON.stringify(captureMetadata, null, 2)], { type: "application/json" });
     const videoUrl = URL.createObjectURL(videoBlob);
@@ -764,6 +773,7 @@ export function CameraPoseView() {
         keypointsJson: JSON.stringify(fixture),
         labelTemplateJson: annotation ? JSON.stringify(annotation, null, 2) : null,
         analysisJson: analysis ? JSON.stringify(analysis) : null,
+        metadataJson: JSON.stringify(captureMetadata, null, 2),
       });
       if (!isUnmountedRef.current) {
         setLocalCaptures((previousCaptures) => [saved, ...previousCaptures.filter((item) => item.id !== saved.id)]);
@@ -873,7 +883,7 @@ export function CameraPoseView() {
       recordedChunksRef.current = [];
       recordingStartMsRef.current = Date.now();
       recordingStopMsRef.current = recordingStartMsRef.current;
-      recordingMetadataRef.current = { exerciseChoice, cameraView, capturePosition };
+      recordingMetadataRef.current = { exerciseChoice, cameraView, capturePosition, variation, trainingSide };
       const mimeType = pickRecorderMimeType();
       const recorder = mimeType
         ? new MediaRecorder(stream, { mimeType })
@@ -895,7 +905,7 @@ export function CameraPoseView() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [cameraView, capturePosition, exerciseChoice, finalizeRecording, rotateCanonicalSequence, status]);
+  }, [cameraView, capturePosition, exerciseChoice, finalizeRecording, rotateCanonicalSequence, status, trainingSide, variation]);
 
   const startUrl = useCallback(
     async (url: string, name: string) => {
@@ -952,15 +962,25 @@ export function CameraPoseView() {
       const analysisUrl = capture.analysisJson
         ? URL.createObjectURL(new Blob([capture.analysisJson], { type: "application/json" }))
         : null;
+      const labelsUrl = capture.labelTemplateJson
+        ? URL.createObjectURL(new Blob([capture.labelTemplateJson], { type: "application/json" }))
+        : null;
+      const metadataUrl = capture.metadataJson
+        ? URL.createObjectURL(new Blob([capture.metadataJson], { type: "application/json" }))
+        : null;
       requestCaptureDownloads([
         { url: videoUrl, name: capture.videoName },
         { url: keypointsUrl, name: capture.keypointsName },
+        ...(labelsUrl ? [{ url: labelsUrl, name: `${capture.id}.labels.json` }] : []),
         ...(analysisUrl ? [{ url: analysisUrl, name: `${capture.id}.analysis.json` }] : []),
+        ...(metadataUrl ? [{ url: metadataUrl, name: `${capture.id}.metadata.json` }] : []),
       ]);
       window.setTimeout(() => {
         URL.revokeObjectURL(videoUrl);
         URL.revokeObjectURL(keypointsUrl);
         if (analysisUrl) URL.revokeObjectURL(analysisUrl);
+        if (labelsUrl) URL.revokeObjectURL(labelsUrl);
+        if (metadataUrl) URL.revokeObjectURL(metadataUrl);
       }, 10_000);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -1665,6 +1685,25 @@ export function CameraPoseView() {
                 </p>
               ) : null;
             })()}
+            <div style={styles.captureDetailsRow}>
+              <label style={styles.exerciseField}>
+                <span>变式 / 器械</span>
+                <input
+                  style={styles.exerciseSelect}
+                  value={variation}
+                  onChange={(event) => setVariation(event.target.value)}
+                  placeholder="例如：哑铃、单臂、宽握"
+                />
+              </label>
+              <label style={styles.exerciseField}>
+                <span>侧别</span>
+                <select style={styles.exerciseSelect} value={trainingSide} onChange={(event) => setTrainingSide(event.target.value as TrainingSide)}>
+                  <option value="bilateral">双侧 / 同步</option>
+                  <option value="left">左侧</option>
+                  <option value="right">右侧</option>
+                </select>
+              </label>
+            </div>
             <div style={styles.subsectionLabel}>拍摄机位</div>
             <div style={styles.btnRow}>
               {CAPTURE_POSITIONS.map((position) => (
@@ -2676,6 +2715,11 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.text,
     fontWeight: 700,
     background: "#0c1610",
+  },
+  captureDetailsRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, .9fr)",
+    gap: 8,
   },
   catalogMeta: {
     margin: "-5px 0 12px",
