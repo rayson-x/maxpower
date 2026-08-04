@@ -471,8 +471,11 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   }
 
   installReferenceProfile(input: RustReferenceProfileInstallation): void {
-    if (input.profile.profileStatus !== "personal_provisional_expert_reviewed") {
-      throw new Error("Product reference profiles must be expert reviewed before installation");
+    if (
+      input.profile.profileStatus !== "personal_provisional_expert_reviewed"
+      && input.profile.profileStatus !== "simulated_nominal"
+    ) {
+      throw new Error("Reference profiles must be either simulated nominal or expert reviewed before installation");
     }
     const envelope = new TextEncoder().encode(JSON.stringify(input));
     ensureOk(

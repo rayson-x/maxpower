@@ -35,6 +35,7 @@ export const LAT_PULLDOWN_QUALITY_FEATURE_GROUPS = {
 } as const satisfies Record<string, readonly LatPulldownReferenceFeature[]>;
 
 export type ReferenceSourceStatus =
+  | "simulated_kinematic_prior"
   | "human_edited_draft"
   | "human_approved_segmentation"
   | "expert_approved_reference";
@@ -138,7 +139,15 @@ export interface ReferenceCorridorNode {
 
 export interface PersonalProvisionalReferenceProfile {
   schemaVersion: typeof PROVISIONAL_REFERENCE_PROFILE_SCHEMA;
-  profileStatus: "personal_provisional_unreviewed" | "personal_provisional_expert_reviewed";
+  /**
+   * A simulated nominal corridor is the initial, explicitly labelled baseline.
+   * Real reviewed captures may replace it later, but are not a prerequisite
+   * for showing descriptive trajectory deviation evidence.
+   */
+  profileStatus:
+    | "simulated_nominal"
+    | "personal_provisional_unreviewed"
+    | "personal_provisional_expert_reviewed";
   identity: PersonalReferenceIdentity & {
     exerciseId: "lat_pulldown";
     capturePosition: CapturePosition;
@@ -156,7 +165,7 @@ export interface PersonalProvisionalReferenceProfile {
   };
   featureNames: readonly LatPulldownReferenceFeature[];
   referencePopulation: {
-    participantCount: 1;
+    participantCount: 0 | 1;
     sessionCount: null;
     captureCount: number;
     repCount: number;

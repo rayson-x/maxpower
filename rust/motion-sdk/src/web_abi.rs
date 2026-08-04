@@ -764,7 +764,8 @@ pub extern "C" fn motion_sdk_commit_reference_profile() -> i32 {
         matching_policy,
     } = envelope.profile;
     if schema_version != "form-coach-provisional-reference-profile/v1"
-        || profile_status != "personal_provisional_expert_reviewed"
+        || (profile_status != "personal_provisional_expert_reviewed"
+            && profile_status != "simulated_nominal")
         || phase_model.normalization != "piecewise_linear_start_bottom_end"
         || phase_model.pull_nodes != 16
         || phase_model.return_nodes != 16

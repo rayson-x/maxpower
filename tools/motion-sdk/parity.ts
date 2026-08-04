@@ -19,6 +19,7 @@ import {
   type NormalizedLatPulldownReferenceRep,
   type PersonalProvisionalReferenceProfile,
 } from "../../src/pose/referenceTrajectory";
+import { buildSimulatedLatPulldownReference } from "../../src/pose/simulatedLatPulldownReference";
 
 const config = (sequenceId: string) => ({
   sequenceId,
@@ -218,6 +219,18 @@ async function main(): Promise<void> {
       else assert.ok(Math.abs((actual.outsideNodeRatio ?? Infinity) - expected.outsideNodeRatio) <= 1e-5);
     });
   }
+
+  const simulatedReferenceRust = new RustCanonicalWasmSession(config("parity:simulated-reference"), wasm);
+  simulatedReferenceRust.setExerciseProfile("lat_pulldown");
+  simulatedReferenceRust.setReferenceRuntimeContext(referenceProfile.identity);
+  simulatedReferenceRust.installReferenceProfile({
+    profile: buildSimulatedLatPulldownReference(referenceProfile.identity),
+  });
+  wristY.forEach((wrist, index) => {
+    simulatedReferenceRust.process(bilateralActionPose(index * 100, wrist, elbowY[index]));
+  });
+  assert.equal(simulatedReferenceRust.referenceComparison.status, "comparison_available");
+  simulatedReferenceRust.close();
   referenceRust.close();
 
   assert.ok(extractedReferenceRep, "TypeScript reference extraction must be available");

@@ -75,8 +75,10 @@ import {
   type RustTargetSnapshot,
 } from "../motion/rustCanonicalWasm";
 import { buildLatPulldownQualityEvidence } from "../pose/trajectoryQualityEvidence";
+import { buildSimulatedLatPulldownReference } from "../pose/simulatedLatPulldownReference";
 import {
-  parseVideoLibraryManifest,
+  buildVideoLibraryFromConfirmedCaptures,
+  parseConfirmedCaptureManifest,
   type VideoLibraryEntry,
 } from "../pose/videoLibrary";
 
@@ -263,6 +265,14 @@ function configureRustExerciseProfile(
     modelPath,
   );
   if (referenceContext) session.setReferenceRuntimeContext(referenceContext);
+  if (
+    referenceContext
+    && (referenceContext.capturePosition === "rear" || referenceContext.capturePosition === "rearLeft45")
+  ) {
+    session.installReferenceProfile({
+      profile: buildSimulatedLatPulldownReference(referenceContext),
+    });
+  }
 }
 
 const EXERCISE_MATURITY_LABEL: Record<ExerciseMaturity, string> = {
@@ -594,6 +604,7 @@ export function CameraPoseView() {
   const [videoName, setVideoName] = useState<string | null>(null);
   const [videoLibrary, setVideoLibrary] = useState<readonly VideoLibraryEntry[]>([]);
   const [selectedLibraryVideoId, setSelectedLibraryVideoId] = useState("");
+  const [selectedLibraryVideoNeedsPosition, setSelectedLibraryVideoNeedsPosition] = useState(false);
   const [videoAspect, setVideoAspect] = useState(16 / 9);
   const [modelId, setModelId] = useState(POSE_MODELS[2].id);
   const [engineKind, setEngineKind] = useState<EngineKind>("mediapipe");
@@ -646,6 +657,13 @@ export function CameraPoseView() {
     referenceComparison,
     rustSealedRepsRef.current,
   );
+  const simulatedNominalReferenceConfigured = referenceRuntimeContextFor(
+    exerciseChoice,
+    capturePosition,
+    trainingSide,
+    variation,
+    POSE_MODELS.find((model) => model.id === modelId)?.path ?? POSE_MODELS[2]!.path,
+  ) !== null;
 
   useEffect(() => {
     const syncWorkspacePage = () => {
@@ -664,10 +682,17 @@ export function CameraPoseView() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/video-library/manifest.json", { cache: "no-store" })
+    void fetch("/archives/confirmed-captures/manifest.json", { cache: "no-store" })
       .then(async (response) => {
-        if (!response.ok) throw new Error("视频库清单不可用");
-        return parseVideoLibraryManifest(await response.json());
+        if (!response.ok) throw new Error("已确认档案清单不可用");
+        const archive = parseConfirmedCaptureManifest(await response.json());
+        const loadedLabels = await Promise.all(archive.captures.map(async (capture) => {
+          if (!capture.labels) return [capture.id, null] as const;
+          const labelResponse = await fetch(`/archives/confirmed-captures/${capture.labels}`, { cache: "no-store" });
+          if (!labelResponse.ok) throw new Error(`无法读取已标注视频：${capture.id}`);
+          return [capture.id, await labelResponse.json()] as const;
+        }));
+        return buildVideoLibraryFromConfirmedCaptures(archive, Object.fromEntries(loadedLabels));
       })
       .then((manifest) => {
         if (!cancelled) setVideoLibrary(manifest.videos);
@@ -710,6 +735,7 @@ export function CameraPoseView() {
     if (!physicalPosition) return;
     setCapturePosition(physicalPosition.id);
     capturePositionRef.current = physicalPosition.id;
+    setSelectedLibraryVideoNeedsPosition(false);
     setCameraView(physicalPosition.analysisView);
     cameraViewRef.current = physicalPosition.analysisView;
     if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
@@ -743,6 +769,7 @@ export function CameraPoseView() {
     setVariation(entry.variation ?? "");
     trainingSideRef.current = entry.trainingSide ?? "bilateral";
     setTrainingSide(entry.trainingSide ?? "bilateral");
+    setSelectedLibraryVideoNeedsPosition(!entry.capturePosition);
     if (entry.capturePosition) {
       applyCapturePosition(entry.capturePosition);
     } else if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
@@ -2274,6 +2301,11 @@ export function CameraPoseView() {
               )}
               <div style={styles.trainingHint}>
                 <strong>轨迹质量证据</strong>
+                {simulatedNominalReferenceConfigured && (
+                  <div>
+                    当前参考：模拟标准轨迹基线（未校准）。带外表示“与模拟相位路径有偏离”，用于复核与纠正，不是总分或医学结论；你后续的同机位标注视频会用于校准它。
+                  </div>
+                )}
                 {currentReferenceQualityEvidence.map((card) => (
                   <div key={card.id}>{card.title}：{card.detail}（{card.evidence}）</div>
                 ))}
@@ -2520,14 +2552,24 @@ export function CameraPoseView() {
                   setSelectedLibraryVideoId(id);
                   const selected = videoLibrary.find((entry) => entry.id === id);
                   if (selected && applyVideoLibraryContext(selected)) {
-                    void startUrl(`/videos/${selected.video}`, selected.label);
+                    void startUrl(`/${selected.video}`, selected.label);
                   }
                 }}
               >
-                <option value="">{videoLibrary.length ? "选择视频…" : "视频库加载中…"}</option>
-                {videoLibrary.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+                <option value="">{videoLibrary.length ? "选择已标注视频…" : "已标注视频库加载中…"}</option>
+                {videoLibrary.map((entry) => {
+                  const exerciseName = entry.exerciseId
+                    ? EXERCISE_REGISTRY.get(entry.exerciseId)?.nameZh ?? entry.exerciseId
+                    : "未命名动作";
+                  return <option key={entry.id} value={entry.id}>{exerciseName} · {entry.label}</option>;
+                })}
               </select>
             </label>
+            {selectedLibraryVideoNeedsPosition && (
+              <p style={styles.agentWarning}>
+                此旧档案有动作与 rep 标注，但未保存实际八向机位；请在下方确认机位后再解读质量结果。
+              </p>
+            )}
             {isRecording && (
               <p style={styles.recordingBadge}>● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板</p>
             )}
