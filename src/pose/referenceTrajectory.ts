@@ -23,6 +23,17 @@ export const LAT_PULLDOWN_REFERENCE_FEATURES = [
 export type LatPulldownReferenceFeature =
   (typeof LAT_PULLDOWN_REFERENCE_FEATURES)[number];
 
+/** Quality-card groupings are part of the fixed high-lat-pulldown feature schema. */
+export const LAT_PULLDOWN_QUALITY_FEATURE_GROUPS = {
+  trajectoryPath: [
+    "leftWristHeight",
+    "rightWristHeight",
+    "leftElbowAngleDeg",
+    "rightElbowAngleDeg",
+  ],
+  torsoStability: ["torsoLateralShift", "torsoLateralTiltDeg"],
+} as const satisfies Record<string, readonly LatPulldownReferenceFeature[]>;
+
 export type ReferenceSourceStatus =
   | "human_edited_draft"
   | "human_approved_segmentation"

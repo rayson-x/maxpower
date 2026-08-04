@@ -74,6 +74,7 @@ import {
   type RustSealedRep,
   type RustTargetSnapshot,
 } from "../motion/rustCanonicalWasm";
+import { buildLatPulldownQualityEvidence } from "../pose/trajectoryQualityEvidence";
 
 injectHudTheme();
 
@@ -99,6 +100,29 @@ function serializeReferenceComparison(comparison: RustReferenceComparison) {
     canonicalSliceHash: comparison.canonicalSliceHash.toString(),
     features: comparison.features.map((feature) => ({ ...feature })),
   };
+}
+
+function phaseTimingForReferenceRep(
+  rep: RustSealedRep | undefined,
+): { toExtremeMs: number; fromExtremeMs: number } | null {
+  if (!rep) return null;
+  return {
+    toExtremeMs: Number(rep.peakTimestampMs - rep.startTimestampMs),
+    fromExtremeMs: Number(rep.endTimestampMs - rep.peakTimestampMs),
+  };
+}
+
+function qualityEvidenceForComparison(
+  comparison: RustReferenceComparison,
+  reps: readonly RustSealedRep[],
+) {
+  if (comparison.status === "unavailable") {
+    return buildLatPulldownQualityEvidence(null, null);
+  }
+  const rep = reps.find((candidate) =>
+    candidate.repId === comparison.repId && candidate.revision === comparison.repRevision,
+  );
+  return buildLatPulldownQualityEvidence(comparison, phaseTimingForReferenceRep(rep));
 }
 
 // BlazePose-33 拓扑(MediaPipe)
@@ -618,6 +642,11 @@ export function CameraPoseView() {
   const [referenceEvidenceVersion, setReferenceEvidenceVersion] = useState(0);
   const [rustSealedRepCount, setRustSealedRepCount] = useState(0);
   const stopRef = useRef<() => void>(() => undefined);
+
+  const currentReferenceQualityEvidence = qualityEvidenceForComparison(
+    referenceComparison,
+    rustSealedRepsRef.current,
+  );
 
   useEffect(() => {
     const syncWorkspacePage = () => {
@@ -1339,6 +1368,23 @@ export function CameraPoseView() {
       qualityVerdict: rep.qualityVerdict,
       recoveredAcrossGap: rep.recoveredAcrossGap,
     }));
+    const referenceComparisons = rustReferenceEvidenceRef.current.map((record) => {
+      return {
+        subjectEpoch: record.subjectEpoch.toString(),
+        comparison: serializeReferenceComparison(record.comparison),
+        qualityEvidence: qualityEvidenceForComparison(
+          record.comparison,
+          rustSealedRepsRef.current,
+        ),
+      };
+    });
+    const activeReferenceComparison = canonicalSessionRef.current instanceof RustCanonicalWasmSession
+      ? canonicalSessionRef.current.referenceComparison
+      : NO_REVIEWED_REFERENCE;
+    const activeReferenceQualityEvidence = qualityEvidenceForComparison(
+      activeReferenceComparison,
+      rustSealedRepsRef.current,
+    );
     recordedChunksRef.current = [];
     captureDiagnosticsRef.current = [];
     if (isUnmountedRef.current) {
@@ -1498,14 +1544,10 @@ export function CameraPoseView() {
       },
       rustSealedReps,
       referenceComparison: serializeReferenceComparison(
-        canonicalSessionRef.current instanceof RustCanonicalWasmSession
-          ? canonicalSessionRef.current.referenceComparison
-          : NO_REVIEWED_REFERENCE,
+        activeReferenceComparison,
       ),
-      referenceComparisons: rustReferenceEvidenceRef.current.map((record) => ({
-        subjectEpoch: record.subjectEpoch.toString(),
-        comparison: serializeReferenceComparison(record.comparison),
-      })),
+      referenceComparisons,
+      qualityEvidence: activeReferenceQualityEvidence,
     };
     const metadataBlob = new Blob([JSON.stringify(captureMetadata, null, 2)], { type: "application/json" });
     const videoUrl = URL.createObjectURL(videoBlob);
@@ -2798,6 +2840,16 @@ export function CameraPoseView() {
                     ))}
                   </div>
                 )}
+                <div style={styles.catalogMeta}>
+                  <div>QUALITY EVIDENCE · descriptive only · no score</div>
+                  {currentReferenceQualityEvidence.map((card) => (
+                    <div key={card.id}>
+                      {card.title} · {card.status}
+                      <br />{card.detail}
+                      <br />{card.evidence}
+                    </div>
+                  ))}
+                </div>
                 {rustReferenceEvidenceRef.current.length > 0 && (
                   <div style={styles.catalogMeta} key={referenceEvidenceVersion}>
                     SAVED REFERENCE EVIDENCE {rustReferenceEvidenceRef.current.length}
