@@ -966,6 +966,11 @@ pub struct SealedRep {
     pub recovered_across_gap: bool,
     pub disposition: RepDisposition,
     pub evidence_reason: Option<RepEvidenceReason>,
+    /// Descriptive observations about a coherent motion cycle. These never
+    /// decide whether a movement exists: they explain how its measured path
+    /// differs from the recognition profile so callers can give useful
+    /// feedback instead of silently discarding a smaller, real effort.
+    pub observation_findings: Vec<RepObservationFinding>,
 }
 
 /// Immutable recognition decision for one completed movement candidate. Only
@@ -986,6 +991,15 @@ pub enum RepEvidenceReason {
     AntiInterferenceFilter,
     DurationExceeded,
     RequiredJointLoss,
+}
+
+/// Profile-relative observations attached to a sealed movement. They are not
+/// a correctness score and must not be interpreted as a medical judgement.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RepObservationFinding {
+    PrimaryRangeBelowExpectation,
+    SecondaryRangeBelowExpectation,
+    CycleFasterThanExpected,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1172,6 +1186,7 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
         flags |= rep_disposition_code(rep.disposition) << 2;
         bytes.push(flags);
         bytes.push(rep.evidence_reason.map_or(0, rep_evidence_reason_code));
+        bytes.push(rep_observation_findings_flags(&rep.observation_findings));
         bytes.extend_from_slice(&identity_len.to_le_bytes());
         bytes.extend_from_slice(identity);
         bytes.extend_from_slice(&verdict_len.to_le_bytes());
@@ -1227,6 +1242,16 @@ fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
         RepEvidenceReason::DurationExceeded => 6,
         RepEvidenceReason::RequiredJointLoss => 7,
     }
+}
+
+fn rep_observation_findings_flags(findings: &[RepObservationFinding]) -> u8 {
+    findings.iter().fold(0_u8, |flags, finding| {
+        flags | match finding {
+            RepObservationFinding::PrimaryRangeBelowExpectation => 1 << 0,
+            RepObservationFinding::SecondaryRangeBelowExpectation => 1 << 1,
+            RepObservationFinding::CycleFasterThanExpected => 1 << 2,
+        }
+    })
 }
 
 fn set_lifecycle_code(lifecycle: SetLifecycle) -> u8 {
@@ -1757,6 +1782,10 @@ struct RepEngine {
     baseline_primary: Option<f32>,
     baseline_secondary: Option<f32>,
     baseline_torso: Option<f32>,
+    /// `Auto` chooses the orientation from the first complete cycle of a
+    /// set, then retains it. A return is the opposite direction of the same
+    /// movement, not permission to start a new rep in reverse.
+    locked_auto_direction: Option<MovementDirection>,
     previous: Option<RepSample>,
     active: Option<ActiveRep>,
     next_rep_id: u64,
@@ -1771,6 +1800,7 @@ impl RepEngine {
             baseline_primary: None,
             baseline_secondary: None,
             baseline_torso: None,
+            locked_auto_direction: None,
             previous: None,
             active: None,
             next_rep_id: 1,
@@ -1788,19 +1818,33 @@ impl RepEngine {
         self.gap_since_ms = None;
     }
 
-    fn reject_active(
+    fn begin_set(&mut self) {
+        self.abort_active();
+        // Orientation is a set-level decision. A later set may legitimately
+        // begin from the opposite physical extreme, so it must earn a fresh
+        // auto-direction lock rather than inheriting the prior set's choice.
+        self.locked_auto_direction = None;
+    }
+
+    /// The external seam for closing an active attempt. Callers only choose
+    /// whether the evidence is unusable; this module owns immutable
+    /// boundaries, identifiers, reset semantics, and profile provenance.
+    fn finish_active(
         &mut self,
-        reason: RepEvidenceReason,
-        end: Option<RepSample>,
-    ) -> Option<SealedRep> {
-        let active = self.active.take()?;
-        let end = end.unwrap_or(active.peak);
-        self.state.partial_attempts = self.state.partial_attempts.saturating_add(1);
+        active: ActiveRep,
+        end: RepSample,
+        disposition: RepDisposition,
+        evidence_reason: Option<RepEvidenceReason>,
+        observation_findings: Vec<RepObservationFinding>,
+    ) -> SealedRep {
+        if disposition == RepDisposition::Rejected {
+            self.state.partial_attempts = self.state.partial_attempts.saturating_add(1);
+        }
         self.state.phase = RepPhase::Ready;
         self.state.active_rep_id = None;
         self.state.recovered_across_gap = false;
         self.gap_since_ms = None;
-        let rejected = SealedRep {
+        let sealed = SealedRep {
             rep_id: active.rep_id,
             start_frame_id: active.start.frame_id,
             start_timestamp_ms: active.start.timestamp_ms,
@@ -1815,13 +1859,109 @@ impl RepEngine {
             profile_maturity: self.profile.maturity.as_str(),
             quality_verdict: None,
             recovered_across_gap: active.recovered_across_gap,
-            disposition: RepDisposition::Rejected,
-            evidence_reason: Some(reason),
+            disposition,
+            evidence_reason,
+            observation_findings,
         };
-        // Rejected candidates are still immutable, addressable evidence. Never
-        // reuse their id for the next attempt in the same set.
+        // Every outcome, including a filtered one, is immutable and
+        // addressable evidence. Never reuse its id in the same set.
         self.next_rep_id = self.next_rep_id.saturating_add(1);
-        Some(rejected)
+        sealed
+    }
+
+    fn reject_active(
+        &mut self,
+        reason: RepEvidenceReason,
+        end: Option<RepSample>,
+    ) -> Option<SealedRep> {
+        let active = self.active.take()?;
+        let end = end.unwrap_or(active.peak);
+        Some(self.finish_active(
+            active,
+            end,
+            RepDisposition::Rejected,
+            Some(reason),
+            Vec::new(),
+        ))
+    }
+
+    /// A recognition profile has two thresholds for different jobs:
+    /// `min_*` describes the normally comparable range; this lower floor is
+    /// only an anti-noise guard. A cycle between the two is still a real
+    /// effort and must be returned with descriptive findings.
+    fn minimum_observable_primary(&self) -> f32 {
+        (self.profile.min_primary_amplitude * 0.45)
+            .max(self.profile.start_amplitude * 1.20)
+    }
+
+    fn minimum_observable_secondary(&self) -> f32 {
+        (self.profile.min_secondary_amplitude * 0.45)
+            .max(self.profile.start_amplitude * 0.50)
+    }
+
+    fn minimum_observable_duration_ms(&self) -> u64 {
+        (self.profile.min_rep_duration_ms / 2).max(250)
+    }
+
+    fn findings_for(&self, active: &ActiveRep, end: RepSample) -> Vec<RepObservationFinding> {
+        let mut findings = Vec::new();
+        if active.peak_amplitude < self.profile.min_primary_amplitude {
+            findings.push(RepObservationFinding::PrimaryRangeBelowExpectation);
+        }
+        if active.peak_secondary_amplitude < self.profile.min_secondary_amplitude {
+            findings.push(RepObservationFinding::SecondaryRangeBelowExpectation);
+        }
+        if end.timestamp_ms.saturating_sub(active.start.timestamp_ms)
+            < self.profile.min_rep_duration_ms
+        {
+            findings.push(RepObservationFinding::CycleFasterThanExpected);
+        }
+        findings
+    }
+
+    fn seal_active(&mut self, end: RepSample) -> Option<SealedRep> {
+        let active = self.active.take()?;
+        let duration_ms = end.timestamp_ms.saturating_sub(active.start.timestamp_ms);
+        let minimum_evidence = active.peak_amplitude >= self.minimum_observable_primary()
+            && active.peak_secondary_amplitude >= self.minimum_observable_secondary()
+            && duration_ms >= self.minimum_observable_duration_ms();
+        if !minimum_evidence {
+            return Some(self.finish_active(
+                active,
+                end,
+                RepDisposition::Rejected,
+                Some(RepEvidenceReason::IncompleteCycle),
+                Vec::new(),
+            ));
+        }
+        let findings = self.findings_for(&active, end);
+        if self.profile.direction == MovementDirection::Auto
+            && self.locked_auto_direction.is_none()
+        {
+            self.locked_auto_direction = Some(active.direction);
+        }
+        // A rapid full-looking reversal is an ambiguous observation: on a
+        // noisy 2D joint-angle signal it is often a local fold rather than a
+        // second training repetition. Preserve it for review, but do not let
+        // it inflate the formal set volume. This is deliberately independent
+        // from range findings: a short but genuine range is still observable
+        // and remains visible to the caller.
+        let faster_than_expected = duration_ms < self.profile.min_rep_duration_ms;
+        let disposition = if active.recovered_across_gap || faster_than_expected {
+            RepDisposition::NeedsReview
+        } else {
+            RepDisposition::Confirmed
+        };
+        let evidence_reason = active
+            .recovered_across_gap
+            .then_some(RepEvidenceReason::ShortContinuityRecovery);
+        Some(self.finish_active(
+            active,
+            end,
+            disposition,
+            evidence_reason,
+            findings,
+        ))
     }
 
     fn reject_for_subject_change(&mut self) -> Option<SealedRep> {
@@ -1879,8 +2019,13 @@ impl RepEngine {
         let baseline_secondary = *self.baseline_secondary.get_or_insert(secondary);
         let baseline_torso = *self.baseline_torso.get_or_insert(torso);
         let direction = self.active.as_ref().map(|active| active.direction).or_else(|| {
+            let configured_direction = if self.profile.direction == MovementDirection::Auto {
+                self.locked_auto_direction.unwrap_or(MovementDirection::Auto)
+            } else {
+                self.profile.direction
+            };
             activation_direction(
-                self.profile.direction,
+                configured_direction,
                 baseline_primary,
                 primary,
                 baseline_secondary,
@@ -1950,13 +2095,23 @@ impl RepEngine {
                 }
                 active.peak_secondary_amplitude =
                     active.peak_secondary_amplitude.max(secondary_amplitude);
-                if active.peak_amplitude >= self.profile.min_primary_amplitude {
-                    self.state.phase = RepPhase::Peak;
-                    if active.peak_amplitude - amplitude >= self.profile.return_hysteresis {
-                        self.state.phase = RepPhase::Return;
-                    }
-                } else if amplitude <= self.profile.ready_tolerance {
-                    sealed.extend(self.reject_active(RepEvidenceReason::IncompleteCycle, Some(sample)));
+                let return_hysteresis = if active.peak_amplitude >= self.profile.min_primary_amplitude {
+                    self.profile.return_hysteresis
+                } else {
+                    // Smaller but coherent excursions do not need to meet the
+                    // same reversal distance as a full-range movement. They
+                    // are still protected by `seal_active`'s multi-joint
+                    // evidence floor before becoming an outcome.
+                    (active.peak_amplitude * 0.35)
+                        .max(self.profile.start_amplitude * 0.35)
+                        .min(self.profile.return_hysteresis)
+                };
+                let returned = active.peak_amplitude - amplitude >= return_hysteresis;
+                let directly_ready = amplitude <= self.profile.ready_tolerance;
+                if returned {
+                    self.state.phase = RepPhase::Return;
+                } else if directly_ready {
+                    sealed.extend(self.seal_active(sample));
                 }
             }
             RepPhase::Return => {
@@ -1967,50 +2122,15 @@ impl RepEngine {
                     active.peak_amplitude = amplitude;
                     self.state.phase = RepPhase::Peak;
                 } else if amplitude <= seal_ready_threshold(&self.profile, active.peak_amplitude) {
-                    if sample.timestamp_ms.saturating_sub(active.start.timestamp_ms) >= self.profile.min_rep_duration_ms
-                        && active.peak_amplitude >= self.profile.min_primary_amplitude
-                        && active.peak_secondary_amplitude >= self.profile.min_secondary_amplitude
-                    {
-                        let active = self.active.take().expect("sealing active rep");
-                        let next_ready_primary = if self.profile.direction == MovementDirection::Auto {
-                            active.start.primary
+                    let next_ready = self.active.as_ref().map(|active| {
+                        if self.profile.direction == MovementDirection::Auto {
+                            (active.start.primary, active.start.secondary, active.start.torso)
                         } else {
-                            primary
-                        };
-                        let next_ready_secondary = if self.profile.direction == MovementDirection::Auto {
-                            active.start.secondary
-                        } else {
-                            secondary
-                        };
-                        let next_ready_torso = if self.profile.direction == MovementDirection::Auto {
-                            active.start.torso
-                        } else {
-                            torso
-                        };
-                        sealed.push(SealedRep {
-                            rep_id: active.rep_id,
-                            start_frame_id: active.start.frame_id,
-                            start_timestamp_ms: active.start.timestamp_ms,
-                            peak_frame_id: active.peak.frame_id,
-                            peak_timestamp_ms: active.peak.timestamp_ms,
-                            end_frame_id: sample.frame_id,
-                            end_timestamp_ms: sample.timestamp_ms,
-                            revision: 0,
-                            canonical_slice_hash: hash_sample(active.hash, sample),
-                            profile_identity: self.profile.identity.clone(),
-                            profile_hash: self.profile.content_hash,
-                            profile_maturity: self.profile.maturity.as_str(),
-                            quality_verdict: None,
-                            recovered_across_gap: active.recovered_across_gap,
-                            disposition: if active.recovered_across_gap {
-                                RepDisposition::NeedsReview
-                            } else {
-                                RepDisposition::Confirmed
-                            },
-                            evidence_reason: active.recovered_across_gap
-                                .then_some(RepEvidenceReason::ShortContinuityRecovery),
-                        });
-                        self.next_rep_id = self.next_rep_id.saturating_add(1);
+                            (primary, secondary, torso)
+                        }
+                    });
+                    sealed.extend(self.seal_active(sample));
+                    if let Some((next_ready_primary, next_ready_secondary, next_ready_torso)) = next_ready {
                         // Auto-oriented profiles may seal while travelling through the
                         // ready corridor. Keep the cycle's original resting anchor,
                         // rather than the mid-return sample, so the remainder of that
@@ -2018,11 +2138,6 @@ impl RepEngine {
                         self.baseline_primary = Some(next_ready_primary);
                         self.baseline_secondary = Some(next_ready_secondary);
                         self.baseline_torso = Some(next_ready_torso);
-                        self.state.phase = RepPhase::Ready;
-                        self.state.active_rep_id = None;
-                        self.state.recovered_across_gap = false;
-                    } else {
-                        sealed.extend(self.reject_active(RepEvidenceReason::IncompleteCycle, Some(sample)));
                     }
                 }
             }
@@ -2347,7 +2462,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     pub fn begin_set(&mut self) {
         self.set_gate.begin();
         if let Some(rep_engine) = self.rep_engine.as_mut() {
-            rep_engine.abort_active();
+            rep_engine.begin_set();
         }
     }
 
@@ -2426,6 +2541,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             recovered_across_gap: original.recovered_across_gap,
             disposition: original.disposition,
             evidence_reason: original.evidence_reason,
+            observation_findings: original.observation_findings.clone(),
         })
     }
 

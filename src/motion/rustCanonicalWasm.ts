@@ -75,6 +75,11 @@ export interface RustSealedRep {
     | "duration_exceeded"
     | "required_joint_loss"
     | null;
+  observationFindings: readonly (
+    | "primary_range_below_expectation"
+    | "secondary_range_below_expectation"
+    | "cycle_faster_than_expected"
+  )[];
 }
 export interface RustExerciseProfileData {
   identity: string;
@@ -756,6 +761,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       recoveredAcrossGap: rep.recoveredAcrossGap,
       disposition: rep.disposition,
       evidenceReason: rep.evidenceReason,
+      observationFindings: rep.observationFindings,
     })));
   }
 

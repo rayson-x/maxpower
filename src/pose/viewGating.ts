@@ -68,6 +68,7 @@ const CAPTURE_RECOMMENDATIONS: Readonly<Record<string, CaptureRecommendation>> =
   barbell_back_squat: { position: "frontLeft45", reason: "斜前 45° 兼顾杆位、膝轨迹和躯干。" },
   leg_press: { position: "left", reason: "侧面更容易保留腿举的膝髋行程。" },
   romanian_deadlift: { position: "left", reason: "侧面最利于记录髋铰链与躯干角度。" },
+  conventional_deadlift: { position: "left", reason: "侧面最利于记录离地、髋膝伸展与受控回放；不可与 RDL 共用 profile。" },
   walking_lunge: { position: "frontLeft45", reason: "斜前 45° 可分辨左右步次与躯干。" },
   bulgarian_split_squat: { position: "frontLeft45", reason: "斜前 45° 可保留前腿膝轨迹和后脚支撑。" },
   leg_extension: { position: "left", reason: "侧面可清楚记录膝伸展行程。" },

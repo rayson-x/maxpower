@@ -257,6 +257,9 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     id: "romanian_deadlift", nameZh: "罗马尼亚硬拉", nameEn: "Romanian deadlift", aliases: ["RDL"], muscleGroup: "legs", movementPattern: "hip_hinge", equipment: ["barbell or dumbbell"], variationOf: null, maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
+    id: "conventional_deadlift", nameZh: "传统硬拉", nameEn: "Conventional deadlift", aliases: ["硬拉", "传统杠铃硬拉"], muscleGroup: "legs", movementPattern: "hip_hinge", equipment: ["barbell"], variationOf: null, maturity: "catalog_only", source: PROJECT_SOURCE,
+  },
+  {
     id: "walking_lunge", nameZh: "行走箭步蹲", nameEn: "Walking lunge", aliases: ["弓步走"], muscleGroup: "legs", movementPattern: "squat", equipment: ["dumbbell or bodyweight"], variationOf: "bodyweight_squat", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {

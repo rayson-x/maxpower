@@ -61,3 +61,27 @@ test("soft-cycle policy never leaks to a different view or explicit variation", 
   assert.equal(wrongView, source);
   assert.equal(explicitVariation, source);
 });
+
+test("front bilateral rear-delt fly switches to its versioned wrist-spread signal", () => {
+  const { contentHash: _sourceHash, ...sourceWithoutHash } = sourceProfile();
+  const rearSourceWithoutHash = {
+    ...sourceWithoutHash,
+    identity: "rear_delt_fly/front/bilateral/observed/v1",
+  };
+  const source = {
+    ...rearSourceWithoutHash,
+    contentHash: computeRustExerciseProfileHash(rearSourceWithoutHash),
+  };
+  const actual = applyObservedRecognitionCompatibilityPolicy({
+    exerciseId: "rear_delt_fly",
+    capturePosition: "front",
+    trainingSide: "bilateral",
+    variation: "",
+  }, source);
+  assert.equal(actual.identity, "rear_delt_fly/front/bilateral/observed/v1/wrist-spread-cycle/v2");
+  assert.equal(actual.coordinateUnit, "torso-normalized-distance");
+  assert.deepEqual(actual.primarySignal, { kind: "landmark-distance", landmarks: [15, 16] });
+  assert.deepEqual(actual.secondarySignal, { kind: "landmark-distance", landmarks: [15, 16] });
+  assert.equal(actual.minPrimaryAmplitude, 0.15);
+  assert.notEqual(actual.contentHash, source.contentHash);
+});

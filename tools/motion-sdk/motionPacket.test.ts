@@ -110,13 +110,13 @@ test("minor extension decodes subject identity and immutable sealed rep", () => 
   const sequence = new TextEncoder().encode("fixture:rep");
   const algorithm = new TextEncoder().encode("motion-session-replay/v1");
   const identity = new TextEncoder().encode("lat-pulldown/rear/bilateral/cable/v1");
-  const length = 44 + sequence.length + algorithm.length + 4 + 30 + 83 + identity.length + 5;
+  const length = 44 + sequence.length + algorithm.length + 4 + 30 + 84 + identity.length + 5;
   const buffer = new ArrayBuffer(length);
   const view = new DataView(buffer);
   const bytes = new Uint8Array(buffer);
   bytes.set(new TextEncoder().encode("MOTN"), 0);
   view.setUint16(4, 1, true);
-  view.setUint16(6, 4, true);
+  view.setUint16(6, 5, true);
   view.setUint32(8, length, true);
   view.setBigUint64(12, 10n, true);
   view.setBigUint64(20, 1_000n, true);
@@ -163,6 +163,8 @@ test("minor extension decodes subject identity and immutable sealed rep", () => 
   offset += 1;
   view.setUint8(offset, 1);
   offset += 1;
+  view.setUint8(offset, 0b101);
+  offset += 1;
   view.setUint16(offset, identity.length, true);
   offset += 2;
   bytes.set(identity, offset);
@@ -183,6 +185,10 @@ test("minor extension decodes subject identity and immutable sealed rep", () => 
   assert.equal(packet.completedReps[0].recoveredAcrossGap, true);
   assert.equal(packet.completedReps[0].disposition, "needs_review");
   assert.equal(packet.completedReps[0].evidenceReason, "short_continuity_recovery");
+  assert.deepEqual(packet.completedReps[0].observationFindings, [
+    "primary_range_below_expectation",
+    "cycle_faster_than_expected",
+  ]);
   assert.equal(packet.setState.lifecycle, "paused");
 });
 

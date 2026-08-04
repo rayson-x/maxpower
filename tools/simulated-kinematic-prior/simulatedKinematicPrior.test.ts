@@ -62,6 +62,18 @@ test("simulated priors cover every five-split catalog exercise without claiming 
   }
 });
 
+test("squat, Romanian deadlift, and conventional deadlift retain separate phase priors", () => {
+  const templates = listSimulatedKinematicPriorTemplates();
+  const find = (exerciseId: string) => templates.find((template) => template.exerciseId === exerciseId)!;
+  const squat = find("barbell_back_squat");
+  const romanian = find("romanian_deadlift");
+  const conventional = find("conventional_deadlift");
+  assert.ok(squat.features.some((feature) => feature.feature === "kneeAngleDeg" && feature.trend === "decrease_to_extreme"));
+  assert.ok(romanian.features.some((feature) => feature.feature === "kneeAngleDeg" && feature.trend === "hold"));
+  assert.ok(conventional.features.some((feature) => feature.feature === "kneeAngleDeg" && feature.trend === "increase_to_extreme"));
+  assert.notEqual(conventional.templateId, romanian.templateId);
+});
+
 test("prior instantiation requires exact observable identity instead of guessing equipment or camera context", () => {
   assert.equal(
     instantiateSimulatedKinematicPrior({ ...squatIdentity, variation: "" }).status,

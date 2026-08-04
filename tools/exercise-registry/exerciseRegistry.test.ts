@@ -38,6 +38,7 @@ test("catalog covers every training muscle group and carries the group in each r
   }
   assert.equal(EXERCISE_REGISTRY.require("barbell_bench_press").muscleGroup, "chest");
   assert.equal(EXERCISE_REGISTRY.require("romanian_deadlift").muscleGroup, "legs");
+  assert.equal(EXERCISE_REGISTRY.require("conventional_deadlift").movementPattern, "hip_hinge");
   assert.equal(EXERCISE_REGISTRY.require("triceps_pushdown").muscleGroup, "arms");
 });
 
@@ -74,6 +75,7 @@ test("registry owns free-text matching and leaves unknown labels unresolved", ()
   assert.equal(EXERCISE_REGISTRY.matchText("宽握高位下拉")?.id, "wide_grip_lat_pulldown");
   assert.equal(EXERCISE_REGISTRY.matchText("Lat_Pulldown")?.id, "lat_pulldown");
   assert.equal(EXERCISE_REGISTRY.matchText("正手引体")?.id, "pull_up");
+  assert.equal(EXERCISE_REGISTRY.matchText("传统杠铃硬拉")?.id, "conventional_deadlift");
   assert.equal(
     EXERCISE_REGISTRY.matchText("宽握高位下拉 Lat pulldown")?.id,
     "wide_grip_lat_pulldown",

@@ -234,6 +234,7 @@ fn sealed_rep() -> SealedRep {
         recovered_across_gap: false,
         disposition: RepDisposition::Confirmed,
         evidence_reason: None,
+        observation_findings: vec![],
     }
 }
 

@@ -275,7 +275,7 @@ pub extern "C" fn motion_sdk_begin_set() -> i32 {
     }
     runtime.set_gate.begin();
     if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-        rep_engine.abort_active();
+        rep_engine.begin_set();
         runtime.rep_state = rep_engine.state.clone();
     } else {
         runtime.rep_state = super::RepStateSnapshot::default();
@@ -565,7 +565,7 @@ fn process_rep(runtime: &mut WebRuntime) {
             .completed_reps
             .iter()
             .rev()
-            .find(|rep| rep.disposition == super::RepDisposition::Confirmed),
+            .find(|rep| rep.disposition != super::RepDisposition::Rejected),
     ) {
         runtime.reference_state =
             if rep.profile_identity != *bound_identity || rep.profile_hash != *bound_hash {
@@ -591,7 +591,7 @@ fn process_rep(runtime: &mut WebRuntime) {
             .completed_reps
             .iter()
             .rev()
-            .find(|rep| rep.disposition == super::RepDisposition::Confirmed),
+            .find(|rep| rep.disposition != super::RepDisposition::Rejected),
         runtime.rep_engine.as_ref(),
     ) {
         runtime.simulated_baseline_state =
@@ -623,7 +623,7 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
     let packet = super::MotionPacket {
         lineage: super::PacketLineage {
             sequence_id: runtime.sequence_id.clone(),
-            contract: super::ContractVersion { major: 1, minor: 4 },
+            contract: super::ContractVersion { major: 1, minor: 5 },
             algorithm_version: "rust-canonical-wasm/v1".into(),
             config_version: "web-motion-config/v1".into(),
             inference_version: "mediapipe-host-adapter/v1".into(),

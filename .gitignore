@@ -58,6 +58,7 @@ tools/harness/out/
 /public/motion-sdk/
 
 # Derived skeletal trajectories remain local unless explicitly de-identified.
+/data/
 /data/reference/private/
 
 # Private field recordings are served locally for review, never committed.

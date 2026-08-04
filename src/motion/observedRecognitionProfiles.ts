@@ -65,38 +65,56 @@ export function resolveObservedRecognitionProfile(
 }
 
 /**
- * A conservative compatibility pass for the first real-world lateral-raise
- * profile. It keeps the exact action/view/side gate and all continuity and
- * anti-interference rules, but accepts an almost-complete bilateral cycle
- * rather than insisting on the in-sample 20th-percentile amplitude floor.
- * This is a provisional counting policy, not a form-quality threshold.
+ * A conservative compatibility pass for a small number of field-observed
+ * profiles. Every branch keeps the exact action/view/side gate and returns a
+ * separately identified, provisional profile; it never changes the archived
+ * source profile or creates a quality threshold.
  */
 export function applyObservedRecognitionCompatibilityPolicy(
   context: RustProfileContext,
   profile: RustExerciseProfileData,
 ): RustExerciseProfileData {
-  if (
-    context.exerciseId !== "lateral_raise"
-    || context.capturePosition !== "front"
-    || context.trainingSide !== "bilateral"
-    || context.variation.trim() !== ""
-  ) {
-    return profile;
+  if (context.trainingSide !== "bilateral" || context.variation.trim() !== "") return profile;
+  if (context.exerciseId === "lateral_raise" && context.capturePosition === "front") {
+    return withHash({
+      ...profile,
+      identity: `${profile.identity}/soft-cycle/v1`,
+      primarySignal: { ...profile.primarySignal },
+      secondarySignal: { ...profile.secondarySignal },
+      startAmplitude: profile.startAmplitude * 0.85,
+      minPrimaryAmplitude: profile.minPrimaryAmplitude * 0.85,
+      minSecondaryAmplitude: profile.minSecondaryAmplitude * 0.85,
+      returnHysteresis: profile.returnHysteresis * 0.85,
+      readyTolerance: profile.readyTolerance * 0.85,
+      minRepDurationMs: Math.round(profile.minRepDurationMs * 0.85),
+    });
   }
-  const withoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
+  if (context.exerciseId !== "rear_delt_fly" || context.capturePosition !== "front") return profile;
+  // The archived front-view rear-delt-fly profile used projected shoulder
+  // angles. Their local folds were enough to create false cycles. In this
+  // view the bilateral wrist spread is the direct observable of abduction, so
+  // make it the versioned v2 segmentation signal. It remains a counting
+  // initializer, not an ideal range-of-motion requirement.
+  return withHash({
     ...profile,
-    identity: `${profile.identity}/soft-cycle/v1`,
-    primarySignal: { ...profile.primarySignal },
-    secondarySignal: { ...profile.secondarySignal },
-    startAmplitude: profile.startAmplitude * 0.85,
-    minPrimaryAmplitude: profile.minPrimaryAmplitude * 0.85,
-    minSecondaryAmplitude: profile.minSecondaryAmplitude * 0.85,
-    returnHysteresis: profile.returnHysteresis * 0.85,
-    readyTolerance: profile.readyTolerance * 0.85,
-    minRepDurationMs: Math.round(profile.minRepDurationMs * 0.85),
-  };
+    identity: `${profile.identity}/wrist-spread-cycle/v2`,
+    coordinateUnit: "torso-normalized-distance",
+    primarySignal: { kind: "landmark-distance", landmarks: [15, 16] },
+    secondarySignal: { kind: "landmark-distance", landmarks: [15, 16] },
+    direction: "increasing",
+    startAmplitude: 0.04,
+    minPrimaryAmplitude: 0.15,
+    minSecondaryAmplitude: 0.15,
+    returnHysteresis: 0.04,
+    readyTolerance: 0.05,
+  });
+}
+
+function withHash(
+  profile: Omit<RustExerciseProfileData, "contentHash">,
+): RustExerciseProfileData {
   return {
-    ...withoutHash,
-    contentHash: computeRustExerciseProfileHash(withoutHash),
+    ...profile,
+    contentHash: computeRustExerciseProfileHash(profile),
   };
 }

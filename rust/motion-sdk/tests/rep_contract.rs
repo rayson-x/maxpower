@@ -4,7 +4,7 @@ use form_coach_motion_sdk::{
     AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseProfile,
     ExerciseMaturity, ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter, FrameLease,
     MotionSession, MovementDirection, PoseObservation, PoseSchemaId, RecordingOutputAdapter,
-    RepBoundaryRevision, RepDisposition, RepEvidenceReason, RepPhase, SessionConfig, SetLifecycle, SubjectPolicy,
+    RepBoundaryRevision, RepDisposition, RepEvidenceReason, RepObservationFinding, RepPhase, SessionConfig, SetLifecycle, SubjectPolicy,
 };
 
 fn config() -> SessionConfig {
@@ -312,7 +312,7 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
 }
 
 #[test]
-fn bottom_oscillation_does_not_double_count_and_half_cycle_is_partial() {
+fn bottom_oscillation_does_not_double_count_and_limited_cycle_keeps_feedback() {
     let full_wrist = [
         0.20, 0.25, 0.45, 0.70, 0.78, 0.74, 0.79, 0.73, 0.55, 0.32, 0.21,
     ];
@@ -335,13 +335,17 @@ fn bottom_oscillation_does_not_double_count_and_half_cycle_is_partial() {
         .flat_map(|packet| packet.completed_reps.iter())
         .collect::<Vec<_>>();
     assert_eq!(half_outcomes.len(), 1);
-    assert_eq!(half_outcomes[0].disposition, RepDisposition::Rejected);
-    assert_eq!(half_outcomes[0].evidence_reason, Some(RepEvidenceReason::IncompleteCycle));
-    assert!(half.last().unwrap().rep_state.partial_attempts >= 1);
+    assert_eq!(half_outcomes[0].disposition, RepDisposition::Confirmed);
+    assert_eq!(half_outcomes[0].evidence_reason, None);
+    assert_eq!(
+        half_outcomes[0].observation_findings,
+        vec![RepObservationFinding::SecondaryRangeBelowExpectation],
+    );
+    assert_eq!(half.last().unwrap().rep_state.partial_attempts, 0);
 }
 
 #[test]
-fn rejected_candidates_keep_unique_immutable_ids() {
+fn limited_cycles_keep_unique_immutable_ids_and_findings() {
     let half_wrist = [
         0.20, 0.28, 0.38, 0.44, 0.35, 0.24, 0.20,
         0.20, 0.28, 0.38, 0.44, 0.35, 0.24, 0.20,
@@ -356,10 +360,33 @@ fn rejected_candidates_keep_unique_immutable_ids() {
         .flat_map(|packet| packet.completed_reps.iter())
         .collect::<Vec<_>>();
     assert_eq!(outcomes.len(), 2);
-    assert!(outcomes.iter().all(|rep| rep.disposition == RepDisposition::Rejected));
+    assert!(outcomes.iter().all(|rep| rep.disposition == RepDisposition::Confirmed));
+    assert!(outcomes.iter().all(|rep| rep.observation_findings
+        .contains(&RepObservationFinding::SecondaryRangeBelowExpectation)));
     assert_eq!(outcomes[0].rep_id, 1);
     assert_eq!(outcomes[1].rep_id, 2);
     assert_ne!(outcomes[0].canonical_slice_hash, outcomes[1].canonical_slice_hash);
+}
+
+#[test]
+fn small_but_coherent_multi_joint_cycle_counts_with_range_feedback() {
+    let wrist_y = [0.20, 0.23, 0.30, 0.36, 0.32, 0.25, 0.20];
+    let elbow_y = [0.30, 0.32, 0.36, 0.44, 0.40, 0.33, 0.30];
+    let packets = replay(&wrist_y, &elbow_y);
+    let outcomes = packets
+        .iter()
+        .flat_map(|packet| packet.completed_reps.iter())
+        .collect::<Vec<_>>();
+
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].disposition, RepDisposition::Confirmed);
+    assert_eq!(
+        outcomes[0].observation_findings,
+        vec![
+            RepObservationFinding::PrimaryRangeBelowExpectation,
+            RepObservationFinding::SecondaryRangeBelowExpectation,
+        ],
+    );
 }
 
 #[test]

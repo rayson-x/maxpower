@@ -270,13 +270,18 @@ function configureRustExerciseProfile(
   const simulatedProfile = !builtInProfile && !observedProfile
     ? resolveSimulatedRecognitionProfile(context)
     : null;
-  if (observedProfile && !keepsBuiltInReferenceBinding) {
-    session.installExerciseProfileData(observedProfile);
-  } else if (simulatedProfile) {
-    session.installExerciseProfileData(simulatedProfile);
+  const dataProfile = observedProfile && !keepsBuiltInReferenceBinding
+    ? observedProfile
+    : simulatedProfile;
+  if (dataProfile) {
+    session.installExerciseProfileData(dataProfile);
+    // Recognition profiles, whether sourced from reviewed observations or a
+    // simulated prior, may receive the same broad descriptive corridor. The
+    // baseline never participates in cycle sealing; it only explains a
+    // sealed motion's phase path to the user.
     const baseline = buildSimulatedTrajectoryBaseline(
       context,
-      simulatedProfile,
+      dataProfile,
       modelPath.includes("heavy") ? "mediapipe-pose-heavy" : "mediapipe-pose-provisional",
     );
     if (baseline) session.installSimulatedTrajectoryBaseline(baseline);
@@ -561,6 +566,14 @@ function candidateEvidenceLabel(reason: RustSealedRep["evidenceReason"]): string
     duration_exceeded: "动作时长超出上限",
     required_joint_loss: "关键关节不可用",
   }[reason ?? ""] ?? "未说明原因";
+}
+
+function observationFindingLabel(finding: RustSealedRep["observationFindings"][number]): string {
+  return {
+    primary_range_below_expectation: "主要动作行程偏小",
+    secondary_range_below_expectation: "辅助关节参与幅度偏小",
+    cycle_faster_than_expected: "动作节奏偏快，控制信息不足",
+  }[finding];
 }
 
 export function CameraPoseView() {
@@ -1582,6 +1595,7 @@ export function CameraPoseView() {
       recoveredAcrossGap: rep.recoveredAcrossGap,
       disposition: rep.disposition,
       evidenceReason: rep.evidenceReason,
+      observationFindings: rep.observationFindings,
     }));
     const rustNeedsReviewReps = rustNeedsReviewRepsRef.current.map((rep) => ({
       repId: rep.repId.toString(),
@@ -1593,6 +1607,7 @@ export function CameraPoseView() {
       endTimestampMs: rebaseRepTimestamp(rep.endTimestampMs),
       disposition: rep.disposition,
       evidenceReason: rep.evidenceReason,
+      observationFindings: rep.observationFindings,
       canonicalSliceHash: rep.canonicalSliceHash.toString(),
     }));
     const rustRejectedReps = rustRejectedRepsRef.current.map((rep) => ({
@@ -1604,6 +1619,7 @@ export function CameraPoseView() {
       endFrameId: rep.endFrameId.toString(),
       endTimestampMs: rebaseRepTimestamp(rep.endTimestampMs),
       evidenceReason: rep.evidenceReason,
+      observationFindings: rep.observationFindings,
       canonicalSliceHash: rep.canonicalSliceHash.toString(),
     }));
     const referenceComparisons = rustReferenceEvidenceRef.current.map((record) => {
@@ -2520,6 +2536,17 @@ export function CameraPoseView() {
                   {rustNeedsReviewRepsRef.current.map((rep) => `待审核 #${rep.repId.toString()}（${candidateEvidenceLabel(rep.evidenceReason)}）`).join("；")}
                   {rustNeedsReviewRepCount > 0 && rustRejectedRepCount > 0 ? "；" : ""}
                   {rustRejectedRepsRef.current.map((rep) => `已过滤 #${rep.repId.toString()}（${candidateEvidenceLabel(rep.evidenceReason)}）`).join("；")}
+                </p>
+              )}
+              {[...rustSealedRepsRef.current, ...rustNeedsReviewRepsRef.current]
+                .some((rep) => rep.observationFindings.length > 0) && (
+                <p style={styles.trainingHint}>
+                  本组改进提示：
+                  {[...rustSealedRepsRef.current, ...rustNeedsReviewRepsRef.current]
+                    .filter((rep) => rep.observationFindings.length > 0)
+                    .map((rep) => `#${rep.repId.toString()}（${rep.observationFindings.map(observationFindingLabel).join("、")}）`)
+                    .join("；")}
+                  。这些动作已经被识别；提示仅用于和当前参考动作对照，不是失败判定。
                 </p>
               )}
               {setAnalysis?.score && (

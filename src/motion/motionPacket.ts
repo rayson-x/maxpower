@@ -26,6 +26,10 @@ export type MotionRepEvidenceReason =
   | "anti_interference_filter"
   | "duration_exceeded"
   | "required_joint_loss";
+export type MotionRepObservationFinding =
+  | "primary_range_below_expectation"
+  | "secondary_range_below_expectation"
+  | "cycle_faster_than_expected";
 
 export interface DecodedSealedRep {
   readonly repId: bigint;
@@ -44,6 +48,7 @@ export interface DecodedSealedRep {
   readonly recoveredAcrossGap: boolean;
   readonly disposition: MotionRepDisposition;
   readonly evidenceReason: MotionRepEvidenceReason | null;
+  readonly observationFindings: readonly MotionRepObservationFinding[];
 }
 
 export interface DecodedMotionLandmark {
@@ -205,12 +210,20 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     offset += 1;
     const repCount = view.getUint16(offset, true);
     offset += 2;
-    // v1.4 adds the immutable candidate disposition and evidence byte. Keep
+    // v1.4 adds the immutable candidate disposition and evidence byte. v1.5
+    // adds profile-relative observations without changing the immutable
+    // boundary object. Keep
     // v1.0-v1.3 RPS1 recordings replayable: their historical sealed reps
     // were all formal confirmations because no candidate vocabulary existed.
     const hasCandidateDisposition = minor >= 4;
+    const hasObservationFindings = minor >= 5;
     for (let index = 0; index < repCount; index += 1) {
-      ensureAvailable(offset, hasCandidateDisposition ? 83 : 82, declaredLength, `sealed rep ${index}`);
+      ensureAvailable(
+        offset,
+        hasCandidateDisposition ? (hasObservationFindings ? 84 : 83) : 82,
+        declaredLength,
+        `sealed rep ${index}`,
+      );
       const values = Array.from({ length: 9 }, () => {
         const value = view.getBigUint64(offset, true);
         offset += 8;
@@ -226,6 +239,10 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
         ? decodeRepEvidenceReason(view.getUint8(offset))
         : null;
       if (hasCandidateDisposition) offset += 1;
+      const observationFindings = hasObservationFindings
+        ? decodeRepObservationFindings(view.getUint8(offset))
+        : Object.freeze([] as MotionRepObservationFinding[]);
+      if (hasObservationFindings) offset += 1;
       const identityLength = view.getUint16(offset, true);
       offset += 2;
       const profileIdentity = readString(
@@ -264,6 +281,7 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
         recoveredAcrossGap: (flags & (1 << 1)) !== 0,
         disposition: hasCandidateDisposition ? decodeRepDisposition((flags >> 2) & 0b11) : "confirmed",
         evidenceReason,
+        observationFindings,
       }));
     }
     if (offset < declaredLength) {
@@ -366,6 +384,17 @@ function decodeRepEvidenceReason(code: number): MotionRepEvidenceReason | null {
     case 7: return "required_joint_loss";
     default: throw new Error(`MotionPacket rep evidence reason code ${code} is invalid`);
   }
+}
+
+function decodeRepObservationFindings(flags: number): readonly MotionRepObservationFinding[] {
+  if ((flags & ~0b111) !== 0) {
+    throw new Error(`MotionPacket rep observation findings flags ${flags} are invalid`);
+  }
+  const findings: MotionRepObservationFinding[] = [];
+  if ((flags & (1 << 0)) !== 0) findings.push("primary_range_below_expectation");
+  if ((flags & (1 << 1)) !== 0) findings.push("secondary_range_below_expectation");
+  if ((flags & (1 << 2)) !== 0) findings.push("cycle_faster_than_expected");
+  return Object.freeze(findings);
 }
 
 function decodeSetLifecycle(code: number): MotionSetLifecycle {
