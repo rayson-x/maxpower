@@ -29,6 +29,7 @@ import {
   resolveObservedRecognitionProfile,
 } from "../motion/observedRecognitionProfiles";
 import { resolveSimulatedRecognitionProfile } from "../motion/simulatedRecognitionProfile";
+import { buildSimulatedTrajectoryBaseline } from "../motion/simulatedTrajectoryBaseline";
 import {
   createPoseContinuitySession,
   type CanonicalPoseFrame,
@@ -273,6 +274,12 @@ function configureRustExerciseProfile(
     session.installExerciseProfileData(observedProfile);
   } else if (simulatedProfile) {
     session.installExerciseProfileData(simulatedProfile);
+    const baseline = buildSimulatedTrajectoryBaseline(
+      context,
+      simulatedProfile,
+      modelPath.includes("heavy") ? "mediapipe-pose-heavy" : "mediapipe-pose-provisional",
+    );
+    if (baseline) session.installSimulatedTrajectoryBaseline(baseline);
   } else {
     session.setExerciseProfile(builtInProfile);
   }
@@ -683,6 +690,9 @@ export function CameraPoseView() {
   const [referenceComparison, setReferenceComparison] = useState<RustReferenceComparison>(
     NO_REVIEWED_REFERENCE,
   );
+  const [simulatedBaselineComparison, setSimulatedBaselineComparison] = useState<RustReferenceComparison>(
+    NO_REVIEWED_REFERENCE,
+  );
   const [referenceEvidenceVersion, setReferenceEvidenceVersion] = useState(0);
   const [rustSealedRepCount, setRustSealedRepCount] = useState(0);
   const [rustNeedsReviewRepCount, setRustNeedsReviewRepCount] = useState(0);
@@ -899,6 +909,7 @@ export function CameraPoseView() {
     inferenceCompletionGateRef.current.resetSequence();
     referenceComparisonKeyRef.current = referenceComparisonKey(NO_REVIEWED_REFERENCE);
     setReferenceComparison(NO_REVIEWED_REFERENCE);
+    setSimulatedBaselineComparison(NO_REVIEWED_REFERENCE);
     if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
       canonicalSessionRef.current.close();
     }
@@ -1275,6 +1286,9 @@ export function CameraPoseView() {
               referenceComparisonKeyRef.current = nextReferenceKey;
               setReferenceComparison(motionPacket.referenceComparison);
             }
+            if (rustSession) {
+              setSimulatedBaselineComparison(rustSession.simulatedBaselineComparison);
+            }
             processingStage = "packet-routing";
             const routeTiming = routeWebMotionPacket(motionPacket, {
               render: (packet) => {
@@ -1585,6 +1599,9 @@ export function CameraPoseView() {
       activeReferenceComparison,
       rustSealedRepsRef.current,
     );
+    const activeSimulatedBaselineComparison = canonicalSessionRef.current instanceof RustCanonicalWasmSession
+      ? canonicalSessionRef.current.simulatedBaselineComparison
+      : NO_REVIEWED_REFERENCE;
     recordedChunksRef.current = [];
     captureDiagnosticsRef.current = [];
     if (isUnmountedRef.current) {
@@ -1758,6 +1775,9 @@ export function CameraPoseView() {
       rustRejectedReps,
       referenceComparison: serializeReferenceComparison(
         activeReferenceComparison,
+      ),
+      simulatedBaselineComparison: serializeReferenceComparison(
+        activeSimulatedBaselineComparison,
       ),
       referenceComparisons,
       qualityEvidence: activeReferenceQualityEvidence,
@@ -2492,7 +2512,16 @@ export function CameraPoseView() {
                 )}
                 {!simulatedNominalReferenceConfigured && simulatedRecognitionBaseline && rustSealedRepCount > 0 && (
                   <div>
-                    当前动作使用 Rust 内的模拟运动学先验（未校准）：它只提供已封装动作的相位方向与可观测性描述，绝不改变正式次数，也不输出“标准/正确”评分。请用同机位审核资料建立独立的轨迹比较 profile。
+                    当前动作使用 Rust 内的模拟运动学 baseline（未校准）：它对同一 Rust 已封装 rep 的主/副信号相位做描述性比对，绝不改变正式次数，也不输出“标准/正确”评分。请用同机位审核资料建立独立的轨迹比较 profile。
+                  </div>
+                )}
+                {simulatedBaselineComparison.status !== "unavailable" && (
+                  <div>
+                    模拟 baseline · rep {simulatedBaselineComparison.repId.toString()} · {simulatedBaselineComparison.status}
+                    {simulatedBaselineComparison.features.map((feature) => (
+                      ` · ${feature.feature} 可比 ${feature.comparableNodeCount}/32，带外 ${feature.outsideNodeCount}`
+                    )).join("")}
+                    。仅供复核，不是质量评分。
                   </div>
                 )}
                 {currentReferenceQualityEvidence.map((card) => (
@@ -3112,6 +3141,7 @@ export function CameraPoseView() {
                   <br />P95 MediaPipe {activePerformance.inferenceMsP95?.toFixed(1) ?? "—"}ms / Rust {activePerformance.rustCoreMsP95?.toFixed(2) ?? "—"}ms / decode {activePerformance.decodeMsP95?.toFixed(2) ?? "—"}ms · age {activePerformance.packetAgeMsP95?.toFixed(1) ?? "—"}ms · drop {activePerformance.droppedFrames}
                   <br />PROFILE {latest?.activeProfile ?? "none"} · provisional
                   <br />REFERENCE {referenceComparison.status} · {referenceComparison.reason ?? "descriptive evidence"} · verdict null
+                  <br />SIMULATED BASELINE {simulatedBaselineComparison.status} · descriptive only · verdict null
                 </p>
                 {referenceComparison.status !== "unavailable" && (
                   <div style={styles.catalogMeta}>
@@ -3120,6 +3150,21 @@ export function CameraPoseView() {
                       {` · slice ${referenceComparison.canonicalSliceHash.toString()} · profile ${referenceComparison.profileHash.toString()}`}
                     </div>
                     {referenceComparison.features.map((feature) => (
+                      <div key={feature.feature}>
+                        {feature.feature}: comparable {feature.comparableNodeCount}
+                        {` · unknown ${feature.unknownNodeCount} · outside ${feature.outsideNodeCount}`}
+                        {` · max-run ${feature.maximumConsecutiveOutsideNodes}`}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {simulatedBaselineComparison.status !== "unavailable" && (
+                  <div style={styles.catalogMeta}>
+                    <div>
+                      SIMULATED REP {simulatedBaselineComparison.repId.toString()} r{simulatedBaselineComparison.repRevision}
+                      {` · slice ${simulatedBaselineComparison.canonicalSliceHash.toString()} · profile ${simulatedBaselineComparison.profileHash.toString()}`}
+                    </div>
+                    {simulatedBaselineComparison.features.map((feature) => (
                       <div key={feature.feature}>
                         {feature.feature}: comparable {feature.comparableNodeCount}
                         {` · unknown ${feature.unknownNodeCount} · outside ${feature.outsideNodeCount}`}

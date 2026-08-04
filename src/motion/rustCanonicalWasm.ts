@@ -142,8 +142,48 @@ export type RustReferenceComparison =
   | RustReferenceComparisonEvidence;
 export type RustReferenceRuntimeContext =
   PersonalProvisionalReferenceProfile["identity"];
+export interface RustTrajectoryIdentity {
+  readonly exerciseId: string;
+  readonly capturePosition: string;
+  readonly variation: string;
+  readonly trainingSide: string;
+  readonly equipment: string;
+  readonly coordinateSystem: string;
+  readonly featureSchemaId: string;
+  readonly poseModelVersion: string;
+}
 export interface RustReferenceProfileInstallation {
   readonly profile: PersonalProvisionalReferenceProfile;
+}
+export interface RustSimulatedTrajectoryBaselineInstallation {
+  readonly baseline: Readonly<{
+    schemaVersion: "form-coach-simulated-trajectory-baseline/v1";
+    source: "simulated_kinematic_prior";
+    evidenceStatus: "uncalibrated";
+    calibrationStatus: "uncalibrated";
+    identity: RustTrajectoryIdentity;
+    profileBinding: Readonly<{
+      exerciseProfileIdentity: string;
+      exerciseProfileHash: string;
+    }>;
+    featureNames: readonly ["primarySignalPhase", "secondarySignalPhase"];
+    corridor: Readonly<{
+      nodes: readonly Readonly<{
+        phase: "to_extreme" | "from_extreme";
+        phasePercent: number;
+        features: readonly Readonly<{
+          qLow: number;
+          qHigh: number;
+          medianAbsoluteDeviation: null;
+          nObserved: number;
+        }>[];
+      }>[];
+    }>;
+    matchingPolicy: Readonly<{
+      minimumObservationConfidence: number;
+      unrestrictedDtwAllowed: false;
+    }>;
+  }>;
 }
 export interface RustWasmTiming {
   readonly coreMs: number;
@@ -229,6 +269,13 @@ export interface MotionWasmExports extends WebAssembly.Exports {
   motion_sdk_reference_field(field: number, high: number): number;
   motion_sdk_reference_feature_count(): number;
   motion_sdk_reference_feature_number(index: number, field: number): number;
+  motion_sdk_begin_simulated_baseline(length: number): number;
+  motion_sdk_set_simulated_baseline_byte(index: number, value: number): number;
+  motion_sdk_commit_simulated_baseline(): number;
+  motion_sdk_simulated_baseline_status(): number;
+  motion_sdk_simulated_baseline_field(field: number, high: number): number;
+  motion_sdk_simulated_baseline_feature_count(): number;
+  motion_sdk_simulated_baseline_feature_number(index: number, field: number): number;
   motion_sdk_rep_state_field(field: number): number;
   motion_sdk_completed_rep_count(): number;
   motion_sdk_completed_rep_field(index: number, field: number): number;
@@ -293,8 +340,16 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     profileIdentity: null,
     qualityVerdict: null,
   });
+  simulatedBaselineComparison: RustReferenceComparison = Object.freeze({
+    status: "unavailable",
+    reason: "no-installed-reviewed-profile",
+    profileIdentity: null,
+    qualityVerdict: null,
+  });
   private installedReferenceIdentity: string | null = null;
   private installedReferenceFeatureNames: readonly string[] = [];
+  private installedSimulatedBaselineIdentity: string | null = null;
+  private installedSimulatedBaselineFeatureNames: readonly string[] = [];
 
   constructor(
     private readonly config: RustCanonicalWasmSessionConfig,
@@ -359,6 +414,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     this.lastTiming = Object.freeze({ coreMs, decodeMs });
     this.applyDecodedPacket(this.lastDecodedPacket);
     this.referenceComparison = this.readReferenceComparison();
+    this.simulatedBaselineComparison = this.readSimulatedBaselineComparison();
     this.lastCandidateDiagnostics = this.readCandidateDiagnostics();
     return this.readFrame(observation, observation.landmarks, observation.worldLandmarks);
   }
@@ -419,6 +475,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     this.lastTiming = Object.freeze({ coreMs, decodeMs });
     this.applyDecodedPacket(this.lastDecodedPacket);
     this.referenceComparison = this.readReferenceComparison();
+    this.simulatedBaselineComparison = this.readSimulatedBaselineComparison();
     this.lastCandidateDiagnostics = this.readCandidateDiagnostics();
     const selected = this.lastTarget.state !== "locked" || this.lastTarget.selectedCandidateId === null
       ? undefined
@@ -550,6 +607,27 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     this.installedReferenceIdentity = referenceIdentityKey(input.profile.identity);
     this.installedReferenceFeatureNames = Object.freeze([...input.profile.featureNames]);
     this.referenceComparison = this.readReferenceComparison();
+  }
+
+  /** Installs a broad simulated phase corridor that is consumed and compared
+   * inside Rust. It is evidence for review only: no simulation can emit a
+   * normative quality verdict or alter a sealed-rep count. */
+  installSimulatedTrajectoryBaseline(input: RustSimulatedTrajectoryBaselineInstallation): void {
+    const envelope = new TextEncoder().encode(JSON.stringify(input));
+    ensureOk(
+      this.wasm.motion_sdk_begin_simulated_baseline(envelope.length),
+      "begin_simulated_baseline",
+    );
+    envelope.forEach((value, index) => {
+      ensureOk(
+        this.wasm.motion_sdk_set_simulated_baseline_byte(index, value),
+        `simulated_baseline_byte_${index}`,
+      );
+    });
+    ensureOk(this.wasm.motion_sdk_commit_simulated_baseline(), "commit_simulated_baseline");
+    this.installedSimulatedBaselineIdentity = referenceIdentityKey(input.baseline.identity);
+    this.installedSimulatedBaselineFeatureNames = Object.freeze([...input.baseline.featureNames]);
+    this.simulatedBaselineComparison = this.readSimulatedBaselineComparison();
   }
 
   /**
@@ -690,6 +768,14 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       profileIdentity: null,
       qualityVerdict: null,
     });
+    this.installedSimulatedBaselineIdentity = null;
+    this.installedSimulatedBaselineFeatureNames = [];
+    this.simulatedBaselineComparison = Object.freeze({
+      status: "unavailable",
+      reason: "no-installed-reviewed-profile",
+      profileIdentity: null,
+      qualityVerdict: null,
+    });
   }
 
   private readReferenceComparison(): RustReferenceComparison {
@@ -746,6 +832,69 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
           ? "invalid reference profile"
           : null,
       profileIdentity: this.installedReferenceIdentity,
+      profileHash: field64(3),
+      repId: field64(0),
+      repRevision: Number(field64(1)),
+      canonicalSliceHash: field64(2),
+      features,
+      qualityVerdict: null,
+    });
+  }
+
+  private readSimulatedBaselineComparison(): RustReferenceComparison {
+    const status = this.wasm.motion_sdk_simulated_baseline_status();
+    if (status <= 2) {
+      return Object.freeze({
+        status: "unavailable",
+        reason: status === 1
+          ? "awaiting-sealed-rep"
+          : status === 2
+            ? "reference-extraction-refused"
+            : "no-installed-reviewed-profile",
+        profileIdentity: this.installedSimulatedBaselineIdentity,
+        qualityVerdict: null,
+      });
+    }
+    if (status > 6 || !this.installedSimulatedBaselineIdentity) {
+      throw new Error(`Rust simulated baseline returned invalid state ${status}`);
+    }
+    const field64 = (field: number) => combineU64(
+      this.wasm.motion_sdk_simulated_baseline_field(field, 0),
+      this.wasm.motion_sdk_simulated_baseline_field(field, 1),
+    );
+    const featureCount = this.wasm.motion_sdk_simulated_baseline_feature_count();
+    const expectedFeatureCount = status >= 5 ? 0 : this.installedSimulatedBaselineFeatureNames.length;
+    if (featureCount !== expectedFeatureCount) {
+      throw new Error("Rust simulated baseline feature schema changed after installation");
+    }
+    const features = Object.freeze(this.installedSimulatedBaselineFeatureNames
+      .slice(0, featureCount)
+      .map((feature, index) => {
+        const value = (field: number) => this.wasm.motion_sdk_simulated_baseline_feature_number(index, field);
+        const outsideRatio = value(3);
+        return Object.freeze({
+          feature,
+          comparableNodeCount: value(0),
+          unknownNodeCount: value(1),
+          outsideNodeCount: value(2),
+          outsideNodeRatio: Number.isFinite(outsideRatio) ? outsideRatio : null,
+          maximumConsecutiveOutsideNodes: value(4),
+          totalNormalizedExcess: value(5),
+        });
+      }));
+    return Object.freeze({
+      status: ([
+        "comparison_available",
+        "insufficient_observation",
+        "profile_mismatch",
+        "invalid_profile",
+      ] as const)[status - 3],
+      reason: status === 5
+        ? "strict simulated baseline identity or phase mismatch"
+        : status === 6
+          ? "invalid simulated baseline"
+          : null,
+      profileIdentity: this.installedSimulatedBaselineIdentity,
       profileHash: field64(3),
       repId: field64(0),
       repRevision: Number(field64(1)),
@@ -820,7 +969,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
 }
 
 function referenceIdentityKey(
-  identity: PersonalProvisionalReferenceProfile["identity"],
+  identity: RustTrajectoryIdentity,
 ): string {
   return [
     identity.exerciseId,

@@ -1,6 +1,7 @@
 use form_coach_motion_sdk::{
     BodyNormalizationConfig, CanonicalFrameSample, CanonicalLandmark, ExerciseProfile,
-    LandmarkSource, PhaseName, RepDisposition, SealedRep, constrained_phase_dtw, normalize_rep_trajectory,
+    LandmarkSource, PhaseName, ReferenceIdentity, RepDisposition, SealedRep,
+    constrained_phase_dtw, extract_profile_signal_reference_rep, normalize_rep_trajectory,
 };
 
 #[test]
@@ -98,6 +99,36 @@ fn missing_origin_or_ambiguous_orientation_refuses_instead_of_guessing() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn generic_profile_signal_extractor_uses_the_sealed_slice_and_normalizes_each_rep() {
+    let rep = sealed(0, 2, 4);
+    let identity = ReferenceIdentity {
+        exercise_id: "lat_pulldown".into(),
+        capture_position: "rear".into(),
+        variation: "straight_bar".into(),
+        training_side: "bilateral".into(),
+        equipment: "cable".into(),
+        coordinate_system: "source-image/v1".into(),
+        feature_schema_id: "simulated-kinematic-features/v1".into(),
+        pose_model_version: "mediapipe-pose@0.10.14".into(),
+    };
+    let profile = ExerciseProfile::lat_pulldown_provisional();
+    let a = extract_profile_signal_reference_rep(identity.clone(), &rep, &profile, &frames(0.0, 1.0, &[0, 100, 200, 300, 400])).unwrap();
+    let b = extract_profile_signal_reference_rep(identity, &rep, &profile, &frames(3.0, 2.0, &[0, 100, 200, 300, 400])).unwrap();
+
+    assert_eq!(a.nodes.len(), 32);
+    assert_eq!(a.nodes[0].phase, "to_extreme");
+    assert_eq!(a.nodes[16].phase, "from_extreme");
+    assert_eq!(a.nodes[0].values[0], Some(0.0));
+    assert_eq!(a.nodes[15].values[0], Some(1.0));
+    assert_eq!(a.nodes[31].values[0], Some(0.0));
+    for (left, right) in a.nodes.iter().zip(&b.nodes) {
+        for (left_value, right_value) in left.values.iter().zip(&right.values) {
+            assert_eq!(left_value, right_value);
+        }
+    }
 }
 
 fn sealed(start: u64, peak: u64, end: u64) -> SealedRep {

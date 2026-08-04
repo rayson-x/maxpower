@@ -2104,6 +2104,18 @@ fn measure_signal(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> O
     }
 }
 
+fn signal_confidence(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> f32 {
+    signal
+        .landmarks
+        .iter()
+        .filter_map(|index| canonical.get(*index))
+        .filter(|landmark| landmark.source != LandmarkSource::Unknown)
+        .map(|landmark| landmark.canonical_confidence)
+        .filter(|confidence| confidence.is_finite())
+        .fold(1.0_f32, f32::min)
+        .clamp(0.0, 1.0)
+}
+
 fn landmark_xy(index: usize, canonical: &[CanonicalLandmark]) -> Option<(f32, f32)> {
     let landmark = canonical.get(index)?;
     if landmark.source == LandmarkSource::Unknown || landmark.canonical_confidence <= 0.0 {
@@ -3422,6 +3434,16 @@ pub const LAT_PULLDOWN_REFERENCE_FEATURES: [&str; 11] = [
     "torsoLateralTiltDeg",
 ];
 
+/// Generic, profile-bound phase features. These values are normalized within
+/// one sealed rep (start -> peak -> end), so they preserve phase direction and
+/// path continuity across camera distance and anthropometry. They are not
+/// absolute pose coordinates and must never be promoted to a form score
+/// without a separately reviewed, observed corridor.
+pub const PROFILE_SIGNAL_REFERENCE_FEATURES: [&str; 2] = [
+    "primarySignalPhase",
+    "secondarySignalPhase",
+];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReferenceExtractionError {
     InvalidBoundary,
@@ -3518,6 +3540,113 @@ pub fn extract_lat_pulldown_reference_rep(
         canonical_slice_hash: rep.canonical_slice_hash,
         nodes,
     })
+}
+
+/// Extracts a portable two-signal trajectory from the exact canonical slice
+/// sealed by the Rust rep engine. This is the only extractor used by the
+/// simulated five-split baseline: it cannot silently fall back to vertical
+/// wrist motion or a TypeScript-side re-segmentation.
+pub fn extract_profile_signal_reference_rep(
+    identity: ReferenceIdentity,
+    rep: &SealedRep,
+    profile: &ExerciseProfile,
+    frames: &[CanonicalFrameSample],
+) -> Result<ObservedReferenceRep, ReferenceExtractionError> {
+    validate_reference_slice(rep, frames)?;
+    let mut nodes = Vec::with_capacity(32);
+    for (phase, start_ms, end_ms) in [
+        ("to_extreme", rep.start_timestamp_ms, rep.peak_timestamp_ms),
+        ("from_extreme", rep.peak_timestamp_ms, rep.end_timestamp_ms),
+    ] {
+        for index in 0..16 {
+            let progress = index as f32 / 15.0;
+            let target_ms = start_ms as f64 + (end_ms - start_ms) as f64 * f64::from(progress);
+            let values_and_confidence = frames
+                .iter()
+                .min_by(|left, right| {
+                    (left.timestamp_ms as f64 - target_ms)
+                        .abs()
+                        .total_cmp(&(right.timestamp_ms as f64 - target_ms).abs())
+                })
+                .filter(|frame| (frame.timestamp_ms as f64 - target_ms).abs() <= 180.0)
+                .and_then(|frame| profile_signal(profile, &frame.canonical).map(|(primary, secondary, _, _)| {
+                    let primary_confidence = signal_confidence(&profile.primary_signal, &frame.canonical);
+                    let secondary_confidence = signal_confidence(&profile.secondary_signal, &frame.canonical);
+                    (vec![Some(primary), Some(secondary)], vec![primary_confidence, secondary_confidence])
+                }))
+                .unwrap_or_else(|| (vec![None, None], vec![0.0, 0.0]));
+            nodes.push(ObservedReferenceNode {
+                phase: phase.into(),
+                phase_progress: round5(progress),
+                values: values_and_confidence.0,
+                confidence: values_and_confidence.1,
+            });
+        }
+    }
+    normalize_profile_signal_nodes(&mut nodes);
+    Ok(ObservedReferenceRep {
+        identity,
+        rep_id: rep.rep_id,
+        rep_revision: rep.revision,
+        canonical_slice_hash: rep.canonical_slice_hash,
+        nodes,
+    })
+}
+
+fn validate_reference_slice(
+    rep: &SealedRep,
+    frames: &[CanonicalFrameSample],
+) -> Result<(), ReferenceExtractionError> {
+    if rep.start_timestamp_ms >= rep.peak_timestamp_ms
+        || rep.peak_timestamp_ms >= rep.end_timestamp_ms
+    {
+        return Err(ReferenceExtractionError::InvalidBoundary);
+    }
+    if frames
+        .windows(2)
+        .any(|pair| pair[0].timestamp_ms > pair[1].timestamp_ms)
+    {
+        return Err(ReferenceExtractionError::UnsortedFrames);
+    }
+    if frames
+        .first()
+        .is_none_or(|frame| frame.timestamp_ms > rep.start_timestamp_ms)
+        || frames
+            .last()
+            .is_none_or(|frame| frame.timestamp_ms < rep.end_timestamp_ms)
+    {
+        return Err(ReferenceExtractionError::MissingBoundaryFrame);
+    }
+    Ok(())
+}
+
+fn normalize_profile_signal_nodes(nodes: &mut [ObservedReferenceNode]) {
+    if nodes.len() != 32 {
+        return;
+    }
+    for feature_index in 0..PROFILE_SIGNAL_REFERENCE_FEATURES.len() {
+        let start = nodes[0].values[feature_index];
+        let peak = nodes[15].values[feature_index];
+        let Some((start, peak)) = start.zip(peak) else {
+            for node in nodes.iter_mut() {
+                node.values[feature_index] = None;
+                node.confidence[feature_index] = 0.0;
+            }
+            continue;
+        };
+        let amplitude = peak - start;
+        if !amplitude.is_finite() || amplitude.abs() < 1e-5 {
+            for node in nodes.iter_mut() {
+                node.values[feature_index] = None;
+                node.confidence[feature_index] = 0.0;
+            }
+            continue;
+        }
+        for node in nodes.iter_mut() {
+            node.values[feature_index] = node.values[feature_index]
+                .map(|value| round5((value - start) / amplitude));
+        }
+    }
 }
 
 fn reference_feature_vector(frame: &CanonicalFrameSample) -> ReferenceFeatureVector {
@@ -3729,7 +3858,7 @@ pub fn match_reference_trajectory(
                 || node
                     .features
                     .iter()
-                    .any(|point| !valid_corridor_point(point))
+                    .any(|point| !valid_corridor_point_for_status(point, &profile.profile_status))
         })
         || !valid_reference_phase_layout(&profile.nodes)
     {
@@ -3874,14 +4003,37 @@ fn valid_corridor_point(point: &CorridorPoint) -> bool {
             .is_none_or(|value| value.is_finite() && value >= 0.0)
 }
 
+fn valid_corridor_point_for_status(point: &CorridorPoint, profile_status: &str) -> bool {
+    if profile_status != "simulated_nominal" {
+        return valid_corridor_point(point);
+    }
+    let corridor = match (point.q_low, point.q_high) {
+        (None, None) => true,
+        (Some(low), Some(high)) => low.is_finite() && high.is_finite() && low <= high,
+        _ => false,
+    };
+    corridor
+        && point
+            .median_absolute_deviation
+            .is_none_or(|value| value.is_finite() && value >= 0.0)
+}
+
 fn valid_reference_phase_layout(nodes: &[ReferenceCorridorNode]) -> bool {
     if nodes.len() < 4 {
         return false;
     }
-    let Some(split) = nodes.iter().position(|node| node.phase == "return") else {
+    let first_phase = nodes[0].phase.as_str();
+    if first_phase.is_empty() {
+        return false;
+    }
+    let Some(split) = nodes.iter().position(|node| node.phase != first_phase) else {
         return false;
     };
     if split < 2 || nodes.len() - split < 2 {
+        return false;
+    }
+    let second_phase = nodes[split].phase.as_str();
+    if second_phase.is_empty() || second_phase == first_phase {
         return false;
     }
     let valid_phase = |phase_nodes: &[ReferenceCorridorNode], phase: &str| {
@@ -3899,7 +4051,7 @@ fn valid_reference_phase_layout(nodes: &[ReferenceCorridorNode]) -> bool {
                 .last()
                 .is_some_and(|node| (node.phase_progress - 1.0).abs() <= 1e-4)
     };
-    valid_phase(&nodes[..split], "pull") && valid_phase(&nodes[split..], "return")
+    valid_phase(&nodes[..split], first_phase) && valid_phase(&nodes[split..], second_phase)
 }
 
 fn identity_mismatch(expected: &ReferenceIdentity, observed: &ReferenceIdentity) -> Option<String> {

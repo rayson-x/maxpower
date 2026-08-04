@@ -35,6 +35,11 @@ struct WebRuntime {
     reference_context: Option<super::ReferenceIdentity>,
     reference_exercise_profile_binding: Option<(String, u64)>,
     reference_state: ReferenceRuntimeState,
+    simulated_baseline_buffer: Vec<u8>,
+    simulated_baseline: Option<super::ReferenceTrajectoryProfile>,
+    simulated_baseline_context: Option<super::ReferenceIdentity>,
+    simulated_baseline_binding: Option<(String, u64)>,
+    simulated_baseline_state: ReferenceRuntimeState,
     frame_history: Vec<super::CanonicalFrameSample>,
 }
 
@@ -105,6 +110,33 @@ struct ReferencePointDto {
 struct ReferenceMatchingPolicyDto {
     minimum_observation_confidence: f32,
     unrestricted_dtw_allowed: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SimulatedBaselineEnvelopeDto {
+    baseline: SimulatedBaselineDto,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SimulatedBaselineDto {
+    schema_version: String,
+    source: String,
+    evidence_status: String,
+    calibration_status: String,
+    identity: ReferenceIdentityDto,
+    profile_binding: SimulatedBaselineBindingDto,
+    feature_names: Vec<String>,
+    corridor: ReferenceCorridorDto,
+    matching_policy: ReferenceMatchingPolicyDto,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SimulatedBaselineBindingDto {
+    exercise_profile_identity: String,
+    exercise_profile_hash: String,
 }
 
 #[derive(Deserialize)]
@@ -472,7 +504,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
 
 fn process_rep(runtime: &mut WebRuntime) {
     runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
-    if runtime.reference_profile.is_some() {
+    if runtime.reference_profile.is_some() || runtime.simulated_baseline.is_some() {
         runtime.frame_history.push(super::CanonicalFrameSample {
             frame_id: runtime.frame_id,
             timestamp_ms: runtime.timestamp_ms,
@@ -542,6 +574,34 @@ fn process_rep(runtime: &mut WebRuntime) {
                 match super::extract_lat_pulldown_reference_rep(
                     identity.clone(),
                     rep,
+                    &runtime.frame_history,
+                ) {
+                    Ok(observed) => ReferenceRuntimeState::Evidence(
+                        super::match_reference_trajectory(profile, &observed),
+                    ),
+                    Err(_) => ReferenceRuntimeState::ExtractionRefused,
+                }
+            };
+    }
+    if let (Some(profile), Some(identity), Some((bound_identity, bound_hash)), Some(rep), Some(rep_engine)) = (
+        runtime.simulated_baseline.as_ref(),
+        runtime.simulated_baseline_context.as_ref(),
+        runtime.simulated_baseline_binding.as_ref(),
+        runtime
+            .completed_reps
+            .iter()
+            .rev()
+            .find(|rep| rep.disposition == super::RepDisposition::Confirmed),
+        runtime.rep_engine.as_ref(),
+    ) {
+        runtime.simulated_baseline_state =
+            if rep.profile_identity != *bound_identity || rep.profile_hash != *bound_hash {
+                ReferenceRuntimeState::ExtractionRefused
+            } else {
+                match super::extract_profile_signal_reference_rep(
+                    identity.clone(),
+                    rep,
+                    &rep_engine.profile,
                     &runtime.frame_history,
                 ) {
                     Ok(observed) => ReferenceRuntimeState::Evidence(
@@ -771,12 +831,22 @@ fn clear_reference(runtime: &mut WebRuntime) {
     runtime.reference_context = None;
     runtime.reference_exercise_profile_binding = None;
     runtime.reference_state = ReferenceRuntimeState::Unavailable;
+    runtime.simulated_baseline_buffer.clear();
+    runtime.simulated_baseline = None;
+    runtime.simulated_baseline_context = None;
+    runtime.simulated_baseline_binding = None;
+    runtime.simulated_baseline_state = ReferenceRuntimeState::Unavailable;
     runtime.frame_history.clear();
 }
 
 fn reset_reference_subject(runtime: &mut WebRuntime) {
     runtime.frame_history.clear();
     runtime.reference_state = if runtime.reference_profile.is_some() {
+        ReferenceRuntimeState::AwaitingSealedRep
+    } else {
+        ReferenceRuntimeState::Unavailable
+    };
+    runtime.simulated_baseline_state = if runtime.simulated_baseline.is_some() {
         ReferenceRuntimeState::AwaitingSealedRep
     } else {
         ReferenceRuntimeState::Unavailable
@@ -973,11 +1043,152 @@ pub extern "C" fn motion_sdk_commit_reference_profile() -> i32 {
     0
 }
 
+/// Installs an uncalibrated simulated phase baseline for the currently active
+/// Rust exercise profile. Unlike a reviewed reference profile, this endpoint
+/// is intentionally restricted to the generic two-signal schema and only
+/// exposes descriptive corridor evidence (never a quality verdict).
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_simulated_baseline(length: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if length == 0 || length > 131_072 {
+        return -2;
+    }
+    runtime.simulated_baseline_buffer = vec![0; length as usize];
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_simulated_baseline_byte(index: u32, value: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Some(slot) = runtime.simulated_baseline_buffer.get_mut(index as usize) else {
+        return -2;
+    };
+    let Ok(value) = u8::try_from(value) else {
+        return -3;
+    };
+    *slot = value;
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_commit_simulated_baseline() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let bytes = std::mem::take(&mut runtime.simulated_baseline_buffer);
+    let profile_hash = bytes.iter().fold(super::FNV_OFFSET, |mut hash, byte| {
+        hash ^= u64::from(*byte);
+        hash.wrapping_mul(super::FNV_PRIME)
+    });
+    let Ok(envelope) = serde_json::from_slice::<SimulatedBaselineEnvelopeDto>(&bytes) else {
+        return -2;
+    };
+    let SimulatedBaselineDto {
+        schema_version,
+        source,
+        evidence_status,
+        calibration_status,
+        identity,
+        profile_binding,
+        feature_names,
+        corridor,
+        matching_policy,
+    } = envelope.baseline;
+    if schema_version != "form-coach-simulated-trajectory-baseline/v1"
+        || source != "simulated_kinematic_prior"
+        || evidence_status != "uncalibrated"
+        || calibration_status != "uncalibrated"
+        || feature_names
+            != super::PROFILE_SIGNAL_REFERENCE_FEATURES
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        || matching_policy.unrestricted_dtw_allowed
+        || !matching_policy.minimum_observation_confidence.is_finite()
+        || !(0.0..=1.0).contains(&matching_policy.minimum_observation_confidence)
+    {
+        return -3;
+    }
+    let Ok(bound_hash) = profile_binding.exercise_profile_hash.parse::<u64>() else {
+        return -4;
+    };
+    let Some(active_exercise_profile) = runtime.rep_engine.as_ref().map(|engine| &engine.profile)
+    else {
+        return -5;
+    };
+    if active_exercise_profile.identity != profile_binding.exercise_profile_identity
+        || active_exercise_profile.content_hash != bound_hash
+    {
+        return -5;
+    }
+    let baseline_identity: super::ReferenceIdentity = identity.into();
+    let profile = super::ReferenceTrajectoryProfile {
+        identity: baseline_identity.clone(),
+        profile_hash,
+        profile_status: "simulated_nominal".into(),
+        feature_names,
+        minimum_observation_confidence: matching_policy.minimum_observation_confidence,
+        nodes: corridor
+            .nodes
+            .into_iter()
+            .map(|node| super::ReferenceCorridorNode {
+                phase: node.phase,
+                phase_progress: node.phase_percent / 100.0,
+                features: node
+                    .features
+                    .into_iter()
+                    .map(|point| super::CorridorPoint {
+                        q_low: point.q_low,
+                        q_high: point.q_high,
+                        median_absolute_deviation: point.median_absolute_deviation,
+                        n_observed: point.n_observed,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    };
+    if !valid_fixed_simulated_baseline_layout(&profile.nodes)
+        || profile.nodes.iter().any(|node| {
+            node.features.len() != profile.feature_names.len()
+                || node
+                    .features
+                    .iter()
+                    .any(|point| {
+                        !super::valid_corridor_point_for_status(point, "simulated_nominal")
+                    })
+        })
+    {
+        return -6;
+    }
+    runtime.simulated_baseline = Some(profile);
+    runtime.simulated_baseline_context = Some(baseline_identity);
+    runtime.simulated_baseline_binding = Some((
+        profile_binding.exercise_profile_identity,
+        bound_hash,
+    ));
+    runtime.simulated_baseline_state = ReferenceRuntimeState::AwaitingSealedRep;
+    0
+}
+
 fn valid_fixed_reference_layout(nodes: &[super::ReferenceCorridorNode]) -> bool {
     nodes.len() == 32
         && nodes.iter().enumerate().all(|(index, node)| {
             let phase_index = index % 16;
             let expected_phase = if index < 16 { "pull" } else { "return" };
+            let expected_progress = phase_index as f32 / 15.0;
+            node.phase == expected_phase && (node.phase_progress - expected_progress).abs() <= 1e-4
+        })
+}
+
+fn valid_fixed_simulated_baseline_layout(nodes: &[super::ReferenceCorridorNode]) -> bool {
+    nodes.len() == 32
+        && nodes.iter().enumerate().all(|(index, node)| {
+            let phase_index = index % 16;
+            let expected_phase = if index < 16 { "to_extreme" } else { "from_extreme" };
             let expected_progress = phase_index as f32 / 15.0;
             node.phase == expected_phase && (node.phase_progress - expected_progress).abs() <= 1e-4
         })
@@ -1040,6 +1251,75 @@ pub extern "C" fn motion_sdk_reference_feature_number(index: u32, field: u32) ->
         return f32::NAN;
     };
     let ReferenceRuntimeState::Evidence(evidence) = &runtime.reference_state else {
+        return f32::NAN;
+    };
+    let Some(feature) = evidence.features.get(index as usize) else {
+        return f32::NAN;
+    };
+    match field {
+        0 => feature.comparable_node_count as f32,
+        1 => feature.unknown_node_count as f32,
+        2 => feature.outside_node_count as f32,
+        3 => feature.outside_node_ratio.unwrap_or(f32::NAN),
+        4 => feature.maximum_consecutive_outside_nodes as f32,
+        5 => feature.total_normalized_excess,
+        _ => f32::NAN,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_simulated_baseline_status() -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return u32::MAX;
+    };
+    match &runtime.simulated_baseline_state {
+        ReferenceRuntimeState::Unavailable => 0,
+        ReferenceRuntimeState::AwaitingSealedRep => 1,
+        ReferenceRuntimeState::ExtractionRefused => 2,
+        ReferenceRuntimeState::Evidence(evidence) => match evidence.status {
+            super::TrajectoryComparisonStatus::ComparisonAvailable => 3,
+            super::TrajectoryComparisonStatus::InsufficientObservation => 4,
+            super::TrajectoryComparisonStatus::ProfileMismatch => 5,
+            super::TrajectoryComparisonStatus::InvalidProfile => 6,
+        },
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_simulated_baseline_field(field: u32, high: u32) -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return u32::MAX;
+    };
+    let ReferenceRuntimeState::Evidence(evidence) = &runtime.simulated_baseline_state else {
+        return 0;
+    };
+    let value = match field {
+        0 => evidence.rep_id,
+        1 => u64::from(evidence.rep_revision),
+        2 => evidence.canonical_slice_hash,
+        3 => evidence.profile_hash,
+        _ => return u32::MAX,
+    };
+    if high == 0 { value as u32 } else { (value >> 32) as u32 }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_simulated_baseline_feature_count() -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return 0;
+    };
+    match &runtime.simulated_baseline_state {
+        ReferenceRuntimeState::Evidence(evidence) => evidence.features.len() as u32,
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_simulated_baseline_feature_number(index: u32, field: u32) -> f32 {
+    let Ok(runtime) = runtime().lock() else {
+        return f32::NAN;
+    };
+    let ReferenceRuntimeState::Evidence(evidence) = &runtime.simulated_baseline_state else {
         return f32::NAN;
     };
     let Some(feature) = evidence.features.get(index as usize) else {

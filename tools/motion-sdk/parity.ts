@@ -20,6 +20,7 @@ import {
   type PersonalProvisionalReferenceProfile,
 } from "../../src/pose/referenceTrajectory";
 import { buildSimulatedLatPulldownReference } from "../../src/pose/simulatedLatPulldownReference";
+import { buildSimulatedTrajectoryBaseline } from "../../src/motion/simulatedTrajectoryBaseline";
 
 const config = (sequenceId: string) => ({
   sequenceId,
@@ -139,6 +140,32 @@ async function main(): Promise<void> {
   assert.equal(angleSealed[0].profileIdentity, angleProfile.identity);
   assert.equal(angleSealed[0].profileHash, angleProfile.contentHash);
   angleRust.close();
+
+  // The catalog-wide simulated baseline is installed separately from formal
+  // references, but Rust must consume it from the same sealed canonical slice.
+  const genericContext = {
+    exerciseId: "barbell_row",
+    capturePosition: "frontLeft45",
+    trainingSide: "bilateral" as const,
+    variation: "",
+  };
+  const genericBaseline = buildSimulatedTrajectoryBaseline(
+    genericContext,
+    angleProfile,
+    "mediapipe-pose-heavy",
+  );
+  assert.ok(genericBaseline);
+  const genericRust = new RustCanonicalWasmSession(config("parity:simulated-baseline"), wasm);
+  genericRust.installExerciseProfileData(angleProfile);
+  genericRust.installSimulatedTrajectoryBaseline(genericBaseline);
+  const genericSealed = [90, 92, 105, 128, 150, 147, 125, 102, 91].flatMap((angle, index) => {
+    genericRust.process(bilateralAnglePose(index * 100, angle));
+    return [...genericRust.lastCompletedReps];
+  });
+  assert.equal(genericSealed.length, 1);
+  assert.equal(genericRust.simulatedBaselineComparison.status, "comparison_available");
+  assert.equal(genericRust.simulatedBaselineComparison.qualityVerdict, null);
+  genericRust.close();
 
   const reverseAngleRust = new RustCanonicalWasmSession(config("parity:reverse-angle-profile"), wasm);
   reverseAngleRust.installExerciseProfileData(angleProfile);
@@ -354,7 +381,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({
     passed: true,
     framesCompared: poses.length + 1 + wristY.length + referencePoses.length * 2,
-    semantics: ["measured", "fused", "predicted", "unknown", "reason", "reset", "profile-bundle", "sealed-reference-match"],
+    semantics: ["measured", "fused", "predicted", "unknown", "reason", "reset", "profile-bundle", "sealed-reference-match", "simulated-baseline"],
     coordinateTolerance: 1e-5,
   }, null, 2));
 }
