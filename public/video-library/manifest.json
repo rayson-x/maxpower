@@ -1,0 +1,37 @@
+{
+  "version": "form-coach-video-library/v1",
+  "videos": [
+    {
+      "id": "pull-up-test",
+      "label": "引体向上 · 测试素材",
+      "video": "ecc14b0bdcd3e1116465edfe08f33368.mp4",
+      "exerciseId": "pull_up",
+      "capturePosition": "front",
+      "variation": "standard",
+      "trainingSide": "bilateral"
+    },
+    {
+      "id": "row-test",
+      "label": "划船动作 · 测试素材",
+      "video": "6e26dae721570a61cc5c9873d18c9380.mp4",
+      "exerciseId": "barbell_row",
+      "capturePosition": "frontLeft45",
+      "variation": "barbell",
+      "trainingSide": "bilateral"
+    },
+    {
+      "id": "movement-test",
+      "label": "动作测试 · 素材",
+      "video": "ebcc8df556ca000ecf8c026d920f1daf.mp4"
+    },
+    {
+      "id": "lat-pulldown-test",
+      "label": "高位下拉 · 测试素材",
+      "video": "f4a69088e395df62a33e7272f9e78192.mp4",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rear",
+      "variation": "cable straight bar",
+      "trainingSide": "bilateral"
+    }
+  ]
+}

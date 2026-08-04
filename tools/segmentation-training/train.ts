@@ -142,7 +142,7 @@ interface BucketReport {
 }
 
 const projectRoot = process.cwd();
-const capturesRoot = path.join(projectRoot, "public", "field-captures");
+const capturesRoot = path.join(projectRoot, "public", "archives", "confirmed-captures");
 const manifestPath = path.join(capturesRoot, "manifest.json");
 const datasetPath = path.join(projectRoot, "data", "training", "approved-segmentation-v1.json");
 const reportJsonPath = path.join(projectRoot, "docs", "reports", "segmentation-training-2026-08-03.json");

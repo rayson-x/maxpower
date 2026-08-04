@@ -391,21 +391,21 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
 }
 
 async function loadProjectCaptures(): Promise<ReviewCapture[]> {
-  const manifestResponse = await fetch("/field-captures/manifest.json", { cache: "no-store" });
+  const manifestResponse = await fetch("/archives/confirmed-captures/manifest.json", { cache: "no-store" });
   if (!manifestResponse.ok) throw new Error("项目采集库清单不可用");
   const manifest = await manifestResponse.json() as ProjectManifest;
   const captures = await Promise.all(
     manifest.captures.map(async (entry) => {
-      const fixtureResponse = await fetch(`/field-captures/${entry.keypoints}`, { cache: "no-store" });
+      const fixtureResponse = await fetch(`/archives/confirmed-captures/${entry.keypoints}`, { cache: "no-store" });
       if (!fixtureResponse.ok) throw new Error(`无法读取 ${entry.keypoints}`);
       const parsed = await fixtureResponse.json() as ImportedFixture[];
       const labels = entry.labels
-        ? await fetch(`/field-captures/${entry.labels}`, { cache: "no-store" }).then(async (response) =>
+        ? await fetch(`/archives/confirmed-captures/${entry.labels}`, { cache: "no-store" }).then(async (response) =>
             response.ok ? await response.json() as ImportedLabels : null,
           )
         : null;
       const metadata = entry.metadata
-        ? await fetch(`/field-captures/${entry.metadata}`, { cache: "no-store" }).then(async (response) =>
+        ? await fetch(`/archives/confirmed-captures/${entry.metadata}`, { cache: "no-store" }).then(async (response) =>
             response.ok ? await response.json() as ImportedCaptureMetadata : null,
           )
         : null;
@@ -413,7 +413,7 @@ async function loadProjectCaptures(): Promise<ReviewCapture[]> {
       if (!fixture || !Array.isArray(fixture.poses)) throw new Error(`采集关键点格式无效: ${entry.id}`);
       return {
         id: entry.id,
-        videoUrl: `/field-captures/${entry.video}`,
+        videoUrl: `/archives/confirmed-captures/${entry.video}`,
         sourceSignature: entry.id,
         revokeVideoUrl: false,
         fixture,

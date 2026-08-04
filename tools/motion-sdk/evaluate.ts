@@ -438,8 +438,8 @@ function splitFor(captureId: string): "tuning" | "held_out" | "challenge" {
 
 function findFixture(filename: string): string {
   for (const candidate of [
-    path.join(root, "public/field-captures", filename),
-    path.join(root, "public/field-captures/shoulders", filename),
+    path.join(root, "public/archives/confirmed-captures", filename),
+    path.join(root, "public/archives/confirmed-captures/shoulders", filename),
   ]) {
     if (fs.existsSync(candidate)) return candidate;
   }

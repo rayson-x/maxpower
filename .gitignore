@@ -59,4 +59,5 @@ tools/harness/out/
 
 # Private field recordings are served locally for review, never committed.
 /public/field-captures/
+/public/archives/confirmed-captures/
 /data/training/

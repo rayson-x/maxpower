@@ -71,7 +71,7 @@ interface ReplayRow {
 }
 
 const projectRoot = path.resolve(__dirname, "../..");
-const capturesRoot = path.join(projectRoot, "public", "field-captures");
+const capturesRoot = path.join(projectRoot, "public", "archives", "confirmed-captures");
 const reportsRoot = path.join(projectRoot, "docs", "reports");
 
 function readJson<T>(file: string): T {
@@ -147,7 +147,7 @@ function reportMarkdown(rows: ReplayRow[], generatedAt: string): string {
     row.historicalRecordedCount === row.currentRuleStableWindow.count &&
     row.currentRuleStableWindow.count === row.automaticCycleCrossCheck.count,
   );
-  return `# 训练录像算法重放报告\n\n生成时间：${generatedAt}\n\n## Executive Summary\n\n已对项目采集库中的 **${rows.length} 组**录像的已保存 canonical pose 序列重放当前 Web 客户端算法：\n\n- 最新专项规则（全帧）与同一规则的稳定训练窗口版本；\n- 动作无关的自动周期分割，仅作交叉核验；\n- 覆盖率与进出机位帧的质量检查。\n\n结论：目前数据足以进入人工审批，但**尚不足以声称计数准确率**。${high.length} 组需要优先看视频确认；${stableChanged.length} 组被稳定窗口移除了进出机位帧；仅 ${allAgree.length} 组在历史录制、当前专项规则和自动周期三者上完全一致。最重要的已知风险是：历史 pull_up 标签中至少有一段实际画面像划船，动作标签错误时专项规则必然产生错误计数。\n\n## Key findings\n\n| 采集时间 | 动作标签 | 骨架 / 躯干 | 历史 | 当前全帧 | 当前稳定段 | 自动周期 | 审核优先级 |\n| --- | --- | --- | ---: | ---: | ---: | ---: | --- |\n${rows.map(rowMarkdown).join("\n")}\n\n“历史”是录制时导出的 labels 分段数，并非人工确认的实际次数；“当前稳定段”是本报告建议你在审批台中优先查看的候选。\n\n## Recommendations\n\n1. 在 Web 审批台按“高”优先级逐组播放，并填写你实际做的次数；确认正确候选后点击“批准为本组真值”。\n2. 先纠正明显的动作标签错误，再比较专项规则；不要把不同动作的候选计数混为算法失败。\n3. 对骨架/躯干覆盖低的组，不自动修补长时间丢失的手臂；保留“不可判定”并用视频审核，避免生成虚假关节轨迹。\n4. 收集一批审批真值后，再以“候选计数与真值的绝对误差、漏计率、误计率”作为调参指标；当前报告不会把历史 labels 当真值。\n\n## Questions for approval\n\n- 对每组：实际次数是多少？其中哪一个候选（历史、当前全帧、当前稳定段、自动周期）最接近？\n- 是否确认该组动作和机位标签？若不同，请在面板中改正后再批准。\n- 对高优先级组：丢点发生在什么相位（开始、底部、顶点或结束）？\n\n## Caveats\n\n本次是对已保存的 pose 数据重放；它验证的是**当前分段/稳定窗口/评分链路**，不能重新推断当时已经丢失的关键点，也不能衡量新的逐解码帧推理修复在旧视频上的提升。之后新录制的组才会包含该修复后的 canonical 序列。所有数据和审批结果均保留在本机。\n`;
+  return `# 训练录像算法重放报告\n\n生成时间：${generatedAt}\n\n## Executive Summary\n\n已对已确认档案中的 **${rows.length} 组**录像的已保存 canonical pose 序列重放当前 Web 客户端算法：\n\n- 最新专项规则（全帧）与同一规则的稳定训练窗口版本；\n- 动作无关的自动周期分割，仅作交叉核验；\n- 覆盖率与进出机位帧的质量检查。\n\n结论：目前数据足以进入人工审批，但**尚不足以声称计数准确率**。${high.length} 组需要优先看视频确认；${stableChanged.length} 组被稳定窗口移除了进出机位帧；仅 ${allAgree.length} 组在历史录制、当前专项规则和自动周期三者上完全一致。最重要的已知风险是：历史 pull_up 标签中至少有一段实际画面像划船，动作标签错误时专项规则必然产生错误计数。\n\n## Key findings\n\n| 采集时间 | 动作标签 | 骨架 / 躯干 | 历史 | 当前全帧 | 当前稳定段 | 自动周期 | 审核优先级 |\n| --- | --- | --- | ---: | ---: | ---: | ---: | --- |\n${rows.map(rowMarkdown).join("\n")}\n\n“历史”是录制时导出的 labels 分段数，并非人工确认的实际次数；“当前稳定段”是本报告建议你在审批台中优先查看的候选。\n\n## Recommendations\n\n1. 在 Web 审批台按“高”优先级逐组播放，并填写你实际做的次数；确认正确候选后点击“批准为本组真值”。\n2. 先纠正明显的动作标签错误，再比较专项规则；不要把不同动作的候选计数混为算法失败。\n3. 对骨架/躯干覆盖低的组，不自动修补长时间丢失的手臂；保留“不可判定”并用视频审核，避免生成虚假关节轨迹。\n4. 收集一批审批真值后，再以“候选计数与真值的绝对误差、漏计率、误计率”作为调参指标；当前报告不会把历史 labels 当真值。\n\n## Questions for approval\n\n- 对每组：实际次数是多少？其中哪一个候选（历史、当前全帧、当前稳定段、自动周期）最接近？\n- 是否确认该组动作和机位标签？若不同，请在面板中改正后再批准。\n- 对高优先级组：丢点发生在什么相位（开始、底部、顶点或结束）？\n\n## Caveats\n\n本次是对已保存的 pose 数据重放；它验证的是**当前分段/稳定窗口/评分链路**，不能重新推断当时已经丢失的关键点，也不能衡量新的逐解码帧推理修复在旧视频上的提升。之后新录制的组才会包含该修复后的 canonical 序列。所有数据和审批结果均保留在本机。\n`;
 }
 
 function main() {
@@ -192,7 +192,7 @@ function main() {
   const output = {
     version: "field-capture-algorithm-replay/v1",
     generatedAt,
-    source: { manifest: "public/field-captures/manifest.json", algorithm: "pose-set-analysis/v1 + training-window/v1 + segment-reps-auto/v1" },
+    source: { manifest: "public/archives/confirmed-captures/manifest.json", algorithm: "pose-set-analysis/v1 + training-window/v1 + segment-reps-auto/v1" },
     rows,
   };
   fs.mkdirSync(reportsRoot, { recursive: true });

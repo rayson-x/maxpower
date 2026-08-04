@@ -66,7 +66,7 @@ interface NormalizedReview {
 }
 
 const projectRoot = process.cwd();
-const capturesRoot = path.join(projectRoot, "public", "field-captures");
+const capturesRoot = path.join(projectRoot, "public", "archives", "confirmed-captures");
 const manifestPath = path.join(capturesRoot, "manifest.json");
 const defaultOutputPath = path.join(
   projectRoot,

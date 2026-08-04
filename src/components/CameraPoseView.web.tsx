@@ -75,6 +75,10 @@ import {
   type RustTargetSnapshot,
 } from "../motion/rustCanonicalWasm";
 import { buildLatPulldownQualityEvidence } from "../pose/trajectoryQualityEvidence";
+import {
+  parseVideoLibraryManifest,
+  type VideoLibraryEntry,
+} from "../pose/videoLibrary";
 
 injectHudTheme();
 
@@ -161,13 +165,6 @@ const STORAGE_KEY = "form-coach-agent-settings-v2";
 /** 单次分析的采集窗口上限。要装得下至少两个完整循环,分期才能切出 rep。 */
 const COLLECT_MAX_MS = 30_000;
 
-const SAMPLE_VIDEOS = [
-  "ecc14b0bdcd3e1116465edfe08f33368.mp4",
-  "6e26dae721570a61cc5c9873d18c9380.mp4",
-  "ebcc8df556ca000ecf8c026d920f1daf.mp4",
-  "f4a69088e395df62a33e7272f9e78192.mp4",
-];
-
 const ANALYSIS_STAGE_LABELS: Record<string, string> = {
   collecting: "⏺ 采集动作数据中…",
   classifying: "⏺ 识别动作中…",
@@ -194,7 +191,7 @@ const STAGE_ASPECT = 16 / 9;
 function readWorkspacePage(): WorkspacePage {
   if (typeof window === "undefined") return "training";
   const view = new URLSearchParams(window.location.search).get("view");
-  return view === "console" || view === "review" ? view : "training";
+  return view === "review" ? "review" : "training";
 }
 
 function poseSchemaForEngine(kind: EngineKind): PoseSchema {
@@ -595,6 +592,8 @@ export function CameraPoseView() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<SourceMode>("camera");
   const [videoName, setVideoName] = useState<string | null>(null);
+  const [videoLibrary, setVideoLibrary] = useState<readonly VideoLibraryEntry[]>([]);
+  const [selectedLibraryVideoId, setSelectedLibraryVideoId] = useState("");
   const [videoAspect, setVideoAspect] = useState(16 / 9);
   const [modelId, setModelId] = useState(POSE_MODELS[2].id);
   const [engineKind, setEngineKind] = useState<EngineKind>("mediapipe");
@@ -665,6 +664,22 @@ export function CameraPoseView() {
 
   useEffect(() => {
     let cancelled = false;
+    void fetch("/video-library/manifest.json", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("视频库清单不可用");
+        return parseVideoLibraryManifest(await response.json());
+      })
+      .then((manifest) => {
+        if (!cancelled) setVideoLibrary(manifest.videos);
+      })
+      .catch((libraryError) => {
+        if (!cancelled) setError(libraryError instanceof Error ? libraryError.message : String(libraryError));
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     void loadRustMotionWasm()
       .then((wasm) => {
         if (cancelled) return;
@@ -709,6 +724,40 @@ export function CameraPoseView() {
       rustSealedRepsRef.current = [];
       setRustSealedRepCount(0);
     }
+  };
+
+  const applyVideoLibraryContext = (entry: VideoLibraryEntry) => {
+    const nextExerciseId = entry.exerciseId ?? "";
+    if (nextExerciseId) {
+      if (!EXERCISE_REGISTRY.get(nextExerciseId)) {
+        setError(`视频库动作未在目录中注册：${entry.exerciseId}`);
+        return false;
+      }
+    }
+    // Every library switch replaces, rather than inherits, its analysis
+    // context. An unclassified clip must never quietly reuse the previous
+    // clip's action or reference profile.
+    exerciseChoiceRef.current = nextExerciseId;
+    setExerciseChoice(nextExerciseId);
+    variationRef.current = entry.variation ?? "";
+    setVariation(entry.variation ?? "");
+    trainingSideRef.current = entry.trainingSide ?? "bilateral";
+    setTrainingSide(entry.trainingSide ?? "bilateral");
+    if (entry.capturePosition) {
+      applyCapturePosition(entry.capturePosition);
+    } else if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+      configureRustExerciseProfile(
+        canonicalSessionRef.current,
+        exerciseChoiceRef.current,
+        capturePositionRef.current,
+        trainingSideRef.current,
+        variationRef.current,
+        modelPathRef.current,
+      );
+      rustSealedRepsRef.current = [];
+      setRustSealedRepCount(0);
+    }
+    return true;
   };
 
   const ensureEngine = useCallback(async () => {
@@ -2028,11 +2077,7 @@ export function CameraPoseView() {
         <div style={styles.brand}>
           <span style={styles.brandLogo}>FORM·RANGE</span>
           <span style={styles.brandSub} className="range-brand-sub">
-            {workspacePage === "training"
-              ? "训练页 / LIVE TRAINING"
-              : workspacePage === "console"
-                ? "控制台 / POSE TELEMETRY CONSOLE"
-                : "审核标注 / VIDEO ANNOTATION"}
+            {workspacePage === "review" ? "审核标注 / VIDEO ANNOTATION" : "训练页 / LIVE TRAINING"}
           </span>
         </div>
         <nav style={styles.pageSwitch} aria-label="页面模式">
@@ -2043,14 +2088,6 @@ export function CameraPoseView() {
             onClick={() => selectWorkspacePage("training")}
           >
             训练页
-          </button>
-          <button
-            type="button"
-            style={{ ...styles.pageSwitchButton, ...(workspacePage === "console" ? styles.pageSwitchButtonActive : null) }}
-            aria-pressed={workspacePage === "console"}
-            onClick={() => selectWorkspacePage("console")}
-          >
-            控制台
           </button>
           <button
             type="button"
@@ -2228,13 +2265,19 @@ export function CameraPoseView() {
                 </span>
               </div>
               <p style={styles.trainingHint}>
-                点击“开始本组录制”才会写入视频、关键点和当前动作配置；切到控制台可查看逐次数据、回放和采集审批。
+                从视频库选择素材即可在此页查看骨架识别、次数与质量证据；只有点击“开始本组录制”才会写入新的本机训练档案。
               </p>
               {setAnalysis?.score && (
                 <p style={styles.trainingScore}>
                   最近结果：{setAnalysis.score.score === null ? setAnalysis.score.label : `${setAnalysis.score.score} 分`}
                 </p>
               )}
+              <div style={styles.trainingHint}>
+                <strong>轨迹质量证据</strong>
+                {currentReferenceQualityEvidence.map((card) => (
+                  <div key={card.id}>{card.title}：{card.detail}（{card.evidence}）</div>
+                ))}
+              </div>
             </section>
           ) : (
           <div style={styles.outputGrid} className="range-output-grid">
@@ -2425,7 +2468,7 @@ export function CameraPoseView() {
                   pointerEvents: isRecording || isFinalizingRecording ? "none" : "auto",
                 }}
               >
-                本地视频
+                导入视频
                 <input
                   type="file"
                   disabled={isRecording || isFinalizingRecording}
@@ -2467,22 +2510,24 @@ export function CameraPoseView() {
                 )}
               </div>
             )}
-            <div style={styles.btnRow}>
-              {SAMPLE_VIDEOS.map((sample, index) => (
-                <button
-                  key={sample}
-                  disabled={isRecording || isFinalizingRecording}
-                  style={{
-                    ...styles.btnSmall,
-                    ...(videoName === `视频 ${index + 1}` ? styles.btnSmallActive : null),
-                    opacity: isRecording || isFinalizingRecording ? 0.3 : 1,
-                  }}
-                  onClick={() => void startUrl(`/videos/${sample}`, `视频 ${index + 1}`)}
-                >
-                  V{index + 1}
-                </button>
-              ))}
-            </div>
+            <label style={styles.field}>
+              视频库
+              <select
+                value={selectedLibraryVideoId}
+                disabled={isRecording || isFinalizingRecording || videoLibrary.length === 0}
+                onChange={(event) => {
+                  const id = event.target.value;
+                  setSelectedLibraryVideoId(id);
+                  const selected = videoLibrary.find((entry) => entry.id === id);
+                  if (selected && applyVideoLibraryContext(selected)) {
+                    void startUrl(`/videos/${selected.video}`, selected.label);
+                  }
+                }}
+              >
+                <option value="">{videoLibrary.length ? "选择视频…" : "视频库加载中…"}</option>
+                {videoLibrary.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+              </select>
+            </label>
             {isRecording && (
               <p style={styles.recordingBadge}>● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板</p>
             )}
