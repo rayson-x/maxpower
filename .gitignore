@@ -47,6 +47,7 @@ tools/harness/out/
 .rule-engine-test-build/
 .segmentation-training-build/
 .reference-trajectory-build/
+.simulated-reference-report-build/
 .motion-sdk-eval-build/
 /target/
 /target-arm64/
