@@ -1,6 +1,6 @@
 {
   "schemaVersion": "form-coach-segmentation-calibration-report/v1",
-  "generatedAt": "2026-08-03T13:59:51.922Z",
+  "generatedAt": "2026-08-04T08:53:45.432Z",
   "sourceDataset": "data/training/approved-segmentation-v1.json",
   "source": {
     "approvalExportSha256": "cadca4ee744cc5b05dd7c7b5be1b28e9b60515225d5ade8a198ac50923ac3722",
