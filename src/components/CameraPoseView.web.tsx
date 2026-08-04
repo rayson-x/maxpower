@@ -698,6 +698,7 @@ export function CameraPoseView() {
   const [rustNeedsReviewRepCount, setRustNeedsReviewRepCount] = useState(0);
   const [rustRejectedRepCount, setRustRejectedRepCount] = useState(0);
   const [rustSetLifecycle, setRustSetLifecycle] = useState<RustSetLifecycle>("idle");
+  const [observedProfilesReady, setObservedProfilesReady] = useState(false);
   const stopRef = useRef<() => void>(() => undefined);
 
   const syncRustSetCommandPacket = (session: RustCanonicalWasmSession) => {
@@ -748,12 +749,35 @@ export function CameraPoseView() {
   }, []);
 
   useEffect(() => {
-    void loadObservedRecognitionProfiles().catch((loadError) => {
-      // The field artifact is local-only in the current prototype. Its absence
-      // must leave the reviewed/built-in profile path usable.
-      console.warn("Observed recognition profiles unavailable", loadError);
-    });
+    let cancelled = false;
+    void loadObservedRecognitionProfiles()
+      .then(() => {
+        if (!cancelled) setObservedProfilesReady(true);
+      })
+      .catch((loadError) => {
+        // The field artifact is local-only in the current prototype. Its absence
+        // must leave the reviewed/built-in profile path usable.
+        console.warn("Observed recognition profiles unavailable", loadError);
+      });
+    return () => { cancelled = true; };
   }, []);
+
+  // A session can be created while the local observed-profile artifact is
+  // still loading. Reinstall the exact context once it is ready so a video
+  // never keeps an accidental simulated fallback for its whole replay.
+  useEffect(() => {
+    if (!observedProfilesReady) return;
+    const session = canonicalSessionRef.current;
+    if (!(session instanceof RustCanonicalWasmSession)) return;
+    configureRustExerciseProfile(
+      session,
+      exerciseChoiceRef.current,
+      capturePositionRef.current,
+      trainingSideRef.current,
+      variationRef.current,
+      modelPathRef.current,
+    );
+  }, [observedProfilesReady]);
 
   useEffect(() => {
     if (workspacePage === "review") setHasVisitedReview(true);

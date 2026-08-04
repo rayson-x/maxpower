@@ -1,4 +1,7 @@
-import type { RustExerciseProfileData } from "./rustCanonicalWasm";
+import {
+  computeRustExerciseProfileHash,
+  type RustExerciseProfileData,
+} from "./rustCanonicalWasm";
 import type { RustProfileContext } from "./rustProfileResolver";
 
 interface SerializedProfile extends Omit<RustExerciseProfileData, "contentHash"> {
@@ -52,10 +55,48 @@ export function resolveObservedRecognitionProfile(
     && entry.variation === "unrecorded",
   );
   if (!found) return null;
-  return {
+  const profile: RustExerciseProfileData = {
     ...found.profile,
     contentHash: BigInt(found.profile.contentHash),
     primarySignal: { ...found.profile.primarySignal },
     secondarySignal: { ...found.profile.secondarySignal },
+  };
+  return applyObservedRecognitionCompatibilityPolicy(context, profile);
+}
+
+/**
+ * A conservative compatibility pass for the first real-world lateral-raise
+ * profile. It keeps the exact action/view/side gate and all continuity and
+ * anti-interference rules, but accepts an almost-complete bilateral cycle
+ * rather than insisting on the in-sample 20th-percentile amplitude floor.
+ * This is a provisional counting policy, not a form-quality threshold.
+ */
+export function applyObservedRecognitionCompatibilityPolicy(
+  context: RustProfileContext,
+  profile: RustExerciseProfileData,
+): RustExerciseProfileData {
+  if (
+    context.exerciseId !== "lateral_raise"
+    || context.capturePosition !== "front"
+    || context.trainingSide !== "bilateral"
+    || context.variation.trim() !== ""
+  ) {
+    return profile;
+  }
+  const withoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
+    ...profile,
+    identity: `${profile.identity}/soft-cycle/v1`,
+    primarySignal: { ...profile.primarySignal },
+    secondarySignal: { ...profile.secondarySignal },
+    startAmplitude: profile.startAmplitude * 0.85,
+    minPrimaryAmplitude: profile.minPrimaryAmplitude * 0.85,
+    minSecondaryAmplitude: profile.minSecondaryAmplitude * 0.85,
+    returnHysteresis: profile.returnHysteresis * 0.85,
+    readyTolerance: profile.readyTolerance * 0.85,
+    minRepDurationMs: Math.round(profile.minRepDurationMs * 0.85),
+  };
+  return {
+    ...withoutHash,
+    contentHash: computeRustExerciseProfileHash(withoutHash),
   };
 }
