@@ -16,6 +16,16 @@ export type MotionContinuityReason =
   | "prediction-timeout"
   | "no-measurement-baseline";
 export type MotionRepPhase = "ready" | "effort" | "peak" | "return" | "frozen";
+export type MotionSetLifecycle = "idle" | "arming" | "active" | "paused" | "finished";
+export type MotionRepDisposition = "confirmed" | "needs_review" | "rejected";
+export type MotionRepEvidenceReason =
+  | "short_continuity_recovery"
+  | "long_continuity_loss"
+  | "subject_changed"
+  | "incomplete_cycle"
+  | "anti_interference_filter"
+  | "duration_exceeded"
+  | "required_joint_loss";
 
 export interface DecodedSealedRep {
   readonly repId: bigint;
@@ -32,6 +42,8 @@ export interface DecodedSealedRep {
   readonly profileIdentity: string;
   readonly qualityVerdict: string | null;
   readonly recoveredAcrossGap: boolean;
+  readonly disposition: MotionRepDisposition;
+  readonly evidenceReason: MotionRepEvidenceReason | null;
 }
 
 export interface DecodedMotionLandmark {
@@ -66,6 +78,9 @@ export interface DecodedMotionPacket {
     selectedCandidateId: bigint | null;
   }>;
   readonly canonical: readonly Readonly<DecodedMotionLandmark>[];
+  readonly setState: Readonly<{
+    lifecycle: MotionSetLifecycle;
+  }>;
   readonly repState: Readonly<{
     phase: MotionRepPhase;
     partialAttempts: bigint;
@@ -159,6 +174,7 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
   let partialAttempts = 0n;
   let activeRepId: bigint | null = null;
   let recoveredAcrossGap = false;
+  let setLifecycle: MotionSetLifecycle = "idle";
   let configVersion = "unspecified";
   let inferenceVersion = "unspecified";
   let diagnosticVersion = "unspecified";
@@ -189,8 +205,12 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     offset += 1;
     const repCount = view.getUint16(offset, true);
     offset += 2;
+    // v1.4 adds the immutable candidate disposition and evidence byte. Keep
+    // v1.0-v1.3 RPS1 recordings replayable: their historical sealed reps
+    // were all formal confirmations because no candidate vocabulary existed.
+    const hasCandidateDisposition = minor >= 4;
     for (let index = 0; index < repCount; index += 1) {
-      ensureAvailable(offset, 82, declaredLength, `sealed rep ${index}`);
+      ensureAvailable(offset, hasCandidateDisposition ? 83 : 82, declaredLength, `sealed rep ${index}`);
       const values = Array.from({ length: 9 }, () => {
         const value = view.getBigUint64(offset, true);
         offset += 8;
@@ -202,6 +222,10 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
       offset += 1;
       const flags = view.getUint8(offset);
       offset += 1;
+      const evidenceReason = hasCandidateDisposition
+        ? decodeRepEvidenceReason(view.getUint8(offset))
+        : null;
+      if (hasCandidateDisposition) offset += 1;
       const identityLength = view.getUint16(offset, true);
       offset += 2;
       const profileIdentity = readString(
@@ -238,7 +262,21 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
         profileIdentity,
         qualityVerdict: (flags & 1) !== 0 ? verdict : null,
         recoveredAcrossGap: (flags & (1 << 1)) !== 0,
+        disposition: hasCandidateDisposition ? decodeRepDisposition((flags >> 2) & 0b11) : "confirmed",
+        evidenceReason,
       }));
+    }
+    if (offset < declaredLength) {
+      ensureAvailable(offset, 4, declaredLength, "set extension marker");
+      const marker = textDecoder.decode(bytes.subarray(offset, offset + 4));
+      if (marker === "SET1") {
+        offset += 4;
+        ensureAvailable(offset, 1, declaredLength, "set lifecycle");
+        setLifecycle = decodeSetLifecycle(view.getUint8(offset));
+        offset += 1;
+      } else if (marker !== "VER1") {
+        throw new Error(`Unknown MotionPacket minor extension ${marker}`);
+      }
     }
     if (offset < declaredLength) {
       ensureAvailable(offset, 4, declaredLength, "version extension marker");
@@ -296,6 +334,7 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     subjectEpoch,
     target: Object.freeze({ state: targetState, candidateCount, selectedCandidateId }),
     canonical: Object.freeze(canonical),
+    setState: Object.freeze({ lifecycle: setLifecycle }),
     repState: Object.freeze({
       phase: repPhase,
       partialAttempts,
@@ -304,6 +343,40 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     }),
     completedReps: Object.freeze(completedReps),
   });
+}
+
+function decodeRepDisposition(code: number): MotionRepDisposition {
+  switch (code) {
+    case 0: return "confirmed";
+    case 1: return "needs_review";
+    case 2: return "rejected";
+    default: throw new Error(`MotionPacket rep disposition code ${code} is invalid`);
+  }
+}
+
+function decodeRepEvidenceReason(code: number): MotionRepEvidenceReason | null {
+  switch (code) {
+    case 0: return null;
+    case 1: return "short_continuity_recovery";
+    case 2: return "long_continuity_loss";
+    case 3: return "subject_changed";
+    case 4: return "incomplete_cycle";
+    case 5: return "anti_interference_filter";
+    case 6: return "duration_exceeded";
+    case 7: return "required_joint_loss";
+    default: throw new Error(`MotionPacket rep evidence reason code ${code} is invalid`);
+  }
+}
+
+function decodeSetLifecycle(code: number): MotionSetLifecycle {
+  switch (code) {
+    case 0: return "idle";
+    case 1: return "arming";
+    case 2: return "active";
+    case 3: return "paused";
+    case 4: return "finished";
+    default: throw new Error(`MotionPacket set lifecycle code ${code} is invalid`);
+  }
 }
 
 function decodeContinuityReason(code: number): MotionContinuityReason | null {

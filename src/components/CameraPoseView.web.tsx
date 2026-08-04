@@ -25,6 +25,11 @@ import {
 } from "../motion/performanceDegradation";
 import { resolveRustExerciseProfile } from "../motion/rustProfileResolver";
 import {
+  loadObservedRecognitionProfiles,
+  resolveObservedRecognitionProfile,
+} from "../motion/observedRecognitionProfiles";
+import { resolveSimulatedRecognitionProfile } from "../motion/simulatedRecognitionProfile";
+import {
   createPoseContinuitySession,
   type CanonicalPoseFrame,
   type PoseContinuitySession,
@@ -72,6 +77,7 @@ import {
   type RustReferenceComparisonEvidence,
   type RustReferenceRuntimeContext,
   type RustSealedRep,
+  type RustSetLifecycle,
   type RustTargetSnapshot,
 } from "../motion/rustCanonicalWasm";
 import { buildLatPulldownQualityEvidence } from "../pose/trajectoryQualityEvidence";
@@ -251,12 +257,25 @@ function configureRustExerciseProfile(
   variation: string,
   modelPath: string,
 ): void {
-  session.setExerciseProfile(rustProfileForContext(
-    exerciseId,
-    capturePosition,
-    trainingSide,
-    variation,
-  ));
+  const context = { exerciseId, capturePosition, trainingSide, variation } as const;
+  const builtInProfile = resolveRustExerciseProfile(context);
+  const observedProfile = resolveObservedRecognitionProfile(context);
+  // The current high-pulldown normative trajectory binding is deliberately
+  // sealed to its built-in profile. Do not make an observed counting profile
+  // silently replace the reference-compatible profile until that binding is
+  // upgraded as one atomic contract.
+  const keepsBuiltInReferenceBinding = ["lat_pulldown", "lat_pulldown_rear_left_45"]
+    .includes(builtInProfile ?? "");
+  const simulatedProfile = !builtInProfile && !observedProfile
+    ? resolveSimulatedRecognitionProfile(context)
+    : null;
+  if (observedProfile && !keepsBuiltInReferenceBinding) {
+    session.installExerciseProfileData(observedProfile);
+  } else if (simulatedProfile) {
+    session.installExerciseProfileData(simulatedProfile);
+  } else {
+    session.setExerciseProfile(builtInProfile);
+  }
   const referenceContext = referenceRuntimeContextFor(
     exerciseId,
     capturePosition,
@@ -525,6 +544,18 @@ function revokeRecordingResultUrls(result: RecordingResult): void {
   URL.revokeObjectURL(result.metadataUrl);
 }
 
+function candidateEvidenceLabel(reason: RustSealedRep["evidenceReason"]): string {
+  return {
+    short_continuity_recovery: "短暂丢点后恢复",
+    long_continuity_loss: "长时间丢点",
+    subject_changed: "追踪主体切换",
+    incomplete_cycle: "未完成完整动作周期",
+    anti_interference_filter: "整体移动干扰",
+    duration_exceeded: "动作时长超出上限",
+    required_joint_loss: "关键关节不可用",
+  }[reason ?? ""] ?? "未说明原因";
+}
+
 export function CameraPoseView() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const engineRef = useRef<AnyPoseEngine | null>(null);
@@ -554,6 +585,7 @@ export function CameraPoseView() {
   const canonicalShadowRef = useRef<PoseContinuitySession | null>(null);
   const rustWasmRef = useRef<MotionWasmExports | null>(null);
   const rustTargetRef = useRef<RustTargetSnapshot | null>(null);
+  const rustSetLifecycleRef = useRef<RustSetLifecycle>("idle");
   const referenceComparisonKeyRef = useRef(referenceComparisonKey(NO_REVIEWED_REFERENCE));
   const sequenceCounterRef = useRef(0);
   // 实时信号曲线(肘角),驱动左下角曲线图
@@ -568,6 +600,8 @@ export function CameraPoseView() {
   const captureDiagnosticsRef = useRef<CaptureFrameDiagnostic[]>([]);
   const motionDiagnosticsRef = useRef<MotionFrameDiagnostic[]>([]);
   const rustSealedRepsRef = useRef<RustSealedRep[]>([]);
+  const rustNeedsReviewRepsRef = useRef<RustSealedRep[]>([]);
+  const rustRejectedRepsRef = useRef<RustSealedRep[]>([]);
   const rustReferenceEvidenceRef = useRef<RustReferenceEvidenceRecord[]>([]);
   const droppedFramesRef = useRef(0);
   const inferenceCompletionGateRef = useRef(new InferenceCompletionGate());
@@ -651,7 +685,28 @@ export function CameraPoseView() {
   );
   const [referenceEvidenceVersion, setReferenceEvidenceVersion] = useState(0);
   const [rustSealedRepCount, setRustSealedRepCount] = useState(0);
+  const [rustNeedsReviewRepCount, setRustNeedsReviewRepCount] = useState(0);
+  const [rustRejectedRepCount, setRustRejectedRepCount] = useState(0);
+  const [rustSetLifecycle, setRustSetLifecycle] = useState<RustSetLifecycle>("idle");
   const stopRef = useRef<() => void>(() => undefined);
+
+  const syncRustSetCommandPacket = (session: RustCanonicalWasmSession) => {
+    // Recording commands produce immutable Rust snapshots too; never mirror a
+    // lifecycle or terminal rejection in TypeScript state by hand.
+    const packet = session.lastDecodedPacket;
+    if (!packet) return;
+    rustSetLifecycleRef.current = session.lastSetLifecycle;
+    setRustSetLifecycle(session.lastSetLifecycle);
+    const confirmed = packet.completedReps.filter((rep) => rep.disposition === "confirmed");
+    const needsReview = packet.completedReps.filter((rep) => rep.disposition === "needs_review");
+    const rejected = packet.completedReps.filter((rep) => rep.disposition === "rejected");
+    rustSealedRepsRef.current.push(...confirmed);
+    rustNeedsReviewRepsRef.current.push(...needsReview);
+    rustRejectedRepsRef.current.push(...rejected);
+    setRustSealedRepCount(rustSealedRepsRef.current.length);
+    setRustNeedsReviewRepCount(rustNeedsReviewRepsRef.current.length);
+    setRustRejectedRepCount(rustRejectedRepsRef.current.length);
+  };
 
   const currentReferenceQualityEvidence = qualityEvidenceForComparison(
     referenceComparison,
@@ -664,6 +719,12 @@ export function CameraPoseView() {
     variation,
     POSE_MODELS.find((model) => model.id === modelId)?.path ?? POSE_MODELS[2]!.path,
   ) !== null;
+  const simulatedRecognitionBaseline = resolveSimulatedRecognitionProfile({
+    exerciseId: exerciseChoice,
+    capturePosition,
+    trainingSide,
+    variation,
+  } as const);
 
   useEffect(() => {
     const syncWorkspacePage = () => {
@@ -674,6 +735,14 @@ export function CameraPoseView() {
     };
     window.addEventListener("popstate", syncWorkspacePage);
     return () => window.removeEventListener("popstate", syncWorkspacePage);
+  }, []);
+
+  useEffect(() => {
+    void loadObservedRecognitionProfiles().catch((loadError) => {
+      // The field artifact is local-only in the current prototype. Its absence
+      // must leave the reviewed/built-in profile path usable.
+      console.warn("Observed recognition profiles unavailable", loadError);
+    });
   }, []);
 
   useEffect(() => {
@@ -748,7 +817,11 @@ export function CameraPoseView() {
         modelPathRef.current,
       );
       rustSealedRepsRef.current = [];
+      rustNeedsReviewRepsRef.current = [];
+      rustRejectedRepsRef.current = [];
       setRustSealedRepCount(0);
+      setRustNeedsReviewRepCount(0);
+      setRustRejectedRepCount(0);
     }
   };
 
@@ -782,7 +855,11 @@ export function CameraPoseView() {
         modelPathRef.current,
       );
       rustSealedRepsRef.current = [];
+      rustNeedsReviewRepsRef.current = [];
+      rustRejectedRepsRef.current = [];
       setRustSealedRepCount(0);
+      setRustNeedsReviewRepCount(0);
+      setRustRejectedRepCount(0);
     }
     return true;
   };
@@ -839,7 +916,13 @@ export function CameraPoseView() {
       stabilization: filterEnabledRef.current ? "legacy" : "fusion",
     } as const;
     if (rustWasmRef.current) {
-      const session = new RustCanonicalWasmSession(config, rustWasmRef.current);
+      const session = new RustCanonicalWasmSession(
+        {
+          ...config,
+          setLifecycleMode: modeRef.current === "camera" ? "preview" : "replay",
+        },
+        rustWasmRef.current,
+      );
       session.setDegradationLevel(degradationControllerRef.current.currentLevel());
       configureRustExerciseProfile(
         session,
@@ -867,8 +950,12 @@ export function CameraPoseView() {
     setPose(null);
     setSignalCurve([]);
     rustSealedRepsRef.current = [];
+    rustNeedsReviewRepsRef.current = [];
+    rustRejectedRepsRef.current = [];
     rustReferenceEvidenceRef.current = [];
     setRustSealedRepCount(0);
+    setRustNeedsReviewRepCount(0);
+    setRustRejectedRepCount(0);
     setReferenceEvidenceVersion((version) => version + 1);
   }, []);
 
@@ -1105,12 +1192,9 @@ export function CameraPoseView() {
               candidates: canonicalSessionRef.current instanceof RustCanonicalWasmSession
                 ? canonicalSessionRef.current.lastCandidateDiagnostics
                 : [],
-              activeProfile: rustProfileForContext(
-                exerciseChoiceRef.current,
-                capturePositionRef.current,
-                trainingSideRef.current,
-                variationRef.current,
-              ),
+              activeProfile: canonicalSessionRef.current instanceof RustCanonicalWasmSession
+                ? canonicalSessionRef.current.lastDecodedPacket?.lineage.activeProfileIdentity ?? null
+                : null,
               landmarkIssues: canonicalFrame.landmarks
                 .map((landmark, index) => ({
                   index,
@@ -1168,6 +1252,10 @@ export function CameraPoseView() {
             const rustSession = canonicalSessionRef.current instanceof RustCanonicalWasmSession
               ? canonicalSessionRef.current
               : null;
+            if (rustSession && rustSession.lastSetLifecycle !== rustSetLifecycleRef.current) {
+              rustSetLifecycleRef.current = rustSession.lastSetLifecycle;
+              setRustSetLifecycle(rustSession.lastSetLifecycle);
+            }
             const motionPacket = createWebMotionPacket({
               canonical: canonicalFrame,
               canonicalContentHash: rustSession?.lastCanonicalHash ?? 0n,
@@ -1196,8 +1284,15 @@ export function CameraPoseView() {
               count: (packet) => {
                 const frame = packet.canonical;
                 if (packet.completedReps.length > 0) {
-                  rustSealedRepsRef.current.push(...packet.completedReps);
+                  const confirmed = packet.completedReps.filter((rep) => rep.disposition === "confirmed");
+                  const needsReview = packet.completedReps.filter((rep) => rep.disposition === "needs_review");
+                  const rejected = packet.completedReps.filter((rep) => rep.disposition === "rejected");
+                  rustSealedRepsRef.current.push(...confirmed);
+                  rustNeedsReviewRepsRef.current.push(...needsReview);
+                  rustRejectedRepsRef.current.push(...rejected);
                   setRustSealedRepCount(rustSealedRepsRef.current.length);
+                  setRustNeedsReviewRepCount(rustNeedsReviewRepsRef.current.length);
+                  setRustRejectedRepCount(rustRejectedRepsRef.current.length);
                   if (packet.target && packet.referenceComparison.status !== "unavailable") {
                     const record: RustReferenceEvidenceRecord = Object.freeze({
                       subjectEpoch: packet.target.subjectEpoch,
@@ -1421,6 +1516,10 @@ export function CameraPoseView() {
 
   /** 录制结束后把视频和关键点 fixture 固化到本机采集库，并暴露导出链接。 */
   const finalizeRecording = useCallback(async () => {
+    if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+      canonicalSessionRef.current.finishSet();
+      syncRustSetCommandPacket(canonicalSessionRef.current);
+    }
     recordingActiveRef.current = false;
     const chunks = recordedChunksRef.current;
     const poses = recordedPosesRef.current;
@@ -1443,6 +1542,31 @@ export function CameraPoseView() {
       profileIdentity: rep.profileIdentity,
       qualityVerdict: rep.qualityVerdict,
       recoveredAcrossGap: rep.recoveredAcrossGap,
+      disposition: rep.disposition,
+      evidenceReason: rep.evidenceReason,
+    }));
+    const rustNeedsReviewReps = rustNeedsReviewRepsRef.current.map((rep) => ({
+      repId: rep.repId.toString(),
+      startFrameId: rep.startFrameId.toString(),
+      startTimestampMs: rebaseRepTimestamp(rep.startTimestampMs),
+      peakFrameId: rep.peakFrameId.toString(),
+      peakTimestampMs: rebaseRepTimestamp(rep.peakTimestampMs),
+      endFrameId: rep.endFrameId.toString(),
+      endTimestampMs: rebaseRepTimestamp(rep.endTimestampMs),
+      disposition: rep.disposition,
+      evidenceReason: rep.evidenceReason,
+      canonicalSliceHash: rep.canonicalSliceHash.toString(),
+    }));
+    const rustRejectedReps = rustRejectedRepsRef.current.map((rep) => ({
+      repId: rep.repId.toString(),
+      startFrameId: rep.startFrameId.toString(),
+      startTimestampMs: rebaseRepTimestamp(rep.startTimestampMs),
+      peakFrameId: rep.peakFrameId.toString(),
+      peakTimestampMs: rebaseRepTimestamp(rep.peakTimestampMs),
+      endFrameId: rep.endFrameId.toString(),
+      endTimestampMs: rebaseRepTimestamp(rep.endTimestampMs),
+      evidenceReason: rep.evidenceReason,
+      canonicalSliceHash: rep.canonicalSliceHash.toString(),
     }));
     const referenceComparisons = rustReferenceEvidenceRef.current.map((record) => {
       return {
@@ -1503,7 +1627,18 @@ export function CameraPoseView() {
       recordingMetadata?.trainingSide ?? "bilateral",
       recordingMetadata?.variation ?? "",
     );
-    const usesRustSealedBoundaries = rustProductProfile !== null;
+    const rustProfileContext = {
+      exerciseId: recordingMetadata?.exerciseChoice ?? "",
+      capturePosition: recordingMetadata?.capturePosition ?? "frontLeft45",
+      trainingSide: recordingMetadata?.trainingSide ?? "bilateral",
+      variation: recordingMetadata?.variation ?? "",
+    } as const;
+    // Built-in, observed and simulated recognition profiles all execute in
+    // Rust. Once one is active, downstream analysis must consume its sealed
+    // boundaries rather than quietly re-segmenting in TypeScript.
+    const usesRustSealedBoundaries = rustProductProfile !== null
+      || resolveObservedRecognitionProfile(rustProfileContext) !== null
+      || resolveSimulatedRecognitionProfile(rustProfileContext) !== null;
     const rustSegments: RepSegment[] = rustSealedReps.map((rep, index) => ({
       repIndex: index + 1,
       startMs: rep.startTimestampMs,
@@ -1619,6 +1754,8 @@ export function CameraPoseView() {
         reason: "Browser download APIs do not expose OS disk-flush completion",
       },
       rustSealedReps,
+      rustNeedsReviewReps,
+      rustRejectedReps,
       referenceComparison: serializeReferenceComparison(
         activeReferenceComparison,
       ),
@@ -1692,12 +1829,24 @@ export function CameraPoseView() {
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    if (recordingActiveRef.current) recordingStopMsRef.current = Date.now();
+    if (recordingActiveRef.current) {
+      recordingStopMsRef.current = Date.now();
+      if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+        // Stop is the semantic set boundary, not the later MediaRecorder blob
+        // callback. This prevents a late video frame from sealing a rep.
+        canonicalSessionRef.current.finishSet();
+        syncRustSetCommandPacket(canonicalSessionRef.current);
+      }
+    }
     if (recorder && recorder.state !== "inactive") {
       finalizingRecordingRef.current = true;
       setIsFinalizingRecording(true);
       recorder.stop();
     } else {
+      if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+        canonicalSessionRef.current.finishSet();
+        syncRustSetCommandPacket(canonicalSessionRef.current);
+      }
       recordingActiveRef.current = false;
       finalizingRecordingRef.current = false;
       setIsFinalizingRecording(false);
@@ -1781,6 +1930,17 @@ export function CameraPoseView() {
       // prevents a pre-set walking frame from contributing smoothing history to
       // a recorded rep, while render and exported data still share each frame.
       rotateCanonicalSequence();
+      const rustSession = canonicalSessionRef.current;
+      if (rustSession instanceof RustCanonicalWasmSession) {
+        rustSession.beginSet();
+        syncRustSetCommandPacket(rustSession);
+      }
+      rustSealedRepsRef.current = [];
+      rustNeedsReviewRepsRef.current = [];
+      rustRejectedRepsRef.current = [];
+      setRustSealedRepCount(0);
+      setRustNeedsReviewRepCount(0);
+      setRustRejectedRepCount(0);
       recordedPosesRef.current = [];
       captureDiagnosticsRef.current = [];
       recordedChunksRef.current = [];
@@ -2191,8 +2351,7 @@ export function CameraPoseView() {
                   const y = (event.clientY - bounds.top) / bounds.height;
                   if (mode === "camera") x = 1 - x;
                   if (canonicalSessionRef.current.selectSubjectAt(x, y)) {
-                    rustSealedRepsRef.current = [];
-                    setRustSealedRepCount(0);
+                    syncRustSetCommandPacket(canonicalSessionRef.current);
                   }
                 }}
               >
@@ -2279,21 +2438,46 @@ export function CameraPoseView() {
               </div>
               <div style={styles.trainingStats}>
                 <span style={styles.trainingStat}>
-                  <strong style={styles.trainingStatValue}>{rustSdkStatus === "ready" ? rustSealedRepCount : (setAnalysis?.reps.length ?? segments.length)}</strong>
+                  <strong style={styles.trainingStatValue}>{rustSdkStatus === "ready" ? rustSealedRepCount : "—"}</strong>
                   已识别次数
                 </span>
+                {rustNeedsReviewRepCount > 0 && (
+                  <span style={styles.trainingStat}>
+                    <strong style={styles.trainingStatValue}>{rustNeedsReviewRepCount}</strong>
+                    待审核动作
+                  </span>
+                )}
+                {rustRejectedRepCount > 0 && (
+                  <span style={styles.trainingStat}>
+                    <strong style={styles.trainingStatValue}>{rustRejectedRepCount}</strong>
+                    已过滤候选
+                  </span>
+                )}
                 <span style={styles.trainingStat}>
                   <strong style={styles.trainingStatValue}>{fps || "—"}</strong>
                   当前 FPS
                 </span>
                 <span style={styles.trainingStat}>
-                  <strong style={styles.trainingStatValue}>{isRecording ? "录制中" : status === "running" ? "预览中" : "待机"}</strong>
+                  <strong style={styles.trainingStatValue}>{
+                    isRecording
+                      ? ({ arming: "稳定锁定中", active: "识别中", paused: "暂停中", finished: "已完成", idle: "准备中" }[rustSetLifecycle])
+                      : status === "running" ? "预览中" : "待机"
+                  }</strong>
                   本组状态
                 </span>
               </div>
               <p style={styles.trainingHint}>
                 从视频库选择素材即可在此页查看骨架识别、次数与质量证据；只有点击“开始本组录制”才会写入新的本机训练档案。
+                {rustSdkStatus !== "ready" ? " Rust SDK 未就绪时只显示骨架预览，不回退到旧计数器写入正式次数。" : ""}
               </p>
+              {(rustNeedsReviewRepCount > 0 || rustRejectedRepCount > 0) && (
+                <p style={styles.trainingHint}>
+                  候选证据：
+                  {rustNeedsReviewRepsRef.current.map((rep) => `待审核 #${rep.repId.toString()}（${candidateEvidenceLabel(rep.evidenceReason)}）`).join("；")}
+                  {rustNeedsReviewRepCount > 0 && rustRejectedRepCount > 0 ? "；" : ""}
+                  {rustRejectedRepsRef.current.map((rep) => `已过滤 #${rep.repId.toString()}（${candidateEvidenceLabel(rep.evidenceReason)}）`).join("；")}
+                </p>
+              )}
               {setAnalysis?.score && (
                 <p style={styles.trainingScore}>
                   最近结果：{setAnalysis.score.score === null ? setAnalysis.score.label : `${setAnalysis.score.score} 分`}
@@ -2304,6 +2488,11 @@ export function CameraPoseView() {
                 {simulatedNominalReferenceConfigured && (
                   <div>
                     当前参考：模拟标准轨迹基线（未校准）。带外表示“与模拟相位路径有偏离”，用于复核与纠正，不是总分或医学结论；你后续的同机位标注视频会用于校准它。
+                  </div>
+                )}
+                {!simulatedNominalReferenceConfigured && simulatedRecognitionBaseline && rustSealedRepCount > 0 && (
+                  <div>
+                    当前动作使用 Rust 内的模拟运动学先验（未校准）：它只提供已封装动作的相位方向与可观测性描述，绝不改变正式次数，也不输出“标准/正确”评分。请用同机位审核资料建立独立的轨迹比较 profile。
                   </div>
                 )}
                 {currentReferenceQualityEvidence.map((card) => (
@@ -2690,7 +2879,11 @@ export function CameraPoseView() {
                       modelPathRef.current,
                     );
                     rustSealedRepsRef.current = [];
+                    rustNeedsReviewRepsRef.current = [];
+                    rustRejectedRepsRef.current = [];
                     setRustSealedRepCount(0);
+                    setRustNeedsReviewRepCount(0);
+                    setRustRejectedRepCount(0);
                   }
                 }}
               >
@@ -2743,7 +2936,11 @@ export function CameraPoseView() {
                         modelPathRef.current,
                       );
                       rustSealedRepsRef.current = [];
+                      rustNeedsReviewRepsRef.current = [];
+                      rustRejectedRepsRef.current = [];
                       setRustSealedRepCount(0);
+                      setRustNeedsReviewRepCount(0);
+                      setRustRejectedRepCount(0);
                     }
                   }}
                   placeholder="例如：哑铃、单臂、宽握"
@@ -2769,7 +2966,11 @@ export function CameraPoseView() {
                         modelPathRef.current,
                       );
                       rustSealedRepsRef.current = [];
+                      rustNeedsReviewRepsRef.current = [];
+                      rustRejectedRepsRef.current = [];
                       setRustSealedRepCount(0);
+                      setRustNeedsReviewRepCount(0);
+                      setRustRejectedRepCount(0);
                     }
                   }}
                 >

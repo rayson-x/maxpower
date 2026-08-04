@@ -1,6 +1,6 @@
 use form_coach_motion_sdk::{
     BodyNormalizationConfig, CanonicalFrameSample, CanonicalLandmark, ExerciseProfile,
-    LandmarkSource, PhaseName, SealedRep, constrained_phase_dtw, normalize_rep_trajectory,
+    LandmarkSource, PhaseName, RepDisposition, SealedRep, constrained_phase_dtw, normalize_rep_trajectory,
 };
 
 #[test]
@@ -116,6 +116,8 @@ fn sealed(start: u64, peak: u64, end: u64) -> SealedRep {
         profile_maturity: "provisional",
         quality_verdict: None,
         recovered_across_gap: false,
+        disposition: RepDisposition::Confirmed,
+        evidence_reason: None,
     }
 }
 

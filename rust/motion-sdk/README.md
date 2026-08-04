@@ -5,7 +5,7 @@ Rust owns motion state; hosts own camera/model/rendering. The public seams are d
 - `InferenceAdapter` supplies timestamped pose candidates and declares capabilities.
 - `MotionSession` owns subject selection, canonical continuity, rep state and sealed boundaries.
 - `OutputAdapter` receives immutable `MotionPacket` values; the binary contract is decoded once.
-- `ExerciseProfile` configures the generic multi-joint state machine. New graph-compatible exercises do not add Rust state-machine code.
+- `ExerciseProfile` configures the generic multi-joint state machine. Its primary and secondary signals are explicit: landmark Y, a three-landmark 2D joint angle, or torso-normalized landmark distance. New graph-compatible exercises do not add Rust state-machine code or pretend that every movement is vertical.
 - `ReferenceTrajectoryProfile` is a separate identity/schema. It can describe corridor evidence but cannot change a `SealedRep`.
 
 The browser uses a dependency-injected numeric WASM ABI because MediaPipe and camera frames are browser-owned. Run:
@@ -24,6 +24,8 @@ Renderer, recorder, counter and analyzer synchronously receive the same frozen W
 ## Profile maturity
 
 The built-in high-pulldown and seated-shoulder-press profiles remain `provisional`. The local evaluation corpus was visible during exploratory threshold work, so its held-out-looking metrics are not a valid independent promotion cohort. Consequently `qualityVerdict` stays `null` and the promotion count stays zero.
+
+Locally generated `observed recognition profiles` are a separate provisional input: they use human-labelled start/peak/end boundaries only to improve segmentation, count and interference rejection for an exact action/camera tuple. They are never a standard-form trajectory, and an explicit variation/equipment selection cannot inherit a historical label where that field was unrecorded.
 
 ## Scope
 

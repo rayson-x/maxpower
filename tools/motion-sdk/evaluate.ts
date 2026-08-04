@@ -131,7 +131,7 @@ function replay(record: DatasetRecord, profile: Exclude<RustExerciseProfile, nul
     stabilization: "fusion",
   }, wasm);
   session.setExerciseProfile(profile);
-  const predicted: RustSealedRep[] = [];
+  const outcomes: RustSealedRep[] = [];
   const rawTriggerStartMs: number[] = [];
   let previousActiveRepId: bigint | null = null;
   let previousRustPhase = "ready";
@@ -149,7 +149,7 @@ function replay(record: DatasetRecord, profile: Exclude<RustExerciseProfile, nul
       })),
       worldLandmarks: pose.worldLandmarks ?? [],
     });
-    predicted.push(...session.lastCompletedReps);
+    outcomes.push(...session.lastCompletedReps);
     const activeRepId = session.lastRepState.activeRepId;
     if (previousActiveRepId === null && activeRepId !== null) {
       rawTriggerStartMs.push(pose.timestampMs);
@@ -164,7 +164,13 @@ function replay(record: DatasetRecord, profile: Exclude<RustExerciseProfile, nul
     throw new Error(`Rust profile identity mismatch for ${record.captureId}`);
   }
   const processingMs = performance.now() - started;
-  const pred = predicted.map((rep) => ({
+  // Formal evaluation follows the same product rule as the training screen:
+  // only confirmed candidates contribute volume, matches, or false positives.
+  // Ambiguous and rejected events remain separately auditable diagnostics.
+  const confirmed = outcomes.filter((rep) => rep.disposition === "confirmed");
+  const needsReview = outcomes.filter((rep) => rep.disposition === "needs_review");
+  const rejected = outcomes.filter((rep) => rep.disposition === "rejected");
+  const pred = confirmed.map((rep) => ({
     startMs: Number(rep.startTimestampMs),
     peakMs: Number(rep.peakTimestampMs),
     endMs: Number(rep.endTimestampMs),
@@ -202,6 +208,9 @@ function replay(record: DatasetRecord, profile: Exclude<RustExerciseProfile, nul
     split: splitFor(record.captureId),
     truthCount: record.expectedCount,
     predictedCount: pred.length,
+    needsReviewCandidateCount: needsReview.length,
+    rejectedCandidateCount: rejected.length,
+    rejectedCandidateReasons: rejected.map((rep) => rep.evidenceReason ?? "unknown"),
     rawTriggerCount: rawTriggerStartMs.length,
     rawMatchedTriggers: rawMatching.matched,
     rawFalsePositiveTriggers: rawTriggerStartMs.length - rawMatching.matched,

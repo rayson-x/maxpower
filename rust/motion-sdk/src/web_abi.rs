@@ -22,7 +22,9 @@ struct WebRuntime {
     frame_id: u64,
     rep_engine: Option<super::RepEngine>,
     rep_state: super::RepStateSnapshot,
+    set_gate: super::SetGate,
     completed_reps: Vec<super::SealedRep>,
+    pending_outcomes: Vec<super::SealedRep>,
     packet_bytes: Vec<u8>,
     sequence_id: String,
     sequence_buffer: Vec<u8>,
@@ -216,7 +218,9 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.frame_id = 0;
     runtime.rep_engine = None;
     runtime.rep_state = super::RepStateSnapshot::default();
+    runtime.set_gate = super::SetGate::default();
     runtime.completed_reps.clear();
+    runtime.pending_outcomes.clear();
     runtime.packet_bytes.clear();
     runtime.reference_profile = None;
     runtime.reference_context_buffer.clear();
@@ -224,6 +228,69 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.reference_exercise_profile_binding = None;
     runtime.reference_state = ReferenceRuntimeState::Unavailable;
     runtime.frame_history.clear();
+    0
+}
+
+/// Crosses the single recording boundary into Rust. Preview frames remain
+/// canonical/renderable, but their rep state machine stays idle.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_set() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    runtime.set_gate.begin();
+    if let Some(rep_engine) = runtime.rep_engine.as_mut() {
+        rep_engine.abort_active();
+        runtime.rep_state = rep_engine.state.clone();
+    } else {
+        runtime.rep_state = super::RepStateSnapshot::default();
+    }
+    runtime.completed_reps.clear();
+    runtime.pending_outcomes.clear();
+    runtime.frame_history.clear();
+    reset_reference_subject(&mut runtime);
+    encode_current_packet(&mut runtime);
+    0
+}
+
+/// Offline fixtures and imported-replay tools intentionally opt into the
+/// legacy always-active semantics. Product camera hosts must use begin_set.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_replay_set() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    runtime.set_gate = super::SetGate::replay_active();
+    0
+}
+
+/// Ends one recorded set without turning a partial last movement into a rep.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_finish_set() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    runtime.set_gate.finish();
+    let terminal_outcome = runtime
+        .rep_engine
+        .as_mut()
+        .and_then(|engine| engine.reject_active(super::RepEvidenceReason::IncompleteCycle, engine.previous));
+    runtime.completed_reps = terminal_outcome.into_iter().collect();
+    runtime.pending_outcomes.clear();
+    runtime.rep_state = runtime
+        .rep_engine
+        .as_ref()
+        .map_or_else(super::RepStateSnapshot::default, |engine| engine.state.clone());
+    encode_current_packet(&mut runtime);
     0
 }
 
@@ -372,9 +439,11 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
         if let Some(engine) = runtime.engine.as_mut() {
             engine.reset();
         }
-        if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-            rep_engine.abort_active();
-        }
+        let subject_change_outcome = runtime
+            .rep_engine
+            .as_mut()
+            .and_then(super::RepEngine::reject_for_subject_change);
+        runtime.pending_outcomes.extend(subject_change_outcome);
         reset_reference_subject(&mut runtime);
     }
     let landmark_count = runtime
@@ -402,7 +471,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
 }
 
 fn process_rep(runtime: &mut WebRuntime) {
-    runtime.completed_reps.clear();
+    runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
     if runtime.reference_profile.is_some() {
         runtime.frame_history.push(super::CanonicalFrameSample {
             frame_id: runtime.frame_id,
@@ -427,22 +496,44 @@ fn process_rep(runtime: &mut WebRuntime) {
     let Some(target) = runtime.target.as_ref() else {
         return;
     };
-    if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-        runtime.completed_reps = rep_engine.process(
-            runtime.frame_id,
-            runtime.timestamp_ms,
-            target.state,
-            &runtime.output,
-        );
-        runtime.rep_state = rep_engine.state.clone();
+    let rep_phase = runtime
+        .rep_engine
+        .as_ref()
+        .map_or(super::RepPhase::Ready, |engine| engine.state.phase);
+    let may_process_rep = runtime.set_gate.advance(
+        runtime.rep_engine.as_ref().map(|engine| &engine.profile),
+        target.state,
+        &runtime.output,
+        runtime.timestamp_ms,
+        rep_phase,
+    );
+    if may_process_rep {
+        if let Some(rep_engine) = runtime.rep_engine.as_mut() {
+            runtime.completed_reps.extend(rep_engine.process(
+                runtime.frame_id,
+                runtime.timestamp_ms,
+                target.state,
+                &runtime.output,
+            ));
+            runtime.rep_state = rep_engine.state.clone();
+        } else {
+            runtime.rep_state = super::RepStateSnapshot::default();
+        }
     } else {
-        runtime.rep_state = super::RepStateSnapshot::default();
+        runtime.rep_state = runtime
+            .rep_engine
+            .as_ref()
+            .map_or_else(super::RepStateSnapshot::default, |engine| engine.state.clone());
     }
     if let (Some(profile), Some(identity), Some((bound_identity, bound_hash)), Some(rep)) = (
         runtime.reference_profile.as_ref(),
         runtime.reference_context.as_ref(),
         runtime.reference_exercise_profile_binding.as_ref(),
-        runtime.completed_reps.last(),
+        runtime
+            .completed_reps
+            .iter()
+            .rev()
+            .find(|rep| rep.disposition == super::RepDisposition::Confirmed),
     ) {
         runtime.reference_state =
             if rep.profile_identity != *bound_identity || rep.profile_hash != *bound_hash {
@@ -460,37 +551,42 @@ fn process_rep(runtime: &mut WebRuntime) {
                 }
             };
     }
-    if let Some(target) = runtime.target.clone() {
-        let packet = super::MotionPacket {
-            lineage: super::PacketLineage {
-                sequence_id: runtime.sequence_id.clone(),
-                contract: super::ContractVersion { major: 1, minor: 2 },
-                algorithm_version: "rust-canonical-wasm/v1".into(),
-                config_version: "web-motion-config/v1".into(),
-                inference_version: "mediapipe-host-adapter/v1".into(),
-                diagnostic_version: "web-motion-diagnostics/v1".into(),
-                active_profile_identity: runtime
-                    .rep_engine
-                    .as_ref()
-                    .map(|engine| engine.profile.identity.clone()),
-                active_profile_hash: runtime
-                    .rep_engine
-                    .as_ref()
-                    .map(|engine| engine.profile.content_hash),
-            },
-            frame_id: runtime.frame_id,
-            source_timestamp_ms: runtime.timestamp_ms,
-            subject_epoch: runtime.subject_epoch,
-            target,
-            canonical: runtime.output.clone(),
-            rep_state: runtime.rep_state.clone(),
-            completed_reps: runtime.completed_reps.clone(),
-        };
-        runtime.packet_bytes = super::encode_motion_packet(&packet).unwrap_or_default();
-    } else {
-        runtime.packet_bytes.clear();
-    }
+    encode_current_packet(runtime);
     runtime.frame_id = runtime.frame_id.saturating_add(1);
+}
+
+fn encode_current_packet(runtime: &mut WebRuntime) {
+    let Some(target) = runtime.target.clone() else {
+        runtime.packet_bytes.clear();
+        return;
+    };
+    let packet = super::MotionPacket {
+        lineage: super::PacketLineage {
+            sequence_id: runtime.sequence_id.clone(),
+            contract: super::ContractVersion { major: 1, minor: 4 },
+            algorithm_version: "rust-canonical-wasm/v1".into(),
+            config_version: "web-motion-config/v1".into(),
+            inference_version: "mediapipe-host-adapter/v1".into(),
+            diagnostic_version: "web-motion-diagnostics/v1".into(),
+            active_profile_identity: runtime
+                .rep_engine
+                .as_ref()
+                .map(|engine| engine.profile.identity.clone()),
+            active_profile_hash: runtime
+                .rep_engine
+                .as_ref()
+                .map(|engine| engine.profile.content_hash),
+        },
+        frame_id: runtime.frame_id,
+        source_timestamp_ms: runtime.timestamp_ms,
+        subject_epoch: runtime.subject_epoch,
+        target,
+        canonical: runtime.output.clone(),
+        set_state: runtime.set_gate.state.clone(),
+        rep_state: runtime.rep_state.clone(),
+        completed_reps: runtime.completed_reps.clone(),
+    };
+    runtime.packet_bytes = super::encode_motion_packet(&packet).unwrap_or_default();
 }
 
 #[unsafe(no_mangle)]
@@ -523,6 +619,7 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     runtime.rep_engine = profile.map(super::RepEngine::new);
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
+    runtime.pending_outcomes.clear();
     clear_reference(&mut runtime);
     0
 }
@@ -564,16 +661,22 @@ pub extern "C" fn motion_sdk_install_profile(
     state_machine: u32,
     required_capabilities: u32,
     direction: u32,
+    primary_kind: u32,
     primary_0: u32,
     primary_1: u32,
+    primary_2: u32,
+    secondary_kind: u32,
     secondary_0: u32,
     secondary_1: u32,
+    secondary_2: u32,
     start_amplitude: f32,
     min_primary_amplitude: f32,
     min_secondary_amplitude: f32,
     return_hysteresis: f32,
     ready_tolerance: f32,
     max_gap_ms: u32,
+    min_rep_duration_ms: u32,
+    max_rep_duration_ms: u32,
 ) -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
         return -1;
@@ -592,6 +695,9 @@ pub extern "C" fn motion_sdk_install_profile(
     };
     let coordinate_unit = match coordinate_unit {
         0 => "image-normalized-y",
+        1 => "image-angle-deg",
+        2 => "torso-normalized-distance",
+        3 => "derived-kinematic-signal",
         _ => return -5,
     };
     let state_machine_id = match state_machine {
@@ -599,16 +705,28 @@ pub extern "C" fn motion_sdk_install_profile(
         _ => return -5,
     };
     let direction = match direction {
-        0 => super::MovementDirection::IncreasingY,
-        1 => super::MovementDirection::DecreasingY,
+        0 => super::MovementDirection::Increasing,
+        1 => super::MovementDirection::Decreasing,
+        2 => super::MovementDirection::Auto,
         _ => return -5,
     };
-    let joints = |left: u32, right: u32| {
-        [left, right]
+    let signal_kind = |code: u32| match code {
+        0 => Some(super::ExerciseSignalKind::LandmarkY),
+        1 => Some(super::ExerciseSignalKind::JointAngle),
+        2 => Some(super::ExerciseSignalKind::LandmarkDistance),
+        _ => None,
+    };
+    let joints = |first: u32, second: u32, third: u32| {
+        [first, second, third]
             .into_iter()
             .filter(|value| *value != u32::MAX)
             .map(|value| value as usize)
             .collect::<Vec<_>>()
+    };
+    let (Some(primary_kind), Some(secondary_kind)) =
+        (signal_kind(primary_kind), signal_kind(secondary_kind))
+    else {
+        return -5;
     };
     let profile = super::ExerciseProfile {
         identity,
@@ -618,8 +736,14 @@ pub extern "C" fn motion_sdk_install_profile(
         coordinate_unit: coordinate_unit.into(),
         state_machine_id: state_machine_id.into(),
         required_capabilities,
-        primary_landmarks: joints(primary_0, primary_1),
-        secondary_landmarks: joints(secondary_0, secondary_1),
+        primary_signal: super::ExerciseSignal {
+            kind: primary_kind,
+            landmarks: joints(primary_0, primary_1, primary_2),
+        },
+        secondary_signal: super::ExerciseSignal {
+            kind: secondary_kind,
+            landmarks: joints(secondary_0, secondary_1, secondary_2),
+        },
         direction,
         start_amplitude,
         min_primary_amplitude,
@@ -627,6 +751,8 @@ pub extern "C" fn motion_sdk_install_profile(
         return_hysteresis,
         ready_tolerance,
         max_gap_ms: u64::from(max_gap_ms),
+        min_rep_duration_ms: u64::from(min_rep_duration_ms),
+        max_rep_duration_ms: u64::from(max_rep_duration_ms),
     };
     if profile.validate().is_err() {
         return -6;
@@ -634,6 +760,7 @@ pub extern "C" fn motion_sdk_install_profile(
     runtime.rep_engine = Some(super::RepEngine::new(profile));
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
+    runtime.pending_outcomes.clear();
     clear_reference(&mut runtime);
     0
 }
@@ -1100,10 +1227,18 @@ pub extern "C" fn motion_sdk_select_subject(x: f32, y: f32) -> i32 {
     if let Some(engine) = runtime.engine.as_mut() {
         engine.reset();
     }
-    if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-        rep_engine.abort_active();
-    }
+    let subject_change_outcome = runtime
+        .rep_engine
+        .as_mut()
+        .and_then(super::RepEngine::reject_for_subject_change);
+    runtime.pending_outcomes.extend(subject_change_outcome);
     reset_reference_subject(&mut runtime);
+    runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
+    runtime.rep_state = runtime
+        .rep_engine
+        .as_ref()
+        .map_or_else(super::RepStateSnapshot::default, |engine| engine.state.clone());
+    encode_current_packet(&mut runtime);
     0
 }
 

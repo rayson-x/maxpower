@@ -49,6 +49,7 @@ export interface RustRepState {
   activeRepId: bigint | null;
   recoveredAcrossGap: boolean;
 }
+export type RustSetLifecycle = "idle" | "arming" | "active" | "paused" | "finished";
 export interface RustSealedRep {
   repId: bigint;
   startFrameId: bigint;
@@ -64,24 +65,44 @@ export interface RustSealedRep {
   profileIdentity: string;
   qualityVerdict: string | null;
   recoveredAcrossGap: boolean;
+  disposition: "confirmed" | "needs_review" | "rejected";
+  evidenceReason:
+    | "short_continuity_recovery"
+    | "long_continuity_loss"
+    | "subject_changed"
+    | "incomplete_cycle"
+    | "anti_interference_filter"
+    | "duration_exceeded"
+    | "required_joint_loss"
+    | null;
 }
 export interface RustExerciseProfileData {
   identity: string;
   contentHash: bigint;
   maturity: "provisional";
   schema: "blazepose33";
-  coordinateUnit: "image-normalized-y";
+  coordinateUnit:
+    | "image-normalized-y"
+    | "image-angle-deg"
+    | "torso-normalized-distance"
+    | "derived-kinematic-signal";
   stateMachineId: "ready-effort-peak-return/v1";
   requiredCapabilities: readonly ["canonical-landmarks", "subject-lock"];
-  direction: "increasing-y" | "decreasing-y";
-  primaryLandmarks: readonly [number, number?];
-  secondaryLandmarks: readonly [number, number?];
+  direction: "increasing" | "decreasing" | "auto";
+  primarySignal: RustExerciseSignal;
+  secondarySignal: RustExerciseSignal;
   startAmplitude: number;
   minPrimaryAmplitude: number;
   minSecondaryAmplitude: number;
   returnHysteresis: number;
   readyTolerance: number;
   maxGapMs: number;
+  minRepDurationMs: number;
+  maxRepDurationMs: number;
+}
+export interface RustExerciseSignal {
+  kind: "landmark-y" | "joint-angle" | "landmark-distance";
+  landmarks: readonly [number, number?, number?];
 }
 export interface RustReferenceComparisonUnavailable {
   readonly status: "unavailable";
@@ -136,6 +157,9 @@ export interface MotionWasmExports extends WebAssembly.Exports {
   motion_sdk_commit_sequence(): number;
   motion_sdk_close(): number;
   motion_sdk_reset(width: number, height: number, fusion: number): number;
+  motion_sdk_begin_set(): number;
+  motion_sdk_begin_replay_set(): number;
+  motion_sdk_finish_set(): number;
   motion_sdk_begin_frame(timestampLow: number, timestampHigh: number, count: number): number;
   motion_sdk_set_landmark(
     index: number,
@@ -178,16 +202,22 @@ export interface MotionWasmExports extends WebAssembly.Exports {
     stateMachine: number,
     requiredCapabilities: number,
     direction: number,
+    primaryKind: number,
     primary0: number,
     primary1: number,
+    primary2: number,
+    secondaryKind: number,
     secondary0: number,
     secondary1: number,
+    secondary2: number,
     startAmplitude: number,
     minPrimaryAmplitude: number,
     minSecondaryAmplitude: number,
     returnHysteresis: number,
     readyTolerance: number,
     maxGapMs: number,
+    minRepDurationMs: number,
+    maxRepDurationMs: number,
   ): number;
   motion_sdk_begin_reference_profile(length: number): number;
   motion_sdk_set_reference_profile_byte(index: number, value: number): number;
@@ -232,6 +262,11 @@ export async function instantiateRustMotionWasm(
   return result.instance.exports as MotionWasmExports;
 }
 
+export interface RustCanonicalWasmSessionConfig extends PoseContinuitySessionConfig {
+  /** Camera preview is idle until the user records; fixture/replay callers are active. */
+  setLifecycleMode?: "preview" | "replay";
+}
+
 export class RustCanonicalWasmSession implements PoseContinuitySession {
   private nextFrameId = 0;
   lastTarget: RustTargetSnapshot = {
@@ -246,6 +281,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     activeRepId: null,
     recoveredAcrossGap: false,
   };
+  lastSetLifecycle: RustSetLifecycle = "idle";
   lastCompletedReps: readonly RustSealedRep[] = [];
   lastCanonicalHash = 0n;
   lastDecodedPacket: DecodedMotionPacket | null = null;
@@ -261,7 +297,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   private installedReferenceFeatureNames: readonly string[] = [];
 
   constructor(
-    private readonly config: PoseContinuitySessionConfig,
+    private readonly config: RustCanonicalWasmSessionConfig,
     private readonly wasm: MotionWasmExports,
   ) {
     const sequence = new TextEncoder().encode(config.sequenceId);
@@ -278,9 +314,13 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       ),
       "reset",
     );
+    if (config.setLifecycleMode !== "preview") {
+      ensureOk(wasm.motion_sdk_begin_replay_set(), "begin_replay_set");
+      this.lastSetLifecycle = "active";
+    }
   }
 
-  static async create(config: PoseContinuitySessionConfig): Promise<RustCanonicalWasmSession> {
+  static async create(config: RustCanonicalWasmSessionConfig): Promise<RustCanonicalWasmSession> {
     return new RustCanonicalWasmSession(config, await loadRustMotionWasm());
   }
 
@@ -393,7 +433,9 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   }
 
   selectSubjectAt(x: number, y: number): boolean {
-    return this.wasm.motion_sdk_select_subject(x, y) === 0;
+    if (this.wasm.motion_sdk_select_subject(x, y) !== 0) return false;
+    this.applyDecodedPacket(this.readPacket());
+    return true;
   }
 
   close(): void {
@@ -401,6 +443,16 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     this.lastDecodedPacket = null;
     this.lastCandidateDiagnostics = [];
     this.resetReferenceComparison();
+  }
+
+  beginSet(): void {
+    ensureOk(this.wasm.motion_sdk_begin_set(), "begin_set");
+    this.applyDecodedPacket(this.readPacket());
+  }
+
+  finishSet(): void {
+    ensureOk(this.wasm.motion_sdk_finish_set(), "finish_set");
+    this.applyDecodedPacket(this.readPacket());
   }
 
   setExerciseProfile(profile: RustExerciseProfile): void {
@@ -442,21 +494,27 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
         Number(profile.contentHash >> 32n),
         0,
         0,
-        0,
+        rustCoordinateUnit(profile.coordinateUnit),
         0,
         Number(profile.requiredCapabilities.includes("canonical-landmarks"))
           | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1),
-        profile.direction === "increasing-y" ? 0 : 1,
-        profile.primaryLandmarks[0],
-        profile.primaryLandmarks[1] ?? 0xffff_ffff,
-        profile.secondaryLandmarks[0],
-        profile.secondaryLandmarks[1] ?? 0xffff_ffff,
+        profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2,
+        rustExerciseSignalKind(profile.primarySignal.kind),
+        profile.primarySignal.landmarks[0],
+        profile.primarySignal.landmarks[1] ?? 0xffff_ffff,
+        profile.primarySignal.landmarks[2] ?? 0xffff_ffff,
+        rustExerciseSignalKind(profile.secondarySignal.kind),
+        profile.secondarySignal.landmarks[0],
+        profile.secondarySignal.landmarks[1] ?? 0xffff_ffff,
+        profile.secondarySignal.landmarks[2] ?? 0xffff_ffff,
         profile.startAmplitude,
         profile.minPrimaryAmplitude,
         profile.minSecondaryAmplitude,
         profile.returnHysteresis,
         profile.readyTolerance,
         profile.maxGapMs,
+        profile.minRepDurationMs,
+        profile.maxRepDurationMs,
       ),
       "install_profile",
     );
@@ -602,6 +660,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       activeRepId: packet.repState.activeRepId,
       recoveredAcrossGap: packet.repState.recoveredAcrossGap,
     };
+    this.lastSetLifecycle = packet.setState.lifecycle;
     this.lastCompletedReps = Object.freeze(packet.completedReps.map((rep) => Object.freeze({
       repId: rep.repId,
       startFrameId: rep.startFrameId,
@@ -617,6 +676,8 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       profileIdentity: rep.profileIdentity,
       qualityVerdict: rep.qualityVerdict,
       recoveredAcrossGap: rep.recoveredAcrossGap,
+      disposition: rep.disposition,
+      evidenceReason: rep.evidenceReason,
     })));
   }
 
@@ -797,11 +858,11 @@ export function computeRustExerciseProfileHash(
   const capabilities = Number(profile.requiredCapabilities.includes("canonical-landmarks"))
     | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1);
   updateU32(capabilities);
-  update([0, 0, profile.direction === "increasing-y" ? 0 : 1]);
-  const primary = profile.primaryLandmarks.filter((value): value is number => value !== undefined);
-  const secondary = profile.secondaryLandmarks.filter((value): value is number => value !== undefined);
-  update([primary.length, ...primary]);
-  update([secondary.length, ...secondary]);
+  update([0, 0, profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2]);
+  for (const signal of [profile.primarySignal, profile.secondarySignal]) {
+    const landmarks = signal.landmarks.filter((value): value is number => value !== undefined);
+    update([rustExerciseSignalKind(signal.kind), landmarks.length, ...landmarks]);
+  }
   for (const value of [
     profile.startAmplitude,
     profile.minPrimaryAmplitude,
@@ -814,7 +875,25 @@ export function computeRustExerciseProfileHash(
   }
   view.setBigUint64(0, BigInt(profile.maxGapMs), true);
   update(new Uint8Array(scratch));
+  view.setBigUint64(0, BigInt(profile.minRepDurationMs), true);
+  update(new Uint8Array(scratch));
+  view.setBigUint64(0, BigInt(profile.maxRepDurationMs), true);
+  update(new Uint8Array(scratch));
   return hash;
+}
+
+function rustExerciseSignalKind(kind: RustExerciseSignal["kind"]): number {
+  return kind === "landmark-y" ? 0 : kind === "joint-angle" ? 1 : 2;
+}
+
+function rustCoordinateUnit(unit: RustExerciseProfileData["coordinateUnit"]): number {
+  return unit === "image-normalized-y"
+    ? 0
+    : unit === "image-angle-deg"
+      ? 1
+      : unit === "torso-normalized-distance"
+        ? 2
+        : 3;
 }
 
 function combineU64(low: number, high: number): bigint {

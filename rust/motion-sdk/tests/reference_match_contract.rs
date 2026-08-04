@@ -1,7 +1,7 @@
 use form_coach_motion_sdk::{
     CanonicalFrameSample, CanonicalLandmark, CorridorPoint, LandmarkSource, ObservedReferenceNode,
     ObservedReferenceRep, ReferenceCorridorNode, ReferenceIdentity, ReferenceTrajectoryProfile,
-    SealedRep, TrajectoryComparisonStatus, extract_lat_pulldown_reference_rep,
+    RepDisposition, SealedRep, TrajectoryComparisonStatus, extract_lat_pulldown_reference_rep,
     match_reference_trajectory,
 };
 
@@ -232,6 +232,8 @@ fn sealed_rep() -> SealedRep {
         profile_maturity: "provisional",
         quality_verdict: None,
         recovered_across_gap: false,
+        disposition: RepDisposition::Confirmed,
+        evidence_reason: None,
     }
 }
 

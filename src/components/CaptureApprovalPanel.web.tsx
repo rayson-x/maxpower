@@ -13,6 +13,7 @@ import {
   type ReviewRangeEditMode,
 } from "../pose/reviewTimeline";
 import { selectTrainingWindow } from "../pose/trainingWindow";
+import { reviewedNegativeWindows, type TimeWindow } from "../pose/segmentationTraining";
 import {
   buildApprovedLatPulldownTrajectorySample,
   type LatPulldownTrajectorySample,
@@ -38,6 +39,25 @@ interface ImportedCaptureMetadata {
   profileVersion?: string | null;
   model?: string | null;
   capturePosition?: CapturePosition | null;
+  rustNeedsReviewReps?: Array<ImportedRustCandidate>;
+  rustRejectedReps?: Array<ImportedRustCandidate>;
+  motionVersions?: {
+    contract?: { major?: number; minor?: number };
+    algorithm?: string;
+    config?: string;
+    inference?: string;
+    activeProfileIdentity?: string | null;
+    activeProfileHash?: string | null;
+  };
+  referenceComparison?: { status?: string; profileIdentity?: string | null } | null;
+}
+
+interface ImportedRustCandidate {
+  repId?: string;
+  startTimestampMs?: number;
+  peakTimestampMs?: number;
+  endTimestampMs?: number;
+  evidenceReason?: string | null;
 }
 
 interface ImportedFixture {
@@ -54,6 +74,7 @@ interface ReviewCapture {
   revokeVideoUrl: boolean;
   fixture: ImportedFixture;
   labels: ImportedLabels | null;
+  metadata: ImportedCaptureMetadata | null;
 }
 
 interface ProjectManifest {
@@ -84,6 +105,27 @@ interface Approval {
   capturePosition?: CapturePosition | null;
   /** Stored at approval time so source reloads cannot silently rewrite a label. */
   trajectoryDataset?: TrajectoryDatasetDecision | null;
+  /** Immutable local audit trail. The top-level fields remain the latest approved version for legacy exports. */
+  analysisVersions?: readonly ReviewAnalysisVersion[];
+}
+
+interface ReviewAnalysisVersion {
+  version: number;
+  approvedAt: string;
+  sourceSignature: string;
+  canonicalPoseFrameCount: number;
+  expectedCount: string;
+  candidateId: string;
+  approvedSegments: Candidate["segments"];
+  weakNegativeWindows: TimeWindow[];
+  recognitionSnapshot: {
+    motionVersions: ImportedCaptureMetadata["motionVersions"] | null;
+    referenceStatus: string | null;
+    needsReviewCandidateCount: number;
+    rejectedCandidateCount: number;
+  };
+  note?: string;
+  algorithmVersion: "reviewed-canonical-replay/v1";
 }
 
 interface ReviewDraft {
@@ -281,6 +323,24 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
     };
   };
   const automatic = segmentRepsAuto(stable.poses);
+  const rustNeedsReview = (capture.metadata?.rustNeedsReviewReps ?? [])
+    .filter((candidate) => [candidate.startTimestampMs, candidate.peakTimestampMs, candidate.endTimestampMs].every(Number.isFinite));
+  const rustReviewCandidate: Candidate | null = rustNeedsReview.length
+    ? {
+        id: "rust_needs_review",
+        label: "Rust 待审核候选（不计正式次数）",
+        count: rustNeedsReview.length,
+        score: "需要人工裁决",
+        reason: `原因：${[...new Set(rustNeedsReview.map((candidate) => candidate.evidenceReason ?? "短暂丢点恢复"))].join("、")}`,
+        segments: rustNeedsReview.map((candidate, index) => ({
+          repIndex: index + 1,
+          startMs: candidate.startTimestampMs!,
+          peakMs: candidate.peakTimestampMs!,
+          endMs: candidate.endTimestampMs!,
+        })),
+        tone: "caution",
+      }
+    : null;
   return [
     {
       id: "recorded",
@@ -298,6 +358,7 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
     },
     toCandidate("raw", "当前规则 · 全部帧", raw, "caution"),
     toCandidate("stable", `当前规则 · 稳定段（排除 ${stable.excludedPoseCount} 帧）`, stable.poses, "current"),
+    ...(rustReviewCandidate ? [rustReviewCandidate] : []),
     {
       id: "auto",
       label: "动作无关 · 自动周期",
@@ -382,6 +443,7 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
         revokeVideoUrl: true,
         fixture,
         labels,
+        metadata,
       });
     } catch {
       // A non-capture JSON in Downloads is not a review failure.
@@ -418,6 +480,7 @@ async function loadProjectCaptures(): Promise<ReviewCapture[]> {
         revokeVideoUrl: false,
         fixture,
         labels: labels ? { ...metadata, ...labels } : metadata?.exerciseId ? metadata : null,
+        metadata,
       } satisfies ReviewCapture;
     }),
   );
@@ -891,6 +954,45 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
           }
         : { decision: "quarantined", reason: trajectoryBuild.reason, sample: null, recordedAt: approvedAt }
       : null;
+    const previous = approvals[selected.id];
+    const analysisVersions: readonly ReviewAnalysisVersion[] = [
+      ...(previous?.analysisVersions ?? (previous ? [{
+        version: 1,
+        approvedAt: previous.approvedAt,
+        sourceSignature: selected.sourceSignature,
+        canonicalPoseFrameCount: selected.fixture.poses.length,
+        expectedCount: previous.expectedCount,
+        candidateId: previous.candidateId,
+        approvedSegments: previous.approvedSegments,
+        weakNegativeWindows: reviewedNegativeWindows(selectedDurationMs, previous.approvedSegments),
+        recognitionSnapshot: {
+          motionVersions: selected.metadata?.motionVersions ?? null,
+          referenceStatus: selected.metadata?.referenceComparison?.status ?? null,
+          needsReviewCandidateCount: selected.metadata?.rustNeedsReviewReps?.length ?? 0,
+          rejectedCandidateCount: selected.metadata?.rustRejectedReps?.length ?? 0,
+        },
+        note: previous.note,
+        algorithmVersion: "reviewed-canonical-replay/v1" as const,
+      }] : [])),
+      {
+        version: (previous?.analysisVersions?.length ?? (previous ? 1 : 0)) + 1,
+        approvedAt,
+        sourceSignature: selected.sourceSignature,
+        canonicalPoseFrameCount: selected.fixture.poses.length,
+        expectedCount,
+        candidateId: draftCandidateId,
+        approvedSegments: draftSegments.map((segment) => ({ ...segment })),
+        weakNegativeWindows: reviewedNegativeWindows(selectedDurationMs, draftSegments),
+        recognitionSnapshot: {
+          motionVersions: selected.metadata?.motionVersions ?? null,
+          referenceStatus: selected.metadata?.referenceComparison?.status ?? null,
+          needsReviewCandidateCount: selected.metadata?.rustNeedsReviewReps?.length ?? 0,
+          rejectedCandidateCount: selected.metadata?.rustRejectedReps?.length ?? 0,
+        },
+        note: note.trim(),
+        algorithmVersion: "reviewed-canonical-replay/v1",
+      },
+    ];
     const next: Record<string, Approval> = {
       ...approvals,
       [selected.id]: {
@@ -908,6 +1010,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         note: note.trim(),
         capturePosition: confirmedPosition,
         trajectoryDataset,
+        analysisVersions,
       },
     };
     approvalsRef.current = next;
@@ -916,7 +1019,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     // Approval is a deliberate user click, so save a portable copy immediately
     // rather than making the athlete remember a second export step.
     downloadJson(
-      { version: "capture-approval/v1", approvals: next },
+      { version: "capture-approval/v3", approvals: next },
       `field-capture-approval-${selected.id}.json`,
     );
     if (trajectoryDataset?.decision === "eligible" && trajectoryDataset.sample) {
@@ -936,7 +1039,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     // Read at click time: exports must survive a page remount and must include
     // the unapproved local drafts the athlete is actively editing.
     downloadJson({
-      version: "capture-approval/v2",
+      version: "capture-approval/v3",
       exportedAt: new Date().toISOString(),
       approvals: loadApprovals(),
       drafts: loadDrafts(),
@@ -1235,7 +1338,8 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                     </div>
                   </div>
                 )}
-                {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}{approvals[selected.id].note ? ` · 备注：${approvals[selected.id].note}` : ""}</p>}
+                {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}{approvals[selected.id].note ? ` · 备注：${approvals[selected.id].note}` : ""} · 审核版本 {approvals[selected.id].analysisVersions?.length ?? 1}（每版保留弱负样本）</p>}
+                {!!selected.metadata?.rustRejectedReps?.length && <p style={styles.trajectoryWarning}>Rust 已过滤 {selected.metadata.rustRejectedReps.length} 个候选：{[...new Set(selected.metadata.rustRejectedReps.map((candidate) => candidate.evidenceReason ?? "未说明"))].join("、")}。它们保留为证据，不能直接批准为正式次数。</p>}
                 {approvals[selected.id]?.exerciseId === "lat_pulldown" && (
                   selectedTrajectoryDecision?.sample ? (
                     <p style={selectedTrajectoryDecision.decision === "eligible" ? styles.trajectoryReady : styles.trajectoryWarning}>

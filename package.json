@@ -33,7 +33,9 @@
     "harness": "tsc -p tools/harness/tsconfig.json && node .harness-build/tools/harness/analyze.js",
     "validate:labeled-fixture": "tsc -p tools/labeled-set-fixture/tsconfig.json && node .labeled-fixture-build/tools/labeled-set-fixture/validate.js",
     "train:segmentation": "tsc -p tools/segmentation-training/tsconfig.json && node .segmentation-training-build/tools/segmentation-training/train.js",
+    "generate:observed-recognition-profiles": "tsc -p tools/recognition-profile/tsconfig.json && node .recognition-profile-build/tools/recognition-profile/generate.js",
     "generate:provisional-reference": "tsc -p tools/reference-trajectory/tsconfig.json && node .reference-trajectory-build/tools/reference-trajectory/generate.js",
+    "generate:simulated-priors": "tsc -p tools/simulated-kinematic-prior/tsconfig.json && node .simulated-prior-build/tools/simulated-kinematic-prior/generate.js",
     "test": "tsc -p tsconfig.test.json && node .test-build/tools/runTests.js"
   },
   "private": true

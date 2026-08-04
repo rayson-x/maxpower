@@ -72,15 +72,17 @@ async function main(): Promise<void> {
     coordinateUnit: "image-normalized-y",
     stateMachineId: "ready-effort-peak-return/v1",
     requiredCapabilities: ["canonical-landmarks", "subject-lock"],
-    direction: "increasing-y",
-    primaryLandmarks: [15],
-    secondaryLandmarks: [13],
+    direction: "auto",
+    primarySignal: { kind: "landmark-y", landmarks: [15] },
+    secondarySignal: { kind: "landmark-y", landmarks: [13] },
     startAmplitude: 0.05,
     minPrimaryAmplitude: 0.22,
     minSecondaryAmplitude: 0.18,
     returnHysteresis: 0.05,
     readyTolerance: 0.06,
     maxGapMs: 700,
+    minRepDurationMs: 450,
+    maxRepDurationMs: 8_000,
   };
   const customProfile: RustExerciseProfileData = {
     ...profileWithoutHash,
@@ -103,6 +105,63 @@ async function main(): Promise<void> {
   assert.equal(customRust.lastDecodedPacket?.lineage.inferenceVersion, "mediapipe-host-adapter/v1");
   assert.equal(customRust.lastDecodedPacket?.lineage.diagnosticVersion, "web-motion-diagnostics/v1");
   customRust.close();
+
+  const angleProfileWithoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
+    identity: "custom-elbow-flexion/front/bilateral/bodyweight/v1",
+    maturity: "provisional",
+    schema: "blazepose33",
+    coordinateUnit: "image-angle-deg",
+    stateMachineId: "ready-effort-peak-return/v1",
+    requiredCapabilities: ["canonical-landmarks", "subject-lock"],
+    direction: "auto",
+    primarySignal: { kind: "joint-angle", landmarks: [11, 13, 15] },
+    secondarySignal: { kind: "joint-angle", landmarks: [12, 14, 16] },
+    startAmplitude: 5,
+    minPrimaryAmplitude: 20,
+    minSecondaryAmplitude: 20,
+    returnHysteresis: 5,
+    readyTolerance: 6,
+    maxGapMs: 700,
+    minRepDurationMs: 450,
+    maxRepDurationMs: 8_000,
+  };
+  const angleProfile: RustExerciseProfileData = {
+    ...angleProfileWithoutHash,
+    contentHash: computeRustExerciseProfileHash(angleProfileWithoutHash),
+  };
+  const angleRust = new RustCanonicalWasmSession(config("parity:angle-profile"), wasm);
+  angleRust.installExerciseProfileData(angleProfile);
+  const angleSealed = [90, 92, 105, 128, 150, 147, 125, 102, 91].flatMap((angle, index) => {
+    angleRust.process(bilateralAnglePose(index * 100, angle));
+    return [...angleRust.lastCompletedReps];
+  });
+  assert.equal(angleSealed.length, 1);
+  assert.equal(angleSealed[0].profileIdentity, angleProfile.identity);
+  assert.equal(angleSealed[0].profileHash, angleProfile.contentHash);
+  angleRust.close();
+
+  const reverseAngleRust = new RustCanonicalWasmSession(config("parity:reverse-angle-profile"), wasm);
+  reverseAngleRust.installExerciseProfileData(angleProfile);
+  const reverseAngleSealed = [150, 148, 135, 112, 90, 93, 115, 140, 150].flatMap((angle, index) => {
+    reverseAngleRust.process(bilateralAnglePose(index * 100, angle));
+    return [...reverseAngleRust.lastCompletedReps];
+  });
+  assert.equal(reverseAngleSealed.length, 1, "auto direction must seal a decreasing-first angle cycle");
+  assert.equal(reverseAngleSealed[0].profileIdentity, angleProfile.identity);
+  assert.equal(reverseAngleSealed[0].profileHash, angleProfile.contentHash);
+  reverseAngleRust.close();
+
+  const twoCycleAngleRust = new RustCanonicalWasmSession(config("parity:two-cycle-angle-profile"), wasm);
+  twoCycleAngleRust.installExerciseProfileData(angleProfile);
+  const twoCycleAngleSealed = [
+    90, 92, 105, 128, 150, 147, 125, 102, 91,
+    93, 106, 129, 151, 146, 124, 101, 90,
+  ].flatMap((angle, index) => {
+    twoCycleAngleRust.process(bilateralAnglePose(index * 100, angle));
+    return [...twoCycleAngleRust.lastCompletedReps];
+  });
+  assert.equal(twoCycleAngleSealed.length, 2, "auto direction must not double count a return");
+  twoCycleAngleRust.close();
 
   const referenceRust = new RustCanonicalWasmSession(config("parity:reference-profile"), wasm);
   referenceRust.setExerciseProfile("lat_pulldown");
@@ -454,6 +513,23 @@ function bilateralActionPose(timestampMs: number, wristY: number, elbowY: number
   value.landmarks[16] = { x: 0.65, y: wristY, z: 0, visibility: 0.99 };
   value.landmarks[23] = { x: 0.43, y: 0.7, z: 0, visibility: 0.99 };
   value.landmarks[24] = { x: 0.57, y: 0.7, z: 0, visibility: 0.99 };
+  return value;
+}
+
+function bilateralAnglePose(timestampMs: number, angleDegrees: number): PoseEstimate {
+  const value = pose(timestampMs);
+  const radius = 0.10;
+  const radians = angleDegrees * Math.PI / 180;
+  for (const [shoulder, elbow, wrist, x] of [[11, 13, 15, 0.35], [12, 14, 16, 0.65]] as const) {
+    value.landmarks[shoulder] = { x, y: 0.40, z: 0, visibility: 0.99 };
+    value.landmarks[elbow] = { x, y: 0.50, z: 0, visibility: 0.99 };
+    value.landmarks[wrist] = {
+      x: x + radius * Math.sin(radians),
+      y: 0.50 - radius * Math.cos(radians),
+      z: 0,
+      visibility: 0.99,
+    };
+  }
   return value;
 }
 
