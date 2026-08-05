@@ -2450,11 +2450,11 @@ export function CameraPoseView() {
   const homeRecognitionStatus = rustSdkStatus !== "ready"
     ? "识别内核未就绪"
     : status !== "running"
-      ? "等待打开相机；相机就绪后点击开始识别并录制视频"
+      ? "等待打开相机；相机就绪后点击开始本组录制"
       : !trackingOk
         ? "请后退并保持全身入镜"
         : !isRecording
-          ? "预览就绪，点击开始识别并录制视频"
+          ? "预览就绪，点击开始本组录制"
           : rustSetLifecycle === "arming"
             ? "正在稳定锁定身体"
             : rustSetLifecycle === "paused"
@@ -2545,7 +2545,7 @@ export function CameraPoseView() {
               {[
                 { index: "1", label: "选择动作", active: Boolean(selectedHomeWorkout), done: Boolean(selectedHomeWorkout) },
                 { index: "2", label: "打开相机", active: status === "running", done: status === "running" },
-                { index: "3", label: "识别 + 录制视频", active: isRecording, done: Boolean(recordingResult) && !isRecording },
+                { index: "3", label: "本组录制", active: isRecording, done: Boolean(recordingResult) && !isRecording },
               ].map((step) => (
                 <div
                   key={step.index}
@@ -2718,7 +2718,7 @@ export function CameraPoseView() {
               </div>
               <p style={styles.trainingHint}>
                 {isHomeWorkout
-                  ? "打开相机只进入站位预览；点击“开始识别并录制视频”后，Rust 才会启动本组计数，并同步保存验证证据。"
+                  ? "与健身采集使用同一流程：打开相机后只预览；点击“开始本组录制”才开始计数和录像，点击“停止并保存本组”后自动保存并继续预览。"
                   : "从视频库选择素材即可在此页查看骨架识别、次数与质量证据；只有点击“开始本组录制”才会写入新的本机训练档案。"}
                 {rustSdkStatus !== "ready" ? " Rust SDK 未就绪时只显示骨架预览，不回退到旧计数器写入正式次数。" : ""}
               </p>
@@ -2943,7 +2943,7 @@ export function CameraPoseView() {
             }}
             className="hud-reveal hud-reveal-1"
           >
-            <div style={styles.sideTitle}>{isHomeWorkout ? "02 · 识别 + 录制视频" : "01 · 采集输入"}</div>
+            <div style={styles.sideTitle}>{isHomeWorkout ? "02 · 采集输入" : "01 · 采集输入"}</div>
             <div style={styles.btnRow}>
               {status === "running" ? (
                 <button style={{ ...styles.btn, background: "#4c1d1d", color: "#fca5a5" }} onClick={stop}>
@@ -2994,17 +2994,6 @@ export function CameraPoseView() {
               </label>
               )}
             </div>
-            {isHomeWorkout && !(status === "running" && mode === "camera") && (
-              <div style={styles.btnRow}>
-                <button
-                  type="button"
-                  disabled
-                  style={{ ...styles.btn, background: HUD.panel2, color: HUD.dim, opacity: 0.55, cursor: "not-allowed" }}
-                >
-                  ● 开始识别并录制视频（请先打开相机）
-                </button>
-              </div>
-            )}
             {status === "running" && mode === "camera" && (
               <div style={styles.btnRow}>
                 {isRecording ? (
@@ -3012,7 +3001,7 @@ export function CameraPoseView() {
                     style={{ ...styles.btn, background: "#7f1d1d", color: "#fee2e2" }}
                     onClick={stopRecording}
                   >
-                    {isHomeWorkout ? "■ 结束识别并保存视频" : "■ 停止并保存本组"}
+                    ■ 停止并保存本组
                   </button>
                 ) : (
                   <button
@@ -3027,14 +3016,12 @@ export function CameraPoseView() {
                   >
                     {isFinalizingRecording
                       ? "保存中…"
-                      : isHomeWorkout
-                        ? "● 开始识别并录制视频"
-                        : "● 开始本组录制"}
+                      : "● 开始本组录制"}
                   </button>
                 )}
                 {!isRecording && !isFinalizingRecording && (
                   <span style={styles.recordingResultMeta}>
-                    {isHomeWorkout ? "当前只在预览站位，识别和视频录制尚未开始。" : "预览中，未写入本组数据"}
+                    预览中，未写入本组数据
                   </span>
                 )}
               </div>
@@ -3103,9 +3090,7 @@ export function CameraPoseView() {
             )}
             {isRecording && (
               <p style={styles.recordingBadge}>
-                {isHomeWorkout
-                  ? "● 正在识别并录制 —— 完整动作会实时计数，结束后自动保存验证证据"
-                  : "● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板"}
+                ● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板
               </p>
             )}
             {isFinalizingRecording && (
