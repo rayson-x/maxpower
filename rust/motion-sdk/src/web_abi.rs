@@ -675,10 +675,16 @@ fn process_rep(runtime: &mut WebRuntime) {
 }
 
 fn encode_current_packet(runtime: &mut WebRuntime) {
-    let Some(target) = runtime.target.clone() else {
-        runtime.packet_bytes.clear();
-        return;
-    };
+    // A lifecycle command can arrive immediately after the host rotates the
+    // canonical sequence, before the next camera frame has produced a target.
+    // That command still owns an immutable packet: "acquiring, no candidate"
+    // is the truthful target state, whereas an empty byte buffer makes the
+    // host treat a valid begin_set command as a broken Rust runtime.
+    let target = runtime.target.clone().unwrap_or(super::TargetSnapshot {
+        state: super::TargetState::Acquiring,
+        candidate_count: 0,
+        selected_candidate_id: None,
+    });
     let packet = super::MotionPacket {
         lineage: super::PacketLineage {
             sequence_id: runtime.sequence_id.clone(),
