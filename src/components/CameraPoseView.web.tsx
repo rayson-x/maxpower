@@ -1512,7 +1512,7 @@ export function CameraPoseView() {
             const routeTiming = routeWebMotionPacket(motionPacket, {
               render: (packet) => {
                 const frame = packet.canonical;
-                setPose(nextTrackerReadiness.phase === "ready" ? frame : null);
+                setPose(usableLandmarkCount > 0 ? frame : null);
               },
               count: (packet) => {
                 const frame = packet.canonical;
@@ -2553,7 +2553,7 @@ export function CameraPoseView() {
           : trackerReadiness.phase === "interrupted"
             ? {
                 title: "追踪暂时中断",
-                detail: "请回到画面中央；重新锁定前不会显示骨架。",
+                detail: "请保持在画面内；有可用骨架时继续预览，重新锁定前暂停计数。",
                 color: HUD.amber,
               }
             : {
@@ -3695,8 +3695,8 @@ export function CameraPoseView() {
                 {latest?.candidates.map((candidate) => (
                   <p key={candidate.candidateId} style={styles.catalogMeta}>
                     C{candidate.candidateId}{candidate.selected ? " · SELECTED" : ""} · bbox [{candidate.bbox.x.toFixed(2)}, {candidate.bbox.y.toFixed(2)}, {candidate.bbox.width.toFixed(2)}, {candidate.bbox.height.toFixed(2)}]
-                    {` · acquire ${candidate.acquisitionCost.toFixed(3)} · identity ${candidate.identityCost?.toFixed(3) ?? "n/a"}`}
-                    <br />{candidate.decision} · p {candidate.identityComponents.position?.toFixed(3) ?? "n/a"} / s {candidate.identityComponents.scale?.toFixed(3) ?? "n/a"} / shape {candidate.identityComponents.proportion?.toFixed(3) ?? "n/a"} / color {candidate.identityComponents.color?.toFixed(3) ?? "n/a"} · gates {candidate.stableThreshold.toFixed(2)}/{candidate.reacquireThreshold.toFixed(2)}
+                    {` · dominance ${candidate.dominanceScore.toFixed(3)} · continuity ${candidate.continuityCost?.toFixed(3) ?? "n/a"}`}
+                    <br />{candidate.decision} · landmarks {candidate.continuityComponents.landmarks?.toFixed(3) ?? "n/a"} / center {candidate.continuityComponents.center?.toFixed(3) ?? "n/a"} / color {candidate.continuityComponents.color?.toFixed(3) ?? "n/a"} · switch {candidate.switchThreshold.toFixed(2)} / {candidate.switchConfirmMs.toFixed(0)}ms
                   </p>
                 ))}
                 {latest && latest.landmarkIssues.length > 0 && (

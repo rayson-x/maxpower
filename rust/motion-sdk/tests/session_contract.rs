@@ -112,7 +112,7 @@ fn incompatible_contract_major_is_refused_at_open() {
 }
 
 #[test]
-fn central_subject_policy_refuses_an_adapter_without_multi_pose_capability() {
+fn dominant_subject_policy_refuses_an_adapter_without_multi_pose_capability() {
     let mut capabilities = AdapterCapabilities::fixture();
     capabilities.multi_pose = false;
     capabilities.max_candidates = 1;
@@ -124,7 +124,7 @@ fn central_subject_policy_refuses_an_adapter_without_multi_pose_capability() {
             image_width_px: 1_000,
             image_height_px: 1_000,
             continuity: form_coach_motion_sdk::ContinuityMode::Raw,
-            subject_policy: form_coach_motion_sdk::SubjectPolicy::CentralStable,
+            subject_policy: form_coach_motion_sdk::SubjectPolicy::DominantVisible,
         },
         capabilities,
         FixtureInferenceAdapter::single_pose(Vec::new()),

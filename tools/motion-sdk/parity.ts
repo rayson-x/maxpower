@@ -68,6 +68,33 @@ async function main(): Promise<void> {
   assert.equal(resetRust.lastDecodedPacket?.canonical[13].reason, "no-measurement-baseline");
   resetRust.close();
 
+  // Cross-language contract for the numeric candidate telemetry slots.
+  // This fails if the TypeScript slot map drifts from the compiled Rust ABI.
+  const candidateDiagnosticsRust = new RustCanonicalWasmSession(
+    config("parity:candidate-diagnostics"),
+    wasm,
+  );
+  const diagnosticPose = pose(1);
+  candidateDiagnosticsRust.processCandidates([{
+    ...diagnosticPose,
+    candidateId: 42,
+    bbox: { x: 0.1, y: 0.2, width: 0.5, height: 0.7 },
+    torsoColor: [0.2, 0.3, 0.4],
+  }], 1);
+  const candidateDiagnostic = candidateDiagnosticsRust.lastCandidateDiagnostics[0];
+  assert.ok(candidateDiagnostic);
+  assert.equal(candidateDiagnostic.candidateId, 42);
+  assert.ok(Math.abs(candidateDiagnostic.bbox.x - 0.1) <= 1e-5);
+  assert.ok(Math.abs(candidateDiagnostic.bbox.y - 0.2) <= 1e-5);
+  assert.ok(Math.abs(candidateDiagnostic.bbox.width - 0.5) <= 1e-5);
+  assert.ok(Math.abs(candidateDiagnostic.bbox.height - 0.7) <= 1e-5);
+  assert.ok(Number.isFinite(candidateDiagnostic.dominanceScore));
+  assert.equal(candidateDiagnostic.selected, true);
+  assert.equal(candidateDiagnostic.decision, "selected");
+  assert.ok(Math.abs(candidateDiagnostic.switchThreshold - 0.25) <= 1e-5);
+  assert.equal(candidateDiagnostic.switchConfirmMs, 300);
+  candidateDiagnosticsRust.close();
+
   for (const [profile, identity] of [
     ["march_in_place", "march-in-place/front/bilateral/bodyweight/v1"],
     ["side_step_touch", "side-step-touch/front/bilateral/bodyweight/v1"],

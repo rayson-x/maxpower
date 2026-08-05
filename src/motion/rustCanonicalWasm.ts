@@ -24,19 +24,34 @@ export interface RustTargetSnapshot {
 export interface RustCandidateDiagnostic {
   candidateId: number;
   bbox: { x: number; y: number; width: number; height: number };
-  acquisitionCost: number;
-  identityCost: number | null;
-  identityComponents: {
-    position: number | null;
-    scale: number | null;
-    proportion: number | null;
+  dominanceScore: number;
+  continuityCost: number | null;
+  continuityComponents: {
+    landmarks: number | null;
+    center: number | null;
     color: number | null;
   };
-  stableThreshold: number;
-  reacquireThreshold: number;
-  decision: "selected" | "no-lock" | "slot-continuity" | "requires-confirmation" | "identity-rejected";
+  switchThreshold: number;
+  switchConfirmMs: number;
+  decision: "selected" | "dominant-candidate" | "temporal-match" | "alternate-candidate";
   selected: boolean;
 }
+
+const RUST_CANDIDATE_FIELD = Object.freeze({
+  id: 0,
+  bboxX: 1,
+  bboxY: 2,
+  bboxWidth: 3,
+  bboxHeight: 4,
+  dominanceScore: 5,
+  continuityCost: 6,
+  selected: 7,
+  continuityLandmarks: 8,
+  continuityCenter: 9,
+  continuityColor: 10,
+  switchThreshold: 12,
+  switchConfirmMs: 13,
+});
 export type RustExerciseProfile =
   | "lat_pulldown"
   | "lat_pulldown_rear_left_45"
@@ -932,34 +947,40 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       { length: this.wasm.motion_sdk_candidate_count() },
       (_, index) => {
         const value = (field: number) => this.wasm.motion_sdk_candidate_number(index, field);
-        const identityCost = value(6);
-        const selected = value(7) === 1;
-        const components = [value(8), value(9), value(10), value(11)]
+        const continuityCost = value(RUST_CANDIDATE_FIELD.continuityCost);
+        const selected = value(RUST_CANDIDATE_FIELD.selected) === 1;
+        const components = [
+          value(RUST_CANDIDATE_FIELD.continuityLandmarks),
+          value(RUST_CANDIDATE_FIELD.continuityCenter),
+          value(RUST_CANDIDATE_FIELD.continuityColor),
+        ]
           .map((component) => Number.isFinite(component) ? component : null);
-        const stableThreshold = value(12);
-        const reacquireThreshold = value(13);
+        const switchThreshold = value(RUST_CANDIDATE_FIELD.switchThreshold);
+        const switchConfirmMs = value(RUST_CANDIDATE_FIELD.switchConfirmMs);
         const decision = selected
           ? "selected"
-          : !Number.isFinite(identityCost)
-            ? "no-lock"
-            : identityCost <= stableThreshold
-              ? "slot-continuity"
-              : identityCost <= reacquireThreshold
-                ? "requires-confirmation"
-                : "identity-rejected";
+          : !Number.isFinite(continuityCost)
+            ? "dominant-candidate"
+            : continuityCost <= switchThreshold
+              ? "temporal-match"
+              : "alternate-candidate";
         return Object.freeze({
-          candidateId: value(0),
-          bbox: Object.freeze({ x: value(1), y: value(2), width: value(3), height: value(4) }),
-          acquisitionCost: value(5),
-          identityCost: Number.isFinite(identityCost) ? identityCost : null,
-          identityComponents: Object.freeze({
-            position: components[0],
-            scale: components[1],
-            proportion: components[2],
-            color: components[3],
+          candidateId: value(RUST_CANDIDATE_FIELD.id),
+          bbox: Object.freeze({
+            x: value(RUST_CANDIDATE_FIELD.bboxX),
+            y: value(RUST_CANDIDATE_FIELD.bboxY),
+            width: value(RUST_CANDIDATE_FIELD.bboxWidth),
+            height: value(RUST_CANDIDATE_FIELD.bboxHeight),
           }),
-          stableThreshold,
-          reacquireThreshold,
+          dominanceScore: value(RUST_CANDIDATE_FIELD.dominanceScore),
+          continuityCost: Number.isFinite(continuityCost) ? continuityCost : null,
+          continuityComponents: Object.freeze({
+            landmarks: components[0],
+            center: components[1],
+            color: components[2],
+          }),
+          switchThreshold,
+          switchConfirmMs,
           decision,
           selected,
         });

@@ -59,7 +59,7 @@ pub enum ContinuityMode {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SubjectPolicy {
     AssumeSingle,
-    CentralStable,
+    DominantVisible,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1560,32 +1560,27 @@ pub enum SubjectSelectionError {
 
 struct SubjectTracker {
     policy: SubjectPolicy,
-    acquiring_id: Option<u64>,
-    acquiring_since_ms: Option<u64>,
-    acquiring_descriptor: Option<PoseCandidate>,
     locked_id: Option<u64>,
     missing_since_ms: Option<u64>,
     locked_descriptor: Option<PoseCandidate>,
-    reacquiring_id: Option<u64>,
-    reacquiring_since_ms: Option<u64>,
-    reacquiring_descriptor: Option<PoseCandidate>,
+    pending_switch: Option<PendingSubjectSwitch>,
     identity_boundary: bool,
     last_candidates: Vec<PoseCandidate>,
+}
+
+struct PendingSubjectSwitch {
+    since_ms: u64,
+    descriptor: PoseCandidate,
 }
 
 impl SubjectTracker {
     fn new(policy: SubjectPolicy) -> Self {
         Self {
             policy,
-            acquiring_id: None,
-            acquiring_since_ms: None,
-            acquiring_descriptor: None,
             locked_id: None,
             missing_since_ms: None,
             locked_descriptor: None,
-            reacquiring_id: None,
-            reacquiring_since_ms: None,
-            reacquiring_descriptor: None,
+            pending_switch: None,
             identity_boundary: false,
             last_candidates: Vec::new(),
         }
@@ -1621,81 +1616,32 @@ impl SubjectTracker {
                 let mut ranked = self
                     .last_candidates
                     .iter()
-                    .map(|candidate| (identity_cost(descriptor, candidate), candidate))
+                    .map(|candidate| (subject_continuity_cost(descriptor, candidate), candidate))
                     .collect::<Vec<_>>();
                 ranked.sort_by(|left, right| left.0.total_cmp(&right.0));
-                let best_is_unambiguous = ranked
-                    .get(1)
-                    .is_none_or(|second| ranked[0].0 + MIN_IDENTITY_MARGIN <= second.0);
-                if let Some((cost, candidate)) = ranked.first()
-                    && *cost <= STABLE_SLOT_IDENTITY_COST
-                    && best_is_unambiguous
-                {
+                if let Some((cost, candidate)) = ranked.first() {
                     let candidate = (*candidate).clone();
-                    self.locked_id = Some(candidate.id);
-                    self.missing_since_ms = None;
-                    self.update_locked_descriptor(candidate.clone());
-                    self.reacquiring_id = None;
-                    self.reacquiring_since_ms = None;
-                    self.reacquiring_descriptor = None;
-                    return (
-                        TargetSnapshot {
-                            state: TargetState::Locked,
-                            candidate_count,
-                            selected_candidate_id: Some(candidate.id),
-                        },
-                        Some(candidate),
-                    );
-                }
-                let possible = best_is_unambiguous
-                    .then(|| ranked.first())
-                    .flatten()
-                    .filter(|(cost, _)| *cost <= 0.35)
-                    .map(|(_, candidate)| (*candidate).clone());
-                if let Some(candidate) = possible {
-                    let same_physical_candidate =
-                        self.reacquiring_descriptor
-                            .as_ref()
-                            .is_some_and(|descriptor| {
-                                identity_cost(descriptor, &candidate) <= STABLE_SLOT_IDENTITY_COST
-                            });
-                    if !same_physical_candidate {
-                        self.reacquiring_since_ms = Some(timestamp_ms);
-                    }
-                    self.reacquiring_id = Some(candidate.id);
-                    self.reacquiring_descriptor = Some(candidate.clone());
-                    let stable_ms = timestamp_ms
-                        .saturating_sub(self.reacquiring_since_ms.unwrap_or(timestamp_ms));
-                    if stable_ms >= 300 {
-                        self.locked_id = Some(candidate.id);
-                        self.locked_descriptor = Some(candidate.clone());
-                        self.identity_boundary = true;
-                        self.missing_since_ms = None;
-                        self.reacquiring_id = None;
-                        self.reacquiring_since_ms = None;
-                        self.reacquiring_descriptor = None;
+                    let requires_switch_confirmation = *cost > SUBJECT_SWITCH_CONTINUITY_COST;
+                    if requires_switch_confirmation
+                        && !self.switch_candidate_is_confirmed(&candidate, timestamp_ms)
+                    {
                         return (
                             TargetSnapshot {
-                                state: TargetState::Locked,
+                                state: TargetState::Uncertain,
                                 candidate_count,
-                                selected_candidate_id: Some(candidate.id),
+                                selected_candidate_id: Some(locked_id),
                             },
                             Some(candidate),
                         );
                     }
-                    return (
-                        TargetSnapshot {
-                            state: TargetState::Reacquiring,
-                            candidate_count,
-                            selected_candidate_id: Some(candidate.id),
-                        },
-                        None,
+                    return self.lock_visible_candidate(
+                        candidate,
+                        candidate_count,
+                        requires_switch_confirmation,
                     );
                 }
             }
-            self.reacquiring_id = None;
-            self.reacquiring_since_ms = None;
-            self.reacquiring_descriptor = None;
+            self.clear_pending_switch();
             let missing_since = *self.missing_since_ms.get_or_insert(timestamp_ms);
             let state = if timestamp_ms.saturating_sub(missing_since) < 1_500 {
                 TargetState::Uncertain
@@ -1715,14 +1661,11 @@ impl SubjectTracker {
         let best = self
             .last_candidates
             .iter()
-            .min_by(|left, right| {
-                subject_acquisition_cost(left).total_cmp(&subject_acquisition_cost(right))
+            .max_by(|left, right| {
+                subject_dominance_score(left).total_cmp(&subject_dominance_score(right))
             })
             .cloned();
         let Some(best) = best else {
-            self.acquiring_id = None;
-            self.acquiring_since_ms = None;
-            self.acquiring_descriptor = None;
             return (
                 TargetSnapshot {
                     state: TargetState::Acquiring,
@@ -1732,48 +1675,17 @@ impl SubjectTracker {
                 None,
             );
         };
-        let same_stable_candidate = self
-            .acquiring_descriptor
-            .as_ref()
-            .is_some_and(|descriptor| {
-                let best_cost = identity_cost(descriptor, &best);
-                let unambiguous = self.last_candidates.iter().all(|candidate| {
-                    candidate.id == best.id
-                        || best_cost + MIN_IDENTITY_MARGIN <= identity_cost(descriptor, candidate)
-                });
-                best_cost <= STABLE_SLOT_IDENTITY_COST && unambiguous
-            });
-        if !same_stable_candidate {
-            self.acquiring_id = Some(best.id);
-            self.acquiring_since_ms = Some(timestamp_ms);
-            self.acquiring_descriptor = Some(best.clone());
-        } else {
-            self.acquiring_id = Some(best.id);
-            self.acquiring_descriptor = Some(best.clone());
-        }
-        let stable_ms =
-            timestamp_ms.saturating_sub(self.acquiring_since_ms.unwrap_or(timestamp_ms));
-        if stable_ms >= 500 {
-            self.locked_id = Some(best.id);
-            self.locked_descriptor = Some(best.clone());
-            self.acquiring_descriptor = None;
-            self.missing_since_ms = None;
-            return (
-                TargetSnapshot {
-                    state: TargetState::Locked,
-                    candidate_count,
-                    selected_candidate_id: Some(best.id),
-                },
-                Some(best),
-            );
-        }
+        self.locked_id = Some(best.id);
+        self.locked_descriptor = Some(best.clone());
+        self.missing_since_ms = None;
+        self.clear_pending_switch();
         (
             TargetSnapshot {
-                state: TargetState::Acquiring,
+                state: TargetState::Locked,
                 candidate_count,
                 selected_candidate_id: Some(best.id),
             },
-            None,
+            Some(best),
         )
     }
 
@@ -1792,16 +1704,12 @@ impl SubjectTracker {
             // The smaller containing box is normally the foreground person
             // the user clicked, rather than a larger overlapping bystander.
             .min_by(|left, right| left.bbox.area().total_cmp(&right.bbox.area()))
+            .cloned()
             .ok_or(SubjectSelectionError::NoCandidateAtPoint)?;
         self.locked_id = Some(selected.id);
         self.locked_descriptor = Some(selected.clone());
-        self.acquiring_id = None;
-        self.acquiring_since_ms = None;
-        self.acquiring_descriptor = None;
         self.missing_since_ms = None;
-        self.reacquiring_id = None;
-        self.reacquiring_since_ms = None;
-        self.reacquiring_descriptor = None;
+        self.clear_pending_switch();
         Ok(selected.id)
     }
 
@@ -1817,26 +1725,102 @@ impl SubjectTracker {
         }
         self.locked_descriptor = Some(candidate);
     }
+
+    fn lock_visible_candidate(
+        &mut self,
+        candidate: PoseCandidate,
+        candidate_count: u8,
+        subject_changed: bool,
+    ) -> (TargetSnapshot, Option<PoseCandidate>) {
+        if subject_changed {
+            self.identity_boundary = true;
+            self.locked_descriptor = Some(candidate.clone());
+        } else {
+            self.update_locked_descriptor(candidate.clone());
+        }
+        self.locked_id = Some(candidate.id);
+        self.missing_since_ms = None;
+        self.clear_pending_switch();
+        (
+            TargetSnapshot {
+                state: TargetState::Locked,
+                candidate_count,
+                selected_candidate_id: Some(candidate.id),
+            },
+            Some(candidate),
+        )
+    }
+
+    fn switch_candidate_is_confirmed(
+        &mut self,
+        candidate: &PoseCandidate,
+        timestamp_ms: u64,
+    ) -> bool {
+        let same_pending_candidate = self.pending_switch.as_ref().is_some_and(|pending| {
+            subject_continuity_cost(&pending.descriptor, candidate)
+                <= SUBJECT_SWITCH_CONTINUITY_COST
+        });
+        if !same_pending_candidate {
+            self.pending_switch = Some(PendingSubjectSwitch {
+                since_ms: timestamp_ms,
+                descriptor: candidate.clone(),
+            });
+        } else if let Some(pending) = self.pending_switch.as_mut() {
+            pending.descriptor = candidate.clone();
+        }
+        self.pending_switch.as_ref().is_some_and(|pending| {
+            timestamp_ms.saturating_sub(pending.since_ms) >= SUBJECT_SWITCH_CONFIRM_MS
+        })
+    }
+
+    fn clear_pending_switch(&mut self) {
+        self.pending_switch = None;
+    }
 }
 
-const STABLE_SLOT_IDENTITY_COST: f32 = 0.12;
-const MIN_IDENTITY_MARGIN: f32 = 0.025;
+const SUBJECT_SWITCH_CONTINUITY_COST: f32 = 0.25;
+const SUBJECT_SWITCH_CONFIRM_MS: u64 = 300;
 
-fn identity_cost(reference: &PoseCandidate, candidate: &PoseCandidate) -> f32 {
-    identity_cost_components(reference, candidate).iter().sum()
+fn subject_continuity_cost(reference: &PoseCandidate, candidate: &PoseCandidate) -> f32 {
+    subject_continuity_cost_components(reference, candidate)
+        .iter()
+        .sum()
 }
 
-fn identity_cost_components(reference: &PoseCandidate, candidate: &PoseCandidate) -> [f32; 4] {
-    let (reference_x, reference_y, reference_scale, reference_ratio) =
-        subject_identity_geometry(reference);
-    let (candidate_x, candidate_y, candidate_scale, candidate_ratio) =
-        subject_identity_geometry(candidate);
-    let position = (reference_x - candidate_x).hypot(reference_y - candidate_y);
-    let scale = (reference_scale.max(1e-6) / candidate_scale.max(1e-6))
-        .ln()
-        .abs();
-    let proportion = (reference_ratio - candidate_ratio).abs();
-    let color = reference
+fn subject_continuity_cost_components(
+    reference: &PoseCandidate,
+    candidate: &PoseCandidate,
+) -> [f32; 3] {
+    let mut landmark_distance = 0.0;
+    let mut comparable_landmarks = 0_u32;
+    for (previous, current) in reference
+        .observations
+        .iter()
+        .zip(candidate.observations.iter())
+    {
+        if previous.visibility < 0.2
+            || current.visibility < 0.2
+            || !previous.x.is_finite()
+            || !previous.y.is_finite()
+            || !current.x.is_finite()
+            || !current.y.is_finite()
+        {
+            continue;
+        }
+        landmark_distance += (previous.x - current.x).hypot(previous.y - current.y);
+        comparable_landmarks += 1;
+    }
+    let mean_landmark_distance = if comparable_landmarks > 0 {
+        landmark_distance / comparable_landmarks as f32
+    } else {
+        let (previous_x, previous_y) = reference.bbox.center();
+        let (current_x, current_y) = candidate.bbox.center();
+        (previous_x - current_x).hypot(previous_y - current_y)
+    };
+    let (previous_x, previous_y) = reference.bbox.center();
+    let (current_x, current_y) = candidate.bbox.center();
+    let center_distance = (previous_x - current_x).hypot(previous_y - current_y);
+    let color_distance = reference
         .torso_color
         .iter()
         .zip(candidate.torso_color)
@@ -1844,55 +1828,24 @@ fn identity_cost_components(reference: &PoseCandidate, candidate: &PoseCandidate
         .sum::<f32>()
         .sqrt();
     [
-        position * 0.50,
-        scale * 0.20,
-        proportion * 0.15,
-        color * 0.15,
+        mean_landmark_distance * 0.75,
+        center_distance * 0.20,
+        color_distance * 0.05,
     ]
 }
 
-fn subject_identity_geometry(candidate: &PoseCandidate) -> (f32, f32, f32, f32) {
-    let torso = [11_usize, 12, 23, 24].map(|index| candidate.observations.get(index).copied());
-    if torso.iter().all(|value| {
-        value.is_some_and(|point| {
-            point.visibility >= 0.2 && point.x.is_finite() && point.y.is_finite()
-        })
-    }) {
-        let [left_shoulder, right_shoulder, left_hip, right_hip] = torso.map(Option::unwrap);
-        let shoulder_center = (
-            (left_shoulder.x + right_shoulder.x) * 0.5,
-            (left_shoulder.y + right_shoulder.y) * 0.5,
-        );
-        let hip_center = (
-            (left_hip.x + right_hip.x) * 0.5,
-            (left_hip.y + right_hip.y) * 0.5,
-        );
-        let shoulder_width = (left_shoulder.x - right_shoulder.x)
-            .hypot(left_shoulder.y - right_shoulder.y)
-            .max(1e-6);
-        let torso_height = (shoulder_center.0 - hip_center.0)
-            .hypot(shoulder_center.1 - hip_center.1)
-            .max(1e-6);
-        return (
-            (shoulder_center.0 + hip_center.0) * 0.5,
-            (shoulder_center.1 + hip_center.1) * 0.5,
-            shoulder_width,
-            torso_height / shoulder_width,
-        );
-    }
-    let (x, y) = candidate.bbox.center();
-    (
-        x,
-        y,
-        candidate.bbox.area().sqrt(),
-        candidate.bbox.height / candidate.bbox.width.max(1e-6),
-    )
-}
-
-fn subject_acquisition_cost(candidate: &PoseCandidate) -> f32 {
-    let (center_x, center_y) = candidate.bbox.center();
-    let center_distance = (center_x - 0.5).hypot(center_y - 0.5);
-    center_distance - candidate.bbox.area() * 0.35
+fn subject_dominance_score(candidate: &PoseCandidate) -> f32 {
+    let observation_quality = if candidate.observations.is_empty() {
+        0.0
+    } else {
+        candidate
+            .observations
+            .iter()
+            .map(|observation| observation.visibility.clamp(0.0, 1.0))
+            .sum::<f32>()
+            / candidate.observations.len() as f32
+    };
+    candidate.bbox.area().sqrt() * 0.7 + observation_quality * 0.3
 }
 
 #[derive(Clone, Copy)]
@@ -2631,7 +2584,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         if !capabilities.monotonic_timestamps {
             return Err(OpenError::MissingMonotonicTimestamps);
         }
-        if config.subject_policy == SubjectPolicy::CentralStable
+        if config.subject_policy == SubjectPolicy::DominantVisible
             && (!capabilities.multi_pose || capabilities.max_candidates < 2)
         {
             return Err(OpenError::MissingMultiPoseCapability);

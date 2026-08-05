@@ -7,6 +7,20 @@ use super::{
     PoseObservation, SubjectPolicy, SubjectTracker, TargetSnapshot, TargetState,
 };
 
+pub const CANDIDATE_FIELD_ID: u32 = 0;
+pub const CANDIDATE_FIELD_BBOX_X: u32 = 1;
+pub const CANDIDATE_FIELD_BBOX_Y: u32 = 2;
+pub const CANDIDATE_FIELD_BBOX_WIDTH: u32 = 3;
+pub const CANDIDATE_FIELD_BBOX_HEIGHT: u32 = 4;
+pub const CANDIDATE_FIELD_DOMINANCE_SCORE: u32 = 5;
+pub const CANDIDATE_FIELD_CONTINUITY_COST: u32 = 6;
+pub const CANDIDATE_FIELD_SELECTED: u32 = 7;
+pub const CANDIDATE_FIELD_CONTINUITY_LANDMARKS: u32 = 8;
+pub const CANDIDATE_FIELD_CONTINUITY_CENTER: u32 = 9;
+pub const CANDIDATE_FIELD_CONTINUITY_COLOR: u32 = 10;
+pub const CANDIDATE_FIELD_SWITCH_THRESHOLD: u32 = 12;
+pub const CANDIDATE_FIELD_SWITCH_CONFIRM_MS: u32 = 13;
+
 #[derive(Default)]
 struct WebRuntime {
     engine: Option<ContinuityEngine>,
@@ -244,7 +258,7 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.output.clear();
     runtime.candidates.clear();
     runtime.candidate_meta = None;
-    runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::CentralStable));
+    runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::DominantVisible));
     runtime.target = None;
     runtime.subject_epoch = 0;
     runtime.last_processed_timestamp_ms = None;
@@ -1572,28 +1586,38 @@ pub extern "C" fn motion_sdk_candidate_number(index: u32, field: u32) -> f32 {
         return f32::NAN;
     };
     match field {
-        0 => candidate.id as f32,
-        1 => candidate.bbox.x,
-        2 => candidate.bbox.y,
-        3 => candidate.bbox.width,
-        4 => candidate.bbox.height,
-        5 => super::subject_acquisition_cost(candidate),
-        6 => tracker
-            .locked_descriptor
-            .as_ref()
-            .map_or(f32::NAN, |locked| super::identity_cost(locked, candidate)),
-        7 => f32::from(u8::from(runtime.target.as_ref().is_some_and(|target| {
-            target.state == TargetState::Locked
-                && target.selected_candidate_id == Some(candidate.id)
-        }))),
-        8..=11 => tracker
+        CANDIDATE_FIELD_ID => candidate.id as f32,
+        CANDIDATE_FIELD_BBOX_X => candidate.bbox.x,
+        CANDIDATE_FIELD_BBOX_Y => candidate.bbox.y,
+        CANDIDATE_FIELD_BBOX_WIDTH => candidate.bbox.width,
+        CANDIDATE_FIELD_BBOX_HEIGHT => candidate.bbox.height,
+        CANDIDATE_FIELD_DOMINANCE_SCORE => super::subject_dominance_score(candidate),
+        CANDIDATE_FIELD_CONTINUITY_COST => tracker
             .locked_descriptor
             .as_ref()
             .map_or(f32::NAN, |locked| {
-                super::identity_cost_components(locked, candidate)[(field - 8) as usize]
+                super::subject_continuity_cost(locked, candidate)
             }),
-        12 => super::STABLE_SLOT_IDENTITY_COST,
-        13 => 0.35,
+        CANDIDATE_FIELD_SELECTED => {
+            f32::from(u8::from(runtime.target.as_ref().is_some_and(|target| {
+                target.state == TargetState::Locked
+                    && target.selected_candidate_id == Some(candidate.id)
+            })))
+        }
+        CANDIDATE_FIELD_CONTINUITY_LANDMARKS
+        | CANDIDATE_FIELD_CONTINUITY_CENTER
+        | CANDIDATE_FIELD_CONTINUITY_COLOR => {
+            tracker
+                .locked_descriptor
+                .as_ref()
+                .map_or(f32::NAN, |locked| {
+                    super::subject_continuity_cost_components(locked, candidate)
+                        [(field - CANDIDATE_FIELD_CONTINUITY_LANDMARKS) as usize]
+                })
+        }
+        11 => f32::NAN,
+        CANDIDATE_FIELD_SWITCH_THRESHOLD => super::SUBJECT_SWITCH_CONTINUITY_COST,
+        CANDIDATE_FIELD_SWITCH_CONFIRM_MS => super::SUBJECT_SWITCH_CONFIRM_MS as f32,
         _ => f32::NAN,
     }
 }
