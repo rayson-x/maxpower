@@ -5,13 +5,18 @@
   },
   "exclude": [
     "node_modules",
+    "ios",
+    "android",
     ".test-build",
     ".motion-sdk-eval-build",
     ".harness-build",
     ".labeled-fixture-build",
+    ".home-workout-validation-build",
     ".reference-trajectory-build",
     ".segmentation-training-build",
     "target",
-    "target-native"
+    "target-native",
+    "target-native-android",
+    "target-native-apple"
   ]
 }

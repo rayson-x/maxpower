@@ -1,7 +1,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[cfg(target_arch = "wasm32")]
-mod web_abi;
+#[doc(hidden)]
+pub mod web_abi;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -487,6 +487,8 @@ pub enum ExerciseSignalKind {
     LandmarkY,
     JointAngle,
     LandmarkDistance,
+    LandmarkHorizontalDistance,
+    PairedLandmarkDistanceSum,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -530,6 +532,104 @@ pub struct ExerciseProfile {
 }
 
 impl ExerciseProfile {
+    pub fn march_in_place_front_provisional() -> Self {
+        Self::with_computed_hash(Self {
+            identity: "march-in-place/front/bilateral/bodyweight/v1".into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::BlazePose33,
+            coordinate_unit: "image-angle-deg".into(),
+            state_machine_id: "alternating-ready-effort-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::JointAngle,
+                landmarks: vec![23, 25, 27],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::JointAngle,
+                landmarks: vec![24, 26, 28],
+            },
+            direction: MovementDirection::Decreasing,
+            start_amplitude: 8.0,
+            min_primary_amplitude: 30.0,
+            min_secondary_amplitude: 30.0,
+            return_hysteresis: 8.0,
+            ready_tolerance: 10.0,
+            max_gap_ms: 700,
+            min_rep_duration_ms: 500,
+            max_rep_duration_ms: 4_000,
+        })
+    }
+
+    pub fn alternating_knee_raise_front_provisional() -> Self {
+        let mut profile = Self::march_in_place_front_provisional();
+        profile.identity = "alternating-knee-raise/front/bilateral/bodyweight/v1".into();
+        profile.start_amplitude = 12.0;
+        profile.min_primary_amplitude = 55.0;
+        profile.min_secondary_amplitude = 55.0;
+        profile.return_hysteresis = 10.0;
+        profile.ready_tolerance = 12.0;
+        Self::with_computed_hash(profile)
+    }
+
+    pub fn side_step_touch_front_provisional() -> Self {
+        Self::with_computed_hash(Self {
+            identity: "side-step-touch/front/bilateral/bodyweight/v1".into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::BlazePose33,
+            coordinate_unit: "torso-normalized-distance".into(),
+            state_machine_id: "alternating-ready-effort-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LandmarkHorizontalDistance,
+                landmarks: vec![23, 27],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LandmarkHorizontalDistance,
+                landmarks: vec![24, 28],
+            },
+            direction: MovementDirection::Increasing,
+            start_amplitude: 0.20,
+            min_primary_amplitude: 0.80,
+            min_secondary_amplitude: 0.80,
+            return_hysteresis: 0.18,
+            ready_tolerance: 0.22,
+            max_gap_ms: 700,
+            min_rep_duration_ms: 500,
+            max_rep_duration_ms: 4_000,
+        })
+    }
+
+    pub fn step_jack_front_provisional() -> Self {
+        Self::with_computed_hash(Self {
+            identity: "step-jack/front/bilateral/bodyweight/v1".into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::BlazePose33,
+            coordinate_unit: "torso-normalized-distance".into(),
+            state_machine_id: "alternating-ready-effort-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::PairedLandmarkDistanceSum,
+                landmarks: vec![11, 15, 23, 27],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::PairedLandmarkDistanceSum,
+                landmarks: vec![12, 16, 24, 28],
+            },
+            direction: MovementDirection::Increasing,
+            start_amplitude: 0.30,
+            min_primary_amplitude: 1.20,
+            min_secondary_amplitude: 1.20,
+            return_hysteresis: 0.22,
+            ready_tolerance: 0.25,
+            max_gap_ms: 700,
+            min_rep_duration_ms: 500,
+            max_rep_duration_ms: 4_000,
+        })
+    }
+
     pub fn lat_pulldown_provisional() -> Self {
         Self::with_computed_hash(Self {
             identity: "lat-pulldown/rear/bilateral/cable/v1".into(),
@@ -539,8 +639,14 @@ impl ExerciseProfile {
             coordinate_unit: "image-normalized-y".into(),
             state_machine_id: "ready-effort-peak-return/v1".into(),
             required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
-            primary_signal: ExerciseSignal { kind: ExerciseSignalKind::LandmarkY, landmarks: vec![15, 16] },
-            secondary_signal: ExerciseSignal { kind: ExerciseSignalKind::LandmarkY, landmarks: vec![13, 14] },
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LandmarkY,
+                landmarks: vec![15, 16],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LandmarkY,
+                landmarks: vec![13, 14],
+            },
             direction: MovementDirection::Increasing,
             start_amplitude: 0.05,
             min_primary_amplitude: 0.22,
@@ -569,8 +675,14 @@ impl ExerciseProfile {
             coordinate_unit: "image-normalized-y".into(),
             state_machine_id: "ready-effort-peak-return/v1".into(),
             required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
-            primary_signal: ExerciseSignal { kind: ExerciseSignalKind::LandmarkY, landmarks: vec![15, 16] },
-            secondary_signal: ExerciseSignal { kind: ExerciseSignalKind::LandmarkY, landmarks: vec![13, 14] },
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LandmarkY,
+                landmarks: vec![15, 16],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LandmarkY,
+                landmarks: vec![13, 14],
+            },
             direction: MovementDirection::Decreasing,
             start_amplitude: 0.04,
             min_primary_amplitude: 0.14,
@@ -628,7 +740,10 @@ impl ExerciseProfile {
             }],
         );
         for signal in [&self.primary_signal, &self.secondary_signal] {
-            hash = fnv_bytes(hash, [signal.kind.hash_code(), signal.landmarks.len() as u8]);
+            hash = fnv_bytes(
+                hash,
+                [signal.kind.hash_code(), signal.landmarks.len() as u8],
+            );
             hash = fnv_bytes(hash, signal.landmarks.iter().map(|value| *value as u8));
         }
         for gate in [
@@ -660,15 +775,16 @@ impl ExerciseProfile {
                 "unsupported pose schema",
             ));
         }
-        if self.coordinate_unit != expected_coordinate_unit(
-            self.primary_signal.kind,
-            self.secondary_signal.kind,
-        ) {
+        if self.coordinate_unit
+            != expected_coordinate_unit(self.primary_signal.kind, self.secondary_signal.kind)
+        {
             return Err(MotionError::InvalidExerciseProfile(
                 "unsupported coordinate unit",
             ));
         }
-        if self.state_machine_id != "ready-effort-peak-return/v1" {
+        if self.state_machine_id != "ready-effort-peak-return/v1"
+            && self.state_machine_id != "alternating-ready-effort-return/v1"
+        {
             return Err(MotionError::InvalidExerciseProfile(
                 "unsupported state graph",
             ));
@@ -720,6 +836,10 @@ impl ExerciseProfile {
         }
         Ok(())
     }
+
+    fn uses_alternating_state_graph(&self) -> bool {
+        self.state_machine_id == "alternating-ready-effort-return/v1"
+    }
 }
 
 impl ExerciseSignalKind {
@@ -728,6 +848,8 @@ impl ExerciseSignalKind {
             Self::LandmarkY => 0,
             Self::JointAngle => 1,
             Self::LandmarkDistance => 2,
+            Self::LandmarkHorizontalDistance => 3,
+            Self::PairedLandmarkDistanceSum => 4,
         }
     }
 }
@@ -738,6 +860,8 @@ impl ExerciseSignal {
             ExerciseSignalKind::LandmarkY => 1..=2,
             ExerciseSignalKind::JointAngle => 3..=3,
             ExerciseSignalKind::LandmarkDistance => 2..=2,
+            ExerciseSignalKind::LandmarkHorizontalDistance => 2..=2,
+            ExerciseSignalKind::PairedLandmarkDistanceSum => 4..=4,
         };
         expected_count.contains(&self.landmarks.len())
             && self.landmarks.iter().all(|index| *index < 33)
@@ -752,9 +876,15 @@ fn expected_coordinate_unit(
     match (primary, secondary) {
         (ExerciseSignalKind::LandmarkY, ExerciseSignalKind::LandmarkY) => "image-normalized-y",
         (ExerciseSignalKind::JointAngle, ExerciseSignalKind::JointAngle) => "image-angle-deg",
-        (ExerciseSignalKind::LandmarkDistance, ExerciseSignalKind::LandmarkDistance) => {
-            "torso-normalized-distance"
-        }
+        (ExerciseSignalKind::LandmarkDistance, ExerciseSignalKind::LandmarkDistance)
+        | (
+            ExerciseSignalKind::LandmarkHorizontalDistance,
+            ExerciseSignalKind::LandmarkHorizontalDistance,
+        )
+        | (
+            ExerciseSignalKind::PairedLandmarkDistanceSum,
+            ExerciseSignalKind::PairedLandmarkDistanceSum,
+        ) => "torso-normalized-distance",
         _ => "derived-kinematic-signal",
     }
 }
@@ -855,8 +985,8 @@ impl SetGate {
         let primary = profile.and_then(|profile| {
             profile_signal(profile, canonical).map(|(primary, _, _, _)| primary)
         });
-        let observable = target_state == TargetState::Locked
-            && (profile.is_none() || primary.is_some());
+        let observable =
+            target_state == TargetState::Locked && (profile.is_none() || primary.is_some());
         let resume_delta = profile
             .map(|profile| (profile.start_amplitude * 0.30).max(0.001))
             .unwrap_or(0.001);
@@ -890,12 +1020,13 @@ impl SetGate {
                 if rep_phase == RepPhase::Ready {
                     match (self.previous_primary, primary) {
                         (Some(previous), Some(current))
-                            if (current - previous).abs() < resume_delta => {
-                                let idle_since = *self.idle_since_ms.get_or_insert(timestamp_ms);
-                                if timestamp_ms.saturating_sub(idle_since) >= SET_PAUSE_IDLE_MS {
-                                    self.state.lifecycle = SetLifecycle::Paused;
-                                }
+                            if (current - previous).abs() < resume_delta =>
+                        {
+                            let idle_since = *self.idle_since_ms.get_or_insert(timestamp_ms);
+                            if timestamp_ms.saturating_sub(idle_since) >= SET_PAUSE_IDLE_MS {
+                                self.state.lifecycle = SetLifecycle::Paused;
                             }
+                        }
                         _ => self.idle_since_ms = None,
                     }
                 } else {
@@ -1246,11 +1377,12 @@ fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
 
 fn rep_observation_findings_flags(findings: &[RepObservationFinding]) -> u8 {
     findings.iter().fold(0_u8, |flags, finding| {
-        flags | match finding {
-            RepObservationFinding::PrimaryRangeBelowExpectation => 1 << 0,
-            RepObservationFinding::SecondaryRangeBelowExpectation => 1 << 1,
-            RepObservationFinding::CycleFasterThanExpected => 1 << 2,
-        }
+        flags
+            | match finding {
+                RepObservationFinding::PrimaryRangeBelowExpectation => 1 << 0,
+                RepObservationFinding::SecondaryRangeBelowExpectation => 1 << 1,
+                RepObservationFinding::CycleFasterThanExpected => 1 << 2,
+            }
     })
 }
 
@@ -1774,6 +1906,14 @@ struct ActiveRep {
     peak_secondary_amplitude: f32,
     hash: u64,
     recovered_across_gap: bool,
+    active_signal: ActiveSignal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActiveSignal {
+    Bilateral,
+    Primary,
+    Secondary,
 }
 
 struct RepEngine {
@@ -1890,13 +2030,11 @@ impl RepEngine {
     /// only an anti-noise guard. A cycle between the two is still a real
     /// effort and must be returned with descriptive findings.
     fn minimum_observable_primary(&self) -> f32 {
-        (self.profile.min_primary_amplitude * 0.45)
-            .max(self.profile.start_amplitude * 1.20)
+        (self.profile.min_primary_amplitude * 0.45).max(self.profile.start_amplitude * 1.20)
     }
 
     fn minimum_observable_secondary(&self) -> f32 {
-        (self.profile.min_secondary_amplitude * 0.45)
-            .max(self.profile.start_amplitude * 0.50)
+        (self.profile.min_secondary_amplitude * 0.45).max(self.profile.start_amplitude * 0.50)
     }
 
     fn minimum_observable_duration_ms(&self) -> u64 {
@@ -1935,8 +2073,7 @@ impl RepEngine {
             ));
         }
         let findings = self.findings_for(&active, end);
-        if self.profile.direction == MovementDirection::Auto
-            && self.locked_auto_direction.is_none()
+        if self.profile.direction == MovementDirection::Auto && self.locked_auto_direction.is_none()
         {
             self.locked_auto_direction = Some(active.direction);
         }
@@ -1955,13 +2092,7 @@ impl RepEngine {
         let evidence_reason = active
             .recovered_across_gap
             .then_some(RepEvidenceReason::ShortContinuityRecovery);
-        Some(self.finish_active(
-            active,
-            end,
-            disposition,
-            evidence_reason,
-            findings,
-        ))
+        Some(self.finish_active(active, end, disposition, evidence_reason, findings))
     }
 
     fn reject_for_subject_change(&mut self) -> Option<SealedRep> {
@@ -2018,31 +2149,62 @@ impl RepEngine {
         let baseline_primary = *self.baseline_primary.get_or_insert(primary);
         let baseline_secondary = *self.baseline_secondary.get_or_insert(secondary);
         let baseline_torso = *self.baseline_torso.get_or_insert(torso);
-        let direction = self.active.as_ref().map(|active| active.direction).or_else(|| {
-            let configured_direction = if self.profile.direction == MovementDirection::Auto {
-                self.locked_auto_direction.unwrap_or(MovementDirection::Auto)
-            } else {
-                self.profile.direction
-            };
-            activation_direction(
-                configured_direction,
-                baseline_primary,
-                primary,
-                baseline_secondary,
-                secondary,
-                self.profile.start_amplitude,
-            )
-        });
-        let (amplitude, secondary_amplitude, torso_amplitude) = direction
-            .map(|direction| (
-                directional_delta(direction, baseline_primary, primary),
-                directional_delta(direction, baseline_secondary, secondary),
-                directional_delta(direction, baseline_torso, torso),
-            ))
-            .unwrap_or((0.0, 0.0, 0.0));
+        let alternating = self.profile.uses_alternating_state_graph();
+        let direction = self
+            .active
+            .as_ref()
+            .map(|active| active.direction)
+            .or_else(|| {
+                let configured_direction = if self.profile.direction == MovementDirection::Auto {
+                    self.locked_auto_direction
+                        .unwrap_or(MovementDirection::Auto)
+                } else {
+                    self.profile.direction
+                };
+                if alternating {
+                    Some(configured_direction)
+                } else {
+                    activation_direction(
+                        configured_direction,
+                        baseline_primary,
+                        primary,
+                        baseline_secondary,
+                        secondary,
+                        self.profile.start_amplitude,
+                    )
+                }
+            });
+        let configured_direction = direction.unwrap_or(self.profile.direction);
+        let primary_amplitude = directional_delta(configured_direction, baseline_primary, primary);
+        let secondary_side_amplitude =
+            directional_delta(configured_direction, baseline_secondary, secondary);
+        let active_signal = self
+            .active
+            .as_ref()
+            .map(|active| active.active_signal)
+            .unwrap_or_else(|| {
+                if !alternating {
+                    ActiveSignal::Bilateral
+                } else if primary_amplitude >= secondary_side_amplitude {
+                    ActiveSignal::Primary
+                } else {
+                    ActiveSignal::Secondary
+                }
+            });
+        let amplitude = match active_signal {
+            ActiveSignal::Bilateral | ActiveSignal::Primary => primary_amplitude,
+            ActiveSignal::Secondary => secondary_side_amplitude,
+        };
+        let secondary_amplitude = if alternating {
+            amplitude
+        } else {
+            secondary_side_amplitude
+        };
+        let torso_amplitude = directional_delta(configured_direction, baseline_torso, torso);
         let mut sealed = Vec::new();
 
-        let translation_like = self.profile.primary_signal.kind == ExerciseSignalKind::LandmarkY
+        let translation_like = !alternating
+            && self.profile.primary_signal.kind == ExerciseSignalKind::LandmarkY
             && self.profile.secondary_signal.kind == ExerciseSignalKind::LandmarkY
             && amplitude > self.profile.start_amplitude
             && torso_amplitude.abs() >= amplitude.abs() * 0.70
@@ -2050,7 +2212,8 @@ impl RepEngine {
             && (torso_amplitude - amplitude).abs() <= 0.08
             && (secondary_amplitude - amplitude).abs() <= 0.08;
         if translation_like {
-            let rejected = self.reject_active(RepEvidenceReason::AntiInterferenceFilter, Some(sample));
+            let rejected =
+                self.reject_active(RepEvidenceReason::AntiInterferenceFilter, Some(sample));
             self.previous = Some(sample);
             return rejected.into_iter().collect();
         }
@@ -2076,6 +2239,7 @@ impl RepEngine {
                         peak_secondary_amplitude: secondary_amplitude,
                         hash: hash_sample(FNV_OFFSET, start),
                         recovered_across_gap: false,
+                        active_signal,
                     });
                     self.state.phase = RepPhase::Effort;
                     self.state.active_rep_id = Some(rep_id);
@@ -2083,8 +2247,11 @@ impl RepEngine {
             }
             RepPhase::Effort | RepPhase::Peak => {
                 let active = self.active.as_mut().expect("active effort rep");
-                if timestamp_ms.saturating_sub(active.start.timestamp_ms) > self.profile.max_rep_duration_ms {
-                    let rejected = self.reject_active(RepEvidenceReason::DurationExceeded, Some(sample));
+                if timestamp_ms.saturating_sub(active.start.timestamp_ms)
+                    > self.profile.max_rep_duration_ms
+                {
+                    let rejected =
+                        self.reject_active(RepEvidenceReason::DurationExceeded, Some(sample));
                     self.previous = Some(sample);
                     return rejected.into_iter().collect();
                 }
@@ -2095,17 +2262,18 @@ impl RepEngine {
                 }
                 active.peak_secondary_amplitude =
                     active.peak_secondary_amplitude.max(secondary_amplitude);
-                let return_hysteresis = if active.peak_amplitude >= self.profile.min_primary_amplitude {
-                    self.profile.return_hysteresis
-                } else {
-                    // Smaller but coherent excursions do not need to meet the
-                    // same reversal distance as a full-range movement. They
-                    // are still protected by `seal_active`'s multi-joint
-                    // evidence floor before becoming an outcome.
-                    (active.peak_amplitude * 0.35)
-                        .max(self.profile.start_amplitude * 0.35)
-                        .min(self.profile.return_hysteresis)
-                };
+                let return_hysteresis =
+                    if active.peak_amplitude >= self.profile.min_primary_amplitude {
+                        self.profile.return_hysteresis
+                    } else {
+                        // Smaller but coherent excursions do not need to meet the
+                        // same reversal distance as a full-range movement. They
+                        // are still protected by `seal_active`'s multi-joint
+                        // evidence floor before becoming an outcome.
+                        (active.peak_amplitude * 0.35)
+                            .max(self.profile.start_amplitude * 0.35)
+                            .min(self.profile.return_hysteresis)
+                    };
                 let returned = active.peak_amplitude - amplitude >= return_hysteresis;
                 let directly_ready = amplitude <= self.profile.ready_tolerance;
                 if returned {
@@ -2124,13 +2292,19 @@ impl RepEngine {
                 } else if amplitude <= seal_ready_threshold(&self.profile, active.peak_amplitude) {
                     let next_ready = self.active.as_ref().map(|active| {
                         if self.profile.direction == MovementDirection::Auto {
-                            (active.start.primary, active.start.secondary, active.start.torso)
+                            (
+                                active.start.primary,
+                                active.start.secondary,
+                                active.start.torso,
+                            )
                         } else {
                             (primary, secondary, torso)
                         }
                     });
                     sealed.extend(self.seal_active(sample));
-                    if let Some((next_ready_primary, next_ready_secondary, next_ready_torso)) = next_ready {
+                    if let Some((next_ready_primary, next_ready_secondary, next_ready_torso)) =
+                        next_ready
+                    {
                         // Auto-oriented profiles may seal while travelling through the
                         // ready corridor. Keep the cycle's original resting anchor,
                         // rather than the mid-return sample, so the remainder of that
@@ -2216,6 +2390,24 @@ fn measure_signal(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> O
             let (right_x, right_y) = landmark_xy(second, canonical)?;
             Some(((left_x - right_x).hypot(left_y - right_y)) / scale)
         }
+        ExerciseSignalKind::LandmarkHorizontalDistance => {
+            let [first, second]: [usize; 2] = signal.landmarks.as_slice().try_into().ok()?;
+            let scale = torso_scale(canonical)?;
+            let (first_x, _) = landmark_xy(first, canonical)?;
+            let (second_x, _) = landmark_xy(second, canonical)?;
+            Some((first_x - second_x).abs() / scale)
+        }
+        ExerciseSignalKind::PairedLandmarkDistanceSum => {
+            let [first, second, third, fourth]: [usize; 4] =
+                signal.landmarks.as_slice().try_into().ok()?;
+            let scale = torso_scale(canonical)?;
+            let distance = |left: usize, right: usize| {
+                let (left_x, left_y) = landmark_xy(left, canonical)?;
+                let (right_x, right_y) = landmark_xy(right, canonical)?;
+                Some((left_x - right_x).hypot(left_y - right_y))
+            };
+            Some((distance(first, second)? + distance(third, fourth)?) / scale)
+        }
     }
 }
 
@@ -2248,8 +2440,8 @@ fn joint_angle_degrees(first: (f32, f32), joint: (f32, f32), third: (f32, f32)) 
     if left_length <= 1e-6 || right_length <= 1e-6 {
         return None;
     }
-    let cosine = ((left.0 * right.0 + left.1 * right.1) / (left_length * right_length))
-        .clamp(-1.0, 1.0);
+    let cosine =
+        ((left.0 * right.0 + left.1 * right.1) / (left_length * right_length)).clamp(-1.0, 1.0);
     Some(cosine.acos().to_degrees())
 }
 
@@ -2332,12 +2524,16 @@ fn activation_direction(
     let increasing_secondary = secondary - baseline_secondary;
     let decreasing_secondary = baseline_secondary - secondary;
     let secondary_start = start_amplitude * 0.5;
-    let increasing = increasing_primary >= start_amplitude && increasing_secondary >= secondary_start;
-    let decreasing = decreasing_primary >= start_amplitude && decreasing_secondary >= secondary_start;
+    let increasing =
+        increasing_primary >= start_amplitude && increasing_secondary >= secondary_start;
+    let decreasing =
+        decreasing_primary >= start_amplitude && decreasing_secondary >= secondary_start;
     match (increasing, decreasing) {
         (true, false) => Some(MovementDirection::Increasing),
         (false, true) => Some(MovementDirection::Decreasing),
-        (true, true) if increasing_primary >= decreasing_primary => Some(MovementDirection::Increasing),
+        (true, true) if increasing_primary >= decreasing_primary => {
+            Some(MovementDirection::Increasing)
+        }
         (true, true) => Some(MovementDirection::Decreasing),
         (false, false) => None,
     }
@@ -2559,10 +2755,12 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             if lease.timestamp_ms().saturating_sub(previous) > 1_000 {
                 self.continuity.reset();
                 if let Some(rep_engine) = self.rep_engine.as_mut() {
-                    self.pending_outcomes.extend(rep_engine.reject_active(
-                        RepEvidenceReason::LongContinuityLoss,
-                        rep_engine.previous,
-                    ));
+                    self.pending_outcomes.extend(
+                        rep_engine.reject_active(
+                            RepEvidenceReason::LongContinuityLoss,
+                            rep_engine.previous,
+                        ),
+                    );
                 }
             }
         }
@@ -3555,10 +3753,8 @@ pub const LAT_PULLDOWN_REFERENCE_FEATURES: [&str; 11] = [
 /// path continuity across camera distance and anthropometry. They are not
 /// absolute pose coordinates and must never be promoted to a form score
 /// without a separately reviewed, observed corridor.
-pub const PROFILE_SIGNAL_REFERENCE_FEATURES: [&str; 2] = [
-    "primarySignalPhase",
-    "secondarySignalPhase",
-];
+pub const PROFILE_SIGNAL_REFERENCE_FEATURES: [&str; 2] =
+    ["primarySignalPhase", "secondarySignalPhase"];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ReferenceExtractionError {
@@ -3685,11 +3881,18 @@ pub fn extract_profile_signal_reference_rep(
                         .total_cmp(&(right.timestamp_ms as f64 - target_ms).abs())
                 })
                 .filter(|frame| (frame.timestamp_ms as f64 - target_ms).abs() <= 180.0)
-                .and_then(|frame| profile_signal(profile, &frame.canonical).map(|(primary, secondary, _, _)| {
-                    let primary_confidence = signal_confidence(&profile.primary_signal, &frame.canonical);
-                    let secondary_confidence = signal_confidence(&profile.secondary_signal, &frame.canonical);
-                    (vec![Some(primary), Some(secondary)], vec![primary_confidence, secondary_confidence])
-                }))
+                .and_then(|frame| {
+                    profile_signal(profile, &frame.canonical).map(|(primary, secondary, _, _)| {
+                        let primary_confidence =
+                            signal_confidence(&profile.primary_signal, &frame.canonical);
+                        let secondary_confidence =
+                            signal_confidence(&profile.secondary_signal, &frame.canonical);
+                        (
+                            vec![Some(primary), Some(secondary)],
+                            vec![primary_confidence, secondary_confidence],
+                        )
+                    })
+                })
                 .unwrap_or_else(|| (vec![None, None], vec![0.0, 0.0]));
             nodes.push(ObservedReferenceNode {
                 phase: phase.into(),
@@ -3759,8 +3962,8 @@ fn normalize_profile_signal_nodes(nodes: &mut [ObservedReferenceNode]) {
             continue;
         }
         for node in nodes.iter_mut() {
-            node.values[feature_index] = node.values[feature_index]
-                .map(|value| round5((value - start) / amplitude));
+            node.values[feature_index] =
+                node.values[feature_index].map(|value| round5((value - start) / amplitude));
         }
     }
 }
@@ -4212,7 +4415,6 @@ fn identity_mismatch(expected: &ReferenceIdentity, observed: &ReferenceIdentity)
 /// allowed to bind. This is deliberately an exact tuple: a reference captured
 /// with another model, coordinate system, attachment, grip, or side must be
 /// refused rather than silently compared.
-#[cfg(any(target_arch = "wasm32", test))]
 fn supported_reference_exercise_profile_identity(
     identity: &ReferenceIdentity,
 ) -> Option<&'static str> {
@@ -4266,7 +4468,10 @@ mod reference_identity_tests {
         for mutation in mutations {
             let mut spoofed = reviewed_rear_identity();
             mutation(&mut spoofed);
-            assert_eq!(supported_reference_exercise_profile_identity(&spoofed), None);
+            assert_eq!(
+                supported_reference_exercise_profile_identity(&spoofed),
+                None
+            );
         }
     }
 }

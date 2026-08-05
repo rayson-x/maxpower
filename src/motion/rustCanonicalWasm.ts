@@ -42,6 +42,10 @@ export type RustExerciseProfile =
   | "lat_pulldown_rear_left_45"
   | "seated_shoulder_press"
   | "seated_shoulder_press_front"
+  | "march_in_place"
+  | "side_step_touch"
+  | "alternating_knee_raise"
+  | "step_jack"
   | null;
 export interface RustRepState {
   phase: "ready" | "effort" | "peak" | "return" | "frozen";
@@ -526,7 +530,15 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
           ? 3
           : profile === "seated_shoulder_press_front"
             ? 4
-            : 0;
+            : profile === "march_in_place"
+              ? 5
+              : profile === "side_step_touch"
+                ? 6
+                : profile === "alternating_knee_raise"
+                  ? 7
+                  : profile === "step_jack"
+                    ? 8
+                    : 0;
     ensureOk(this.wasm.motion_sdk_set_profile(code), "set_profile");
     this.lastRepState = {
       phase: "ready",

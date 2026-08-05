@@ -18,7 +18,8 @@ export type MovementPattern =
   | "elbow_extension"
   | "knee_flexion"
   | "knee_extension"
-  | "ankle_plantarflexion";
+  | "ankle_plantarflexion"
+  | "locomotion";
 
 export type MuscleGroup = "chest" | "back" | "legs" | "shoulders" | "arms";
 
@@ -71,6 +72,7 @@ const MOVEMENT_PATTERNS = new Set<MovementPattern>([
   "knee_flexion",
   "knee_extension",
   "ankle_plantarflexion",
+  "locomotion",
 ]);
 const MUSCLE_GROUP_IDS = new Set<MuscleGroup>(MUSCLE_GROUPS.map((group) => group.id));
 
@@ -81,6 +83,54 @@ const PROJECT_SOURCE: ExerciseSource = {
 };
 
 const SEED_EXERCISES: readonly ExerciseConcept[] = [
+  {
+    id: "march_in_place",
+    nameZh: "原地踏步",
+    nameEn: "March in place",
+    aliases: ["原地走", "站立踏步"],
+    muscleGroup: "legs",
+    movementPattern: "locomotion",
+    equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "side_step_touch",
+    nameZh: "侧步并步",
+    nameEn: "Side step-touch",
+    aliases: ["侧步", "左右并步"],
+    muscleGroup: "legs",
+    movementPattern: "locomotion",
+    equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "alternating_knee_raise",
+    nameZh: "慢速交替提膝",
+    nameEn: "Alternating knee raise",
+    aliases: ["交替提膝", "站姿提膝"],
+    muscleGroup: "legs",
+    movementPattern: "locomotion",
+    equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "step_jack",
+    nameZh: "低冲击开合",
+    nameEn: "Step jack",
+    aliases: ["低冲击开合跳", "踏步开合"],
+    muscleGroup: "legs",
+    movementPattern: "locomotion",
+    equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
   {
     id: "barbell_row",
     nameZh: "杠铃划船",

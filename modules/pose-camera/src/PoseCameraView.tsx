@@ -10,11 +10,20 @@ export interface PoseEvent {
   timestampMs: number;
   model: string;
   error?: string;
+  /** Base64 encoded Rust canonical packet produced from this observation. */
+  packetBase64?: string;
+  processedFrames?: number;
+  validFrames?: number;
+  processedFps?: number;
+  droppedFrames?: number | null;
+  maxBacklogFrames?: number;
 }
 
 export interface PoseCameraViewProps extends ViewProps {
   /** "lite" | "full" | "heavy" — selects models/pose_landmarker_<id>.task in assets. */
   model: string;
+  exerciseId: string;
+  recognitionActive: boolean;
   onPose?: (event: { nativeEvent: PoseEvent }) => void;
   style?: ViewStyle;
 }

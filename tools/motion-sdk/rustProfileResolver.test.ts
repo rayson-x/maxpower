@@ -58,4 +58,24 @@ test("Rust profile selection requires exact action, camera position, side, and v
     trainingSide: "bilateral",
     variation: "随便写的未知器械",
   }), null);
+
+  for (const [exerciseId, expected] of [
+    ["march_in_place", "march_in_place"],
+    ["side_step_touch", "side_step_touch"],
+    ["alternating_knee_raise", "alternating_knee_raise"],
+    ["step_jack", "step_jack"],
+  ] as const) {
+    assert.equal(resolveRustExerciseProfile({
+      exerciseId,
+      capturePosition: "front",
+      trainingSide: "bilateral",
+      variation: "",
+    }), expected);
+    assert.equal(resolveRustExerciseProfile({
+      exerciseId,
+      capturePosition: "frontLeft45",
+      trainingSide: "bilateral",
+      variation: "",
+    }), null);
+  }
 });

@@ -13,6 +13,12 @@ export function resolveRustExerciseProfile(
 ): RustExerciseProfile {
   if (context.trainingSide !== "bilateral") return null;
   const detail = context.variation.trim().toLowerCase();
+  if (["", "bodyweight", "徒手"].includes(detail) && context.capturePosition === "front") {
+    if (context.exerciseId === "march_in_place") return "march_in_place";
+    if (context.exerciseId === "side_step_touch") return "side_step_touch";
+    if (context.exerciseId === "alternating_knee_raise") return "alternating_knee_raise";
+    if (context.exerciseId === "step_jack") return "step_jack";
+  }
   if (context.exerciseId === "lat_pulldown") {
     if (!["", "cable", "cable straight bar", "绳索", "绳索直杆", "直杆"].includes(detail)) {
       return null;

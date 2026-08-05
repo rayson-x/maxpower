@@ -360,9 +360,12 @@ fn limited_cycles_keep_unique_immutable_ids_and_findings() {
         .flat_map(|packet| packet.completed_reps.iter())
         .collect::<Vec<_>>();
     assert_eq!(outcomes.len(), 2);
-    assert!(outcomes.iter().all(|rep| rep.disposition == RepDisposition::Confirmed));
+    assert_eq!(outcomes[0].disposition, RepDisposition::Confirmed);
+    assert_eq!(outcomes[1].disposition, RepDisposition::NeedsReview);
     assert!(outcomes.iter().all(|rep| rep.observation_findings
         .contains(&RepObservationFinding::SecondaryRangeBelowExpectation)));
+    assert!(outcomes[1].observation_findings
+        .contains(&RepObservationFinding::CycleFasterThanExpected));
     assert_eq!(outcomes[0].rep_id, 1);
     assert_eq!(outcomes[1].rep_id, 2);
     assert_ne!(outcomes[0].canonical_slice_hash, outcomes[1].canonical_slice_hash);

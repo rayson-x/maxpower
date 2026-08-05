@@ -264,6 +264,10 @@ function profileIdentity(profile: Exclude<RustExerciseProfile, null>): string {
     lat_pulldown_rear_left_45: "lat-pulldown/rear-left-45/bilateral/cable/v1",
     seated_shoulder_press: "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1",
     seated_shoulder_press_front: "seated-shoulder-press/front/bilateral/dumbbell/v1",
+    march_in_place: "march-in-place/front/bilateral/bodyweight/v1",
+    side_step_touch: "side-step-touch/front/bilateral/bodyweight/v1",
+    alternating_knee_raise: "alternating-knee-raise/front/bilateral/bodyweight/v1",
+    step_jack: "step-jack/front/bilateral/bodyweight/v1",
   }[profile];
 }
 

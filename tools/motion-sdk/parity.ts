@@ -66,6 +66,20 @@ async function main(): Promise<void> {
   assert.equal(resetRust.lastDecodedPacket?.canonical[13].reason, "no-measurement-baseline");
   resetRust.close();
 
+  for (const [profile, identity] of [
+    ["march_in_place", "march-in-place/front/bilateral/bodyweight/v1"],
+    ["side_step_touch", "side-step-touch/front/bilateral/bodyweight/v1"],
+    ["alternating_knee_raise", "alternating-knee-raise/front/bilateral/bodyweight/v1"],
+    ["step_jack", "step-jack/front/bilateral/bodyweight/v1"],
+  ] as const) {
+    const homeWorkout = new RustCanonicalWasmSession(config(`parity:${profile}`), wasm);
+    homeWorkout.setExerciseProfile(profile);
+    homeWorkout.process(pose(0));
+    assert.equal(homeWorkout.lastDecodedPacket?.lineage.activeProfileIdentity, identity);
+    assert.ok((homeWorkout.lastDecodedPacket?.lineage.activeProfileHash ?? 0n) !== 0n);
+    homeWorkout.close();
+  }
+
   const profileWithoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
     identity: "custom-pull/rear/bilateral/cable/v1",
     maturity: "provisional",

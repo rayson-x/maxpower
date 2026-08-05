@@ -5,16 +5,61 @@ plugins {
 
 group = 'expo.modules.posecamera'
 version = '0.1.0'
+def rustJniDir = file("$buildDir/rustJni")
+def generatedPoseAssetsDir = file("$buildDir/generated/poseAssets")
 
 android {
   namespace "expo.modules.posecamera"
+  ndkVersion "27.1.12297006"
   defaultConfig {
     versionCode 1
     versionName "0.1.0"
+    externalNativeBuild {
+      cmake {
+        cppFlags "-std=c++17"
+      }
+    }
+  }
+  externalNativeBuild {
+    cmake {
+      path "src/main/cpp/CMakeLists.txt"
+      version "3.22.1"
+    }
+  }
+  sourceSets {
+    main {
+      jniLibs.srcDirs += rustJniDir
+      assets.srcDirs += generatedPoseAssetsDir
+    }
   }
   lintOptions {
     abortOnError false
   }
+}
+
+tasks.register("buildRustAndroid", Exec) {
+  workingDir rootProject.projectDir.parentFile
+  commandLine "sh", "tools/motion-sdk/build-native.sh", "android", rustJniDir.absolutePath
+  inputs.files(
+    fileTree("${rootProject.projectDir.parentFile}/rust/motion-sdk/src"),
+    file("${rootProject.projectDir.parentFile}/tools/motion-sdk/build-native.sh"),
+    file("${rootProject.projectDir.parentFile}/Cargo.toml"),
+    file("${rootProject.projectDir.parentFile}/rust/motion-sdk/Cargo.toml"),
+    file("${rootProject.projectDir.parentFile}/Cargo.lock")
+  )
+  outputs.dir rustJniDir
+}
+
+tasks.register("preparePoseModels", Sync) {
+  from("${rootProject.projectDir.parentFile}/public/models") {
+    include "pose_landmarker_*.task"
+    into "models"
+  }
+  into generatedPoseAssetsDir
+}
+
+tasks.configureEach { task ->
+  if (task.name == "preBuild") task.dependsOn("buildRustAndroid", "preparePoseModels")
 }
 
 dependencies {

@@ -13,6 +13,12 @@ class PoseCameraModule : Module() {
       Prop("model") { view: PoseCameraView, model: String ->
         view.setModel(model)
       }
+      Prop("exerciseId") { view: PoseCameraView, exerciseId: String ->
+        view.setExerciseId(exerciseId)
+      }
+      Prop("recognitionActive") { view: PoseCameraView, active: Boolean ->
+        view.setRecognitionActive(active)
+      }
     }
   }
 }

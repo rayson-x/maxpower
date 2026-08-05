@@ -312,16 +312,17 @@ pub extern "C" fn motion_sdk_finish_set() -> i32 {
         return -2;
     }
     runtime.set_gate.finish();
-    let terminal_outcome = runtime
-        .rep_engine
-        .as_mut()
-        .and_then(|engine| engine.reject_active(super::RepEvidenceReason::IncompleteCycle, engine.previous));
+    let terminal_outcome = runtime.rep_engine.as_mut().and_then(|engine| {
+        engine.reject_active(super::RepEvidenceReason::IncompleteCycle, engine.previous)
+    });
     runtime.completed_reps = terminal_outcome.into_iter().collect();
     runtime.pending_outcomes.clear();
     runtime.rep_state = runtime
         .rep_engine
         .as_ref()
-        .map_or_else(super::RepStateSnapshot::default, |engine| engine.state.clone());
+        .map_or_else(super::RepStateSnapshot::default, |engine| {
+            engine.state.clone()
+        });
     encode_current_packet(&mut runtime);
     0
 }
@@ -555,7 +556,9 @@ fn process_rep(runtime: &mut WebRuntime) {
         runtime.rep_state = runtime
             .rep_engine
             .as_ref()
-            .map_or_else(super::RepStateSnapshot::default, |engine| engine.state.clone());
+            .map_or_else(super::RepStateSnapshot::default, |engine| {
+                engine.state.clone()
+            });
     }
     if let (Some(profile), Some(identity), Some((bound_identity, bound_hash)), Some(rep)) = (
         runtime.reference_profile.as_ref(),
@@ -583,7 +586,13 @@ fn process_rep(runtime: &mut WebRuntime) {
                 }
             };
     }
-    if let (Some(profile), Some(identity), Some((bound_identity, bound_hash)), Some(rep), Some(rep_engine)) = (
+    if let (
+        Some(profile),
+        Some(identity),
+        Some((bound_identity, bound_hash)),
+        Some(rep),
+        Some(rep_engine),
+    ) = (
         runtime.simulated_baseline.as_ref(),
         runtime.simulated_baseline_context.as_ref(),
         runtime.simulated_baseline_binding.as_ref(),
@@ -663,6 +672,40 @@ pub extern "C" fn motion_sdk_packet_ptr() -> u32 {
         .map_or(0, |runtime| runtime.packet_bytes.as_ptr() as usize as u32)
 }
 
+/// Copies the current packet into host-owned memory. Native hosts use this
+/// instead of the WASM linear-memory pointer, which is intentionally u32.
+/// Returns the number of bytes copied, or a negative error code.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn motion_sdk_copy_packet(output: *mut u8, capacity: usize) -> isize {
+    if output.is_null() {
+        return -2;
+    }
+    let Ok(runtime) = runtime().lock() else {
+        return -1;
+    };
+    if capacity < runtime.packet_bytes.len() {
+        return -3;
+    }
+    let length = runtime.packet_bytes.len();
+    // SAFETY: the caller supplied a non-null buffer whose declared capacity
+    // is at least `length`; source and destination cannot overlap because the
+    // source is owned by the locked runtime.
+    unsafe {
+        std::ptr::copy_nonoverlapping(runtime.packet_bytes.as_ptr(), output, length);
+    }
+    length as isize
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_contract_major() -> u32 {
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_contract_minor() -> u32 {
+    5
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
@@ -674,6 +717,10 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
         2 => Some(super::ExerciseProfile::seated_shoulder_press_provisional()),
         3 => Some(super::ExerciseProfile::lat_pulldown_rear_left_45_provisional()),
         4 => Some(super::ExerciseProfile::seated_shoulder_press_front_provisional()),
+        5 => Some(super::ExerciseProfile::march_in_place_front_provisional()),
+        6 => Some(super::ExerciseProfile::side_step_touch_front_provisional()),
+        7 => Some(super::ExerciseProfile::alternating_knee_raise_front_provisional()),
+        8 => Some(super::ExerciseProfile::step_jack_front_provisional()),
         _ => return -2,
     };
     runtime.rep_engine = profile.map(super::RepEngine::new);
@@ -1154,22 +1201,17 @@ pub extern "C" fn motion_sdk_commit_simulated_baseline() -> i32 {
     if !valid_fixed_simulated_baseline_layout(&profile.nodes)
         || profile.nodes.iter().any(|node| {
             node.features.len() != profile.feature_names.len()
-                || node
-                    .features
-                    .iter()
-                    .any(|point| {
-                        !super::valid_corridor_point_for_status(point, "simulated_nominal")
-                    })
+                || node.features.iter().any(|point| {
+                    !super::valid_corridor_point_for_status(point, "simulated_nominal")
+                })
         })
     {
         return -6;
     }
     runtime.simulated_baseline = Some(profile);
     runtime.simulated_baseline_context = Some(baseline_identity);
-    runtime.simulated_baseline_binding = Some((
-        profile_binding.exercise_profile_identity,
-        bound_hash,
-    ));
+    runtime.simulated_baseline_binding =
+        Some((profile_binding.exercise_profile_identity, bound_hash));
     runtime.simulated_baseline_state = ReferenceRuntimeState::AwaitingSealedRep;
     0
 }
@@ -1188,7 +1230,11 @@ fn valid_fixed_simulated_baseline_layout(nodes: &[super::ReferenceCorridorNode])
     nodes.len() == 32
         && nodes.iter().enumerate().all(|(index, node)| {
             let phase_index = index % 16;
-            let expected_phase = if index < 16 { "to_extreme" } else { "from_extreme" };
+            let expected_phase = if index < 16 {
+                "to_extreme"
+            } else {
+                "from_extreme"
+            };
             let expected_progress = phase_index as f32 / 15.0;
             node.phase == expected_phase && (node.phase_progress - expected_progress).abs() <= 1e-4
         })
@@ -1300,7 +1346,11 @@ pub extern "C" fn motion_sdk_simulated_baseline_field(field: u32, high: u32) -> 
         3 => evidence.profile_hash,
         _ => return u32::MAX,
     };
-    if high == 0 { value as u32 } else { (value >> 32) as u32 }
+    if high == 0 {
+        value as u32
+    } else {
+        (value >> 32) as u32
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -1517,7 +1567,9 @@ pub extern "C" fn motion_sdk_select_subject(x: f32, y: f32) -> i32 {
     runtime.rep_state = runtime
         .rep_engine
         .as_ref()
-        .map_or_else(super::RepStateSnapshot::default, |engine| engine.state.clone());
+        .map_or_else(super::RepStateSnapshot::default, |engine| {
+            engine.state.clone()
+        });
     encode_current_packet(&mut runtime);
     0
 }

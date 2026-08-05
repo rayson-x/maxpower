@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.os.SystemClock
+import android.util.Base64
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -33,7 +34,13 @@ class PoseCameraView(context: Context, appContext: AppContext) :
 
   private var cameraProvider: ProcessCameraProvider? = null
   private var landmarker: PoseLandmarker? = null
-  private var modelName: String = "heavy"
+  private var modelName: String = "lite"
+  private var profileCode: Int = 5
+  private var recognitionActive = false
+  private var rustConfigured = false
+  private var processedFrames = 0L
+  private var validFrames = 0L
+  private var metricsStartedAtMs = 0L
   private var bound = false
 
   init {
@@ -53,6 +60,29 @@ class PoseCameraView(context: Context, appContext: AppContext) :
       landmarker?.close()
       landmarker = null
       landmarker = createLandmarker()
+    }
+  }
+
+  fun setExerciseId(exerciseId: String) {
+    val nextCode = when (exerciseId) {
+      "march_in_place" -> 5
+      "side_step_touch" -> 6
+      "alternating_knee_raise" -> 7
+      "step_jack" -> 8
+      else -> 0
+    }
+    if (nextCode == profileCode) return
+    profileCode = nextCode
+    if (rustConfigured && MotionNative.nativeSetProfile(profileCode) != 0) {
+      emitError("rust-profile", IllegalStateException("profile rejected"))
+    }
+  }
+
+  fun setRecognitionActive(active: Boolean) {
+    if (active == recognitionActive) return
+    recognitionActive = active
+    if (rustConfigured && MotionNative.nativeSetActive(active) != 0) {
+      emitError("rust-set", IllegalStateException("set lifecycle rejected"))
     }
   }
 
@@ -117,15 +147,42 @@ class PoseCameraView(context: Context, appContext: AppContext) :
               landmark.visibility().orElse(0f).toDouble()
             )
           } ?: emptyList()
-          onPose(
-            mapOf(
-              "landmarks" to landmarks,
-              "width" to bitmap.width,
-              "height" to bitmap.height,
-              "timestampMs" to timestampMs.toDouble(),
-              "model" to modelName
+          if (!rustConfigured) {
+            val status = MotionNative.nativeConfigure(
+              bitmap.width,
+              bitmap.height,
+              profileCode,
+              recognitionActive
             )
+            if (status != 0) throw IllegalStateException("Rust configure failed ($status)")
+            rustConfigured = true
+            metricsStartedAtMs = timestampMs
+          }
+          val flatLandmarks = DoubleArray(landmarks.size * 4)
+          landmarks.forEachIndexed { index, values ->
+            val offset = index * 4
+            flatLandmarks[offset] = values[0]
+            flatLandmarks[offset + 1] = values[1]
+            flatLandmarks[offset + 2] = values[2]
+            flatLandmarks[offset + 3] = values[3]
+          }
+          val packet = MotionNative.nativeProcessFrame(timestampMs, flatLandmarks)
+          processedFrames += 1
+          if (landmarks.size == 33) validFrames += 1
+          val elapsedMs = (timestampMs - metricsStartedAtMs).coerceAtLeast(1)
+          val payload = mutableMapOf<String, Any>(
+            "landmarks" to landmarks,
+            "width" to bitmap.width,
+            "height" to bitmap.height,
+            "timestampMs" to timestampMs.toDouble(),
+            "model" to modelName,
+            "processedFrames" to processedFrames.toDouble(),
+            "validFrames" to validFrames.toDouble(),
+            "processedFps" to processedFrames * 1000.0 / elapsedMs.toDouble(),
+            "maxBacklogFrames" to 1.0
           )
+          packet?.let { payload["packetBase64"] = Base64.encodeToString(it, Base64.NO_WRAP) }
+          onPose(payload)
         }
       } catch (error: Exception) {
         emitError("inference", error)
@@ -138,7 +195,7 @@ class PoseCameraView(context: Context, appContext: AppContext) :
       provider.unbindAll()
       provider.bindToLifecycle(
         lifecycleOwner,
-        CameraSelector.DEFAULT_BACK_CAMERA,
+        CameraSelector.DEFAULT_FRONT_CAMERA,
         preview,
         analysis
       )
@@ -158,6 +215,8 @@ class PoseCameraView(context: Context, appContext: AppContext) :
     analysisExecutor.execute {
       landmarker?.close()
       landmarker = null
+      if (rustConfigured) MotionNative.nativeClose()
+      rustConfigured = false
     }
   }
 }

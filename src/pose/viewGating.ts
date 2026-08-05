@@ -48,6 +48,10 @@ export interface CaptureRecommendation {
  * oblique views are the conservative all-purpose choice.
  */
 const CAPTURE_RECOMMENDATIONS: Readonly<Record<string, CaptureRecommendation>> = {
+  march_in_place: { position: "front", reason: "正前方可观察左右交替抬腿与回落。" },
+  side_step_touch: { position: "front", reason: "正前方可观察左右侧移和并步返回。" },
+  alternating_knee_raise: { position: "front", reason: "正前方可观察左右膝部交替抬起与回落。" },
+  step_jack: { position: "front", reason: "正前方可同时观察单侧迈步与手臂开合。" },
   barbell_bench_press: { position: "frontLeft45", reason: "斜前 45° 可同时保留双腕轨迹与躯干稳定性。" },
   dumbbell_bench_press: { position: "frontLeft45", reason: "斜前 45° 可同时保留双腕轨迹与躯干稳定性。" },
   incline_dumbbell_press: { position: "frontLeft45", reason: "斜前 45° 便于看到上肢行程和凳上躯干。" },

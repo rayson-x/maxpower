@@ -40,6 +40,7 @@ yarn-error.*
 /ios
 /android
 modules/*/android/build/
+modules/*/android/.cxx/
 src/agent/defaultCredentials.ts
 .harness-build/
 tools/harness/out/
@@ -51,9 +52,12 @@ tools/harness/out/
 .simulated-reference-report-build/
 .simulated-prior-build/
 .motion-sdk-eval-build/
+.home-workout-validation-build/
 /target/
 /target-arm64/
 /target-native/
+/target-native-android/
+/target-native-apple/
 /target-wasm/
 /public/motion-sdk/
 
@@ -65,3 +69,5 @@ tools/harness/out/
 /public/field-captures/
 /public/archives/confirmed-captures/
 /data/training/
+/modules/pose-camera/ios/Frameworks/
+/modules/pose-camera/android/build/rustJni/

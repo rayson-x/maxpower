@@ -27,6 +27,7 @@ export type PriorFeature =
   | "ankleAngleDeg"
   | "wristHeightRelativeShoulderY"
   | "wristLateralSpread"
+  | "ankleLateralSpread"
   | "wristDistanceToShoulder"
   | "hipHeightRelativeAnkleY"
   | "heelHeightRelativeAnkleY"
@@ -197,6 +198,7 @@ const ALL_FEATURES: readonly PriorFeature[] = [
   "ankleAngleDeg",
   "wristHeightRelativeShoulderY",
   "wristLateralSpread",
+  "ankleLateralSpread",
   "wristDistanceToShoulder",
   "hipHeightRelativeAnkleY",
   "heelHeightRelativeAnkleY",
@@ -266,6 +268,10 @@ const TEMPLATES: readonly SimulatedKinematicPriorTemplate[] = [
 
   // Legs
   template({ exerciseId: "bodyweight_squat", muscleGroup: "legs", primaryCapturePosition: "left", supportedCapturePositions: ["right", "frontLeft45"], phaseLabels: { start: "站立顶部", extreme: "下蹲底部", end: "站回顶部" }, toExtremeMeaning: "eccentric", fromExtremeMeaning: "concentric", features: [primary("kneeAngleDeg", "decrease_to_extreme", "下蹲时膝关节投影角总体趋向屈曲。"), primary("hipHeightRelativeAnkleY", "increase_to_extreme", "固定侧面中髋部相对脚踝总体下移。"), secondary("hipAngleDeg", "decrease_to_extreme", "髋部投影角可作辅助相位证据。")], assumptions: ["深度、足尖方向和躯干角不构成模拟先验的合格阈值。"], prohibitedClaims: COMMON_PROHIBITIONS }),
+  template({ exerciseId: "march_in_place", muscleGroup: "legs", primaryCapturePosition: "front", supportedCapturePositions: ["frontLeft45"], supportedTrainingSides: ["left", "right"], phaseLabels: { start: "双脚落地", extreme: "单侧提膝顶点", end: "该侧脚重新落地" }, toExtremeMeaning: "knee_lift", fromExtremeMeaning: "controlled_return", features: [primary("kneeAngleDeg", "decrease_to_extreme", "工作侧提膝时膝角总体趋向屈曲。"), secondary("hipAngleDeg", "decrease_to_extreme", "工作侧髋角变化只作为辅助相位信号。")], assumptions: ["每次单侧抬起并回落记为一个周期；左右侧分别保留证据。"], prohibitedClaims: COMMON_PROHIBITIONS }),
+  template({ exerciseId: "side_step_touch", muscleGroup: "legs", primaryCapturePosition: "front", supportedCapturePositions: ["frontLeft45"], supportedTrainingSides: ["left", "right"], phaseLabels: { start: "双脚并拢", extreme: "单侧侧步最远点", end: "并步回到起点" }, toExtremeMeaning: "lateral_step", fromExtremeMeaning: "touch_return", features: [primary("ankleLateralSpread", "increase_to_extreme", "固定正面机位中双踝横向间距在侧步时总体增大。"), secondary("hipHeightRelativeAnkleY", "hold", "骨盆高度仅作稳定性辅助，不作为姿势评分。")], assumptions: ["地面空间与正面机位固定；左右侧分开记录。"], prohibitedClaims: COMMON_PROHIBITIONS }),
+  template({ exerciseId: "alternating_knee_raise", muscleGroup: "legs", primaryCapturePosition: "front", supportedCapturePositions: ["frontLeft45"], supportedTrainingSides: ["left", "right"], phaseLabels: { start: "双脚落地", extreme: "单侧高提膝顶点", end: "该侧脚重新落地" }, toExtremeMeaning: "high_knee_lift", fromExtremeMeaning: "controlled_return", features: [primary("kneeAngleDeg", "decrease_to_extreme", "工作侧高提膝时膝角应产生可观察屈曲。"), primary("hipAngleDeg", "decrease_to_extreme", "工作侧髋屈曲提供第二个独立相位信号。")], assumptions: ["只验证完整单侧抬起回落周期，不把提膝高度解释为动作质量。"], prohibitedClaims: COMMON_PROHIBITIONS }),
+  template({ exerciseId: "step_jack", muscleGroup: "legs", primaryCapturePosition: "front", supportedCapturePositions: ["frontLeft45"], supportedTrainingSides: ["left", "right"], phaseLabels: { start: "双脚并拢且手臂下垂", extreme: "单侧迈开且双臂展开", end: "脚和手臂回到起点" }, toExtremeMeaning: "coordinated_open", fromExtremeMeaning: "coordinated_close", features: [primary("ankleLateralSpread", "increase_to_extreme", "固定正面机位中迈步侧使双踝横向间距增大。"), primary("wristLateralSpread", "increase_to_extreme", "手臂同步展开使双腕横向间距增大。")], assumptions: ["脚步与手臂必须在同一周期内协调展开和回收；左右迈步分别保留证据。"], prohibitedClaims: COMMON_PROHIBITIONS }),
   template({ exerciseId: "barbell_back_squat", muscleGroup: "legs", primaryCapturePosition: "left", supportedCapturePositions: ["right", "frontLeft45"], phaseLabels: { start: "站立顶部", extreme: "下蹲底部", end: "站回顶部" }, toExtremeMeaning: "eccentric", fromExtremeMeaning: "concentric", features: [primary("kneeAngleDeg", "decrease_to_extreme", "下蹲时膝角总体趋向屈曲。"), primary("hipHeightRelativeAnkleY", "increase_to_extreme", "髋部在固定侧面相对脚踝总体下移。"), secondary("hipAngleDeg", "decrease_to_extreme", "髋部投影角作辅助。")], assumptions: ["杆位、鞋跟、深度与躯干角分别记录，不共享徒手深蹲数值。"], prohibitedClaims: COMMON_PROHIBITIONS }),
   template({ exerciseId: "leg_press", muscleGroup: "legs", primaryCapturePosition: "left", supportedCapturePositions: ["right", "frontLeft45"], phaseLabels: { start: "膝髋较伸展", extreme: "屈髋屈膝底部", end: "推回起点" }, toExtremeMeaning: "lowering", fromExtremeMeaning: "press", features: [primary("kneeAngleDeg", "decrease_to_extreme", "放下踏板时膝角总体趋向屈曲。"), secondary("hipAngleDeg", "decrease_to_extreme", "髋角作为同器械辅助相位信号。")], assumptions: ["靠背角、踏板高度和足位必须单独建桶。"], prohibitedClaims: COMMON_PROHIBITIONS }),
   template({ exerciseId: "romanian_deadlift", muscleGroup: "legs", primaryCapturePosition: "left", supportedCapturePositions: ["right", "frontLeft45"], phaseLabels: { start: "髋伸展顶部", extreme: "髋铰链底部", end: "回到顶部" }, toExtremeMeaning: "hinge_lowering", fromExtremeMeaning: "hip_extension", features: [primary("hipAngleDeg", "decrease_to_extreme", "下放时髋部投影角总体趋向屈曲。"), primary("torsoLeanImageDeg", "increase_to_extreme", "固定侧面中躯干相对竖直的倾角总体增大。"), secondary("kneeAngleDeg", "hold", "膝关节小幅变化只作辅助，不设数值目标。")], assumptions: ["杠铃/哑铃、站距与膝部微屈需分开校准。"], prohibitedClaims: COMMON_PROHIBITIONS }),
@@ -689,6 +695,14 @@ function featureVector(
   if (leftWrist && rightWrist && leftShoulder && rightShoulder) {
     const shoulderWidth = distance(leftShoulder, rightShoulder);
     values.wristLateralSpread = shoulderWidth >= 1e-6 ? round(Math.abs(leftWrist.x - rightWrist.x) / shoulderWidth) : null;
+  }
+  const leftAnkle = measurement(pose.landmarks[27]);
+  const rightAnkle = measurement(pose.landmarks[28]);
+  if (leftAnkle && rightAnkle && leftShoulder && rightShoulder) {
+    const shoulderWidth = distance(leftShoulder, rightShoulder);
+    values.ankleLateralSpread = shoulderWidth >= 1e-6
+      ? round(Math.abs(leftAnkle.x - rightAnkle.x) / shoulderWidth)
+      : null;
   }
   return Object.freeze(values);
 }

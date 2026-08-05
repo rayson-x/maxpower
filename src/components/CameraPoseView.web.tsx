@@ -15,6 +15,7 @@ import {
 } from "../pose/exerciseRegistry";
 import { RULE_METRIC } from "../pose/formRuleEngine";
 import { createWebMotionPacket, routeWebMotionPacket } from "../motion/webMotionPacket";
+import { CanonicalActiveDurationAccumulator } from "../motion/canonicalActiveDuration";
 import {
   InferenceCompletionGate,
   type InferenceCompletionDropReason,
@@ -557,7 +558,8 @@ function revokeRecordingResultUrls(result: RecordingResult): void {
 }
 
 function candidateEvidenceLabel(reason: RustSealedRep["evidenceReason"]): string {
-  return {
+  if (!reason) return "未说明原因";
+  const labels: Record<NonNullable<RustSealedRep["evidenceReason"]>, string> = {
     short_continuity_recovery: "短暂丢点后恢复",
     long_continuity_loss: "长时间丢点",
     subject_changed: "追踪主体切换",
@@ -565,7 +567,8 @@ function candidateEvidenceLabel(reason: RustSealedRep["evidenceReason"]): string
     anti_interference_filter: "整体移动干扰",
     duration_exceeded: "动作时长超出上限",
     required_joint_loss: "关键关节不可用",
-  }[reason ?? ""] ?? "未说明原因";
+  };
+  return labels[reason] ?? "未说明原因";
 }
 
 function observationFindingLabel(finding: RustSealedRep["observationFindings"][number]): string {
@@ -606,6 +609,7 @@ export function CameraPoseView() {
   const rustWasmRef = useRef<MotionWasmExports | null>(null);
   const rustTargetRef = useRef<RustTargetSnapshot | null>(null);
   const rustSetLifecycleRef = useRef<RustSetLifecycle>("idle");
+  const activeDurationRef = useRef(new CanonicalActiveDurationAccumulator());
   const referenceComparisonKeyRef = useRef(referenceComparisonKey(NO_REVIEWED_REFERENCE));
   const sequenceCounterRef = useRef(0);
   // 实时信号曲线(肘角),驱动左下角曲线图
@@ -711,6 +715,7 @@ export function CameraPoseView() {
   const [rustNeedsReviewRepCount, setRustNeedsReviewRepCount] = useState(0);
   const [rustRejectedRepCount, setRustRejectedRepCount] = useState(0);
   const [rustSetLifecycle, setRustSetLifecycle] = useState<RustSetLifecycle>("idle");
+  const [rustActiveDurationMs, setRustActiveDurationMs] = useState(0);
   const [observedProfilesReady, setObservedProfilesReady] = useState(false);
   const stopRef = useRef<() => void>(() => undefined);
 
@@ -1300,6 +1305,12 @@ export function CameraPoseView() {
             const rustSession = canonicalSessionRef.current instanceof RustCanonicalWasmSession
               ? canonicalSessionRef.current
               : null;
+            if (rustSession?.lastDecodedPacket) {
+              setRustActiveDurationMs(activeDurationRef.current.update(
+                rustSession.lastDecodedPacket.sourceTimestampMs,
+                rustSession.lastDecodedPacket.setState.lifecycle,
+              ));
+            }
             if (rustSession && rustSession.lastSetLifecycle !== rustSetLifecycleRef.current) {
               rustSetLifecycleRef.current = rustSession.lastSetLifecycle;
               setRustSetLifecycle(rustSession.lastSetLifecycle);
@@ -1810,6 +1821,14 @@ export function CameraPoseView() {
         diskCompletionObservable: false,
         reason: "Browser download APIs do not expose OS disk-flush completion",
       },
+      offlineRuntimeMetrics: {
+        processedFrames: diagnostics.length,
+        validFrames: diagnostics.filter((frame) => frame.hasPose && !frame.processingError).length,
+        processedFps: fixture[0].durationSec > 0 ? diagnostics.length / fixture[0].durationSec : 0,
+        droppedFrames: droppedFramesRef.current,
+        maxBacklogFrames: 1,
+        activeDurationMs: activeDurationRef.current.value(),
+      },
       rustSealedReps,
       rustNeedsReviewReps,
       rustRejectedReps,
@@ -1995,6 +2014,8 @@ export function CameraPoseView() {
         rustSession.beginSet();
         syncRustSetCommandPacket(rustSession);
       }
+      activeDurationRef.current.reset();
+      setRustActiveDurationMs(0);
       rustSealedRepsRef.current = [];
       rustNeedsReviewRepsRef.current = [];
       rustRejectedRepsRef.current = [];
@@ -2516,6 +2537,10 @@ export function CameraPoseView() {
                 <span style={styles.trainingStat}>
                   <strong style={styles.trainingStatValue}>{fps || "—"}</strong>
                   当前 FPS
+                </span>
+                <span style={styles.trainingStat}>
+                  <strong style={styles.trainingStatValue}>{(rustActiveDurationMs / 1000).toFixed(1)}s</strong>
+                  Canonical 有效时间
                 </span>
                 <span style={styles.trainingStat}>
                   <strong style={styles.trainingStatValue}>{
