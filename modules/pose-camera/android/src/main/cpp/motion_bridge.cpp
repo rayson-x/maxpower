@@ -45,6 +45,7 @@ Java_expo_modules_posecamera_MotionNative_nativeSetActive(
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_expo_modules_posecamera_MotionNative_nativeProcessFrame(
     JNIEnv *env, jobject, jlong timestamp_ms, jdoubleArray flat_landmarks) {
+  if (timestamp_ms < 0) return nullptr;
   const jsize length = env->GetArrayLength(flat_landmarks);
   if (length % 4 != 0) return nullptr;
   std::vector<jdouble> values(static_cast<size_t>(length));
@@ -75,6 +76,12 @@ Java_expo_modules_posecamera_MotionNative_nativeProcessFrame(
   env->SetByteArrayRegion(output, 0, static_cast<jsize>(packet.size()),
                           reinterpret_cast<const jbyte *>(packet.data()));
   return output;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_expo_modules_posecamera_MotionNative_nativeIsCurrentFrameValid(
+    JNIEnv *, jobject) {
+  return motion_sdk_current_frame_valid() == 1 ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL

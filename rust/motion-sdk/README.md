@@ -29,4 +29,4 @@ Locally generated `observed recognition profiles` are a separate provisional inp
 
 ## Scope
 
-PC Web is implemented. Android, iOS, device heat and throttling are intentionally unimplemented and unverified. The core avoids per-frame profile scans and runs only the selected profile, which preserves a viable native-SDK seam without claiming mobile performance evidence.
+PC Web and the Android offline technical-validation adapter are implemented. The Android adapter packages the lightweight MediaPipe models, sends the selected action's BlazePose 33 observations through the native Rust ABI, and consumes canonical packet semantics rather than maintaining a platform counter. The iOS client adapter remains deferred; the shared C header and Apple Rust library build path are preparatory only. Physical-device throughput, heat, throttling and participant accuracy remain unmeasured and unverified until declared field evidence is supplied. The core avoids per-frame profile scans and runs only the selected profile, so no mobile performance claim is inferred from the implementation alone.

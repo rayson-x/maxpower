@@ -20,10 +20,10 @@ fn config(sequence_id: &str) -> SessionConfig {
 
 #[test]
 fn march_profile_seals_each_unilateral_lift_and_return_once() {
-    let left_angles = [170.0, 168.0, 150.0, 120.0, 95.0, 120.0, 150.0, 168.0, 170.0];
-    let right_angles = [170.0; 9];
-    let mut frames = leg_angle_frames(&left_angles, &right_angles);
-    frames.extend(leg_angle_frames(&right_angles, &left_angles));
+    let lift = [0.0, 0.01, 0.04, 0.08, 0.12, 0.08, 0.04, 0.01, 0.0];
+    let rest = [0.0; 9];
+    let mut frames = knee_lift_frames(&lift, &rest);
+    frames.extend(knee_lift_frames(&rest, &lift));
 
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
@@ -71,10 +71,10 @@ fn march_profile_seals_each_unilateral_lift_and_return_once() {
 
 #[test]
 fn march_profile_does_not_confirm_stationary_or_incomplete_motion() {
-    let stationary = [170.0; 9];
-    let incomplete = [170.0, 168.0, 150.0, 120.0, 95.0, 96.0, 98.0, 100.0, 102.0];
-    let mut frames = leg_angle_frames(&stationary, &stationary);
-    frames.extend(leg_angle_frames(&incomplete, &stationary));
+    let stationary = [0.0; 9];
+    let incomplete = [0.0, 0.01, 0.04, 0.08, 0.12, 0.12, 0.12, 0.12, 0.12];
+    let mut frames = knee_lift_frames(&stationary, &stationary);
+    frames.extend(knee_lift_frames(&incomplete, &stationary));
 
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
@@ -111,18 +111,42 @@ fn march_profile_does_not_confirm_stationary_or_incomplete_motion() {
 }
 
 #[test]
+fn march_and_knee_raise_do_not_count_a_heel_curl_without_knee_lift() {
+    let heel_curl = [170.0, 168.0, 145.0, 105.0, 65.0, 105.0, 145.0, 168.0, 170.0];
+    for profile in [
+        ExerciseProfile::march_in_place_front_provisional(),
+        ExerciseProfile::alternating_knee_raise_front_provisional(),
+    ] {
+        let output = run_profile(
+            "home-workout:heel-curl-negative",
+            profile,
+            leg_angle_frames(&heel_curl, &[170.0; 9]),
+        );
+        assert_eq!(
+            output
+                .packets()
+                .iter()
+                .flat_map(|packet| &packet.completed_reps)
+                .filter(|rep| rep.disposition == RepDisposition::Confirmed)
+                .count(),
+            0,
+        );
+    }
+}
+
+#[test]
 fn all_four_home_workout_profiles_count_their_exact_unilateral_cycle() {
-    let knee_raise = [170.0, 168.0, 145.0, 105.0, 65.0, 105.0, 145.0, 168.0, 170.0];
+    let knee_raise = [0.0, 0.02, 0.06, 0.12, 0.18, 0.12, 0.06, 0.02, 0.0];
     assert_one_confirmed(
         "home-workout:knee-raise-left",
         ExerciseProfile::alternating_knee_raise_front_provisional(),
-        leg_angle_frames(&knee_raise, &[170.0; 9]),
+        knee_lift_frames(&knee_raise, &[0.0; 9]),
         "alternating-knee-raise/front/bilateral/bodyweight/v1",
     );
     assert_one_confirmed(
         "home-workout:knee-raise-right",
         ExerciseProfile::alternating_knee_raise_front_provisional(),
-        leg_angle_frames(&[170.0; 9], &knee_raise),
+        knee_lift_frames(&[0.0; 9], &knee_raise),
         "alternating-knee-raise/front/bilateral/bodyweight/v1",
     );
 
@@ -286,6 +310,22 @@ fn leg_angle_frames(left: &[f32], right: &[f32]) -> Vec<Vec<PoseObservation>> {
         .zip(right)
         .map(|(&left_angle, &right_angle)| leg_angle_frame(left_angle, right_angle))
         .collect()
+}
+
+fn knee_lift_frames(left: &[f32], right: &[f32]) -> Vec<Vec<PoseObservation>> {
+    left.iter()
+        .zip(right)
+        .map(|(&left_lift, &right_lift)| knee_lift_frame(left_lift, right_lift))
+        .collect()
+}
+
+fn knee_lift_frame(left_lift: f32, right_lift: f32) -> Vec<PoseObservation> {
+    let mut frame = leg_angle_frame(170.0, 170.0);
+    for (knee, ankle, lift) in [(25, 27, left_lift), (26, 28, right_lift)] {
+        frame[knee].y -= lift;
+        frame[ankle].y -= lift;
+    }
+    frame
 }
 
 fn leg_angle_frame(left_angle: f32, right_angle: f32) -> Vec<PoseObservation> {

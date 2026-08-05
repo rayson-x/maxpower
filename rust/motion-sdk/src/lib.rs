@@ -488,6 +488,7 @@ pub enum ExerciseSignalKind {
     JointAngle,
     LandmarkDistance,
     LandmarkHorizontalDistance,
+    LandmarkVerticalDistance,
     PairedLandmarkDistanceSum,
 }
 
@@ -538,23 +539,23 @@ impl ExerciseProfile {
             content_hash: 0,
             maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::BlazePose33,
-            coordinate_unit: "image-angle-deg".into(),
+            coordinate_unit: "torso-normalized-distance".into(),
             state_machine_id: "alternating-ready-effort-return/v1".into(),
             required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
             primary_signal: ExerciseSignal {
-                kind: ExerciseSignalKind::JointAngle,
-                landmarks: vec![23, 25, 27],
+                kind: ExerciseSignalKind::LandmarkVerticalDistance,
+                landmarks: vec![23, 25],
             },
             secondary_signal: ExerciseSignal {
-                kind: ExerciseSignalKind::JointAngle,
-                landmarks: vec![24, 26, 28],
+                kind: ExerciseSignalKind::LandmarkVerticalDistance,
+                landmarks: vec![24, 26],
             },
             direction: MovementDirection::Decreasing,
-            start_amplitude: 8.0,
-            min_primary_amplitude: 30.0,
-            min_secondary_amplitude: 30.0,
-            return_hysteresis: 8.0,
-            ready_tolerance: 10.0,
+            start_amplitude: 0.18,
+            min_primary_amplitude: 0.80,
+            min_secondary_amplitude: 0.80,
+            return_hysteresis: 0.18,
+            ready_tolerance: 0.22,
             max_gap_ms: 700,
             min_rep_duration_ms: 500,
             max_rep_duration_ms: 4_000,
@@ -564,11 +565,11 @@ impl ExerciseProfile {
     pub fn alternating_knee_raise_front_provisional() -> Self {
         let mut profile = Self::march_in_place_front_provisional();
         profile.identity = "alternating-knee-raise/front/bilateral/bodyweight/v1".into();
-        profile.start_amplitude = 12.0;
-        profile.min_primary_amplitude = 55.0;
-        profile.min_secondary_amplitude = 55.0;
-        profile.return_hysteresis = 10.0;
-        profile.ready_tolerance = 12.0;
+        profile.start_amplitude = 0.25;
+        profile.min_primary_amplitude = 1.10;
+        profile.min_secondary_amplitude = 1.10;
+        profile.return_hysteresis = 0.24;
+        profile.ready_tolerance = 0.28;
         Self::with_computed_hash(profile)
     }
 
@@ -850,6 +851,7 @@ impl ExerciseSignalKind {
             Self::LandmarkDistance => 2,
             Self::LandmarkHorizontalDistance => 3,
             Self::PairedLandmarkDistanceSum => 4,
+            Self::LandmarkVerticalDistance => 5,
         }
     }
 }
@@ -861,6 +863,7 @@ impl ExerciseSignal {
             ExerciseSignalKind::JointAngle => 3..=3,
             ExerciseSignalKind::LandmarkDistance => 2..=2,
             ExerciseSignalKind::LandmarkHorizontalDistance => 2..=2,
+            ExerciseSignalKind::LandmarkVerticalDistance => 2..=2,
             ExerciseSignalKind::PairedLandmarkDistanceSum => 4..=4,
         };
         expected_count.contains(&self.landmarks.len())
@@ -880,6 +883,10 @@ fn expected_coordinate_unit(
         | (
             ExerciseSignalKind::LandmarkHorizontalDistance,
             ExerciseSignalKind::LandmarkHorizontalDistance,
+        )
+        | (
+            ExerciseSignalKind::LandmarkVerticalDistance,
+            ExerciseSignalKind::LandmarkVerticalDistance,
         )
         | (
             ExerciseSignalKind::PairedLandmarkDistanceSum,
@@ -2396,6 +2403,13 @@ fn measure_signal(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> O
             let (first_x, _) = landmark_xy(first, canonical)?;
             let (second_x, _) = landmark_xy(second, canonical)?;
             Some((first_x - second_x).abs() / scale)
+        }
+        ExerciseSignalKind::LandmarkVerticalDistance => {
+            let [first, second]: [usize; 2] = signal.landmarks.as_slice().try_into().ok()?;
+            let scale = torso_scale(canonical)?;
+            let (_, first_y) = landmark_xy(first, canonical)?;
+            let (_, second_y) = landmark_xy(second, canonical)?;
+            Some((first_y - second_y).abs() / scale)
         }
         ExerciseSignalKind::PairedLandmarkDistanceSum => {
             let [first, second, third, fourth]: [usize; 4] =

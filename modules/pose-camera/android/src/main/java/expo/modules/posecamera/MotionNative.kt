@@ -10,5 +10,6 @@ internal object MotionNative {
   external fun nativeSetProfile(profileCode: Int): Int
   external fun nativeSetActive(active: Boolean): Int
   external fun nativeProcessFrame(timestampMs: Long, flatLandmarks: DoubleArray): ByteArray?
+  external fun nativeIsCurrentFrameValid(): Boolean
   external fun nativeClose()
 }

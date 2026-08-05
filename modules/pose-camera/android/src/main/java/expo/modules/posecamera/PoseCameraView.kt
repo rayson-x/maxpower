@@ -168,7 +168,7 @@ class PoseCameraView(context: Context, appContext: AppContext) :
           }
           val packet = MotionNative.nativeProcessFrame(timestampMs, flatLandmarks)
           processedFrames += 1
-          if (landmarks.size == 33) validFrames += 1
+          if (packet != null && MotionNative.nativeIsCurrentFrameValid()) validFrames += 1
           val elapsedMs = (timestampMs - metricsStartedAtMs).coerceAtLeast(1)
           val payload = mutableMapOf<String, Any>(
             "landmarks" to landmarks,

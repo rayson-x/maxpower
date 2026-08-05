@@ -11,6 +11,7 @@ use super::{
 struct WebRuntime {
     engine: Option<ContinuityEngine>,
     timestamp_ms: u64,
+    last_processed_timestamp_ms: Option<u64>,
     observations: Vec<PoseObservation>,
     output: Vec<CanonicalLandmark>,
     candidates: Vec<PoseCandidate>,
@@ -246,6 +247,7 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::CentralStable));
     runtime.target = None;
     runtime.subject_epoch = 0;
+    runtime.last_processed_timestamp_ms = None;
     runtime.scheduler = Some(super::InferenceScheduler::new(500, 100));
     runtime.frame_id = 0;
     runtime.rep_engine = None;
@@ -339,7 +341,14 @@ pub extern "C" fn motion_sdk_begin_frame(
     if runtime.engine.is_none() || landmark_count > 256 {
         return -2;
     }
-    runtime.timestamp_ms = (u64::from(timestamp_high) << 32) | u64::from(timestamp_low);
+    let timestamp_ms = (u64::from(timestamp_high) << 32) | u64::from(timestamp_low);
+    if runtime
+        .last_processed_timestamp_ms
+        .is_some_and(|last| timestamp_ms <= last)
+    {
+        return -3;
+    }
+    runtime.timestamp_ms = timestamp_ms;
     runtime.observations = vec![PoseObservation::new(0.0, 0.0, 0.0, 0.0); landmark_count as usize];
     runtime.output.clear();
     runtime.candidates.clear();
@@ -371,6 +380,12 @@ pub extern "C" fn motion_sdk_process_frame() -> i32 {
         return -1;
     };
     let timestamp_ms = runtime.timestamp_ms;
+    if runtime
+        .last_processed_timestamp_ms
+        .is_some_and(|last| timestamp_ms <= last)
+    {
+        return -3;
+    }
     let observations = runtime.observations.clone();
     let Some(engine) = runtime.engine.as_mut() else {
         return -2;
@@ -382,6 +397,7 @@ pub extern "C" fn motion_sdk_process_frame() -> i32 {
         selected_candidate_id: Some(0),
     });
     process_rep(&mut runtime);
+    runtime.last_processed_timestamp_ms = Some(timestamp_ms);
     0
 }
 
@@ -393,7 +409,14 @@ pub extern "C" fn motion_sdk_begin_multi(timestamp_low: u32, timestamp_high: u32
     if runtime.engine.is_none() || runtime.subject_tracker.is_none() {
         return -2;
     }
-    runtime.timestamp_ms = (u64::from(timestamp_high) << 32) | u64::from(timestamp_low);
+    let timestamp_ms = (u64::from(timestamp_high) << 32) | u64::from(timestamp_low);
+    if runtime
+        .last_processed_timestamp_ms
+        .is_some_and(|last| timestamp_ms <= last)
+    {
+        return -3;
+    }
+    runtime.timestamp_ms = timestamp_ms;
     runtime.observations.clear();
     runtime.output.clear();
     runtime.candidates.clear();
@@ -457,6 +480,12 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     }
     let candidates = std::mem::take(&mut runtime.candidates);
     let timestamp_ms = runtime.timestamp_ms;
+    if runtime
+        .last_processed_timestamp_ms
+        .is_some_and(|last| timestamp_ms <= last)
+    {
+        return -3;
+    }
     let (target, selected) = {
         let Some(tracker) = runtime.subject_tracker.as_mut() else {
             return -2;
@@ -500,7 +529,28 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     };
     runtime.target = Some(target);
     process_rep(&mut runtime);
+    runtime.last_processed_timestamp_ms = Some(timestamp_ms);
     0
+}
+
+/// Reports whether the current canonical frame contains every landmark needed
+/// by the installed recognition profile. Hosts use this for validity metrics;
+/// it deliberately does not treat a merely present 33-point MediaPipe array as
+/// usable recognition evidence.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_current_frame_valid() -> i32 {
+    let Ok(runtime) = runtime().lock() else {
+        return -1;
+    };
+    let target_locked = runtime
+        .target
+        .as_ref()
+        .is_some_and(|target| target.state == TargetState::Locked);
+    let observable = runtime
+        .rep_engine
+        .as_ref()
+        .is_some_and(|engine| super::profile_signal(&engine.profile, &runtime.output).is_some());
+    i32::from(target_locked && observable)
 }
 
 fn process_rep(runtime: &mut WebRuntime) {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 import {
   computeRustExerciseProfileHash,
@@ -10,6 +11,7 @@ import {
   type RustExerciseProfileData,
   type RustReferenceComparison,
 } from "../../src/motion/rustCanonicalWasm";
+import { decodeMotionPacket, type DecodedMotionPacket } from "../../src/motion/motionPacket";
 import { createPoseContinuitySession, type CanonicalPoseFrame } from "../../src/pose/canonicalPose";
 import type { PoseEstimate, PoseLandmark } from "../../src/pose/PoseEngine";
 import {
@@ -79,6 +81,8 @@ async function main(): Promise<void> {
     assert.ok((homeWorkout.lastDecodedPacket?.lineage.activeProfileHash ?? 0n) !== 0n);
     homeWorkout.close();
   }
+
+  compareNativeAndWasmHomeWorkoutFixture(wasm);
 
   const profileWithoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
     identity: "custom-pull/rear/bilateral/cable/v1",
@@ -394,10 +398,115 @@ async function main(): Promise<void> {
 
   console.log(JSON.stringify({
     passed: true,
-    framesCompared: poses.length + 1 + wristY.length + referencePoses.length * 2,
-    semantics: ["measured", "fused", "predicted", "unknown", "reason", "reset", "profile-bundle", "sealed-reference-match", "simulated-baseline"],
+    framesCompared: poses.length + 1 + wristY.length + referencePoses.length * 2 + 9,
+    semantics: ["measured", "fused", "predicted", "unknown", "reason", "reset", "profile-bundle", "native-wasm-home-workout", "sealed-reference-match", "simulated-baseline"],
     coordinateTolerance: 1e-5,
   }, null, 2));
+}
+
+interface SharedMarchFixture {
+  readonly sequenceId: string;
+  readonly profile: "march_in_place";
+  readonly imageWidth: number;
+  readonly imageHeight: number;
+  readonly frames: readonly Readonly<{
+    timestampMs: number;
+    leftKneeLift: number;
+    rightKneeLift: number;
+  }>[];
+}
+
+function compareNativeAndWasmHomeWorkoutFixture(wasm: MotionWasmExports): void {
+  const fixturePath = path.join(
+    process.cwd(),
+    "tools/motion-sdk/fixtures/march-lift-cycle.json",
+  );
+  const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8")) as SharedMarchFixture;
+  const nativeHexPackets = JSON.parse(execFileSync(
+    process.env.CARGO ?? "cargo",
+    [
+      "run",
+      "--quiet",
+      "--manifest-path",
+      "rust/motion-sdk/Cargo.toml",
+      "--bin",
+      "native_home_workout_fixture",
+      "--",
+      fixturePath,
+    ],
+    { cwd: process.cwd(), encoding: "utf8" },
+  )) as string[];
+  const nativePackets = nativeHexPackets.map((hex) => decodeMotionPacket(Buffer.from(hex, "hex")));
+
+  const session = new RustCanonicalWasmSession({
+    sequenceId: fixture.sequenceId,
+    schema: "blazepose33",
+    image: {
+      widthPx: fixture.imageWidth,
+      heightPx: fixture.imageHeight,
+      rotationDegrees: 0,
+      mirrored: false,
+    },
+    stabilization: "raw",
+  }, wasm);
+  session.setExerciseProfile(fixture.profile);
+  const wasmPackets = fixture.frames.map((frame) => {
+    session.process(sharedMarchPose(frame));
+    assert.ok(session.lastDecodedPacket);
+    return session.lastDecodedPacket;
+  });
+  session.close();
+
+  assert.equal(nativePackets.length, wasmPackets.length);
+  nativePackets.forEach((nativePacket, index) => {
+    assert.deepEqual(packetSemantics(nativePacket), packetSemantics(wasmPackets[index]));
+  });
+  assert.equal(
+    wasmPackets.flatMap((packet) => packet.completedReps)
+      .filter((rep) => rep.disposition === "confirmed").length,
+    1,
+  );
+}
+
+function sharedMarchPose(frame: SharedMarchFixture["frames"][number]): PoseEstimate {
+  const landmarks = Array.from({ length: 33 }, () => landmark(0.5, 0.5));
+  landmarks[11] = landmark(0.44, 0.30);
+  landmarks[12] = landmark(0.56, 0.30);
+  landmarks[23] = landmark(0.44, 0.50);
+  landmarks[24] = landmark(0.56, 0.50);
+  landmarks[25] = landmark(0.44, 0.68 - frame.leftKneeLift);
+  landmarks[26] = landmark(0.56, 0.68 - frame.rightKneeLift);
+  landmarks[27] = landmark(0.44, 0.86 - frame.leftKneeLift);
+  landmarks[28] = landmark(0.56, 0.86 - frame.rightKneeLift);
+  return { timestampMs: frame.timestampMs, landmarks, worldLandmarks: [] };
+}
+
+function landmark(x: number, y: number): PoseLandmark {
+  return { x, y, z: 0, visibility: 1 };
+}
+
+function packetSemantics(packet: DecodedMotionPacket) {
+  return {
+    profileIdentity: packet.lineage.activeProfileIdentity,
+    profileHash: packet.lineage.activeProfileHash,
+    timestampMs: packet.sourceTimestampMs,
+    target: packet.target,
+    lifecycle: packet.setState.lifecycle,
+    repState: packet.repState,
+    completedReps: packet.completedReps.map((rep) => ({
+      repId: rep.repId,
+      startFrameId: rep.startFrameId,
+      startTimestampMs: rep.startTimestampMs,
+      peakFrameId: rep.peakFrameId,
+      peakTimestampMs: rep.peakTimestampMs,
+      endFrameId: rep.endFrameId,
+      endTimestampMs: rep.endTimestampMs,
+      disposition: rep.disposition,
+      evidenceReason: rep.evidenceReason,
+      profileIdentity: rep.profileIdentity,
+      profileHash: rep.profileHash,
+    })),
+  };
 }
 
 function diagnosticReviewedReferenceProfile(

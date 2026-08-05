@@ -1,0 +1,19 @@
+{
+  "schema": "blazepose33",
+  "sequenceId": "parity:native-wasm-march",
+  "profile": "march_in_place",
+  "profileCode": 5,
+  "imageWidth": 1000,
+  "imageHeight": 1000,
+  "frames": [
+    { "timestampMs": 100, "leftKneeLift": 0.00, "rightKneeLift": 0.00 },
+    { "timestampMs": 200, "leftKneeLift": 0.01, "rightKneeLift": 0.00 },
+    { "timestampMs": 300, "leftKneeLift": 0.04, "rightKneeLift": 0.00 },
+    { "timestampMs": 400, "leftKneeLift": 0.08, "rightKneeLift": 0.00 },
+    { "timestampMs": 500, "leftKneeLift": 0.12, "rightKneeLift": 0.00 },
+    { "timestampMs": 600, "leftKneeLift": 0.08, "rightKneeLift": 0.00 },
+    { "timestampMs": 700, "leftKneeLift": 0.04, "rightKneeLift": 0.00 },
+    { "timestampMs": 800, "leftKneeLift": 0.01, "rightKneeLift": 0.00 },
+    { "timestampMs": 900, "leftKneeLift": 0.00, "rightKneeLift": 0.00 }
+  ]
+}
