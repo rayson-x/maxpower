@@ -88,10 +88,12 @@ export function injectHudTheme(): void {
         overflow: visible !important;
       }
       .range-sidebar > button { grid-column: 1 / -1; }
+      .home-flow-rail { grid-template-columns: minmax(210px, 1.4fr) repeat(3, minmax(90px, .55fr)) !important; }
     }
     @media (max-width: 680px) {
       .range-body { padding: 10px !important; gap: 10px !important; }
       .range-output-grid, .range-sidebar, .range-training-readout { grid-template-columns: 1fr !important; }
+      .home-flow-rail { grid-template-columns: 1fr !important; }
       .range-sidebar > button { grid-column: auto; }
       .range-brand-sub { display: none; }
       .range-header { padding: 10px 14px !important; }

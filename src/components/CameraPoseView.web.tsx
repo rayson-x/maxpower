@@ -190,7 +190,40 @@ const POSE_MODELS = [
 ];
 
 type EngineKind = "mediapipe" | "rtmpose";
-type WorkspacePage = "training" | "console" | "review";
+type WorkspacePage = "training" | "home-workout" | "console" | "review";
+const HOME_WORKOUT_FLOW_ACTIONS = [
+  {
+    id: "march_in_place",
+    step: "01",
+    label: "原地踏步",
+    labelEn: "MARCH",
+    cue: "左右交替抬腿，单脚落地算一次完整周期。",
+  },
+  {
+    id: "side_step_touch",
+    step: "02",
+    label: "侧步并步",
+    labelEn: "SIDE STEP",
+    cue: "向侧方迈开，再并步回到起始位置。",
+  },
+  {
+    id: "alternating_knee_raise",
+    step: "03",
+    label: "交替提膝",
+    labelEn: "KNEE RAISE",
+    cue: "左右膝交替抬高，每次抬起并回落算一轮。",
+  },
+  {
+    id: "step_jack",
+    step: "04",
+    label: "低冲击开合",
+    labelEn: "STEP JACK",
+    cue: "侧向迈步，同时完成双臂打开与回收。",
+  },
+] as const;
+const HOME_WORKOUT_FLOW_IDS = new Set<string>(
+  HOME_WORKOUT_FLOW_ACTIONS.map((action) => action.id),
+);
 const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
   { id: "mediapipe", label: "MediaPipe" },
   { id: "rtmpose", label: "RTMPose-m" },
@@ -201,7 +234,9 @@ const STAGE_ASPECT = 16 / 9;
 function readWorkspacePage(): WorkspacePage {
   if (typeof window === "undefined") return "training";
   const view = new URLSearchParams(window.location.search).get("view");
-  return view === "review" ? "review" : "training";
+  if (view === "review") return "review";
+  if (view === "home-workout") return "home-workout";
+  return "training";
 }
 
 function poseSchemaForEngine(kind: EngineKind): PoseSchema {
@@ -760,7 +795,7 @@ export function CameraPoseView() {
   useEffect(() => {
     const syncWorkspacePage = () => {
       const nextPage = readWorkspacePage();
-      if (nextPage === "review") stopRef.current();
+      if (nextPage !== workspacePageRef.current) stopRef.current();
       workspacePageRef.current = nextPage;
       setWorkspacePage(nextPage);
     };
@@ -804,6 +839,22 @@ export function CameraPoseView() {
   }, [workspacePage]);
 
   useEffect(() => {
+    if (workspacePage !== "home-workout") return;
+    trainingSideRef.current = "bilateral";
+    setTrainingSide("bilateral");
+    variationRef.current = "";
+    setVariation("");
+    capturePositionRef.current = "front";
+    setCapturePosition("front");
+    cameraViewRef.current = "front";
+    setCameraView("front");
+    if (!HOME_WORKOUT_FLOW_IDS.has(exerciseChoiceRef.current)) {
+      exerciseChoiceRef.current = "";
+      setExerciseChoice("");
+    }
+  }, [workspacePage]);
+
+  useEffect(() => {
     let cancelled = false;
     void fetch("/archives/confirmed-captures/manifest.json", { cache: "no-store" })
       .then(async (response) => {
@@ -844,15 +895,6 @@ export function CameraPoseView() {
     };
   }, []);
 
-  const selectWorkspacePage = (nextPage: WorkspacePage) => {
-    if (nextPage === "review") stopRef.current();
-    workspacePageRef.current = nextPage;
-    setWorkspacePage(nextPage);
-    const url = new URL(window.location.href);
-    url.searchParams.set("view", nextPage);
-    window.history.replaceState(null, "", url);
-  };
-
   const applyCapturePosition = (positionId: CapturePosition) => {
     const physicalPosition = CAPTURE_POSITIONS.find((position) => position.id === positionId);
     if (!physicalPosition) return;
@@ -877,6 +919,52 @@ export function CameraPoseView() {
       setRustNeedsReviewRepCount(0);
       setRustRejectedRepCount(0);
     }
+  };
+
+  const selectExercise = (nextExerciseId: string) => {
+    exerciseChoiceRef.current = nextExerciseId;
+    setExerciseChoice(nextExerciseId);
+    // Variation/equipment is action-specific. Carrying the previous action's
+    // free text into a new action can select the wrong profile even when every
+    // other field matches.
+    variationRef.current = "";
+    setVariation("");
+    const recommendation = recommendCapturePosition(nextExerciseId);
+    if (recommendation) {
+      applyCapturePosition(recommendation.position);
+    } else if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
+      configureRustExerciseProfile(
+        canonicalSessionRef.current,
+        nextExerciseId,
+        capturePositionRef.current,
+        trainingSideRef.current,
+        variationRef.current,
+        modelPathRef.current,
+      );
+      rustSealedRepsRef.current = [];
+      rustNeedsReviewRepsRef.current = [];
+      rustRejectedRepsRef.current = [];
+      setRustSealedRepCount(0);
+      setRustNeedsReviewRepCount(0);
+      setRustRejectedRepCount(0);
+    }
+  };
+
+  const selectWorkspacePage = (nextPage: WorkspacePage) => {
+    if (nextPage !== workspacePageRef.current) stopRef.current();
+    if (nextPage === "home-workout") {
+      trainingSideRef.current = "bilateral";
+      setTrainingSide("bilateral");
+      variationRef.current = "";
+      setVariation("");
+      applyCapturePosition("front");
+      if (!HOME_WORKOUT_FLOW_IDS.has(exerciseChoiceRef.current)) selectExercise("");
+    }
+    workspacePageRef.current = nextPage;
+    setWorkspacePage(nextPage);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", nextPage);
+    window.history.replaceState(null, "", url);
   };
 
   const applyVideoLibraryContext = (entry: VideoLibraryEntry) => {
@@ -2344,7 +2432,9 @@ export function CameraPoseView() {
   const trackingOk = usableLandmarks.size >= landmarkTotal * 0.6;
   const analyzing = analysisStage !== null && analysisStage !== "done";
   const isConsole = workspacePage === "console";
+  const isHomeWorkout = workspacePage === "home-workout";
   const isReview = workspacePage === "review";
+  const selectedHomeWorkout = HOME_WORKOUT_FLOW_ACTIONS.find((action) => action.id === exerciseChoice);
   const videoViewport = fitVideoIntoStage(videoAspect);
 
   return (
@@ -2354,7 +2444,11 @@ export function CameraPoseView() {
         <div style={styles.brand}>
           <span style={styles.brandLogo}>FORM·RANGE</span>
           <span style={styles.brandSub} className="range-brand-sub">
-            {workspacePage === "review" ? "审核标注 / VIDEO ANNOTATION" : "训练页 / LIVE TRAINING"}
+            {workspacePage === "review"
+              ? "审核标注 / VIDEO ANNOTATION"
+              : isHomeWorkout
+                ? "居家跟练 / HOME MOTION LAB"
+                : "训练页 / LIVE TRAINING"}
           </span>
         </div>
         <nav style={styles.pageSwitch} aria-label="页面模式">
@@ -2365,6 +2459,14 @@ export function CameraPoseView() {
             onClick={() => selectWorkspacePage("training")}
           >
             训练页
+          </button>
+          <button
+            type="button"
+            style={{ ...styles.pageSwitchButton, ...(isHomeWorkout ? styles.pageSwitchButtonActiveHome : null) }}
+            aria-pressed={isHomeWorkout}
+            onClick={() => selectWorkspacePage("home-workout")}
+          >
+            居家验证
           </button>
           <button
             type="button"
@@ -2409,6 +2511,31 @@ export function CameraPoseView() {
         <>
       <div style={styles.body} className="range-body">
         <main style={styles.main} className="range-main">
+          {isHomeWorkout && (
+            <section style={styles.homeFlowRail} className="home-flow-rail hud-reveal hud-reveal-1" aria-label="居家动作验证流程">
+              <div style={styles.homeFlowIntro}>
+                <span style={styles.homeFlowEyebrow}>TECHNICAL VALIDATION · 仅验证识别链路</span>
+                <strong style={styles.homeFlowTitle}>正面站立动作识别</strong>
+              </div>
+              {[
+                { index: "1", label: "选择动作", active: Boolean(selectedHomeWorkout), done: Boolean(selectedHomeWorkout) },
+                { index: "2", label: "打开相机", active: status === "running", done: status === "running" },
+                { index: "3", label: "录制本组", active: isRecording, done: Boolean(recordingResult) && !isRecording },
+              ].map((step) => (
+                <div
+                  key={step.index}
+                  style={{
+                    ...styles.homeFlowStep,
+                    ...(step.active ? styles.homeFlowStepActive : null),
+                    ...(step.done ? styles.homeFlowStepDone : null),
+                  }}
+                >
+                  <span style={styles.homeFlowStepIndex}>{step.done ? "✓" : step.index}</span>
+                  <span>{step.label}</span>
+                </div>
+              ))}
+            </section>
+          )}
           <div style={styles.stageWrap} className="hud-reveal hud-reveal-1">
             <div style={{ ...styles.stage, aspectRatio: String(STAGE_ASPECT) }} className="hud-scanline">
               {cornerBrackets(trackingOk && status === "running" ? HUD.primary : HUD.lineBright).map(
@@ -2491,7 +2618,11 @@ export function CameraPoseView() {
                       ? "模型加载中…"
                       : status === "starting-camera"
                         ? "正在打开相机…"
-                        : "选择输入源,开始追踪"}
+                        : isHomeWorkout
+                          ? selectedHomeWorkout
+                            ? `已选择 ${selectedHomeWorkout.label}，请打开相机`
+                            : "请先在右侧选择一个居家动作"
+                          : "选择输入源,开始追踪"}
                   </div>
                 </div>
               )}
@@ -2777,8 +2908,11 @@ export function CameraPoseView() {
         </main>
 
         <aside style={styles.sidebar} className="range-sidebar">
-          <div style={styles.sideSection} className="hud-reveal hud-reveal-1">
-            <div style={styles.sideTitle}>01 · 采集输入</div>
+          <div
+            style={{ ...styles.sideSection, ...(isHomeWorkout ? styles.homeCaptureOrder : null) }}
+            className="hud-reveal hud-reveal-1"
+          >
+            <div style={styles.sideTitle}>{isHomeWorkout ? "02 · 开始识别" : "01 · 采集输入"}</div>
             <div style={styles.btnRow}>
               {status === "running" ? (
                 <button style={{ ...styles.btn, background: "#4c1d1d", color: "#fca5a5" }} onClick={stop}>
@@ -2786,13 +2920,24 @@ export function CameraPoseView() {
                 </button>
               ) : (
                 <button
-                  disabled={isFinalizingRecording}
-                  style={{ ...styles.btn, background: HUD.primaryDim, color: "#eafff2", opacity: isFinalizingRecording ? 0.45 : 1 }}
+                  disabled={isFinalizingRecording || (isHomeWorkout && !selectedHomeWorkout)}
+                  style={{
+                    ...styles.btn,
+                    background: HUD.primaryDim,
+                    color: "#eafff2",
+                    opacity: isFinalizingRecording || (isHomeWorkout && !selectedHomeWorkout) ? 0.35 : 1,
+                    cursor: isFinalizingRecording || (isHomeWorkout && !selectedHomeWorkout) ? "not-allowed" : "pointer",
+                  }}
                   onClick={start}
                 >
-                  {isFinalizingRecording ? "保存中…" : "▶ 相机"}
+                  {isFinalizingRecording
+                    ? "保存中…"
+                    : isHomeWorkout && !selectedHomeWorkout
+                      ? "请先选择动作"
+                      : "▶ 打开相机"}
                 </button>
               )}
+              {!isHomeWorkout && (
               <label
                 style={{
                   ...styles.btn,
@@ -2816,6 +2961,7 @@ export function CameraPoseView() {
                   }}
                 />
               </label>
+              )}
             </div>
             {status === "running" && mode === "camera" && (
               <div style={styles.btnRow}>
@@ -2845,7 +2991,7 @@ export function CameraPoseView() {
                 )}
               </div>
             )}
-            <label style={styles.field}>
+            {!isHomeWorkout && <label style={styles.field}>
               视频库
               <select
                 value={selectedLibraryVideoId}
@@ -2867,8 +3013,8 @@ export function CameraPoseView() {
                   return <option key={entry.id} value={entry.id}>{exerciseName} · {entry.label}</option>;
                 })}
               </select>
-            </label>
-            {selectedLibraryVideoNeedsPosition && (
+            </label>}
+            {!isHomeWorkout && selectedLibraryVideoNeedsPosition && (
               <p style={styles.agentWarning}>
                 此旧档案有动作与 rep 标注，但未保存实际八向机位；请在下方确认机位后再解读质量结果。
               </p>
@@ -2963,43 +3109,66 @@ export function CameraPoseView() {
             )}
           </div>
 
-          <div style={styles.sideSection} className="hud-reveal hud-reveal-2">
-            <div style={styles.sideTitle}>02 · 动作配置</div>
+          <div
+            style={{ ...styles.sideSection, ...(isHomeWorkout ? styles.homeActionOrder : null) }}
+            className="hud-reveal hud-reveal-2"
+          >
+            <div style={styles.sideTitle}>{isHomeWorkout ? "01 · 选择居家动作" : "02 · 动作配置"}</div>
+            {isHomeWorkout ? (
+              <>
+                <p style={styles.homeActionLead}>选择本轮只识别的动作。四项都要求正面机位、全身入镜。</p>
+                <div style={styles.homeActionGrid}>
+                  {HOME_WORKOUT_FLOW_ACTIONS.map((action) => {
+                    const active = action.id === exerciseChoice;
+                    return (
+                      <button
+                        key={action.id}
+                        type="button"
+                        aria-pressed={active}
+                        disabled={isRecording || isFinalizingRecording}
+                        style={{
+                          ...styles.homeActionCard,
+                          ...(active ? styles.homeActionCardActive : null),
+                          opacity: isRecording || isFinalizingRecording ? 0.45 : 1,
+                        }}
+                        onClick={() => selectExercise(action.id)}
+                      >
+                        <span style={styles.homeActionIndex}>{action.step}</span>
+                        <span style={styles.homeActionCopy}>
+                          <strong style={styles.homeActionName}>{action.label}</strong>
+                          <span style={styles.homeActionEnglish}>{action.labelEn}</span>
+                          <span style={styles.homeActionCue}>{action.cue}</span>
+                        </span>
+                        <span style={styles.homeActionState}>{active ? "已选择" : "选择"}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={styles.homeLockedContext}>
+                  <span>机位</span><strong>正前</strong>
+                  <span>空间</span><strong>全身入镜</strong>
+                  <span>模式</span><strong>双侧 / 徒手</strong>
+                </div>
+                {selectedHomeWorkout && (
+                  <p style={styles.homeSelectionReady}>
+                    READY · 已选择 {selectedHomeWorkout.label}。下一步打开相机，站到全身可见的位置。
+                  </p>
+                )}
+                <div style={styles.telemetryRow}>
+                  <span>FPS <strong>{fps}</strong></span>
+                  <span>POINTS <strong>{measuredLandmarks.size}/{landmarkTotal}</strong></span>
+                  <span>REPS <strong>{rustSealedRepCount}</strong></span>
+                </div>
+              </>
+            ) : (
+            <>
             <label style={styles.exerciseField}>
               <span>训练动作</span>
               <select
                 style={styles.exerciseSelect}
                 value={exerciseChoice}
                 disabled={isRecording || isFinalizingRecording}
-                onChange={(event) => {
-                  const nextExerciseId = event.target.value;
-                  exerciseChoiceRef.current = nextExerciseId;
-                  setExerciseChoice(nextExerciseId);
-                  // Variation/equipment is action-specific. Carrying the
-                  // previous action's free text into a new action can select
-                  // the wrong profile even when every other field matches.
-                  variationRef.current = "";
-                  setVariation("");
-                  const recommendation = recommendCapturePosition(nextExerciseId);
-                  if (recommendation) {
-                    applyCapturePosition(recommendation.position);
-                  } else if (canonicalSessionRef.current instanceof RustCanonicalWasmSession) {
-                    configureRustExerciseProfile(
-                      canonicalSessionRef.current,
-                      nextExerciseId,
-                      capturePositionRef.current,
-                      trainingSideRef.current,
-                      variationRef.current,
-                      modelPathRef.current,
-                    );
-                    rustSealedRepsRef.current = [];
-                    rustNeedsReviewRepsRef.current = [];
-                    rustRejectedRepsRef.current = [];
-                    setRustSealedRepCount(0);
-                    setRustNeedsReviewRepCount(0);
-                    setRustRejectedRepCount(0);
-                  }
-                }}
+                onChange={(event) => selectExercise(event.target.value)}
               >
                 <option value="">请选择本次训练动作</option>
                 {MUSCLE_GROUPS.map((group) => (
@@ -3125,6 +3294,8 @@ export function CameraPoseView() {
               <span>POINTS <strong>{measuredLandmarks.size}/{landmarkTotal}</strong></span>
               <span>LEAN <strong>{torsoLean === null ? "—" : `${torsoLean.toFixed(0)}°`}</strong></span>
             </div>
+            </>
+            )}
           </div>
 
           {isConsole && (
@@ -4075,6 +4246,11 @@ const styles: Record<string, React.CSSProperties> = {
     background: HUD.primaryDim,
     color: "#eafff2",
   },
+  pageSwitchButtonActiveHome: {
+    background: "#6b470d",
+    color: "#fff1cd",
+    boxShadow: `inset 0 0 0 1px ${HUD.amber}66`,
+  },
   headerStatus: { display: "flex", alignItems: "center", gap: 8 },
   led: {
     width: 8,
@@ -4105,6 +4281,61 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 0,
     overflowY: "auto",
     paddingRight: 2,
+  },
+  homeFlowRail: {
+    display: "grid",
+    gridTemplateColumns: "minmax(230px, 1.4fr) repeat(3, minmax(105px, .55fr))",
+    alignItems: "stretch",
+    gap: 1,
+    flexShrink: 0,
+    border: `1px solid ${HUD.line}`,
+    background: HUD.line,
+  },
+  homeFlowIntro: {
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 4,
+    padding: "11px 14px",
+    background: "#0c130e",
+  },
+  homeFlowEyebrow: {
+    color: HUD.amber,
+    fontSize: 8,
+    letterSpacing: 1.5,
+  },
+  homeFlowTitle: {
+    color: HUD.text,
+    fontSize: 14,
+    letterSpacing: 0.4,
+  },
+  homeFlowStep: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    padding: "10px 8px",
+    background: HUD.panel,
+    color: HUD.dim,
+    fontSize: 10,
+    letterSpacing: 0.8,
+  },
+  homeFlowStepActive: {
+    background: "rgba(255, 178, 36, .10)",
+    color: "#ffe6b3",
+  },
+  homeFlowStepDone: {
+    color: HUD.primary,
+  },
+  homeFlowStepIndex: {
+    display: "inline-flex",
+    width: 20,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    border: `1px solid ${HUD.lineBright}`,
+    color: "inherit",
+    fontWeight: 700,
   },
   stageWrap: {
     flexShrink: 0,
@@ -4316,6 +4547,8 @@ const styles: Record<string, React.CSSProperties> = {
     border: `1px solid ${HUD.line}`,
     padding: 12,
   },
+  homeActionOrder: { order: 1, borderColor: "#5a4215" },
+  homeCaptureOrder: { order: 2 },
   sideTitle: {
     fontSize: 10,
     letterSpacing: 2,
@@ -4340,6 +4573,76 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.text,
     fontWeight: 700,
     background: "#0c1610",
+  },
+  homeActionLead: {
+    margin: "-2px 0 10px",
+    color: HUD.dim,
+    fontSize: 11,
+    lineHeight: 1.6,
+  },
+  homeActionGrid: {
+    display: "grid",
+    gap: 7,
+  },
+  homeActionCard: {
+    width: "100%",
+    display: "grid",
+    gridTemplateColumns: "30px minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: 9,
+    padding: "10px 9px",
+    border: `1px solid ${HUD.line}`,
+    background: "#09100c",
+    color: HUD.text,
+    textAlign: "left",
+    cursor: "pointer",
+    fontFamily: HUD.mono,
+  },
+  homeActionCardActive: {
+    borderColor: HUD.amber,
+    background: "linear-gradient(90deg, rgba(255, 178, 36, .15), rgba(255, 178, 36, .03))",
+    boxShadow: "inset 3px 0 0 #ffb224",
+  },
+  homeActionIndex: {
+    color: HUD.amber,
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  homeActionCopy: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    minWidth: 0,
+  },
+  homeActionName: { color: HUD.text, fontSize: 13 },
+  homeActionEnglish: { color: HUD.dim, fontSize: 8, letterSpacing: 1.5 },
+  homeActionCue: { color: HUD.dim, fontSize: 9, lineHeight: 1.45, marginTop: 3 },
+  homeActionState: {
+    color: HUD.amber,
+    border: "1px solid #5a4215",
+    padding: "4px 6px",
+    fontSize: 9,
+    whiteSpace: "nowrap",
+  },
+  homeLockedContext: {
+    display: "grid",
+    gridTemplateColumns: "auto 1fr",
+    gap: "5px 10px",
+    marginTop: 10,
+    padding: 9,
+    border: `1px solid ${HUD.line}`,
+    color: HUD.dim,
+    fontSize: 9,
+    letterSpacing: 0.8,
+  },
+  homeSelectionReady: {
+    margin: "9px 0 0",
+    padding: "8px 9px",
+    borderLeft: `2px solid ${HUD.primary}`,
+    background: "rgba(87, 255, 142, .06)",
+    color: HUD.primary,
+    fontSize: 10,
+    lineHeight: 1.55,
   },
   captureDetailsRow: {
     display: "grid",
