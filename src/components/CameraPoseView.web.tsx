@@ -38,6 +38,11 @@ import {
   type PoseSchema,
 } from "../pose/canonicalPose";
 import { buildCanonicalPosePresentation } from "../pose/canonicalPosePresentation";
+import {
+  INITIAL_TRACKER_READINESS,
+  updateTrackerReadiness,
+  type TrackerReadinessInput,
+} from "../pose/trackerReadiness";
 import { classifyLocally, type LocalClassification } from "../pose/localClassifier";
 import { buildLabeledSetFixtureTemplate } from "../pose/labeledSetFixture";
 import {
@@ -652,6 +657,7 @@ export function CameraPoseView() {
   const canonicalShadowRef = useRef<PoseContinuitySession | null>(null);
   const rustWasmRef = useRef<MotionWasmExports | null>(null);
   const rustTargetRef = useRef<RustTargetSnapshot | null>(null);
+  const trackerReadinessRef = useRef(INITIAL_TRACKER_READINESS);
   const rustSetLifecycleRef = useRef<RustSetLifecycle>("idle");
   const activeDurationRef = useRef(new CanonicalActiveDurationAccumulator());
   const referenceComparisonKeyRef = useRef(referenceComparisonKey(NO_REVIEWED_REFERENCE));
@@ -748,6 +754,7 @@ export function CameraPoseView() {
   const [localCaptureError, setLocalCaptureError] = useState<string | null>(null);
   const [rustSdkStatus, setRustSdkStatus] = useState<"loading" | "ready" | "fallback">("loading");
   const [rustTarget, setRustTarget] = useState<RustTargetSnapshot | null>(null);
+  const [trackerReadiness, setTrackerReadiness] = useState(INITIAL_TRACKER_READINESS);
   const [diagnosticsVersion, setDiagnosticsVersion] = useState(0);
   const [referenceComparison, setReferenceComparison] = useState<RustReferenceComparison>(
     NO_REVIEWED_REFERENCE,
@@ -1044,6 +1051,58 @@ export function CameraPoseView() {
       if (epoch === engineLoadEpochRef.current) setModelLoading(false);
     }
   }, []);
+
+  const publishTrackerReadiness = useCallback((input: TrackerReadinessInput) => {
+    const previous = trackerReadinessRef.current;
+    const next = updateTrackerReadiness(previous, input);
+    if (
+      next.phase !== previous.phase
+      || next.stableFrameCount !== previous.stableFrameCount
+    ) {
+      trackerReadinessRef.current = next;
+      setTrackerReadiness(next);
+    }
+    return next;
+  }, []);
+
+  const trackerAssetsReady =
+    rustSdkStatus === "ready" && !modelLoading && engineRef.current !== null;
+
+  // Load both tracking runtimes before asking for camera permission. Opening
+  // the camera is then only a source transition, rather than an opaque model
+  // download followed by a delayed first result.
+  useEffect(() => {
+    if (workspacePage === "review") return;
+    let cancelled = false;
+    void ensureEngine().catch((loadError) => {
+      if (cancelled || loadError instanceof Error && loadError.message === "stale model completion dropped") {
+        return;
+      }
+      setError(loadError instanceof Error ? loadError.message : String(loadError));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [engineKind, ensureEngine, modelId, workspacePage]);
+
+  useEffect(() => {
+    if (!trackerAssetsReady) {
+      publishTrackerReadiness({
+        assetsReady: false,
+        sourceOpen: status === "running",
+        targetLocked: false,
+        usableLandmarkRatio: 0,
+      });
+      setPose(null);
+      return;
+    }
+    publishTrackerReadiness({
+      assetsReady: true,
+      sourceOpen: status === "running",
+      targetLocked: false,
+      usableLandmarkRatio: 0,
+    });
+  }, [publishTrackerReadiness, status, trackerAssetsReady]);
 
   const startCanonicalSequence = useCallback(() => {
     inferenceCompletionGateRef.current.resetSequence();
@@ -1414,6 +1473,19 @@ export function CameraPoseView() {
               rustSetLifecycleRef.current = rustSession.lastSetLifecycle;
               setRustSetLifecycle(rustSession.lastSetLifecycle);
             }
+            const usableLandmarkCount = canonicalFrame.landmarks.filter((landmark) =>
+              landmark.source !== "unknown"
+              && Number.isFinite(landmark.x)
+              && Number.isFinite(landmark.y)
+            ).length;
+            const nextTrackerReadiness = publishTrackerReadiness({
+              assetsReady: Boolean(engineRef.current && rustWasmRef.current),
+              sourceOpen: true,
+              targetLocked: rustSession?.lastTarget.state === "locked",
+              usableLandmarkRatio: canonicalFrame.landmarks.length > 0
+                ? usableLandmarkCount / canonicalFrame.landmarks.length
+                : 0,
+            });
             const motionPacket = createWebMotionPacket({
               canonical: canonicalFrame,
               canonicalContentHash: rustSession?.lastCanonicalHash ?? 0n,
@@ -1440,7 +1512,7 @@ export function CameraPoseView() {
             const routeTiming = routeWebMotionPacket(motionPacket, {
               render: (packet) => {
                 const frame = packet.canonical;
-                setPose(frame);
+                setPose(nextTrackerReadiness.phase === "ready" ? frame : null);
               },
               count: (packet) => {
                 const frame = packet.canonical;
@@ -1533,6 +1605,13 @@ export function CameraPoseView() {
         } catch (caught) {
           const message = caught instanceof Error ? caught.message : String(caught);
           console.warn(`Motion frame processing failed at ${processingStage}`, caught);
+          publishTrackerReadiness({
+            assetsReady: Boolean(engineRef.current && rustWasmRef.current),
+            sourceOpen: true,
+            targetLocked: false,
+            usableLandmarkRatio: 0,
+          });
+          setPose(null);
           if (recordingActiveRef.current) {
             captureDiagnosticsRef.current.push({
               timestampMs: mediaTimestampMs,
@@ -1617,7 +1696,7 @@ export function CameraPoseView() {
     };
     scheduleNextFrame();
     setStatus("running");
-  }, [rotateCanonicalSequence, startCanonicalSequence]);
+  }, [publishTrackerReadiness, rotateCanonicalSequence, startCanonicalSequence]);
 
   const stopCameraTracks = () => {
     const video = videoRef.current;
@@ -2068,7 +2147,11 @@ export function CameraPoseView() {
   stopRef.current = stop;
 
   const start = useCallback(async () => {
-    if (recordingActiveRef.current || finalizingRecordingRef.current) return;
+    if (
+      recordingActiveRef.current
+      || finalizingRecordingRef.current
+      || !trackerAssetsReady
+    ) return;
     setError(null);
     try {
       await ensureEngine();
@@ -2094,7 +2177,7 @@ export function CameraPoseView() {
       setError(caught instanceof Error ? caught.message : String(caught));
       setStatus("error");
     }
-  }, [ensureEngine, startLoop]);
+  }, [ensureEngine, startLoop, trackerAssetsReady]);
 
   const startRecording = useCallback(() => {
     const video = videoRef.current;
@@ -2104,15 +2187,15 @@ export function CameraPoseView() {
       modeRef.current !== "camera" ||
       !(stream instanceof MediaStream) ||
       recordingActiveRef.current ||
-      finalizingRecordingRef.current
+      finalizingRecordingRef.current ||
+      trackerReadinessRef.current.phase !== "ready"
     ) {
       return;
     }
     try {
-      // This is the exact capture boundary. Resetting the canonical session
-      // prevents a pre-set walking frame from contributing smoothing history to
-      // a recorded rep, while render and exported data still share each frame.
-      rotateCanonicalSequence();
+      // beginSet is the exact capture boundary. Keep the calibrated tracking
+      // session alive so pressing record cannot discard the verified subject
+      // lock; preview frames are still excluded from the capture artifact.
       const rustSession = canonicalSessionRef.current;
       if (rustSession instanceof RustCanonicalWasmSession) {
         rustSession.beginSet();
@@ -2154,7 +2237,7 @@ export function CameraPoseView() {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
-  }, [cameraView, capturePosition, exerciseChoice, finalizeRecording, rotateCanonicalSequence, status, trainingSide, variation]);
+  }, [cameraView, capturePosition, exerciseChoice, finalizeRecording, status, trainingSide, variation]);
 
   const startUrl = useCallback(
     async (url: string, name: string) => {
@@ -2443,6 +2526,45 @@ export function CameraPoseView() {
   const isHomeWorkout = workspacePage === "home-workout";
   const isReview = workspacePage === "review";
   const selectedHomeWorkout = HOME_WORKOUT_FLOW_ACTIONS.find((action) => action.id === exerciseChoice);
+  const trackerReadinessPresentation = rustSdkStatus === "fallback"
+    ? {
+        title: "追踪器加载失败",
+        detail: "Rust 骨架识别内核不可用，请刷新后重试。",
+        color: HUD.danger,
+      }
+    : trackerReadiness.phase === "loading"
+      ? {
+          title: "正在加载追踪器",
+          detail: "正在准备 MediaPipe 与 Rust 骨架识别内核，请稍候。",
+          color: HUD.amber,
+        }
+      : trackerReadiness.phase === "loaded"
+        ? {
+            title: "追踪器已加载",
+            detail: "打开相机后将进行人物校准。",
+            color: HUD.primary,
+          }
+        : trackerReadiness.phase === "calibrating"
+          ? {
+              title: "正在校准人物",
+              detail: "请保持全身入镜；稳定识别前不会显示骨架或允许录制。",
+              color: HUD.amber,
+            }
+          : trackerReadiness.phase === "interrupted"
+            ? {
+                title: "追踪暂时中断",
+                detail: "请回到画面中央；重新锁定前不会显示骨架。",
+                color: HUD.amber,
+              }
+            : {
+                title: "骨架识别已就绪",
+                detail: "人物已稳定锁定，可以开始本组录制。",
+                color: HUD.primary,
+              };
+  const cameraStartBlocked =
+    isFinalizingRecording
+    || !trackerAssetsReady
+    || (isHomeWorkout && !selectedHomeWorkout);
   const liveRustSession = canonicalSessionRef.current instanceof RustCanonicalWasmSession
     ? canonicalSessionRef.current
     : null;
@@ -2450,9 +2572,9 @@ export function CameraPoseView() {
   const homeRecognitionStatus = rustSdkStatus !== "ready"
     ? "识别内核未就绪"
     : status !== "running"
-      ? "等待打开相机；相机就绪后点击开始本组录制"
-      : !trackingOk
-        ? "请后退并保持全身入镜"
+      ? trackerReadinessPresentation.detail
+      : trackerReadiness.phase !== "ready"
+        ? trackerReadinessPresentation.detail
         : !isRecording
           ? "预览就绪，点击开始本组录制"
           : rustSetLifecycle === "arming"
@@ -2640,7 +2762,7 @@ export function CameraPoseView() {
                   <div style={styles.placeholderReticle}>◎</div>
                   <div>
                     {status === "loading-model" || modelLoading
-                      ? "模型加载中…"
+                      ? "正在加载追踪器…"
                       : status === "starting-camera"
                         ? "正在打开相机…"
                         : isHomeWorkout
@@ -2649,6 +2771,14 @@ export function CameraPoseView() {
                             : "请先在右侧选择一个居家动作"
                           : "选择输入源,开始追踪"}
                   </div>
+                </div>
+              )}
+              {status === "running" && mode === "camera" && trackerReadiness.phase !== "ready" && (
+                <div style={styles.trackerStageNotice} role="status" aria-live="polite">
+                  <strong style={{ color: trackerReadinessPresentation.color }}>
+                    {trackerReadinessPresentation.title}
+                  </strong>
+                  <span>{trackerReadinessPresentation.detail}</span>
                 </div>
               )}
               <div style={styles.hud}>
@@ -2944,6 +3074,30 @@ export function CameraPoseView() {
             className="hud-reveal hud-reveal-1"
           >
             <div style={styles.sideTitle}>{isHomeWorkout ? "02 · 采集输入" : "01 · 采集输入"}</div>
+            <section
+              data-tracker-phase={rustSdkStatus === "fallback" ? "error" : trackerReadiness.phase}
+              style={{
+                ...styles.trackerReadinessPanel,
+                borderColor: trackerReadinessPresentation.color,
+              }}
+              role="status"
+              aria-live="polite"
+            >
+              <span
+                aria-hidden="true"
+                style={{
+                  ...styles.trackerReadinessDot,
+                  background: trackerReadinessPresentation.color,
+                  boxShadow: `0 0 10px ${trackerReadinessPresentation.color}`,
+                }}
+              />
+              <span style={styles.trackerReadinessCopy}>
+                <strong style={{ color: trackerReadinessPresentation.color }}>
+                  {trackerReadinessPresentation.title}
+                </strong>
+                <small>{trackerReadinessPresentation.detail}</small>
+              </span>
+            </section>
             <div style={styles.btnRow}>
               {status === "running" ? (
                 <button style={{ ...styles.btn, background: "#4c1d1d", color: "#fca5a5" }} onClick={stop}>
@@ -2951,18 +3105,22 @@ export function CameraPoseView() {
                 </button>
               ) : (
                 <button
-                  disabled={isFinalizingRecording || (isHomeWorkout && !selectedHomeWorkout)}
+                  disabled={cameraStartBlocked}
                   style={{
                     ...styles.btn,
                     background: HUD.primaryDim,
                     color: "#eafff2",
-                    opacity: isFinalizingRecording || (isHomeWorkout && !selectedHomeWorkout) ? 0.35 : 1,
-                    cursor: isFinalizingRecording || (isHomeWorkout && !selectedHomeWorkout) ? "not-allowed" : "pointer",
+                    opacity: cameraStartBlocked ? 0.35 : 1,
+                    cursor: cameraStartBlocked ? "not-allowed" : "pointer",
                   }}
                   onClick={start}
                 >
                   {isFinalizingRecording
                     ? "保存中…"
+                    : !trackerAssetsReady
+                      ? rustSdkStatus === "fallback"
+                        ? "追踪器不可用"
+                        : "正在加载追踪器…"
                     : isHomeWorkout && !selectedHomeWorkout
                       ? "请先选择动作"
                       : "▶ 打开相机"}
@@ -3005,18 +3163,23 @@ export function CameraPoseView() {
                   </button>
                 ) : (
                   <button
-                    disabled={isFinalizingRecording}
+                    disabled={isFinalizingRecording || trackerReadiness.phase !== "ready"}
                     style={{
                       ...styles.btn,
                       background: HUD.primaryDim,
                       color: "#eafff2",
-                      opacity: isFinalizingRecording ? 0.45 : 1,
+                      opacity: isFinalizingRecording || trackerReadiness.phase !== "ready" ? 0.45 : 1,
+                      cursor: isFinalizingRecording || trackerReadiness.phase !== "ready"
+                        ? "not-allowed"
+                        : "pointer",
                     }}
                     onClick={startRecording}
                   >
                     {isFinalizingRecording
                       ? "保存中…"
-                      : "● 开始本组录制"}
+                      : trackerReadiness.phase === "ready"
+                        ? "● 开始本组录制"
+                        : "等待骨架识别就绪"}
                   </button>
                 )}
                 {!isRecording && !isFinalizingRecording && (
@@ -3032,10 +3195,14 @@ export function CameraPoseView() {
                   <span>实时识别反馈</span>
                   <span style={{
                     ...styles.homeRecognitionBadge,
-                    color: isRecording && trackingOk ? HUD.primary : HUD.amber,
-                    borderColor: isRecording && trackingOk ? HUD.primaryDim : "#5a4215",
+                    color: isRecording && trackerReadiness.phase === "ready" ? HUD.primary : HUD.amber,
+                    borderColor: isRecording && trackerReadiness.phase === "ready" ? HUD.primaryDim : "#5a4215",
                   }}>
-                    {isRecording ? "RECOGNIZING" : status === "running" ? "PREVIEW" : "STANDBY"}
+                    {isRecording
+                      ? "RECOGNIZING"
+                      : status === "running"
+                        ? trackerReadiness.phase === "ready" ? "PREVIEW" : "CALIBRATING"
+                        : "STANDBY"}
                   </span>
                 </div>
                 <div style={styles.homeCountRow}>
@@ -3051,7 +3218,7 @@ export function CameraPoseView() {
                 <p style={styles.homeRecognitionMessage}>{homeRecognitionStatus}</p>
                 <div style={styles.homeRecognitionFacts}>
                   <span style={styles.homeRecognitionFact}>动作阶段<strong>{isRecording ? HOME_REP_PHASE_LABEL[homeRepPhase] : "未开始"}</strong></span>
-                  <span style={styles.homeRecognitionFact}>骨架有效<strong>{liveRustSession?.lastFrameValid ? "是" : "否"}</strong></span>
+                  <span style={styles.homeRecognitionFact}>骨架有效<strong>{trackerReadiness.phase === "ready" ? "是" : "否"}</strong></span>
                   <span style={styles.homeRecognitionFact}>人物锁定<strong>{rustTarget?.state === "locked" ? "是" : "否"}</strong></span>
                   <span style={styles.homeRecognitionFact}>视频录制状态<strong>{isFinalizingRecording ? "正在保存" : isRecording ? "正在录制" : recordingResult ? "已保存" : "未开始"}</strong></span>
                 </div>
@@ -4438,6 +4605,25 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 2,
     background: HUD.panel,
   },
+  trackerStageNotice: {
+    position: "absolute",
+    left: "50%",
+    bottom: 22,
+    zIndex: 5,
+    display: "flex",
+    width: "min(520px, calc(100% - 36px))",
+    boxSizing: "border-box",
+    transform: "translateX(-50%)",
+    flexDirection: "column",
+    gap: 5,
+    padding: "12px 15px",
+    border: `1px solid ${HUD.lineBright}`,
+    background: "rgba(5, 12, 8, .92)",
+    color: HUD.dim,
+    fontSize: 11,
+    lineHeight: 1.5,
+    textAlign: "center",
+  },
   placeholderReticle: {
     fontSize: 44,
     color: HUD.lineBright,
@@ -4630,6 +4816,30 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.dim,
     marginBottom: 10,
     fontWeight: 600,
+  },
+  trackerReadinessPanel: {
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    gap: 9,
+    alignItems: "start",
+    marginBottom: 10,
+    padding: "9px 10px",
+    border: "1px solid",
+    background: "rgba(5, 12, 8, .72)",
+  },
+  trackerReadinessDot: {
+    width: 7,
+    height: 7,
+    marginTop: 4,
+    borderRadius: "50%",
+  },
+  trackerReadinessCopy: {
+    display: "flex",
+    minWidth: 0,
+    flexDirection: "column",
+    gap: 3,
+    fontSize: 10,
+    letterSpacing: 0.6,
   },
   exerciseField: {
     display: "flex",
