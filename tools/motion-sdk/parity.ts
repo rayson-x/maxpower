@@ -76,9 +76,12 @@ async function main(): Promise<void> {
   ] as const) {
     const homeWorkout = new RustCanonicalWasmSession(config(`parity:${profile}`), wasm);
     homeWorkout.setExerciseProfile(profile);
-    homeWorkout.process(pose(0));
+    homeWorkout.process({ timestampMs: 0, landmarks: [], worldLandmarks: [] });
     assert.equal(homeWorkout.lastDecodedPacket?.lineage.activeProfileIdentity, identity);
     assert.ok((homeWorkout.lastDecodedPacket?.lineage.activeProfileHash ?? 0n) !== 0n);
+    assert.equal(homeWorkout.lastFrameValid, false);
+    homeWorkout.process(pose(1));
+    assert.equal(homeWorkout.lastFrameValid, true);
     homeWorkout.close();
   }
 
@@ -453,6 +456,7 @@ function compareNativeAndWasmHomeWorkoutFixture(wasm: MotionWasmExports): void {
   const wasmPackets = fixture.frames.map((frame) => {
     session.process(sharedMarchPose(frame));
     assert.ok(session.lastDecodedPacket);
+    assert.equal(session.lastFrameValid, true);
     return session.lastDecodedPacket;
   });
   session.close();

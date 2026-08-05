@@ -9,6 +9,8 @@ export interface PoseEvent {
   height: number;
   timestampMs: number;
   model: string;
+  /** Front-camera PreviewView is mirrored while canonical coordinates are not. */
+  previewMirrored?: boolean;
   error?: string;
   /** Base64 encoded Rust canonical packet produced from this observation. */
   packetBase64?: string;

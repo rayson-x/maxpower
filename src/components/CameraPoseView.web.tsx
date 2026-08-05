@@ -332,6 +332,7 @@ interface RecordingResult {
 interface CaptureFrameDiagnostic {
   timestampMs: number;
   hasPose: boolean;
+  canonicalFrameValid?: boolean;
   inferenceMs: number;
   rustCoreMs?: number;
   decodeMs?: number;
@@ -628,6 +629,7 @@ export function CameraPoseView() {
   const rustRejectedRepsRef = useRef<RustSealedRep[]>([]);
   const rustReferenceEvidenceRef = useRef<RustReferenceEvidenceRecord[]>([]);
   const droppedFramesRef = useRef(0);
+  const captureDroppedFramesRef = useRef(0);
   const inferenceCompletionGateRef = useRef(new InferenceCompletionGate());
   const staleCompletionDiagnosticsRef = useRef<Array<{
     timestampMs: number;
@@ -1094,6 +1096,7 @@ export function CameraPoseView() {
         : "normal" as const;
       const recordDroppedFrame = () => {
         droppedFramesRef.current += 1;
+        if (recordingActiveRef.current) captureDroppedFramesRef.current += 1;
         droppedFramesByModeRef.current[diagnosticMode] += 1;
       };
       const engine = engineRef.current;
@@ -1387,6 +1390,7 @@ export function CameraPoseView() {
                   captureDiagnosticsRef.current.push({
                     timestampMs: frame.timestampMs,
                     hasPose: frame.landmarks.length > 0,
+                    canonicalFrameValid: rustSession?.lastFrameValid ?? false,
                     inferenceMs: Number(inferenceMs.toFixed(2)),
                     rustCoreMs: Number(rustCoreMs.toFixed(3)),
                     decodeMs: Number(decodeMs.toFixed(3)),
@@ -1790,6 +1794,10 @@ export function CameraPoseView() {
     const rustLineage = canonicalSessionRef.current instanceof RustCanonicalWasmSession
       ? canonicalSessionRef.current.lastDecodedPacket?.lineage ?? null
       : null;
+    const processedFrameCount = diagnostics.filter((frame) =>
+      frame.canonicalContentHash !== undefined && !frame.processingError).length;
+    const validFrameCount = diagnostics.filter((frame) =>
+      frame.canonicalFrameValid && !frame.processingError).length;
     // This sidecar exists even for catalog-only exercises, unlike the labelled
     // rep template which correctly requires a validated-by-sampling profile.
     const captureMetadata = {
@@ -1822,10 +1830,10 @@ export function CameraPoseView() {
         reason: "Browser download APIs do not expose OS disk-flush completion",
       },
       offlineRuntimeMetrics: {
-        processedFrames: diagnostics.length,
-        validFrames: diagnostics.filter((frame) => frame.hasPose && !frame.processingError).length,
-        processedFps: fixture[0].durationSec > 0 ? diagnostics.length / fixture[0].durationSec : 0,
-        droppedFrames: droppedFramesRef.current,
+        processedFrames: processedFrameCount,
+        validFrames: validFrameCount,
+        processedFps: fixture[0].durationSec > 0 ? processedFrameCount / fixture[0].durationSec : 0,
+        droppedFrames: captureDroppedFramesRef.current,
         maxBacklogFrames: 1,
         activeDurationMs: activeDurationRef.current.value(),
       },
@@ -2024,6 +2032,7 @@ export function CameraPoseView() {
       setRustRejectedRepCount(0);
       recordedPosesRef.current = [];
       captureDiagnosticsRef.current = [];
+      captureDroppedFramesRef.current = 0;
       recordedChunksRef.current = [];
       recordingStartMsRef.current = Date.now();
       recordingStopMsRef.current = recordingStartMsRef.current;

@@ -141,7 +141,7 @@ export function CameraPoseView() {
     const landmark = visibleLandmarks.find((entry) => entry.index === index);
     if (!landmark || !mapping) return null;
     return {
-      x: mapping.offsetX + landmark.x * mapping.drawnWidth,
+      x: mapping.offsetX + (event?.previewMirrored ? 1 - landmark.x : landmark.x) * mapping.drawnWidth,
       y: mapping.offsetY + landmark.y * mapping.drawnHeight,
     };
   };

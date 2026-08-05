@@ -218,6 +218,7 @@ export interface MotionWasmExports extends WebAssembly.Exports {
     visibility: number,
   ): number;
   motion_sdk_process_frame(): number;
+  motion_sdk_current_frame_valid(): number;
   motion_sdk_begin_multi(timestampLow: number, timestampHigh: number): number;
   motion_sdk_begin_candidate(
     idLow: number,
@@ -340,6 +341,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   lastSetLifecycle: RustSetLifecycle = "idle";
   lastCompletedReps: readonly RustSealedRep[] = [];
   lastCanonicalHash = 0n;
+  lastFrameValid = false;
   lastDecodedPacket: DecodedMotionPacket | null = null;
   lastCandidateDiagnostics: readonly RustCandidateDiagnostic[] = [];
   lastTiming: RustWasmTiming = Object.freeze({ coreMs: 0, decodeMs: 0 });
@@ -412,6 +414,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       );
     });
     ensureOk(this.wasm.motion_sdk_process_frame(), "process_frame");
+    this.lastFrameValid = this.wasm.motion_sdk_current_frame_valid() === 1;
     this.lastCanonicalHash = combineU64(
       this.wasm.motion_sdk_output_hash(0),
       this.wasm.motion_sdk_output_hash(1),
@@ -473,6 +476,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       ensureOk(this.wasm.motion_sdk_commit_candidate(), "commit_candidate");
     }
     ensureOk(this.wasm.motion_sdk_process_multi(), "process_multi");
+    this.lastFrameValid = this.wasm.motion_sdk_current_frame_valid() === 1;
     this.lastCanonicalHash = combineU64(
       this.wasm.motion_sdk_output_hash(0),
       this.wasm.motion_sdk_output_hash(1),
@@ -507,6 +511,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   close(): void {
     ensureOk(this.wasm.motion_sdk_close(), "close");
     this.lastDecodedPacket = null;
+    this.lastFrameValid = false;
     this.lastCandidateDiagnostics = [];
     this.resetReferenceComparison();
   }

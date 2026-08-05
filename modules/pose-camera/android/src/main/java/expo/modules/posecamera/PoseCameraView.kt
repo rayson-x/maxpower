@@ -34,13 +34,17 @@ class PoseCameraView(context: Context, appContext: AppContext) :
 
   private var cameraProvider: ProcessCameraProvider? = null
   private var landmarker: PoseLandmarker? = null
-  private var modelName: String = "lite"
-  private var profileCode: Int = 5
-  private var recognitionActive = false
+  @Volatile private var modelName: String = "lite"
+  @Volatile private var profileCode: Int = 5
+  @Volatile private var recognitionActive = false
   private var rustConfigured = false
+  private var configuredProfileCode: Int? = null
+  private var nativeRecognitionActive = false
+  private var metricsCollecting = false
   private var processedFrames = 0L
   private var validFrames = 0L
   private var metricsStartedAtMs = 0L
+  private var processedFps = 0.0
   private var bound = false
 
   init {
@@ -73,16 +77,35 @@ class PoseCameraView(context: Context, appContext: AppContext) :
     }
     if (nextCode == profileCode) return
     profileCode = nextCode
-    if (rustConfigured && MotionNative.nativeSetProfile(profileCode) != 0) {
-      emitError("rust-profile", IllegalStateException("profile rejected"))
+    analysisExecutor.execute {
+      if (rustConfigured && configuredProfileCode != nextCode) {
+        if (MotionNative.nativeSetProfile(nextCode) != 0) {
+          emitError("rust-profile", IllegalStateException("profile rejected"))
+        } else {
+          configuredProfileCode = nextCode
+        }
+      }
     }
   }
 
   fun setRecognitionActive(active: Boolean) {
     if (active == recognitionActive) return
     recognitionActive = active
-    if (rustConfigured && MotionNative.nativeSetActive(active) != 0) {
-      emitError("rust-set", IllegalStateException("set lifecycle rejected"))
+    analysisExecutor.execute {
+      if (rustConfigured && nativeRecognitionActive != active) {
+        if (MotionNative.nativeSetActive(active) != 0) {
+          emitError("rust-set", IllegalStateException("set lifecycle rejected"))
+          return@execute
+        }
+        nativeRecognitionActive = active
+      }
+      metricsCollecting = active
+      if (active) {
+        processedFrames = 0
+        validFrames = 0
+        metricsStartedAtMs = 0
+        processedFps = 0.0
+      }
     }
   }
 
@@ -148,15 +171,23 @@ class PoseCameraView(context: Context, appContext: AppContext) :
             )
           } ?: emptyList()
           if (!rustConfigured) {
+            val desiredProfileCode = profileCode
+            val desiredRecognitionActive = recognitionActive
             val status = MotionNative.nativeConfigure(
               bitmap.width,
               bitmap.height,
-              profileCode,
-              recognitionActive
+              desiredProfileCode,
+              desiredRecognitionActive
             )
             if (status != 0) throw IllegalStateException("Rust configure failed ($status)")
             rustConfigured = true
-            metricsStartedAtMs = timestampMs
+            configuredProfileCode = desiredProfileCode
+            nativeRecognitionActive = desiredRecognitionActive
+            metricsCollecting = desiredRecognitionActive
+            processedFrames = 0
+            validFrames = 0
+            processedFps = 0.0
+            metricsStartedAtMs = if (metricsCollecting) timestampMs else 0
           }
           val flatLandmarks = DoubleArray(landmarks.size * 4)
           landmarks.forEachIndexed { index, values ->
@@ -167,21 +198,32 @@ class PoseCameraView(context: Context, appContext: AppContext) :
             flatLandmarks[offset + 3] = values[3]
           }
           val packet = MotionNative.nativeProcessFrame(timestampMs, flatLandmarks)
-          processedFrames += 1
-          if (packet != null && MotionNative.nativeIsCurrentFrameValid()) validFrames += 1
-          val elapsedMs = (timestampMs - metricsStartedAtMs).coerceAtLeast(1)
+          if (packet == null) {
+            emitError("rust-frame", IllegalStateException("canonical packet unavailable"))
+            return@setAnalyzer
+          }
+          if (metricsCollecting) {
+            if (metricsStartedAtMs == 0L) metricsStartedAtMs = timestampMs
+            processedFrames += 1
+            if (MotionNative.nativeIsCurrentFrameValid()) validFrames += 1
+            val elapsedMs = timestampMs - metricsStartedAtMs
+            if (processedFrames > 1 && elapsedMs > 0) {
+              processedFps = (processedFrames - 1) * 1000.0 / elapsedMs.toDouble()
+            }
+          }
           val payload = mutableMapOf<String, Any>(
             "landmarks" to landmarks,
             "width" to bitmap.width,
             "height" to bitmap.height,
             "timestampMs" to timestampMs.toDouble(),
             "model" to modelName,
+            "previewMirrored" to true,
             "processedFrames" to processedFrames.toDouble(),
             "validFrames" to validFrames.toDouble(),
-            "processedFps" to processedFrames * 1000.0 / elapsedMs.toDouble(),
+            "processedFps" to processedFps,
             "maxBacklogFrames" to 1.0
           )
-          packet?.let { payload["packetBase64"] = Base64.encodeToString(it, Base64.NO_WRAP) }
+          payload["packetBase64"] = Base64.encodeToString(packet, Base64.NO_WRAP)
           onPose(payload)
         }
       } catch (error: Exception) {
@@ -217,6 +259,13 @@ class PoseCameraView(context: Context, appContext: AppContext) :
       landmarker = null
       if (rustConfigured) MotionNative.nativeClose()
       rustConfigured = false
+      configuredProfileCode = null
+      nativeRecognitionActive = false
+      metricsCollecting = false
+      processedFrames = 0
+      validFrames = 0
+      metricsStartedAtMs = 0
+      processedFps = 0.0
     }
   }
 }

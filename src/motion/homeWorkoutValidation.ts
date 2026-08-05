@@ -50,6 +50,14 @@ export interface HomeWorkoutValidationReport {
     readonly countErrorRate: number | null;
     readonly status: "pass" | "fail" | "unmeasured";
   }>>;
+  readonly perParticipantAction: readonly Readonly<{
+    readonly participantId: string;
+    readonly action: HomeWorkoutAction;
+    readonly manualRepCount: number;
+    readonly recognizedRepCount: number;
+    readonly countErrorRate: number | null;
+    readonly status: "pass" | "fail" | "unmeasured";
+  }>[];
   readonly criteria: Readonly<Record<string, ValidationCriterion>>;
   readonly notes: readonly string[];
 }
@@ -69,25 +77,42 @@ export function evaluateHomeWorkoutValidation(input: {
   const observedKeys = new Set(input.rounds.map((round) => `${round.participantId}\0${round.action}\0${round.round}`));
   const coverageComplete = participants.size >= 5
     && [...expectedKeys].every((key) => observedKeys.has(key))
-    && input.rounds.every((round) => round.durationMs >= 45_000);
+    && input.rounds.every((round) => round.durationMs >= 45_000 && round.restDurationMs >= 30_000);
 
-  const perAction = Object.fromEntries(HOME_WORKOUT_ACTIONS.map((action) => {
-    const rounds = input.rounds.filter((round) => round.action === action);
+  const countSummary = (rounds: readonly HomeWorkoutValidationRound[]) => {
     const manualRepCount = sum(rounds.map((round) => round.manualRepCount));
     const recognizedRepCount = sum(rounds.map((round) => round.recognizedRepCount));
     const countErrorRate = manualRepCount > 0
-      ? Math.abs(recognizedRepCount - manualRepCount) / manualRepCount : null;
-    return [action, {
-      manualRepCount, recognizedRepCount, countErrorRate,
+      ? sum(rounds.map((round) => Math.abs(round.recognizedRepCount - round.manualRepCount)))
+        / manualRepCount
+      : null;
+    return {
+      manualRepCount,
+      recognizedRepCount,
+      countErrorRate,
       status: rounds.length === 0 || countErrorRate === null
-        ? "unmeasured" : countErrorRate <= 0.10 ? "pass" : "fail",
-    }];
+        ? "unmeasured" as const : countErrorRate <= 0.10 ? "pass" as const : "fail" as const,
+    };
+  };
+
+  const perAction = Object.fromEntries(HOME_WORKOUT_ACTIONS.map((action) => {
+    const rounds = input.rounds.filter((round) => round.action === action);
+    return [action, countSummary(rounds)];
   })) as unknown as HomeWorkoutValidationReport["perAction"];
 
-  const totalProcessed = sum(input.rounds.map((round) => round.processedFrames));
-  const totalValid = sum(input.rounds.map((round) => round.validFrames));
+  const perParticipantAction = [...participants].flatMap((participantId) =>
+    HOME_WORKOUT_ACTIONS.map((action) => Object.freeze({
+      participantId,
+      action,
+      ...countSummary(input.rounds.filter((round) =>
+        round.participantId === participantId && round.action === action)),
+    })),
+  );
+
   const validFrameRatios = [
-    totalProcessed > 0 ? totalValid / totalProcessed : null,
+    ...input.rounds.map((round) => round.processedFrames > 0
+      ? round.validFrames / round.processedFrames
+      : 0),
     ...input.performanceRuns.map((run) => run.processedFrames > 0
       ? run.validFrames / run.processedFrames
       : 0),
@@ -95,8 +120,8 @@ export function evaluateHomeWorkoutValidation(input: {
   const anySustainedBacklog = input.performanceRuns.some((run) => run.sustainedBacklog);
   const criteria = {
     participantCoverage: criterion(participants.size || null, (value) => value >= 5, ">= 5 participants"),
-    roundCoverage: criterion(input.rounds.length || null, () => coverageComplete, "3 x 45s per action and participant"),
-    countError: criterion(maxMeasured(HOME_WORKOUT_ACTIONS.map((action) => perAction[action].countErrorRate)), (value) => value <= 0.10, "<= 10% per action"),
+    roundCoverage: criterion(input.rounds.length || null, () => coverageComplete, "3 x 45s plus 30s rest per action and participant"),
+    countError: criterion(maxMeasured(perParticipantAction.map((entry) => entry.countErrorRate)), (value) => value <= 0.10, "<= 10% per participant and action without signed cancellation"),
     startLatency: criterion(maxMeasured(input.rounds.map((round) => round.startLatencyMs)), (value) => value <= 1_000, "<= 1000ms"),
     stopLatency: criterion(maxMeasured(input.rounds.map((round) => round.stopLatencyMs)), (value) => value <= 1_000, "<= 1000ms"),
     restFalseReps: criterion(maxMeasured(input.rounds.map((round) => round.restDurationMs > 0 ? round.restFalseRepCount * 30_000 / round.restDurationMs : null)), (value) => value <= 1, "<= 1 per 30s rest"),
@@ -114,7 +139,8 @@ export function evaluateHomeWorkoutValidation(input: {
     ...(input.performanceRuns.some((run) => run.droppedFrames === null)
       ? ["A scheduler did not expose discarded-frame counts; bounded backlog is reported separately."] : []),
   ];
-  return Object.freeze({ status, participantCount: participants.size, coverageComplete, perAction, criteria, notes });
+  return Object.freeze({ status, participantCount: participants.size, coverageComplete, perAction,
+    perParticipantAction: Object.freeze(perParticipantAction), criteria, notes });
 }
 
 function validateInput(input: { readonly rounds: readonly HomeWorkoutValidationRound[]; readonly performanceRuns: readonly MobilePerformanceRun[] }): void {

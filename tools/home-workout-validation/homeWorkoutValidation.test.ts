@@ -61,3 +61,53 @@ test("the eight-minute device run cannot hide an invalid canonical-frame ratio",
   assert.equal(report.criteria.validFrameRatio.status, "fail");
   assert.equal(report.criteria.validFrameRatio.measured, 0.8);
 });
+
+test("opposite participant count errors cannot cancel into a passing action", () => {
+  const common = {
+    durationMs: 45_000, startLatencyMs: 500, stopLatencyMs: 500,
+    restDurationMs: 30_000, restFalseRepCount: 0, processedFrames: 900,
+    validFrames: 855, processedFps: 20, droppedFrames: null, maxBacklogFrames: 1,
+  } as const;
+  const report = evaluateHomeWorkoutValidation({ rounds: [
+    { ...common, participantId: "p1", action: "march_in_place", round: 1,
+      manualRepCount: 20, recognizedRepCount: 10 },
+    { ...common, participantId: "p2", action: "march_in_place", round: 1,
+      manualRepCount: 20, recognizedRepCount: 30 },
+  ], performanceRuns: [] });
+  assert.equal(report.perAction.march_in_place.countErrorRate, 0.5);
+  assert.equal(report.criteria.countError.status, "fail");
+});
+
+test("one low-validity participant round cannot hide inside the field aggregate", () => {
+  const common = {
+    participantId: "p1", action: "march_in_place" as const, durationMs: 45_000,
+    manualRepCount: 20, recognizedRepCount: 20, startLatencyMs: 500, stopLatencyMs: 500,
+    restDurationMs: 30_000, restFalseRepCount: 0, processedFps: 20,
+    droppedFrames: null, maxBacklogFrames: 1,
+  };
+  const report = evaluateHomeWorkoutValidation({ rounds: [
+    { ...common, round: 1, processedFrames: 100, validFrames: 80 },
+    { ...common, round: 2, processedFrames: 900, validFrames: 900 },
+  ], performanceRuns: [] });
+  assert.equal(report.criteria.validFrameRatio.measured, 0.8);
+  assert.equal(report.criteria.validFrameRatio.status, "fail");
+});
+
+test("coverage requires the full thirty-second stationary segment in every round", () => {
+  const rounds: HomeWorkoutValidationRound[] = [];
+  for (let participant = 1; participant <= 5; participant += 1) {
+    for (const action of HOME_WORKOUT_ACTIONS) {
+      for (const round of [1, 2, 3] as const) {
+        rounds.push({ participantId: `p${participant}`, action, round, durationMs: 45_000,
+          manualRepCount: 20, recognizedRepCount: 20, startLatencyMs: 500, stopLatencyMs: 500,
+          restDurationMs: participant === 1 && action === "march_in_place" && round === 1
+            ? 29_999 : 30_000,
+          restFalseRepCount: 0, processedFrames: 900, validFrames: 900,
+          processedFps: 20, droppedFrames: null, maxBacklogFrames: 1 });
+      }
+    }
+  }
+  const report = evaluateHomeWorkoutValidation({ rounds, performanceRuns: [] });
+  assert.equal(report.coverageComplete, false);
+  assert.equal(report.criteria.roundCoverage.status, "fail");
+});
