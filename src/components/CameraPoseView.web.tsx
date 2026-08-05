@@ -78,6 +78,7 @@ import {
   type RustReferenceComparison,
   type RustReferenceComparisonEvidence,
   type RustReferenceRuntimeContext,
+  type RustRepState,
   type RustSealedRep,
   type RustSetLifecycle,
   type RustTargetSnapshot,
@@ -224,6 +225,13 @@ const HOME_WORKOUT_FLOW_ACTIONS = [
 const HOME_WORKOUT_FLOW_IDS = new Set<string>(
   HOME_WORKOUT_FLOW_ACTIONS.map((action) => action.id),
 );
+const HOME_REP_PHASE_LABEL: Record<RustRepState["phase"], string> = {
+  ready: "等待动作",
+  effort: "动作进行中",
+  peak: "到达动作顶点",
+  return: "正在回到起点",
+  frozen: "本轮已封装",
+};
 const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
   { id: "mediapipe", label: "MediaPipe" },
   { id: "rtmpose", label: "RTMPose-m" },
@@ -2435,6 +2443,23 @@ export function CameraPoseView() {
   const isHomeWorkout = workspacePage === "home-workout";
   const isReview = workspacePage === "review";
   const selectedHomeWorkout = HOME_WORKOUT_FLOW_ACTIONS.find((action) => action.id === exerciseChoice);
+  const liveRustSession = canonicalSessionRef.current instanceof RustCanonicalWasmSession
+    ? canonicalSessionRef.current
+    : null;
+  const homeRepPhase = liveRustSession?.lastRepState.phase ?? "ready";
+  const homeRecognitionStatus = rustSdkStatus !== "ready"
+    ? "识别内核未就绪"
+    : status !== "running"
+      ? "等待打开相机；相机就绪后点击开始识别（同时录制）"
+      : !trackingOk
+        ? "请后退并保持全身入镜"
+        : !isRecording
+          ? "预览就绪，点击开始识别（同时录制）"
+          : rustSetLifecycle === "arming"
+            ? "正在稳定锁定身体"
+            : rustSetLifecycle === "paused"
+              ? "动作中断，等待恢复"
+              : HOME_REP_PHASE_LABEL[homeRepPhase];
   const videoViewport = fitVideoIntoStage(videoAspect);
 
   return (
@@ -2520,7 +2545,7 @@ export function CameraPoseView() {
               {[
                 { index: "1", label: "选择动作", active: Boolean(selectedHomeWorkout), done: Boolean(selectedHomeWorkout) },
                 { index: "2", label: "打开相机", active: status === "running", done: status === "running" },
-                { index: "3", label: "录制本组", active: isRecording, done: Boolean(recordingResult) && !isRecording },
+                { index: "3", label: "开始识别", active: isRecording, done: Boolean(recordingResult) && !isRecording },
               ].map((step) => (
                 <div
                   key={step.index}
@@ -2647,7 +2672,7 @@ export function CameraPoseView() {
             </div>
           </div>
 
-          {workspacePage === "training" ? (
+          {(workspacePage === "training" || isHomeWorkout) ? (
             <section style={styles.trainingReadout} className="range-training-readout hud-reveal hud-reveal-2">
               <div>
                 <span style={styles.panelKicker}>LIVE SESSION</span>
@@ -2692,7 +2717,9 @@ export function CameraPoseView() {
                 </span>
               </div>
               <p style={styles.trainingHint}>
-                从视频库选择素材即可在此页查看骨架识别、次数与质量证据；只有点击“开始本组录制”才会写入新的本机训练档案。
+                {isHomeWorkout
+                  ? "打开相机只进入站位预览；点击“开始识别（同时录制）”后，Rust 才会启动本组计数，并同步保存验证证据。"
+                  : "从视频库选择素材即可在此页查看骨架识别、次数与质量证据；只有点击“开始本组录制”才会写入新的本机训练档案。"}
                 {rustSdkStatus !== "ready" ? " Rust SDK 未就绪时只显示骨架预览，不回退到旧计数器写入正式次数。" : ""}
               </p>
               {(rustNeedsReviewRepCount > 0 || rustRejectedRepCount > 0) && (
@@ -2719,7 +2746,7 @@ export function CameraPoseView() {
                   最近结果：{setAnalysis.score.score === null ? setAnalysis.score.label : `${setAnalysis.score.score} 分`}
                 </p>
               )}
-              <div style={styles.trainingHint}>
+              {!isHomeWorkout && <div style={styles.trainingHint}>
                 <strong>轨迹质量证据</strong>
                 {simulatedNominalReferenceConfigured && (
                   <div>
@@ -2743,7 +2770,7 @@ export function CameraPoseView() {
                 {currentReferenceQualityEvidence.map((card) => (
                   <div key={card.id}>{card.title}：{card.detail}（{card.evidence}）</div>
                 ))}
-              </div>
+              </div>}
             </section>
           ) : (
           <div style={styles.outputGrid} className="range-output-grid">
@@ -2909,7 +2936,11 @@ export function CameraPoseView() {
 
         <aside style={styles.sidebar} className="range-sidebar">
           <div
-            style={{ ...styles.sideSection, ...(isHomeWorkout ? styles.homeCaptureOrder : null) }}
+            style={{
+              ...styles.sideSection,
+              ...(isHomeWorkout ? styles.homeCaptureOrder : null),
+              ...(isHomeWorkout ? { order: selectedHomeWorkout ? 1 : 2 } : null),
+            }}
             className="hud-reveal hud-reveal-1"
           >
             <div style={styles.sideTitle}>{isHomeWorkout ? "02 · 开始识别" : "01 · 采集输入"}</div>
@@ -2970,7 +3001,7 @@ export function CameraPoseView() {
                     style={{ ...styles.btn, background: "#7f1d1d", color: "#fee2e2" }}
                     onClick={stopRecording}
                   >
-                    ■ 停止并保存本组
+                    {isHomeWorkout ? "■ 结束识别并保存" : "■ 停止并保存本组"}
                   </button>
                 ) : (
                   <button
@@ -2983,13 +3014,52 @@ export function CameraPoseView() {
                     }}
                     onClick={startRecording}
                   >
-                    {isFinalizingRecording ? "保存中…" : "● 开始本组录制"}
+                    {isFinalizingRecording
+                      ? "保存中…"
+                      : isHomeWorkout
+                        ? "● 开始识别（同时录制）"
+                        : "● 开始本组录制"}
                   </button>
                 )}
                 {!isRecording && !isFinalizingRecording && (
-                  <span style={styles.recordingResultMeta}>预览中，未写入本组数据</span>
+                  <span style={styles.recordingResultMeta}>
+                    {isHomeWorkout ? "当前只在预览站位，点击上方按钮后才开始计数。" : "预览中，未写入本组数据"}
+                  </span>
                 )}
               </div>
+            )}
+            {isHomeWorkout && (
+              <section style={styles.homeRecognitionPanel} aria-label="实时识别反馈">
+                <div style={styles.homeRecognitionHeader}>
+                  <span>实时识别反馈</span>
+                  <span style={{
+                    ...styles.homeRecognitionBadge,
+                    color: isRecording && trackingOk ? HUD.primary : HUD.amber,
+                    borderColor: isRecording && trackingOk ? HUD.primaryDim : "#5a4215",
+                  }}>
+                    {isRecording ? "RECOGNIZING" : status === "running" ? "PREVIEW" : "STANDBY"}
+                  </span>
+                </div>
+                <div style={styles.homeCountRow}>
+                  <div style={styles.homeCountPrimary}>
+                    <strong style={styles.homeCountValue}>{rustSdkStatus === "ready" ? rustSealedRepCount : "—"}</strong>
+                    <span>已识别次数</span>
+                  </div>
+                  <div style={styles.homeCountSecondary}>
+                    <strong style={styles.homeCountSecondaryValue}>{rustNeedsReviewRepCount}</strong>
+                    <span>待确认动作</span>
+                  </div>
+                </div>
+                <p style={styles.homeRecognitionMessage}>{homeRecognitionStatus}</p>
+                <div style={styles.homeRecognitionFacts}>
+                  <span style={styles.homeRecognitionFact}>动作阶段<strong>{isRecording ? HOME_REP_PHASE_LABEL[homeRepPhase] : "未开始"}</strong></span>
+                  <span style={styles.homeRecognitionFact}>骨架有效<strong>{liveRustSession?.lastFrameValid ? "是" : "否"}</strong></span>
+                  <span style={styles.homeRecognitionFact}>人物锁定<strong>{rustTarget?.state === "locked" ? "是" : "否"}</strong></span>
+                </div>
+                {isRecording && rustRejectedRepCount > 0 && (
+                  <p style={styles.homeRecognitionNote}>已过滤 {rustRejectedRepCount} 个不完整或干扰动作，不计入正式次数。</p>
+                )}
+              </section>
             )}
             {!isHomeWorkout && <label style={styles.field}>
               视频库
@@ -3020,7 +3090,11 @@ export function CameraPoseView() {
               </p>
             )}
             {isRecording && (
-              <p style={styles.recordingBadge}>● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板</p>
+              <p style={styles.recordingBadge}>
+                {isHomeWorkout
+                  ? "● 正在识别并录制 —— 完整动作会实时计数，结束后自动保存验证证据"
+                  : "● 正在录制本组 —— 停止本组后自动保存视频、关键点与标注模板"}
+              </p>
             )}
             {isFinalizingRecording && (
               <p style={styles.recordingBadge}>● 正在保存本地采集文件…</p>
@@ -3110,7 +3184,11 @@ export function CameraPoseView() {
           </div>
 
           <div
-            style={{ ...styles.sideSection, ...(isHomeWorkout ? styles.homeActionOrder : null) }}
+            style={{
+              ...styles.sideSection,
+              ...(isHomeWorkout ? styles.homeActionOrder : null),
+              ...(isHomeWorkout ? { order: selectedHomeWorkout ? 2 : 1 } : null),
+            }}
             className="hud-reveal hud-reveal-2"
           >
             <div style={styles.sideTitle}>{isHomeWorkout ? "01 · 选择居家动作" : "02 · 动作配置"}</div>
@@ -4643,6 +4721,96 @@ const styles: Record<string, React.CSSProperties> = {
     color: HUD.primary,
     fontSize: 10,
     lineHeight: 1.55,
+  },
+  homeRecognitionPanel: {
+    marginTop: 10,
+    padding: 11,
+    border: `1px solid ${HUD.lineBright}`,
+    background: "#07100a",
+  },
+  homeRecognitionHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    color: HUD.text,
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: 1.2,
+  },
+  homeRecognitionBadge: {
+    border: "1px solid",
+    padding: "3px 5px",
+    fontSize: 8,
+    letterSpacing: 1,
+  },
+  homeCountRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.35fr) minmax(0, .65fr)",
+    gap: 8,
+    marginTop: 10,
+  },
+  homeCountPrimary: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+    padding: "9px 11px",
+    borderLeft: `3px solid ${HUD.primary}`,
+    background: "rgba(87, 255, 142, .06)",
+    color: HUD.dim,
+    fontSize: 9,
+    letterSpacing: 1,
+  },
+  homeCountSecondary: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+    padding: "9px 10px",
+    borderLeft: `2px solid ${HUD.amber}`,
+    background: "rgba(255, 178, 36, .05)",
+    color: HUD.dim,
+    fontSize: 9,
+    letterSpacing: 0.7,
+  },
+  homeCountValue: {
+    color: HUD.primary,
+    fontFamily: HUD.mono,
+    fontSize: 32,
+    lineHeight: 1,
+  },
+  homeCountSecondaryValue: {
+    color: HUD.amber,
+    fontFamily: HUD.mono,
+    fontSize: 20,
+    lineHeight: 1.2,
+  },
+  homeRecognitionMessage: {
+    margin: "9px 0 0",
+    color: HUD.primary,
+    fontSize: 11,
+    lineHeight: 1.5,
+  },
+  homeRecognitionFacts: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: 5,
+    marginTop: 9,
+  },
+  homeRecognitionFact: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    paddingTop: 6,
+    borderTop: `1px solid ${HUD.line}`,
+    color: HUD.dim,
+    fontSize: 8,
+    lineHeight: 1.35,
+  },
+  homeRecognitionNote: {
+    margin: "8px 0 0",
+    color: HUD.amber,
+    fontSize: 9,
+    lineHeight: 1.5,
   },
   captureDetailsRow: {
     display: "grid",
