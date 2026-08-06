@@ -1,6 +1,6 @@
 # 轻量级“运动轨迹 × 预计肌群”关联数据库
 
-_整理日期：2026-08-06。数据库 schema：`form-coach-expected-muscle-associations/v1`。_
+_整理日期：2026-08-06；五分化扩展：2026-08-07。数据库 schema：`form-coach-expected-muscle-associations/v1`。_
 
 ## 结论
 
@@ -13,7 +13,7 @@ _整理日期：2026-08-06。数据库 schema：`form-coach-expected-muscle-asso
 
 数据库不存储激活百分比，也不允许把相近动作的肌群映射自动借给未知动作。骨架只证明“关节怎样移动”，肌群部分来自经过引用的动作知识；两者组合后只能展示“预计参与”或“可能的机械需求倾向”。
 
-实现位于 [`src/pose/expectedMuscleAssociations.ts`](../../src/pose/expectedMuscleAssociations.ts)，公共查询接口通过 `exerciseId` 返回只读关联；未知动作返回 `undefined`。
+数据目录位于 [`src/pose/expectedMuscleAssociationCatalog.ts`](../../src/pose/expectedMuscleAssociationCatalog.ts)，查询与校验接口位于 [`src/pose/expectedMuscleAssociations.ts`](../../src/pose/expectedMuscleAssociations.ts)。公共查询接口通过 `exerciseId` 返回只读关联；未知动作返回 `undefined`。
 
 ## 领域术语
 
@@ -52,7 +52,7 @@ _整理日期：2026-08-06。数据库 schema：`form-coach-expected-muscle-asso
 - `exact_exercise_reference` 没有引用 `exactExerciseId` 相同的来源；
 - 缺少激活边界文案。
 
-## v1 覆盖
+## v1 覆盖：48 / 48 Registry 动作
 
 | 动作 | 主要肌群 | 轨迹相位 |
 | --- | --- | --- |
@@ -66,7 +66,17 @@ _整理日期：2026-08-06。数据库 schema：`form-coach-expected-muscle-asso
 | 提踵 `calf_raise` | 小腿后侧肌群 | 提踵；落踵 |
 | 臀推 `hip_thrust` | 臀肌群 | 伸髋抬起；屈髋下放 |
 
-v1 收紧为 9 个无器械或可在家完成的动作，当前四个居家 Rust 识别动作都有记录。器械动作即使已在 registry 中登记，仍保持未知，不会按 movement pattern 猜测肌群。
+居家与可在家完成的 9 个动作继续保留，当前四个居家 Rust 识别动作都有记录。2026-08-07 扩展后，Registry 的五分化动作也实现完整覆盖：
+
+| 分化 | 数量 | 已覆盖动作 |
+| --- | ---: | --- |
+| 胸 | 6 | 杠铃卧推、哑铃卧推、上斜哑铃卧推、器械推胸、绳索夹胸、俯卧撑 |
+| 背 | 10 | 杠铃划船、引体向上、高位下拉、坐姿划船、直臂下拉、宽握高位下拉、单臂哑铃划船、胸托划船、单臂绳索划船、辅助引体 |
+| 腿 | 15 | 4 个居家 locomotion、徒手/杠铃深蹲、腿举、罗马尼亚/传统硬拉、行走箭步、保加利亚分腿蹲、腿屈伸、腿弯举、臀推、提踵 |
+| 肩 | 10 | 坐姿推肩、侧平举、后束飞鸟、面拉、前平举、单臂绳索侧平举、地雷管推举、绳索 Y 举、绳索外旋、后束划船 |
+| 手臂 | 7 | 杠铃/哑铃/锤式/绳索弯举、绳索下压、过顶臂屈伸、仰卧臂屈伸 |
+
+每个动作仍是独立 `exerciseId` 记录；共享相位模板只是数据维护方式，运行时不会按 movement pattern 或相邻变式回退。
 
 现有 registry 尚未登记标准 plank、独立髋铰链、glute bridge 和基础瑜伽体式，所以本次没有用相近 identity 代替。它们是下一批居家优先项：先建立精确动作身份与资料，再加入关联数据库。
 
@@ -114,7 +124,11 @@ const presentation = presentExpectedMuscleAssociation("bodyweight_squat");
 
 ## 证据边界
 
-动作和肌群的基础映射参考 [Nike 徒手训练资料](https://www.nike.com/a/what-is-calisthenics-workout)、[Nike 居家无器械资料](https://www.nike.com/a/exercise-with-no-equipment) 和 [ACE Exercise Library](https://www.acefitness.org/resources/everyone/exercise-library/)。其中徒手深蹲使用 [ACE 的精确动作页](https://www.acefitness.org/resources/everyone/exercise-library/135/bodyweight-squat/)，可标为 `exact_exercise_reference`；其余记录明确标为 `curated_general_reference`，不能把资料库首页包装成逐肌群、逐相位的直接证据。
+动作和肌群的基础映射参考 [Nike 徒手训练资料](https://www.nike.com/a/what-is-calisthenics-workout)、[ACE Exercise Library](https://www.acefitness.org/resources/everyone/exercise-library/)、ACSM 自由重量资料、NASM 具体动作页和 ExRx 具体动作页。详细的逐动作来源与支持范围见 [`2026-08-07-five-split-exercise-muscle-sources.md`](./2026-08-07-five-split-exercise-muscle-sources.md)。
+
+当前 48 条记录中，22 条有与 `exerciseId` 一致的具体动作页，标为 `exact_exercise_reference`；其余 26 条仍为 `curated_general_reference`。精确页可能只支持动作身份、目标区域和相位，不一定直接证明数据库中的 primary/secondary 角色；逐角色结论仍需阅读来源的 claim 范围，不能只看 evidenceStatus。
+
+研究还发现若干 Registry identity 合并过宽：坐姿推肩、侧/前平举、后束飞鸟、腿弯举、提踵、过顶臂屈伸、仰卧臂屈伸和胸托划船。它们当前可以展示保守的预计肌群，但在拆分器械与姿势 identity 前不会提升为精确证据。`front_raise` 的 movement pattern 已从肩外展修正为肩屈曲；面拉和绳索外旋中的肩外旋仍只能作为普通二维骨架的弱观测。
 
 [OpenSim 逆动力学文档](https://opensimconfluence.atlassian.net/wiki/spaces/OpenSim/pages/53090063/Getting+Started+with+Inverse+Dynamics)明确说明，净关节力矩需要运动学、个体模型和外部负载；[OpenCap 论文](https://doi.org/10.1371/journal.pcbi.1011462)使用多机位 3D、人体模型、足地接触和优化仿真估计下肢肌肉激活。v1 数据库没有这些输入，因此只提供知识关联，不冒充 OpenSim/OpenCap 的动力学结果。
 

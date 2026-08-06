@@ -12,6 +12,7 @@ export type MovementPattern =
   | "horizontal_push"
   | "vertical_push"
   | "shoulder_abduction"
+  | "shoulder_flexion"
   | "shoulder_horizontal_abduction"
   | "shoulder_external_rotation"
   | "elbow_flexion"
@@ -65,6 +66,7 @@ const MOVEMENT_PATTERNS = new Set<MovementPattern>([
   "horizontal_push",
   "vertical_push",
   "shoulder_abduction",
+  "shoulder_flexion",
   "shoulder_horizontal_abduction",
   "shoulder_external_rotation",
   "elbow_flexion",
@@ -328,7 +330,7 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     id: "calf_raise", nameZh: "提踵", nameEn: "Calf raise", aliases: ["站姿提踵", "坐姿提踵"], muscleGroup: "legs", movementPattern: "ankle_plantarflexion", equipment: ["calf raise machine or bodyweight"], variationOf: null, maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
-    id: "front_raise", nameZh: "前平举", nameEn: "Front raise", aliases: ["哑铃前平举", "绳索前平举"], muscleGroup: "shoulders", movementPattern: "shoulder_abduction", equipment: ["dumbbell or cable"], variationOf: "lateral_raise", maturity: "catalog_only", source: PROJECT_SOURCE,
+    id: "front_raise", nameZh: "前平举", nameEn: "Front raise", aliases: ["哑铃前平举", "绳索前平举"], muscleGroup: "shoulders", movementPattern: "shoulder_flexion", equipment: ["dumbbell or cable"], variationOf: "lateral_raise", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
     id: "single_arm_cable_lateral_raise", nameZh: "单臂绳索侧平举", nameEn: "Single-arm cable lateral raise", aliases: ["单手绳索侧平举"], muscleGroup: "shoulders", movementPattern: "shoulder_abduction", equipment: ["cable machine"], variationOf: "lateral_raise", maturity: "catalog_only", source: PROJECT_SOURCE,

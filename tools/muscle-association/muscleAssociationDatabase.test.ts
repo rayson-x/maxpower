@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { EXERCISE_REGISTRY, MUSCLE_GROUPS } from "../../src/pose/exerciseRegistry";
 import {
   EXPECTED_MUSCLE_ASSOCIATIONS,
   loadExpectedMuscleAssociationDatabase,
@@ -54,6 +55,52 @@ test("the current home-workout recognition profiles all have lightweight associa
   assert.deepEqual(
     homeWorkoutIds.filter((exerciseId) => !EXPECTED_MUSCLE_ASSOCIATIONS.get(exerciseId)),
     [],
+  );
+});
+
+test("every registered five-split exercise has an exact-identity muscle association", () => {
+  const missingByGroup = Object.fromEntries(
+    MUSCLE_GROUPS.map((group) => [
+      group.id,
+      EXERCISE_REGISTRY.exercises
+        .filter((exercise) => exercise.muscleGroup === group.id)
+        .filter((exercise) => !EXPECTED_MUSCLE_ASSOCIATIONS.get(exercise.id))
+        .map((exercise) => exercise.id),
+    ]),
+  );
+
+  assert.deepEqual(missingByGroup, {
+    chest: [],
+    back: [],
+    legs: [],
+    shoulders: [],
+    arms: [],
+  });
+  assert.equal(EXPECTED_MUSCLE_ASSOCIATIONS.records.length, 48);
+  assert.equal(
+    EXPECTED_MUSCLE_ASSOCIATIONS.records.filter(
+      (association) => association.evidenceStatus === "exact_exercise_reference",
+    ).length,
+    22,
+  );
+});
+
+test("front raise keeps shoulder flexion distinct from lateral-raise abduction", () => {
+  assert.equal(EXERCISE_REGISTRY.get("front_raise")?.movementPattern, "shoulder_flexion");
+  const frontRaise = knownAssociation("front_raise");
+  assert.ok(
+    frontRaise.phases[0].expectedJointMotions.some(
+      (motion) => motion.joint === "shoulder" && motion.action === "flexion",
+    ),
+  );
+});
+
+test("cable external rotation names rotation without disguising it as abduction", () => {
+  const externalRotation = knownAssociation("cable_external_rotation");
+  assert.ok(
+    externalRotation.phases[0].expectedJointMotions.some(
+      (motion) => motion.joint === "shoulder" && motion.action === "external_rotation",
+    ),
   );
 });
 
