@@ -11,9 +11,11 @@ import type { CameraView } from "../pose/formRuleEngine";
 import { analyzePoseSet } from "../pose/poseSetAnalysis";
 import type { PoseEstimate } from "../pose/PoseEngine";
 import { segmentRepsAuto } from "../pose/repSegmenter";
+import { reviewKeyboardShortcut } from "../pose/reviewKeyboardShortcut";
 import {
   addReviewRange,
   editReviewRange,
+  reviewRangeGeometryEquals,
   restoreReviewRangeSnapshot,
   timelineTimeAt,
   type ReviewRangeEditMode,
@@ -555,12 +557,19 @@ async function filesFromDirectory(directory: DirectoryHandle): Promise<File[]> {
  * Local-only evidence board. The athlete compares deterministic replays and
  * explicitly approves a ground-truth count; nothing is uploaded.
  */
-export function CaptureApprovalPanel({ compact = false }: { compact?: boolean }) {
+export function CaptureApprovalPanel({
+  compact = false,
+  keyboardShortcutsEnabled = true,
+}: {
+  compact?: boolean;
+  keyboardShortcutsEnabled?: boolean;
+}) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const timelineTrackRef = useRef<HTMLDivElement | null>(null);
   const rangeDragRef = useRef<ReviewRangeDrag | null>(null);
   const segmentEditRef = useRef<ReviewSegmentEdit | null>(null);
+  const numericEditSnapshotRef = useRef<Candidate["segments"] | null>(null);
   const capturesRef = useRef<ReviewCapture[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
@@ -871,6 +880,17 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     ));
   };
 
+  const beginNumericSegmentEdit = () => {
+    numericEditSnapshotRef.current = draftSegments.map((segment) => ({ ...segment }));
+  };
+
+  const finishNumericSegmentEdit = () => {
+    const snapshot = numericEditSnapshotRef.current;
+    numericEditSnapshotRef.current = null;
+    if (!snapshot || reviewRangeGeometryEquals(snapshot, draftSegments)) return;
+    setSegmentUndoStack((current) => [...current.slice(-19), snapshot]);
+  };
+
   const updateDraftSegmentNote = (repIndex: number, segmentNote: string) => {
     setDraftSegments((current) => current.map((segment) =>
       segment.repIndex === repIndex ? { ...segment, note: segmentNote } : segment,
@@ -917,6 +937,34 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
       .map((item, index) => ({ ...item, repIndex: index + 1 })));
     setSelectedSegmentRepIndex(null);
   };
+
+  useEffect(() => {
+    if (!keyboardShortcutsEnabled) return;
+
+    const handleReviewShortcut = (event: KeyboardEvent) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const action = reviewKeyboardShortcut({
+        key: event.key,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        shiftKey: event.shiftKey,
+        targetTagName: target?.tagName,
+        targetContentEditable: target?.isContentEditable,
+      });
+
+      if (action === "undo" && segmentUndoStack.length > 0) {
+        event.preventDefault();
+        undoTimelineSegments();
+      } else if (action === "delete-selected" && selectedSegmentRepIndex !== null) {
+        event.preventDefault();
+        removeDraftSegment(selectedSegmentRepIndex);
+      }
+    };
+
+    window.addEventListener("keydown", handleReviewShortcut);
+    return () => window.removeEventListener("keydown", handleReviewShortcut);
+  }, [keyboardShortcutsEnabled, draftSegments, segmentUndoStack, selectedSegmentRepIndex]);
 
   const seekReviewVideo = (timestampMs: number) => {
     const nextMs = Math.min(selectedDurationMs, Math.max(0, timestampMs));
@@ -1339,11 +1387,11 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                   <div style={styles.timelineHeader}>
                     <div>
                       <strong>REP RANGE / 拖选一次动作范围</strong>
-                      <span>空白处拖选新增；拖动色块移动；选中后拖两侧缩放</span>
+                      <span>空白处拖选新增；拖动色块移动；选中后拖两侧缩放；⌫ 删除所选</span>
                     </div>
                     <div style={styles.timelineHeaderActions}>
                       <div style={styles.timelineCounter}><b>{draftSegments.length}</b> / {expectedCount || "?"} REPS</div>
-                      <button type="button" disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回</button>
+                      <button type="button" disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回 ⌘Z</button>
                       <button type="button" disabled={!draftSegments.length} onClick={clearTimelineSegments}>清空</button>
                     </div>
                   </div>
@@ -1409,6 +1457,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                           onPointerUp={(event) => { event.stopPropagation(); segmentEditRef.current = null; }}
                           onPointerCancel={() => { segmentEditRef.current = null; }}
                           onClick={() => seekReviewVideo(segment.startMs)}
+                          onFocus={() => setSelectedSegmentRepIndex(segment.repIndex)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") seekReviewVideo(segment.startMs);
                           }}
@@ -1496,16 +1545,16 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                       {draftSegments.map((segment) => (
                         <div key={segment.repIndex} style={styles.segmentRow}>
                           <b>#{segment.repIndex}</b>
-                          <label>start<input inputMode="numeric" value={segment.startMs} onChange={(event) => updateDraftSegment(segment.repIndex, "startMs", Number(event.target.value))} /></label>
-                          <label>peak<input inputMode="numeric" value={segment.peakMs} onChange={(event) => updateDraftSegment(segment.repIndex, "peakMs", Number(event.target.value))} /></label>
-                          <label>end<input inputMode="numeric" value={segment.endMs} onChange={(event) => updateDraftSegment(segment.repIndex, "endMs", Number(event.target.value))} /></label>
+                          <label>start<input inputMode="numeric" value={segment.startMs} onFocus={beginNumericSegmentEdit} onBlur={finishNumericSegmentEdit} onChange={(event) => updateDraftSegment(segment.repIndex, "startMs", Number(event.target.value))} /></label>
+                          <label>peak<input inputMode="numeric" value={segment.peakMs} onFocus={beginNumericSegmentEdit} onBlur={finishNumericSegmentEdit} onChange={(event) => updateDraftSegment(segment.repIndex, "peakMs", Number(event.target.value))} /></label>
+                          <label>end<input inputMode="numeric" value={segment.endMs} onFocus={beginNumericSegmentEdit} onBlur={finishNumericSegmentEdit} onChange={(event) => updateDraftSegment(segment.repIndex, "endMs", Number(event.target.value))} /></label>
                           <button onClick={() => removeDraftSegment(segment.repIndex)}>移除</button>
                         </div>
                       ))}
                     </details>
                     <div style={styles.segmentActions}>
                       <button onClick={addDraftSegment}>+ 添加 rep</button>
-                      <button disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回</button>
+                      <button disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回 ⌘Z</button>
                       <button style={styles.approve} disabled={inboxWork !== null} onClick={() => void approve()}>批准此逐 rep 真值</button>
                     </div>
                   </div>

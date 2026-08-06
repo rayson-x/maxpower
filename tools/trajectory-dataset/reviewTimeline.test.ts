@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   addReviewRange,
   editReviewRange,
+  reviewRangeGeometryEquals,
   restoreReviewRangeSnapshot,
   timelineTimeAt,
 } from "../../src/pose/reviewTimeline";
@@ -66,4 +67,16 @@ test("undoing a geometry edit preserves a note typed after that edit", () => {
   assert.deepEqual(restoreReviewRangeSnapshot(snapshot, current), [
     { repIndex: 1, startMs: 1000, peakMs: 1500, endMs: 2000, note: "底部停顿" },
   ]);
+});
+
+test("numeric edit sessions detect geometry changes but ignore note-only changes", () => {
+  const snapshot = [{ repIndex: 1, startMs: 1000, peakMs: 1500, endMs: 2000, note: "原备注" }];
+
+  assert.equal(reviewRangeGeometryEquals(snapshot, [
+    { repIndex: 1, startMs: 1000, peakMs: 1500, endMs: 2000, note: "新备注" },
+  ]), true);
+  assert.equal(reviewRangeGeometryEquals(snapshot, [
+    { repIndex: 1, startMs: 1000, peakMs: 1600, endMs: 2000, note: "原备注" },
+  ]), false);
+  assert.equal(reviewRangeGeometryEquals(snapshot, []), false);
 });

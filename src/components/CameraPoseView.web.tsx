@@ -3837,7 +3837,7 @@ export function CameraPoseView() {
       {hasVisitedReview && (
         <div style={{ display: isReview ? "block" : "none" }} aria-hidden={!isReview}>
           <div style={styles.reviewPage}>
-            <CaptureApprovalPanel compact />
+            <CaptureApprovalPanel compact keyboardShortcutsEnabled={isReview} />
           </div>
         </div>
       )}

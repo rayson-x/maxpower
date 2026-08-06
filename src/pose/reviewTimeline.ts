@@ -76,6 +76,20 @@ export function restoreReviewRangeSnapshot(
   });
 }
 
+/** Compares only undoable timeline geometry; notes are edited independently. */
+export function reviewRangeGeometryEquals(
+  left: readonly ReviewTimelineSegment[],
+  right: readonly ReviewTimelineSegment[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((segment) => {
+    const other = right.find((candidate) => candidate.repIndex === segment.repIndex);
+    return other?.startMs === segment.startMs
+      && other.peakMs === segment.peakMs
+      && other.endMs === segment.endMs;
+  });
+}
+
 /** Moves or resizes one range while keeping it between adjacent annotations. */
 export function editReviewRange(input: {
   segment: ReviewTimelineSegment;
