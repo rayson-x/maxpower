@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../.annotation-inbox-build",
+    "rootDir": "../..",
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "./annotationInbox.ts",
+    "./server.ts",
+    "./start.ts",
+    "../../src/pose/annotationInboxContract.ts"
+  ]
+}

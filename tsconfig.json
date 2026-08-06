@@ -8,6 +8,7 @@
     "ios",
     "android",
     ".test-build",
+    ".annotation-inbox-build",
     ".motion-sdk-eval-build",
     ".harness-build",
     ".labeled-fixture-build",

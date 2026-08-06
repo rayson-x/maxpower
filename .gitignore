@@ -45,6 +45,7 @@ src/agent/defaultCredentials.ts
 .harness-build/
 tools/harness/out/
 .test-build/
+.annotation-inbox-build/
 .rule-engine-test-build/
 .segmentation-training-build/
 .recognition-profile-build/

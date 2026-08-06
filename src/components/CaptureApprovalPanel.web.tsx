@@ -1,5 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import {
+  annotationInboxVideoUrl,
+  completeReviewedInboxItem,
+  loadAnnotationInbox,
+  type AnnotationInboxItem,
+} from "../pose/annotationInbox";
 import { EXERCISE_REGISTRY, MUSCLE_GROUPS } from "../pose/exerciseRegistry";
 import type { CameraView } from "../pose/formRuleEngine";
 import { analyzePoseSet } from "../pose/poseSetAnalysis";
@@ -19,6 +25,7 @@ import {
   type LatPulldownTrajectorySample,
 } from "../pose/trajectoryDataset";
 import { CAPTURE_POSITIONS, type CapturePosition } from "../pose/viewGating";
+import { extractInboxVideoPoseFixture } from "../pose/inboxVideoPoseExtractor";
 
 interface ImportedLabels {
   exerciseId?: string | null;
@@ -63,6 +70,7 @@ interface ImportedRustCandidate {
 interface ImportedFixture {
   video: string;
   durationSec: number;
+  stepMs?: number;
   model?: string;
   poses: PoseEstimate[];
 }
@@ -75,6 +83,8 @@ interface ReviewCapture {
   fixture: ImportedFixture;
   labels: ImportedLabels | null;
   metadata: ImportedCaptureMetadata | null;
+  sourceKind: "project" | "directory" | "manual" | "inbox";
+  inboxItem?: AnnotationInboxItem;
 }
 
 interface ProjectManifest {
@@ -322,7 +332,11 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
       tone,
     };
   };
-  const automatic = segmentRepsAuto(stable.poses);
+  // Entry/exit trimming was calibrated for upright field captures. The inbox
+  // includes supine bench press and push-up footage, where that heuristic can
+  // discard the whole working set; keep the complete Rust-canonical replay as
+  // the action-agnostic annotation suggestion.
+  const automatic = segmentRepsAuto(capture.inboxItem ? raw : stable.poses);
   const rustNeedsReview = (capture.metadata?.rustNeedsReviewReps ?? [])
     .filter((candidate) => [candidate.startTimestampMs, candidate.peakTimestampMs, candidate.endTimestampMs].every(Number.isFinite));
   const rustReviewCandidate: Candidate | null = rustNeedsReview.length
@@ -413,7 +427,10 @@ function replayReportFor(captures: ReviewCapture[]): ReplayReportRow[] {
   });
 }
 
-async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
+async function parseCaptureFiles(
+  files: File[],
+  sourceKind: ReviewCapture["sourceKind"] = "manual",
+): Promise<ReviewCapture[]> {
   const byName = new Map(files.map((file) => [file.name, file]));
   const fixtures = files.filter((file) => /\.json$/i.test(file.name) && !/\.(labels|metadata)\.json$/i.test(file.name));
   const captures: ReviewCapture[] = [];
@@ -444,6 +461,7 @@ async function parseCaptureFiles(files: File[]): Promise<ReviewCapture[]> {
         fixture,
         labels,
         metadata,
+        sourceKind,
       });
     } catch {
       // A non-capture JSON in Downloads is not a review failure.
@@ -481,6 +499,7 @@ async function loadProjectCaptures(): Promise<ReviewCapture[]> {
         fixture,
         labels: labels ? { ...metadata, ...labels } : metadata?.exerciseId ? metadata : null,
         metadata,
+        sourceKind: "project",
       } satisfies ReviewCapture;
     }),
   );
@@ -546,9 +565,13 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   const selectedIdRef = useRef<string | null>(null);
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
   const draftsRef = useRef<Record<string, ReviewDraft>>(loadDrafts());
+  const inboxItemsRef = useRef<readonly AnnotationInboxItem[]>([]);
+  const processingInboxIdsRef = useRef(new Set<string>());
+  const inboxInitializedRef = useRef(false);
   const [captures, setCaptures] = useState<ReviewCapture[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [inboxWarning, setInboxWarning] = useState<string | null>(null);
   const [approvals, setApprovals] = useState<Record<string, Approval>>(approvalsRef.current);
   const [exerciseId, setExerciseId] = useState("");
   const [cameraView, setCameraView] = useState<CameraView>("oblique45");
@@ -564,6 +587,8 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   const [currentVideoTimeMs, setCurrentVideoTimeMs] = useState(0);
   const [rangeDrag, setRangeDrag] = useState<ReviewRangeDrag | null>(null);
   const [selectedSegmentRepIndex, setSelectedSegmentRepIndex] = useState<number | null>(null);
+  const [inboxItems, setInboxItems] = useState<readonly AnnotationInboxItem[]>([]);
+  const [inboxWork, setInboxWork] = useState<{ itemId: string; phase: "tracking" | "archiving"; progress: number } | null>(null);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
   const selectedDurationMs = selected
@@ -674,11 +699,66 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     return true;
   };
 
+  const mergeCaptureSource = (
+    loaded: ReviewCapture[],
+    replacedSource: ReviewCapture["sourceKind"],
+  ) => {
+    const loadedIds = new Set(loaded.map((capture) => capture.id));
+    installCaptures([
+      ...loaded,
+      ...capturesRef.current.filter((capture) =>
+        capture.sourceKind !== replacedSource && !loadedIds.has(capture.id),
+      ),
+    ]);
+    return loaded.length > 0;
+  };
+
   const importFiles = async (files: File[]) => {
     setError(null);
-    const loaded = await parseCaptureFiles(files);
-    if (!installCaptures(loaded)) {
+    const loaded = await parseCaptureFiles(files, "manual");
+    if (!mergeCaptureSource(loaded, "manual")) {
       setError("没有找到完整采集包：每组需要同名的 .webm/.mp4/.mov 与 .json 文件。");
+    }
+  };
+
+  const processInboxItem = async (item: AnnotationInboxItem) => {
+    const existing = capturesRef.current.find((capture) => capture.inboxItem?.id === item.id);
+    if (existing) {
+      chooseCapture(existing);
+      return;
+    }
+    if (processingInboxIdsRef.current.has(item.id)) return;
+    processingInboxIdsRef.current.add(item.id);
+    setError(null);
+    setExportNotice(null);
+    setInboxWork({ itemId: item.id, phase: "tracking", progress: 0 });
+    try {
+      const fixture = await extractInboxVideoPoseFixture({
+        item,
+        videoUrl: annotationInboxVideoUrl(item),
+        onProgress: (progress) => setInboxWork({ itemId: item.id, phase: "tracking", progress }),
+      });
+      const capture: ReviewCapture = {
+        id: item.id,
+        videoUrl: annotationInboxVideoUrl(item),
+        sourceSignature: `annotation-inbox:${item.filename}:${item.sizeBytes}`,
+        revokeVideoUrl: false,
+        fixture,
+        labels: null,
+        metadata: null,
+        sourceKind: "inbox",
+        inboxItem: item,
+      };
+      installCaptures([
+        capture,
+        ...capturesRef.current.filter((current) => current.id !== capture.id),
+      ]);
+      chooseCapture(capture);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      processingInboxIdsRef.current.delete(item.id);
+      setInboxWork(null);
     }
   };
 
@@ -691,8 +771,8 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         setDirectoryConnected(false);
         return;
       }
-      const loaded = await parseCaptureFiles(await filesFromDirectory(saved));
-      if (installCaptures(loaded)) setDirectoryConnected(true);
+      const loaded = await parseCaptureFiles(await filesFromDirectory(saved), "directory");
+      if (mergeCaptureSource(loaded, "directory")) setDirectoryConnected(true);
     } catch {
       // A browser can revoke a persisted handle. The manual import control
       // remains available and is the recovery path.
@@ -701,11 +781,25 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
   };
 
   useEffect(() => {
-    void loadProjectCaptures()
-      .then((loaded) => {
-        if (!installCaptures(loaded)) setError("项目采集库中没有完整采集包。");
-      })
-      .catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
+    if (!inboxInitializedRef.current) {
+      inboxInitializedRef.current = true;
+      void Promise.allSettled([loadAnnotationInbox(), loadProjectCaptures()])
+        .then(async ([inboxResult, projectResult]) => {
+          if (projectResult.status === "fulfilled") {
+            mergeCaptureSource(projectResult.value, "project");
+          }
+          if (inboxResult.status === "rejected") {
+            setInboxWarning(inboxResult.reason instanceof Error ? inboxResult.reason.message : String(inboxResult.reason));
+          } else {
+            inboxItemsRef.current = inboxResult.value.items;
+            setInboxItems(inboxResult.value.items);
+            if (inboxResult.value.items[0]) await processInboxItem(inboxResult.value.items[0]);
+          }
+          if (projectResult.status === "rejected" && inboxResult.status === "rejected") {
+            setError(projectResult.reason instanceof Error ? projectResult.reason.message : String(projectResult.reason));
+          }
+        });
+    }
     void refreshConnectedDirectory();
     const timer = window.setInterval(() => void refreshConnectedDirectory(), 10_000);
     return () => window.clearInterval(timer);
@@ -909,7 +1003,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
     seekReviewVideo(edit.mode === "resize-end" ? updated.endMs : updated.startMs);
   };
 
-  const approve = () => {
+  const approve = async () => {
     if (!selected) return;
     if (!draftCandidateId) {
       setError("先选择一个候选分段，并逐 rep 检查或修正 start / peak / end 边界。");
@@ -993,35 +1087,69 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         algorithmVersion: "reviewed-canonical-replay/v1",
       },
     ];
-    const next: Record<string, Approval> = {
-      ...approvals,
-      [selected.id]: {
-        expectedCount,
-        candidateId: draftCandidateId,
-        candidateCount: draftSegments.length,
-        exerciseId,
-        cameraView: approvedCameraView,
-        variation: selected.labels?.variation ?? null,
-        trainingSide: selected.labels?.trainingSide ?? null,
-        profileVersion: selected.labels?.profileVersion ?? null,
-        model: selected.fixture.model ?? selected.labels?.model ?? "unknown",
-        approvedSegments: draftSegments,
-        approvedAt,
-        note: note.trim(),
-        capturePosition: confirmedPosition,
-        trajectoryDataset,
-        analysisVersions,
-      },
+    const approvedRecord: Approval = {
+      expectedCount,
+      candidateId: draftCandidateId,
+      candidateCount: draftSegments.length,
+      exerciseId,
+      cameraView: approvedCameraView,
+      variation: selected.labels?.variation ?? null,
+      trainingSide: selected.labels?.trainingSide ?? null,
+      profileVersion: selected.labels?.profileVersion ?? null,
+      model: selected.fixture.model ?? selected.labels?.model ?? "unknown",
+      approvedSegments: draftSegments,
+      approvedAt,
+      note: note.trim(),
+      capturePosition: confirmedPosition,
+      trajectoryDataset,
+      analysisVersions,
     };
+    if (selected.inboxItem) {
+      setInboxWork({ itemId: selected.inboxItem.id, phase: "archiving", progress: 1 });
+      try {
+        await completeReviewedInboxItem({
+          item: selected.inboxItem,
+          fixture: {
+            ...selected.fixture,
+            stepMs: selected.fixture.stepMs ?? (
+              selected.fixture.poses.length > 1
+                ? selected.fixture.durationSec * 1000 / (selected.fixture.poses.length - 1)
+                : 0
+            ),
+            model: selected.fixture.model ?? "unknown",
+          },
+          approval: {
+            exerciseId: approvedRecord.exerciseId,
+            cameraView: approvedRecord.cameraView,
+            capturePosition: confirmedPosition!,
+            expectedCount: approvedRecord.expectedCount,
+            approvedAt: approvedRecord.approvedAt,
+            approvedSegments: approvedRecord.approvedSegments,
+            candidateId: approvedRecord.candidateId,
+            note: approvedRecord.note,
+          },
+        });
+      } catch (caught) {
+        setInboxWork(null);
+        setError(caught instanceof Error ? caught.message : String(caught));
+        return;
+      }
+    }
+    const next: Record<string, Approval> = { ...approvals, [selected.id]: approvedRecord };
     approvalsRef.current = next;
     setApprovals(next);
-    localStorage.setItem(APPROVAL_KEY, JSON.stringify(next));
-    // Approval is a deliberate user click, so save a portable copy immediately
-    // rather than making the athlete remember a second export step.
-    downloadJson(
-      { version: "capture-approval/v3", approvals: next },
-      `field-capture-approval-${selected.id}.json`,
-    );
+    try {
+      localStorage.setItem(APPROVAL_KEY, JSON.stringify(next));
+    } catch {
+      setError("审批已归档，但浏览器未允许写入本机审批缓存。");
+    }
+    if (!selected.inboxItem) {
+      // Imported capture packages retain the legacy portable-download fallback.
+      downloadJson(
+        { version: "capture-approval/v3", approvals: next },
+        `field-capture-approval-${selected.id}.json`,
+      );
+    }
     if (trajectoryDataset?.decision === "eligible" && trajectoryDataset.sample) {
       downloadJson({
         schemaVersion: "form-coach-trajectory-dataset/v1",
@@ -1032,6 +1160,25 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         samples: [trajectoryDataset.sample],
         quarantined: [],
       }, `lat-pulldown-segmentation-trajectory-${selected.id}.json`);
+    }
+    if (selected.inboxItem) {
+      const completedId = selected.inboxItem.id;
+      const remaining = inboxItems.filter((item) => item.id !== completedId);
+      inboxItemsRef.current = remaining;
+      setInboxItems(remaining);
+      const remainingCaptures = capturesRef.current.filter((capture) => capture.id !== selected.id);
+      capturesRef.current = remainingCaptures;
+      setCaptures(remainingCaptures);
+      selectedIdRef.current = null;
+      setSelectedId(null);
+      const drafts = { ...draftsRef.current };
+      delete drafts[selected.id];
+      draftsRef.current = drafts;
+      saveDrafts(drafts);
+      setInboxWork(null);
+      setExportNotice(`✓ ${selected.inboxItem.filename} 已归档并从 new-video 移出。`);
+      if (remaining[0]) void processInboxItem(remaining[0]);
+      else if (remainingCaptures[0]) chooseCapture(remainingCaptures[0]);
     }
   };
 
@@ -1101,6 +1248,31 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
           }}
         />
       </header>
+      {inboxItems.length > 0 && (
+        <div style={styles.inboxBar}>
+          <div>
+            <strong>NEW-VIDEO / 待标注收件箱</strong>
+            <span>{inboxItems.length} 个视频；选择后先生成 canonical 骨架，批准后自动迁入正式档案。</span>
+          </div>
+          <select
+            aria-label="待标注视频"
+            value={inboxWork?.itemId ?? selected?.inboxItem?.id ?? ""}
+            disabled={inboxWork !== null}
+            onChange={(event) => {
+              const item = inboxItems.find((candidate) => candidate.id === event.target.value);
+              if (item) void processInboxItem(item);
+            }}
+          >
+            <option value="">选择待标注视频…</option>
+            {inboxItems.map((item) => <option key={item.id} value={item.id}>{item.filename}</option>)}
+          </select>
+          {inboxWork?.phase === "tracking" && (
+            <span style={styles.inboxProgress}>正在识别骨架 {Math.round(inboxWork.progress * 100)}%</span>
+          )}
+          {inboxWork?.phase === "archiving" && <span style={styles.inboxProgress}>正在归档并迁移…</span>}
+        </div>
+      )}
+      {inboxWarning && <p style={styles.inboxWarning}>待标注收件箱未加载：{inboxWarning}</p>}
       {error && <p style={styles.error}>{error}</p>}
       {exportNotice && <p style={styles.exportNotice}>{exportNotice}</p>}
       {!compact && !!replayReport.length && (
@@ -1133,7 +1305,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
         </section>
       )}
       {!captures.length ? (
-        <p style={styles.empty}>选择 Downloads 文件夹。面板会自动配对同名的视频、关键点和 labels 文件。</p>
+        <p style={styles.empty}>{inboxWork ? "正在从待标注视频生成 canonical 骨架…" : "待标注目录为空；也可以选择 Downloads 文件夹导入成套采集文件。"}</p>
       ) : (
         <div style={compact ? styles.compactGrid : styles.grid}>
           {!compact && <nav style={styles.ledger} aria-label="采集组列表">
@@ -1288,7 +1460,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
-                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select></label>
+                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && (!selected.inboxItem || exercise.maturity === "catalog_only")).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select>{selected.inboxItem && <small>待标注收件箱只建立尚无 Rust profile 的动作真值，不在 TypeScript 中替代正式计数。</small>}</label>
                   <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
                   <label style={{ gridColumn: "1 / -1" }}>备注<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：底部有停顿、左臂被器械遮挡、这一组不作为动作质量标准" rows={2} /></label>
@@ -1334,7 +1506,7 @@ export function CaptureApprovalPanel({ compact = false }: { compact?: boolean })
                     <div style={styles.segmentActions}>
                       <button onClick={addDraftSegment}>+ 添加 rep</button>
                       <button disabled={!segmentUndoStack.length} onClick={undoTimelineSegments}>↶ 撤回</button>
-                      <button style={styles.approve} onClick={approve}>批准此逐 rep 真值</button>
+                      <button style={styles.approve} disabled={inboxWork !== null} onClick={() => void approve()}>批准此逐 rep 真值</button>
                     </div>
                   </div>
                 )}
@@ -1362,6 +1534,9 @@ const styles: Record<string, React.CSSProperties> = {
   kicker: { color: "#7cffbc", fontSize: 10, letterSpacing: 1.7 },
   title: { margin: "5px 0", fontSize: 21, letterSpacing: 1 },
   subtitle: { margin: 0, color: "#89aaa1", fontSize: 12 },
+  inboxBar: { display: "flex", alignItems: "center", gap: 12, padding: "11px 20px", borderBottom: "1px solid #315b50", background: "#0d261f", color: "#d8eee4", fontSize: 11 },
+  inboxProgress: { color: "#ffcf83", whiteSpace: "nowrap" },
+  inboxWarning: { margin: 16, color: "#ffbd6f", fontSize: 12 },
   importButton: { border: "1px solid #72e6a8", background: "#123b2d", color: "#dffff0", padding: "10px 13px", cursor: "pointer", font: "inherit", fontSize: 12 },
   manualImport: { border: "1px solid #42685d", background: "#0b201a", color: "#b8d7cc", padding: "10px 11px", cursor: "pointer", font: "inherit", fontSize: 12 },
   error: { margin: 16, color: "#ff9b83" },
