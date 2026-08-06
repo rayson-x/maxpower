@@ -5,22 +5,13 @@ import type { AnnotationInboxItem, InboxPoseFixture } from "./annotationInbox";
 
 const REVIEW_MODEL = "/models/pose_landmarker_heavy.task";
 
-interface VideoFrameMetadata {
-  mediaTime: number;
-}
-
-interface FrameCallbackVideo extends HTMLVideoElement {
-  requestVideoFrameCallback?: (callback: (now: number, metadata: VideoFrameMetadata) => void) => number;
-  cancelVideoFrameCallback?: (handle: number) => void;
-}
-
 /** Runs the same BlazePose33 -> Rust subject-lock path used by the live Web view. */
 export async function extractInboxVideoPoseFixture(input: {
   item: AnnotationInboxItem;
   videoUrl: string;
   onProgress?: (ratio: number) => void;
 }): Promise<InboxPoseFixture> {
-  const video = document.createElement("video") as FrameCallbackVideo;
+  const video = document.createElement("video");
   video.crossOrigin = "anonymous";
   video.muted = true;
   video.playsInline = true;
@@ -70,7 +61,7 @@ export async function extractInboxVideoPoseFixture(input: {
       };
       const schedule = () => {
         if (video.ended) return;
-        if (video.requestVideoFrameCallback) {
+        if (typeof video.requestVideoFrameCallback === "function") {
           frameHandle = video.requestVideoFrameCallback((_now, metadata) => {
             frameHandle = null;
             processFrame(metadata.mediaTime);
@@ -100,7 +91,9 @@ export async function extractInboxVideoPoseFixture(input: {
     })[0];
   } finally {
     video.pause();
-    if (frameHandle !== null) video.cancelVideoFrameCallback?.(frameHandle);
+    if (frameHandle !== null && typeof video.cancelVideoFrameCallback === "function") {
+      video.cancelVideoFrameCallback(frameHandle);
+    }
     cancelAnimationFrame(rafHandle);
     video.removeAttribute("src");
     video.load();

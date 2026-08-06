@@ -11,6 +11,11 @@ import type { CameraView } from "../pose/formRuleEngine";
 import { analyzePoseSet } from "../pose/poseSetAnalysis";
 import type { PoseEstimate } from "../pose/PoseEngine";
 import { segmentRepsAuto } from "../pose/repSegmenter";
+import {
+  revocableCaptureUrlsExcluding,
+  reviewDraftAfterContextChange,
+  shouldSelectProcessedInboxCapture,
+} from "../pose/reviewCaptureState";
 import { reviewKeyboardShortcut } from "../pose/reviewKeyboardShortcut";
 import {
   addReviewRange,
@@ -570,6 +575,7 @@ export function CaptureApprovalPanel({
   const rangeDragRef = useRef<ReviewRangeDrag | null>(null);
   const segmentEditRef = useRef<ReviewSegmentEdit | null>(null);
   const numericEditSnapshotRef = useRef<Candidate["segments"] | null>(null);
+  const reviewInteractionRevisionRef = useRef(0);
   const capturesRef = useRef<ReviewCapture[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
@@ -632,6 +638,10 @@ export function CaptureApprovalPanel({
     ? approvals[selected.id]?.trajectoryDataset ?? null
     : null;
 
+  const markReviewInteraction = () => {
+    reviewInteractionRevisionRef.current += 1;
+  };
+
   // Every edit is durable before the user can move to another capture. This is
   // intentionally local-only and distinct from an approved ground-truth label.
   useLayoutEffect(() => {
@@ -657,9 +667,9 @@ export function CaptureApprovalPanel({
 
   const hasExportableLocalData = Object.keys(approvals).length > 0 || Object.keys(draftsRef.current).length > 0 || draftRevision > 0;
 
-  useEffect(() => () => captures.forEach((capture) => {
-    if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
-  }), [captures]);
+  useEffect(() => () => {
+    revocableCaptureUrlsExcluding(capturesRef.current, []).forEach((url) => URL.revokeObjectURL(url));
+  }, []);
 
   const installCaptures = (loaded: ReviewCapture[]) => {
     if (!loaded.length) return false;
@@ -671,14 +681,12 @@ export function CaptureApprovalPanel({
         capture.fixture.poses.length === loaded[index]?.fixture.poses.length,
       );
     if (unchanged) {
-      loaded.forEach((capture) => {
-        if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
-      });
+      revocableCaptureUrlsExcluding(loaded, capturesRef.current)
+        .forEach((url) => URL.revokeObjectURL(url));
       return true;
     }
-    capturesRef.current.forEach((capture) => {
-      if (capture.revokeVideoUrl) URL.revokeObjectURL(capture.videoUrl);
-    });
+    revocableCaptureUrlsExcluding(capturesRef.current, loaded)
+      .forEach((url) => URL.revokeObjectURL(url));
     capturesRef.current = loaded;
     setCaptures(loaded);
     const retained = loaded.find((capture) => capture.id === selectedIdRef.current);
@@ -730,10 +738,15 @@ export function CaptureApprovalPanel({
     }
   };
 
-  const processInboxItem = async (item: AnnotationInboxItem) => {
+  const processInboxItem = async (item: AnnotationInboxItem, foreground = true) => {
+    const interactionRevisionAtStart = reviewInteractionRevisionRef.current;
     const existing = capturesRef.current.find((capture) => capture.inboxItem?.id === item.id);
     if (existing) {
-      chooseCapture(existing);
+      if (shouldSelectProcessedInboxCapture({
+        foreground,
+        interactionRevisionAtStart,
+        currentInteractionRevision: reviewInteractionRevisionRef.current,
+      })) chooseCapture(existing);
       return;
     }
     if (processingInboxIdsRef.current.has(item.id)) return;
@@ -762,7 +775,11 @@ export function CaptureApprovalPanel({
         capture,
         ...capturesRef.current.filter((current) => current.id !== capture.id),
       ]);
-      chooseCapture(capture);
+      if (shouldSelectProcessedInboxCapture({
+        foreground,
+        interactionRevisionAtStart,
+        currentInteractionRevision: reviewInteractionRevisionRef.current,
+      })) chooseCapture(capture);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -802,7 +819,7 @@ export function CaptureApprovalPanel({
           } else {
             inboxItemsRef.current = inboxResult.value.items;
             setInboxItems(inboxResult.value.items);
-            if (inboxResult.value.items[0]) await processInboxItem(inboxResult.value.items[0]);
+            if (inboxResult.value.items[0]) await processInboxItem(inboxResult.value.items[0], false);
           }
           if (projectResult.status === "rejected" && inboxResult.status === "rejected") {
             setError(projectResult.reason instanceof Error ? projectResult.reason.message : String(projectResult.reason));
@@ -868,6 +885,15 @@ export function CaptureApprovalPanel({
     setDraftCandidateId(candidate.id);
     setDraftSegments(candidate.segments.map((segment) => ({ ...segment })));
     setSelectedSegmentRepIndex(null);
+  };
+
+  const preserveDraftRangesForContextChange = () => {
+    const next = reviewDraftAfterContextChange({
+      candidateId: draftCandidateId,
+      segments: draftSegments,
+    });
+    setDraftCandidateId(next.candidateId);
+    setError(null);
   };
 
   const updateDraftSegment = (
@@ -1270,7 +1296,11 @@ export function CaptureApprovalPanel({
   };
 
   return (
-    <section style={styles.shell}>
+    <section
+      style={styles.shell}
+      onPointerDownCapture={markReviewInteraction}
+      onKeyDownCapture={markReviewInteraction}
+    >
       <header style={styles.header}>
         <div>
           <div style={styles.kicker}>FIELD EVIDENCE / 本机审核</div>
@@ -1381,6 +1411,8 @@ export function CaptureApprovalPanel({
                   controls
                   preload="metadata"
                   style={styles.video}
+                  onPlay={markReviewInteraction}
+                  onSeeking={markReviewInteraction}
                   onTimeUpdate={(event) => setCurrentVideoTimeMs(event.currentTarget.currentTime * 1000)}
                 />
                 <div style={styles.timelineShell}>
@@ -1509,8 +1541,8 @@ export function CaptureApprovalPanel({
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
-                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && (!selected.inboxItem || exercise.maturity === "catalog_only")).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select>{selected.inboxItem && <small>待标注收件箱只建立尚无 Rust profile 的动作真值，不在 TypeScript 中替代正式计数。</small>}</label>
-                  <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); setDraftSegments([]); setDraftCandidateId(null); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
+                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); preserveDraftRangesForContextChange(); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && (!selected.inboxItem || exercise.maturity === "catalog_only")).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select>{selected.inboxItem && <small>待标注收件箱只建立尚无 Rust profile 的动作真值，不在 TypeScript 中替代正式计数。</small>}</label>
+                  <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); preserveDraftRangesForContextChange(); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
                   <label style={{ gridColumn: "1 / -1" }}>备注<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：底部有停顿、左臂被器械遮挡、这一组不作为动作质量标准" rows={2} /></label>
                 </div>
