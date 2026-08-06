@@ -11,12 +11,7 @@ import type { CameraView } from "../pose/formRuleEngine";
 import { analyzePoseSet } from "../pose/poseSetAnalysis";
 import type { PoseEstimate } from "../pose/PoseEngine";
 import { segmentRepsAuto } from "../pose/repSegmenter";
-import {
-  revocableCaptureUrlsExcluding,
-  reviewBootstrapSourceOrder,
-  reviewDraftAfterContextChange,
-  shouldSelectProcessedInboxCapture,
-} from "../pose/reviewCaptureState";
+import { reviewDraftAfterContextChange } from "../pose/reviewCaptureState";
 import { reviewKeyboardShortcut } from "../pose/reviewKeyboardShortcut";
 import {
   addReviewRange,
@@ -28,52 +23,9 @@ import {
 } from "../pose/reviewTimeline";
 import { selectTrainingWindow } from "../pose/trainingWindow";
 import { reviewedNegativeWindows, type TimeWindow } from "../pose/segmentationTraining";
-import {
-  buildApprovedLatPulldownTrajectorySample,
-  type LatPulldownTrajectorySample,
-} from "../pose/trajectoryDataset";
+import type { LatPulldownTrajectorySample } from "../pose/trajectoryDataset";
 import { CAPTURE_POSITIONS, type CapturePosition } from "../pose/viewGating";
 import { extractInboxVideoPoseFixture } from "../pose/inboxVideoPoseExtractor";
-
-interface ImportedLabels {
-  exerciseId?: string | null;
-  cameraView?: CameraView;
-  variation?: string | null;
-  trainingSide?: "bilateral" | "left" | "right";
-  profileVersion?: string | null;
-  model?: string | null;
-  capturePosition?: CapturePosition | null;
-  labels?: Array<{ repIndex: number; startMs: number; extremeMs: number; endMs: number }>;
-}
-
-interface ImportedCaptureMetadata {
-  exerciseId?: string | null;
-  cameraView?: CameraView;
-  variation?: string | null;
-  trainingSide?: "bilateral" | "left" | "right";
-  profileVersion?: string | null;
-  model?: string | null;
-  capturePosition?: CapturePosition | null;
-  rustNeedsReviewReps?: Array<ImportedRustCandidate>;
-  rustRejectedReps?: Array<ImportedRustCandidate>;
-  motionVersions?: {
-    contract?: { major?: number; minor?: number };
-    algorithm?: string;
-    config?: string;
-    inference?: string;
-    activeProfileIdentity?: string | null;
-    activeProfileHash?: string | null;
-  };
-  referenceComparison?: { status?: string; profileIdentity?: string | null } | null;
-}
-
-interface ImportedRustCandidate {
-  repId?: string;
-  startTimestampMs?: number;
-  peakTimestampMs?: number;
-  endTimestampMs?: number;
-  evidenceReason?: string | null;
-}
 
 interface ImportedFixture {
   video: string;
@@ -87,16 +39,8 @@ interface ReviewCapture {
   id: string;
   videoUrl: string;
   sourceSignature: string;
-  revokeVideoUrl: boolean;
   fixture: ImportedFixture;
-  labels: ImportedLabels | null;
-  metadata: ImportedCaptureMetadata | null;
-  sourceKind: "project" | "directory" | "manual" | "inbox";
-  inboxItem?: AnnotationInboxItem;
-}
-
-interface ProjectManifest {
-  captures: Array<{ id: string; video: string; keypoints: string; labels?: string; metadata?: string }>;
+  inboxItem: AnnotationInboxItem;
 }
 
 interface TrajectoryDatasetDecision {
@@ -136,12 +80,6 @@ interface ReviewAnalysisVersion {
   candidateId: string;
   approvedSegments: Candidate["segments"];
   weakNegativeWindows: TimeWindow[];
-  recognitionSnapshot: {
-    motionVersions: ImportedCaptureMetadata["motionVersions"] | null;
-    referenceStatus: string | null;
-    needsReviewCandidateCount: number;
-    rejectedCandidateCount: number;
-  };
   note?: string;
   algorithmVersion: "reviewed-canonical-replay/v1";
 }
@@ -165,7 +103,7 @@ interface Candidate {
   score: string;
   reason: string;
   segments: Array<{ repIndex: number; startMs: number; peakMs: number; endMs: number; note?: string }>;
-  tone: "recorded" | "current" | "caution";
+  tone: "current" | "caution";
 }
 
 interface ReviewRangeDrag {
@@ -183,34 +121,8 @@ interface ReviewSegmentEdit {
   historyCaptured: boolean;
 }
 
-interface ReplayReportRow {
-  capture: ReviewCapture;
-  quality: ReturnType<typeof qualityOf>;
-  historicalCount: number | null;
-  currentCount: number | null;
-  stableCount: number | null;
-  automaticCount: number;
-  excludedFrames: number;
-  priority: "high" | "normal" | "low";
-  reason: string;
-}
-
-interface DirectoryFileHandle {
-  kind: "file";
-  name: string;
-  getFile(): Promise<File>;
-}
-
-interface DirectoryHandle {
-  values(): AsyncIterableIterator<DirectoryFileHandle>;
-  queryPermission?: (descriptor?: { mode: "read" }) => Promise<"granted" | "denied" | "prompt">;
-}
-
 const APPROVAL_KEY = "form-coach-capture-approvals/v1";
 const DRAFT_KEY = "form-coach-capture-review-drafts/v1";
-const SOURCE_DATABASE = "form-coach-review-source";
-const SOURCE_STORE = "settings";
-const SOURCE_KEY = "downloads-directory";
 function analysisViewFor(position: CapturePosition | ""): CameraView | null {
   return CAPTURE_POSITIONS.find((item) => item.id === position)?.analysisView ?? null;
 }
@@ -253,10 +165,6 @@ function approvalValidationError(input: {
     previousRepIndex = segment.repIndex;
   }
   return null;
-}
-
-function baseName(name: string): string {
-  return name.replace(/\.labels\.json$/i, "").replace(/\.(webm|mp4|mov|json)$/i, "");
 }
 
 function formatTimelineTime(timestampMs: number): string {
@@ -318,7 +226,6 @@ function qualityOf(poses: PoseEstimate[]) {
 function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: CameraView): Candidate[] {
   const raw = capture.fixture.poses;
   const stable = selectTrainingWindow(raw);
-  const recorded = capture.labels?.labels ?? [];
   const toCandidate = (id: string, label: string, poses: PoseEstimate[], tone: Candidate["tone"]): Candidate => {
     if (!exerciseId) {
       return { id, label, count: 0, score: "等待动作", reason: "请先确认本组动作", segments: [], tone };
@@ -344,43 +251,10 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
   // includes supine bench press and push-up footage, where that heuristic can
   // discard the whole working set; keep the complete Rust-canonical replay as
   // the action-agnostic annotation suggestion.
-  const automatic = segmentRepsAuto(capture.inboxItem ? raw : stable.poses);
-  const rustNeedsReview = (capture.metadata?.rustNeedsReviewReps ?? [])
-    .filter((candidate) => [candidate.startTimestampMs, candidate.peakTimestampMs, candidate.endTimestampMs].every(Number.isFinite));
-  const rustReviewCandidate: Candidate | null = rustNeedsReview.length
-    ? {
-        id: "rust_needs_review",
-        label: "Rust 待审核候选（不计正式次数）",
-        count: rustNeedsReview.length,
-        score: "需要人工裁决",
-        reason: `原因：${[...new Set(rustNeedsReview.map((candidate) => candidate.evidenceReason ?? "短暂丢点恢复"))].join("、")}`,
-        segments: rustNeedsReview.map((candidate, index) => ({
-          repIndex: index + 1,
-          startMs: candidate.startTimestampMs!,
-          peakMs: candidate.peakTimestampMs!,
-          endMs: candidate.endTimestampMs!,
-        })),
-        tone: "caution",
-      }
-    : null;
+  const automatic = segmentRepsAuto(raw);
   return [
-    {
-      id: "recorded",
-      label: "录制时结果",
-      count: recorded.length,
-      score: capture.labels?.exerciseId ?? "没有历史标签",
-      reason: recorded.length ? "原始录制已经固化的分段" : "录制时没有生成可审批的标签",
-      segments: recorded.map((segment) => ({
-        repIndex: segment.repIndex,
-        startMs: segment.startMs,
-        peakMs: segment.extremeMs,
-        endMs: segment.endMs,
-      })),
-      tone: "recorded",
-    },
     toCandidate("raw", "当前规则 · 全部帧", raw, "caution"),
     toCandidate("stable", `当前规则 · 稳定段（排除 ${stable.excludedPoseCount} 帧）`, stable.poses, "current"),
-    ...(rustReviewCandidate ? [rustReviewCandidate] : []),
     {
       id: "auto",
       label: "动作无关 · 自动周期",
@@ -401,165 +275,6 @@ function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: C
 }
 
 /**
- * A compact, live version of the offline replay report.  It deliberately runs
- * the exact candidate builder used by the approval cards, so the dashboard
- * never shows a count that differs from the one an athlete can approve.
- */
-function replayReportFor(captures: ReviewCapture[]): ReplayReportRow[] {
-  return captures.map((capture): ReplayReportRow => {
-    const quality = qualityOf(capture.fixture.poses);
-    const exerciseId = capture.labels?.exerciseId ?? "";
-    const cameraView = capture.labels?.cameraView ?? "oblique45";
-    const candidates = candidatesFor(capture, exerciseId, cameraView);
-    const historical = candidates.find((candidate) => candidate.id === "recorded")?.count ?? null;
-    const current = candidates.find((candidate) => candidate.id === "raw")?.count ?? null;
-    const stable = candidates.find((candidate) => candidate.id === "stable")?.count ?? null;
-    const automatic = candidates.find((candidate) => candidate.id === "auto")?.count ?? 0;
-    const excludedFrames = selectTrainingWindow(capture.fixture.poses).excludedPoseCount;
-    if (!exerciseId) {
-      return { capture, quality, historicalCount: null, currentCount: null, stableCount: null, automaticCount: automatic, excludedFrames, priority: "high", reason: "缺少动作标签，专项规则未运行。" };
-    }
-    if (quality.posePercent < 90 || quality.torsoPercent < 85) {
-      return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "high", reason: "骨架或躯干覆盖不足，候选不能直接当真值。" };
-    }
-    if (stable !== historical || stable !== automatic) {
-      return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "high", reason: "候选计数不一致，需要播放视频裁决。" };
-    }
-    if (excludedFrames > 0) {
-      return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "normal", reason: "稳定窗口已排除进出机位帧。" };
-    }
-    return { capture, quality, historicalCount: historical, currentCount: current, stableCount: stable, automaticCount: automatic, excludedFrames, priority: "low", reason: "三种候选一致；仍请确认实际次数。" };
-  }).sort((a, b) => {
-    const weight = { high: 0, normal: 1, low: 2 };
-    return weight[a.priority] - weight[b.priority] || b.capture.id.localeCompare(a.capture.id);
-  });
-}
-
-async function parseCaptureFiles(
-  files: File[],
-  sourceKind: ReviewCapture["sourceKind"] = "manual",
-): Promise<ReviewCapture[]> {
-  const byName = new Map(files.map((file) => [file.name, file]));
-  const fixtures = files.filter((file) => /\.json$/i.test(file.name) && !/\.(labels|metadata)\.json$/i.test(file.name));
-  const captures: ReviewCapture[] = [];
-  for (const fixtureFile of fixtures) {
-    try {
-      const parsed = JSON.parse(await fixtureFile.text()) as ImportedFixture[];
-      const fixture = parsed[0];
-      if (!fixture || !Array.isArray(fixture.poses)) continue;
-      const id = baseName(fixtureFile.name);
-      const videoFile = ["webm", "mp4", "mov"]
-        .map((extension) => byName.get(`${id}.${extension}`))
-        .find((file): file is File => !!file);
-      if (!videoFile) continue;
-      const labelsFile = byName.get(`${id}.labels.json`);
-      const metadataFile = byName.get(`${id}.metadata.json`);
-      const metadata = metadataFile ? JSON.parse(await metadataFile.text()) as ImportedCaptureMetadata : null;
-      const importedLabels = labelsFile ? JSON.parse(await labelsFile.text()) as ImportedLabels : null;
-      const labels = importedLabels
-        ? { ...metadata, ...importedLabels }
-        : metadata?.exerciseId
-          ? { ...metadata, exerciseId: metadata.exerciseId }
-          : null;
-      captures.push({
-        id,
-        videoUrl: URL.createObjectURL(videoFile),
-        sourceSignature: `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`,
-        revokeVideoUrl: true,
-        fixture,
-        labels,
-        metadata,
-        sourceKind,
-      });
-    } catch {
-      // A non-capture JSON in Downloads is not a review failure.
-    }
-  }
-  return captures.sort((a, b) => b.id.localeCompare(a.id));
-}
-
-async function loadProjectCaptures(): Promise<ReviewCapture[]> {
-  const manifestResponse = await fetch("/archives/confirmed-captures/manifest.json", { cache: "no-store" });
-  if (!manifestResponse.ok) throw new Error("项目采集库清单不可用");
-  const manifest = await manifestResponse.json() as ProjectManifest;
-  const captures = await Promise.all(
-    manifest.captures.map(async (entry) => {
-      const fixtureResponse = await fetch(`/archives/confirmed-captures/${entry.keypoints}`, { cache: "no-store" });
-      if (!fixtureResponse.ok) throw new Error(`无法读取 ${entry.keypoints}`);
-      const parsed = await fixtureResponse.json() as ImportedFixture[];
-      const labels = entry.labels
-        ? await fetch(`/archives/confirmed-captures/${entry.labels}`, { cache: "no-store" }).then(async (response) =>
-            response.ok ? await response.json() as ImportedLabels : null,
-          )
-        : null;
-      const metadata = entry.metadata
-        ? await fetch(`/archives/confirmed-captures/${entry.metadata}`, { cache: "no-store" }).then(async (response) =>
-            response.ok ? await response.json() as ImportedCaptureMetadata : null,
-          )
-        : null;
-      const fixture = parsed[0];
-      if (!fixture || !Array.isArray(fixture.poses)) throw new Error(`采集关键点格式无效: ${entry.id}`);
-      return {
-        id: entry.id,
-        videoUrl: `/archives/confirmed-captures/${entry.video}`,
-        sourceSignature: entry.id,
-        revokeVideoUrl: false,
-        fixture,
-        labels: labels ? { ...metadata, ...labels } : metadata?.exerciseId ? metadata : null,
-        metadata,
-        sourceKind: "project",
-      } satisfies ReviewCapture;
-    }),
-  );
-  return captures.sort((a, b) => b.id.localeCompare(a.id));
-}
-
-function openSourceDatabase(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(SOURCE_DATABASE, 1);
-    request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(SOURCE_STORE)) {
-        request.result.createObjectStore(SOURCE_STORE);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("无法读取本机采集目录授权"));
-  });
-}
-
-async function persistDirectory(directory: DirectoryHandle): Promise<void> {
-  const database = await openSourceDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(SOURCE_STORE, "readwrite");
-    transaction.objectStore(SOURCE_STORE).put(directory, SOURCE_KEY);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("无法保存本机采集目录授权"));
-  });
-  database.close();
-}
-
-async function restoreDirectory(): Promise<DirectoryHandle | null> {
-  const database = await openSourceDatabase();
-  const handle = await new Promise<DirectoryHandle | null>((resolve, reject) => {
-    const request = database.transaction(SOURCE_STORE, "readonly").objectStore(SOURCE_STORE).get(SOURCE_KEY);
-    request.onsuccess = () => resolve((request.result as DirectoryHandle | undefined) ?? null);
-    request.onerror = () => reject(request.error ?? new Error("无法恢复本机采集目录授权"));
-  });
-  database.close();
-  return handle;
-}
-
-async function filesFromDirectory(directory: DirectoryHandle): Promise<File[]> {
-  const files: File[] = [];
-  for await (const entry of directory.values()) {
-    if (entry.kind === "file" && /field-capture-.*\.(json|webm|mp4|mov)$/i.test(entry.name)) {
-      files.push(await entry.getFile());
-    }
-  }
-  return files;
-}
-
-/**
  * Local-only evidence board. The athlete compares deterministic replays and
  * explicitly approves a ground-truth count; nothing is uploaded.
  */
@@ -570,13 +285,11 @@ export function CaptureApprovalPanel({
   compact?: boolean;
   keyboardShortcutsEnabled?: boolean;
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const reviewVideoRef = useRef<HTMLVideoElement | null>(null);
   const timelineTrackRef = useRef<HTMLDivElement | null>(null);
   const rangeDragRef = useRef<ReviewRangeDrag | null>(null);
   const segmentEditRef = useRef<ReviewSegmentEdit | null>(null);
   const numericEditSnapshotRef = useRef<Candidate["segments"] | null>(null);
-  const reviewInteractionRevisionRef = useRef(0);
   const capturesRef = useRef<ReviewCapture[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
@@ -597,7 +310,6 @@ export function CaptureApprovalPanel({
   const [draftCandidateId, setDraftCandidateId] = useState<string | null>(null);
   const [segmentUndoStack, setSegmentUndoStack] = useState<Candidate["segments"][]>([]);
   const [note, setNote] = useState("");
-  const [directoryConnected, setDirectoryConnected] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [currentVideoTimeMs, setCurrentVideoTimeMs] = useState(0);
@@ -619,9 +331,6 @@ export function CaptureApprovalPanel({
     () => selected ? candidatesFor(selected, exerciseId, cameraView) : [],
     [selected, exerciseId, cameraView],
   );
-  const replayReport = useMemo(() => replayReportFor(captures), [captures]);
-  const highPriorityCount = replayReport.filter((row) => row.priority === "high").length;
-  const consistentCount = replayReport.filter((row) => row.priority === "low").length;
   // A trajectory is materialized while the athlete approves it. We never
   // rebuild an accepted record from a different import later, because that
   // would make the same approval mean different data.
@@ -635,13 +344,6 @@ export function CaptureApprovalPanel({
   const eligibleTrajectorySamples = trajectoryDecisions.flatMap((decision) =>
     decision.decision === "eligible" && decision.sample ? [decision.sample] : [],
   );
-  const selectedTrajectoryDecision = selected
-    ? approvals[selected.id]?.trajectoryDataset ?? null
-    : null;
-
-  const markReviewInteraction = () => {
-    reviewInteractionRevisionRef.current += 1;
-  };
 
   // Every edit is durable before the user can move to another capture. This is
   // intentionally local-only and distinct from an approved ground-truth label.
@@ -668,86 +370,10 @@ export function CaptureApprovalPanel({
 
   const hasExportableLocalData = Object.keys(approvals).length > 0 || Object.keys(draftsRef.current).length > 0 || draftRevision > 0;
 
-  useEffect(() => () => {
-    revocableCaptureUrlsExcluding(capturesRef.current, []).forEach((url) => URL.revokeObjectURL(url));
-  }, []);
-
-  const installCaptures = (loaded: ReviewCapture[]) => {
-    if (!loaded.length) return false;
-    const unchanged =
-      capturesRef.current.length === loaded.length &&
-      capturesRef.current.every((capture, index) =>
-        capture.id === loaded[index]?.id &&
-        capture.sourceSignature === loaded[index]?.sourceSignature &&
-        capture.fixture.poses.length === loaded[index]?.fixture.poses.length,
-      );
-    if (unchanged) {
-      revocableCaptureUrlsExcluding(loaded, capturesRef.current)
-        .forEach((url) => URL.revokeObjectURL(url));
-      return true;
-    }
-    revocableCaptureUrlsExcluding(capturesRef.current, loaded)
-      .forEach((url) => URL.revokeObjectURL(url));
-    capturesRef.current = loaded;
-    setCaptures(loaded);
-    const retained = loaded.find((capture) => capture.id === selectedIdRef.current);
-    // Start an unattended review session with the riskiest evidence, not simply
-    // the newest recording. The same priority order is visible in the report.
-    const next = retained ?? replayReportFor(loaded)[0]?.capture ?? loaded[0];
-    if (!retained) {
-      selectedIdRef.current = next.id;
-      setSelectedId(next.id);
-      const storedApproval = approvalsRef.current[next.id];
-      const savedDraft = draftsRef.current[next.id];
-      setExerciseId(storedApproval?.exerciseId ?? savedDraft?.exerciseId ?? next.labels?.exerciseId ?? "");
-      const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? savedDraft?.capturePosition ?? next.labels?.capturePosition);
-      setCapturePosition(nextPosition);
-      setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? savedDraft?.cameraView ?? next.labels?.cameraView ?? "oblique45");
-      setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
-      setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
-      setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
-      setSegmentUndoStack(storedApproval ? [] : savedDraft?.segmentUndoStack ?? []);
-      setNote(storedApproval?.note ?? savedDraft?.note ?? "");
-      setCurrentVideoTimeMs(0);
-      rangeDragRef.current = null;
-      setRangeDrag(null);
-      setSelectedSegmentRepIndex(null);
-      segmentEditRef.current = null;
-    }
-    return true;
-  };
-
-  const mergeCaptureSource = (
-    loaded: ReviewCapture[],
-    replacedSource: ReviewCapture["sourceKind"],
-  ) => {
-    const loadedIds = new Set(loaded.map((capture) => capture.id));
-    installCaptures([
-      ...loaded,
-      ...capturesRef.current.filter((capture) =>
-        capture.sourceKind !== replacedSource && !loadedIds.has(capture.id),
-      ),
-    ]);
-    return loaded.length > 0;
-  };
-
-  const importFiles = async (files: File[]) => {
-    setError(null);
-    const loaded = await parseCaptureFiles(files, "manual");
-    if (!mergeCaptureSource(loaded, "manual")) {
-      setError("没有找到完整采集包：每组需要同名的 .webm/.mp4/.mov 与 .json 文件。");
-    }
-  };
-
-  const processInboxItem = async (item: AnnotationInboxItem, foreground = true) => {
-    const interactionRevisionAtStart = reviewInteractionRevisionRef.current;
-    const existing = capturesRef.current.find((capture) => capture.inboxItem?.id === item.id);
+  const processInboxItem = async (item: AnnotationInboxItem) => {
+    const existing = capturesRef.current.find((capture) => capture.inboxItem.id === item.id);
     if (existing) {
-      if (shouldSelectProcessedInboxCapture({
-        foreground,
-        interactionRevisionAtStart,
-        currentInteractionRevision: reviewInteractionRevisionRef.current,
-      })) chooseCapture(existing);
+      chooseCapture(existing);
       return;
     }
     if (processingInboxIdsRef.current.has(item.id)) return;
@@ -765,22 +391,16 @@ export function CaptureApprovalPanel({
         id: item.id,
         videoUrl: annotationInboxVideoUrl(item),
         sourceSignature: `annotation-inbox:${item.filename}:${item.sizeBytes}`,
-        revokeVideoUrl: false,
         fixture,
-        labels: null,
-        metadata: null,
-        sourceKind: "inbox",
         inboxItem: item,
       };
-      installCaptures([
+      const nextCaptures = [
         capture,
         ...capturesRef.current.filter((current) => current.id !== capture.id),
-      ]);
-      if (shouldSelectProcessedInboxCapture({
-        foreground,
-        interactionRevisionAtStart,
-        currentInteractionRevision: reviewInteractionRevisionRef.current,
-      })) chooseCapture(capture);
+      ];
+      capturesRef.current = nextCaptures;
+      setCaptures(nextCaptures);
+      chooseCapture(capture);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -789,84 +409,32 @@ export function CaptureApprovalPanel({
     }
   };
 
-  const refreshConnectedDirectory = async (directory?: DirectoryHandle) => {
-    try {
-      const saved = directory ?? await restoreDirectory();
-      if (!saved) return;
-      const permission = saved.queryPermission ? await saved.queryPermission({ mode: "read" }) : "granted";
-      if (permission !== "granted") {
-        setDirectoryConnected(false);
-        return;
-      }
-      const loaded = await parseCaptureFiles(await filesFromDirectory(saved), "directory");
-      if (mergeCaptureSource(loaded, "directory")) setDirectoryConnected(true);
-    } catch {
-      // A browser can revoke a persisted handle. The manual import control
-      // remains available and is the recovery path.
-      setDirectoryConnected(false);
-    }
-  };
-
   useEffect(() => {
     if (!inboxInitializedRef.current) {
       inboxInitializedRef.current = true;
-      void Promise.allSettled([loadAnnotationInbox(), loadProjectCaptures()])
-        .then(async ([inboxResult, projectResult]) => {
-          const firstInboxItem = inboxResult.status === "fulfilled"
-            ? inboxResult.value.items[0]
-            : undefined;
-          if (inboxResult.status === "rejected") {
-            setInboxWarning(inboxResult.reason instanceof Error ? inboxResult.reason.message : String(inboxResult.reason));
-          } else {
-            inboxItemsRef.current = inboxResult.value.items;
-            setInboxItems(inboxResult.value.items);
-          }
-          for (const source of reviewBootstrapSourceOrder({
-            hasInboxVideo: firstInboxItem !== undefined,
-            hasProjectCaptures: projectResult.status === "fulfilled" && projectResult.value.length > 0,
-          })) {
-            if (source === "inbox") await processInboxItem(firstInboxItem!, false);
-            else if (projectResult.status === "fulfilled") mergeCaptureSource(projectResult.value, "project");
-          }
-          if (projectResult.status === "rejected" && inboxResult.status === "rejected") {
-            setError(projectResult.reason instanceof Error ? projectResult.reason.message : String(projectResult.reason));
-          }
+      void loadAnnotationInbox()
+        .then(async (manifest) => {
+          inboxItemsRef.current = manifest.items;
+          setInboxItems(manifest.items);
+          if (manifest.items[0]) await processInboxItem(manifest.items[0]);
+        })
+        .catch((caught) => {
+          setInboxWarning(caught instanceof Error ? caught.message : String(caught));
         });
     }
-    void refreshConnectedDirectory();
-    const timer = window.setInterval(() => void refreshConnectedDirectory(), 10_000);
-    return () => window.clearInterval(timer);
-  // Only establish the background directory watcher once; user selections
-  // remain local state and must not restart it.
+  // Establish the one local new-video source once; user selections remain state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const importDirectory = async () => {
-    const picker = (window as unknown as { showDirectoryPicker?: () => Promise<DirectoryHandle> }).showDirectoryPicker;
-    if (!picker) {
-      fileInputRef.current?.click();
-      return;
-    }
-    try {
-      const directory = await picker();
-      await persistDirectory(directory);
-      await refreshConnectedDirectory(directory);
-    } catch (caught) {
-      if ((caught as DOMException)?.name !== "AbortError") {
-        setError(caught instanceof Error ? caught.message : String(caught));
-      }
-    }
-  };
 
   const chooseCapture = (capture: ReviewCapture) => {
     const storedApproval = approvalsRef.current[capture.id];
     const savedDraft = draftsRef.current[capture.id];
     selectedIdRef.current = capture.id;
     setSelectedId(capture.id);
-    setExerciseId(storedApproval?.exerciseId ?? savedDraft?.exerciseId ?? capture.labels?.exerciseId ?? "");
-    const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? savedDraft?.capturePosition ?? capture.labels?.capturePosition);
+    setExerciseId(storedApproval?.exerciseId ?? savedDraft?.exerciseId ?? "");
+    const nextPosition = importedCapturePosition(storedApproval?.capturePosition ?? savedDraft?.capturePosition);
     setCapturePosition(nextPosition);
-    setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? savedDraft?.cameraView ?? capture.labels?.cameraView ?? "oblique45");
+    setCameraView(analysisViewFor(nextPosition) ?? storedApproval?.cameraView ?? savedDraft?.cameraView ?? "oblique45");
     setExpectedCount(storedApproval?.expectedCount ?? savedDraft?.expectedCount ?? "");
     setDraftSegments(storedApproval?.approvedSegments ?? savedDraft?.draftSegments ?? []);
     setDraftCandidateId(storedApproval?.candidateId ?? savedDraft?.draftCandidateId ?? null);
@@ -1106,29 +674,6 @@ export function CaptureApprovalPanel({
     // The physical placement is the source of truth. The smaller CameraView
     // vocabulary is derived from it rather than being independently editable.
     const approvedCameraView = analysisViewFor(capturePosition) ?? cameraView;
-    const trajectoryBuild = exerciseId === "lat_pulldown"
-      ? buildApprovedLatPulldownTrajectorySample({
-          captureId: selected.id,
-          exerciseId,
-          cameraView: approvedCameraView,
-          capturePosition: confirmedPosition,
-          approvedAt,
-          expectedCount,
-          approvedSegments: draftSegments,
-          poses: selected.fixture.poses,
-          model: selected.fixture.model ?? selected.labels?.model ?? null,
-        })
-      : null;
-    const trajectoryDataset: TrajectoryDatasetDecision | null = trajectoryBuild
-      ? trajectoryBuild.status === "ready"
-        ? {
-            decision: trajectoryBuild.sample.quality.eligibleForSegmentationTraining ? "eligible" : "quarantined",
-            reason: trajectoryBuild.sample.quality.reason,
-            sample: trajectoryBuild.sample,
-            recordedAt: approvedAt,
-          }
-        : { decision: "quarantined", reason: trajectoryBuild.reason, sample: null, recordedAt: approvedAt }
-      : null;
     const previous = approvals[selected.id];
     const analysisVersions: readonly ReviewAnalysisVersion[] = [
       ...(previous?.analysisVersions ?? (previous ? [{
@@ -1140,12 +685,6 @@ export function CaptureApprovalPanel({
         candidateId: previous.candidateId,
         approvedSegments: previous.approvedSegments,
         weakNegativeWindows: reviewedNegativeWindows(selectedDurationMs, previous.approvedSegments),
-        recognitionSnapshot: {
-          motionVersions: selected.metadata?.motionVersions ?? null,
-          referenceStatus: selected.metadata?.referenceComparison?.status ?? null,
-          needsReviewCandidateCount: selected.metadata?.rustNeedsReviewReps?.length ?? 0,
-          rejectedCandidateCount: selected.metadata?.rustRejectedReps?.length ?? 0,
-        },
         note: previous.note,
         algorithmVersion: "reviewed-canonical-replay/v1" as const,
       }] : [])),
@@ -1158,12 +697,6 @@ export function CaptureApprovalPanel({
         candidateId: draftCandidateId,
         approvedSegments: draftSegments.map((segment) => ({ ...segment })),
         weakNegativeWindows: reviewedNegativeWindows(selectedDurationMs, draftSegments),
-        recognitionSnapshot: {
-          motionVersions: selected.metadata?.motionVersions ?? null,
-          referenceStatus: selected.metadata?.referenceComparison?.status ?? null,
-          needsReviewCandidateCount: selected.metadata?.rustNeedsReviewReps?.length ?? 0,
-          rejectedCandidateCount: selected.metadata?.rustRejectedReps?.length ?? 0,
-        },
         note: note.trim(),
         algorithmVersion: "reviewed-canonical-replay/v1",
       },
@@ -1174,47 +707,44 @@ export function CaptureApprovalPanel({
       candidateCount: draftSegments.length,
       exerciseId,
       cameraView: approvedCameraView,
-      variation: selected.labels?.variation ?? null,
-      trainingSide: selected.labels?.trainingSide ?? null,
-      profileVersion: selected.labels?.profileVersion ?? null,
-      model: selected.fixture.model ?? selected.labels?.model ?? "unknown",
+      variation: null,
+      trainingSide: null,
+      profileVersion: null,
+      model: selected.fixture.model ?? "unknown",
       approvedSegments: draftSegments,
       approvedAt,
       note: note.trim(),
       capturePosition: confirmedPosition,
-      trajectoryDataset,
       analysisVersions,
     };
-    if (selected.inboxItem) {
-      setInboxWork({ itemId: selected.inboxItem.id, phase: "archiving", progress: 1 });
-      try {
-        await completeReviewedInboxItem({
-          item: selected.inboxItem,
-          fixture: {
-            ...selected.fixture,
-            stepMs: selected.fixture.stepMs ?? (
-              selected.fixture.poses.length > 1
-                ? selected.fixture.durationSec * 1000 / (selected.fixture.poses.length - 1)
-                : 0
-            ),
-            model: selected.fixture.model ?? "unknown",
-          },
-          approval: {
-            exerciseId: approvedRecord.exerciseId,
-            cameraView: approvedRecord.cameraView,
-            capturePosition: confirmedPosition!,
-            expectedCount: approvedRecord.expectedCount,
-            approvedAt: approvedRecord.approvedAt,
-            approvedSegments: approvedRecord.approvedSegments,
-            candidateId: approvedRecord.candidateId,
-            note: approvedRecord.note,
-          },
-        });
-      } catch (caught) {
-        setInboxWork(null);
-        setError(caught instanceof Error ? caught.message : String(caught));
-        return;
-      }
+    setInboxWork({ itemId: selected.inboxItem.id, phase: "archiving", progress: 1 });
+    try {
+      await completeReviewedInboxItem({
+        item: selected.inboxItem,
+        fixture: {
+          ...selected.fixture,
+          stepMs: selected.fixture.stepMs ?? (
+            selected.fixture.poses.length > 1
+              ? selected.fixture.durationSec * 1000 / (selected.fixture.poses.length - 1)
+              : 0
+          ),
+          model: selected.fixture.model ?? "unknown",
+        },
+        approval: {
+          exerciseId: approvedRecord.exerciseId,
+          cameraView: approvedRecord.cameraView,
+          capturePosition: confirmedPosition!,
+          expectedCount: approvedRecord.expectedCount,
+          approvedAt: approvedRecord.approvedAt,
+          approvedSegments: approvedRecord.approvedSegments,
+          candidateId: approvedRecord.candidateId,
+          note: approvedRecord.note,
+        },
+      });
+    } catch (caught) {
+      setInboxWork(null);
+      setError(caught instanceof Error ? caught.message : String(caught));
+      return;
     }
     const next: Record<string, Approval> = { ...approvals, [selected.id]: approvedRecord };
     approvalsRef.current = next;
@@ -1224,43 +754,23 @@ export function CaptureApprovalPanel({
     } catch {
       setError("审批已归档，但浏览器未允许写入本机审批缓存。");
     }
-    if (!selected.inboxItem) {
-      // Imported capture packages retain the legacy portable-download fallback.
-      downloadJson(
-        { version: "capture-approval/v3", approvals: next },
-        `field-capture-approval-${selected.id}.json`,
-      );
-    }
-    if (trajectoryDataset?.decision === "eligible" && trajectoryDataset.sample) {
-      downloadJson({
-        schemaVersion: "form-coach-trajectory-dataset/v1",
-        exerciseId: "lat_pulldown",
-        intendedUse: "rep_segmentation_observation",
-        formReference: "not_labeled",
-        generatedAt: approvedAt,
-        samples: [trajectoryDataset.sample],
-        quarantined: [],
-      }, `lat-pulldown-segmentation-trajectory-${selected.id}.json`);
-    }
-    if (selected.inboxItem) {
-      const completedId = selected.inboxItem.id;
-      const remaining = inboxItems.filter((item) => item.id !== completedId);
-      inboxItemsRef.current = remaining;
-      setInboxItems(remaining);
-      const remainingCaptures = capturesRef.current.filter((capture) => capture.id !== selected.id);
-      capturesRef.current = remainingCaptures;
-      setCaptures(remainingCaptures);
-      selectedIdRef.current = null;
-      setSelectedId(null);
-      const drafts = { ...draftsRef.current };
-      delete drafts[selected.id];
-      draftsRef.current = drafts;
-      saveDrafts(drafts);
-      setInboxWork(null);
-      setExportNotice(`✓ ${selected.inboxItem.filename} 已归档并从 new-video 移出。`);
-      if (remaining[0]) void processInboxItem(remaining[0]);
-      else if (remainingCaptures[0]) chooseCapture(remainingCaptures[0]);
-    }
+    const completedId = selected.inboxItem.id;
+    const remaining = inboxItems.filter((item) => item.id !== completedId);
+    inboxItemsRef.current = remaining;
+    setInboxItems(remaining);
+    const remainingCaptures = capturesRef.current.filter((capture) => capture.id !== selected.id);
+    capturesRef.current = remainingCaptures;
+    setCaptures(remainingCaptures);
+    selectedIdRef.current = null;
+    setSelectedId(null);
+    const drafts = { ...draftsRef.current };
+    delete drafts[selected.id];
+    draftsRef.current = drafts;
+    saveDrafts(drafts);
+    setInboxWork(null);
+    setExportNotice(`✓ ${selected.inboxItem.filename} 已归档并从 new-video 移出。`);
+    if (remaining[0]) void processInboxItem(remaining[0]);
+    else if (remainingCaptures[0]) chooseCapture(remainingCaptures[0]);
   };
 
   const exportApprovals = () => {
@@ -1303,35 +813,17 @@ export function CaptureApprovalPanel({
   };
 
   return (
-    <section
-      style={styles.shell}
-      onPointerDownCapture={markReviewInteraction}
-      onKeyDownCapture={markReviewInteraction}
-    >
+    <section style={styles.shell}>
       <header style={styles.header}>
         <div>
           <div style={styles.kicker}>FIELD EVIDENCE / 本机审核</div>
           <h2 style={styles.title}>{compact ? "逐组视频审核标注" : "训练录像审批台"}</h2>
-          <p style={styles.subtitle}>{directoryConnected ? "Downloads 已连接 · 每 10 秒自动加载新的导出包" : "同一关键点序列的固定回放对比；审批结果只保存在这台设备。"} 审批只标注动作、次数与边界，不把你的训练动作当成标准姿势。</p>
+          <p style={styles.subtitle}>new-video 是唯一标注输入；批准后自动迁入正式档案。审批只标注动作、次数与边界，不把你的训练动作当成标准姿势。</p>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-          <button style={styles.importButton} onClick={() => void importDirectory()}>导入 Downloads 采集包</button>
-          <button style={styles.manualImport} onClick={() => fileInputRef.current?.click()}>手动选择文件</button>
           <button style={styles.manualImport} disabled={!hasExportableLocalData} onClick={exportApprovals}>导出审批真值</button>
           <button style={styles.manualImport} disabled={!eligibleTrajectorySamples.length} onClick={exportLatPulldownTrajectoryDataset}>导出高位下拉分段轨迹数据</button>
         </div>
-        <input
-          data-testid="capture-review-files"
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept=".json,.webm,.mp4,.mov"
-          style={{ display: "none" }}
-          onChange={(event) => {
-            void importFiles(Array.from(event.currentTarget.files ?? []));
-            event.currentTarget.value = "";
-          }}
-        />
       </header>
       {inboxItems.length > 0 && (
         <div style={styles.inboxBar}>
@@ -1341,7 +833,7 @@ export function CaptureApprovalPanel({
           </div>
           <select
             aria-label="待标注视频"
-            value={inboxWork?.itemId ?? selected?.inboxItem?.id ?? ""}
+            value={inboxWork?.itemId ?? selected?.inboxItem.id ?? ""}
             disabled={inboxWork !== null}
             onChange={(event) => {
               const item = inboxItems.find((candidate) => candidate.id === event.target.value);
@@ -1360,37 +852,8 @@ export function CaptureApprovalPanel({
       {inboxWarning && <p style={styles.inboxWarning}>待标注收件箱未加载：{inboxWarning}</p>}
       {error && <p style={styles.error}>{error}</p>}
       {exportNotice && <p style={styles.exportNotice}>{exportNotice}</p>}
-      {!compact && !!replayReport.length && (
-        <section style={styles.replayShell} aria-label="算法重放报告">
-          <div style={styles.replayIntro}>
-            <div>
-              <div style={styles.kicker}>ALGORITHM REPLAY / 当前骨架回放</div>
-              <h3 style={styles.replayTitle}>本机算法重放报告</h3>
-              <p style={styles.replayCopy}>同一份 canonical 骨架数据，同时驱动这里的候选计数、视频标记与最终审批。</p>
-            </div>
-            <div style={styles.metrics}>
-              <span><b>{replayReport.length}</b> 组已重放</span>
-              <span style={{ color: highPriorityCount ? "#ffbd6f" : "#7cffbc" }}><b>{highPriorityCount}</b> 组优先审核</span>
-              <span><b>{consistentCount}</b> 组候选一致</span>
-              <span style={{ color: eligibleTrajectorySamples.length ? "#7cffbc" : "#89aaa1" }}><b>{eligibleTrajectorySamples.length}</b> 组高位下拉分段观察</span>
-            </div>
-          </div>
-          <div style={styles.replayRows}>
-            {replayReport.map((row) => (
-              <button key={row.capture.id} onClick={() => chooseCapture(row.capture)} style={{ ...styles.replayRow, ...(row.capture.id === selected?.id ? styles.replayRowActive : {}) }}>
-                <span style={{ ...styles.priority, ...(row.priority === "high" ? styles.priorityHigh : row.priority === "normal" ? styles.priorityNormal : styles.priorityLow) }}>{row.priority === "high" ? "优先" : row.priority === "normal" ? "复核" : "一致"}</span>
-                <span style={styles.replayStamp}>{row.capture.id.replace("field-capture-2026-08-02T", "").replace("Z", "")}</span>
-                <span style={styles.replayAction}>{row.capture.labels?.exerciseId ?? "未标动作"}</span>
-                <span style={styles.replayNumbers}>历史 {row.historicalCount ?? "—"} · 全帧 {row.currentCount ?? "—"} · 稳定段 {row.stableCount ?? "—"} · 周期 {row.automaticCount}</span>
-                <span style={styles.replayQuality}>POSE {row.quality.posePercent}% / 躯干 {row.quality.torsoPercent}%</span>
-                <span style={styles.replayReason}>{row.reason}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
       {!captures.length ? (
-        <p style={styles.empty}>{inboxWork ? "正在从待标注视频生成 canonical 骨架…" : "待标注目录为空；也可以选择 Downloads 文件夹导入成套采集文件。"}</p>
+        <p style={styles.empty}>{inboxWork ? "正在从待标注视频生成 canonical 骨架…" : "new-video 待标注目录为空。"}</p>
       ) : (
         <div style={compact ? styles.compactGrid : styles.grid}>
           {!compact && <nav style={styles.ledger} aria-label="采集组列表">
@@ -1400,7 +863,7 @@ export function CaptureApprovalPanel({
               return (
                 <button key={capture.id} onClick={() => chooseCapture(capture)} style={{ ...styles.capture, ...(capture.id === selected?.id ? styles.captureActive : {}) }}>
                   <strong>{capture.id.replace("field-capture-", "")}</strong>
-                  <span>{capture.labels?.exerciseId ?? "未标动作"} · {capture.fixture.durationSec.toFixed(1)}s</span>
+                  <span>{approved?.exerciseId ?? "未标动作"} · {capture.fixture.durationSec.toFixed(1)}s</span>
                   <span style={{ color: report.posePercent >= 90 ? "#7cffbc" : "#ffbd6f" }}>骨架 {report.posePercent}%</span>
                   {approved && <em>已审批 · {approved.expectedCount || "未填次数"} 次</em>}
                 </button>
@@ -1418,8 +881,6 @@ export function CaptureApprovalPanel({
                   controls
                   preload="metadata"
                   style={styles.video}
-                  onPlay={markReviewInteraction}
-                  onSeeking={markReviewInteraction}
                   onTimeUpdate={(event) => setCurrentVideoTimeMs(event.currentTarget.currentTime * 1000)}
                 />
                 <div style={styles.timelineShell}>
@@ -1548,7 +1009,7 @@ export function CaptureApprovalPanel({
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
-                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); preserveDraftRangesForContextChange(); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && (!selected.inboxItem || exercise.maturity === "catalog_only")).map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · {exercise.maturity === "catalog_only" ? "仅采集" : "实验"}</option>)}</optgroup>)}</select>{selected.inboxItem && <small>待标注收件箱只建立尚无 Rust profile 的动作真值，不在 TypeScript 中替代正式计数。</small>}</label>
+                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); preserveDraftRangesForContextChange(); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && exercise.maturity === "catalog_only").map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · 仅采集</option>)}</optgroup>)}</select><small>待标注收件箱只建立尚无 Rust profile 的动作真值，不在 TypeScript 中替代正式计数。</small></label>
                   <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); preserveDraftRangesForContextChange(); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
                   <label style={{ gridColumn: "1 / -1" }}>备注<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：底部有停顿、左臂被器械遮挡、这一组不作为动作质量标准" rows={2} /></label>
@@ -1599,14 +1060,6 @@ export function CaptureApprovalPanel({
                   </div>
                 )}
                 {approvals[selected.id] && <p style={styles.approved}>✓ 已批准：{approvals[selected.id].candidateId}；实际 {approvals[selected.id].expectedCount || "未填写"} 次 · {approvals[selected.id].trainingSide ?? "未标侧别"}{approvals[selected.id].variation ? ` · ${approvals[selected.id].variation}` : ""}{approvals[selected.id].note ? ` · 备注：${approvals[selected.id].note}` : ""} · 审核版本 {approvals[selected.id].analysisVersions?.length ?? 1}（每版保留弱负样本）</p>}
-                {!!selected.metadata?.rustRejectedReps?.length && <p style={styles.trajectoryWarning}>Rust 已过滤 {selected.metadata.rustRejectedReps.length} 个候选：{[...new Set(selected.metadata.rustRejectedReps.map((candidate) => candidate.evidenceReason ?? "未说明"))].join("、")}。它们保留为证据，不能直接批准为正式次数。</p>}
-                {approvals[selected.id]?.exerciseId === "lat_pulldown" && (
-                  selectedTrajectoryDecision?.sample ? (
-                    <p style={selectedTrajectoryDecision.decision === "eligible" ? styles.trajectoryReady : styles.trajectoryWarning}>
-                      轨迹库：{selectedTrajectoryDecision.decision === "eligible" ? "可用于分段训练（非标准动作模板）" : "已隔离，不参与训练"} · 特征覆盖 {Math.round(selectedTrajectoryDecision.sample.quality.meanFeatureCoverage * 100)}%
-                    </p>
-                  ) : selectedTrajectoryDecision ? <p style={styles.trajectoryWarning}>轨迹库：已隔离 · {selectedTrajectoryDecision.reason}</p> : <p style={styles.trajectoryWarning}>轨迹库：旧审批尚未固化轨迹，请重新批准一次。</p>
-                )}
               </div>
             </div>
           )}
@@ -1625,28 +1078,10 @@ const styles: Record<string, React.CSSProperties> = {
   inboxBar: { display: "flex", alignItems: "center", gap: 12, padding: "11px 20px", borderBottom: "1px solid #315b50", background: "#0d261f", color: "#d8eee4", fontSize: 11 },
   inboxProgress: { color: "#ffcf83", whiteSpace: "nowrap" },
   inboxWarning: { margin: 16, color: "#ffbd6f", fontSize: 12 },
-  importButton: { border: "1px solid #72e6a8", background: "#123b2d", color: "#dffff0", padding: "10px 13px", cursor: "pointer", font: "inherit", fontSize: 12 },
   manualImport: { border: "1px solid #42685d", background: "#0b201a", color: "#b8d7cc", padding: "10px 11px", cursor: "pointer", font: "inherit", fontSize: 12 },
   error: { margin: 16, color: "#ff9b83" },
   exportNotice: { margin: 16, color: "#7cffbc", fontSize: 12 },
   empty: { padding: 22, color: "#89aaa1" },
-  replayShell: { borderBottom: "1px solid #24443e", background: "linear-gradient(90deg, rgba(17,51,42,.66), rgba(7,19,16,.32))" },
-  replayIntro: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "end", padding: "16px 20px 12px" },
-  replayTitle: { margin: "5px 0", fontSize: 16, letterSpacing: .6 },
-  replayCopy: { margin: 0, maxWidth: 640, color: "#89aaa1", fontSize: 11, lineHeight: 1.5 },
-  metrics: { display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 10, color: "#b8d7cc", fontSize: 11, textAlign: "right" },
-  replayRows: { maxHeight: 260, overflowY: "auto", borderTop: "1px solid #24443e", padding: 7, display: "grid", gap: 4 },
-  replayRow: { display: "grid", gridTemplateColumns: "44px 104px 128px minmax(172px, .8fr) minmax(126px, .68fr) minmax(190px, 1fr)", alignItems: "center", gap: 8, width: "100%", padding: "8px 9px", color: "#b8d7cc", background: "rgba(5,15,13,.3)", border: "1px solid transparent", cursor: "pointer", textAlign: "left", font: "inherit", fontSize: 10 },
-  replayRowActive: { borderColor: "#5bc795", background: "#12342c", color: "#effff6" },
-  priority: { padding: "3px 4px", textAlign: "center", fontSize: 9, letterSpacing: .5 },
-  priorityHigh: { color: "#1a1000", background: "#ffbd6f" },
-  priorityNormal: { color: "#101c1a", background: "#a8d6c0" },
-  priorityLow: { color: "#042215", background: "#7cffbc" },
-  replayStamp: { color: "#d8eee4" },
-  replayAction: { color: "#84d8ad" },
-  replayNumbers: { color: "#e5c78a" },
-  replayQuality: { color: "#91b9aa" },
-  replayReason: { color: "#78988d", lineHeight: 1.35 },
   grid: { display: "grid", gridTemplateColumns: "minmax(200px, .55fr) minmax(0, 1.8fr)", minHeight: 440 },
   compactGrid: { minHeight: 440 },
   ledger: { borderRight: "1px solid #24443e", maxHeight: 610, overflowY: "auto", padding: 8 },
@@ -1685,6 +1120,4 @@ const styles: Record<string, React.CSSProperties> = {
   repButtons: { display: "flex", gap: 4, flexWrap: "wrap", margin: "8px 0" },
   approve: { border: "1px solid #69df9f", background: "#174631", color: "#e6fff0", padding: "5px 8px", cursor: "pointer", font: "inherit", fontSize: 11 },
   approved: { color: "#8affbd", fontSize: 12 },
-  trajectoryReady: { margin: "7px 0 0", color: "#7cffbc", fontSize: 12 },
-  trajectoryWarning: { margin: "7px 0 0", color: "#ffbd6f", fontSize: 12, lineHeight: 1.5 },
 };
