@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   revocableCaptureUrlsExcluding,
+  reviewBootstrapSourceOrder,
   reviewDraftAfterContextChange,
   shouldSelectProcessedInboxCapture,
 } from "../../src/pose/reviewCaptureState";
@@ -27,6 +28,21 @@ test("changing exercise or capture position preserves reviewed rep ranges", () =
     candidateId: null,
     segments: [],
   });
+});
+
+test("review bootstrap gives new-video precedence over archived captures", () => {
+  assert.deepEqual(reviewBootstrapSourceOrder({
+    hasInboxVideo: true,
+    hasProjectCaptures: true,
+  }), ["inbox", "project"]);
+  assert.deepEqual(reviewBootstrapSourceOrder({
+    hasInboxVideo: false,
+    hasProjectCaptures: true,
+  }), ["project"]);
+  assert.deepEqual(reviewBootstrapSourceOrder({
+    hasInboxVideo: true,
+    hasProjectCaptures: false,
+  }), ["inbox"]);
 });
 
 test("background inbox tracking never steals selection after review interaction", () => {

@@ -13,6 +13,7 @@ import type { PoseEstimate } from "../pose/PoseEngine";
 import { segmentRepsAuto } from "../pose/repSegmenter";
 import {
   revocableCaptureUrlsExcluding,
+  reviewBootstrapSourceOrder,
   reviewDraftAfterContextChange,
   shouldSelectProcessedInboxCapture,
 } from "../pose/reviewCaptureState";
@@ -811,15 +812,21 @@ export function CaptureApprovalPanel({
       inboxInitializedRef.current = true;
       void Promise.allSettled([loadAnnotationInbox(), loadProjectCaptures()])
         .then(async ([inboxResult, projectResult]) => {
-          if (projectResult.status === "fulfilled") {
-            mergeCaptureSource(projectResult.value, "project");
-          }
+          const firstInboxItem = inboxResult.status === "fulfilled"
+            ? inboxResult.value.items[0]
+            : undefined;
           if (inboxResult.status === "rejected") {
             setInboxWarning(inboxResult.reason instanceof Error ? inboxResult.reason.message : String(inboxResult.reason));
           } else {
             inboxItemsRef.current = inboxResult.value.items;
             setInboxItems(inboxResult.value.items);
-            if (inboxResult.value.items[0]) await processInboxItem(inboxResult.value.items[0], false);
+          }
+          for (const source of reviewBootstrapSourceOrder({
+            hasInboxVideo: firstInboxItem !== undefined,
+            hasProjectCaptures: projectResult.status === "fulfilled" && projectResult.value.length > 0,
+          })) {
+            if (source === "inbox") await processInboxItem(firstInboxItem!, false);
+            else if (projectResult.status === "fulfilled") mergeCaptureSource(projectResult.value, "project");
           }
           if (projectResult.status === "rejected" && inboxResult.status === "rejected") {
             setError(projectResult.reason instanceof Error ? projectResult.reason.message : String(projectResult.reason));
