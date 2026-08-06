@@ -12,6 +12,9 @@
 - **Needs-review rep**: a candidate with a usable but insufficiently reliable observation, preserved for user review and excluded from formal volume until approved.
 - **Rejected candidate**: a proposed cycle that failed a stated evidence rule; it is retained as diagnostic evidence but is not a rep.
 - **Simulation baseline**: a five-split 32-node phase template. It can guide exploratory trajectory comparison and recommended camera position, but cannot produce a correctness score, medical claim, or automatic rep rejection.
+- **Expected muscle association**: curated exercise knowledge linking an exact exercise context and phase to muscles that commonly contribute mechanically. It is metadata, never an observation of activation or force in the current athlete.
+- **Observed movement strategy**: canonical-packet evidence describing how visible joints moved within a matched exercise context, such as relative hip/knee excursion, phase timing, or bilateral rhythm. It does not name the muscles that actually produced the movement.
+- **Mechanical-demand tendency**: a conditional, evidence-labelled interpretation that an observed movement strategy may shift mechanical demand toward a joint action or muscle group under the same exercise, load, and view context. It is not a muscle-activation percentage or a correctness verdict.
 
 ## Non-negotiable invariants
 
