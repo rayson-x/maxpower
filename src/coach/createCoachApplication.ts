@@ -129,12 +129,16 @@ import {
 } from "../workout";
 import {
   deriveRecoveryTimelineEvidence,
+  deriveDailyEvaluation,
   evaluateRecovery,
   type RecoveryCheckIn,
   type RecoveryRulePack,
 } from "../recovery";
 import {
   createNutritionStrategy,
+  deriveNextMealRecommendation,
+  deriveNutritionDayPlan,
+  projectNutritionDayLedger,
   deriveNutritionReviewEvidence,
   nutritionSafetyBlockReason,
   proposeNutritionPlanCoordination,
@@ -144,9 +148,12 @@ import {
   type NutritionObservationProviderResolver,
   type NutritionObservationRequest,
   type NutritionStrategyRulePack,
+  type NextMealRecommendation,
 } from "../nutrition";
 import {
   evaluateReplan,
+  deriveMetricRegistry,
+  derivePhaseTransitionProposal,
   weeklyCoachReport,
   type ReplanTrigger,
 } from "../replanning";
@@ -354,9 +361,10 @@ export class CoachApplication {
 
   /** Persist an immutable, local planning preview without materializing any plan facts. */
   async createPlanningPreview(
-    input: Omit<PlannerRequest, "facts"> & { userId: string; idempotencyKey: string; recomputeOf?: string },
+    input: Omit<PlannerRequest, "facts"> & { userId: string; idempotencyKey: string; recomputeOf?: string; phaseTransition?: import("../replanning").PhaseTransitionProposal },
   ): Promise<EvidenceBriefArtifact> {
-    const decision = await this.previewGoalCycle(input);
+    const { phaseTransition, ...plannerInput } = input;
+    const decision = await this.previewGoalCycle(plannerInput);
     const now = this.runtime.now();
     const artifactId = `planning-preview-${stableHash({
       userId: input.userId,
@@ -367,6 +375,7 @@ export class CoachApplication {
       },
       ...(input.recomputeOf ? { recomputeOf: input.recomputeOf } : {}),
       decision,
+      ...(phaseTransition ? { phaseTransition } : {}),
     })}`;
     const existing = (await this.ledger.read()).artifacts.find(
       (artifact): artifact is import("./model").EvidenceBriefArtifact =>
@@ -393,7 +402,7 @@ export class CoachApplication {
       evidenceRefs: decision.kind === "plan_proposal" || decision.kind === "infeasible_plan" ? decision.evidenceRefs : [],
       missingness: decision.kind === "plan_proposal" ? decision.missing : decision.kind === "infeasible_plan" ? decision.reasonCodes : [],
       capabilityBoundary: ["immutable_preview_only", "local_rule_engine_only", "unknown_facts_are_not_inferred"],
-      hash: stableHash({ artifactId, decision }),
+      hash: stableHash({ artifactId, decision, ...(phaseTransition ? { phaseTransition } : {}) }),
       ...(decision.kind === "plan_proposal" || decision.kind === "infeasible_plan" ? { knowledgePins: decision.knowledgePins } : {}),
       title: "长期计划预览",
       summary,
@@ -411,6 +420,7 @@ export class CoachApplication {
             },
           }
         : {}),
+      ...(phaseTransition ? { phaseTransition } : {}),
     };
     const refs = decision.kind === "plan_proposal" ? decision.baseRevisions : [];
     await this.ledger.commit({
@@ -469,6 +479,36 @@ export class CoachApplication {
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
       idempotencyKey: input.idempotencyKey,
       recomputeOf: preview.id,
+    });
+  }
+
+  async createPhaseTransitionPreview(input: {
+    userId: string;
+    currentDate: string;
+    trigger: "goal_reached" | "plateau" | "recovery_decline" | "deadline_infeasible" | "user_requested";
+    idempotencyKey: string;
+  }): Promise<EvidenceBriefArtifact> {
+    const metrics = await this.readMetricRegistry({ userId: input.userId, startDate: offsetDate(input.currentDate, -20), endDate: input.currentDate });
+    const domain = await this.readDomainProjection({ userId: input.userId });
+    const currentPhase = [...domain.goalCycles].sort((left, right) => right.revision - left.revision)[0]?.value.phasePath?.find((phase) => phase.startDate <= input.currentDate && input.currentDate <= phase.endDate);
+    const decision = await this.previewGoalCycle({ userId: input.userId, currentDate: input.currentDate, trigger: "user_requested", requestedScope: "future_plan" });
+    const proposal = derivePhaseTransitionProposal({
+      id: `phase-transition:${stableHash({ userId: input.userId, currentDate: input.currentDate, trigger: input.trigger, metrics, decision })}`,
+      metrics,
+      ...(currentPhase ? { currentPhaseId: currentPhase.id } : {}),
+      ...(domain.plan ? { currentPlanRevision: domain.plan.revision } : {}),
+      candidate: decision,
+      trigger: input.trigger,
+      reviewAt: `${input.currentDate}T12:00:00.000Z`,
+    });
+    if (proposal.status !== "eligible") throw new Error("phase_transition_gate_blocked");
+    return this.createPlanningPreview({
+      userId: input.userId,
+      currentDate: input.currentDate,
+      trigger: "user_requested",
+      requestedScope: "future_plan",
+      idempotencyKey: input.idempotencyKey,
+      phaseTransition: proposal,
     });
   }
 
@@ -891,6 +931,15 @@ export class CoachApplication {
           right.createdAt.localeCompare(left.createdAt) ||
           right.id.localeCompare(left.id),
       )[0];
+  }
+
+  async readMetricRegistry(input: {
+    userId: string;
+    startDate: string;
+    endDate: string;
+  }): Promise<readonly import("../replanning").MetricEnvelope[]> {
+    const projection = await this.readDomainProjection({ userId: input.userId });
+    return deriveMetricRegistry({ domain: projection, startDate: input.startDate, endDate: input.endDate, ruleVersion: "maxpower.metrics.v1" });
   }
 
   async createWeeklyCoachReport(input: {
@@ -1811,6 +1860,47 @@ export class CoachApplication {
     return { evidence, decision };
   }
 
+  async evaluateDailyRecovery(input: {
+    userId: string;
+    date: string;
+    validUntil: string;
+    timezoneOffsetMinutes: number;
+    checkIn?: RecoveryCheckIn;
+    idempotencyKey?: string;
+    rulePack?: RecoveryRulePack;
+  }): Promise<{
+    evaluation: import("../recovery").DailyEvaluation;
+    evidence: import("../recovery").RecoveryTimelineEvidence;
+    decision: ReturnType<typeof evaluateRecovery>;
+  }> {
+    const recovered = await this.evaluateRecoveryFromTimeline({
+      userId: input.userId,
+      validUntil: input.validUntil,
+      ...(input.checkIn ? { checkIn: input.checkIn } : {}),
+      ...(input.idempotencyKey ? { id: `recovery-constraint:${input.idempotencyKey}` } : {}),
+      ...(input.rulePack ? { rulePack: input.rulePack } : {}),
+    });
+    const domain = await this.readDomainProjection({ userId: input.userId });
+    const nutrition = await this.readNutritionDayLedger({
+      userId: input.userId,
+      date: input.date,
+      timezoneOffsetMinutes: input.timezoneOffsetMinutes,
+    });
+    const session = domain.plan?.value.sessions.find((candidate) => candidate.scheduledFor === input.date);
+    const workout = domain.workouts.find((candidate) => candidate.frozenPrescription.id === session?.id && (candidate.status === "active" || candidate.status === "paused"));
+    const evaluation = deriveDailyEvaluation({
+      id: input.idempotencyKey ? `daily-evaluation:${input.idempotencyKey}` : this.runtime.nextId("daily-evaluation"),
+      date: input.date,
+      recovery: recovered.decision,
+      nutrition: nutrition.ledger,
+      ...(session?.kind ? { plannedSessionKind: session.kind } : {}),
+      hasStartedSet: Boolean(workout?.setOutcomes.length),
+      factRefs: recovered.evidence.factRefs,
+      nextReviewAt: input.validUntil,
+    });
+    return { evaluation, ...recovered };
+  }
+
   /**
    * Bounded entry point for the native morning job. It only inspects already
    * imported local facts and creates a privacy-safe notification job; it does
@@ -2010,6 +2100,112 @@ export class CoachApplication {
       ...input,
       id: input.id ?? this.runtime.nextId("nutrition-strategy"),
     });
+  }
+
+  async readNutritionDayLedger(input: {
+    userId: string;
+    date: string;
+    timezoneOffsetMinutes: number;
+  }) {
+    const projection = await this.readDomainProjection({ userId: input.userId });
+    const strategy = [...projection.nutritionStrategies]
+      .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
+    const recoveryConstraint = [...projection.recoveryConstraints]
+      .filter((item) => item.value.validUntil >= `${input.date}T00:00:00.000Z`)
+      .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
+    const plan = deriveNutritionDayPlan({
+      date: input.date,
+      timezoneOffsetMinutes: input.timezoneOffsetMinutes,
+      ...(strategy ? { strategy } : {}),
+      ...(recoveryConstraint ? { recoveryConstraint } : {}),
+    });
+    return { plan, ledger: projectNutritionDayLedger({ plan, events: projection.timeline.current }) };
+  }
+
+  async createNextMealRecommendation(input: {
+    userId: string;
+    date: string;
+    timezoneOffsetMinutes: number;
+    mealSlot: NextMealRecommendation["mealSlot"];
+    conditions?: { cooking?: "home" | "takeaway" | "convenience"; dietaryNotes?: readonly string[] };
+  }): Promise<NextMealRecommendation> {
+    const day = await this.readNutritionDayLedger(input);
+    return deriveNextMealRecommendation({
+      plan: day.plan,
+      ledger: day.ledger,
+      mealSlot: input.mealSlot,
+      now: this.runtime.now(),
+      ...(input.conditions ? { conditions: input.conditions } : {}),
+    });
+  }
+
+  /** Selection persists a MealDraft as the existing immutable nutrition draft artifact. */
+  async selectNextMealRecommendation(input: {
+    userId: string;
+    recommendation: NextMealRecommendation;
+    candidateId: string;
+    idempotencyKey: string;
+  }): Promise<import("./model").NutritionObservationDraftArtifact> {
+    const current = await this.createNextMealRecommendation({
+      userId: input.userId,
+      date: input.recommendation.date,
+      timezoneOffsetMinutes: input.recommendation.timezoneOffsetMinutes,
+      mealSlot: input.recommendation.mealSlot,
+    });
+    if (current.ledgerFingerprint !== input.recommendation.ledgerFingerprint) throw new Error("next_meal_recommendation_stale");
+    const candidate = input.recommendation.candidates.find((item) => item.id === input.candidateId);
+    if (!candidate) throw new Error("next_meal_candidate_not_found");
+    const now = this.runtime.now();
+    const observation: import("../nutrition").MealObservation = {
+      id: this.runtime.nextId("meal-draft"),
+      occurredAt: `${input.recommendation.date}T12:00:00.000Z`,
+      mode: "simplified",
+      description: candidate.title,
+      mealSlot: input.recommendation.mealSlot,
+      foods: candidate.foods,
+      provenance: "manual",
+    };
+    const draft: import("../nutrition").NutritionObservationDraft = {
+      id: observation.id,
+      schemaVersion: 1,
+      observation,
+      estimates: [],
+      generatedAt: now,
+      missing: ["user_has_not_confirmed_meal", "candidate_nutrition_values_unknown_until_food_is_confirmed"],
+      clarificationRequired: true,
+      status: "draft",
+    };
+    const artifact: import("./model").NutritionObservationDraftArtifact = {
+      id: `meal-draft-${stableHash({ userId: input.userId, recommendation: input.recommendation.id, candidateId: input.candidateId })}`,
+      kind: "nutrition_observation_draft",
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [{ kind: "today", ref: input.recommendation.date }],
+      evidenceRefs: [],
+      missingness: draft.missing ?? [],
+      capabilityBoundary: ["推荐不会计入摄入", "确认实际吃过并补充可量化信息后才进入 Timeline"],
+      hash: stableHash(draft),
+      knowledgePins: this.knowledge.versionPins(),
+      draft,
+    };
+    const existing = (await this.ledger.read()).artifacts.find((item) => item.id === artifact.id);
+    if (existing?.kind === "nutrition_observation_draft") return existing;
+    await this.ledger.commit({
+      kind: "domain",
+      userId: input.userId,
+      actorId: input.userId,
+      intent: "nutrition.meal_draft.create",
+      expectedRevisions: [],
+      domainEvents: [],
+      artifacts: [artifact],
+      actionEvents: [],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: now,
+    });
+    return artifact;
   }
 
   proposeNutritionStrategyChange(input: Parameters<typeof proposeNutritionChange>[0]) {
@@ -2737,6 +2933,8 @@ export class CoachApplication {
       fact: {
         kind: "nutrition",
         observationId: input.observation.id,
+        ...(input.observation.mealSlot ? { mealSlot: input.observation.mealSlot } : {}),
+        ...(input.observation.foods ? { foods: input.observation.foods } : {}),
         ...(input.observation.energy ? { energy: input.observation.energy } : {}),
         ...(input.observation.proteinGrams !== undefined ? { proteinGrams: input.observation.proteinGrams } : {}),
         ...(input.observation.fatGrams !== undefined ? { fatGrams: input.observation.fatGrams } : {}),
@@ -8616,6 +8814,14 @@ function plannerTriggerForReplan(
 function timezoneOffsetForInstant(iso: string): number {
   const date = new Date(iso);
   return Number.isFinite(date.getTime()) ? date.getTimezoneOffset() * -1 : 0;
+}
+
+function offsetDate(localDate: string, days: number): string {
+  const value = Date.parse(`${localDate}T12:00:00.000Z`);
+  if (!Number.isFinite(value)) throw new Error("invalid_local_date");
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function localDateAtTimezoneOffset(iso: string, timezoneOffsetMinutes: number): string {

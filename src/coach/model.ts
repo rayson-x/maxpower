@@ -370,6 +370,7 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
     request: { currentDate: string; trigger: import("../planning").PlannerTrigger; requestedScope?: import("../planning").PlannerRequest["requestedScope"] };
     sourcePreviewId?: string;
   };
+  phaseTransition?: import("../replanning").PhaseTransitionProposal;
 }
 
 export interface NutritionObservationDraftArtifact extends ArtifactBase {

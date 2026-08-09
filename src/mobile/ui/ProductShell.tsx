@@ -30,7 +30,7 @@ import {
   presentReplicaSyncOverview,
 } from "../../product";
 import type { TimelineReadEvent } from "../../timeline";
-import { createManualMealObservation } from "../../nutrition";
+import { createManualMealObservation, type NextMealRecommendation } from "../../nutrition";
 import { colors, radius } from "./theme";
 import { ANDROID_HEALTH_CONNECT_MVP_METRICS } from "../native/AndroidHealthConnectPort";
 import { APPLE_HEALTHKIT_MVP_METRICS } from "../native/AppleHealthKitPort";
@@ -68,6 +68,8 @@ export interface ProductShellProps {
   initialProductShellRecovery?: ProductShellRecovery;
 }
 
+type ActivityLogMode = "activity" | "nutrition" | "sleep" | "recovery" | "body";
+
 /** Shared iOS/Android shell. It owns navigation presentation state only. */
 export function ProductShell({ application, userId, incomingDeepLink, notificationDeepLink, productShellStateStore, initialProductShellRecovery }: ProductShellProps) {
   const initialShellState = initialProductShellRecovery?.state ?? initialProductShellState(localDate());
@@ -80,6 +82,7 @@ export function ProductShell({ application, userId, incomingDeepLink, notificati
   const [coachExpanded, setCoachExpanded] = useState(initialShellState.navigation.coachExpanded);
   const [showWorkoutStartChoice, setShowWorkoutStartChoice] = useState(false);
   const [showActivityLog, setShowActivityLog] = useState(false);
+  const [activityLogInitialMode, setActivityLogInitialMode] = useState<ActivityLogMode>("activity");
   const [timelineCorrection, setTimelineCorrection] = useState<TimelineReadEvent>();
   const [workoutSummary, setWorkoutSummary] = useState<WorkoutOutcomeProductSummary>();
   const [workoutCorrectionId, setWorkoutCorrectionId] = useState<string>();
@@ -467,7 +470,7 @@ export function ProductShell({ application, userId, incomingDeepLink, notificati
 
   return (
     <View style={styles.page}>
-      {route === "today" && <TodayScreen screen={screen} onOpenCalendar={() => setRoute("calendar")} onOpenCoach={() => handleCoachExpandedChange(true)} onStartOnboarding={() => setRoute("onboarding")} onBeginWorkout={requestWorkoutStart} onRecordActivity={() => setShowActivityLog(true)} onViewWorkoutSummary={setWorkoutSummary} onCorrectTimeline={setTimelineCorrection} />}
+      {route === "today" && <TodayScreen application={application} userId={userId} screen={screen} onOpenCalendar={() => setRoute("calendar")} onOpenCoach={() => handleCoachExpandedChange(true)} onStartOnboarding={() => setRoute("onboarding")} onBeginWorkout={requestWorkoutStart} onRecordActivity={() => { setActivityLogInitialMode("activity"); setShowActivityLog(true); }} onRecordMeal={() => { setActivityLogInitialMode("nutrition"); setShowActivityLog(true); }} onCheckIn={() => { setActivityLogInitialMode("recovery"); setShowActivityLog(true); }} onViewWorkoutSummary={setWorkoutSummary} onCorrectTimeline={setTimelineCorrection} onMealDraft={(draft) => setNutritionDraft(draft)} />}
       {route === "calendar" && (
         <CalendarScreen
           screen={screen}
@@ -510,7 +513,7 @@ export function ProductShell({ application, userId, incomingDeepLink, notificati
           onDismiss={() => setShowWorkoutStartChoice(false)}
         />
       ) : null}
-      {showActivityLog ? <ActivityLogEntry application={application} userId={userId} onDismiss={() => setShowActivityLog(false)} onSaved={() => { setShowActivityLog(false); void refresh(); }} /> : null}
+      {showActivityLog ? <ActivityLogEntry application={application} userId={userId} initialMode={activityLogInitialMode} onDismiss={() => setShowActivityLog(false)} onSaved={() => { setShowActivityLog(false); void refresh(); }} /> : null}
       {timelineCorrection ? <TimelineCorrectionSheet application={application} userId={userId} entry={timelineCorrection} onDismiss={() => setTimelineCorrection(undefined)} onSaved={() => { setTimelineCorrection(undefined); void refresh(); }} /> : null}
       {workoutSummary ? <WorkoutOutcomeSummarySheet summary={workoutSummary} onDismiss={() => setWorkoutSummary(undefined)} onCorrect={() => { setWorkoutCorrectionId(workoutSummary.id); setWorkoutSummary(undefined); }} /> : null}
       {workoutCorrectionId ? <WorkoutOutcomeCorrectionSheet application={application} userId={userId} workoutId={workoutCorrectionId} onDismiss={() => setWorkoutCorrectionId(undefined)} onSaved={() => { setWorkoutCorrectionId(undefined); void refresh(); }} /> : null}
@@ -562,7 +565,7 @@ export function ProductShell({ application, userId, incomingDeepLink, notificati
   );
 }
 
-function TodayScreen({ screen, onOpenCalendar, onOpenCoach, onStartOnboarding, onBeginWorkout, onRecordActivity, onViewWorkoutSummary, onCorrectTimeline }: { screen: CoachProductProjection; onOpenCalendar: () => void; onOpenCoach: () => void; onStartOnboarding: () => void; onBeginWorkout: () => void; onRecordActivity: () => void; onViewWorkoutSummary: (summary: WorkoutOutcomeProductSummary) => void; onCorrectTimeline: (entry: TimelineReadEvent) => void }) {
+function TodayScreen({ application, userId, screen, onOpenCalendar, onOpenCoach, onStartOnboarding, onBeginWorkout, onRecordActivity, onRecordMeal, onCheckIn, onViewWorkoutSummary, onCorrectTimeline, onMealDraft }: { application: CoachApplication; userId: string; screen: CoachProductProjection; onOpenCalendar: () => void; onOpenCoach: () => void; onStartOnboarding: () => void; onBeginWorkout: () => void; onRecordActivity: () => void; onRecordMeal: () => void; onCheckIn: () => void; onViewWorkoutSummary: (summary: WorkoutOutcomeProductSummary) => void; onCorrectTimeline: (entry: TimelineReadEvent) => void; onMealDraft: (draft: NutritionObservationDraftArtifact) => void }) {
   const { today, coach } = screen;
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -574,6 +577,8 @@ function TodayScreen({ screen, onOpenCalendar, onOpenCoach, onStartOnboarding, o
         </Pressable>
       </View>
       <TodayCard today={today} onStartOnboarding={onStartOnboarding} onBeginWorkout={onBeginWorkout} onRecordActivity={onRecordActivity} onViewWorkoutSummary={onViewWorkoutSummary} />
+      <NutritionLedgerCard application={application} userId={userId} date={today.date} nutrition={today.nutrition} onRecordMeal={onRecordMeal} onMealDraft={onMealDraft} />
+      <RecoveryStatusCard recovery={today.recovery} onCheckIn={onCheckIn} />
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>今天</Text>
         <Text style={styles.sectionMeta}>{today.activityLog.entries.length ? `${today.activityLog.entries.length} 条记录` : ""}</Text>
@@ -583,6 +588,43 @@ function TodayScreen({ screen, onOpenCalendar, onOpenCoach, onStartOnboarding, o
       {coach.pending ? <CoachPending prompt={coach.pending.prompt} /> : null}
     </ScrollView>
   );
+}
+
+function RecoveryStatusCard({ recovery, onCheckIn }: { recovery: CoachProductProjection["today"]["recovery"]; onCheckIn: () => void }) {
+  const label = recovery.level === "normal" ? "按原计划" : recovery.level === "slight_reduction" ? "稍微放缓" : recovery.level === "recovery_priority" ? "优先恢复" : "暂停并确认";
+  return <View style={styles.recoveryStatusCard}>
+    <View style={styles.sectionHeader}><View><Text style={styles.cardEyebrow}>今日恢复</Text><Text style={styles.detailTitle}>{label}</Text></View><Text style={styles.detailMeta}>{recovery.validUntil ? `复核 ${recovery.validUntil.slice(0, 10)}` : "尚未记录"}</Text></View>
+    <Text style={styles.detailMeta}>{recovery.reasons.join("、") || "没有需要升级的恢复信号"}</Text>
+    {recovery.missing.length ? <Text style={styles.detailMeta}>未知：{recovery.missing.join("、")}</Text> : null}
+    <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.recoveryCheckInButton}><Text style={styles.recoveryCheckInText}>记录睡眠 / 疲劳 / 酸痛</Text></Pressable>
+  </View>;
+}
+
+function NutritionLedgerCard({ application, userId, date, nutrition, onRecordMeal, onMealDraft }: { application: CoachApplication; userId: string; date: string; nutrition: CoachProductProjection["today"]["nutrition"]; onRecordMeal: () => void; onMealDraft: (draft: NutritionObservationDraftArtifact) => void }) {
+  const [recommendation, setRecommendation] = useState<NextMealRecommendation>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const labels = { energy: "能量", protein: "蛋白质", carbohydrate: "碳水", fat: "脂肪" } as const;
+  return <View style={styles.nutritionLedgerCard}>
+    <View style={styles.sectionHeader}>
+      <View><Text style={styles.cardEyebrow}>今日营养</Text><Text style={styles.detailMeta}>{nutrition.plan.dayKind === "unknown" ? "当天类型未知" : nutrition.plan.dayKind === "training" ? "训练日" : nutrition.plan.dayKind === "rest" ? "休息日" : nutrition.plan.dayKind}</Text></View>
+      <Text style={styles.nutritionCoverage}>{nutrition.ledger.coverage === "no_log" ? "未记录" : nutrition.ledger.coverage === "partial" ? "部分量化" : "已记录"}</Text>
+    </View>
+    <View style={styles.nutritionProgressGrid}>
+      {(Object.keys(labels) as (keyof typeof labels)[]).map((nutrient) => {
+        const value = nutrition.ledger.nutrients[nutrient];
+        const target = value.target;
+        const remaining = value.remainingAgainstLogged;
+        const suffix = nutrient === "energy" ? " kcal" : " g";
+        const status = !value.intakeKnown ? "未知" : remaining === undefined ? "待记录" : remaining < 0 ? `超出 ${Math.round(Math.abs(remaining))}${suffix}` : `余 ${Math.round(remaining)}${suffix}`;
+        return <View key={nutrient} style={styles.nutritionProgressItem}><Text style={styles.nutritionProgressLabel}>{labels[nutrient]}</Text><Text style={styles.nutritionProgressValue}>{value.intakeKnown ? `${Math.round(value.consumedLogged)}${suffix}` : "—"}</Text><Text style={styles.nutritionProgressMeta}>{target === undefined ? "目标未知" : `目标 ${Math.round(target)}${suffix}`} · {status}</Text></View>;
+      })}
+    </View>
+    {nutrition.ledger.meals.length ? <View style={styles.nutritionMealList}>{nutrition.ledger.meals.map((meal) => <View key={meal.eventId} style={styles.nutritionMealRow}><Text style={styles.nutritionMealTitle}>{meal.description ?? meal.slot}</Text><Text style={styles.nutritionMealMeta}>{meal.confirmed ? "已确认" : "待确认"}{meal.nutrients?.energy !== undefined ? ` · ${Math.round(meal.nutrients.energy)} kcal` : " · 数值未知"}</Text></View>)}</View> : <Text style={styles.detailMeta}>还没有已确认餐食；未知不等于零摄入。</Text>}
+    {recommendation ? <View style={styles.nutritionRecommendationList}>{recommendation.candidates.map((candidate) => <Pressable key={candidate.id} accessibilityRole="button" disabled={busy} onPress={() => { setBusy(true); void application.selectNextMealRecommendation({ userId, recommendation, candidateId: candidate.id, idempotencyKey: `mobile-meal-draft:${candidate.id}` }).then(onMealDraft).catch((cause) => setError(cause instanceof Error ? cause.message : "推荐已变化，请重新计算")).finally(() => setBusy(false)); }} style={styles.nutritionRecommendationRow}><View style={styles.nutritionRecommendationBody}><Text style={styles.nutritionRecommendationTitle}>{candidate.title}</Text><Text style={styles.nutritionMealMeta}>{candidate.assumptions.join(" · ")}</Text></View><Text style={styles.chevron}>›</Text></Pressable>)}</View> : null}
+    {error ? <Text style={styles.formError}>{error}</Text> : null}
+    <View style={styles.nutritionButtonRow}><Pressable accessibilityRole="button" onPress={onRecordMeal} style={styles.nutritionRecordButton}><Text style={styles.nutritionRecordButtonText}>记录餐食</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => { setBusy(true); void application.createNextMealRecommendation({ userId, date, timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1, mealSlot: "snack" }).then(setRecommendation).catch((cause) => setError(cause instanceof Error ? cause.message : "暂时无法生成下一餐")).finally(() => setBusy(false)); }} style={styles.nutritionSuggestButton}><Text style={styles.nutritionSuggestButtonText}>{busy ? "处理中" : "推荐下一餐"}</Text></Pressable></View>
+  </View>;
 }
 
 function CoachNotice({ screen, onOpenCoach }: { screen: CoachProductProjection; onOpenCoach: () => void }) {
@@ -724,15 +766,17 @@ function OutcomeMetric({ value, label }: { value: string; label: string }) {
 function ActivityLogEntry({
   application,
   userId,
+  initialMode,
   onDismiss,
   onSaved,
 }: {
   application: CoachApplication;
   userId: string;
+  initialMode?: ActivityLogMode;
   onDismiss: () => void;
   onSaved: () => void;
 }) {
-  const [entryMode, setEntryMode] = useState<"activity" | "nutrition" | "sleep" | "recovery" | "body">("activity");
+  const [entryMode, setEntryMode] = useState<ActivityLogMode>(initialMode ?? "activity");
   const [activityType, setActivityType] = useState("散步");
   const [durationMinutes, setDurationMinutes] = useState("");
   const [intensity, setIntensity] = useState<"easy" | "moderate" | "hard" | "unknown">("moderate");
@@ -765,6 +809,17 @@ function ActivityLogEntry({
           id: `manual-meal:${now.getTime()}`,
           occurredAt: now.toISOString(),
           description: activityType,
+          mealSlot: mealSlotForLabel(activityType),
+          foods: [{
+            id: `manual-food:${now.getTime()}`,
+            name: activityType,
+            portion: "用户记录的一份餐食",
+            ...(optionalFiniteNumber(energyKcal) !== undefined ? { energy: { value: optionalFiniteNumber(energyKcal)!, unit: "kcal" as const } } : {}),
+            ...(optionalFiniteNumber(proteinGrams) !== undefined ? { proteinGrams: optionalFiniteNumber(proteinGrams) } : {}),
+            ...(optionalFiniteNumber(fatGrams) !== undefined ? { fatGrams: optionalFiniteNumber(fatGrams) } : {}),
+            ...(optionalFiniteNumber(carbohydrateGrams) !== undefined ? { carbohydrateGrams: optionalFiniteNumber(carbohydrateGrams) } : {}),
+            source: nutritionProvenance,
+          }],
           mode: nutritionMode,
           provenance: nutritionMode === "simplified" ? "manual" : nutritionProvenance,
           ...(nutritionMode === "precise" ? {
@@ -893,6 +948,10 @@ function NutritionChoice<T extends string>({ label, value, options, onChange }: 
 
 function NutritionMetricInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return <View style={styles.nutritionMetric}><Text style={styles.nutritionMetricLabel}>{label}</Text><TextInput accessibilityLabel={label} keyboardType="decimal-pad" value={value} onChangeText={onChange} placeholder="—" placeholderTextColor={colors.ink3} style={styles.nutritionMetricInput} /></View>;
+}
+
+function mealSlotForLabel(label: string): "breakfast" | "lunch" | "dinner" | "snack" {
+  return label === "早餐" ? "breakfast" : label === "午餐" ? "lunch" : label === "晚餐" ? "dinner" : "snack";
 }
 
 function CalendarScreen(props: {
@@ -1167,6 +1226,16 @@ function ProgressScreen({ screen, onOpenVideoLibrary }: { screen: CoachProductPr
         <ProgressMetric label="完成训练" value={String(screen.progress.completedWorkoutCount)} meta="已结束 Session" />
         <ProgressMetric label="体重" value={trendValue(weight?.smoothedPoints.at(-1)?.smoothedValue, weight?.rawPoints.at(-1)?.unit)} meta={trendCoverage(weight?.coverage.observations)} />
         <ProgressMetric label="体脂" value={trendValue(bodyFat?.smoothedPoints.at(-1)?.smoothedValue, bodyFat?.rawPoints.at(-1)?.unit)} meta={trendCoverage(bodyFat?.coverage.observations)} />
+      </View>
+      <Text style={styles.sectionTitle}>统一指标</Text>
+      <View style={styles.progressMetricList}>
+        {screen.progress.metrics.map((metric) => (
+          <View key={metric.name} style={styles.progressMetricCompact}>
+            <Text style={styles.progressMetricCompactTitle}>{metricLabel(metric.name)}</Text>
+            <Text style={styles.progressMetricCompactValue}>{metricDirectionLabel(metric.value.direction, metric.value.score)}</Text>
+            <Text style={styles.progressMetricMeta}>{metricConfidenceLabel(metric.confidence)} · {metric.comparableDays} 天可比</Text>
+          </View>
+        ))}
       </View>
       <Text style={styles.sectionTitle}>训练视频</Text>
       <Pressable accessibilityRole="button" accessibilityLabel="打开训练视频" onPress={onOpenVideoLibrary} style={styles.videoLibraryCard}>
@@ -2722,6 +2791,9 @@ function outcomeStatusLabel(status: WorkoutOutcomeProductSummary["status"]): str
 function outcomeCompletenessLabel(value: WorkoutOutcomeProductSummary["dataCompleteness"]): string { return value === "complete" ? "记录完整" : value === "partial" ? "部分记录" : "手动记录"; }
 function trendValue(value: number | undefined, unit: string | undefined): string { return value === undefined ? "—" : `${value.toFixed(1)}${unit === "percent" ? "%" : unit ?? ""}`; }
 function trendCoverage(count: number | undefined): string { return count ? `${count} 条可比记录` : "记录不足"; }
+function metricLabel(name: string): string { return { body_trend: "身体趋势", training_trend: "训练趋势", nutrition_adherence: "营养执行", recovery_trend: "恢复趋势", phase_progress: "阶段进度", goal_feasibility: "目标可行性" }[name] ?? name; }
+function metricDirectionLabel(direction: string, score?: number): string { if (direction === "improving") return score === undefined ? "改善" : `改善 ${score.toFixed(2)}`; if (direction === "declining") return score === undefined ? "下降" : `下降 ${Math.abs(score).toFixed(2)}`; if (direction === "stable") return "稳定"; return "待积累"; }
+function metricConfidenceLabel(confidence: string): string { return confidence === "high" ? "高信心" : confidence === "moderate" ? "中信心" : "低信心"; }
 function goalLabel(value?: string): string { return value === "hypertrophy" ? "增肌" : value === "strength" ? "增力" : value === "fat_loss_preserve_lean_mass" ? "减脂保肌" : "待填写"; }
 function movementLabel(value?: MovementPattern): string { return movementChoices.find((choice) => choice.value === value)?.label ?? "未分类"; }
 function mandateLabel(value?: string): string { return value === "manual" ? "手动" : value === "managed" ? "托管" : value === "collaborative" ? "协作" : "待选择"; }
@@ -2839,6 +2911,17 @@ function todayCopy(today: CoachProductProjection["today"]): { title: string; sub
 }
 
 const styles = StyleSheet.create({
+  nutritionRecommendationList: { gap: 7, marginTop: 8 },
+  nutritionRecommendationRow: { backgroundColor: colors.paper2, borderRadius: 12, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 },
+  nutritionRecommendationBody: { flex: 1 },
+  nutritionRecommendationTitle: { flex: 1, color: colors.ink, fontSize: 12, fontWeight: "800" },
+  nutritionButtonRow: { flexDirection: "row", gap: 8, marginTop: 8 },
+  nutritionSuggestButton: { flex: 1, minHeight: 42, borderRadius: radius.chip, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, alignItems: "center", justifyContent: "center" },
+  nutritionSuggestButtonText: { color: colors.ink, fontSize: 12, fontWeight: "800" },
+  progressMetricList: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  progressMetricCompact: { width: "48%", minHeight: 78, backgroundColor: colors.white, borderRadius: radius.row, padding: 11, gap: 3 },
+  progressMetricCompactTitle: { color: colors.ink2, fontSize: 11, fontWeight: "800" },
+  progressMetricCompactValue: { color: colors.ink, fontSize: 15, fontWeight: "900" },
   page: { flex: 1, backgroundColor: colors.paper },
   content: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 116, gap: 14 },
   statePage: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: colors.paper, padding: 24 },
@@ -2861,7 +2944,7 @@ const styles = StyleSheet.create({
   videoLibraryCard: { backgroundColor: colors.dark, borderRadius: radius.row, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, videoLibraryTitle: { color: colors.white, fontSize: 15, fontWeight: "900" }, videoLibraryMeta: { color: "#aeb3a6", fontSize: 11, marginTop: 5 }, videoLibraryArrow: { color: colors.lime, fontSize: 28, lineHeight: 30 },
   profileCard: { backgroundColor: colors.white, borderRadius: radius.card, paddingHorizontal: 16 }, profileStart: { backgroundColor: colors.dark, borderRadius: radius.chip, minHeight: 48, alignItems: "center", justifyContent: "center" }, profileStartText: { color: colors.white, fontSize: 15, fontWeight: "800" }, profileRow: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth }, profileLabel: { color: colors.ink2, fontSize: 14 }, profileValue: { color: colors.ink, fontSize: 14, fontWeight: "700" }, privacySummaryLoading: { minHeight: 74, alignItems: "center", justifyContent: "center" }, privacySummaryFooter: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }, privacySummaryFooterText: { color: colors.ink3, fontSize: 12, flex: 1 }, privacySheet: { maxHeight: "84%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, privacySheetLoading: { minHeight: 160, alignItems: "center", justifyContent: "center" }, privacyDetailList: { gap: 10, paddingBottom: 8 }, privacyDetailBlock: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, gap: 7 }, privacyDetailHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 12 }, privacyDetailTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" }, privacyDetailSummary: { color: colors.limeInk, fontSize: 12, fontWeight: "800", textAlign: "right" }, privacyDetailText: { color: colors.ink2, fontSize: 12, lineHeight: 18 }, privacyDetailMeta: { color: colors.ink3, fontSize: 11, lineHeight: 17, marginTop: 1 }, privacyManageButton: { minHeight: 46, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", marginTop: 2 }, privacyManageButtonText: { color: colors.lime, fontSize: 14, fontWeight: "900" }, replicaConflict: { borderLeftWidth: 2, borderLeftColor: colors.limeDeep, backgroundColor: colors.paper, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, gap: 2, marginTop: 1 }, replicaConflictTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" }, replicaSyncButton: { minHeight: 42, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", marginTop: 3 }, replicaSyncButtonText: { color: colors.lime, fontSize: 13, fontWeight: "900" }, healthConnectionCard: { paddingVertical: 16, gap: 10 }, healthConnectionTop: { flexDirection: "row", alignItems: "center", gap: 12 }, healthConnectionTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" }, healthConnectionMeta: { color: colors.ink3, fontSize: 12, lineHeight: 18, marginTop: 3 }, healthConnectionNote: { color: colors.ink2, fontSize: 12, lineHeight: 18 }, healthImportedList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 2 }, healthConnectionActions: { flexDirection: "row", gap: 8, marginTop: 2 }, healthConnectionPrimary: { flex: 1, minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, healthConnectionPrimaryText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, healthConnectionSecondary: { minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.paper, borderColor: colors.line, borderWidth: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 }, healthConnectionSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, actionLogRow: { flexDirection: "row", alignItems: "center", minHeight: 56, borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 }, actionLogBody: { flex: 1 }, actionLogTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, actionLogMeta: { color: colors.ink3, fontSize: 11, marginTop: 4 },
   permissionScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, permissionSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, permissionList: { gap: 9, paddingBottom: 8 }, permissionRow: { backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 14, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 12 }, permissionBody: { flex: 1 }, permissionTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" }, permissionDescription: { color: colors.ink3, fontSize: 11, lineHeight: 16, marginTop: 4 }, permissionSwitch: { width: 45, height: 28, borderRadius: 16, backgroundColor: colors.paper2, padding: 3, justifyContent: "center" }, permissionSwitchOn: { backgroundColor: colors.limeDeep, alignItems: "flex-end" }, permissionKnob: { width: 22, height: 22, borderRadius: 12, backgroundColor: colors.white, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }, permissionKnobOn: { backgroundColor: colors.dark }, actionLogScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, actionLogSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, actionLogList: { gap: 9, paddingBottom: 8 }, actionLogDetailRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, gap: 4 }, actionLogDetailTop: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actionLogResult: { color: colors.limeInk, fontSize: 11, fontWeight: "800" }, actionLogDetailMeta: { color: colors.ink3, fontSize: 11, lineHeight: 16 }, actionLogIntent: { color: colors.ink2, fontSize: 12, lineHeight: 18, marginVertical: 2 }, actionLogReversible: { color: colors.limeInk, fontSize: 11, fontWeight: "800", marginTop: 2 },
-  question: { gap: 9 }, questionLabel: { color: colors.ink, fontWeight: "800", fontSize: 15 }, optionList: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, option: { backgroundColor: colors.white, borderRadius: radius.chip, borderWidth: 1, borderColor: "transparent", minHeight: 40, paddingHorizontal: 13, justifyContent: "center" }, optionSelected: { backgroundColor: "#EEF9C7", borderColor: colors.limeDeep }, optionText: { color: colors.ink2, fontSize: 13, fontWeight: "700" }, optionTextSelected: { color: colors.limeInk }, onboardingFields: { flexDirection: "row", gap: 8 }, onboardingInput: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 10, fontSize: 13 }, professionalToggle: { minHeight: 40, justifyContent: "center" }, professionalToggleText: { color: colors.limeInk, fontSize: 13, fontWeight: "900" }, professionalFields: { backgroundColor: colors.paper2, borderRadius: radius.card, padding: 14, gap: 12 }, confirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: colors.white, borderRadius: radius.row, padding: 14 }, checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: colors.ink3, alignItems: "center", justifyContent: "center", marginTop: 1 }, checkboxOn: { borderColor: colors.limeDeep, backgroundColor: colors.lime }, checkboxMark: { color: colors.limeInk, fontWeight: "900" }, confirmText: { flex: 1, color: colors.ink2, fontSize: 13, lineHeight: 19 }, formError: { color: colors.terra, fontSize: 12 }, onboardingButton: { backgroundColor: colors.dark, minHeight: 50, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", marginTop: 4 }, onboardingButtonText: { color: colors.white, fontSize: 16, fontWeight: "900" }, previewRejectButton: { minHeight: 44, alignItems: "center", justifyContent: "center", marginBottom: 24 }, previewRejectText: { color: colors.ink3, fontSize: 13, fontWeight: "800" },
+  nutritionLedgerCard: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 12 }, nutritionCoverage: { color: colors.limeInk, fontSize: 12, fontWeight: "900" }, nutritionProgressGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, nutritionProgressItem: { width: "48%", backgroundColor: colors.paper2, borderRadius: 12, padding: 10, gap: 3 }, nutritionProgressLabel: { color: colors.ink2, fontSize: 11, fontWeight: "800" }, nutritionProgressValue: { color: colors.ink, fontSize: 18, fontFamily: "monospace", fontWeight: "900" }, nutritionProgressMeta: { color: colors.ink3, fontSize: 10, lineHeight: 14 }, nutritionMealList: { backgroundColor: colors.paper2, borderRadius: 12, paddingHorizontal: 12 }, nutritionMealRow: { minHeight: 42, justifyContent: "center", borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth }, nutritionMealTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" }, nutritionMealMeta: { color: colors.ink3, fontSize: 10, marginTop: 3 }, nutritionRecordButton: { minHeight: 42, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" }, nutritionRecordButtonText: { color: colors.lime, fontSize: 13, fontWeight: "900" }, recoveryStatusCard: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 9 }, recoveryCheckInButton: { minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.paper2, alignItems: "center", justifyContent: "center" }, recoveryCheckInText: { color: colors.ink, fontSize: 12, fontWeight: "900" }, question: { gap: 9 }, questionLabel: { color: colors.ink, fontWeight: "800", fontSize: 15 }, optionList: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, option: { backgroundColor: colors.white, borderRadius: radius.chip, borderWidth: 1, borderColor: "transparent", minHeight: 40, paddingHorizontal: 13, justifyContent: "center" }, optionSelected: { backgroundColor: "#EEF9C7", borderColor: colors.limeDeep }, optionText: { color: colors.ink2, fontSize: 13, fontWeight: "700" }, optionTextSelected: { color: colors.limeInk }, onboardingFields: { flexDirection: "row", gap: 8 }, onboardingInput: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 10, fontSize: 13 }, professionalToggle: { minHeight: 40, justifyContent: "center" }, professionalToggleText: { color: colors.limeInk, fontSize: 13, fontWeight: "900" }, professionalFields: { backgroundColor: colors.paper2, borderRadius: radius.card, padding: 14, gap: 12 }, confirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: colors.white, borderRadius: radius.row, padding: 14 }, checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: colors.ink3, alignItems: "center", justifyContent: "center", marginTop: 1 }, checkboxOn: { borderColor: colors.limeDeep, backgroundColor: colors.lime }, checkboxMark: { color: colors.limeInk, fontWeight: "900" }, confirmText: { flex: 1, color: colors.ink2, fontSize: 13, lineHeight: 19 }, formError: { color: colors.terra, fontSize: 12 }, onboardingButton: { backgroundColor: colors.dark, minHeight: 50, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", marginTop: 4 }, onboardingButtonText: { color: colors.white, fontSize: 16, fontWeight: "900" }, previewRejectButton: { minHeight: 44, alignItems: "center", justifyContent: "center", marginBottom: 24 }, previewRejectText: { color: colors.ink3, fontSize: 13, fontWeight: "800" },
   workoutTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }, workoutTopActions: { alignItems: "flex-end", gap: 8 }, workoutProgress: { color: colors.limeInk, backgroundColor: colors.lime, borderRadius: radius.chip, paddingHorizontal: 11, paddingVertical: 7, fontWeight: "900" }, workoutCoachButton: { minHeight: 34, minWidth: 72, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, workoutCoachButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, currentSetCard: { backgroundColor: colors.dark, borderRadius: 26, padding: 22, gap: 10 }, currentSetTitle: { color: colors.white, fontSize: 22, fontWeight: "900" }, currentSetDose: { color: "#C5C9C0", fontSize: 15 }, currentSetBoundary: { color: "#979C93", fontSize: 11, lineHeight: 17, marginBottom: 4 }, setActions: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actualButton: { flex: 1, alignItems: "center", minHeight: 34, justifyContent: "center" }, actualButtonText: { color: colors.lime, fontWeight: "800", fontSize: 13 }, skipSetText: { color: "#F5B6A4", fontWeight: "800", fontSize: 13 }, actualForm: { gap: 8 }, actualField: { minHeight: 42, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", flexDirection: "row", alignItems: "center", paddingHorizontal: 12 }, actualLabel: { color: "#B6BAAF", width: 52, fontSize: 12 }, actualInput: { flex: 1, color: colors.white, fontSize: 15, fontWeight: "700", paddingVertical: 0, textAlign: "right" }, workoutTask: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 4 }, workoutTaskTitle: { color: colors.ink, fontWeight: "800", fontSize: 15, marginBottom: 4 }, workoutSetRow: { flexDirection: "row", alignItems: "center", minHeight: 38, gap: 10 }, workoutSetIndex: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.paper2, color: colors.ink2, fontSize: 11, textAlign: "center", paddingTop: 3 }, workoutSetDose: { flex: 1, color: colors.ink2, fontFamily: "monospace", fontSize: 12 }, workoutSetState: { color: colors.ink3, fontSize: 11 }, workoutSetDone: { color: colors.limeDeep, fontWeight: "800" }, workoutSetSkipped: { color: colors.terra, fontWeight: "800" }, manageWorkoutTasksButton: { minHeight: 38, borderRadius: radius.chip, borderWidth: 1, borderColor: "#3B4039", alignItems: "center", justifyContent: "center", marginTop: 2 }, manageWorkoutTasksText: { color: colors.white, fontSize: 13, fontWeight: "800" }, workoutTaskEditorRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 12, gap: 8 }, workoutTaskEditorRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskEditorPrimary: { minHeight: 38 }, workoutTaskEditorActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, workoutTaskTiny: { minHeight: 28, justifyContent: "center" }, workoutTaskTinyText: { color: colors.ink2, fontSize: 12, fontWeight: "800" }, workoutTaskPicker: { backgroundColor: "#EEF9C7", borderRadius: radius.card, padding: 14, gap: 9, marginTop: 4 }, workoutCatalogList: { gap: 6 }, workoutCatalogRow: { backgroundColor: colors.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, workoutCatalogRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskBoundary: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, workoutTaskAddFields: { flexDirection: "row", gap: 8 }, workoutTaskNumberField: { flex: 1, minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", paddingHorizontal: 10 }, workoutTaskNumberLabel: { color: colors.ink2, fontSize: 12 }, workoutTaskNumberInput: { flex: 1, color: colors.ink, fontFamily: "monospace", fontWeight: "800", textAlign: "right", fontSize: 14, paddingVertical: 0 }, workoutTaskButtons: { flexDirection: "row", gap: 8 }, workoutTaskSecondary: { flex: 1, minHeight: 46, borderRadius: radius.chip, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center", backgroundColor: colors.white }, workoutTaskSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, workoutTaskAddButton: { flex: 1, marginTop: 0 }, pauseButton: { minHeight: 42, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, pauseButtonText: { color: colors.ink3, fontSize: 13, fontWeight: "800" }, safetyPauseButton: { minHeight: 42, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.terraSoft }, safetyPauseButtonText: { color: colors.terra, fontSize: 13, fontWeight: "900" }, safetyPauseScrim: { ...StyleSheet.absoluteFill, zIndex: 55, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, safetyPauseSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, safetyPauseTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, safetyPauseDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19, marginBottom: 4 }, safetyPauseChoice: { minHeight: 50, paddingHorizontal: 14, borderRadius: radius.row, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, safetyPauseChoiceText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: "800" }, safetyPauseCancel: { minHeight: 46, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line }, safetyPauseCancelText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, skipSetSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, skipSetTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, skipSetDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19 }, skipSetInput: { minHeight: 86, borderRadius: radius.row, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 13, paddingVertical: 11, textAlignVertical: "top", fontSize: 14 }, skipSetConfirm: { minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, skipSetConfirmText: { color: colors.white, fontWeight: "900", fontSize: 15 }, finishButton: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, finishButtonText: { color: colors.ink, fontWeight: "800" }, pausedPage: { flex: 1, padding: 20, justifyContent: "center", backgroundColor: colors.paper }, pausedCard: { backgroundColor: colors.dark, padding: 24, borderRadius: 28, gap: 13 }, pausedTitle: { color: colors.white, fontSize: 30, fontWeight: "900" }, pausedDetail: { color: "#B7BBB3", fontSize: 14, lineHeight: 21, marginBottom: 8 },
   monitorEntry: { minHeight: 62, backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 15, paddingVertical: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, monitorEntryTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, monitorEntrySub: { color: colors.ink3, fontSize: 11, marginTop: 3 }, monitorEntryButton: { minWidth: 54, minHeight: 34, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, monitorEntryButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, nextSetRecommendation: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 84, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }, nextSetRecommendationBody: { flex: 1, gap: 2 }, nextSetRecommendationTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" }, nextSetRecommendationDetail: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, nextSetRecommendationButton: { minWidth: 58, minHeight: 38, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, nextSetRecommendationButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" },
   restCard: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 72, paddingHorizontal: 16, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, restTime: { color: colors.ink, fontFamily: "monospace", fontSize: 24, fontWeight: "900", marginTop: 2 }, restActions: { flexDirection: "row", alignItems: "center", gap: 8 }, restAdd: { backgroundColor: colors.dark, borderRadius: radius.chip, minHeight: 38, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }, restAddText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, restCancel: { backgroundColor: colors.white, borderColor: colors.line, borderWidth: 1, borderRadius: radius.chip, minHeight: 38, paddingHorizontal: 14, alignItems: "center", justifyContent: "center" }, restCancelText: { color: colors.ink, fontSize: 12, fontWeight: "800" },

@@ -25,6 +25,13 @@ import type {
   RecommendationExplanation,
   StrategySelection,
 } from "../planning";
+import { deriveMetricRegistry, type MetricEnvelope } from "../replanning";
+import {
+  deriveNutritionDayPlan,
+  projectNutritionDayLedger,
+  type NutritionDayLedger,
+  type NutritionDayPlan,
+} from "../nutrition";
 
 export type CalendarPresentationMode = "week" | "month";
 
@@ -69,10 +76,24 @@ export interface TodayProductProjection {
   action: "start_workout" | "continue_workout" | "record_activity" | "open_onboarding" | "view_reason" | "view_summary";
   session?: ProductSession;
   activityLog: TimelineActivityLog;
+  nutrition: NutritionProductProjection;
+  recovery: RecoveryProductProjection;
   activeWorkout?: { id: string; status: WorkoutProjection["status"] };
   /** A factual outcome, kept separate from today's SessionPrescription. */
   completedWorkout?: WorkoutOutcomeProductSummary;
   reason?: string;
+}
+
+export interface RecoveryProductProjection {
+  level: "normal" | "slight_reduction" | "recovery_priority" | "pause_and_confirm";
+  validUntil?: string;
+  reasons: readonly string[];
+  missing: readonly string[];
+}
+
+export interface NutritionProductProjection {
+  plan: NutritionDayPlan;
+  ledger: NutritionDayLedger;
 }
 
 export interface ProductSession {
@@ -153,6 +174,7 @@ export interface ProgressProductProjection {
   bodyTrends: BodyTrendReport;
   completedWorkoutCount: number;
   reportArtifacts: readonly Extract<Artifact, { kind: "weekly_coach_report" | "replan_evaluation" | "goal_forecast" | "mesocycle_review" }>[];
+  metrics: readonly MetricEnvelope[];
 }
 
 export interface ProfileProductProjection {
@@ -245,6 +267,7 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
     activityLog,
     safetyReason: safetyHold?.value.reasons[0],
     exerciseLabel: input.exerciseLabel,
+    timezoneOffsetMinutes: input.timezoneOffsetMinutes,
   });
   const visibleCalendarDates = calendarRangeDates(input.calendarMode, input.calendarAnchorDate);
   const calendar = {
@@ -357,6 +380,12 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       }),
       completedWorkoutCount: input.domain.workouts.filter((workout) => workout.status === "completed").length,
       reportArtifacts: reports,
+      metrics: deriveMetricRegistry({
+        domain: input.domain,
+        startDate: addDays(input.date, -20),
+        endDate: input.date,
+        ruleVersion: "maxpower.metrics.v1",
+      }),
     },
     profile: {
       onboardingComplete: Boolean(input.domain.profile && input.domain.goalContract && input.domain.mandate),
@@ -392,12 +421,34 @@ function buildToday(input: {
   activityLog: TimelineActivityLog;
   safetyReason?: string;
   exerciseLabel: (exerciseVariantId: string) => string;
+  timezoneOffsetMinutes: number;
 }): TodayProductProjection {
+  const nutritionStrategy = [...input.domain.nutritionStrategies]
+    .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
+  const recoveryConstraint = [...input.domain.recoveryConstraints]
+    .filter((item) => item.value.validUntil >= `${input.date}T00:00:00.000Z`)
+    .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
+  const recovery = {
+    level: recoveryConstraint?.level ?? "normal",
+    ...(recoveryConstraint?.validUntil ? { validUntil: recoveryConstraint.validUntil } : {}),
+    reasons: recoveryConstraint?.evaluation?.reasonCodes ?? ["no_active_recovery_constraint"],
+    missing: recoveryConstraint?.evaluation?.missingOrStale ?? ["check_in_optional"],
+  } satisfies RecoveryProductProjection;
+  const nutritionPlan = deriveNutritionDayPlan({
+    date: input.date,
+    timezoneOffsetMinutes: input.timezoneOffsetMinutes,
+    ...(nutritionStrategy ? { strategy: nutritionStrategy } : {}),
+    ...(recoveryConstraint ? { recoveryConstraint } : {}),
+  });
+  const nutrition = {
+    plan: nutritionPlan,
+    ledger: projectNutritionDayLedger({ plan: nutritionPlan, events: input.domain.timeline.current }),
+  } satisfies NutritionProductProjection;
   if (!input.domain.profile || !input.domain.goalContract || !input.domain.mandate) {
-    return { date: input.date, state: "onboarding_required", action: "open_onboarding", activityLog: input.activityLog };
+    return { date: input.date, state: "onboarding_required", action: "open_onboarding", activityLog: input.activityLog, nutrition, recovery };
   }
   if (input.safetyReason) {
-    return { date: input.date, state: "safety_hold", action: "view_reason", activityLog: input.activityLog, reason: input.safetyReason };
+    return { date: input.date, state: "safety_hold", action: "view_reason", activityLog: input.activityLog, nutrition, recovery, reason: input.safetyReason };
   }
   if (!input.domain.plan || input.domain.planStatus === "stale_goal_contract") {
     return {
@@ -405,6 +456,8 @@ function buildToday(input: {
       state: "planner_hold",
       action: "view_reason",
       activityLog: input.activityLog,
+      nutrition,
+      recovery,
       reason: input.domain.planStatus === "stale_goal_contract" ? "当前目标已更新，需要重新生成计划" : "还没有可执行的今日计划",
     };
   }
@@ -414,6 +467,8 @@ function buildToday(input: {
       state: "completed",
       action: "view_summary",
       activityLog: input.activityLog,
+      nutrition,
+      recovery,
       ...(input.session ? { session: productSession(input.session, input.exerciseLabel) } : {}),
       activeWorkout: { id: input.activeWorkout.id, status: input.activeWorkout.status },
       ...(completedWorkoutSummary(input.activeWorkout)
@@ -428,23 +483,27 @@ function buildToday(input: {
         state: "completed",
         action: "view_summary",
         activityLog: input.activityLog,
+        nutrition,
+        recovery,
         completedWorkout: input.completedWorkout,
       };
     }
-    return { date: input.date, state: "rest", action: "record_activity", activityLog: input.activityLog };
+    return { date: input.date, state: "rest", action: "record_activity", activityLog: input.activityLog, nutrition, recovery };
   }
   const product = productSession(input.session, input.exerciseLabel);
   if (input.session.kind === "cardio") {
-    return { date: input.date, state: "activity", action: "record_activity", activityLog: input.activityLog, session: product };
+    return { date: input.date, state: "activity", action: "record_activity", activityLog: input.activityLog, nutrition, recovery, session: product };
   }
   if (input.session.kind === "rest" || input.session.kind === "recovery") {
-    return { date: input.date, state: "rest", action: "record_activity", activityLog: input.activityLog, session: product };
+    return { date: input.date, state: "rest", action: "record_activity", activityLog: input.activityLog, nutrition, recovery, session: product };
   }
   return {
     date: input.date,
     state: "workout",
     action: input.activeWorkout?.status === "active" || input.activeWorkout?.status === "paused" ? "continue_workout" : "start_workout",
     activityLog: input.activityLog,
+    nutrition,
+    recovery,
     session: product,
     ...(input.activeWorkout ? { activeWorkout: { id: input.activeWorkout.id, status: input.activeWorkout.status } } : {}),
   };
