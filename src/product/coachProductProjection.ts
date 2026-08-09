@@ -7,6 +7,7 @@ import type {
 import type {
   ActionEvent,
   Artifact,
+  EvidenceBriefArtifact,
   HealthImportState,
   PendingHumanAction,
 } from "../coach/model";
@@ -145,6 +146,7 @@ export interface PlanProductProjection {
   appliedPhaseStrategy?: AppliedPhaseStrategy;
   forecasts: readonly AdaptiveForecastScenario[];
   explanation?: RecommendationExplanation;
+  latestPlanningPreview?: EvidenceBriefArtifact;
 }
 
 export interface ProgressProductProjection {
@@ -274,6 +276,19 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       artifact.kind === "goal_forecast" ||
       artifact.kind === "mesocycle_review",
   ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const supersededPlanningPreviewIds = new Set(
+    input.artifacts
+      .filter((artifact): artifact is EvidenceBriefArtifact => artifact.kind === "evidence_brief" && Boolean(artifact.planningPreview?.sourcePreviewId))
+      .map((artifact) => artifact.planningPreview!.sourcePreviewId!),
+  );
+  const latestPlanningPreview = input.artifacts
+    .filter((artifact): artifact is EvidenceBriefArtifact =>
+      artifact.kind === "evidence_brief" &&
+      Boolean(artifact.planningPreview) &&
+      artifact.planningPreview?.status !== "confirmed" &&
+      !supersededPlanningPreviewIds.has(artifact.id),
+    )
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const pending = input.pendingHumanActions
     .filter((item) => item.status === "pending")
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
@@ -333,6 +348,7 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       ...(plan?.value.appliedPhaseStrategy ? { appliedPhaseStrategy: plan.value.appliedPhaseStrategy } : {}),
       forecasts: plan?.value.adaptiveForecasts ?? [],
       ...(plan?.value.explanation ? { explanation: plan.value.explanation } : {}),
+      ...(latestPlanningPreview ? { latestPlanningPreview } : {}),
     },
     progress: {
       bodyTrends: deriveBodyTrends({

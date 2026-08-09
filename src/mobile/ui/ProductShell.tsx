@@ -11,7 +11,7 @@ import {
 } from "react-native";
 
 import type { CoachApplication } from "../../coach";
-import type { CoachContextKind, CoachSession, ContextRef, NutritionObservationDraftArtifact } from "../../coach/model";
+import type { CoachContextKind, CoachSession, ContextRef, EvidenceBriefArtifact, NutritionObservationDraftArtifact } from "../../coach/model";
 import type { CustomExerciseVariantView, MovementPattern } from "../../knowledge";
 import {
   CoachDrawer,
@@ -479,7 +479,7 @@ export function ProductShell({ application, userId, incomingDeepLink, notificati
           onCorrectTimeline={setTimelineCorrection}
         />
       )}
-      {route === "plan" && <PlanScreen application={application} userId={userId} screen={screen} />}
+      {route === "plan" && <PlanScreen application={application} userId={userId} screen={screen} onUpdated={() => void refresh()} />}
       {route === "progress" && <ProgressScreen screen={screen} onOpenVideoLibrary={() => setRoute("video_library")} />}
       {route === "profile" && <ProfileScreen application={application} userId={userId} screen={screen} onStartOnboarding={() => setRoute("onboarding")} onUpdated={() => void refresh()} />}
       {route === "onboarding" && <OnboardingScreen application={application} userId={userId} onCompleted={() => { setRoute("today"); void refresh(); }} />}
@@ -946,9 +946,56 @@ function CalendarScreen(props: {
   );
 }
 
-function PlanScreen({ application, userId, screen }: { application: CoachApplication; userId: string; screen: CoachProductProjection }) {
+function PlanScreen({ application, userId, screen, onUpdated }: { application: CoachApplication; userId: string; screen: CoachProductProjection; onUpdated: () => void }) {
   const { plan } = screen;
   const [managingExercises, setManagingExercises] = useState(false);
+  const [previewOverride, setPreviewOverride] = useState<EvidenceBriefArtifact>();
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string>();
+  const preview = previewOverride ?? plan.latestPlanningPreview;
+  const confirmPreview = async () => {
+    if (!preview?.planningPreview || preview.planningPreview.status !== "awaiting_confirmation") return;
+    setPreviewBusy(true);
+    try {
+      await application.confirmPlanningPreview({ userId, previewId: preview.id, idempotencyKey: `mobile-plan-preview:confirm:${preview.id}` });
+      setPreviewOverride(undefined);
+      setPreviewError(undefined);
+      onUpdated();
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "预览已变化，请重新计算");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const rejectPreview = async () => {
+    if (!preview?.planningPreview || preview.planningPreview.status !== "awaiting_confirmation") return;
+    setPreviewBusy(true);
+    try {
+      setPreviewOverride(await application.rejectPlanningPreview({ userId, previewId: preview.id, idempotencyKey: `mobile-plan-preview:reject:${preview.id}` }));
+      setPreviewError(undefined);
+      onUpdated();
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "暂时无法保存你的选择");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const recomputePreview = async () => {
+    if (!preview?.planningPreview) return;
+    setPreviewBusy(true);
+    try {
+      const next = await application.recomputePlanningPreview({ userId, previewId: preview.id, idempotencyKey: `mobile-plan-preview:recompute:${preview.id}` });
+      setPreviewOverride(next);
+      setPreviewError(undefined);
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "暂时无法重新计算预览");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  if (preview?.planningPreview && preview.planningPreview.status !== "confirmed") {
+    return <PlanningPreviewScreen preview={preview} busy={previewBusy} error={previewError} onConfirm={() => void confirmPreview()} onReject={() => void rejectPreview()} onRecompute={() => void recomputePreview()} />;
+  }
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.screenHeader}>
@@ -966,9 +1013,18 @@ function PlanScreen({ application, userId, screen }: { application: CoachApplica
             <Text style={styles.planForecastName}>{forecastScenarioLabel(forecast.scenario)}</Text>
             <Text style={styles.planForecastMeta}>{forecast.eligibility === "eligible" ? "可选" : forecast.eligibility === "degraded" ? "降级" : "不可用"}</Text>
             <Text style={styles.planForecastDate}>{forecast.earliest}–{forecast.latest}</Text>
+            <Text style={styles.planForecastDate}>置信度 {Math.round(forecast.confidence.min * 100)}–{Math.round(forecast.confidence.max * 100)}%</Text>
           </View>)}
         </View>
+        {plan.forecasts.map((forecast) => <Text key={`${forecast.scenario}:detail`} style={styles.detailMeta}>{forecastScenarioLabel(forecast.scenario)} · 执行 {forecast.executionRequirements.join("、")} · 代价 {forecast.tradeoffs.join("、")} · 护栏 {forecast.guardrails.join("、")} · 复核 {forecast.recalibrateAt}</Text>)}
         <Text style={styles.planFootnote}>预测会在真实趋势与周期复核后重新校准；不是结果保证。</Text>
+      </View> : null}
+      {plan.explanation ? <View style={styles.detailCard}>
+        <Text style={styles.cardEyebrow}>依据与未知</Text>
+        <Text style={styles.detailMeta}>个人事实：{plan.explanation.userEvidence.join("、")}</Text>
+        <Text style={styles.detailMeta}>规则：{plan.explanation.ruleReason.join("、")}</Text>
+        {plan.explanation.researchEvidence.map((citation) => <Text key={citation.citationId} style={styles.detailMeta}>本地依据：{citation.citationId} · {citation.claim} · 适用 {citation.population} · 局限 {citation.limitation}</Text>)}
+        <Text style={styles.detailMeta}>未知：{plan.explanation.uncertainty.join("、")}</Text>
       </View> : null}
       {plan.currentWeek.map((session) => <PlanSession key={session.id} session={session} />)}
       {plan.nextWeek.length ? <Text style={styles.sectionTitle}>下一周</Text> : null}
@@ -1682,35 +1738,65 @@ function OnboardingScreen({ application, userId, onCompleted }: { application: C
   const [location, setLocation] = useState<"home" | "gym">("home");
   const [mode, setMode] = useState<"manual" | "collaborative" | "managed">("collaborative");
   const [age, setAge] = useState("");
+  const [sex, setSex] = useState<"female" | "male" | "prefer_not_to_say" | "unknown">("unknown");
   const [height, setHeight] = useState("");
   const [weight, setWeight] = useState("");
+  const [weeklyFrequency, setWeeklyFrequency] = useState("");
+  const [sessionDuration, setSessionDuration] = useState("");
+  const [nutritionCondition, setNutritionCondition] = useState("");
+  const [showProfessional, setShowProfessional] = useState(false);
+  const [squat, setSquat] = useState("");
+  const [benchPress, setBenchPress] = useState("");
+  const [deadlift, setDeadlift] = useState("");
+  const [waist, setWaist] = useState("");
+  const [neck, setNeck] = useState("");
+  const [bodyFat, setBodyFat] = useState("");
+  const [bodyFatMethod, setBodyFatMethod] = useState("");
+  const [plateauWeeks, setPlateauWeeks] = useState("");
+  const [priorStrategies, setPriorStrategies] = useState("");
+  const [executionAdherence, setExecutionAdherence] = useState<"unknown" | "low" | "mixed" | "high">("unknown");
+  const [recoveryChange, setRecoveryChange] = useState<"unknown" | "worse" | "stable" | "better">("unknown");
   const [adultConfirmed, setAdultConfirmed] = useState(false);
   const [noCurrentStopSignal, setNoCurrentStopSignal] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const [preview, setPreview] = useState<EvidenceBriefArtifact>();
+  const onboardingDraftId = useRef<string>();
+  const previewAttempt = useRef(0);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState<string>();
   const complete = async () => {
     if (!adultConfirmed || !noCurrentStopSignal) {
       setError("请先确认以上两项，再继续。");
       return;
     }
+    const frequency = optionalFiniteNumber(weeklyFrequency);
+    const duration = optionalFiniteNumber(sessionDuration);
+    if (frequency === undefined || frequency <= 0 || duration === undefined || duration <= 0) {
+      setError("请填写每周训练次数和单次时长；未知信息不会被系统猜测。");
+      return;
+    }
     setSaving(true);
     try {
       const date = localDate();
+      const depth = showProfessional ? "professional" : "basic";
       const end = new Date(`${date}T12:00:00.000Z`);
       end.setUTCDate(end.getUTCDate() + 84);
-      const draft = await application.startOnboarding({ userId, depth: "basic" });
-      await application.saveOnboardingProgress({
-        draftId: draft.id,
-        inputMode: "form",
-        idempotencyKey: `mobile-onboarding:${draft.id}:basic`,
-        confirmedSections: ["profile", "goal", "mandate", "permissions", "safety"],
-        patch: {
+      if (!onboardingDraftId.current) {
+        const draft = await application.startOnboarding({ userId, depth });
+        await application.saveOnboardingProgress({
+          draftId: draft.id,
+          inputMode: "form",
+          idempotencyKey: `mobile-onboarding:${draft.id}:${depth}`,
+          confirmedSections: ["profile", "goal", "mandate", "permissions", "safety", ...(showProfessional ? ["professional" as const] : [])],
+          patch: {
           profile: {
             adultConfirmed: true,
-            ...((optionalFiniteNumber(age) !== undefined || optionalFiniteNumber(height) !== undefined || optionalFiniteNumber(weight) !== undefined)
+            ...((optionalFiniteNumber(age) !== undefined || optionalFiniteNumber(height) !== undefined || optionalFiniteNumber(weight) !== undefined || sex !== "unknown")
               ? {
                   demographics: {
                     ...(optionalFiniteNumber(age) !== undefined ? { ageYears: optionalFiniteNumber(age) } : {}),
+                    ...(sex !== "unknown" ? { sex } : {}),
                     ...(optionalFiniteNumber(height) !== undefined ? { height: { value: optionalFiniteNumber(height)!, unit: "cm" as const } } : {}),
                     ...(optionalFiniteNumber(weight) !== undefined ? { currentWeight: { value: optionalFiniteNumber(weight)!, unit: "kg" as const } } : {}),
                   },
@@ -1718,7 +1804,7 @@ function OnboardingScreen({ application, userId, onCompleted }: { application: C
               : {}),
             trainingExperience: experience,
             returningStatus: "new",
-            schedule: { weeklyFrequency: 3, sessionDurationMinutes: 45 },
+            schedule: { weeklyFrequency: frequency, sessionDurationMinutes: duration },
             locations: [{
               id: `location:${location}`,
               kind: location,
@@ -1727,9 +1813,38 @@ function OnboardingScreen({ application, userId, onCompleted }: { application: C
             }],
             bodyDirection: goal === "fat_loss_preserve_lean_mass" ? "decrease_body_fat" : goal === "hypertrophy" ? "gain_mass" : "performance_only",
             exerciseConstraints: [],
-            nutritionPreferences: [],
+            nutritionPreferences: nutritionCondition.trim() ? [nutritionCondition.trim()] : [],
             professionalConstraints: [],
           },
+          ...(showProfessional ? {
+            professional: {
+              ...(optionalFiniteNumber(squat) !== undefined || optionalFiniteNumber(benchPress) !== undefined || optionalFiniteNumber(deadlift) !== undefined
+                ? {
+                    strengthBaseline: {
+                      ...(optionalFiniteNumber(squat) !== undefined ? { squat: { value: optionalFiniteNumber(squat)!, unit: "kg" as const } } : {}),
+                      ...(optionalFiniteNumber(benchPress) !== undefined ? { benchPress: { value: optionalFiniteNumber(benchPress)!, unit: "kg" as const } } : {}),
+                      ...(optionalFiniteNumber(deadlift) !== undefined ? { deadlift: { value: optionalFiniteNumber(deadlift)!, unit: "kg" as const } } : {}),
+                      measuredAt: `${date}T12:00:00.000Z`,
+                      source: "user_confirmed" as const,
+                    },
+                  }
+                : {}),
+              bodyObservations: [
+                ...(optionalFiniteNumber(waist) !== undefined ? [{ occurredAt: `${date}T12:00:00.000Z`, metric: "circumference" as const, site: "waist", quantity: { value: optionalFiniteNumber(waist)!, unit: "cm" as const } }] : []),
+                ...(optionalFiniteNumber(neck) !== undefined ? [{ occurredAt: `${date}T12:00:00.000Z`, metric: "circumference" as const, site: "neck", quantity: { value: optionalFiniteNumber(neck)!, unit: "cm" as const } }] : []),
+                ...(optionalFiniteNumber(bodyFat) !== undefined ? [{ occurredAt: `${date}T12:00:00.000Z`, metric: "body_fat_percentage" as const, quantity: { value: optionalFiniteNumber(bodyFat)!, unit: "percent" as const }, condition: bodyFatMethod.trim() || "user_reported" }] : []),
+              ],
+              ...(optionalFiniteNumber(plateauWeeks) !== undefined || priorStrategies.trim() || executionAdherence !== "unknown" || recoveryChange !== "unknown" ? {
+                plateauHistory: {
+                  ...(optionalFiniteNumber(plateauWeeks) !== undefined ? { durationWeeks: optionalFiniteNumber(plateauWeeks) } : {}),
+                  ...(priorStrategies.trim() ? { priorStrategies: priorStrategies.split(",").map((item) => item.trim()).filter(Boolean) } : {}),
+                  executionAdherence,
+                  recoveryChange,
+                  suspectedReasons: [],
+                },
+              } : {}),
+            },
+          } : {}),
           goal: {
             primaryGoal: goal,
             goalType,
@@ -1765,25 +1880,81 @@ function OnboardingScreen({ application, userId, onCompleted }: { application: C
             eatingDisorderOrLowEnergyRiskDeclared: false,
             stopSignals: [],
           },
-        },
-      });
-      await application.completeOnboarding({ draftId: draft.id, idempotencyKey: `mobile-onboarding:${draft.id}:complete` });
-      // Installs typed local recipes only. Nothing is scheduled or sent until
-      // a matching local fact arrives and notification settings allow it.
-      await application.ensureDefaultEventRecipes(userId);
-      await application.materializeGoalCycle({
+        });
+        await application.completeOnboarding({ draftId: draft.id, idempotencyKey: `mobile-onboarding:${draft.id}:complete` });
+        onboardingDraftId.current = draft.id;
+        // Installs typed local recipes only. Nothing is scheduled or sent until
+        // a matching local fact arrives and notification settings allow it.
+        await application.ensureDefaultEventRecipes(userId);
+      }
+      previewAttempt.current += 1;
+      const nextPreview = await application.createPlanningPreview({
         userId,
         currentDate: date,
         trigger: "initial_plan",
-        idempotencyKey: `mobile-onboarding:${draft.id}:initial-plan`,
+        idempotencyKey: `mobile-onboarding:${onboardingDraftId.current}:preview:${previewAttempt.current}`,
       });
-      onCompleted();
+      setPreview(nextPreview);
+      setPreviewError(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "暂时无法保存资料");
     } finally {
       setSaving(false);
     }
   };
+  const confirmPreview = async () => {
+    if (!preview?.planningPreview) return;
+    setPreviewBusy(true);
+    try {
+      await application.confirmPlanningPreview({
+        userId,
+        previewId: preview.id,
+        idempotencyKey: `mobile-onboarding:${onboardingDraftId.current}:confirm:${preview.id}`,
+      });
+      onCompleted();
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "预览已变化，请重新计算");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const rejectPreview = async () => {
+    if (!preview?.planningPreview) return;
+    setPreviewBusy(true);
+    try {
+      await application.rejectPlanningPreview({
+        userId,
+        previewId: preview.id,
+        idempotencyKey: `mobile-onboarding:${onboardingDraftId.current}:reject:${preview.id}`,
+      });
+      onCompleted();
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "暂时无法保存你的选择");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const recomputePreview = async () => {
+    if (!preview?.planningPreview) return;
+    setPreviewBusy(true);
+    try {
+      previewAttempt.current += 1;
+      const nextPreview = await application.recomputePlanningPreview({
+        userId,
+        previewId: preview.id,
+        idempotencyKey: `mobile-onboarding:${onboardingDraftId.current}:recompute:${previewAttempt.current}`,
+      });
+      setPreview(nextPreview);
+      setPreviewError(undefined);
+    } catch (cause) {
+      setPreviewError(cause instanceof Error ? cause.message : "暂时无法重新计算预览");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  if (preview) {
+    return <PlanningPreviewScreen preview={preview} busy={previewBusy} error={previewError} onConfirm={() => void confirmPreview()} onReject={() => void rejectPreview()} onRecompute={() => void recomputePreview()} />;
+  }
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.screenHeader}><View><Text style={styles.screenTitle}>建立资料</Text><Text style={styles.screenSub}>先从几项基础信息开始</Text></View></View>
@@ -1794,6 +1965,36 @@ function OnboardingScreen({ application, userId, onCompleted }: { application: C
         <TextInput value={height} onChangeText={setHeight} keyboardType="decimal-pad" placeholder="身高 cm" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
         <TextInput value={weight} onChangeText={setWeight} keyboardType="decimal-pad" placeholder="体重 kg" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
       </View>
+      <Question label="性别（可留空）" options={[{ id: "female", label: "女性" }, { id: "male", label: "男性" }, { id: "prefer_not_to_say", label: "不填写" }, { id: "unknown", label: "未知" }]} selected={sex} onSelect={setSex} />
+      <Text style={styles.questionLabel}>每周安排与饮食条件</Text>
+      <View style={styles.onboardingFields}>
+        <TextInput value={weeklyFrequency} onChangeText={setWeeklyFrequency} keyboardType="number-pad" placeholder="每周次数" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+        <TextInput value={sessionDuration} onChangeText={setSessionDuration} keyboardType="number-pad" placeholder="单次分钟" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+      </View>
+      <TextInput value={nutritionCondition} onChangeText={setNutritionCondition} placeholder="饮食条件（可选，例如外食 / 自己做饭）" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+      <Pressable accessibilityRole="button" onPress={() => setShowProfessional((value) => !value)} style={styles.professionalToggle}><Text style={styles.professionalToggleText}>{showProfessional ? "收起专业资料" : "补充专业资料（可选）"}</Text></Pressable>
+      {showProfessional ? <View style={styles.professionalFields}>
+        <Text style={styles.questionLabel}>力量基线（kg，可留空）</Text>
+        <View style={styles.onboardingFields}>
+          <TextInput value={squat} onChangeText={setSquat} keyboardType="decimal-pad" placeholder="深蹲" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+          <TextInput value={benchPress} onChangeText={setBenchPress} keyboardType="decimal-pad" placeholder="卧推" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+          <TextInput value={deadlift} onChangeText={setDeadlift} keyboardType="decimal-pad" placeholder="硬拉" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+        </View>
+        <Text style={styles.questionLabel}>围度与体脂（可留空）</Text>
+        <View style={styles.onboardingFields}>
+          <TextInput value={waist} onChangeText={setWaist} keyboardType="decimal-pad" placeholder="腰围 cm" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+          <TextInput value={neck} onChangeText={setNeck} keyboardType="decimal-pad" placeholder="颈围 cm" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+          <TextInput value={bodyFat} onChangeText={setBodyFat} keyboardType="decimal-pad" placeholder="体脂 %" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+        </View>
+        <TextInput value={bodyFatMethod} onChangeText={setBodyFatMethod} placeholder="体脂来源 / 方法，例如 DEXA、皮脂钳、用户自测" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+        <Text style={styles.questionLabel}>平台与往期策略（可留空）</Text>
+        <View style={styles.onboardingFields}>
+          <TextInput value={plateauWeeks} onChangeText={setPlateauWeeks} keyboardType="number-pad" placeholder="平台周数" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
+          <TextInput value={priorStrategies} onChangeText={setPriorStrategies} placeholder="往期策略，用逗号分隔" placeholderTextColor={colors.ink3} style={[styles.onboardingInput, { flex: 2 }]} />
+        </View>
+        <Question label="执行情况" options={[{ id: "unknown", label: "未知" }, { id: "low", label: "低" }, { id: "mixed", label: "不稳定" }, { id: "high", label: "高" }]} selected={executionAdherence} onSelect={setExecutionAdherence} />
+        <Question label="恢复变化" options={[{ id: "unknown", label: "未知" }, { id: "worse", label: "变差" }, { id: "stable", label: "稳定" }, { id: "better", label: "变好" }]} selected={recoveryChange} onSelect={setRecoveryChange} />
+      </View> : null}
       <Question label="现在最想达成" options={[{ id: "hypertrophy", label: "增肌" }, { id: "strength", label: "增力" }, { id: "fat_loss_preserve_lean_mass", label: "减脂保肌" }]} selected={goal} onSelect={(next) => { setGoal(next); setGoalType(next === "fat_loss_preserve_lean_mass" ? "fat_loss" : next); }} />
       <Question label="目标阶段意图" options={[{ id: "hypertrophy", label: "增肌" }, { id: "fat_loss", label: "减脂" }, { id: "strength", label: "增力" }, { id: "maintain", label: "维持重组" }, { id: "return_to_training", label: "重返训练" }]} selected={goalType} onSelect={setGoalType} />
       <Question label="主要在哪里训练" options={[{ id: "home", label: "家里 / 徒手" }, { id: "gym", label: "健身房" }]} selected={location} onSelect={setLocation} />
@@ -1804,6 +2005,60 @@ function OnboardingScreen({ application, userId, onCompleted }: { application: C
       <Pressable accessibilityRole="button" disabled={saving} onPress={() => void complete()} style={[styles.onboardingButton, saving && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{saving ? "正在保存" : "继续"}</Text></Pressable>
     </ScrollView>
   );
+}
+
+function PlanningPreviewScreen({ preview, busy, error, onConfirm, onReject, onRecompute }: {
+  preview: EvidenceBriefArtifact;
+  busy: boolean;
+  error?: string;
+  onConfirm?: () => void;
+  onReject?: () => void;
+  onRecompute: () => void;
+}) {
+  const proposal = preview.planningPreview?.proposal;
+  if (!proposal) {
+    return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.screenHeader}><View><Text style={styles.screenTitle}>计划预览</Text><Text style={styles.screenSub}>当前事实不足以安全生成路线</Text></View></View>
+      <View style={styles.detailCard}><Text style={styles.detailTitle}>先保留未知</Text>{preview.summary.map((item) => <Text key={item} style={styles.detailMeta}>{item}</Text>)}<Text style={styles.planFootnote}>不会用猜测填入训练能力、重量或维护热量。</Text></View>
+      {error ? <Text style={styles.formError}>{error}</Text> : null}
+      <Pressable accessibilityRole="button" disabled={busy} onPress={onRecompute} style={[styles.primaryButton, busy && styles.primaryButtonDisabled]}><Text style={styles.primaryButtonText}>重新检查</Text></Pressable>
+    </ScrollView>;
+  }
+  const phase = proposal.appliedPhaseStrategy;
+  return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <View style={styles.screenHeader}><View><Text style={styles.screenTitle}>长期路线预览</Text><Text style={styles.screenSub}>{preview.planningPreview?.status === "awaiting_confirmation" ? "确认前不会写入 GoalCycle、PlanRevision 或 Today" : preview.planningPreview?.status === "stale" ? "上游事实已变化，需要重新计算" : "你保留了当前状态，可以随时重新计算"}</Text></View></View>
+    <View style={styles.detailCard}>
+      <Text style={styles.cardEyebrow}>当前策略</Text>
+      <Text style={styles.detailTitle}>{strategyLabel(proposal.strategySelection?.primary ?? "unknown")}</Text>
+      <Text style={styles.detailMeta}>{phase?.objective ?? "根据已确认资料生成"}</Text>
+      {phase ? <Text style={styles.planFootnote}>预计 {phase.expectedDurationWeeks.min}–{phase.expectedDurationWeeks.max} 周 · 复核 {phase.reviewAt}</Text> : null}
+    </View>
+    <View style={styles.detailCard}>
+      <Text style={styles.cardEyebrow}>三档预测</Text>
+      <View style={styles.planForecastRow}>{(proposal.adaptiveForecasts ?? []).map((forecast) => <View key={forecast.scenario} style={styles.planForecastItem}>
+        <Text style={styles.planForecastName}>{forecastScenarioLabel(forecast.scenario)}</Text>
+        <Text style={styles.planForecastMeta}>{forecast.eligibility === "eligible" ? "可选" : forecast.eligibility === "degraded" ? "降级" : "不可用"}</Text>
+        <Text style={styles.planForecastDate}>{forecast.earliest}–{forecast.latest}</Text>
+        <Text style={styles.planForecastDate}>{forecast.phaseRoute.join(" → ")}</Text>
+        <Text style={styles.planForecastDate}>置信度 {Math.round(forecast.confidence.min * 100)}–{Math.round(forecast.confidence.max * 100)}%</Text>
+        <Text style={styles.planForecastDate}>复核 {forecast.recalibrateAt}</Text>
+      </View>)}</View>
+      {(proposal.adaptiveForecasts ?? []).map((forecast) => <Text key={`${forecast.scenario}:detail`} style={styles.detailMeta}>{forecastScenarioLabel(forecast.scenario)} · 执行 {forecast.executionRequirements.join("、")} · 代价 {forecast.tradeoffs.join("、")} · 护栏 {forecast.guardrails.join("、")}</Text>)}
+      <Text style={styles.planFootnote}>预测包含执行要求、代价和安全边界，会在真实趋势后重新校准。</Text>
+    </View>
+    {proposal.explanation ? <View style={styles.detailCard}>
+      <Text style={styles.cardEyebrow}>为什么这样安排</Text>
+      <Text style={styles.detailMeta}>个人事实：{proposal.explanation.userEvidence.join("、")}</Text>
+      <Text style={styles.detailMeta}>规则：{proposal.explanation.ruleReason.join("、")}</Text>
+      {proposal.explanation.researchEvidence.map((citation) => <Text key={citation.citationId} style={styles.detailMeta}>本地依据：{citation.citationId} · {citation.claim} · 适用 {citation.population} · 局限 {citation.limitation}</Text>)}
+      <Text style={styles.detailMeta}>未知：{proposal.explanation.uncertainty.join("、")}</Text>
+      <Text style={styles.detailMeta}>替代：{proposal.explanation.alternative.join("、")}</Text>
+    </View> : null}
+    {error ? <Text style={styles.formError}>{error}</Text> : null}
+    {preview.planningPreview?.status === "awaiting_confirmation" && onConfirm ? <Pressable accessibilityRole="button" disabled={busy} onPress={onConfirm} style={[styles.primaryButton, busy && styles.primaryButtonDisabled]}><Text style={styles.primaryButtonText}>{busy ? "正在处理" : "确认并生成本周计划"}</Text></Pressable> : null}
+    <Pressable accessibilityRole="button" disabled={busy} onPress={onRecompute} style={styles.onboardingButton}><Text style={styles.onboardingButtonText}>重新计算预览</Text></Pressable>
+    {preview.planningPreview?.status === "awaiting_confirmation" && onReject ? <Pressable accessibilityRole="button" disabled={busy} onPress={onReject} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>保留当前状态</Text></Pressable> : null}
+  </ScrollView>;
 }
 
 function Question<T extends string>({ label, options, selected, onSelect }: { label: string; options: readonly { id: T; label: string }[]; selected: T; onSelect: (id: T) => void }) {
@@ -2606,7 +2861,7 @@ const styles = StyleSheet.create({
   videoLibraryCard: { backgroundColor: colors.dark, borderRadius: radius.row, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, videoLibraryTitle: { color: colors.white, fontSize: 15, fontWeight: "900" }, videoLibraryMeta: { color: "#aeb3a6", fontSize: 11, marginTop: 5 }, videoLibraryArrow: { color: colors.lime, fontSize: 28, lineHeight: 30 },
   profileCard: { backgroundColor: colors.white, borderRadius: radius.card, paddingHorizontal: 16 }, profileStart: { backgroundColor: colors.dark, borderRadius: radius.chip, minHeight: 48, alignItems: "center", justifyContent: "center" }, profileStartText: { color: colors.white, fontSize: 15, fontWeight: "800" }, profileRow: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth }, profileLabel: { color: colors.ink2, fontSize: 14 }, profileValue: { color: colors.ink, fontSize: 14, fontWeight: "700" }, privacySummaryLoading: { minHeight: 74, alignItems: "center", justifyContent: "center" }, privacySummaryFooter: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }, privacySummaryFooterText: { color: colors.ink3, fontSize: 12, flex: 1 }, privacySheet: { maxHeight: "84%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, privacySheetLoading: { minHeight: 160, alignItems: "center", justifyContent: "center" }, privacyDetailList: { gap: 10, paddingBottom: 8 }, privacyDetailBlock: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, gap: 7 }, privacyDetailHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 12 }, privacyDetailTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" }, privacyDetailSummary: { color: colors.limeInk, fontSize: 12, fontWeight: "800", textAlign: "right" }, privacyDetailText: { color: colors.ink2, fontSize: 12, lineHeight: 18 }, privacyDetailMeta: { color: colors.ink3, fontSize: 11, lineHeight: 17, marginTop: 1 }, privacyManageButton: { minHeight: 46, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", marginTop: 2 }, privacyManageButtonText: { color: colors.lime, fontSize: 14, fontWeight: "900" }, replicaConflict: { borderLeftWidth: 2, borderLeftColor: colors.limeDeep, backgroundColor: colors.paper, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, gap: 2, marginTop: 1 }, replicaConflictTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" }, replicaSyncButton: { minHeight: 42, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", marginTop: 3 }, replicaSyncButtonText: { color: colors.lime, fontSize: 13, fontWeight: "900" }, healthConnectionCard: { paddingVertical: 16, gap: 10 }, healthConnectionTop: { flexDirection: "row", alignItems: "center", gap: 12 }, healthConnectionTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" }, healthConnectionMeta: { color: colors.ink3, fontSize: 12, lineHeight: 18, marginTop: 3 }, healthConnectionNote: { color: colors.ink2, fontSize: 12, lineHeight: 18 }, healthImportedList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 2 }, healthConnectionActions: { flexDirection: "row", gap: 8, marginTop: 2 }, healthConnectionPrimary: { flex: 1, minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, healthConnectionPrimaryText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, healthConnectionSecondary: { minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.paper, borderColor: colors.line, borderWidth: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 }, healthConnectionSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, actionLogRow: { flexDirection: "row", alignItems: "center", minHeight: 56, borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 }, actionLogBody: { flex: 1 }, actionLogTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, actionLogMeta: { color: colors.ink3, fontSize: 11, marginTop: 4 },
   permissionScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, permissionSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, permissionList: { gap: 9, paddingBottom: 8 }, permissionRow: { backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 14, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 12 }, permissionBody: { flex: 1 }, permissionTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" }, permissionDescription: { color: colors.ink3, fontSize: 11, lineHeight: 16, marginTop: 4 }, permissionSwitch: { width: 45, height: 28, borderRadius: 16, backgroundColor: colors.paper2, padding: 3, justifyContent: "center" }, permissionSwitchOn: { backgroundColor: colors.limeDeep, alignItems: "flex-end" }, permissionKnob: { width: 22, height: 22, borderRadius: 12, backgroundColor: colors.white, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }, permissionKnobOn: { backgroundColor: colors.dark }, actionLogScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, actionLogSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, actionLogList: { gap: 9, paddingBottom: 8 }, actionLogDetailRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, gap: 4 }, actionLogDetailTop: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actionLogResult: { color: colors.limeInk, fontSize: 11, fontWeight: "800" }, actionLogDetailMeta: { color: colors.ink3, fontSize: 11, lineHeight: 16 }, actionLogIntent: { color: colors.ink2, fontSize: 12, lineHeight: 18, marginVertical: 2 }, actionLogReversible: { color: colors.limeInk, fontSize: 11, fontWeight: "800", marginTop: 2 },
-  question: { gap: 9 }, questionLabel: { color: colors.ink, fontWeight: "800", fontSize: 15 }, optionList: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, option: { backgroundColor: colors.white, borderRadius: radius.chip, borderWidth: 1, borderColor: "transparent", minHeight: 40, paddingHorizontal: 13, justifyContent: "center" }, optionSelected: { backgroundColor: "#EEF9C7", borderColor: colors.limeDeep }, optionText: { color: colors.ink2, fontSize: 13, fontWeight: "700" }, optionTextSelected: { color: colors.limeInk }, onboardingFields: { flexDirection: "row", gap: 8 }, onboardingInput: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 10, fontSize: 13 }, confirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: colors.white, borderRadius: radius.row, padding: 14 }, checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: colors.ink3, alignItems: "center", justifyContent: "center", marginTop: 1 }, checkboxOn: { borderColor: colors.limeDeep, backgroundColor: colors.lime }, checkboxMark: { color: colors.limeInk, fontWeight: "900" }, confirmText: { flex: 1, color: colors.ink2, fontSize: 13, lineHeight: 19 }, formError: { color: colors.terra, fontSize: 12 }, onboardingButton: { backgroundColor: colors.dark, minHeight: 50, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", marginTop: 4 }, onboardingButtonText: { color: colors.white, fontSize: 16, fontWeight: "900" },
+  question: { gap: 9 }, questionLabel: { color: colors.ink, fontWeight: "800", fontSize: 15 }, optionList: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, option: { backgroundColor: colors.white, borderRadius: radius.chip, borderWidth: 1, borderColor: "transparent", minHeight: 40, paddingHorizontal: 13, justifyContent: "center" }, optionSelected: { backgroundColor: "#EEF9C7", borderColor: colors.limeDeep }, optionText: { color: colors.ink2, fontSize: 13, fontWeight: "700" }, optionTextSelected: { color: colors.limeInk }, onboardingFields: { flexDirection: "row", gap: 8 }, onboardingInput: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 10, fontSize: 13 }, professionalToggle: { minHeight: 40, justifyContent: "center" }, professionalToggleText: { color: colors.limeInk, fontSize: 13, fontWeight: "900" }, professionalFields: { backgroundColor: colors.paper2, borderRadius: radius.card, padding: 14, gap: 12 }, confirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: colors.white, borderRadius: radius.row, padding: 14 }, checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: colors.ink3, alignItems: "center", justifyContent: "center", marginTop: 1 }, checkboxOn: { borderColor: colors.limeDeep, backgroundColor: colors.lime }, checkboxMark: { color: colors.limeInk, fontWeight: "900" }, confirmText: { flex: 1, color: colors.ink2, fontSize: 13, lineHeight: 19 }, formError: { color: colors.terra, fontSize: 12 }, onboardingButton: { backgroundColor: colors.dark, minHeight: 50, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", marginTop: 4 }, onboardingButtonText: { color: colors.white, fontSize: 16, fontWeight: "900" }, previewRejectButton: { minHeight: 44, alignItems: "center", justifyContent: "center", marginBottom: 24 }, previewRejectText: { color: colors.ink3, fontSize: 13, fontWeight: "800" },
   workoutTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }, workoutTopActions: { alignItems: "flex-end", gap: 8 }, workoutProgress: { color: colors.limeInk, backgroundColor: colors.lime, borderRadius: radius.chip, paddingHorizontal: 11, paddingVertical: 7, fontWeight: "900" }, workoutCoachButton: { minHeight: 34, minWidth: 72, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, workoutCoachButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, currentSetCard: { backgroundColor: colors.dark, borderRadius: 26, padding: 22, gap: 10 }, currentSetTitle: { color: colors.white, fontSize: 22, fontWeight: "900" }, currentSetDose: { color: "#C5C9C0", fontSize: 15 }, currentSetBoundary: { color: "#979C93", fontSize: 11, lineHeight: 17, marginBottom: 4 }, setActions: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actualButton: { flex: 1, alignItems: "center", minHeight: 34, justifyContent: "center" }, actualButtonText: { color: colors.lime, fontWeight: "800", fontSize: 13 }, skipSetText: { color: "#F5B6A4", fontWeight: "800", fontSize: 13 }, actualForm: { gap: 8 }, actualField: { minHeight: 42, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", flexDirection: "row", alignItems: "center", paddingHorizontal: 12 }, actualLabel: { color: "#B6BAAF", width: 52, fontSize: 12 }, actualInput: { flex: 1, color: colors.white, fontSize: 15, fontWeight: "700", paddingVertical: 0, textAlign: "right" }, workoutTask: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 4 }, workoutTaskTitle: { color: colors.ink, fontWeight: "800", fontSize: 15, marginBottom: 4 }, workoutSetRow: { flexDirection: "row", alignItems: "center", minHeight: 38, gap: 10 }, workoutSetIndex: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.paper2, color: colors.ink2, fontSize: 11, textAlign: "center", paddingTop: 3 }, workoutSetDose: { flex: 1, color: colors.ink2, fontFamily: "monospace", fontSize: 12 }, workoutSetState: { color: colors.ink3, fontSize: 11 }, workoutSetDone: { color: colors.limeDeep, fontWeight: "800" }, workoutSetSkipped: { color: colors.terra, fontWeight: "800" }, manageWorkoutTasksButton: { minHeight: 38, borderRadius: radius.chip, borderWidth: 1, borderColor: "#3B4039", alignItems: "center", justifyContent: "center", marginTop: 2 }, manageWorkoutTasksText: { color: colors.white, fontSize: 13, fontWeight: "800" }, workoutTaskEditorRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 12, gap: 8 }, workoutTaskEditorRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskEditorPrimary: { minHeight: 38 }, workoutTaskEditorActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, workoutTaskTiny: { minHeight: 28, justifyContent: "center" }, workoutTaskTinyText: { color: colors.ink2, fontSize: 12, fontWeight: "800" }, workoutTaskPicker: { backgroundColor: "#EEF9C7", borderRadius: radius.card, padding: 14, gap: 9, marginTop: 4 }, workoutCatalogList: { gap: 6 }, workoutCatalogRow: { backgroundColor: colors.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, workoutCatalogRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskBoundary: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, workoutTaskAddFields: { flexDirection: "row", gap: 8 }, workoutTaskNumberField: { flex: 1, minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", paddingHorizontal: 10 }, workoutTaskNumberLabel: { color: colors.ink2, fontSize: 12 }, workoutTaskNumberInput: { flex: 1, color: colors.ink, fontFamily: "monospace", fontWeight: "800", textAlign: "right", fontSize: 14, paddingVertical: 0 }, workoutTaskButtons: { flexDirection: "row", gap: 8 }, workoutTaskSecondary: { flex: 1, minHeight: 46, borderRadius: radius.chip, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center", backgroundColor: colors.white }, workoutTaskSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, workoutTaskAddButton: { flex: 1, marginTop: 0 }, pauseButton: { minHeight: 42, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, pauseButtonText: { color: colors.ink3, fontSize: 13, fontWeight: "800" }, safetyPauseButton: { minHeight: 42, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.terraSoft }, safetyPauseButtonText: { color: colors.terra, fontSize: 13, fontWeight: "900" }, safetyPauseScrim: { ...StyleSheet.absoluteFill, zIndex: 55, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, safetyPauseSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, safetyPauseTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, safetyPauseDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19, marginBottom: 4 }, safetyPauseChoice: { minHeight: 50, paddingHorizontal: 14, borderRadius: radius.row, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, safetyPauseChoiceText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: "800" }, safetyPauseCancel: { minHeight: 46, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line }, safetyPauseCancelText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, skipSetSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, skipSetTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, skipSetDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19 }, skipSetInput: { minHeight: 86, borderRadius: radius.row, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 13, paddingVertical: 11, textAlignVertical: "top", fontSize: 14 }, skipSetConfirm: { minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, skipSetConfirmText: { color: colors.white, fontWeight: "900", fontSize: 15 }, finishButton: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, finishButtonText: { color: colors.ink, fontWeight: "800" }, pausedPage: { flex: 1, padding: 20, justifyContent: "center", backgroundColor: colors.paper }, pausedCard: { backgroundColor: colors.dark, padding: 24, borderRadius: 28, gap: 13 }, pausedTitle: { color: colors.white, fontSize: 30, fontWeight: "900" }, pausedDetail: { color: "#B7BBB3", fontSize: 14, lineHeight: 21, marginBottom: 8 },
   monitorEntry: { minHeight: 62, backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 15, paddingVertical: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, monitorEntryTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, monitorEntrySub: { color: colors.ink3, fontSize: 11, marginTop: 3 }, monitorEntryButton: { minWidth: 54, minHeight: 34, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, monitorEntryButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, nextSetRecommendation: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 84, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }, nextSetRecommendationBody: { flex: 1, gap: 2 }, nextSetRecommendationTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" }, nextSetRecommendationDetail: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, nextSetRecommendationButton: { minWidth: 58, minHeight: 38, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, nextSetRecommendationButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" },
   restCard: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 72, paddingHorizontal: 16, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, restTime: { color: colors.ink, fontFamily: "monospace", fontSize: 24, fontWeight: "900", marginTop: 2 }, restActions: { flexDirection: "row", alignItems: "center", gap: 8 }, restAdd: { backgroundColor: colors.dark, borderRadius: radius.chip, minHeight: 38, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }, restAddText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, restCancel: { backgroundColor: colors.white, borderColor: colors.line, borderWidth: 1, borderRadius: radius.chip, minHeight: 38, paddingHorizontal: 14, alignItems: "center", justifyContent: "center" }, restCancelText: { color: colors.ink, fontSize: 12, fontWeight: "800" },

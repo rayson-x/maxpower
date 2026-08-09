@@ -144,6 +144,12 @@ test("建档保留身体基线、目标约束、平台历史与体脂估算 prov
         unacceptableCosts: ["persistent_recovery_decline"],
       },
       professional: {
+        priorStrategies: ["aggressive_cut", "maintenance_phase"],
+        majorWeightLossHistory: {
+          lostWeight: { value: 35, unit: "kg" },
+          maintenanceExperience: "established",
+          reboundOrHunger: "present",
+        },
         bodyObservations: [{
           occurredAt: "2026-08-08T07:00:00.000+08:00",
           metric: "body_fat_percentage",
@@ -171,6 +177,13 @@ test("建档保留身体基线、目标约束、平台历史与体脂估算 prov
           recoveryChange: "stable",
           suspectedReasons: ["strategy_stagnation"],
         },
+        recoveryObservations: [{
+          occurredAt: "2026-08-08T07:00:00.000+08:00",
+          perceivedRecovery: 4,
+          fatigue: 7,
+          soreness: 5,
+          sleepHours: 6,
+        }],
       },
     },
     confirmedSections: ["profile", "goal", "mandate", "permissions", "safety", "professional"],
@@ -185,6 +198,8 @@ test("建档保留身体基线、目标约束、平台历史与体脂估算 prov
     currentWeight: { value: 100, unit: "kg" },
   });
   assert.equal(projection.profile?.value.historyModifiers?.plateau?.durationWeeks, 12);
+  assert.deepEqual(projection.profile?.value.historyModifiers?.priorStrategies, ["aggressive_cut", "maintenance_phase"]);
+  assert.equal(projection.profile?.value.historyModifiers?.majorWeightLossHistory?.maintenanceExperience, "established");
   assert.equal(projection.goalContract?.value.goalType, "fat_loss");
   assert.equal(projection.goalContract?.value.targets?.targetBodyFat?.value, 12);
   const estimate = projection.timeline.current
@@ -199,6 +214,9 @@ test("建档保留身体基线、目标约束、平台历史与体脂估算 prov
       max: { value: 26, unit: "percent" },
     });
   }
+  assert.ok(projection.timeline.current.some((event) => event.fact.kind === "recovery"));
+  assert.ok(projection.timeline.current.some((event) => event.fact.kind === "sleep"));
+  assert.ok(projection.timeline.current.some((event) => event.fact.kind === "symptom" && event.fact.symptom === "soreness"));
 });
 
 test("未确认的对话建议保持 draft；专业建档的历史重量、RIR、身体和营养进入 Timeline", async () => {

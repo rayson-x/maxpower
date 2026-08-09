@@ -98,6 +98,7 @@ export interface SafetyDraft {
 }
 
 export interface ProfessionalDraft {
+  priorStrategies?: readonly string[];
   strengthBaseline?: {
     squat?: MassQuantity;
     benchPress?: MassQuantity;
@@ -141,6 +142,18 @@ export interface ProfessionalDraft {
     recoveryChange?: "unknown" | "worse" | "stable" | "better";
     suspectedReasons?: readonly string[];
   };
+  majorWeightLossHistory?: {
+    lostWeight?: MassQuantity;
+    maintenanceExperience?: "unknown" | "short" | "established";
+    reboundOrHunger?: "unknown" | "present" | "not_reported";
+  };
+  recoveryObservations?: readonly {
+    occurredAt: string;
+    perceivedRecovery?: number;
+    fatigue?: number;
+    soreness?: number;
+    sleepHours?: number;
+  }[];
   availableCustomExercises?: readonly {
     name: string;
     movement: MovementPattern;

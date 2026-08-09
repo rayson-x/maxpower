@@ -107,8 +107,12 @@ export function selectAdaptiveStrategy(input: {
 }): AdaptiveStrategyPlan {
   const goalType = input.goal.goalType ?? legacyGoalType(input.goal.primaryGoal);
   const history = input.profile.historyModifiers;
+  const priorStrategies = history?.priorStrategies ?? history?.plateau?.priorStrategies;
   const historyModifiers = [
+    ...(priorStrategies?.length ? ["prior_strategies"] : []),
     ...(history?.plateau ? ["plateau_history"] : []),
+    ...(history?.plateau?.executionAdherence ? [`plateau_execution_${history.plateau.executionAdherence}`] : []),
+    ...(history?.plateau?.suspectedReasons?.length ? ["plateau_reason_reported"] : []),
     ...(history?.majorWeightLossHistory ? ["major_weight_loss_history"] : []),
     ...(input.profile.returningStatus === "returning" ? ["returning_status"] : []),
   ];

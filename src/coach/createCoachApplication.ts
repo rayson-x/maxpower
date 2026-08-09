@@ -32,6 +32,7 @@ import type {
   ArtifactCardModel,
   CoachSession,
   ContextRef,
+  EvidenceBriefArtifact,
   HealthImportState,
   HealthMetric,
   PlanRevision,
@@ -353,8 +354,8 @@ export class CoachApplication {
 
   /** Persist an immutable, local planning preview without materializing any plan facts. */
   async createPlanningPreview(
-    input: Omit<PlannerRequest, "facts"> & { userId: string; idempotencyKey: string },
-  ): Promise<import("./model").EvidenceBriefArtifact> {
+    input: Omit<PlannerRequest, "facts"> & { userId: string; idempotencyKey: string; recomputeOf?: string },
+  ): Promise<EvidenceBriefArtifact> {
     const decision = await this.previewGoalCycle(input);
     const now = this.runtime.now();
     const artifactId = `planning-preview-${stableHash({
@@ -364,6 +365,7 @@ export class CoachApplication {
         trigger: input.trigger,
         ...(input.requestedScope ? { requestedScope: input.requestedScope } : {}),
       },
+      ...(input.recomputeOf ? { recomputeOf: input.recomputeOf } : {}),
       decision,
     })}`;
     const existing = (await this.ledger.read()).artifacts.find(
@@ -380,7 +382,7 @@ export class CoachApplication {
       : decision.kind === "infeasible_plan"
         ? decision.reasonCodes
         : decision.reasonCodes;
-    const artifact: import("./model").EvidenceBriefArtifact = {
+    const artifact: EvidenceBriefArtifact = {
       id: artifactId,
       kind: "evidence_brief",
       userId: input.userId,
@@ -405,6 +407,7 @@ export class CoachApplication {
                 trigger: input.trigger,
                 ...(input.requestedScope ? { requestedScope: input.requestedScope } : {}),
               },
+              ...(input.recomputeOf ? { sourcePreviewId: input.recomputeOf } : {}),
             },
           }
         : {}),
@@ -414,7 +417,7 @@ export class CoachApplication {
       kind: "domain",
       userId: input.userId,
       actorId: input.userId,
-      intent: "planning.preview",
+      intent: input.recomputeOf ? "planning.preview.recompute" : "planning.preview",
       expectedRevisions: refs,
       domainEvents: [],
       artifacts: [artifact],
@@ -427,7 +430,7 @@ export class CoachApplication {
         targetType: "plan",
         targetId: artifact.id,
         scope: "planning_preview",
-        intent: "planning.preview",
+        intent: input.recomputeOf ? "planning.preview.recompute" : "planning.preview",
         before: {},
         after: { artifactId: artifact.id, status: artifact.planningPreview?.status ?? "infeasible" },
         evidenceRefs: artifact.evidenceRefs,
@@ -446,6 +449,27 @@ export class CoachApplication {
       recordedAt: now,
     });
     return artifact;
+  }
+
+  async recomputePlanningPreview(input: {
+    userId: string;
+    previewId: string;
+    idempotencyKey: string;
+  }): Promise<EvidenceBriefArtifact> {
+    const snapshot = await this.ledger.read();
+    const preview = snapshot.artifacts.find(
+      (artifact): artifact is EvidenceBriefArtifact =>
+        artifact.id === input.previewId && artifact.kind === "evidence_brief" && artifact.userId === input.userId,
+    );
+    if (!preview?.planningPreview) throw new Error("planning_preview_not_found");
+    return this.createPlanningPreview({
+      userId: input.userId,
+      currentDate: preview.planningPreview.request.currentDate,
+      trigger: preview.planningPreview.request.trigger,
+      ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
+      idempotencyKey: input.idempotencyKey,
+      recomputeOf: preview.id,
+    });
   }
 
   /** Re-reads the fact frontier before confirmation; stale previews never commit. */
@@ -469,7 +493,7 @@ export class CoachApplication {
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
     });
     if (stableHash(current) !== stableHash(preview.planningPreview.proposal)) {
-      const stale: import("./model").EvidenceBriefArtifact = {
+      const stale: EvidenceBriefArtifact = {
         ...preview,
         id: `${preview.id}:stale:${stableHash(current)}`,
         createdAt: this.runtime.now(),
@@ -524,6 +548,7 @@ export class CoachApplication {
       trigger: preview.planningPreview.request.trigger,
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
       idempotencyKey: input.idempotencyKey,
+      confirmedPreview: preview,
       ...(input.deviceId ? { deviceId: input.deviceId } : {}),
     });
   }
@@ -540,7 +565,7 @@ export class CoachApplication {
     );
     if (!preview?.planningPreview) throw new Error("planning_preview_not_found");
     if (preview.planningPreview.status !== "awaiting_confirmation") throw new Error("planning_preview_not_rejectable");
-    const rejected: import("./model").EvidenceBriefArtifact = {
+    const rejected: EvidenceBriefArtifact = {
       ...preview,
       id: `${preview.id}:rejected`,
       createdAt: this.runtime.now(),
@@ -595,8 +620,10 @@ export class CoachApplication {
     userId: string;
     idempotencyKey: string;
     deviceId?: string;
+    confirmedPreview?: EvidenceBriefArtifact;
   }): Promise<PlannerDecision> {
-    const decision = await this.previewGoalCycle(input);
+    const { confirmedPreview, ...plannerInput } = input;
+    const decision = await this.previewGoalCycle(plannerInput);
     if (decision.kind !== "plan_proposal") return decision;
     const snapshot = await this.ledger.read();
     const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
@@ -661,17 +688,34 @@ export class CoachApplication {
       status: "pending",
       createdAt: recordedAt,
     }));
+    const confirmedArtifact = confirmedPreview?.planningPreview
+      ? {
+          ...confirmedPreview,
+          id: `${confirmedPreview.id}:confirmed`,
+          createdAt: recordedAt,
+          hash: stableHash({ preview: confirmedPreview.id, status: "confirmed", planRevision: decision.planRevision }),
+          summary: ["已确认长期路线，并物化当前周与下一周计划"],
+          planningPreview: {
+            ...confirmedPreview.planningPreview,
+            status: "confirmed" as const,
+            sourcePreviewId: confirmedPreview.id,
+          },
+        }
+      : undefined;
+    const expectedRevisions = [
+      ...decision.baseRevisions.filter((ref) => ref.kind !== "goal_cycle" && ref.kind !== "plan"),
+      { kind: "goal_cycle" as const, id: decision.goalCycle.id, revision: expectedCycleRevision },
+      { kind: "plan" as const, id: decision.planRevision.id, revision: expectedPlanRevision },
+    ];
     await this.ledger.commit({
       kind: "domain",
       userId: input.userId,
       actorId: actor.id,
       intent: "goal_cycle.materialize",
-      expectedRevisions: [
-        { kind: "goal_cycle", id: decision.goalCycle.id, revision: expectedCycleRevision },
-        { kind: "plan", id: decision.planRevision.id, revision: expectedPlanRevision },
-      ],
+      expectedRevisions,
       domainEvents: events,
       outbox,
+      artifacts: confirmedArtifact ? [confirmedArtifact] : [],
       actionEvents: [{
         id: this.runtime.nextId("action"),
         userId: input.userId,
@@ -700,7 +744,30 @@ export class CoachApplication {
         causationId: correlationId,
         correlationId,
         reversible: true,
-      }],
+      }, ...(confirmedArtifact ? [{
+        id: this.runtime.nextId("action"),
+        userId: input.userId,
+        occurredAt: recordedAt,
+        actor: "user" as const,
+        action: "plan.change.applied" as const,
+        targetType: "plan" as const,
+        targetId: decision.planRevision.id,
+        scope: "planning_preview",
+        intent: "planning.preview.confirm",
+        before: { previewId: confirmedPreview!.id, status: "awaiting_confirmation" },
+        after: { artifactId: confirmedArtifact.id, status: "confirmed", planRevision: expectedPlanRevision + 1 },
+        evidenceRefs: confirmedArtifact.evidenceRefs,
+        beforeRefs: confirmedArtifact.evidenceRefs,
+        afterRefs: confirmedArtifact.evidenceRefs,
+        ruleVersions: knowledgeRuleVersions(confirmedArtifact.knowledgePins),
+        mandateRevision: domain.mandate?.revision ?? 0,
+        result: "applied" as const,
+        undoBoundary: "compensating_revision" as const,
+        policyDecision: "allow" as const,
+        causationId: confirmedPreview!.id,
+        correlationId,
+        reversible: false,
+      }] : [])],
       idempotencyKey: input.idempotencyKey,
       recordedAt,
     });
@@ -4035,6 +4102,15 @@ export class CoachApplication {
         .filter((artifact) => artifact.userId === input.userId)
         .map((artifact) => artifact.id),
     );
+    const planningPreviewArtifactIds = new Set(
+      snapshot.artifacts
+        .filter((artifact): artifact is EvidenceBriefArtifact =>
+          artifact.kind === "evidence_brief" &&
+          artifact.userId === input.userId &&
+          Boolean(artifact.planningPreview),
+        )
+        .map((artifact) => artifact.id),
+    );
     const customExerciseNames = new Map(
       domain.customExercises.map((exercise) => [exercise.value.id, exercise.value.name]),
     );
@@ -4047,7 +4123,7 @@ export class CoachApplication {
       actions: snapshot.actionEvents.filter((event) => event.userId === input.userId),
       pendingHumanActions: snapshot.pendingHumanActions.filter((item) => item.userId === input.userId),
       artifacts: snapshot.artifacts.filter(
-        (artifact) => artifactIds.has(artifact.id) || durableProgressArtifactIds.has(artifact.id),
+        (artifact) => artifactIds.has(artifact.id) || durableProgressArtifactIds.has(artifact.id) || planningPreviewArtifactIds.has(artifact.id),
       ),
       healthImportStates: snapshot.healthImportStates.filter((state) => state.userId === input.userId),
       exerciseLabel: (exerciseVariantId) =>

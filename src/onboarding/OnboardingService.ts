@@ -225,11 +225,19 @@ export class OnboardingService {
               ? { weeklyVolume: data.professional.weeklyVolume }
               : {}),
           },
-          ...(data.professional?.plateauHistory || data.professional?.recentSplit?.length
+          ...(data.professional?.plateauHistory || data.professional?.priorStrategies?.length || data.professional?.majorWeightLossHistory
             ? {
                 historyModifiers: {
+                  ...(data.professional.priorStrategies?.length
+                    ? { priorStrategies: data.professional.priorStrategies }
+                    : data.professional.plateauHistory?.priorStrategies?.length
+                      ? { priorStrategies: data.professional.plateauHistory.priorStrategies }
+                      : {}),
                   ...(data.professional.plateauHistory
                     ? { plateau: data.professional.plateauHistory }
+                    : {}),
+                  ...(data.professional.majorWeightLossHistory
+                    ? { majorWeightLossHistory: data.professional.majorWeightLossHistory }
                     : {}),
                 },
               }
@@ -675,6 +683,29 @@ function professionalTimelineFacts(
         confidence: observation.source === "user_exact" ? "confirmed" as const : "estimated" as const,
       },
     })),
+    ...(professional.recoveryObservations ?? []).flatMap((observation) => [
+      {
+        occurredAt: observation.occurredAt,
+        fact: {
+          kind: "recovery" as const,
+          ...(observation.perceivedRecovery !== undefined ? { perceivedRecovery: observation.perceivedRecovery } : {}),
+          ...(observation.fatigue !== undefined ? { fatigue: observation.fatigue } : {}),
+          confidence: "confirmed" as const,
+        },
+      },
+      ...(observation.soreness !== undefined
+        ? [{
+            occurredAt: observation.occurredAt,
+            fact: { kind: "symptom" as const, symptom: "soreness" as const, severity: observation.soreness, confidence: "confirmed" as const },
+          }]
+        : []),
+      ...(observation.sleepHours !== undefined
+        ? [{
+            occurredAt: observation.occurredAt,
+            fact: { kind: "sleep" as const, duration: { value: observation.sleepHours, unit: "hours" as const }, confidence: "confirmed" as const },
+          }]
+        : []),
+    ]),
   ];
 }
 

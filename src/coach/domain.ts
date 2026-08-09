@@ -166,6 +166,7 @@ export interface UserProfileData {
     priorStrategies?: readonly string[];
     plateau?: {
       durationWeeks?: number;
+      priorStrategies?: readonly string[];
       executionAdherence?: "unknown" | "low" | "mixed" | "high";
       recoveryChange?: "unknown" | "worse" | "stable" | "better";
       suspectedReasons?: readonly string[];

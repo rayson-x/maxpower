@@ -427,6 +427,62 @@ test("统一 Strategy Selection 根据结构化目标与历史 modifier 生成�
   assert.equal(decision.planRevision.nutritionStrategy?.energyApproach, "maintenance");
 });
 
+test("同一 CoachApplication API 区分高体脂减脂、偏瘦增肌和大幅减重后平台", async () => {
+  const scenarios = [
+    {
+      userId: "adaptive-fat-loss",
+      expected: "preserve_lean_mass_cut" as const,
+      profile: { bodyDirection: "decrease_body_fat" as const, demographics: { currentWeight: { value: 100, unit: "kg" as const } } },
+      goal: { goalType: "fat_loss" as const, targets: { targetWeight: { value: 88, unit: "kg" as const }, targetBodyFat: { value: 12, unit: "percent" as const } } },
+    },
+    {
+      userId: "adaptive-lean-gain",
+      expected: "conservative_gain" as const,
+      profile: { bodyDirection: "gain_mass" as const, demographics: { currentWeight: { value: 60, unit: "kg" as const } } },
+      goal: { goalType: "hypertrophy" as const, targets: { targetWeight: { value: 80, unit: "kg" as const }, strength: { combinedTotal: { value: 350, unit: "kg" as const } } } },
+    },
+    {
+      userId: "adaptive-post-loss",
+      expected: "post_loss_consolidation_gain" as const,
+      profile: {
+        bodyDirection: "gain_mass" as const,
+        historyModifiers: {
+          majorWeightLossHistory: { lostWeight: { value: 35, unit: "kg" as const }, maintenanceExperience: "established" as const, reboundOrHunger: "present" as const },
+          plateau: { durationWeeks: 16, executionAdherence: "high" as const, recoveryChange: "stable" as const, suspectedReasons: ["strategy_stagnation"] },
+        },
+      },
+      goal: { goalType: "hypertrophy" as const },
+    },
+  ];
+  const selections = [];
+  for (const scenario of scenarios) {
+    const app = new CoachApplication(new InMemoryCoachLedger(), runtime());
+    const base = facts();
+    await app.executeDomainCommand({
+      type: "user.bootstrap",
+      profile: { ...base.profile.value, ...scenario.profile },
+      goalContract: { ...base.goalContract.value, ...scenario.goal },
+      mandate: base.mandate.value,
+      meta: {
+        userId: scenario.userId,
+        actor: { kind: "user", id: scenario.userId },
+        deviceId: "fixture-device",
+        occurredAt: "2026-08-03T08:00:00.000Z",
+        timezoneOffsetMinutes: 480,
+        idempotencyKey: `${scenario.userId}:bootstrap`,
+      },
+    });
+    const decision = await app.previewGoalCycle({ userId: scenario.userId, trigger: "initial_plan", currentDate: "2026-08-03" });
+    assert.equal(decision.kind, "plan_proposal");
+    if (decision.kind === "plan_proposal") {
+      assert.equal(decision.strategySelection?.primary, scenario.expected);
+      assert.ok(decision.explanation?.userEvidence.some((item) => item.startsWith("goal_type:")));
+      selections.push(decision.strategySelection?.primary);
+    }
+  }
+  assert.deepEqual(selections, ["preserve_lean_mass_cut", "conservative_gain", "post_loss_consolidation_gain"]);
+});
+
 test("CoachApplication 在 InMemory 与 SQLite frontier 上得到结构等价 Planner 输出", async () => {
   const sqlite = new DatabaseSync(":memory:");
   const applications = [
@@ -464,7 +520,8 @@ test("CoachApplication 在 InMemory 与 SQLite frontier 上得到结构等价 Pl
 });
 
 test("Planning preview 只生成可追溯 immutable artifact，确认后才原子物化 GoalCycle 与 PlanRevision", async () => {
-  const app = new CoachApplication(new InMemoryCoachLedger(), runtime());
+  const ledger = new InMemoryCoachLedger();
+  const app = new CoachApplication(ledger, runtime());
   const base = facts();
   await app.executeDomainCommand({
     type: "user.bootstrap",
@@ -489,17 +546,44 @@ test("Planning preview 只生成可追溯 immutable artifact，确认后才原�
   assert.equal(preview.kind, "evidence_brief");
   assert.equal(preview.planningPreview?.status, "awaiting_confirmation");
   assert.equal((await app.readDomainProjection({ userId: "preview-user" })).plan, undefined);
+  const pendingProjection = await app.readProductProjection({ userId: "preview-user", date: "2026-08-03", timezoneOffsetMinutes: 480, calendarMode: "week", calendarAnchorDate: "2026-08-03" });
+  assert.equal(pendingProjection.plan.latestPlanningPreview?.id, preview.id);
   assert.ok((await app.listActionLog("preview-user")).some((event) => event.intent === "planning.preview"));
+
+  const recomputed = await app.recomputePlanningPreview({
+    userId: "preview-user",
+    previewId: preview.id,
+    idempotencyKey: "preview-recompute",
+  });
+  assert.notEqual(recomputed.id, preview.id);
+  assert.equal(recomputed.planningPreview?.sourcePreviewId, preview.id);
+  assert.ok((await app.listActionLog("preview-user")).some((event) => event.intent === "planning.preview.recompute"));
 
   const confirmed = await app.confirmPlanningPreview({
     userId: "preview-user",
-    previewId: preview.id,
+    previewId: recomputed.id,
     idempotencyKey: "preview-confirm",
   });
   assert.equal(confirmed.kind, "plan_proposal");
   const domain = await app.readDomainProjection({ userId: "preview-user" });
   assert.ok(domain.goalCycles.length > 0);
   assert.ok(domain.plan);
+  const confirmedArtifact = (await ledger.read()).artifacts.find((artifact) => artifact.id === `${recomputed.id}:confirmed`);
+  assert.equal(confirmedArtifact?.kind, "evidence_brief");
+  assert.equal(confirmedArtifact?.kind === "evidence_brief" ? confirmedArtifact.planningPreview?.status : undefined, "confirmed");
+  assert.ok((await app.listActionLog("preview-user")).some((event) => event.intent === "planning.preview.confirm"));
+  const restarted = new CoachApplication(ledger, runtime());
+  const restored = await restarted.readProductProjection({
+    userId: "preview-user",
+    date: "2026-08-03",
+    timezoneOffsetMinutes: 480,
+    calendarMode: "week",
+    calendarAnchorDate: "2026-08-03",
+  });
+  assert.equal(restored.plan.forecasts.length, 3);
+  assert.ok(restored.plan.currentWeek.length > 0);
+  assert.notEqual(restored.today.state, "onboarding_required");
+  assert.equal(restored.plan.latestPlanningPreview, undefined);
 });
 
 test("Planning preview 在事实变化后变 stale，拒绝只写审计事实而不物化计划", async () => {
