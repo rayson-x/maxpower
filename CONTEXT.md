@@ -1,4 +1,4 @@
-# Form Coach context
+# MaxPower context
 
 ## Canonical terms
 
@@ -11,19 +11,50 @@
 - **Confirmed rep**: a candidate with sufficient subject, landmark, segmentation, and continuity evidence; it contributes to formal training volume.
 - **Needs-review rep**: a candidate with a usable but insufficiently reliable observation, preserved for user review and excluded from formal volume until approved.
 - **Rejected candidate**: a proposed cycle that failed a stated evidence rule; it is retained as diagnostic evidence but is not a rep.
-- **Simulation baseline**: a five-split 32-node phase template. It can guide exploratory trajectory comparison and recommended camera position, but cannot produce a correctness score, medical claim, or automatic rep rejection.
+- **Simulation baseline**: a five-split 32-node phase template. It can guide internal exploratory trajectory comparison and recommended camera position, but it does not qualify an exercise for user-facing calibrated trajectory or validated-analysis capability and cannot produce a correctness score, medical claim, automatic rep rejection, or specific technique cue.
 - **Expected muscle association**: curated exercise knowledge linking an exact exercise context and phase to muscles that commonly contribute mechanically. It is metadata, never an observation of activation or force in the current athlete.
+- **Exercise module**: the reviewable expansion unit for one exact exercise context. It joins an exercise identity, expected muscle association, phase-level observable joint motions, capture recommendation, and an explicitly optional recognition or trajectory profile. A catalog entry alone is not a complete or validated exercise module.
 - **Observed movement strategy**: canonical-packet evidence describing how visible joints moved within a matched exercise context, such as relative hip/knee excursion, phase timing, or bilateral rhythm. It does not name the muscles that actually produced the movement.
 - **Mechanical-demand tendency**: a conditional, evidence-labelled interpretation that an observed movement strategy may shift mechanical demand toward a joint action or muscle group under the same exercise, load, and view context. It is not a muscle-activation percentage or a correctness verdict.
+- **Goal contract**: the versioned agreement describing the user's primary goal, secondary goals, success measures, horizon, constraints, and confidence. A forecast is an evaluation of this contract, not a promise.
+- **Goal cycle**: the full planned path for one goal contract. It owns ordered mesocycles and their intent, but not the user's performed history.
+- **Mesocycle**: a bounded training phase with an explicit intent, stimulus targets, progression strategy, and deload window.
+- **Stimulus slot**: a goal- and context-specific demand that a session must satisfy. It can resolve to different exercise variants without changing its training intent.
+- **Exercise variant**: one exact exercise identity including variation and equipment context. Similar names do not make two variants interchangeable.
+- **Week plan**: the planned intent, schedule, and stimulus budget for one week inside a mesocycle.
+- **Exercise slot**: the resolved place inside a stimulus slot that references one ExerciseVariant and its prescription while preserving the parent stimulus intent.
+- **Plan revision**: an immutable version of planned GoalCycle, WeekPlan, SessionPrescription, StimulusSlot, and ExerciseSlot content. A newer revision never rewrites performed or observed history.
+- **Session prescription**: the planned tasks, targets, constraints, and intent for one training occasion.
+- **Workout session**: the real execution of a session prescription, including partial, interrupted, skipped, substituted, and unplanned outcomes.
+- **Recovery constraint**: a graded, time-bounded limit derived from recovery facts. It constrains planning but does not itself choose exercises, sets, repetitions, or load.
+- **Nutrition strategy**: a versioned energy, macronutrient, timing, and adherence strategy coordinated with the active goal cycle. It is not a food database or a medical diet.
+- **Timeline**: the append-only, provenance-bearing history of what actually happened to or was reported by the user. Plans, proposals, and unconfirmed model estimates are not Timeline facts.
+- **Correction event**: a new fact that corrects an earlier Timeline or user-reported outcome without deleting the original evidence.
+- **Coaching mandate**: the user's versioned grant of manual, collaborative, or managed authority, scoped by action type, impact radius, limits, locks, and expiry.
+- **Coach session**: a durable, discoverable interaction record containing messages, runs, tool calls, artifacts, and pending human decisions for one task context. It can reference facts but is not their authoritative owner.
+- **Artifact**: an immutable, versioned, typed result produced from validated local tools or rules and rendered by a fixed client registry.
+- **Working memory item**: a non-authoritative, provenance-bearing Coach note or preference that can be reviewed, edited, pinned, forgotten, or proposed for promotion to a fact.
+- **Action log**: the append-only history of meaningful Agent, rule, user, sensor, and sync operations, including their evidence, policy decision, causal links, and compensating undo.
 
 ## Non-negotiable invariants
 
-1. The Rust canonical packet is the only source for rendering, persistence, exported data, rep boundaries, and trajectory evidence.
+1. The Rust canonical packet is the only source for rendering, persistence, exported data, rep boundaries, and trajectory evidence. Android may run either a built-in or data-installed recognition profile. Profile evidence maturity never authorizes a second counter: when an executable profile is active, phase and rep boundaries come only from Rust; when no exact profile resolves, counting is disabled. A recognition initializer may count/segment motion but must never be presented as a correctness claim or score.
 2. User workout footage may calibrate observation conditions only after explicit approval; it must not silently become a standard-form trajectory.
 3. Missing landmarks remain unknown. The system never fills them from another person, mirrors them without evidence, or fabricates coordinates.
 4. Historical source video, canonical packets, annotations, and approved analysis versions are immutable. New analysis creates a new version.
+5. Planned, performed, and observed records never overwrite one another. Corrections and undo create new linked revisions or events.
+6. LLM text, proposals, assessments, and Working Memory do not become facts without a typed local action accepted under the active coaching mandate.
 
-## Current implementation state (2026-08-05)
+## Target client motion data flow
+
+- The product target is `Client CameraInputStream → Rust Motion SDK → CanonicalMotionOutput → client projection/Coach tools`.
+- Android/iOS own permission, lens selection, preview, orientation and frame lifecycle. They submit versioned frame inputs; they do not own a parallel pose/skeleton/rep-analysis truth.
+- Rust Motion SDK owns pose inference or its hidden backend orchestration, skeleton normalization, landmark identity/confidence/unknown semantics, CanonicalPacket, phase/rep disposition/tempo/findings and sealed set output.
+- Skeleton points and analysis travel in one versioned output lineage. TypeScript/Kotlin/Swift may render and project them but must not fill landmarks, resegment reps, reinterpret mirroring or persist a second result.
+- The frame bridge uses bounded latest-frame/backpressure and explicit begin/pause/resume/finish/reset commands so camera lifecycle and profile changes cannot leak stale frames across sets.
+- Current Android code may still contain platform pose preprocessing; that is implementation debt to migrate behind the Rust SDK boundary and must not be treated as the target architecture.
+
+## Current implementation state (2026-08-07)
 
 ### Canonical Rust recognition
 
@@ -54,9 +85,33 @@
   body includes bodyweight squat, barbell back squat, Romanian deadlift, and
   conventional deadlift. Conventional and Romanian deadlift are intentionally
   separate identities and never share trajectory gates.
-- Simulated priors guide capture, phase labels and exploratory comparison only.
-  They cannot emit a correctness score, a medical claim, or automatically
-  reject a user movement.
+- Simulated priors may produce broad recognition/counting initializers for a
+  known action and supported camera position. The initializer configures the
+  canonical Rust rep engine; it is not a standard-form reference and cannot
+  emit a correctness score, a medical claim, or automatically reject a user
+  movement.
+
+### Android motion integration
+
+- Android has an exercise library, camera-position guidance, live recognition
+  and a set-report surface. The current product MVP consumes this only through
+  the shared `Client CameraInputStream → Rust Motion SDK →
+  CanonicalMotionOutput` boundary; recording/training-video capture is not a
+  client MVP requirement.
+- Android capability is resolver-based, not maturity-tier based. Shared
+  TypeScript resolves an exact action×view context to either a built-in Rust
+  code, a complete data-installed profile, or none. Both built-in and data
+  profiles may emit canonical phase and rep boundaries; evidence maturity is
+  separate metadata and does not switch recognition off.
+- The Android native view receives one versioned profile envelope. Kotlin
+  validates the envelope and installs it through JNI; it does not duplicate
+  action×view profile tables or interpret recognition thresholds.
+- Dual camera modes: front lens = recognition (user watches the screen),
+  back lens = observation (set report is the only feedback loop). Lens
+  switching rebinds CameraX; mirroring follows the active lens.
+- Live output may be rendered and sealed into the active WorkoutSession through
+  the canonical packet lineage. It is not a separate recording demo, and the
+  client does not upload it or derive a form score from it.
 
 ### Home-workout technical validation
 
@@ -68,8 +123,10 @@
 - Web/WASM and Android consume canonical packet minor `1.5` from the same Rust
   crate. Android uses the MediaPipe lite model by default, latest-frame CameraX
   scheduling, and the Rust native ABI; Kotlin and TypeScript do not own a
-  second counter. Apple native library generation also uses the same crate,
-  while the full iOS client build is deferred from this delivery.
+  second counter. Apple native library generation also uses the same crate.
+  The full iOS client was deferred only from the 2026-08-07 home-workout
+  validation slice; the complete adaptive Coach MVP requires a production iOS
+  client and Android parity.
 - The validation harness intentionally reports participant accuracy and
   physical-device performance as `unmeasured` until labeled 45-second rounds
   and a declared eight-minute phone run are supplied. Implemented thresholds
