@@ -14,6 +14,7 @@ import type {
   StimulusBudgetData,
   StimulusIntentData,
   StimulusSlotData,
+  UserProfileData,
   WeekPlanData,
   WeeklyIntentData,
 } from "../coach/domain";
@@ -46,7 +47,15 @@ import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStr
 const DAY_MS = 86_400_000;
 const MESOCYCLE_WEEKS = 6;
 const MATERIALIZED_WEEKS = 2;
-const DEFAULT_TRAINING_DAYS = [1, 3, 5] as const;
+const DEFAULT_TRAINING_DAYS_BY_FREQUENCY: Readonly<Record<number, readonly number[]>> = {
+  1: [3],
+  2: [2, 5],
+  3: [1, 3, 5],
+  4: [1, 3, 5, 7],
+  5: [1, 2, 4, 5, 7],
+  6: [1, 2, 3, 5, 6, 7],
+  7: [1, 2, 3, 4, 5, 6, 7],
+};
 
 export const PLANNER_CONSTRAINT_PRIORITY = [
   "safety_and_professional_directive",
@@ -173,6 +182,9 @@ export class GoalCyclePlanner {
     const missing: string[] = [];
     if (!request.facts.timeline.length) missing.push("timeline_history");
     if (!request.historicalPerformance?.length) missing.push("exact_variant_load_history");
+    if (!request.historicalPerformance?.length && hasStrengthBaseline(profile)) {
+      missing.push("strength_baseline_missing_reps_rir");
+    }
     if (!request.facts.recoveryConstraints.length) missing.push("current_recovery_constraint");
     if (!request.facts.nutritionStrategies.length) missing.push("nutrition_strategy");
     return {
@@ -461,6 +473,10 @@ export class GoalCyclePlanner {
       kind,
       locationId: availability.locationId,
       durationBudget: { value: availability.availableMinutes, unit: "minutes" },
+      estimatedDuration: {
+        value: estimateSessionMinutes(slots, availability.availableMinutes),
+        unit: "minutes",
+      },
       stimulusSlots: slots,
       status: "planned",
       tasks,
@@ -493,21 +509,21 @@ export class GoalCyclePlanner {
       .map((id) => this.knowledge.stimulusContract(id))
       .find((candidate): candidate is StimulusContract => candidate !== undefined);
     const mode = contract?.prescriptionMode ?? modeForExercise(selected.exercise);
+    const goal = context.facts.goalContract.value.primaryGoal;
     const hasHistory = context.history.some(
       (entry) => entry.exerciseVariantId === selected.exercise.id && entry.confidence === "confirmed",
     );
     const prescription = prescriptionFor(
       mode,
       template.priority,
+      template,
+      goal,
       strongestRecovery(context.facts),
       hasHistory
-        ? Math.round(
-            (context.trainingRule.defaults.workingRir.min +
-              context.trainingRule.defaults.workingRir.max) /
-              2,
-          )
-        : context.trainingRule.defaults.calibrationRir.max,
+        ? context.trainingRule.defaults.workingRir
+        : context.trainingRule.defaults.calibrationRir,
       hasHistory,
+      availability.availableMinutes,
     );
     const lockedFields = context.facts.mandate.value.locks
       ?.filter((lock) => lock.field === "exercise" || lock.field === "sets" || lock.field === "load")
@@ -536,7 +552,7 @@ export class GoalCyclePlanner {
       coldStart: !context.history.some(
         (entry) => entry.exerciseVariantId === selected.exercise.id && entry.confidence === "confirmed",
       ),
-      sessionTimeImpactMinutes: estimateSlotMinutes(prescription.setCount, prescription.rest?.value),
+      sessionTimeImpactMinutes: estimateSlotMinutes(prescription),
       fatigueImpact: template.fatigueIntent,
       cameraCapability:
         this.knowledge.resolve({ exerciseVariantId: selected.exercise.id, cameraView: "front" }).countPhase ===
@@ -607,10 +623,12 @@ export class GoalCyclePlanner {
     const sameLocationHistory = context.facts.timeline.some(
       (event) => event.fact.kind === "training" && event.fact.historicalSet?.exerciseVariantId === exercise.id,
     );
+    const strengthBaseline = strengthBaselineForExercise(context.facts.profile.value, exercise);
     const score =
       (directSelected ? 10_000 : 0) +
       (explicitlyPreferred ? 250 : 0) +
       (exactHistory.length ? 500 : 0) +
+      (strengthBaseline ? 200 : 0) +
       (sameLocationHistory ? 100 : 0) +
       (exercise.equipment.loadMode === "bodyweight" && locationId.includes("home") ? 40 : 0) -
       (disliked ? 300 : 0) -
@@ -622,10 +640,12 @@ export class GoalCyclePlanner {
       deviations: [
         ...(disliked ? ["soft_preference_dislike"] : []),
         ...(exactHistory.length ? [] : ["load_history_cold_start"]),
+        ...(strengthBaseline && !exactHistory.length ? ["strength_baseline_missing_set_context"] : []),
       ],
       reasons: [
         "hard_filters_passed",
         exactHistory.length ? "exact_variant_continuity" : "cold_start_allowed_without_load_copy",
+        ...(strengthBaseline ? ["user_strength_baseline_reference"] : []),
         directSelected ? `direct_choice:${direct?.scope}` : "goal_and_stimulus_fit",
         ...(explicitlyPreferred ? ["saved_future_preference"] : []),
         "camera_capability_is_bonus_only",
@@ -648,6 +668,9 @@ export class GoalCyclePlanner {
           ...(slot.prescription.distance ? { targetDistance: slot.prescription.distance } : {}),
           ...(slot.prescription.targetRir !== undefined
             ? { targetRir: slot.prescription.targetRir }
+            : {}),
+          ...(slot.prescription.targetRirRange
+            ? { targetRirRange: slot.prescription.targetRirRange }
             : {}),
           ...(slot.prescription.rest ? { rest: slot.prescription.rest } : {}),
         };
@@ -835,19 +858,25 @@ function sessionTemplates(
       { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
       { movementPattern: "horizontal_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
       { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "high" },
+      { movementPattern: "knee_flexion", muscleGroups: ["hamstrings"], priority: "maintenance", fatigueIntent: "medium" },
+      { movementPattern: "shoulder_abduction", muscleGroups: ["lateral_deltoid"], priority: "maintenance", fatigueIntent: "low" },
       { movementPattern: "elbow_flexion", muscleGroups: ["biceps"], priority: "optional", fatigueIntent: "low" },
     ],
     [
       { movementPattern: "vertical_push", muscleGroups: ["deltoids"], priority: "primary", fatigueIntent: "medium" },
       { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
       { movementPattern: "hip_hinge", muscleGroups: ["posterior_chain"], priority: "primary", fatigueIntent: "high" },
+      { movementPattern: "lunge", muscleGroups: ["quadriceps", "glutes"], priority: "maintenance", fatigueIntent: "medium" },
+      { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "maintenance", fatigueIntent: "medium" },
       { movementPattern: "elbow_extension", muscleGroups: ["triceps"], priority: "optional", fatigueIntent: "low" },
     ],
     [
       { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
       { movementPattern: "horizontal_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
-      { movementPattern: "lunge", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "medium" },
-      { movementPattern: "shoulder_abduction", muscleGroups: ["lateral_deltoid"], priority: "optional", fatigueIntent: "low" },
+      { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "high" },
+      { movementPattern: "hip_hinge", muscleGroups: ["posterior_chain"], priority: "maintenance", fatigueIntent: "medium" },
+      { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "maintenance", fatigueIntent: "medium" },
+      { movementPattern: "core_anti_extension", muscleGroups: ["core"], priority: "maintenance", fatigueIntent: "low" },
     ],
   ];
   const selected = [...rotations[ordinal % rotations.length]!];
@@ -871,25 +900,54 @@ function isBodyweightOnly(available: ReadonlySet<string>): boolean {
 function prescriptionFor(
   mode: StimulusIntentData["prescriptionMode"],
   priority: StimulusIntentData["priority"],
+  template: SlotTemplate,
+  goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass",
   recovery: ReturnType<typeof strongestRecovery>,
-  targetRir: number,
+  targetRirRange: { min: number; max: number },
   hasHistory: boolean,
+  availableMinutes: number,
 ) {
   const reduction = recovery === "slight_reduction" ? 1 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 2 : 0;
   const requestedSets = priority === "primary" ? 3 : priority === "maintenance" ? 2 : 1;
   const setCount = Math.max(1, Math.min(hasHistory ? requestedSets : 2, requestedSets) - reduction);
+  // 标量中点仅为旧消费者兼容；区间才是处方的权威语义（TP-RIR-001）。
+  const targetRir = Math.round((targetRirRange.min + targetRirRange.max) / 2);
   if (mode === "timed") {
-    return { setCount: 1, duration: { value: 20, unit: "minutes" as const }, targetRir: undefined, rest: undefined };
+    return {
+      setCount: 1,
+      duration: {
+        value: Math.min(45, Math.max(20, Math.floor(availableMinutes * 0.65))),
+        unit: "minutes" as const,
+      },
+      targetRir: undefined,
+      targetRirRange: undefined,
+      rest: undefined,
+    };
   }
   if (mode === "distance") {
-    return { setCount: 1, distance: { value: 2, unit: "km" as const }, targetRir: undefined, rest: undefined };
+    return { setCount: 1, distance: { value: 2, unit: "km" as const }, targetRir: undefined, targetRirRange: undefined, rest: undefined };
   }
   return {
     setCount,
-    repRange: { min: 6, max: 12 },
+    repRange: repRangeFor(goal, template, hasHistory),
     targetRir,
-    rest: { value: priority === "primary" ? 120 : 75, unit: "seconds" as const },
+    targetRirRange,
+    rest: {
+      value: template.fatigueIntent === "high" ? 180 : priority === "primary" ? 120 : priority === "maintenance" ? 90 : 75,
+      unit: "seconds" as const,
+    },
   };
+}
+
+function repRangeFor(
+  goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass",
+  template: SlotTemplate,
+  hasHistory: boolean,
+): { min: number; max: number } {
+  if (template.priority !== "primary" || template.fatigueIntent === "low") return { min: 10, max: 15 };
+  if (goal === "strength") return hasHistory ? { min: 4, max: 8 } : { min: 6, max: 10 };
+  if (goal === "fat_loss_preserve_lean_mass") return { min: 6, max: 10 };
+  return { min: 6, max: 12 };
 }
 
 function intentFrom(
@@ -944,7 +1002,7 @@ function normalizeSchedule(
   const frequency = Math.min(Math.max(profile.schedule?.weeklyFrequency ?? 3, 1), 7);
   const minutes = profile.schedule?.sessionDurationMinutes ?? 45;
   const locationId = profile.locations?.[0]?.id ?? "location-unspecified";
-  const preferred = [...DEFAULT_TRAINING_DAYS, 2, 4, 6, 7].slice(0, frequency).sort();
+  const preferred = DEFAULT_TRAINING_DAYS_BY_FREQUENCY[frequency] ?? DEFAULT_TRAINING_DAYS_BY_FREQUENCY[3]!;
   return preferred.map((weekday) => ({ weekday, availableMinutes: minutes, locationId }));
 }
 
@@ -1056,6 +1114,23 @@ function deriveHistory(facts: PlannerFacts): HistoricalPerformance[] {
         ]
       : [];
   });
+}
+
+function hasStrengthBaseline(profile: UserProfileData): boolean {
+  const baseline = profile.strengthBaseline;
+  return Boolean(baseline?.squat || baseline?.benchPress || baseline?.deadlift);
+}
+
+function strengthBaselineForExercise(
+  profile: UserProfileData,
+  exercise: ExerciseVariant,
+): MassQuantity | undefined {
+  const baseline = profile.strengthBaseline;
+  if (!baseline) return undefined;
+  if (exercise.identity.movement === "bench_press") return baseline.benchPress;
+  if (exercise.identity.movement === "squat") return baseline.squat;
+  if (exercise.identity.movement === "deadlift") return baseline.deadlift;
+  return undefined;
 }
 
 function strongestRecovery(facts: PlannerFacts): "normal" | "slight_reduction" | "recovery_priority" | "pause_and_confirm" {
@@ -1193,8 +1268,28 @@ function priorityRank(priority: SlotTemplate["priority"]): number {
   return priority === "primary" ? 0 : priority === "maintenance" ? 1 : 2;
 }
 
-function estimateSlotMinutes(sets: number, restSeconds = 60): number {
-  return Math.ceil(sets * (1.25 + restSeconds / 60));
+function estimateSlotMinutes(prescription: StimulusSlotData["prescription"]): number {
+  if (prescription.duration) {
+    return prescription.duration.unit === "minutes"
+      ? Math.ceil(prescription.duration.value)
+      : Math.ceil(prescription.duration.value / 60);
+  }
+  if (prescription.distance) return prescription.distance.unit === "km" ? Math.ceil(prescription.distance.value * 8) : 10;
+  const restSeconds = prescription.rest?.unit === "seconds"
+    ? prescription.rest.value
+    : (prescription.rest?.value ?? 1) * 60;
+  return Math.ceil(prescription.setCount * 1.25 + Math.max(0, prescription.setCount - 1) * (restSeconds / 60));
+}
+
+function estimateSessionMinutes(slots: readonly StimulusSlotData[], availableMinutes: number): number {
+  const resistance = slots.some((slot) => slot.intent.prescriptionMode === "weighted_reps" || slot.intent.prescriptionMode === "bodyweight_reps");
+  const preparation = resistance ? 10 : 5;
+  const transitions = Math.max(0, slots.length - 1) * 2;
+  const planned = preparation + transitions + slots.reduce(
+    (sum, slot) => sum + slot.exerciseSlot.sessionTimeImpactMinutes,
+    0,
+  );
+  return Math.min(availableMinutes, Math.ceil(planned));
 }
 
 function assertPlannerRequest(request: PlannerRequest): void {

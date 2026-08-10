@@ -1170,7 +1170,7 @@ export class CoachApplication {
         : [],
       capabilityBoundary: [
         "仅汇总已确认的本地训练、恢复与饮食策略状态",
-        "不会自动改变周期、营养策略或训练处方",
+        "不会自动改变周期、营养策略或训练计划",
       ],
       hash: stableHash({ mesocycle, plannedSetCount, performedSetCount, partialSessions, recoveryLimited, nutritionStatus: activeNutrition?.status, status, summary, frontier }),
       knowledgePins: this.knowledge.versionPins(),
@@ -5083,7 +5083,7 @@ export class CoachApplication {
       prescription: {
         ...(target.set.targetLoad ? { load: target.set.targetLoad } : {}),
         repRange: target.set.targetReps,
-        targetRir: { min: target.set.targetRir, max: target.set.targetRir },
+        targetRir: target.set.targetRirRange ?? { min: target.set.targetRir, max: target.set.targetRir },
         setCount: target.task.sets.length,
       },
       recentSessions,
@@ -8621,7 +8621,7 @@ function unavailableWorkoutRuleDecision(reason: string): RuleDecision {
     requiresConfirmation: true,
     reviewBoundary: "between_sets",
     safetyBoundary: ["no_unversioned_or_llm_progression"],
-    explanation: "当前记录不足以对下一组生成确定性调整，保持处方。",
+    explanation: "当前记录不足以对下一组生成确定性调整，保持当前训练计划。",
   };
 }
 

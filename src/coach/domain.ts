@@ -367,6 +367,8 @@ export interface ExerciseSetPrescription {
   };
   calibrationIntent?: string;
   targetRir?: number;
+  /** RIR 处方区间（权威）；targetRir 标量仅为旧消费者的兼容中点。 */
+  targetRirRange?: { min: number; max: number };
   rest?: DurationQuantity;
 }
 
@@ -410,6 +412,8 @@ export interface StimulusSlotData {
     duration?: DurationQuantity;
     distance?: { value: number; unit: "m" | "km" };
     targetRir?: number;
+    /** RIR 处方区间（权威）；targetRir 标量仅为旧消费者的兼容中点。 */
+    targetRirRange?: { min: number; max: number };
     rest?: DurationQuantity;
   };
   exerciseSlot: ExerciseResolutionData;
@@ -424,6 +428,8 @@ export interface SessionPrescriptionData {
   kind?: "weighted_reps" | "bodyweight_reps" | "cardio" | "recovery" | "rest";
   locationId?: string;
   durationBudget?: DurationQuantity;
+  /** Deterministic estimate from warm-up, work sets, planned rest and exercise transitions. */
+  estimatedDuration?: DurationQuantity;
   stimulusSlots?: readonly StimulusSlotData[];
   status?: "planned" | "frozen_for_workout";
   tasks: readonly ExerciseTaskPrescription[];
