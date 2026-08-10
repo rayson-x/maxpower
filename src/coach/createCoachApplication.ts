@@ -74,9 +74,12 @@ import { clone, stableHash } from "./stable";
 import { CoachToolRegistry } from "./toolRegistry";
 import {
   createInstalledKnowledgePack,
+  createKnowledgePackRegistry,
   KnowledgePackRegistry,
   type CustomExerciseVariantView,
   type ExerciseSearchInput,
+  type KnowledgePackLoadResult,
+  type KnowledgePackSourcePort,
   type MovementPattern,
   type SubstitutionInput,
 } from "../knowledge";
@@ -157,6 +160,8 @@ const DEFAULT_KNOWLEDGE_REGISTRY = new KnowledgePackRegistry(createInstalledKnow
 
 export interface CoachApplicationDependencies extends CoachApplicationPorts {
   knowledgeRegistry?: KnowledgePackRegistry;
+  /** 本地安装的知识包来源（ticket 02）；配置后按 内置兜底 + 数据包覆盖 加载。 */
+  knowledgePackSource?: KnowledgePackSourcePort;
   trainingRuleRegistry?: TrainingRulePackRegistry;
   /** Set only by AuthRoot's account-scoped runtime composition. */
   authenticatedAccountId?: string;
@@ -243,6 +248,7 @@ export class CoachApplication {
   private readonly credentials?: SecureCredentialPort;
   private readonly monotonicClock: NonNullable<CoachApplicationPorts["monotonicClock"]>;
   private readonly knowledge: KnowledgePackRegistry;
+  private knowledgePackLoad: KnowledgePackLoadResult | null;
   private readonly onboarding: OnboardingService;
   private readonly planner: GoalCyclePlanner;
   private readonly trainingRules: TrainingRulePackRegistry;
@@ -270,7 +276,16 @@ export class CoachApplication {
     this.authenticatedAccountId = dependencies.authenticatedAccountId;
     this.credentials = dependencies.credentials;
     this.monotonicClock = dependencies.monotonicClock ?? { nowMs: () => Date.now() };
-    this.knowledge = dependencies.knowledgeRegistry ?? DEFAULT_KNOWLEDGE_REGISTRY;
+    this.knowledgePackLoad = null;
+    if (dependencies.knowledgeRegistry) {
+      this.knowledge = dependencies.knowledgeRegistry;
+    } else if (dependencies.knowledgePackSource) {
+      const { registry, load } = createKnowledgePackRegistry(dependencies.knowledgePackSource);
+      this.knowledge = registry;
+      this.knowledgePackLoad = load;
+    } else {
+      this.knowledge = DEFAULT_KNOWLEDGE_REGISTRY;
+    }
     this.onboarding = new OnboardingService(this.ledger, this.runtime);
     this.trainingRules =
       dependencies.trainingRuleRegistry ?? new TrainingRulePackRegistry(this.knowledge.versionPins());
@@ -7592,6 +7607,13 @@ export class CoachApplication {
    * pending action/token/到期 working memory 显式化。幂等；每次清扫落 action log。
    * 在 catchUp 周期（前台打开/后台任务）中调用。
    */
+  /** 知识包加载状态（内置/数据包覆盖/回退原因），供 UI 与审计展示。 */
+  readKnowledgePackStatus(): { source: "builtin" | "installed"; rejectionReason?: string } {
+    return this.knowledgePackLoad
+      ? { source: this.knowledgePackLoad.source, ...(this.knowledgePackLoad.rejectionReason ? { rejectionReason: this.knowledgePackLoad.rejectionReason } : {}) }
+      : { source: "builtin" };
+  }
+
   async sweepExpiredCoachState(userId: string): Promise<{ swept: number }> {
     const now = this.runtime.now();
     const snapshot = await this.ledger.read();
