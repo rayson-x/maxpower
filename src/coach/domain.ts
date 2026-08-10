@@ -205,6 +205,8 @@ export interface GoalContractData {
   acceptableCosts?: readonly string[];
   measurementStrategy?: readonly string[];
   maintenanceFloors?: readonly string[];
+  /** 显式选择的计划性恢复窗口间隔（TP-DELOAD-001：默认不按日历强制 deload）。 */
+  plannedRecoveryEveryWeeks?: number;
   /** Structured goal intent keeps maintain/return-to-training explicit while
    * legacy primaryGoal remains the executable training-rule key. */
   goalType?: "hypertrophy" | "fat_loss" | "strength" | "maintain" | "return_to_training";
@@ -324,7 +326,7 @@ export interface MesocycleData {
   intent: string;
   weeklyIntents: readonly WeeklyIntentData[];
   stimulusBudget: readonly StimulusBudgetData[];
-  plannedRecoveryWindow: { weekOrdinal: number; intent: string };
+  plannedRecoveryWindow?: { weekOrdinal: number; intent: string };
   scheduleConstraints: {
     weeklyFrequency: number;
     sessionDurationMinutes: number;

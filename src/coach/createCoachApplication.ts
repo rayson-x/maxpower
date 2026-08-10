@@ -1240,7 +1240,7 @@ export class CoachApplication {
       .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0];
     const mesocycle = cycle?.value.phasePath?.find((candidate) => candidate.id === input.mesocycleId);
     const recoveryWeek = mesocycle?.weeklyIntents.find(
-      (week) => week.ordinal === mesocycle.plannedRecoveryWindow.weekOrdinal,
+      (week) => week.ordinal === mesocycle.plannedRecoveryWindow?.weekOrdinal,
     );
     if (!cycle || !mesocycle || !recoveryWeek) throw new Error("mesocycle_recovery_window_not_found");
     if (input.occurredOn < recoveryWeek.endDate) throw new Error("deload_not_yet_ended");

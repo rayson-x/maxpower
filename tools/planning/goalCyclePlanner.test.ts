@@ -72,6 +72,7 @@ function facts(overrides: Partial<PlannerFacts> = {}): PlannerFacts {
     successMetrics: ["weekly_training_adherence", "confirmed_performance_trend"],
     horizon: { startDate: "2026-08-03", endDate: "2026-09-13" },
     maintenanceFloors: ["retain_lower_body_exposure"],
+    plannedRecoveryEveryWeeks: 6,
     status: "active",
   };
   const mandate: CoachingMandateData = { id: "mandate-1", mode: "collaborative" };
@@ -572,6 +573,12 @@ test("Planning preview 只生成可追溯 immutable artifact，确认后才原�
   assert.equal(confirmedArtifact?.kind, "evidence_brief");
   assert.equal(confirmedArtifact?.kind === "evidence_brief" ? confirmedArtifact.planningPreview?.status : undefined, "confirmed");
   assert.ok((await app.listActionLog("preview-user")).some((event) => event.intent === "planning.preview.confirm"));
+  const coachSession = await app.startSession({
+    userId: "preview-user",
+    context: { kind: "today", ref: "2026-08-03" },
+  });
+  const todayCard = await app.showTodayPlan({ sessionId: coachSession.id, date: "2026-08-03" });
+  assert.equal(todayCard.artifact.planRevision, domain.plan?.revision);
   const restarted = new CoachApplication(ledger, runtime());
   const restored = await restarted.readProductProjection({
     userId: "preview-user",
@@ -846,7 +853,7 @@ test("Mesocycle review 与 Deload 结束只由已配置周期和本地事实驱�
   assert.deepEqual(replay, review);
   assert.equal((await app.listActionLog("user-1")).some((event) => event.intent === "mesocycle.review"), true);
 
-  const recoveryWeek = mesocycle.weeklyIntents.find((week) => week.ordinal === mesocycle.plannedRecoveryWindow.weekOrdinal);
+  const recoveryWeek = mesocycle.weeklyIntents.find((week) => week.ordinal === mesocycle.plannedRecoveryWindow?.weekOrdinal);
   assert.ok(recoveryWeek);
   if (!recoveryWeek) return;
   await assert.rejects(

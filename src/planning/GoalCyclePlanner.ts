@@ -1,6 +1,7 @@
 import type {
   CoachingMandateData,
   DomainAggregateRef,
+  GoalContractData,
   EquipmentRequirement,
   ExerciseResolutionData,
   ExerciseSetPrescription,
@@ -45,7 +46,17 @@ import {
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
 
 const DAY_MS = 86_400_000;
-const MESOCYCLE_WEEKS = 6;
+const DEFAULT_MESOCYCLE_WEEKS = 6;
+
+/** 周期长度由 horizon 推导（4–12 周），无 endDate 时用默认值（TP-MESO-001：不固定 4–8 周）。 */
+function mesocycleLengthFor(goal: GoalContractData): number {
+  if (!goal.horizon.endDate) return DEFAULT_MESOCYCLE_WEEKS;
+  const days = Math.round(
+    (Date.parse(goal.horizon.endDate) - Date.parse(goal.horizon.startDate)) / DAY_MS,
+  );
+  if (!Number.isFinite(days) || days <= 0) return DEFAULT_MESOCYCLE_WEEKS;
+  return Math.max(4, Math.min(12, Math.round(days / 7)));
+}
 const MATERIALIZED_WEEKS = 2;
 const DEFAULT_TRAINING_DAYS_BY_FREQUENCY: Readonly<Record<number, readonly number[]>> = {
   1: [3],
@@ -279,14 +290,21 @@ export class GoalCyclePlanner {
     const cycleStart = mondayOf(context.request.currentDate);
     const allocations = goalAllocations(goal.primaryGoal, goal.modifiers);
     const stimulusBudget = goalStimulusBudget(goal.primaryGoal);
-    const weeklyIntents: WeeklyIntentData[] = Array.from({ length: MESOCYCLE_WEEKS }, (_, index) => {
+    // TP-MESO-001：周期长度按 horizon 配置（4–12 周），不固定；TP-DELOAD-001：
+    // 只有用户显式选择计划性恢复窗口时才排入，不按"第 N 周"强制 deload。
+    const mesocycleWeeks = mesocycleLengthFor(goal);
+    const recoveryWindowOrdinal =
+      goal.plannedRecoveryEveryWeeks !== undefined
+        ? Math.min(Math.max(1, Math.round(goal.plannedRecoveryEveryWeeks)), mesocycleWeeks)
+        : undefined;
+    const weeklyIntents: WeeklyIntentData[] = Array.from({ length: mesocycleWeeks }, (_, index) => {
       const startDate = addDays(cycleStart, index * 7);
       return {
         id: `week-intent-${stableHash({ goal: goal.id, revision: context.facts.goalContract.revision, index })}`,
         ordinal: index + 1,
         startDate,
         endDate: addDays(startDate, 6),
-        intent: index === MESOCYCLE_WEEKS - 1 ? "planned_recovery_and_formal_review" : "accumulate_goal_aligned_stimulus",
+        intent: index + 1 === recoveryWindowOrdinal ? "planned_recovery_and_formal_review" : "accumulate_goal_aligned_stimulus",
         materialization: index < MATERIALIZED_WEEKS ? "materialized" : "intent_only",
         stimulusBudget,
       };
@@ -295,14 +313,18 @@ export class GoalCyclePlanner {
       id: `mesocycle-${stableHash({ goal: goal.id, revision: context.facts.goalContract.revision, cycleStart })}`,
       ordinal: 1,
       startDate: cycleStart,
-      endDate: addDays(cycleStart, MESOCYCLE_WEEKS * 7 - 1),
+      endDate: addDays(cycleStart, mesocycleWeeks * 7 - 1),
       intent: goal.primaryGoal,
       weeklyIntents,
       stimulusBudget,
-      plannedRecoveryWindow: {
-        weekOrdinal: MESOCYCLE_WEEKS,
-        intent: "reduce_fatigue_while_retaining_primary_skill_exposure",
-      },
+      ...(recoveryWindowOrdinal !== undefined
+        ? {
+            plannedRecoveryWindow: {
+              weekOrdinal: recoveryWindowOrdinal,
+              intent: "reduce_fatigue_while_retaining_primary_skill_exposure",
+            },
+          }
+        : {}),
       scheduleConstraints: {
         weeklyFrequency: context.schedule.length,
         sessionDurationMinutes: Math.min(
@@ -439,7 +461,8 @@ export class GoalCyclePlanner {
     ordinal: number,
   ): SessionPrescriptionData {
     const goal = context.facts.goalContract.value.primaryGoal;
-    const useCardio = goal === "fat_loss_preserve_lean_mass" && ordinal === context.schedule.length - 1;
+    const isDeloadWeek = week.intent === "planned_recovery_and_formal_review";
+    const useCardio = goal === "fat_loss_preserve_lean_mass" && ordinal === context.schedule.length - 1 && !isDeloadWeek;
     const recovery = strongestRecovery(context.facts);
     const useRecovery = recovery === "recovery_priority" || recovery === "pause_and_confirm";
     const templates = useRecovery
@@ -449,13 +472,34 @@ export class GoalCyclePlanner {
         : sessionTemplates(goal, ordinal, isBodyweightOnly(context.availableEquipment));
     const maxSlots = Math.max(1, Math.floor(availability.availableMinutes / 12));
     const boundedTemplates = templates
+      // TP-DELOAD-CONTENT-001：deload 周先删可选/低优先级刺激
+      .filter((template) => !isDeloadWeek || template.priority !== "optional")
       .sort((left, right) => priorityRank(left.priority) - priorityRank(right.priority))
       .slice(0, maxSlots);
     if (boundedTemplates.length < templates.length) context.reasonCodes.push("time_capacity_removed_optional_stimulus");
     const slots = boundedTemplates.map((template, slotIndex) =>
       this.resolveStimulusSlot(context, week, date, availability, ordinal, slotIndex, template),
     );
-    const tasks = slots.flatMap((slot) =>
+    // TP-DELOAD-CONTENT-001：减组、远离力竭、保留主动作技术暴露；不写死固定减幅
+    const deloadedSlots = isDeloadWeek
+      ? slots.map((slot) => ({
+          ...slot,
+          prescription: {
+            ...slot.prescription,
+            setCount: Math.max(1, slot.prescription.setCount - 1),
+            ...(slot.prescription.targetRirRange
+              ? {
+                  targetRirRange: {
+                    min: Math.min(6, slot.prescription.targetRirRange.min + 1),
+                    max: Math.min(6, slot.prescription.targetRirRange.max + 1),
+                  },
+                  targetRir: Math.min(6, (slot.prescription.targetRir ?? 2) + 1),
+                }
+              : {}),
+          },
+        }))
+      : slots;
+    const tasks = deloadedSlots.flatMap((slot) =>
       slot.exerciseSlot.exerciseVariantId ? [this.taskForSlot(context, slot)] : [],
     );
     const kind = useRecovery
@@ -474,10 +518,10 @@ export class GoalCyclePlanner {
       locationId: availability.locationId,
       durationBudget: { value: availability.availableMinutes, unit: "minutes" },
       estimatedDuration: {
-        value: estimateSessionMinutes(slots, availability.availableMinutes),
+        value: estimateSessionMinutes(deloadedSlots, availability.availableMinutes),
         unit: "minutes",
       },
-      stimulusSlots: slots,
+      stimulusSlots: deloadedSlots,
       status: "planned",
       tasks,
     };
