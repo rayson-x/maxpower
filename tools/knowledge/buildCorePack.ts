@@ -403,6 +403,39 @@ function rulePack(
   return { ...content, contentHash: stableHash(content) };
 }
 
+
+/**
+ * 安全词表（ticket 09/07）：禁止声称清单初始内容来自 workspace wiki 三张知识页
+ * （training-programming / nutrition-strategy / recovery-health-signals）的明文化清单。
+ * patterns 为 AND 语义（全部子串命中才拦截），降低误伤。
+ */
+const SAFETY_LEXICON = {
+  semanticVersion: "1.0.0",
+  forbiddenClaims: [
+    { id: "fat-burn-rep-range", patterns: ["燃脂次数区间"], replacement: "该说法不成立：不存在专属\u201c燃脂次数区间\u201d，减脂主要由持续能量缺口驱动。" },
+    { id: "camera-verified-load", patterns: ["摄像头确认你举了"], replacement: "摄像头无法确认真实负重；负荷只以你确认的记录为准。" },
+    { id: "soreness-mandates-set", patterns: ["没有酸痛", "必须加组"], replacement: "酸痛与否不能单独决定是否加组；调整依据是可比的表现与恢复证据。" },
+    { id: "calendar-mandatory-deload", patterns: ["身体必须 deload"], replacement: "不存在\u201c到第几周必须 deload\u201d的生理定律；deload 由表现与恢复信号触发。" },
+    { id: "ten-sets-mev", patterns: ["是你的最低有效量"], replacement: "\u201c10 组\u201d是群体层面的增强信号，不是你个人的最低有效量。" },
+    { id: "rir-objective", patterns: ["RIR 是客观测得"], replacement: "RIR 是主观估计，不是传感器测得的客观事实。" },
+    { id: "high-rep-fat-loss", patterns: ["高次数更燃脂"], replacement: "高次数并不更\u201c燃脂\u201d；减脂期训练核心是保留力量与肌肉刺激。" },
+    { id: "hrv-diagnosis", patterns: ["HRV 表明你"], replacement: "HRV 不能诊断生病或过度训练；它只是需要结合其他信号的参考趋势。" },
+    { id: "deep-sleep-injury", patterns: ["深睡不足", "会受伤"], replacement: "睡眠分期不能预测受伤；消费级设备的睡眠分期可靠性有限。" },
+    { id: "acwr-injury-risk", patterns: ["ACWR", "受伤风险"], replacement: "ACWR 阈值不能预测伤病，也不会据此限制训练。" },
+    { id: "readiness-auto-cancel", patterns: ["恢复分", "已取消训练"], replacement: "任何设备分数都不会自动取消你的训练；决定权在你。" },
+    { id: "soreness-damage", patterns: ["酸痛说明肌肉尚未修复"], replacement: "酸痛程度不代表肌肉修复进度或损伤程度。" },
+    { id: "carb-cycle-fat-loss", patterns: ["碳循环", "燃脂更多"], replacement: "碳循环不比等热量的普通饮食\u201c燃脂更多\u201d；它只是安排碳水的便利方式。" },
+    { id: "low-carb-reset", patterns: ["重置代谢"], replacement: "低碳休息日不会\u201c重置代谢\u201d；能量平衡才是主导因素。" },
+    { id: "refeed-metabolic", patterns: ["防止代谢适应"], replacement: "没有证据表明 refeed 能\u201c防止代谢适应\u201d。" },
+    { id: "keto-required", patterns: ["生酮", "必需"], replacement: "生酮不是减脂必需；持续能量缺口才是主要驱动。" },
+  ],
+  domainAnchors: [
+    "训练", "增肌", "力量", "减脂", "减重", "增重", "饮食", "营养", "蛋白", "碳水", "脂肪",
+    "热量", "睡眠", "恢复", "疲劳", "酸痛", "HRV", "心率", "动作", "重量", "次数", "组数",
+    "RIR", "RPE", "器械", "有氧", "热身", "拉伸", "关节", "肌肉", "健康",
+  ],
+};
+
 export function buildCoreKnowledgePack(): KnowledgePack {
   const exerciseCatalog = buildCatalog();
   const executableRulePacks = [
@@ -449,6 +482,7 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     exerciseCatalog,
     executableRulePacks,
     wikiDocuments,
+    safetyLexicon: SAFETY_LEXICON,
   });
   return {
     manifest: {
@@ -460,6 +494,7 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     exerciseCatalog,
     executableRulePacks,
     wikiDocuments,
+    safetyLexicon: SAFETY_LEXICON,
   };
 }
 

@@ -273,6 +273,22 @@ export interface KnowledgePack {
   exerciseCatalog: ExerciseCatalogArtifact;
   executableRulePacks: readonly RulePackArtifact[];
   wikiDocuments: readonly WikiDocumentRef[];
+  /** 安全词表（ticket 09/07）：禁止声称清单与领域锚定词，随包版本化更新。 */
+  safetyLexicon?: SafetyLexicon;
+}
+
+/** 禁止声称规则：patterns 全部命中（AND）才拦截，降低误伤。 */
+export interface ForbiddenClaimRule {
+  id: string;
+  patterns: readonly string[];
+  replacement: string;
+}
+
+export interface SafetyLexicon {
+  semanticVersion: string;
+  forbiddenClaims: readonly ForbiddenClaimRule[];
+  /** 领域锚定词（运动/健康/饮食），用于领域边界判定（ticket 07）。 */
+  domainAnchors: readonly string[];
 }
 
 export interface MotionCapabilitySet {

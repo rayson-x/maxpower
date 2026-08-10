@@ -362,6 +362,7 @@ export class CoachApplication {
       this.humanActions,
       dependencies.providerExecutionPolicy,
       dependencies.llmProviderResolver,
+      this.knowledge.safetyLexicon()?.forbiddenClaims ?? [],
     );
   }
 
