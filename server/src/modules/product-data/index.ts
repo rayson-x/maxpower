@@ -1,0 +1,31 @@
+export { InMemoryProductDataAdapter } from "./in-memory-adapter.js";
+export type {
+  CompleteWorkoutSessionInput,
+  CursorPage,
+  CursorPageInput,
+  CreatePlanInput,
+  CreateResultInput,
+  CreateWorkoutSessionInput,
+  DeletePlanInput,
+  DeleteResultInput,
+  DeleteWorkoutSessionInput,
+  JsonObject,
+  JsonValue,
+  MarkMediaEvidenceDeletedInput,
+  MediaEvidenceLifecycle,
+  MediaEvidenceReference,
+  MediaEvidenceStatus,
+  PatchPlanInput,
+  PatchProfileInput,
+  PatchResultInput,
+  PatchWorkoutSessionInput,
+  Plan,
+  PlanVersion,
+  ProductData,
+  Profile,
+  PublishPlanInput,
+  ResultRecord,
+  WorkoutSession,
+} from "./model.js";
+export { ProductDataModule, type ProductDataModuleDependencies } from "./product-data.js";
+export type { ProductDataStateAdapter } from "./state-adapter.js";

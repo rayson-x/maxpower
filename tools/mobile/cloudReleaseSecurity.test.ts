@@ -1,0 +1,71 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import test from "node:test";
+
+const root = process.cwd();
+
+test("发布客户端没有 Provider 配置、直连凭据或本地模型 bootstrap", () => {
+  for (const path of [
+    "src/agent/defaultCredentials.ts",
+    "src/agent/coach.ts",
+    "src/mobile/ui/RemoteModelSetupSheet.tsx",
+    "src/mobile/ui/embeddedRemoteLlm.ts",
+    "tools/mobile/run-with-bettermeet-llm.sh",
+  ]) {
+    assert.equal(existsSync(join(root, path)), false, `${path} must not ship`);
+  }
+
+  const shippedSource = ["src", "modules"].flatMap((directory) => readTextFiles(join(root, directory)));
+  const joined = shippedSource.join("\n");
+  assert.doesNotMatch(joined, /EXPO_PUBLIC_MAXPOWER_LLM_(?:API_KEY|ENDPOINT|MODEL)/);
+  assert.doesNotMatch(joined, /localRemoteLlmProviderSettings|configureRemoteLlmProvider|readLocalRemoteLlmProviderSettings/);
+  assert.doesNotMatch(joined, /DEFAULT_ZHIPU_API_KEY|provider:\s*ZHIPU|open\.bigmodel\.cn/);
+
+  const packageJson = readFileSync(join(root, "package.json"), "utf8");
+  assert.doesNotMatch(packageJson, /@mariozechner\/pi-(?:ai|agent-core)/);
+});
+
+test("云端 LLM 只暴露固定产品 alias，并从账号内存 token source 取 JWT", () => {
+  const coach = readFileSync(
+    join(root, "src/mobile/cloud/MaxPowerCloudLlmProvider.ts"),
+    "utf8",
+  );
+  const nutrition = readFileSync(
+    join(root, "src/mobile/cloud/CloudNutritionObservationProvider.ts"),
+    "utf8",
+  );
+  assert.match(coach, /maxpower\/coach-v1/);
+  assert.match(nutrition, /maxpower\/nutrition-vision-v1/);
+  assert.match(coach, /accessTokenFor\(accountId/);
+  assert.match(nutrition, /cloud_service_jwt_is_memory_only/);
+  assert.doesNotMatch(`${coach}\n${nutrition}`, /apiKey|credentialRef|provider\.example/);
+});
+
+test("Android release harness excludes the web public corpus and scans the emitted bytecode", () => {
+  const harness = readFileSync(join(root, "tools/mobile/exportAndroidRelease.mjs"), "utf8");
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+
+  assert.equal(packageJson.scripts?.["release:client"], "node tools/mobile/exportAndroidRelease.mjs");
+  assert.match(harness, /EXPO_PUBLIC_FOLDER:\s*"\.native-public"/);
+  assert.match(harness, /confirmed-captures/);
+  assert.match(harness, /EXPO_PUBLIC_MAXPOWER_LLM_API_KEY/);
+  assert.match(harness, /EXPO_PUBLIC_MAXPOWER_API_BASE_URL/);
+});
+
+function readTextFiles(directory: string): string[] {
+  if (!existsSync(directory)) return [];
+  const output: string[] = [];
+  for (const name of readdirSync(directory)) {
+    const path = join(directory, name);
+    const stat = statSync(path);
+    if (stat.isDirectory()) {
+      output.push(...readTextFiles(path));
+    } else if (/\.(?:ts|tsx|js|jsx|json)$/.test(name)) {
+      output.push(readFileSync(path, "utf8"));
+    }
+  }
+  return output;
+}

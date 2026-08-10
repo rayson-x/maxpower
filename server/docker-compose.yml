@@ -1,0 +1,52 @@
+x-container: &container
+  build:
+    context: .
+  image: maxpower-server:${MAXPOWER_IMAGE_TAG:-local}
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - private
+
+x-runtime: &runtime
+  <<: *container
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    - NODE_ENV=production
+    - MAXPOWER_RUNTIME=production
+    - STREAM_REDIS_PERSISTENCE=disabled
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *runtime
+    expose:
+      - "8787"
+    stop_grace_period: 30s
+
+  worker:
+    <<: *runtime
+    command: ["node", "dist/worker.js"]
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+
+  migrate:
+    <<: *container
+    command: ["node", "dist/migrate.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-}
+    restart: "no"
+    profiles: ["ops"]
+    healthcheck:
+      disable: true
+
+networks:
+  private: {}

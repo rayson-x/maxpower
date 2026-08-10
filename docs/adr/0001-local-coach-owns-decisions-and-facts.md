@@ -1,0 +1,3 @@
+# Local Coach owns decisions and facts
+
+MaxPower keeps Agent orchestration, deterministic planning, policy, tool execution, and authoritative facts behind one CoachApplication module because auditable writes and identical shared product behaviour are requirements. The core MVP implements an interchangeable LLM Provider and a single-device repository so Profile → Plan → Timeline/Workout/Nutrition/Recovery → Replan can be validated before backend concerns are introduced. Production account storage and multi-device synchronization are deferred to a future cloud-service ADR; they must reuse the same application contracts and may not bypass the coaching mandate. Neither a remote Provider nor an SDK hook is the safety or transaction seam.
