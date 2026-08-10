@@ -162,6 +162,8 @@ export interface CoachApplicationDependencies extends CoachApplicationPorts {
   knowledgeRegistry?: KnowledgePackRegistry;
   /** 本地安装的知识包来源（ticket 02）；配置后按 内置兜底 + 数据包覆盖 加载。 */
   knowledgePackSource?: KnowledgePackSourcePort;
+  /** 知识检索工具开关（ticket 06）：默认禁用，由 eval 门槛（ticket 10）翻转。 */
+  knowledgeToolsEnabled?: boolean;
   trainingRuleRegistry?: TrainingRulePackRegistry;
   /** Set only by AuthRoot's account-scoped runtime composition. */
   authenticatedAccountId?: string;
@@ -346,7 +348,10 @@ export class CoachApplication {
         proposeNutritionPlanCoordination: (input, execution) => this.proposeNutritionPlanCoordinationForTool(input, execution),
         proposePlanChange: (input, execution) =>
           this.actions.proposePlanChange(input, undefined, execution),
+        lookupExerciseKnowledge: (input, execution) => this.lookupExerciseKnowledge(input, execution),
+        explainKnowledgeRule: (input, execution) => this.explainKnowledgeRule(input, execution),
       },
+      { knowledgeToolsEnabled: dependencies.knowledgeToolsEnabled ?? false },
     );
     this.agentRuntime = new AgentRuntime(
       this.ledger,
@@ -1451,6 +1456,148 @@ export class CoachApplication {
       execution,
       artifact,
       scope: selected ? `recovery:${selected.value.id}` : "recovery:no_active_constraint",
+    });
+  }
+
+  /**
+   * 知识检索工具（ticket 06）：只读查询当前安装的知识包。
+   * 查无结果返回 typed unknown（missingness 标记），绝不返回空内容让模型自由发挥。
+   */
+  async lookupExerciseKnowledge(
+    input: { sessionId: string; query: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const knowledgePins = this.knowledge.versionPins();
+    const matches = this.knowledge.search({ query: input.query, limit: 3 });
+    const first = matches[0];
+    const artifact: import("./model").EvidenceBriefArtifact = first
+      ? {
+          id: `knowledge-exercise-${stableHash({ id: first.id, pins: knowledgePins })}`,
+          kind: "evidence_brief",
+          userId: session.userId,
+          title: `动作：${first.displayName.zh}（${first.displayName.en}）`,
+          summary: [
+            `动作模式：${first.movementPattern}；负荷方式：${first.equipment.loadMode}`,
+            muscleSummaryLine(first),
+            ...first.aliases.length ? [`别名：${first.aliases.join("、")}`] : [],
+            ...matches.length > 1
+              ? [`其他相近条目：${matches.slice(1).map((variant) => variant.displayName.zh).join("、")}`]
+              : [],
+            "肌群关联是动作学参考的策展结论（预计参与），摄像头无法测量肌肉实际激活",
+          ],
+          schemaVersion: 1,
+          renderVersion: 1,
+          createdAt: now,
+          contextRefs: [session.context],
+          evidenceRefs: [{ aggregate: "exercise", id: first.id, revision: 1 }],
+          missingness: first.expectedMuscleAssociation.status === "unknown" ? ["muscle_association_unknown"] : [],
+          capabilityBoundary: [
+            "只呈现当前知识包已审核的目录内容",
+            "肌群关联为预计参与，不是当次激活观测",
+            "不提供负荷建议；负荷只来自用户确认的表现历史",
+          ],
+          hash: stableHash({ id: first.id, pins: knowledgePins }),
+          knowledgePins,
+        }
+      : {
+          id: `knowledge-exercise-unknown-${stableHash({ query: input.query, pins: knowledgePins })}`,
+          kind: "evidence_brief",
+          userId: session.userId,
+          title: `未收录：${input.query}`,
+          summary: [
+            `"${input.query}" 不在当前知识包目录中`,
+            "不要凭模型一般知识编造该动作的细节、肌群或负荷建议",
+          ],
+          schemaVersion: 1,
+          renderVersion: 1,
+          createdAt: now,
+          contextRefs: [session.context],
+          evidenceRefs: [],
+          missingness: ["exercise_not_in_catalog"],
+          capabilityBoundary: ["知识库未收录时必须明示不知道，不得编造"],
+          hash: stableHash({ query: input.query, unknown: true, pins: knowledgePins }),
+          knowledgePins,
+        };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "knowledge.lookup_exercise",
+      execution,
+      artifact,
+      scope: first ? `knowledge:exercise:${first.id}` : "knowledge:exercise:not_in_catalog",
+    });
+  }
+
+  async explainKnowledgeRule(
+    input: { sessionId: string; ruleId: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const knowledgePins = this.knowledge.versionPins();
+    const inspection = this.knowledge.inspect();
+    const rulePack = inspection.executableRulePacks.find((candidate) => candidate.id === input.ruleId);
+    const sourceTitles = rulePack
+      ? rulePack.sourceRefs.map((refId) => {
+          const source = inspection.manifest.sourceRefs.find((candidate) => candidate.id === refId);
+          return source ? `${source.title}（${source.uri}）` : refId;
+        })
+      : [];
+    const artifact: import("./model").EvidenceBriefArtifact = rulePack
+      ? {
+          id: `knowledge-rule-${stableHash({ id: rulePack.id, hash: rulePack.contentHash })}`,
+          kind: "evidence_brief",
+          userId: session.userId,
+          title: `规则包：${rulePack.id} v${rulePack.semanticVersion}`,
+          summary: [
+            `覆盖范围：${rulePack.scope.join("、")}`,
+            `审核时间：${rulePack.reviewedAt}`,
+            ...sourceTitles.length ? [`证据锚点：${sourceTitles.join("；")}`] : [],
+            "可执行逻辑在本地确定性规则包；此处只呈现清单与证据锚点，具体数值以规则包产出为准",
+          ],
+          schemaVersion: 1,
+          renderVersion: 1,
+          createdAt: now,
+          contextRefs: [session.context],
+          evidenceRefs: [{ aggregate: "exercise", id: rulePack.id, revision: 1 }],
+          missingness: [],
+          capabilityBoundary: [
+            "只呈现知识包中已审核的规则清单与证据锚点",
+            "规则数值是产品默认值，不是被研究验证的唯一生理最优",
+          ],
+          hash: stableHash({ id: rulePack.id, hash: rulePack.contentHash }),
+          knowledgePins,
+        }
+      : {
+          id: `knowledge-rule-unknown-${stableHash({ ruleId: input.ruleId, pins: knowledgePins })}`,
+          kind: "evidence_brief",
+          userId: session.userId,
+          title: `未收录规则：${input.ruleId}`,
+          summary: [
+            `规则 "${input.ruleId}" 不在当前知识包中`,
+            "不要凭模型一般知识编造规则数值或阈值",
+          ],
+          schemaVersion: 1,
+          renderVersion: 1,
+          createdAt: now,
+          contextRefs: [session.context],
+          evidenceRefs: [],
+          missingness: ["rule_not_in_pack"],
+          capabilityBoundary: ["知识库未收录时必须明示不知道，不得编造"],
+          hash: stableHash({ ruleId: input.ruleId, unknown: true, pins: knowledgePins }),
+          knowledgePins,
+        };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "knowledge.explain_rule",
+      execution,
+      artifact,
+      scope: rulePack ? `knowledge:rule:${rulePack.id}` : "knowledge:rule:not_in_pack",
     });
   }
 
@@ -9236,4 +9383,19 @@ function actionTargetType(
     safety_constraint: "safety",
   };
   return mapping[kind];
+}
+
+/** 知识工具的动作肌群摘要行：只呈现策展关联，unknown 时明示不得猜测。 */
+function muscleSummaryLine(variant: import("../knowledge").ExerciseVariant): string {
+  const association = variant.expectedMuscleAssociation;
+  if (association.status === "unknown" || !association.associations.length) {
+    return "肌群关联：未收录（unknown），不得猜测";
+  }
+  const primary = association.associations
+    .filter((entry) => entry.role === "primary_intent")
+    .map((entry) => entry.muscleId);
+  const secondary = association.associations
+    .filter((entry) => entry.role === "secondary_intent")
+    .map((entry) => entry.muscleId);
+  return `预计参与肌群（动作学策展，非当次激活观测）：主要 ${primary.join("、") || "未标注"}；次要 ${secondary.join("、") || "无"}`;
 }

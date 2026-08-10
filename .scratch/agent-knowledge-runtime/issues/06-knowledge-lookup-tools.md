@@ -6,7 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] 两工具经工具目录注册，schema/权限声明与既有 13 个工具同构
-- [ ] 查询命中返回知识包当前版本内容（数据包覆盖后返回新内容）
-- [ ] 查无结果返回 typed unknown，不返回空字符串
-- [ ] 禁用 flag 存在且默认关闭；禁用时工具不出现在 provider manifest
+- [x] 两工具经工具目录注册，schema/权限声明与既有 13 个工具同构
+- [x] 查询命中返回知识包当前版本内容（数据包覆盖后返回新内容）
+- [x] 查无结果返回 typed unknown，不返回空字符串
+- [x] 禁用 flag 存在且默认关闭；禁用时工具不出现在 provider manifest
+
+## Comments
+
+- 2026-08-10 完成：`knowledge.lookup_exercise` / `knowledge.explain_rule` 注册进工具目录（read/local_deterministic/offline）；`CoachToolRegistry` 新增 `knowledgeToolsEnabled` 开关（默认禁用，禁用时 manifest 不含且 invoke 抛 unknown_tool）；facade 返回 evidence_brief artifact（含肌群免责声明、证据锚点 URI、knowledgePins）；未收录返回 typed unknown（missingness: exercise_not_in_catalog / rule_not_in_pack）。测试 4 例（tools/coach-runtime/knowledgeTools.test.ts），全量 661 通过。
