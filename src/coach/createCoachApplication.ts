@@ -18,10 +18,7 @@ import {
   MotionCoordinator,
 } from "./adapters/motion";
 import { AgentRuntime } from "./agentRuntime";
-import {
-  remoteLlmCredentialKey,
-  validateRemoteLlmProviderConfiguration,
-} from "./adapters/configuredProvider";
+import { planCoachStateSweep } from "./stateSweep";
 import {
   type CoachLedger,
   type DomainAtomicCommit,
@@ -40,6 +37,7 @@ import type {
   TimelineEvent,
   ToolExecutionIdentity,
   UserProfile,
+  UserState,
 } from "./model";
 import {
   DOMAIN_EVENT_SCHEMA_VERSION,
@@ -60,7 +58,6 @@ import {
   type HealthEvidencePage,
   type NormalizedHealthEvidence,
   type MediaBlobStore,
-  type IdentityPort,
   type NotificationPort,
   type SecureCredentialPort,
   type SyncPort,
@@ -70,11 +67,8 @@ import {
   buildPrivacySettingsOverview,
   ClientSidePortableBackupService,
   PortableDataService,
-  type AccountSession,
   type ClientSidePortableBackup,
-  type DeviceRegistration,
   type PrivacySettingsOverview,
-  type RemoteLlmProviderConfiguration,
 } from "../privacy";
 import { clone, stableHash } from "./stable";
 import { CoachToolRegistry } from "./toolRegistry";
@@ -164,6 +158,24 @@ const DEFAULT_KNOWLEDGE_REGISTRY = new KnowledgePackRegistry(createInstalledKnow
 export interface CoachApplicationDependencies extends CoachApplicationPorts {
   knowledgeRegistry?: KnowledgePackRegistry;
   trainingRuleRegistry?: TrainingRulePackRegistry;
+  /** Set only by AuthRoot's account-scoped runtime composition. */
+  authenticatedAccountId?: string;
+}
+
+export type StagedOnboardingApplication = Pick<
+  CoachApplication,
+  | "startOnboarding"
+  | "saveOnboardingProgress"
+  | "completeOnboarding"
+  | "createNutritionStrategy"
+  | "commitNutritionStrategy"
+>;
+
+export interface StagedOnboardingMutation<T> {
+  value: T;
+  domain: DomainProjection;
+  /** Publishes the staged Ledger only if no concurrent local writer advanced it. */
+  commit(): Promise<void>;
 }
 
 export interface StartSessionInput {
@@ -227,7 +239,7 @@ export class CoachApplication {
   private readonly notifications?: NotificationPort;
   private readonly sync: SyncPort;
   private readonly media?: MediaBlobStore;
-  private readonly identity?: IdentityPort;
+  private readonly authenticatedAccountId?: string;
   private readonly credentials?: SecureCredentialPort;
   private readonly monotonicClock: NonNullable<CoachApplicationPorts["monotonicClock"]>;
   private readonly knowledge: KnowledgePackRegistry;
@@ -240,6 +252,7 @@ export class CoachApplication {
   private readonly replicaSynchronizer?: ReplicaSynchronizer;
   private readonly portableData: PortableDataService;
   private readonly clientSideBackup?: ClientSidePortableBackupService;
+  private readonly dependencies: CoachApplicationDependencies;
 
   constructor(ledger: CoachLedger, runtime: RuntimeServices);
   constructor(dependencies: CoachApplicationDependencies);
@@ -247,13 +260,14 @@ export class CoachApplication {
     const dependencies: CoachApplicationDependencies = "ledger" in first
       ? first
       : { ledger: first, runtime: second ?? missingRuntime() };
+    this.dependencies = dependencies;
     this.ledger = dependencies.ledger;
     this.runtime = dependencies.runtime;
     this.health = dependencies.health;
     this.notifications = dependencies.notifications;
     this.sync = dependencies.sync ?? disabledSyncPort;
     this.media = dependencies.media;
-    this.identity = dependencies.identity;
+    this.authenticatedAccountId = dependencies.authenticatedAccountId;
     this.credentials = dependencies.credentials;
     this.monotonicClock = dependencies.monotonicClock ?? { nowMs: () => Date.now() };
     this.knowledge = dependencies.knowledgeRegistry ?? DEFAULT_KNOWLEDGE_REGISTRY;
@@ -305,6 +319,7 @@ export class CoachApplication {
     const tools = new CoachToolRegistry(
       {
         showToday: (input, execution) => this.showTodayPlan(input, execution),
+        showCurrentPlan: (input, execution) => this.showCurrentPlanOverview(input, execution),
         showWeeklyReport: (input, execution) => this.showWeeklyCoachReport(input, execution),
         showMesocycleReview: (input, execution) => this.showLatestMesocycleReview(input, execution),
         showGoalForecast: (input, execution) => this.showGoalForecast(input, execution),
@@ -1590,6 +1605,150 @@ export class CoachApplication {
       execution,
       artifact,
       scope: strategy ? `nutrition:${strategy.value.id}` : "nutrition:no_active_strategy",
+    });
+  }
+
+  /** Presents the committed week plan and intake targets through one read-only Agent card. */
+  async showCurrentPlanOverview(
+    input: { sessionId: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    const plan = domain.plan;
+    const currentDate = this.runtime.now().slice(0, 10);
+    const fallbackWindow = localCalendarWeek(currentDate) ?? { start: currentDate, end: currentDate };
+    const materializedWeek = plan?.value.materializedWeeks?.find((week) => week.startDate <= currentDate && week.endDate >= currentDate)
+      ?? plan?.value.materializedWeeks?.[0];
+    const window = materializedWeek
+      ? { start: materializedWeek.startDate, end: materializedWeek.endDate }
+      : fallbackWindow;
+    const scheduled = materializedWeek?.sessions
+      ?? plan?.value.sessions.filter((candidate) => candidate.scheduledFor >= window.start && candidate.scheduledFor <= window.end)
+      ?? [];
+    const nutrition = [...domain.nutritionStrategies]
+      .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0];
+    const timezoneOffsetMinutes = [...domain.timeline.events]
+      .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+      .at(-1)?.timezoneOffsetMinutes ?? 0;
+    const product = await this.readProductProjection({
+      userId: session.userId,
+      date: currentDate,
+      timezoneOffsetMinutes,
+      calendarMode: "week",
+      calendarAnchorDate: currentDate,
+    });
+    const todayBudget = product.today.nutrition.budget;
+    const tasks = scheduled.flatMap((plannedSession) => plannedSession.tasks.map((task) => {
+      const firstSet = task.sets[0];
+      const reps = firstSet?.targetReps
+        ? firstSet.targetReps.min === firstSet.targetReps.max
+          ? String(firstSet.targetReps.min)
+          : `${firstSet.targetReps.min}–${firstSet.targetReps.max}`
+        : firstSet?.targetDuration
+          ? `${firstSet.targetDuration.value} ${prescriptionUnitLabel(firstSet.targetDuration.unit)}`
+          : firstSet?.targetDistance
+            ? `${firstSet.targetDistance.value} ${prescriptionUnitLabel(firstSet.targetDistance.unit)}`
+            : "待校准";
+      const restSeconds = firstSet?.rest
+        ? firstSet.rest.unit === "seconds"
+          ? firstSet.rest.value
+          : firstSet.rest.unit === "minutes"
+            ? firstSet.rest.value * 60
+            : firstSet.rest.value * 3600
+        : undefined;
+      return {
+        id: task.id,
+        name: localizedExerciseDisplayName(this.knowledge.exerciseVariant(task.exerciseVariantId)?.displayName.zh ?? task.exerciseVariantId),
+        exerciseVariantId: task.exerciseVariantId,
+        sets: task.sets.length,
+        reps,
+        ...(firstSet?.targetLoad?.unit === "kg" ? { loadKg: firstSet.targetLoad.value } : {}),
+        ...(firstSet?.targetRir !== undefined ? { targetRir: firstSet.targetRir } : {}),
+        ...(restSeconds !== undefined ? { restSeconds } : {}),
+        scheduledFor: plannedSession.scheduledFor,
+        sessionTitle: plannedSession.title,
+      };
+    }));
+    const trainingDays = scheduled.filter((candidate) => candidate.kind !== "rest" && candidate.tasks.length > 0).length;
+    const totalWorkSets = tasks.reduce((sum, task) => sum + task.sets, 0);
+    const nutritionReviewAt = nutrition?.value.reviewWindow?.endsAt;
+    const calibrationBoundaries = [
+      ...(tasks.length ? ["仍需校准：每个动作的实际起始重量、实际完成次数与实际余力；首周训练记录后再调整"] : []),
+      ...(nutrition?.value.calorieRange
+        ? [`摄入范围已给出；${nutritionReviewAt ? `在 ${nutritionReviewAt} 前` : "进入复核前"}至少记录 3 次同条件体重，并结合真实饮食与训练表现复核`]
+        : ["仍需校准：个人维持热量；先记录 7 天真实饮食，不使用人群平均值代填"]),
+      ...(!nutrition?.value.macronutrientTargets ? ["仍需补充体重，才能把蛋白质来源换算为每日克数"] : []),
+    ];
+    const now = this.runtime.now();
+    const artifact: import("./model").PlanOverviewArtifact = {
+      id: `plan-overview-${stableHash({ userId: session.userId, planRevision: plan?.revision ?? 0, window, nutritionRevision: nutrition?.revision, todayBudget, intakeWeek: product.plan.intakeWeek })}`,
+      kind: "plan_overview",
+      userId: session.userId,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [
+        ...(plan ? [{ aggregate: "plan" as const, id: plan.value.id, revision: plan.revision }] : []),
+        ...(nutrition ? [{ aggregate: "nutrition" as const, id: nutrition.value.id, revision: nutrition.revision }] : []),
+      ],
+      missingness: [
+        ...(!plan ? ["current_plan"] : []),
+        ...(!nutrition ? ["nutrition_strategy"] : []),
+        ...(!nutrition?.value.calorieRange ? ["maintenance_energy"] : []),
+        ...(!nutrition?.value.macronutrientTargets ? ["body_mass"] : []),
+      ],
+      capabilityBoundary: [
+        "只读取当前已确认的训练版本与饮食范围，不代表实际完成或真实摄入",
+        "每日摄入目标会按训练日、休息日和已确认运动做有界分配；额外运动补给最多增加 200 kcal，不等同于声称测得消耗",
+        "建议值上下 10% 视为正常区间；高于 10% / 20% 分级提醒，明显偏低同样需要解释，减脂不是越少越好",
+        ...calibrationBoundaries,
+        "未知值保持未知；Agent 不可自行补造",
+      ],
+      hash: stableHash({ plan: plan?.value, planRevision: plan?.revision, window, nutrition: nutrition?.value, nutritionRevision: nutrition?.revision, todayBudget, intakeWeek: product.plan.intakeWeek }),
+      knowledgePins: this.knowledge.versionPins(),
+      planRevision: plan?.revision ?? 0,
+      strategy: plan?.value.strategySelection?.primary ?? "unavailable",
+      window,
+      trainingDays,
+      totalWorkSets,
+      tasks,
+      ...(nutrition ? {
+        nutrition: {
+          ...(nutrition.value.calorieRange ? { energyRange: { min: nutrition.value.calorieRange.min.value, max: nutrition.value.calorieRange.max.value, unit: "kcal" as const } } : {}),
+          ...(nutrition.value.macronutrientTargets ? {
+            proteinGrams: nutrition.value.macronutrientTargets.proteinGrams,
+            fatEnergyFloorPercent: nutrition.value.macronutrientTargets.fatEnergyFloorPercent,
+          } : {}),
+          ...(nutrition.value.reviewWindow?.endsAt ? { reviewAt: nutrition.value.reviewWindow.endsAt } : {}),
+          today: {
+            date: todayBudget.date,
+            dayKind: todayBudget.dayKind,
+            ...(todayBudget.recommendedKcal === undefined ? {} : { recommendedKcal: todayBudget.recommendedKcal }),
+            ...(todayBudget.recommendedRange ? { recommendedRange: todayBudget.recommendedRange } : {}),
+            ...(todayBudget.consumedKcal === undefined ? {} : { consumedKcal: todayBudget.consumedKcal }),
+            ...(todayBudget.variancePercent === undefined ? {} : { variancePercent: todayBudget.variancePercent }),
+            status: todayBudget.status,
+            dayTypeAdjustmentKcal: todayBudget.dayTypeAdjustmentKcal,
+            activityAdjustmentKcal: todayBudget.activityAdjustmentKcal,
+          },
+          week: product.plan.intakeWeek.map((budget) => ({
+            date: budget.date,
+            dayKind: budget.dayKind,
+            ...(budget.recommendedKcal === undefined ? {} : { recommendedKcal: budget.recommendedKcal }),
+          })),
+        },
+      } : {}),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "plan.show_current",
+      execution,
+      artifact,
+      scope: plan ? `plan:${plan.value.id}:r${plan.revision}` : "plan:unavailable",
     });
   }
 
@@ -5315,6 +5474,37 @@ export class CoachApplication {
     return this.onboarding.complete(input);
   }
 
+  /**
+   * Runs only Ledger-backed onboarding writes against a private staging copy.
+   * The caller may send `domain` to the cloud and invoke `commit` only after
+   * the canonical server ACK; a concurrent local writer makes commit fail CAS.
+   */
+  async stageOnboardingMutation<T>(input: {
+    userId: string;
+    mutate(application: StagedOnboardingApplication): Promise<T>;
+  }): Promise<StagedOnboardingMutation<T>> {
+    const before = await this.ledger.read();
+    const stagedLedger = new InMemoryCoachLedger(before);
+    const stagedApplication = new CoachApplication({
+      ...this.dependencies,
+      ledger: stagedLedger,
+    });
+    const value = await input.mutate(stagedApplication);
+    const domain = await stagedApplication.readDomainProjection({ userId: input.userId });
+    const nextSnapshot = await stagedLedger.read();
+    const expectedSnapshotHash = stableHash(before);
+    let committed = false;
+    return {
+      value,
+      domain,
+      commit: async () => {
+        if (committed) return;
+        await this.ledger.swapRestoredSnapshot({ expectedSnapshotHash, nextSnapshot });
+        committed = true;
+      },
+    };
+  }
+
   async evaluateOnboardingPolicy(userId: string) {
     const projection = await this.readDomainProjection({ userId });
     if (!projection.profile || !projection.mandate) {
@@ -5460,132 +5650,6 @@ export class CoachApplication {
       expectedRevision: input.expectedRevision,
       permissionSet: next,
       authorization: input.authorization,
-    });
-  }
-
-  /**
-   * Saves the non-secret endpoint/model locally and the API credential only in
-   * the platform secure store. A successful setup is also an explicit remote
-   * model grant; it never enables sync or any other network feature.
-   */
-  async configureRemoteLlmProvider(input: {
-    userId: string;
-    expectedPermissionRevision: number;
-    endpoint: string;
-    model: string;
-    apiKey: string;
-    authorization: import("./domain").LocalSettingsAuthorization;
-    idempotencyKey: string;
-  }) {
-    assertLocalSettingsAuthorization(input.authorization);
-    if (!this.credentials) throw new Error("remote_provider_secure_storage_unavailable");
-    const apiKey = input.apiKey.trim();
-    if (!apiKey || apiKey.length > 16_384 || /[\u0000-\u001F\u007F]/.test(apiKey)) {
-      throw new Error("remote_provider_credential_invalid");
-    }
-    const provider = validateRemoteLlmProviderConfiguration({
-      kind: "openai_compatible",
-      endpoint: input.endpoint,
-      model: input.model,
-      configuredAt: this.runtime.now(),
-    });
-    const key = remoteLlmCredentialKey(input.userId, provider.credentialRef);
-    const previousCredential = await this.credentials.get({ key, requireUserPresence: false });
-    await this.credentials.put({ key, value: apiKey, requireUserPresence: false });
-    const prior = await this.readLocalRemoteLlmProviderSettings(input.userId);
-    try {
-      await this.writeLocalRemoteLlmProviderSettings({
-        userId: input.userId,
-        provider,
-        idempotencyKey: `${input.idempotencyKey}:local-provider`,
-      });
-      return await this.updatePermissionFromSettings({
-        userId: input.userId,
-        expectedRevision: input.expectedPermissionRevision,
-        changes: { remoteLlm: "granted" },
-        authorization: input.authorization,
-        idempotencyKey: input.idempotencyKey,
-      });
-    } catch (cause) {
-      // Roll back the local selection before releasing its new key. Neither
-      // local setting is ever synced, and a failed rollback still has no
-      // network route unless the durable permission was successfully granted.
-      await this.writeLocalRemoteLlmProviderSettings({
-        userId: input.userId,
-        ...(prior?.provider ? { provider: prior.provider } : {}),
-        idempotencyKey: `${input.idempotencyKey}:rollback-local-provider`,
-      }).catch(() => undefined);
-      if (previousCredential.status === "available") {
-        await this.credentials.put({ key, value: previousCredential.value, requireUserPresence: false }).catch(() => undefined);
-      } else {
-        await this.credentials.delete({ key, requireUserPresence: false }).catch(() => undefined);
-      }
-      throw cause;
-    }
-  }
-
-  /** Revocation reaches the durable policy before removing the secure key. */
-  async removeRemoteLlmProvider(input: {
-    userId: string;
-    expectedPermissionRevision: number;
-    authorization: import("./domain").LocalSettingsAuthorization;
-    idempotencyKey: string;
-  }) {
-    assertLocalSettingsAuthorization(input.authorization);
-    const projection = await this.readDomainProjection({ userId: input.userId });
-    const current = projection.permissions;
-    if (!current) throw new Error(`PermissionSet not found: ${input.userId}`);
-    const prior = await this.readLocalRemoteLlmProviderSettings(input.userId);
-    const result = await this.updatePermissionFromSettings({
-      userId: input.userId,
-      expectedRevision: input.expectedPermissionRevision,
-      changes: { remoteLlm: "denied" },
-      authorization: input.authorization,
-      idempotencyKey: input.idempotencyKey,
-    });
-    await this.writeLocalRemoteLlmProviderSettings({
-      userId: input.userId,
-      idempotencyKey: `${input.idempotencyKey}:clear-local-provider`,
-    });
-    if (prior?.provider && this.credentials) {
-      // The policy is already revoked even if platform secure storage is
-      // temporarily unavailable; a leftover secret has no executable route.
-      await this.credentials.delete({
-        key: remoteLlmCredentialKey(input.userId, prior.provider.credentialRef),
-        requireUserPresence: false,
-      }).catch(() => undefined);
-    }
-    return result;
-  }
-
-  /** Safe, local-only read for the settings form; no credential is exposed. */
-  async readLocalRemoteLlmProviderSettings(userId: string) {
-    return (await this.ledger.read()).localRemoteLlmProviderSettings.find((item) => item.userId === userId);
-  }
-
-  private async writeLocalRemoteLlmProviderSettings(input: {
-    userId: string;
-    provider?: RemoteLlmProviderConfiguration;
-    idempotencyKey: string;
-  }): Promise<void> {
-    const snapshot = await this.ledger.read();
-    const prior = snapshot.localRemoteLlmProviderSettings.find((item) => item.userId === input.userId);
-    await this.ledger.commit({
-      kind: "domain",
-      userId: input.userId,
-      actorId: input.userId,
-      intent: "local.remote_llm_provider.configure",
-      expectedRevisions: [],
-      domainEvents: [],
-      localRemoteLlmProviderSettings: [{
-        id: prior?.id ?? `local-remote-llm:${input.userId}`,
-        userId: input.userId,
-        revision: (prior?.revision ?? 0) + 1,
-        ...(input.provider ? { provider: input.provider } : {}),
-        updatedAt: this.runtime.now(),
-      }],
-      idempotencyKey: input.idempotencyKey,
-      recordedAt: this.runtime.now(),
     });
   }
 
@@ -5935,7 +5999,13 @@ export class CoachApplication {
     const snapshot = await this.ledger.read();
     const session = snapshot.sessions.find((item) => item.id === input.sessionId);
     if (!session) throw new Error(`CoachSession not found: ${input.sessionId}`);
-    const user = snapshot.users.find((item) => item.userId === session.userId);
+    const user = snapshot.users.find((item) => item.userId === session.userId)
+      ?? todayPlanUserFromDomain(
+        snapshot,
+        session.userId,
+        input.date,
+        (exerciseVariantId) => this.knowledge.exerciseVariant(exerciseVariantId)?.displayName.zh ?? exerciseVariantId,
+      );
     if (!user) throw new Error(`User facts not found: ${session.userId}`);
     const now = this.runtime.now();
     const runId = execution?.runId ?? this.runtime.nextId("coach-run");
@@ -6964,93 +7034,6 @@ export class CoachApplication {
     return { cancelled: true, runId: run.id };
   }
 
-  /** Optional identity stays outside the fitness fact model and is never required for local use. */
-  async readAccountSession(): Promise<AccountSession | null> {
-    return this.requireIdentity().currentSession();
-  }
-
-  async startGuestAccount(input: { userId: string; idempotencyKey: string }): Promise<AccountSession> {
-    const before = await this.requireIdentity().currentSession();
-    const session = await this.requireIdentity().startGuest({ localUserId: input.userId });
-    await this.recordIdentityAction({
-      userId: input.userId,
-      idempotencyKey: input.idempotencyKey,
-      action: "account.guest_started",
-      intent: "account.start_guest",
-      before,
-      after: session,
-    });
-    return session;
-  }
-
-  beginAccountSignIn(input: { provider: string; redirectUri: string }) {
-    return this.requireIdentity().signIn(input);
-  }
-
-  async completeAccountSignIn(input: {
-    userId: string;
-    provider: string;
-    state: string;
-    authorizationCode: string;
-    idempotencyKey: string;
-  }): Promise<AccountSession> {
-    const before = await this.requireIdentity().currentSession();
-    const session = await this.requireIdentity().completeSignIn(input);
-    await this.recordIdentityAction({
-      userId: input.userId,
-      idempotencyKey: input.idempotencyKey,
-      action: "account.signed_in",
-      intent: "account.complete_sign_in",
-      before,
-      after: session,
-    });
-    return session;
-  }
-
-  async signOutAccount(input: { userId: string; accountId: string; idempotencyKey: string }): Promise<void> {
-    const before = await this.requireIdentity().currentSession();
-    await this.requireIdentity().signOut({ accountId: input.accountId });
-    await this.recordIdentityAction({
-      userId: input.userId,
-      idempotencyKey: input.idempotencyKey,
-      action: "account.signed_out",
-      intent: "account.sign_out",
-      before,
-      after: null,
-    });
-  }
-
-  async registerAccountDevice(input: {
-    userId: string;
-    accountId: string;
-    deviceId: string;
-    displayName?: string;
-    idempotencyKey: string;
-  }): Promise<DeviceRegistration> {
-    const registration = await this.requireIdentity().registerDevice(input);
-    await this.recordIdentityAction({
-      userId: input.userId,
-      idempotencyKey: input.idempotencyKey,
-      action: "account.device_registered",
-      intent: "account.register_device",
-      before: null,
-      after: { status: registration.status, hasDisplayName: Boolean(registration.displayName) },
-    });
-    return registration;
-  }
-
-  async revokeAccountDevice(input: { userId: string; accountId: string; deviceId: string; idempotencyKey: string }): Promise<void> {
-    await this.requireIdentity().revokeDevice(input);
-    await this.recordIdentityAction({
-      userId: input.userId,
-      idempotencyKey: input.idempotencyKey,
-      action: "account.device_revoked",
-      intent: "account.revoke_device",
-      before: null,
-      after: { status: "revoked" },
-    });
-  }
-
   replayMotionRuntime(input: Parameters<MotionCoordinator["replay"]>[0]) {
     return this.motion.replay(input);
   }
@@ -7064,7 +7047,6 @@ export class CoachApplication {
     notifications: boolean;
     sync: "disabled" | "enabled";
     media: boolean;
-    identity: boolean;
     secureCredentials: boolean;
   } {
     return {
@@ -7072,61 +7054,8 @@ export class CoachApplication {
       notifications: Boolean(this.notifications),
       sync: this.sync.mode,
       media: Boolean(this.media),
-      identity: Boolean(this.identity),
       secureCredentials: Boolean(this.credentials),
     };
-  }
-
-  private requireIdentity(): IdentityPort {
-    if (!this.identity) throw new Error("IdentityPort is not configured");
-    return this.identity;
-  }
-
-  private async recordIdentityAction(input: {
-    userId: string;
-    idempotencyKey: string;
-    action: Extract<import("./model").ActionEvent["action"],
-      "account.guest_started" | "account.signed_in" | "account.signed_out" | "account.device_registered" | "account.device_revoked">;
-    intent: string;
-    before: AccountSession | null;
-    after: AccountSession | null | Readonly<Record<string, unknown>>;
-  }): Promise<void> {
-    const occurredAt = this.runtime.now();
-    const projection = await this.readDomainProjection({ userId: input.userId });
-    await this.ledger.commit({
-      kind: "domain",
-      userId: input.userId,
-      actorId: "identity",
-      intent: input.intent,
-      expectedRevisions: [],
-      domainEvents: [],
-      actionEvents: [{
-        id: this.runtime.nextId("action"),
-        userId: input.userId,
-        occurredAt,
-        actor: "user",
-        action: input.action,
-        targetType: "session",
-        targetId: "identity_session",
-        scope: "account",
-        intent: input.intent,
-        before: identityAuditShape(input.before),
-        after: identityAuditShape(input.after),
-        evidenceRefs: [],
-        beforeRefs: [],
-        afterRefs: [],
-        ruleVersions: {},
-        mandateRevision: projection.mandate?.revision ?? 0,
-        result: "applied",
-        undoBoundary: "not_reversible",
-        policyDecision: "allow",
-        causationId: `identity:${input.userId}:${input.idempotencyKey}`,
-        correlationId: `identity:${input.userId}:${input.idempotencyKey}`,
-        reversible: false,
-      }],
-      idempotencyKey: input.idempotencyKey,
-      recordedAt: occurredAt,
-    });
   }
 
   readHealthFacts(userId: string, since: string) {
@@ -7406,54 +7335,25 @@ export class CoachApplication {
   async readPrivacySettingsOverview(input: { userId: string }): Promise<PrivacySettingsOverview> {
     const snapshot = await this.ledger.read();
     const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
-    let accountSession: AccountSession | null = null;
-    let identityUnavailable = false;
-    if (this.identity) {
-      try {
-        accountSession = await this.identity.currentSession();
-      } catch {
-        // A transient identity adapter failure must not prevent offline local
-        // training. The settings page exposes only that it is temporarily
-        // unavailable, not its transport or credential failure details.
-        identityUnavailable = true;
-      }
-    }
     let media = [] as readonly import("../privacy").MediaBlobReference[];
     let mediaUnavailable = false;
     if (this.media) {
       try {
         media = await this.media.list({ userId: input.userId });
       } catch {
-        // Same rule as identity: preserve the local mode and avoid rendering a
-        // low-level filesystem error or any raw attachment metadata.
+        // Avoid rendering a low-level filesystem error or any raw attachment
+        // metadata on the disclosure surface.
         mediaUnavailable = true;
       }
     }
-    let remoteCredentialAvailability: "available" | "missing_or_invalidated" | "unavailable" | undefined;
-    const configuredRemote = snapshot.localRemoteLlmProviderSettings.find(
-      (item) => item.userId === input.userId,
-    )?.provider;
-    if (configuredRemote && this.credentials) {
-      const credential = await this.credentials.get({
-        key: remoteLlmCredentialKey(input.userId, configuredRemote.credentialRef),
-        requireUserPresence: false,
-      }).catch(() => ({ status: "unavailable" } as const));
-      remoteCredentialAvailability = credential.status;
-    }
     return buildPrivacySettingsOverview({
       userId: input.userId,
-      identity: {
-        configured: Boolean(this.identity),
-        ...(identityUnavailable ? { unavailable: true } : {}),
-        session: accountSession,
-      },
+      authenticatedAccountId: this.authenticatedAccountId ?? "",
       replica: {
         configured: Boolean(this.replicaSynchronizer),
         overview: await this.readReplicaSyncOverview(input.userId),
       },
       ...(domain.permissions ? { permissions: domain.permissions } : {}),
-      ...(configuredRemote ? { remoteProviderConfiguration: configuredRemote } : {}),
-      ...(remoteCredentialAvailability ? { remoteCredentialAvailability } : {}),
       media: {
         configured: Boolean(this.media),
         ...(mediaUnavailable ? { unavailable: true } : {}),
@@ -7682,8 +7582,51 @@ export class CoachApplication {
     return this.recipes.triggerRecipe(input);
   }
 
-  catchUpRecipes(userId: string, now?: string) {
+  async catchUpRecipes(userId: string, now?: string) {
+    await this.sweepExpiredCoachState(userId);
     return this.recipes.catchUp(userId, now);
+  }
+
+  /**
+   * 过期/孤儿状态清扫（ticket 03）：把崩溃遗留的非终态 run 终态化、过期
+   * pending action/token/到期 working memory 显式化。幂等；每次清扫落 action log。
+   * 在 catchUp 周期（前台打开/后台任务）中调用。
+   */
+  async sweepExpiredCoachState(userId: string): Promise<{ swept: number }> {
+    const now = this.runtime.now();
+    const snapshot = await this.ledger.read();
+    const plan = planCoachStateSweep(snapshot, userId, now);
+    const swept =
+      plan.runs.length +
+      plan.pendingHumanActions.length +
+      plan.actionTokens.length +
+      plan.workingMemoryItems.length;
+    if (swept === 0) return { swept: 0 };
+    await this.ledger.commit({
+      kind: "domain",
+      userId,
+      actorId: "rule_engine",
+      intent: "coach_state.sweep",
+      expectedRevisions: [],
+      expectedPendingHumanActionStatuses: plan.expectedPendingHumanActionStatuses,
+      expectedWorkingMemoryVersions: plan.expectedWorkingMemoryVersions,
+      domainEvents: [],
+      runs: plan.runs,
+      pendingHumanActions: plan.pendingHumanActions,
+      updateActionTokens: plan.actionTokens,
+      workingMemoryItems: plan.workingMemoryItems,
+      actionEvents: plan.actionEvents,
+      idempotencyKey: stableHash({
+        intent: "coach_state.sweep",
+        userId,
+        runIds: plan.runs.map((run) => run.id),
+        pendingActionIds: plan.pendingHumanActions.map((action) => action.id),
+        tokenIds: plan.actionTokens.map((token) => token.token),
+        memoryIds: plan.workingMemoryItems.map((item) => item.id),
+      }),
+      recordedAt: now,
+    });
+    return { swept };
   }
 
   cancelRecipe(userId: string, recipeId: string) {
@@ -7982,18 +7925,6 @@ function outboxForDomainEvent(event: DomainEvent): OutboxEntry {
 
 export function createInMemoryCoachApplication(runtime: RuntimeServices): CoachApplication {
   return new CoachApplication(new InMemoryCoachLedger(), runtime);
-}
-
-/** Never place an external account id, authorization URL or credential in ActionLog. */
-function identityAuditShape(value: AccountSession | null | Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-  if (!value) return { session: "none" };
-  if ("kind" in value && (value.kind === "guest" || value.kind === "authenticated")) {
-    return {
-      session: value.kind,
-      ...(value.kind === "authenticated" && value.provider ? { provider: value.provider } : {}),
-    };
-  }
-  return clone(value) as Readonly<Record<string, unknown>>;
 }
 
 /** Only same-variant, user-confirmed load×reps totals form a performance series. */
@@ -9096,6 +9027,146 @@ function domainEventFactRefs(event: DomainEvent): {
         ? [{ aggregate, id: event.aggregate.id, revision: event.aggregate.revision - 1 }]
         : [],
     after: [{ aggregate, id: event.aggregate.id, revision: event.aggregate.revision }],
+  };
+}
+
+/**
+ * The event-sourced onboarding/planner path no longer writes the legacy
+ * `snapshot.users` projection. Read-only Coach cards still accept UserState,
+ * so derive that narrow view from authoritative domain events when needed.
+ */
+function localizedExerciseDisplayName(label: string): string {
+  const tokenLabels: Record<string, string> = {
+    band: "弹力带",
+    barbell: "杠铃",
+    bodyweight: "徒手",
+    cable: "绳索",
+    cardio_machine: "有氧器械",
+    dumbbell: "哑铃",
+    kettlebell: "壶铃",
+    machine: "固定器械",
+    none: "无器械",
+    conventional: "传统式",
+    breathing: "呼吸练习",
+    body_saw: "身体锯",
+    brisk: "快走",
+    ankle: "踝部",
+    easy: "轻松",
+    easy_walk: "轻松步行",
+    elbow_at_side: "肘贴体侧",
+    forward: "前跨式",
+    full_body: "全身",
+    gentle_stretch: "轻柔拉伸",
+    half_kneeling: "半跪姿",
+    hip: "髋部",
+    in_place: "原地",
+    interval: "间歇",
+    knee: "膝撑",
+    knee_raise: "提膝",
+    kneeling: "跪姿",
+    lateral: "侧向",
+    lean_away: "侧倾式",
+    long_lever: "长杠杆",
+    lying: "卧姿",
+    ninety_degree: "90 度",
+    overhead: "过顶式",
+    paused: "停顿式",
+    pushdown: "下压式",
+    recumbent: "卧式",
+    rear_foot_elevated: "后脚抬高",
+    reverse: "后撤式",
+    rest: "休息",
+    rope: "绳索式",
+    romanian: "罗马尼亚式",
+    seated: "坐姿",
+    side_left: "左侧",
+    side_right: "右侧",
+    spin: "动感单车",
+    steady: "稳态",
+    standing: "站姿",
+    step_jack: "开合踏步",
+    shoulder: "肩部",
+    thoracic: "胸椎",
+    walking: "行走式",
+    wrist: "腕部",
+    upright: "直立式",
+  };
+  return label
+    .split(" · ")
+    .filter((token) => token !== "standard")
+    .map((token) => tokenLabels[token] ?? token)
+    .join(" · ");
+}
+
+function prescriptionUnitLabel(unit: string): string {
+  return ({ seconds: "秒", minutes: "分钟", hours: "小时", reps: "次" } as Record<string, string>)[unit] ?? unit;
+}
+
+function todayPlanUserFromDomain(
+  snapshot: Awaited<ReturnType<CoachLedger["read"]>>,
+  userId: string,
+  date: string,
+  exerciseLabel: (exerciseVariantId: string) => string = (exerciseVariantId) => exerciseVariantId,
+): UserState | undefined {
+  const domain = projectDomainEvents(snapshot.domainEvents, { userId, date });
+  if (!domain.profile || !domain.plan) return undefined;
+  const scheduled = domain.plan.value.sessions.find((item) => item.scheduledFor === date);
+  const primaryGoal = domain.goalContract?.value.primaryGoal;
+  const goal: UserProfile["goal"] = primaryGoal === "fat_loss_preserve_lean_mass"
+    ? "fat_loss"
+    : primaryGoal ?? "health";
+  return {
+    userId,
+    profile: {
+      goal,
+      trainingExperience: domain.profile.value.trainingExperience,
+    },
+    profileRevision: domain.profile.revision,
+    plan: {
+      revision: domain.plan.revision,
+      effectiveDate: domain.plan.value.effectiveFrom,
+      title: scheduled?.title ?? "休息与记录",
+      tasks: (scheduled?.tasks ?? []).map((task) => {
+        const firstSet = task.sets[0];
+        const targetReps = firstSet?.targetReps;
+        const reps = targetReps
+          ? targetReps.min === targetReps.max
+            ? String(targetReps.min)
+            : `${targetReps.min}-${targetReps.max}`
+          : firstSet?.targetDuration
+            ? `${firstSet.targetDuration.value} ${prescriptionUnitLabel(firstSet.targetDuration.unit)}`
+            : firstSet?.targetDistance
+              ? `${firstSet.targetDistance.value} ${prescriptionUnitLabel(firstSet.targetDistance.unit)}`
+              : "待记录";
+        const restSeconds = firstSet?.rest
+          ? firstSet.rest.unit === "seconds"
+            ? firstSet.rest.value
+            : firstSet.rest.unit === "minutes"
+              ? firstSet.rest.value * 60
+              : firstSet.rest.value * 3600
+          : undefined;
+        return {
+          id: task.id,
+          name: localizedExerciseDisplayName(exerciseLabel(task.exerciseVariantId)),
+          exerciseVariantId: task.exerciseVariantId,
+          sets: task.sets.length,
+          reps,
+          ...(firstSet?.targetLoad?.unit === "kg" ? { loadKg: firstSet.targetLoad.value } : {}),
+          ...(firstSet?.targetRir !== undefined ? { targetRir: firstSet.targetRir } : {}),
+          ...(restSeconds !== undefined ? { restSeconds } : {}),
+        };
+      }),
+      ...(domain.plan.value.baseRevision !== undefined ? { previousRevision: domain.plan.value.baseRevision } : {}),
+      ...(domain.plan.value.reasonCodes?.length ? { reason: domain.plan.value.reasonCodes.join(", ") } : {}),
+      knowledgePins: domain.plan.value.knowledgePins,
+    },
+    timeline: [],
+    timelineRevision: domain.timeline.revision,
+    mandate: {
+      mode: domain.mandate?.value.mode ?? "collaborative",
+      revision: domain.mandate?.revision ?? 0,
+    },
+    safetyHold: domain.safetyConstraints.some((item) => item.value.disposition !== "clear"),
   };
 }
 

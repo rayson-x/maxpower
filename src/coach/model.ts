@@ -1,7 +1,6 @@
 import type { KnowledgeVersionPins } from "../knowledge/model";
 import type { OnboardingDraftEvent } from "../onboarding/model";
 import type { ContextManifest } from "./adapters/provider";
-import type { RemoteLlmProviderConfiguration } from "../privacy";
 import type {
   AggregateRevisionState,
   DomainEvent,
@@ -177,6 +176,7 @@ export interface PresentationRef {
 
 export type ArtifactKind =
   | "today_plan"
+  | "plan_overview"
   | "plan_change_proposal"
   | "exercise_substitution"
   | "action_receipt"
@@ -212,6 +212,40 @@ export interface TodayPlanArtifact extends ArtifactBase {
   title: string;
   planRevision: number;
   tasks: readonly PlanTask[];
+}
+
+/** Read-only, week-scoped training and intake plan shown by Coach. */
+export interface PlanOverviewArtifact extends ArtifactBase {
+  kind: "plan_overview";
+  userId: string;
+  planRevision: number;
+  strategy: string;
+  window: { start: string; end: string };
+  trainingDays: number;
+  totalWorkSets: number;
+  tasks: readonly (PlanTask & { scheduledFor: string; sessionTitle: string })[];
+  nutrition?: {
+    energyRange?: { min: number; max: number; unit: "kcal" };
+    proteinGrams?: { min: number; max: number };
+    fatEnergyFloorPercent?: number;
+    reviewAt?: string;
+    today?: {
+      date: string;
+      dayKind: import("../nutrition").DailyIntakeBudget["dayKind"];
+      recommendedKcal?: number;
+      recommendedRange?: { min: number; max: number };
+      consumedKcal?: number;
+      variancePercent?: number;
+      status: import("../nutrition").DailyIntakeStatus;
+      dayTypeAdjustmentKcal: number;
+      activityAdjustmentKcal: number;
+    };
+    week?: readonly {
+      date: string;
+      dayKind: import("../nutrition").DailyIntakeBudget["dayKind"];
+      recommendedKcal?: number;
+    }[];
+  };
 }
 
 export interface AdjustTaskChange {
@@ -425,6 +459,7 @@ export interface NutritionStrategyArtifact extends ArtifactBase {
 
 export type Artifact =
   | TodayPlanArtifact
+  | PlanOverviewArtifact
   | PlanChangeProposalArtifact
   | ExerciseSubstitutionArtifact
   | ActionReceiptArtifact
@@ -595,6 +630,8 @@ export interface ActionTokenRecord {
   nonce: string;
   pendingActionId?: string;
   consumedAt?: string;
+  /** 过期清扫器标记的撤销时间；与真实消费（consumedAt）分开。 */
+  revokedAt?: string;
 }
 
 export interface ActionEvent {
@@ -619,11 +656,6 @@ export interface ActionEvent {
     | "mandate.changed"
     | "data.lifecycle.changed"
     | "permission.changed"
-    | "account.guest_started"
-    | "account.signed_in"
-    | "account.signed_out"
-    | "account.device_registered"
-    | "account.device_revoked"
     | "notification.scheduled"
     | "nutrition.draft.rejected"
     | "nutrition.strategy.proposed"
@@ -981,14 +1013,4 @@ export interface LedgerSnapshot {
   healthImportStates: readonly HealthImportState[];
   replicaSyncStates: readonly import("../sync").ReplicaSyncState[];
   pendingReplicaEnvelopes: readonly import("../sync").PendingReplicaEnvelope[];
-  /** Per-device Provider selection, intentionally outside the sync/event graph. */
-  localRemoteLlmProviderSettings: readonly LocalRemoteLlmProviderSettings[];
-}
-
-export interface LocalRemoteLlmProviderSettings {
-  id: string;
-  userId: string;
-  revision: number;
-  provider?: RemoteLlmProviderConfiguration;
-  updatedAt: string;
 }
