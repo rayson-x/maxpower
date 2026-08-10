@@ -25,6 +25,7 @@ function request(overrides: Partial<LLMProviderRequest> = {}): LLMProviderReques
       canonicalEvidence: [],
       historicalSummaries: [],
       currentConversation: [],
+      conversationSummaries: [],
     },
     contextManifest: {
       schemaVersion: 1,
