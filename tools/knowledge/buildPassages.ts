@@ -70,6 +70,12 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
     ],
   },
   {
+    path: "docs/research/2026-08-12-overseas-exercise-science-evidence.md",
+    title: "海外运动科学证据（补剂/睡眠/周期化/热身/性别/人群）",
+    publish: true,
+    excludeSections: [/待核验/, /调研起因|目的|纪律/],
+  },
+  {
     path: "docs/research/2026-08-11-healthy-adult-plan-and-nutrition-acceptance-standards.md",
     title: "健康成人训练与营养标准",
     publish: true,
@@ -153,6 +159,12 @@ const CITATION_PATTERNS: readonly { ref: string; patterns: readonly RegExp[] }[]
   { ref: "thomas_2016_nutrition_athletic_performance", patterns: [/26920240/, /S2212-2672/] },
   { ref: "who_2020_physical_activity", patterns: [/9789240015128/, /WHO 20?20/] },
   { ref: "acsm_2009_progression", patterns: [/19204579/] },
+  { ref: "issn_2017_creatine", patterns: [/28615996/, /PMC5469049/] },
+  { ref: "issn_2021_caffeine", patterns: [/33388079/] },
+  { ref: "issn_2015_beta_alanine", patterns: [/26175657/] },
+  { ref: "acsm_2007_fluid_replacement", patterns: [/17277604/] },
+  { ref: "sleep_loss_performance_meta_2022", patterns: [/35708888/] },
+  { ref: "sleep_muscle_strength_2018", patterns: [/29422383/] },
 ];
 
 
@@ -212,6 +224,19 @@ const EN_ZH_TERMS: readonly (readonly [RegExp, readonly string[]])[] = [
   [/\bstimulus\b/i, ["刺激"]],
   [/\bequipment\b/i, ["器械"]],
   [/\bsubstitut/i, ["替代"]],
+  [/\bcreatine\b/i, ["肌酸"]],
+  [/\bcaffeine\b/i, ["咖啡因"]],
+  [/\bbeta-?alanine/i, ["丙氨酸"]],
+  [/\belectrolyte|fluid|hydration/i, ["电解质", "补水"]],
+  [/\bwomen|female\b/i, ["女性"]],
+  [/\bmen\b|male\b/i, ["男性"]],
+  [/\bsex (differences?|dimorphism)/i, ["性别"]],
+  [/\bolder adult|older adult|aging|elderly/i, ["老年"]],
+  [/\bsleep\b/i, ["睡眠"]],
+  [/\bperiodization|periodised|periodized/i, ["周期化"]],
+  [/\bwarm-?up/i, ["热身"]],
+  [/\bstretch/i, ["拉伸"]],
+  [/\bcluster set|velocity[- ]based|PAP|postactivation/i, ["集群组", "PAP"]],
 ];
 
 /** 主题标签（语言无关，供按主题限定检索）。 */

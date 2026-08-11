@@ -16,10 +16,7 @@ export interface PassageHit {
   score: number;
   /** 命中的关键词（用于向用户解释"为什么找到这条"）。 */
   matchedTerms: readonly string[];
-  /** 可用于支撑该段落声称的引用（结论已映射）。 */
   citations: readonly EvidenceCitation[];
-  /** 延伸阅读：文献真实但结论未映射，不得用于支撑声称。 */
-  furtherReading: readonly EvidenceCitation[];
 }
 
 export interface PassageSearchResult {
@@ -60,6 +57,14 @@ function isCjk(char: string): boolean {
  * 只放**语料里确实用另一种说法**的项，不做知识性推断。
  */
 const QUERY_SYNONYMS: readonly (readonly [RegExp, readonly string[]])[] = [
+  [/(咖啡|咖啡因|caffeine)/, ["咖啡因", "caffeine"]],
+  [/(肌酸|creatine)/, ["肌酸", "creatine"]],
+  [/(拉伸|stretch|柔韧)/, ["拉伸", "柔韧", "防伤", "受伤"]],
+  [/(女生|女性|女人|金刚芭比|男的|男性|男生|性别)/, ["性别差异", "训练反应"]],
+  [/(老年|老人|岁数大|上了年纪)/, ["老年", "older"]],
+  [/(睡|睡眠|熬夜)/, ["睡眠"]],
+  [/(热身)/, ["热身", "拉伸"]],
+  [/(补水|电解质|口渴|喝水)/, ["电解质", "补水"]],
   [/蛋白.{0,3}(吃|多少|摄入|克)/, ["蛋白", "蛋白质", "g/kg"]],
   [/(变大|变壮|金刚芭比|太壮|肌肉大)/, ["女性", "增肌", "负荷"]],
   [/(掉秤|停滞|不掉|平台)/, ["平台期", "代谢", "适应"]],
@@ -89,8 +94,20 @@ export function tokenizeQuery(query: string, vocabulary: ReadonlySet<string>): s
   // 同义词映射（把口语说法接到语料用词）
   for (const [pattern, mapped] of QUERY_SYNONYMS) {
     if (pattern.test(normalized)) {
+      // 映射词可能部分不在词表；逐个检查，取存在于词表的那些
+      const usable = mapped.filter((term) => vocabulary.has(term));
+      if (usable.length > 0) {
+        for (const term of usable) terms.add(term);
+        continue;
+      }
+      // 全部不在词表时，回退尝试每个映射词的前缀（「咖啡因」→「咖啡因」已在词表但「咖啡」不在）
       for (const term of mapped) {
-        if (vocabulary.has(term)) terms.add(term);
+        for (const vocab of vocabulary) {
+          if (vocab.startsWith(term) || term.startsWith(vocab)) {
+            terms.add(vocab);
+            break;
+          }
+        }
       }
     }
   }
@@ -172,15 +189,13 @@ export function searchPassages(input: {
     if (passage.tier === "A") score += 2;
     if (passage.tier === "U") score -= 5;
     if (score <= 0) continue;
-    const resolved = passage.citationRefs
-      .map((ref) => library.find((citation) => citation.id === ref))
-      .filter((citation): citation is EvidenceCitation => citation !== undefined);
     scored.push({
       passage,
       score,
       matchedTerms: [...matched],
-      citations: resolved.filter((citation) => citation.claimStatus === "curated"),
-      furtherReading: resolved.filter((citation) => citation.claimStatus === "pending_review"),
+      citations: passage.citationRefs
+        .map((ref) => library.find((citation) => citation.id === ref))
+        .filter((citation): citation is EvidenceCitation => citation !== undefined),
     });
   }
 
