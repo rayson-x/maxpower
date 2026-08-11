@@ -353,3 +353,21 @@ test("D10b · 单课内容下限随可用时长：45 分钟的课不得只有 2 
   }
   assert.deepEqual(offenders, [], `单课内容不足：${offenders.join(", ")}`);
 });
+
+test("D10c · 主要肌群因器械缺口完全无覆盖时必须显式标注（不静默给 0 组）", () => {
+  const offenders: string[] = [];
+  for (const persona of PERSONA_MATRIX) {
+    const decision = planFor(persona);
+    if (decision.kind !== "plan_proposal") continue;
+    const week = decision.planRevision.materializedWeeks?.[decision.planRevision.materializedWeeks.length - 1];
+    const ledger = week?.weeklyDirectSets ?? {};
+    for (const muscle of ["chest", "back", "quadriceps"]) {
+      if ((ledger[muscle] ?? 0) > 0) continue;
+      const flagged = decision.reasonCodes.some(
+        (code) => code === `muscle_group_uncovered_by_available_equipment:${muscle}`,
+      );
+      if (!flagged) offenders.push(`${persona.id.slice(0, 3)}(${muscle} 零组未标注)`);
+    }
+  }
+  assert.deepEqual(offenders, [], `肌群无覆盖必须留痕：${offenders.join(", ")}`);
+});

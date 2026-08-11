@@ -669,6 +669,13 @@ export class GoalCyclePlanner {
     });
     // 有氧：目标需要时安排在非训练日，不占用力量日（验收标准 §1 有氧条）
     const withAerobic = this.injectAerobicSessions(context, week, sessions);
+    // 主要肌群完全未覆盖时必须显式标注（器械缺口导致的 0 组不能静默）
+    const coverage = volumeLedgerFromSessions(withAerobic);
+    for (const muscle of ["chest", "back", "quadriceps"]) {
+      if ((coverage[muscle] ?? 0) === 0) {
+        context.reasonCodes.push(`muscle_group_uncovered_by_available_equipment:${muscle}`);
+      }
+    }
     // 周量硬上限：单肌群直接组数不得超过天花板（防 emphasis 等叠加超量）
     const capped = capWeeklyVolume(withAerobic);
     if (capped.cappedMuscles.length) {

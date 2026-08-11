@@ -111,6 +111,30 @@ async function runPersona(
   if (out.restDays === 0) out.issues.push("零休息日");
   const ng = preview.planRevision.nutritionGuidance;
   if (persona.profile.demographics?.currentWeight && !ng?.proteinGramsPerDay) out.issues.push("无蛋白克数");
+  // 主要肌群周量下限：滚动 7 天内不得低于维持线（否则该肌群会流失）
+  // 只在完整周（有满额训练日）上检查，避免把截断周误判
+  if (out.strengthDays === out.declared && (out.declared ?? 0) >= 3) {
+    const ledger: Record<string, number> = {};
+    for (const session of seven) {
+      for (const slot of session.stimulusSlots ?? []) {
+        for (const muscle of slot.intent.directMuscles ?? slot.intent.muscleGroups) {
+          ledger[muscle] = (ledger[muscle] ?? 0) + slot.prescription.setCount;
+        }
+      }
+    }
+    // 完全未覆盖是硬缺陷（该肌群永远练不到），必须有显式标注
+    const uncovered = ["chest", "back", "quadriceps"].filter((m) => (ledger[m] ?? 0) === 0);
+    for (const muscle of uncovered) {
+      const flagged = preview.reasonCodes.some((code) => code.includes(`muscle_group_uncovered_by_available_equipment:${muscle}`));
+      out.issues.push(flagged ? `${muscle} 无覆盖(已标注)` : `${muscle} 无覆盖且未标注`);
+    }
+    // 周量下限按训练年限分档：新手起步区间本来就低（保守是设计意图）
+    const floor = persona.profile.trainingExperience === "beginner" ? 4 : 6;
+    const thin = ["chest", "back", "quadriceps"]
+      .filter((m) => !uncovered.includes(m))
+      .filter((m) => (ledger[m] ?? 0) < floor);
+    if (thin.length) out.issues.push(`周量<${floor}: ${thin.map((m) => `${m}=${ledger[m] ?? 0}`).join(",")}`);
+  }
   // 动作数下限按可用时长分档：20 分钟做 2 个动作是合理的，75 分钟只有 2 个才是问题
   const minutes = persona.profile.schedule?.sessionDurationMinutes ?? 60;
   const minTasks = minutes <= 25 ? 2 : minutes <= 45 ? 3 : 4;
