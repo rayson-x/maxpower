@@ -939,9 +939,12 @@ export class GoalCyclePlanner {
         }
         return feasible;
       });
-      // 单课内容地板：器械过滤后不足 2 个动作时，从同轮转其他课回填可行 slot
+      // 单课内容地板：按可用时长决定下限（45 分钟只排 2 个动作是内容不足，
+      // 20 分钟排 2 个才是合理的）。器械过滤后不足下限时从同轮转其他课回填可行 slot。
+      const sessionMinutes = context.facts.profile.value.schedule?.sessionDurationMinutes ?? 60;
+      const minSlotsForDuration = sessionMinutes <= 25 ? 2 : sessionMinutes <= 45 ? 3 : 4;
       const beforeBackfill = templates.length;
-      templates = backfillThinSession(templates, selection.rotation, slotFeasible);
+      templates = backfillThinSession(templates, selection.rotation, slotFeasible, minSlotsForDuration);
       if (templates.length > beforeBackfill) {
         context.reasonCodes.push("thin_session_backfilled_from_rotation");
       }
@@ -1569,6 +1572,10 @@ function isBodyweightOnly(available: ReadonlySet<string>): boolean {
     "kettlebell",
     "cable_stack",
     "resistance_band",
+    // 用户粗粒度词汇（见 equipmentConceptCovers）
+    "dumbbell",
+    "machine",
+    "cable",
   ];
   return !weightedEquipment.some((item) => available.has(item));
 }
@@ -1723,6 +1730,30 @@ function modeForExercise(exercise: ExerciseVariant): StimulusIntentData["prescri
   return exercise.equipment.loadMode === "bodyweight" ? "bodyweight_reps" : "weighted_reps";
 }
 
+/**
+ * 器械概念展开（2026-08-12）：用户词汇 → 目录细粒度 id。
+ *
+ * 为什么需要：动作目录用细粒度 id（dumbbell_pair / cable_stack / row_machine），
+ * 但用户在 onboarding 只会说"我有哑铃""健身房有器械"。此前这些粗粒度概念
+ * 匹配不上任何变式，导致有全套器械的用户也只拿到徒手动作（划船/肩推全被丢弃）。
+ *
+ * 规则是产品映射（D 级），按"用户声明该概念时合理可用的器械"展开。
+ */
+function equipmentConceptCovers(declared: ReadonlySet<string>, requiredId: string): boolean {
+  if (declared.has(requiredId)) return true;
+  // "有器械/机械" → 任何机械（后缀规则自维护：目录新增机器自动覆盖）
+  if (declared.has("machine") && requiredId.endsWith("_machine")) return true;
+  // 哑铃：用户说"哑铃"即指一对
+  if (declared.has("dumbbell") && requiredId === "dumbbell_pair") return true;
+  // 龙门/拉索
+  if (declared.has("cable") && (requiredId === "cable_stack" || requiredId === "cable_attachment")) return true;
+  // 杠铃通常连带杠片
+  if (declared.has("barbell") && requiredId === "weight_plates") return true;
+  // 卧推凳可当可调凳用（保守：反向不成立）
+  if (declared.has("bench") && requiredId === "adjustable_bench") return true;
+  return false;
+}
+
 function equipmentSatisfied(
   requirement: EquipmentRequirement,
   available: ReadonlySet<string>,
@@ -1730,7 +1761,7 @@ function equipmentSatisfied(
 ): boolean {
   if (available.has("full_gym")) return true;
   if (requirement.kind === "unknown") return false;
-  if (requirement.kind === "item") return available.has(requirement.id);
+  if (requirement.kind === "item") return equipmentConceptCovers(available, requirement.id);
   if (requirement.kind === "all") {
     return requirement.items.every((item) => equipmentSatisfied(item, available, environment));
   }

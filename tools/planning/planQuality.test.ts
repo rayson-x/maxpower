@@ -314,3 +314,42 @@ test("局部硬约束不得升级为整份计划不可行（p05 腰伤限制髋�
   const shape = shapeOf(decision);
   assert.ok(shape.strengthSessions.length > 0, "应保留可安全执行的训练");
 });
+
+// ───────────────── D10（2026-08-12 真实 E2E 发现）─────────────────
+
+test("D10 · 器械概念展开：用户说「哑铃/器械/龙门」必须匹配到目录细粒度变式", () => {
+  // 真实 bug：目录用 dumbbell_pair/cable_stack/row_machine，
+  // 用户 onboarding 只说 dumbbell/cable/machine，此前完全匹配不上，
+  // 导致有全套器械的用户也只拿到徒手动作（划船/肩推被全部丢弃）。
+  const persona = personas(["p06"])[0]!;
+  const equipment = persona.profile.locations?.[0]?.availableEquipment ?? [];
+  assert.ok(equipment.includes("dumbbell") || equipment.includes("machine"), "fixture 应含粗粒度器械词");
+  const decision = planFor(persona);
+  assert.equal(decision.kind, "plan_proposal");
+  if (decision.kind !== "plan_proposal") return;
+  const dropped = decision.reasonCodes.filter((code) => code.startsWith("slot_dropped_no_feasible_variant"));
+  for (const pattern of ["horizontal_pull", "vertical_push", "elbow_flexion"]) {
+    assert.ok(
+      !dropped.some((code) => code.includes(pattern)),
+      `有器械却丢弃 ${pattern}：${dropped.join(", ")}`,
+    );
+  }
+});
+
+test("D10b · 单课内容下限随可用时长：45 分钟的课不得只有 2 个动作", () => {
+  const offenders: string[] = [];
+  for (const persona of PERSONA_MATRIX) {
+    const minutes = persona.profile.schedule?.sessionDurationMinutes ?? 60;
+    const floor = minutes <= 25 ? 2 : minutes <= 45 ? 3 : 4;
+    const decision = planFor(persona);
+    if (decision.kind !== "plan_proposal") continue;
+    const seven = decision.planRevision.upcomingSevenDays ?? [];
+    for (const session of seven.filter((s) => s.tasks.length > 0 && s.kind !== "cardio")) {
+      if (session.tasks.length < floor) {
+        offenders.push(`${persona.id.slice(0, 3)}(${minutes}min→${session.tasks.length}动作,应≥${floor})`);
+        break;
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `单课内容不足：${offenders.join(", ")}`);
+});
