@@ -25,6 +25,8 @@ export interface PersonaTiering {
   weeklyRateTarget?: { min: number; max: number };
   /** 是否应优先低冲击有氧。 */
   preferLowImpact: boolean;
+  /** 速度档位（激进/标准/稳健）。 */
+  pace: "aggressive" | "standard" | "gentle";
   /** 产后/特殊阶段的额外提示。 */
   phaseNoteZh?: string;
   /** 进 reasonCodes 的标记。 */
@@ -42,15 +44,33 @@ export function bodyMassStateOf(profile: UserProfileData): { state: BodyMassStat
 }
 
 /** 赤字期周降幅目标（%体重/周）：体脂越高允许的周降幅越大。 */
-export function weeklyRateTargetFor(state: BodyMassState, recentPhase?: "bulk" | "cut" | "maintain"): { min: number; max: number } {
+export function weeklyRateTargetFor(
+  state: BodyMassState,
+  recentPhase?: "bulk" | "cut" | "maintain",
+  pace?: "aggressive" | "standard" | "gentle",
+): { min: number; max: number } {
   // 刚过增肌期转刷脂：起步保守（避免同时加有氧又降碳的双打击）
   if (recentPhase === "bulk") return { min: 0.25, max: 0.6 };
-  switch (state) {
-    case "very_high": return { min: 0.5, max: 1.0 };
-    case "high": return { min: 0.4, max: 0.8 };
-    case "normal": return { min: 0.3, max: 0.6 };
-    case "low": return { min: 0.2, max: 0.4 };
-  }
+  const base = (() => {
+    switch (state) {
+      case "very_high": return { min: 0.5, max: 1.0 };
+      case "high": return { min: 0.4, max: 0.8 };
+      case "normal": return { min: 0.3, max: 0.6 };
+      case "low": return { min: 0.2, max: 0.4 };
+    }
+  })();
+  // 激进：取该体型档的上限（仍不越安全线）；稳健：取下限
+  if (pace === "aggressive") return { min: Math.max(base.min, base.max - 0.1), max: base.max };
+  if (pace === "gentle") return { min: base.min, max: Math.min(base.max, base.min + 0.2) };
+  return base;
+}
+
+/** 由目标时间窗推导速度档位。 */
+export function paceFromTargetWeeks(targetWeeks: number | undefined, state: BodyMassState): "aggressive" | "standard" | "gentle" {
+  if (targetWeeks === undefined) return "standard";
+  if (targetWeeks <= 6) return "aggressive";
+  if (targetWeeks >= 12) return "gentle";
+  return "standard";
 }
 
 /**
@@ -65,6 +85,7 @@ export function tierPersona(
   const experience = profile.trainingExperience;
   const returning = profile.returningStatus;
   const recentPhase = profile.historyModifiers?.recentPhase;
+  const pace = goal.pace ?? paceFromTargetWeeks(goal.targetWeeks, state);
   const isFatLoss = goal.goalType === "fat_loss" || goal.primaryGoal === "fat_loss_preserve_lean_mass";
   const isHypertrophy = goal.goalType === "hypertrophy" || goal.primaryGoal === "hypertrophy";
 
@@ -119,14 +140,25 @@ export function tierPersona(
 
   const preferLowImpact = state === "very_high" || state === "high";
   if (preferLowImpact) reasonCodes.push("aerobic_prefer_low_impact_high_body_mass");
+  if (pace === "aggressive") reasonCodes.push("pace_aggressive_timeboxed");
+
+  // 形态目标（肩腰比/围度）→ 综合方案：增肌与减脂并行，不是单纯减体脂
+  const hasPhysiqueTarget = Boolean(
+    goal.targets?.targetShoulderWaistRatio ?? goal.targets?.targetWaist ?? goal.targets?.targetShoulder,
+  );
+  if (hasPhysiqueTarget) reasonCodes.push("physique_target_recomp_dual_track");
 
   return {
     bodyMassState: state,
     ...(bmi !== undefined ? { bmi } : {}),
     recomp,
     recompNoteZh,
-    ...(isFatLoss ? { weeklyRateTarget: weeklyRateTargetFor(state, recentPhase) } : {}),
+    ...(isFatLoss ? { weeklyRateTarget: weeklyRateTargetFor(state, recentPhase, pace) } : {}),
+    pace,
     preferLowImpact,
+    ...(hasPhysiqueTarget
+      ? { phaseNoteZh: "形态目标（宽肩窄腰）需要两条腿一起走：肩背维度要够（增肌/保肌），体脂要够低（减脂）。所以这不是单纯减体脂——力量刺激和蛋白都不能省。" }
+      : {}),
     reasonCodes,
   };
 }

@@ -235,6 +235,10 @@ export interface GoalContractData {
   dailyStepTarget?: number;
   /** 训练史中的近期阶段（刚过增肌期/刚减脂/维持），影响起步策略。 */
   recentPhase?: "bulk" | "cut" | "maintain";
+  /** 目标达成的时间窗（周）；用户想要的速度。 */
+  targetWeeks?: number;
+  /** 速度档位（由 targetWeeks 推导或用户直接选）：激进 / 标准 / 稳健。 */
+  pace?: "aggressive" | "standard" | "gentle";
   commitmentPreferences?: {
     training?: "minimal" | "standard" | "high";
     nutrition?: "flexible" | "standard" | "strict";
@@ -246,6 +250,14 @@ export interface GoalContractData {
   targets?: {
     targetWeight?: MassQuantity;
     targetBodyFat?: PercentageQuantity;
+    /** 当前体脂率（用户测量或估算；时间反推的起点）。 */
+    currentBodyFat?: PercentageQuantity;
+    /** 目标肩腰比（"宽肩窄腰"类形态目标的量化：肩围/腰围）。 */
+    targetShoulderWaistRatio?: number;
+    /** 目标腰围。 */
+    targetWaist?: LengthQuantity;
+    /** 目标肩围。 */
+    targetShoulder?: LengthQuantity;
     strength?: {
       squat?: MassQuantity;
       benchPress?: MassQuantity;
@@ -560,6 +572,18 @@ export interface NutritionGuidanceData {
   weeklyRateTarget?: { min: number; max: number };
   /** 每日步数目标（减脂期）。 */
   dailyStepTarget?: number;
+  /** 维持热量估算（kcal/天，Mifflin-St Jeor × 活动系数；标为估算非测量）。 */
+  maintenanceKcalEstimate?: number;
+  /** 每日能量目标（kcal/天，含赤字/盈余方向）。 */
+  dailyEnergyTargetKcal?: { min: number; max: number };
+  /** 每日脂肪目标（克，下限约总能量 20-25%）。 */
+  fatGramsPerDay?: { min: number; max: number };
+  /** 碳循环各日型的碳水克数（高/中/低碳日的绝对量）。 */
+  carbGramsByDayType?: {
+    high: { min: number; max: number };
+    moderate: { min: number; max: number };
+    low: { min: number; max: number };
+  };
   tracking: string;
   committedStrategyRef?: { id: string; revision: number };
   /** 显式未知项（如 body_weight_unknown）：禁止用推测值补齐。 */
@@ -603,6 +627,22 @@ export interface PlanRevisionData {
   progressionPolicy?: ProgressionPolicyData;
   /** 人群分层说明（recomp 可行性与阶段提示，用户可读）。 */
   personaTieringNote?: string;
+  /** 目标→时间反推（体脂目标存在时）：最快天数 + 三档速度 + 所需总能量差。 */
+  goalTimeline?: {
+    fatToLoseKg?: number;
+    totalDeficitKcal?: number;
+    maxDailyDeficitKcal: number;
+    fastestDays?: number;
+    paceOptions: readonly {
+      pace: "aggressive" | "standard" | "gentle";
+      dailyDeficitKcal: number;
+      days: number;
+      weeks: number;
+      note: string;
+    }[];
+    estimable: boolean;
+    missing?: string;
+  };
   /** 饮食×训练耦合结果（碳水日型 + 冲突说明），见 src/planning/dietTrainingGraph.ts。 */
   dietTrainingCoupling?: {
     strategyId: string;

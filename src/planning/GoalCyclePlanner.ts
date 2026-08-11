@@ -2156,6 +2156,78 @@ function progressionPolicyFor(
  * 否则会出现"恢复维持策略 + 热量赤字文案"这类冲突（验收标准 §2）。
  * 饮食意愿只决定约束强度（记录负担），不决定方向。
  */
+
+/**
+ * 营养绝对量（产品规则 D；有体重才给，无体重不推测）。
+ *
+ * 维持热量：Mifflin-St Jeor × 活动系数（标为估算非测量，需 2-3 周体重趋势校准）。
+ * 赤字/盈余按 weeklyRateTarget（%体重/周）换算成每日千卡（1kg 体脂 ≈ 7700 kcal）。
+ * 三素分配：蛋白优先（上段）、脂肪下限约 25% 能量、碳水为平衡项。
+ * 碳循环绝对量 = 该日型在周总量约束下的分配（不是加量）。
+ */
+function absoluteNutritionTargets(
+  facts: PlannerFacts,
+  calorieDirection: "small_surplus" | "maintenance" | "deficit",
+  tiering?: ReturnType<typeof tierPersona>,
+): Partial<import("../coach/domain").NutritionGuidanceData> {
+  const demo = facts.profile.value.demographics;
+  const weight = demo?.currentWeight?.value;
+  const height = demo?.height?.value;
+  const age = demo?.ageYears;
+  if (!weight || !height || age === undefined) return {};
+  const sex = demo?.sex ?? "male";
+
+  // Mifflin-St Jeor
+  const bmr = sex === "female"
+    ? 10 * weight + 6.25 * height - 5 * age - 161
+    : 10 * weight + 6.25 * height - 5 * age + 5;
+  const freq = facts.profile.value.schedule?.weeklyFrequency ?? 3;
+  const activityFactor = freq <= 2 ? 1.375 : freq <= 4 ? 1.55 : 1.725;
+  const maintenance = Math.round(bmr * activityFactor);
+
+  // 赤字/盈余换算：周降幅 %体重 → 每日千卡
+  let dailyTarget: { min: number; max: number };
+  if (calorieDirection === "deficit" && tiering?.weeklyRateTarget) {
+    const weeklyDeficitMin = (tiering.weeklyRateTarget.min / 100) * weight * 7700;
+    const weeklyDeficitMax = (tiering.weeklyRateTarget.max / 100) * weight * 7700;
+    dailyTarget = {
+      min: Math.round(maintenance - weeklyDeficitMax / 7),
+      max: Math.round(maintenance - weeklyDeficitMin / 7),
+    };
+  } else if (calorieDirection === "small_surplus") {
+    dailyTarget = { min: maintenance, max: Math.round(maintenance + 250) };
+  } else {
+    dailyTarget = { min: maintenance - 100, max: maintenance + 100 };
+  }
+
+  // 三素分配：蛋白上段、脂肪下限 ~25%、碳水为平衡项
+  const proteinG = goal2ProteinPerKg(facts.goalContract.value.primaryGoal);
+  const proteinMid = weight * ((proteinG.min + proteinG.max) / 2);
+  const fatFloor = Math.round((dailyTarget.min * 0.25) / 9);
+  const fatCeil = Math.round((dailyTarget.max * 0.3) / 9);
+
+  // 碳循环各日型（按需供能）：高碳=糖原需求大的训练日，低碳=休息/低强度日
+  const carbFor = (kcal: number, protein: number, fat: number, boost: number) =>
+    Math.max(0, Math.round((kcal - protein * 4 - fat * 9) / 4 * boost));
+  const fatMid = Math.round((fatFloor + fatCeil) / 2);
+  const carbByDayType = {
+    high: { min: carbFor(dailyTarget.min, proteinMid, fatMid, 1.15), max: carbFor(dailyTarget.max, proteinMid, fatMid, 1.25) },
+    moderate: { min: carbFor(dailyTarget.min, proteinMid, fatMid, 0.95), max: carbFor(dailyTarget.max, proteinMid, fatMid, 1.05) },
+    low: { min: carbFor(dailyTarget.min, proteinMid, fatMid, 0.6), max: carbFor(dailyTarget.max, proteinMid, fatMid, 0.75) },
+  };
+
+  return {
+    maintenanceKcalEstimate: maintenance,
+    dailyEnergyTargetKcal: dailyTarget,
+    fatGramsPerDay: { min: fatFloor, max: fatCeil },
+    carbGramsByDayType: carbByDayType,
+  };
+}
+
+function goal2ProteinPerKg(goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass"): { min: number; max: number } {
+  return goal === "fat_loss_preserve_lean_mass" ? { min: 1.6, max: 2.2 } : { min: 1.4, max: 2.0 };
+}
+
 function nutritionGuidanceFor(
   facts: PlannerFacts,
   energyApproach: import("./adaptiveStrategy").PlanningNutritionStrategy["energyApproach"],
@@ -2188,6 +2260,7 @@ function nutritionGuidanceFor(
         }
       : {}),
     calorieDirection,
+    ...absoluteNutritionTargets(facts, calorieDirection, tiering),
     ...(tiering?.weeklyRateTarget ? { weeklyRateTarget: tiering.weeklyRateTarget } : {}),
     ...(tiering?.bodyMassState === "high" || tiering?.bodyMassState === "very_high"
       ? { dailyStepTarget: 8000 }
