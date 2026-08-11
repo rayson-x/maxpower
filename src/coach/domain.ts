@@ -193,6 +193,18 @@ export interface ProfessionalConstraint {
   scope: readonly ("training" | "nutrition" | "exercise" | "schedule")[];
   instruction: string;
   validUntil?: string;
+  /**
+   * 结构化限制（2026-08-11）：规划引擎只消费这些字段，不对 instruction 做文本匹配。
+   * instruction 保留为用户可读原文；缺结构化字段时该限制只作为上下文展示，
+   * 并在 trace 里标记为 not_machine_actionable（要求 intake 补齐，而不是猜）。
+   */
+  restrictedPatterns?: readonly import("../knowledge/model").MovementPattern[];
+  /** ROM 限制（如"深蹲不低于大腿平行"）。 */
+  romLimits?: readonly { pattern: import("../knowledge/model").MovementPattern; limit: string }[];
+  /** 是否需要专业许可才能自动规划（如孕期、术后）。 */
+  requiresClearance?: boolean;
+  /** 低冲击要求（跳跃/跑动受限）。 */
+  lowImpactOnly?: boolean;
 }
 
 export interface GoalContractData {

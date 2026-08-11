@@ -477,6 +477,25 @@ export class GoalCyclePlanner {
       .filter((week) => week.materialization === "materialized")
       .map((week) => this.materializeWeek(context, week));
     const sessions = materializedWeeks.flatMap((week) => week.sessions);
+    // 专业限制审计（每条医嘱都要在推理链里留痕：应用了/无法机器执行/已过期）
+    for (const constraint of context.facts.profile.value.professionalConstraints ?? []) {
+      const expired = constraint.validUntil !== undefined && constraint.validUntil < context.request.currentDate;
+      const machineActionable = Boolean(
+        constraint.restrictedPatterns?.length || constraint.romLimits?.length
+          || constraint.lowImpactOnly || constraint.requiresClearance,
+      );
+      const outcome = expired
+        ? "expired"
+        : machineActionable
+          ? "applied"
+          : "not_machine_actionable_needs_structured_intake";
+      context.traceCollector.constraintEvents.push(
+        `professional_constraint:${constraint.id}:${constraint.scope.join("|")}:${outcome}`,
+      );
+      if (!expired && !machineActionable) {
+        context.reasonCodes.push(`professional_constraint_context_only:${constraint.id}`);
+      }
+    }
     const progressionPolicy = progressionPolicyFor(materializedWeeks);
     const reasonCodes = [...context.reasonCodes];
     if (progressionPolicy.phase === "calibration") {
@@ -980,12 +999,22 @@ export class GoalCyclePlanner {
         (constraint.kind === "cannot_do" || constraint.kind === "temporary_unavailable" || constraint.kind === "do_not_recommend") &&
         constraintTargets(constraint, exercise),
     );
-    const professionalBlock = (context.facts.profile.value.professionalConstraints ?? []).some(
-      (constraint) =>
+    // 专业限制：优先消费结构化字段（restrictedPatterns / lowImpactOnly）；
+    // 仅当没有结构化字段时才退回文本匹配（并在 trace 里标为不可机器执行）。
+    const professionalConstraints = context.facts.profile.value.professionalConstraints ?? [];
+    const professionalBlock = professionalConstraints.some((constraint) => {
+      if (constraint.restrictedPatterns?.includes(exercise.movementPattern)) return true;
+      if (constraint.lowImpactOnly && (exercise.impact?.level ?? "low") !== "low") return true;
+      const structured = Boolean(
+        constraint.restrictedPatterns?.length || constraint.romLimits?.length || constraint.lowImpactOnly,
+      );
+      if (structured) return false;
+      return (
         constraint.scope.includes("exercise") &&
         mentionsExercise(constraint.instruction, exercise) &&
-        /avoid|禁止|不要|不可|stop/i.test(constraint.instruction),
-    );
+        /avoid|禁止|不要|不可|stop/i.test(constraint.instruction)
+      );
+    });
     const location = context.facts.profile.value.locations?.find((item) => item.id === locationId);
     const equipmentOk = equipmentSatisfied(
       exercise.equipment.requirement,
@@ -1019,11 +1048,23 @@ export class GoalCyclePlanner {
       (event) => event.fact.kind === "training" && event.fact.historicalSet?.exerciseVariantId === exercise.id,
     );
     const strengthBaseline = strengthBaselineForExercise(context.facts.profile.value, exercise);
+    // 负荷可测量性：弹力带无法给出绝对负荷，双进阶与周量推进都无从追踪。
+    // 器械可用时应优先可测量负荷；"器材条目少者优"只是可执行性的次要 tiebreaker，
+    // 不能让弹力带在全套健身房里压过杠铃（真实缺陷，2026-08-11 修）。
+    const measurableLoad = ["barbell", "dumbbell", "kettlebell", "machine", "cable"].includes(
+      exercise.equipment.loadMode,
+    );
+    // 目标特异性：力量目标需要竞技动作模式（杠铃三大项及其变式）
+    const goalNeedsBarbellSpecificity =
+      context.facts.goalContract.value.primaryGoal === "strength" &&
+      exercise.equipment.loadMode === "barbell";
     const score =
       (directSelected ? 10_000 : 0) +
       (explicitlyPreferred ? 250 : 0) +
       (exactHistory.length ? 500 : 0) +
       (strengthBaseline ? 200 : 0) +
+      (goalNeedsBarbellSpecificity ? 200 : 0) +
+      (measurableLoad ? 150 : 0) +
       (sameLocationHistory ? 100 : 0) +
       (exercise.equipment.loadMode === "bodyweight" && locationId.includes("home") ? 40 : 0) -
       (disliked ? 300 : 0) -
@@ -1039,6 +1080,8 @@ export class GoalCyclePlanner {
       ],
       reasons: [
         "hard_filters_passed",
+        ...(measurableLoad ? ["measurable_load_for_progression"] : ["load_not_measurable_progression_by_reps_only"]),
+        ...(goalNeedsBarbellSpecificity ? ["barbell_specificity_for_strength_goal"] : []),
         exactHistory.length ? "exact_variant_continuity" : "cold_start_allowed_without_load_copy",
         ...(strengthBaseline ? ["user_strength_baseline_reference"] : []),
         directSelected ? `direct_choice:${direct?.scope}` : "goal_and_stimulus_fit",

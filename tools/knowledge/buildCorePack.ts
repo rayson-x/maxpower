@@ -122,12 +122,20 @@ const FAMILIES: readonly FamilySeed[] = [
   { movement: "recovery_activity", nameZh: "恢复活动", nameEn: "Recovery activity", pattern: "recovery", primary: [], secondary: [], loadModes: ["none"], variations: ["breathing", "easy_walk", "gentle_stretch", "rest"], angles: ["gentle"], prescriptionMode: "timed", fatigue: "low" },
 ];
 
+/**
+ * 器械需求 = 负荷来源 + **结构支撑**。
+ * 只看 loadMode 会得出"靠凳臀推只需要 bodyweight"、"引体只需要 bodyweight"这类
+ * 用户根本无法执行的方案（真实缺陷，2026-08-11 修）。
+ * 支撑维度（angleOrStance / support）必须叠加到需求里。
+ */
 function equipmentFor(
   movement: string,
   loadMode: ExerciseEquipmentDescriptor["loadMode"],
+  angleOrStance?: string,
+  support?: string,
 ): ExerciseEquipmentDescriptor {
   const item = (id: string): EquipmentRequirement => ({ kind: "item", id });
-  const requirement: EquipmentRequirement = (() => {
+  const base: EquipmentRequirement = (() => {
     switch (loadMode) {
       case "bodyweight":
         return { kind: "all", items: [item("bodyweight"), item("floor_space")] };
@@ -153,7 +161,22 @@ function equipmentFor(
         return item("custom_equipment");
     }
   })();
-  return { loadMode, requirement };
+
+  // 结构支撑需求：与负荷来源无关，缺了动作就做不了
+  const structural: EquipmentRequirement[] = [];
+  if (angleOrStance === "hanging") structural.push(item("pull_up_bar"));
+  if (angleOrStance === "bench_supported" || support === "bench") structural.push(item("bench"));
+  if (angleOrStance === "incline" || angleOrStance === "decline") structural.push(item("adjustable_bench"));
+  if (angleOrStance === "flat" && (loadMode === "barbell" || loadMode === "dumbbell")) structural.push(item("bench"));
+  if (support === "chest_supported" || support === "back_supported") structural.push(item("bench"));
+  if (!structural.length) return { loadMode, requirement: base };
+
+  const flatten = (requirement: EquipmentRequirement): EquipmentRequirement[] =>
+    requirement.kind === "all" ? [...requirement.items] : [requirement];
+  return {
+    loadMode,
+    requirement: { kind: "all", items: [...flatten(base), ...structural] },
+  };
 }
 
 function buildCatalog(): ExerciseCatalogArtifact {
@@ -235,7 +258,7 @@ function buildCatalog(): ExerciseCatalogArtifact {
                     identity,
                     performanceIdentity: stableHash(identity),
                     movementPattern: family.pattern,
-                    equipment: equipmentFor(family.movement, loadMode),
+                    equipment: equipmentFor(family.movement, loadMode, angle, support),
                     stimulusContractIds: [`stimulus.${family.movement}.v1`],
                     expectedMuscleAssociation: {
                       exerciseVariantId: id,

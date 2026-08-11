@@ -234,7 +234,13 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       locations: [commercialGym("gym-community")],
       bodyDirection: "maintain",
       professionalConstraints: [
-        { id: "pc-p06", sourceDescription: "社区医院随诊医生", scope: ["training"], instruction: "避免憋气用力与倒立类动作；训练中如头晕立即停止" },
+        {
+          id: "pc-p06", sourceDescription: "社区医院随诊医生", scope: ["training"],
+          instruction: "避免憋气用力与倒立类动作；训练中如头晕立即停止",
+          // 结构化：倒立类＝头下位，映射到我们目录里最接近的受限模式
+          restrictedPatterns: ["core_flexion"],
+          lowImpactOnly: false,
+        },
       ],
     },
     goalContract: {
@@ -476,7 +482,13 @@ export const PERSONA_MATRIX: readonly Persona[] = [
         { kind: "cannot_do", movementPattern: "locomotion", reason: "膝关节康复期避免跳跃与跑动", priority: "hard", scope: "future_policy" },
       ],
       professionalConstraints: [
-        { id: "pc-p15", sourceDescription: "骨科医生", scope: ["training", "exercise"], instruction: "深蹲不低于大腿平行；避免跳跃与急停变向；疼痛出现即停止", validUntil: "2026-10-01" },
+        {
+          id: "pc-p15", sourceDescription: "骨科医生", scope: ["training", "exercise"],
+          instruction: "深蹲不低于大腿平行；避免跳跃与急停变向；疼痛出现即停止",
+          validUntil: "2026-10-01",
+          romLimits: [{ pattern: "squat", limit: "not_below_parallel" }],
+          lowImpactOnly: true,
+        },
       ],
     },
     goalContract: {
