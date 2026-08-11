@@ -2,6 +2,7 @@ import type { LedgerSnapshot } from "../model";
 import { projectDomainEvents } from "../domain";
 import { stableHash } from "../stable";
 import { redactDirectIdentifiers } from "../remoteRedaction";
+import { COACH_PLAYBOOK } from "../playbook";
 import type { CoachToolManifest } from "../toolRegistry";
 import { openAiCompatibleToolName } from "./openAiToolName";
 import { remoteCoachContext } from "./remoteCoachContext";
@@ -65,6 +66,8 @@ export interface ContextManifest {
   redactionPolicyVersion: "direct-identifiers-v1";
   /** Present only when a permission aggregate records the currently active grant. */
   remoteLlmConsentRef?: string;
+  /** 场景 playbook 版本（ticket 06）：对话准则钉入 manifest，可追溯到当次生效版本。 */
+  playbookVersion?: string;
   /** 上下文预算与降级记录（ticket 04）；未触发降级时 conversation 为 verbatim。 */
   contextBudget?: {
     maxTokens: number;
@@ -441,6 +444,7 @@ export class ContextAssembler {
         timeRange,
         mediaAttachments: [],
         redactionPolicyVersion: "direct-identifiers-v1",
+        playbookVersion: COACH_PLAYBOOK.version,
         contextBudget: {
           maxTokens,
           estimatedTokens: estimateTokens(),
@@ -594,7 +598,7 @@ export class LocalCoachProvider implements LLMProvider {
     if (asksForPlanOverview) {
       yield {
         type: "text-delta",
-        delta: "我会读取同一版本下的本周训练处方与已确认摄入范围；未知热量或重量会明确保留为待校准。",
+        delta: "我会读取同一版本下的本周训练计划与已确认摄入范围；未知热量或重量会明确保留为待校准。",
       };
       yield {
         type: "tool-call",

@@ -128,6 +128,33 @@ const KNOWLEDGE_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   },
 ]);
 
+/**
+ * 三形态工具面（ticket 06）：代为操作 / 主动提案 / 场景升级。
+ * 全部走 typed action + PolicyGate + artifact 确认链，无第三种写入。
+ */
+const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
+  {
+    name: "nutrition.record_observation", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["user_stated_items"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["items"], properties: { items: { type: "array", minItems: 1, maxItems: 20 }, mealSlot: { type: "string" }, note: { type: "string", maxLength: 240 } } },
+  },
+  {
+    name: "plan.substitute_exercise", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["current_plan", "stimulus_equivalence_check"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["taskId", "reason"], properties: { taskId: { type: "string", minLength: 1 }, replacementExerciseId: { type: "string" }, reason: { type: "string", minLength: 1, maxLength: 240 } } },
+  },
+  {
+    name: "workout.report_set", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["active_workout_session", "user_stated_performance"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["workoutId", "actualReps"], properties: { workoutId: { type: "string", minLength: 1 }, actualReps: { type: "integer", minimum: 0, maximum: 200 }, actualLoadKg: { type: "number", minimum: 0, maximum: 1000 }, actualRir: { type: "integer", minimum: 0, maximum: 10 } } },
+  },
+  {
+    name: "plan.trigger_replan_with_context", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["user_stated_context"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["contextType"], properties: { contextType: { enum: ["progress_plateau", "goal_shift", "schedule_change", "feeling_stalled", "other"] }, note: { type: "string", maxLength: 240 } } },
+  },
+]);
+
 export class ToolSchemaError extends Error {
   constructor(readonly code: "unknown_tool" | "invalid_tool_input" | "missing_tool_result") {
     super(code);
@@ -194,14 +221,31 @@ export class CoachToolRegistry {
         input: { sessionId: string; ruleId: string },
         execution: ToolExecutionIdentity,
       ): Promise<ShowArtifactResult>;
+      recordNutritionObservation(
+        input: { sessionId: string; items: readonly string[]; mealSlot?: string; note?: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      substituteExercise(
+        input: { sessionId: string; taskId: string; replacementExerciseId?: string; reason: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      reportWorkoutSet(
+        input: { sessionId: string; workoutId: string; actualReps: number; actualLoadKg?: number; actualRir?: number },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      triggerReplanWithContext(
+        input: { sessionId: string; contextType: string; note?: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
     },
-    private readonly options: { knowledgeToolsEnabled?: boolean } = {},
+    private readonly options: { knowledgeToolsEnabled?: boolean; actionToolsEnabled?: boolean } = {},
   ) {}
 
   manifest(): readonly CoachToolManifest[] {
-    return this.options.knowledgeToolsEnabled
+    const base = this.options.knowledgeToolsEnabled
       ? [...COACH_TOOL_MANIFEST, ...KNOWLEDGE_TOOL_MANIFEST]
-      : COACH_TOOL_MANIFEST;
+      : [...COACH_TOOL_MANIFEST];
+    return this.options.actionToolsEnabled ? [...base, ...ACTION_TOOL_MANIFEST] : base;
   }
 
   async invoke(input: {
@@ -229,6 +273,75 @@ export class CoachToolRegistry {
       }
       const result = await this.handlers.explainKnowledgeRule(
         { sessionId: input.sessionId, ruleId: parsed.ruleId.trim() },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "nutrition.record_observation") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const parsed = parseExactObject(input.call.input, ["items", "mealSlot", "note"]);
+      if (!Array.isArray(parsed.items) || !parsed.items.length || parsed.items.some((item) => typeof item !== "string" || !item.trim())) {
+        throw new ToolSchemaError("invalid_tool_input");
+      }
+      const result = await this.handlers.recordNutritionObservation(
+        {
+          sessionId: input.sessionId,
+          items: parsed.items.map((item) => String(item).trim()),
+          ...(typeof parsed.mealSlot === "string" ? { mealSlot: parsed.mealSlot } : {}),
+          ...(typeof parsed.note === "string" ? { note: parsed.note } : {}),
+        },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "plan.substitute_exercise") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const parsed = parseExactObject(input.call.input, ["taskId", "replacementExerciseId", "reason"]);
+      if (typeof parsed.taskId !== "string" || !parsed.taskId || typeof parsed.reason !== "string" || !parsed.reason.trim()) {
+        throw new ToolSchemaError("invalid_tool_input");
+      }
+      const result = await this.handlers.substituteExercise(
+        {
+          sessionId: input.sessionId,
+          taskId: parsed.taskId,
+          ...(typeof parsed.replacementExerciseId === "string" ? { replacementExerciseId: parsed.replacementExerciseId } : {}),
+          reason: parsed.reason.trim(),
+        },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "workout.report_set") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const parsed = parseExactObject(input.call.input, ["workoutId", "actualReps", "actualLoadKg", "actualRir"]);
+      if (typeof parsed.workoutId !== "string" || !parsed.workout || typeof parsed.actualReps !== "number" || !Number.isInteger(parsed.actualReps)) {
+        throw new ToolSchemaError("invalid_tool_input");
+      }
+      const result = await this.handlers.reportWorkoutSet(
+        {
+          sessionId: input.sessionId,
+          workoutId: parsed.workoutId,
+          actualReps: parsed.actualReps,
+          ...(typeof parsed.actualLoadKg === "number" ? { actualLoadKg: parsed.actualLoadKg } : {}),
+          ...(typeof parsed.actualRir === "number" ? { actualRir: parsed.actualRir } : {}),
+        },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "plan.trigger_replan_with_context") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const parsed = parseExactObject(input.call.input, ["contextType", "note"]);
+      const allowed = ["progress_plateau", "goal_shift", "schedule_change", "feeling_stalled", "other"];
+      if (typeof parsed.contextType !== "string" || !allowed.includes(parsed.contextType)) {
+        throw new ToolSchemaError("invalid_tool_input");
+      }
+      const result = await this.handlers.triggerReplanWithContext(
+        {
+          sessionId: input.sessionId,
+          contextType: parsed.contextType,
+          ...(typeof parsed.note === "string" ? { note: parsed.note } : {}),
+        },
         { runId: input.runId, toolCallId: input.call.toolCallId },
       );
       return this.validateResultIdentity(input, result.events);

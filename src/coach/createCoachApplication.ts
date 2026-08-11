@@ -164,6 +164,8 @@ export interface CoachApplicationDependencies extends CoachApplicationPorts {
   knowledgePackSource?: KnowledgePackSourcePort;
   /** 知识检索工具开关（ticket 06）：默认禁用，由 eval 门槛（ticket 10）翻转。 */
   knowledgeToolsEnabled?: boolean;
+  /** 三形态动作工具开关（ticket 06）：默认禁用，由 eval 门槛翻转。 */
+  actionToolsEnabled?: boolean;
   /** 个人知识层（ticket 05）：实测休息等校准值的沉淀处；缺省不启用。 */
   personalKnowledge?: import("../knowledge/personalLayer").PersonalKnowledgeLayer;
   trainingRuleRegistry?: TrainingRulePackRegistry;
@@ -354,8 +356,15 @@ export class CoachApplication {
           this.actions.proposePlanChange(input, undefined, execution),
         lookupExerciseKnowledge: (input, execution) => this.lookupExerciseKnowledge(input, execution),
         explainKnowledgeRule: (input, execution) => this.explainKnowledgeRule(input, execution),
+        recordNutritionObservation: (input, execution) => this.recordNutritionObservationForTool(input, execution),
+        substituteExercise: (input, execution) => this.substituteExerciseForTool(input, execution),
+        reportWorkoutSet: (input, execution) => this.reportWorkoutSetForTool(input, execution),
+        triggerReplanWithContext: (input, execution) => this.triggerReplanWithContextForTool(input, execution),
       },
-      { knowledgeToolsEnabled: dependencies.knowledgeToolsEnabled ?? false },
+      {
+        knowledgeToolsEnabled: dependencies.knowledgeToolsEnabled ?? false,
+        actionToolsEnabled: dependencies.actionToolsEnabled ?? false,
+      },
     );
     this.agentRuntime = new AgentRuntime(
       this.ledger,
@@ -1581,6 +1590,226 @@ export class CoachApplication {
       execution,
       artifact,
       scope: first ? `knowledge:exercise:${first.id}` : "knowledge:exercise:not_in_catalog",
+    });
+  }
+
+  /**
+   * 三形态工具面（ticket 06）。全部走 artifact + 确认链；LLM 只传话。
+   */
+  async recordNutritionObservationForTool(
+    input: { sessionId: string; items: readonly string[]; mealSlot?: string; note?: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const observation = {
+      id: this.runtime.nextId("meal-observation"),
+      mode: "simplified" as const,
+      foods: input.items.map((name, index) => ({ id: `food-${index + 1}`, name, source: "manual" as const })),
+      ...(input.mealSlot && ["breakfast", "lunch", "dinner", "snack"].includes(input.mealSlot)
+        ? { mealSlot: input.mealSlot as import("../nutrition").MealSlot }
+        : {}),
+      ...(input.note ? { note: input.note } : {}),
+      provenance: "manual" as const,
+      occurredAt: now,
+    };
+    const draft: import("../nutrition").NutritionObservationDraft = {
+      id: observation.id,
+      schemaVersion: 1,
+      observation,
+      estimates: [],
+      generatedAt: now,
+      missing: ["quantities_not_estimated_user_voice_record"],
+      clarificationRequired: true,
+      status: "draft",
+    };
+    const artifact: import("./model").NutritionObservationDraftArtifact = {
+      id: `meal-draft-${stableHash({ userId: session.userId, observation: observation.id })}`,
+      kind: "nutrition_observation_draft",
+      userId: session.userId,
+      idempotencyKey: `tool:${execution?.toolCallId ?? observation.id}`,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [],
+      missingness: draft.missing ?? [],
+      capabilityBoundary: ["对话记录只形成草稿，确认后才进入 Timeline", "不估算热量与营养素"],
+      hash: stableHash(draft),
+      knowledgePins: this.knowledge.versionPins(),
+      draft,
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "nutrition.record_observation",
+      execution,
+      artifact,
+      scope: "nutrition:observation_draft",
+    });
+  }
+
+  async substituteExerciseForTool(
+    input: { sessionId: string; taskId: string; replacementExerciseId?: string; reason: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    const task = domain.plan?.value.sessions.flatMap((item) => item.tasks).find((candidate) => candidate.id === input.taskId);
+    if (!task) throw new Error("plan_task_not_found");
+    const goalPack = domain.goalContract?.value.primaryGoal === "fat_loss_preserve_lean_mass"
+      ? "fat_loss" as const
+      : (domain.goalContract?.value.primaryGoal ?? "hypertrophy");
+    const location = domain.profile?.value.locations?.[0];
+    const candidates = this.resolveExerciseSubstitutions({
+      originalExerciseId: task.exerciseVariantId,
+      goalPack,
+      availableEquipment: location?.availableEquipment ?? [],
+      constraints: {
+        noise: location?.environment.noise ?? "any",
+        space: location?.environment.space ?? "large",
+        unavailableToday: [],
+      },
+    });
+    const now = this.runtime.now();
+    const artifact: import("./model").ExerciseSubstitutionArtifact = {
+      id: `substitution-${stableHash({ task: input.taskId, to: input.replacementExerciseId ?? "auto", at: now })}`,
+      kind: "exercise_substitution",
+      userId: session.userId,
+      sourceExerciseVariantId: task.exerciseVariantId,
+      candidates: candidates.slice(0, 5).map((candidate) => ({
+        exerciseVariantId: candidate.exercise.id,
+        label: candidate.exercise.displayName.zh,
+        stimulusFit: candidate.deviatedFields.length === 0 ? "matches" as const : "partial" as const,
+        equipmentFit: candidate.eligibility === "eligible" ? "available" as const : "unknown" as const,
+        comparableLoadHistory: candidate.coldStart.loadHistory === "known" ? "available" as const : "cold_start" as const,
+      })),
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [{ aggregate: "exercise", id: task.exerciseVariantId, revision: 1 }],
+      missingness: [],
+      capabilityBoundary: [
+        "替换保持原刺激意图，负荷不跨动作复制",
+        "确认后才写入计划；新动作从校准开始",
+      ],
+      hash: stableHash({ task: input.taskId, candidates: candidates.slice(0, 5).map((c) => c.exercise.id) }),
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "plan.substitute_exercise",
+      execution,
+      artifact,
+      scope: `plan:substitute:${task.exerciseVariantId}`,
+    });
+  }
+
+  async reportWorkoutSetForTool(
+    input: { sessionId: string; workoutId: string; actualReps: number; actualLoadKg?: number; actualRir?: number },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const draft = await this.saveCurrentSetDraft({
+      userId: session.userId,
+      workoutId: input.workoutId,
+      idempotencyKey: `tool:${execution?.toolCallId}:draft`,
+      draft: {
+        actualReps: input.actualReps,
+        ...(input.actualLoadKg !== undefined ? { actualLoad: { value: input.actualLoadKg, unit: "kg" as const } } : {}),
+        ...(input.actualRir !== undefined ? { actualRir: input.actualRir } : {}),
+      },
+    });
+    const outcome = await this.confirmCurrentSet({
+      userId: session.userId,
+      workoutId: input.workoutId,
+      draftId: draft.id,
+      idempotencyKey: `tool:${execution?.toolCallId}:confirm`,
+    });
+    const now = this.runtime.now();
+    const artifact: import("./model").EvidenceBriefArtifact = {
+      id: `set-report-${stableHash({ outcome: outcome.id })}`,
+      kind: "evidence_brief",
+      userId: session.userId,
+      title: "已记录一组",
+      summary: [
+        `次数 ${outcome.actualReps ?? "?"}${outcome.actualLoad ? ` · ${outcome.actualLoad.value}${outcome.actualLoad.unit}` : ""}${outcome.actualRir !== undefined ? ` · RIR ${outcome.actualRir}` : ""}`,
+        "来源：用户口述确认（user_confirmed）",
+      ],
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [{ aggregate: "workout", id: input.workoutId, revision: 0 }],
+      missingness: [],
+      capabilityBoundary: ["用户口述即为确认事实", "不经摄像头时不声称识别验证"],
+      hash: stableHash({ outcome: outcome.id }),
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "workout.report_set",
+      execution,
+      artifact,
+      scope: `workout:${input.workoutId}:set`,
+    });
+  }
+
+  async triggerReplanWithContextForTool(
+    input: { sessionId: string; contextType: string; note?: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const currentDate = now.slice(0, 10);
+    const window = localCalendarWeek(currentDate);
+    if (!window) throw new Error("invalid_replan_window");
+    const evaluation = await this.evaluateLocalReplan({
+      userId: session.userId,
+      currentDate,
+      trigger: {
+        id: `chat-replan:${execution?.toolCallId ?? now}`,
+        kind: "user_requested",
+        actor: "user",
+        occurredAt: now,
+        causationId: `${input.contextType}${input.note ? `:${input.note}` : ""}`,
+        idempotencyKey: `tool:${execution?.toolCallId ?? now}:replan`,
+      },
+      window,
+    });
+    const artifact: import("./model").EvidenceBriefArtifact = {
+      id: `replan-context-${stableHash({ evaluation: evaluation.id ?? input.contextType, at: now })}`,
+      kind: "evidence_brief",
+      userId: session.userId,
+      title: "已带上下文触发重排",
+      summary: [
+        `场景：${input.contextType}${input.note ? `（${input.note}）` : ""}`,
+        `结果：${evaluation.outcome}${evaluation.outcome === "proposal_required" ? "——调整提案待你确认" : ""}`,
+      ],
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [],
+      missingness: [],
+      capabilityBoundary: ["重排只产生提案，确认前不改变计划", "你的反馈被记录为重排上下文"],
+      hash: stableHash({ evaluation: evaluation.id ?? "none", at: now }),
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "plan.trigger_replan_with_context",
+      execution,
+      artifact,
+      scope: `plan:replan:${input.contextType}`,
     });
   }
 
