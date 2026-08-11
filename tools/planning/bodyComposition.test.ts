@@ -123,3 +123,58 @@ test("估算结果始终标记为估算（不能冒充测量）", () => {
   assert.equal(estimate.neckApproximated, true);
   assert.notEqual(estimate.confidence, "high", "颈围为近似值时不能给高置信");
 });
+
+// ─── TDEE 分解法（2026-08-12：训练与日常活动分开算）───
+
+import { estimateTdee } from "../../src/planning/bodyComposition";
+
+function tdeeProfile(level: UserProfileData["dailyActivityLevel"], freq: number, minutes = 75): UserProfileData {
+  return {
+    id: "p", trainingExperience: "intermediate", locale: "zh-CN",
+    demographics: { ageYears: 30, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 75, unit: "kg" } },
+    schedule: { weeklyFrequency: freq, sessionDurationMinutes: minutes },
+    ...(level ? { dailyActivityLevel: level } : {}),
+  };
+}
+
+test("分解法：日常活动与训练分开算，同频率不同活动水平必须区分开", () => {
+  const sedentary = estimateTdee(tdeeProfile("sedentary", 5))!;
+  const active = estimateTdee(tdeeProfile("active", 5))!;
+  assert.equal(sedentary.method, "decomposed");
+  assert.ok(active.kcal - sedentary.kcal > 300, `久坐(${sedentary.kcal}) 与常走动(${active.kcal}) 应差 >300 kcal`);
+});
+
+test("分解法：同活动水平下训练越多 TDEE 越高", () => {
+  const low = estimateTdee(tdeeProfile("sedentary", 2))!;
+  const high = estimateTdee(tdeeProfile("sedentary", 6))!;
+  assert.ok(high.kcal > low.kcal, `6 练(${high.kcal}) 应高于 2 练(${low.kcal})`);
+});
+
+test("分解法校准：久坐+零训练应对上 Harris-Benedict 的 1.2 档（防 TEF 重复计入）", () => {
+  // 初版 bug：NEAT 乘数直接用了 HB 总系数 1.2，而 TEF 又单独加了一次 → 高估约 200
+  const estimate = estimateTdee(tdeeProfile("sedentary", 0))!;
+  const harrisBenedict = 1717.5 * 1.2;
+  assert.ok(
+    Math.abs(estimate.kcal - harrisBenedict) < 60,
+    `久坐零训练分解值 ${estimate.kcal} 应接近 HB ${Math.round(harrisBenedict)}（差 <60）`,
+  );
+});
+
+test("分解项之和等于总量（账目自洽）", () => {
+  const t = estimateTdee(tdeeProfile("lightly_active", 5))!;
+  const sum = t.bmr + t.breakdown.dailyActivityKcal + t.breakdown.trainingKcal + t.breakdown.thermicEffectKcal;
+  assert.ok(Math.abs(sum - t.kcal) <= 1, `分解和 ${sum} 应等于总量 ${t.kcal}`);
+});
+
+test("缺日常活动水平 → 退单系数法，且不确定度更大（如实反映精度下降）", () => {
+  const withLevel = estimateTdee(tdeeProfile("sedentary", 5))!;
+  const without = estimateTdee(tdeeProfile(undefined, 5))!;
+  assert.equal(without.method, "activity_factor");
+  assert.ok(without.uncertaintyKcal > withLevel.uncertaintyKcal, "信息更少时不确定度应更大");
+});
+
+test("缺身高/体重/年龄 → 不估算 TDEE（不猜）", () => {
+  const profile = tdeeProfile("sedentary", 5);
+  delete (profile.demographics as { currentWeight?: unknown }).currentWeight;
+  assert.equal(estimateTdee(profile), undefined);
+});

@@ -137,6 +137,17 @@ export interface UserProfileData {
   adultConfirmed?: boolean;
   returningStatus?: "new" | "returning" | "consistent";
   schedule?: { weeklyFrequency: number; sessionDurationMinutes: number };
+  /**
+   * 日常活动水平（**不含**结构化训练）。
+   *
+   * 为什么与 weeklyFrequency 分开：把训练频率与全天活动混成一个系数，是 TDEE 估算
+   * 的主要误差源——一周练 5 天的久坐程序员和一周练 5 天的工地师傅日消耗差几百千卡。
+   * 现在训练消耗按频率×时长单独估，日常消耗按这个字段估。
+   *
+   * sedentary 久坐办公 · lightly_active 有一定走动 · active 常走动/站立工作 ·
+   * very_active 体力劳动
+   */
+  dailyActivityLevel?: "sedentary" | "lightly_active" | "active" | "very_active";
   locations?: readonly {
     id: string;
     kind: "home" | "gym" | "hotel" | "outdoor" | "other";

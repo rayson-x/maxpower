@@ -44,7 +44,7 @@ import {
   type TrainingRulePackDescriptor,
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
-import { activityFactorFor } from "./bodyComposition";
+import { activityFactorFor, estimateTdee } from "./bodyComposition";
 import { estimateTimeToGoal } from "./goalTimeline";
 import { tierPersona } from "./personTiering";
 import { fuelingAdviceFor } from "./sessionFueling";
@@ -2245,9 +2245,9 @@ function absoluteNutritionTargets(
   const bmr = sex === "female"
     ? 10 * weight + 6.25 * height - 5 * age - 161
     : 10 * weight + 6.25 * height - 5 * age + 5;
-  const freq = facts.profile.value.schedule?.weeklyFrequency ?? 3;
-  const activityFactor = activityFactorFor(freq);
-  const maintenance = Math.round(bmr * activityFactor);
+  // TDEE：有日常活动水平时用分解法（训练与日常分开算），否则退单系数法
+  const tdee = estimateTdee(facts.profile.value);
+  const maintenance = tdee?.kcal ?? Math.round(bmr * activityFactorFor(facts.profile.value.schedule?.weeklyFrequency ?? 3));
 
   // 赤字/盈余换算：周降幅 %体重 → 每日千卡
   let dailyTarget: { min: number; max: number };
