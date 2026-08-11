@@ -16,7 +16,10 @@ export interface PassageHit {
   score: number;
   /** 命中的关键词（用于向用户解释"为什么找到这条"）。 */
   matchedTerms: readonly string[];
+  /** 可用于支撑该段落声称的引用（结论已映射）。 */
   citations: readonly EvidenceCitation[];
+  /** 延伸阅读：文献真实但结论未映射，不得用于支撑声称。 */
+  furtherReading: readonly EvidenceCitation[];
 }
 
 export interface PassageSearchResult {
@@ -169,13 +172,15 @@ export function searchPassages(input: {
     if (passage.tier === "A") score += 2;
     if (passage.tier === "U") score -= 5;
     if (score <= 0) continue;
+    const resolved = passage.citationRefs
+      .map((ref) => library.find((citation) => citation.id === ref))
+      .filter((citation): citation is EvidenceCitation => citation !== undefined);
     scored.push({
       passage,
       score,
       matchedTerms: [...matched],
-      citations: passage.citationRefs
-        .map((ref) => library.find((citation) => citation.id === ref))
-        .filter((citation): citation is EvidenceCitation => citation !== undefined),
+      citations: resolved.filter((citation) => citation.claimStatus === "curated"),
+      furtherReading: resolved.filter((citation) => citation.claimStatus === "pending_review"),
     });
   }
 

@@ -364,7 +364,15 @@ export interface KnowledgePassage {
  */
 export interface EvidenceCitation {
   id: string;
+  /** **来源质量**：A/B = 同行评议（立场声明/系统综述/RCT）；C = 课程资料；D = 产品规则；U = 未知。 */
   tier: "A" | "B" | "C" | "D" | "U";
+  /**
+   * **结论映射状态**（与来源质量正交）：
+   * curated = 已人工确认"我们从这篇采用什么结论、它不能推出什么"，可用于面向用户的声称；
+   * pending_review = 文献真实可核验，但结论尚未映射——**不得用于支撑具体建议**，
+   *   只能作为"延伸阅读"列出。这样引用库可以诚实地增长，而不会因为条数多就滥用。
+   */
+  claimStatus: "curated" | "pending_review";
   /** 英文标题（面向海外市场时的主标题；引用时优先展示）。 */
   titleEn: string;
   /** 中文标题（中文用户界面展示）。 */
