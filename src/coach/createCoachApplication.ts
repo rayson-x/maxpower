@@ -390,6 +390,19 @@ export class CoachApplication {
     const priorGoalCycle = [...projection.goalCycles].sort(
       (left, right) => right.revision - left.revision,
     )[0];
+    // 意愿向量默认值（意愿规则表）：用户没显式选时按表单信号推断，可改
+    const goalContractFacts = projection.goalContract.value.commitmentPreferences
+      ? projection.goalContract
+      : {
+          ...projection.goalContract,
+          value: {
+            ...projection.goalContract.value,
+            commitmentPreferences: inferCommitmentPreferences(
+              projection.profile.value,
+              projection.goalContract.value,
+            ),
+          },
+        };
     // 数据桥（ticket 02）：从 workout 聚合组装 planner 的历史表现（所有 replan 入口统一受益）
     const historicalPerformance = assembleHistoricalPerformance(projection.workouts);
     // 个人节奏校准（ticket 05）：实测休息中位数个性化休息建议与时长估算
@@ -408,7 +421,7 @@ export class CoachApplication {
       facts: {
         userId: input.userId,
         profile: projection.profile,
-        goalContract: projection.goalContract,
+        goalContract: goalContractFacts,
         mandate: projection.mandate,
         safetyConstraints: projection.safetyConstraints,
         equipmentProfiles: projection.equipmentProfiles,
@@ -419,6 +432,12 @@ export class CoachApplication {
         ...(projection.plan ? { priorPlan: projection.plan } : {}),
       },
       ...(historicalPerformance.length ? { historicalPerformance } : {}),
+      ...(() => {
+        // 缺席检测（ticket 02+顺延开关）：任何重排都带本周缺席日，供顺延/欠债策略使用
+        const computed = currentWeekMissedDates(projection, input.currentDate);
+        const merged = [...new Set([...(input.missedSessionDates ?? []), ...computed])].sort();
+        return merged.length ? { missedSessionDates: merged } : {};
+      })(),
     });
   }
 
@@ -9857,6 +9876,56 @@ function muscleSummaryLine(variant: import("../knowledge").ExerciseVariant): str
 }
 
 /** 数据桥（ticket 02）：从 workout 聚合组装 planner 的历史表现。 */
+
+
+/**
+ * 意愿推断规则表（版本化产品规则，非生理结论）：
+ * 只从强信号推断默认值；用户显式选择永远优先；行为证据随后修正。
+ */
+function inferCommitmentPreferences(
+  profile: import("./domain").UserProfileData,
+  goal: import("./domain").GoalContractData,
+): NonNullable<import("./domain").GoalContractData["commitmentPreferences"]> {
+  const frequency = profile.schedule?.weeklyFrequency ?? 0;
+  const minutes = profile.schedule?.sessionDurationMinutes ?? 0;
+  const training =
+    frequency >= 4 || (frequency >= 3 && minutes >= 75)
+      ? "high" as const
+      : (frequency > 0 && frequency <= 2) || (minutes > 0 && minutes <= 30)
+        ? "minimal" as const
+        : "standard" as const;
+  const hasNutritionData = (profile.nutritionPreferences?.length ?? 0) > 0;
+  const hasPreciseTargets = Boolean(
+    goal.targets?.targetWeight || goal.targets?.targetBodyFat || goal.targets?.strength,
+  );
+  const nutrition = hasNutritionData
+    ? "strict" as const
+    : hasPreciseTargets
+      ? "standard" as const
+      : "flexible" as const;
+  return { training, nutrition, recovery: "standard" };
+}
+
+/** 本周已过去、计划了但未开始的训练日（顺延/缺席策略的输入）。 */
+function currentWeekMissedDates(
+  projection: import("./domain").DomainProjection,
+  currentDate: string,
+): readonly string[] {
+  const plan = projection.plan?.value;
+  if (!plan?.sessions?.length) return [];
+  const day = new Date(`${currentDate}T00:00:00.000Z`).getUTCDay() || 7;
+  const weekStart = new Date(Date.parse(`${currentDate}T00:00:00.000Z`) - (day - 1) * 86_400_000)
+    .toISOString().slice(0, 10);
+  const started = new Set(
+    projection.workouts.map((workout) => workout.prescriptionRef?.sessionPrescriptionId).filter(Boolean),
+  );
+  return plan.sessions
+    .filter((session) => session.tasks.length > 0)
+    .filter((session) => session.scheduledFor >= weekStart && session.scheduledFor < currentDate)
+    .filter((session) => !started.has(session.id))
+    .map((session) => session.scheduledFor);
+}
+
 function assembleHistoricalPerformance(
   workouts: readonly import("./domain").WorkoutProjection[],
 ): import("../planning").HistoricalPerformance[] {

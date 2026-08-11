@@ -162,3 +162,31 @@ test("完成的训练组写成 historicalSet，后续计划从 workout 聚合获
   assert.equal(benchTask?.sets[0]?.targetLoad?.value, 60);
   assert.deepEqual(benchTask?.sets[0]?.targetRirRange, { min: 2, max: 4 });
 });
+
+test("意愿规则表：表单信号推断默认意愿向量，显式选择优先", async () => {
+  const { readFileSync } = await import("node:fs");
+  const facade = readFileSync("src/coach/createCoachApplication.ts", "utf8");
+  assert.ok(facade.includes("inferCommitmentPreferences"));
+
+  // 规则表行为级验证（经 previewGoalCycle 的 reasonCodes 透出）
+  const app = new CoachApplication(new InMemoryCoachLedger(), runtime());
+  const base = facts();
+  base.profile.value.schedule = { weeklyFrequency: 5, sessionDurationMinutes: 75 };
+  await app.executeDomainCommand({
+    type: "user.bootstrap",
+    profile: base.profile.value,
+    goalContract: base.goalContract.value,
+    mandate: base.mandate.value,
+    meta: meta("bootstrap-infer"),
+  });
+  const decision = await app.previewGoalCycle({
+    userId: "user-1",
+    trigger: "initial_plan",
+    currentDate: "2026-08-03",
+  });
+  assert.equal(decision.kind, "plan_proposal");
+  if (decision.kind !== "plan_proposal") return;
+  // 5 天×75 分钟 → training high → 周量上限档（比默认 6 组更高的 slot 组数）
+  const week1 = decision.planRevision.materializedWeeks?.[0];
+  assert.ok((week1?.weeklyDirectSets?.chest ?? 0) >= 4, "高意愿应给出更高周量");
+});

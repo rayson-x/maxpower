@@ -124,3 +124,57 @@ test("居家徒手自动剔除无变式的 slot 且不崩（水平拉无徒手�
   if (decision.kind !== "plan_proposal") return;
   assert.ok(decision.reasonCodes.some((code) => code.startsWith("slot_dropped_no_feasible_variant")));
 });
+
+test("顺延开关：shift 时缺席日内容后移，skip/默认时跳过", () => {
+  // 周三缺席（missedSessionDates），周五的课在 shift 模式下应承接周三的轮转内容
+  const shiftFacts = facts({}, "intermediate");
+  shiftFacts.goalContract.value.missedSessionPolicy = "shift";
+  const shift = planner.plan(
+    request(
+      {
+        currentDate: "2026-08-06",
+        missedSessionDates: ["2026-08-05"],
+        schedule: [
+          { weekday: 1, availableMinutes: 75, locationId: "gym-main" },
+          { weekday: 3, availableMinutes: 75, locationId: "gym-main" },
+          { weekday: 5, availableMinutes: 75, locationId: "gym-main" },
+        ],
+      },
+      shiftFacts,
+      "intermediate",
+    ),
+  );
+  assert.equal(shift.kind, "plan_proposal");
+  if (shift.kind !== "plan_proposal") return;
+  const shiftSessions = shift.planRevision.materializedWeeks?.[0]?.sessions.filter(
+    (session) => session.tasks.length > 0,
+  ) ?? [];
+  const shiftPatterns = (shiftSessions[0]?.stimulusSlots ?? []).map((slot) => slot.intent.movementPattern).join(",");
+
+  const skip = planner.plan(
+    request(
+      {
+        currentDate: "2026-08-06",
+        missedSessionDates: ["2026-08-05"],
+        schedule: [
+          { weekday: 1, availableMinutes: 75, locationId: "gym-main" },
+          { weekday: 3, availableMinutes: 75, locationId: "gym-main" },
+          { weekday: 5, availableMinutes: 75, locationId: "gym-main" },
+        ],
+      },
+      undefined,
+      "intermediate",
+    ),
+  );
+  assert.equal(skip.kind, "plan_proposal");
+  if (skip.kind !== "plan_proposal") return;
+  const skipSessions = skip.planRevision.materializedWeeks?.[0]?.sessions.filter(
+    (session) => session.tasks.length > 0,
+  ) ?? [];
+  const skipPatterns = (skipSessions[0]?.stimulusSlots ?? []).map((slot) => slot.intent.movementPattern).join(",");
+  // shift 模式下周五承接周三的轮转内容；skip 模式下周五按原序号
+  assert.notEqual(shiftPatterns, skipPatterns);
+  // shift 下周五承接周三（full_c）：含 vertical_pull；skip 下周五按原序（full_a）：含 horizontal_pull
+  assert.ok(shiftPatterns.includes("vertical_pull"));
+  assert.ok(skipPatterns.includes("horizontal_pull"));
+});

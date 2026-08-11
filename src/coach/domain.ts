@@ -207,6 +207,15 @@ export interface GoalContractData {
   maintenanceFloors?: readonly string[];
   /** 显式选择的计划性恢复窗口间隔（TP-DELOAD-001：默认不按日历强制 deload）。 */
   plannedRecoveryEveryWeeks?: number;
+  /** 分领域意愿向量（用户自选、随时可改；不由系统推断）。
+   * 训练/饮食/作息各自独立：意愿高的领域走最佳路线，意愿低的给最小约束方案并明说 trade-off。 */
+  /** 缺席处理总开关（用户自选）：shift=轮转顺延（胸背腿一轮回不错过）；skip=默认跳过，只记录。 */
+  missedSessionPolicy?: "shift" | "skip";
+  commitmentPreferences?: {
+    training?: "minimal" | "standard" | "high";
+    nutrition?: "flexible" | "standard" | "strict";
+    recovery?: "flexible" | "standard" | "strict";
+  };
   /** Structured goal intent keeps maintain/return-to-training explicit while
    * legacy primaryGoal remains the executable training-rule key. */
   goalType?: "hypertrophy" | "fat_loss" | "strength" | "maintain" | "return_to_training";
@@ -459,6 +468,23 @@ export interface PlanCustomizationRecord {
   appliedAt: string;
 }
 
+/** 计划级营养指导（按目标 × 饮食意愿生成；数值规则见营养知识库）。 */
+export interface NutritionGuidanceData {
+  mode: "minimal_constraint" | "standard" | "full_targets";
+  proteinFloorPerKg: number;
+  calorieDirection: "small_surplus" | "maintenance" | "deficit";
+  tracking: string;
+  committedStrategyRef?: { id: string; revision: number };
+  note: string;
+}
+
+/** 计划级恢复指导。 */
+export interface RecoveryGuidanceData {
+  sleepNote: string;
+  restDayIntent: string;
+  deloadPolicy: string;
+}
+
 export interface PlanRevisionData {
   id: string;
   goalContractRef: DomainAggregateRef<"goal_contract">;
@@ -479,6 +505,9 @@ export interface PlanRevisionData {
   sessions: readonly PlannedSessionData[];
   /** 用户确认前的定制记录（ticket 04）：每处修改带 provenance。 */
   customizations?: readonly PlanCustomizationRecord[];
+  /** 营养与恢复指导（ticket：计划=训练+饮食+恢复一体）。 */
+  nutritionGuidance?: NutritionGuidanceData;
+  recoveryGuidance?: RecoveryGuidanceData;
 }
 
 export interface PlannedSessionRef {

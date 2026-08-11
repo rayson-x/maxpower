@@ -48,6 +48,8 @@ import {
   selectSplitRotation,
   sessionTemplateFor,
   setsPerSlot,
+  simplifyForMinimalCommitment,
+  trainingCommitmentTarget,
   weeklyDirectSetTarget,
   weeklyVolumeLedger,
   volumeLedgerFromSessions,
@@ -407,6 +409,8 @@ export class GoalCyclePlanner {
         .filter((week) => week.materialization === "intent_only")
         .map((week) => week.id),
       reasonCodes,
+      nutritionGuidance: nutritionGuidanceFor(context.facts),
+      recoveryGuidance: recoveryGuidanceFor(context.facts),
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -420,6 +424,13 @@ export class GoalCyclePlanner {
 
   private materializeWeek(context: PlanningContext, week: WeeklyIntentData): WeekPlanData {
     const sessionByWeekday = new Map(context.schedule.map((item) => [item.weekday, item]));
+    // 轮转顺延（用户拍板 2026-08-11）：本周已错过的训练日不跳过内容，
+    // 后续训练日的轮转序号前移——胸背腿一轮回，缺席一天整体后移。
+    const missedThisWeek = new Set(
+      (context.request.missedSessionDates ?? []).filter(
+        (date) => date >= week.startDate && date <= week.endDate,
+      ),
+    );
     let trainingOrdinal = 0;
     const sessions = Array.from({ length: 7 }, (_, dayOffset) => {
       const date = addDays(week.startDate, dayOffset);
@@ -427,8 +438,14 @@ export class GoalCyclePlanner {
       if (!availability || date < context.request.currentDate) {
         return this.restSession(context, week, date, date < context.request.currentDate);
       }
-      const session = this.trainingSession(context, week, date, availability, trainingOrdinal);
-      trainingOrdinal += 1;
+      const missedBefore = context.facts.goalContract.value.missedSessionPolicy === "shift"
+        ? (context.request.missedSessionDates ?? []).filter(
+            (missed) => missed >= week.startDate && missed < date,
+          ).length
+        : 0;
+      const effectiveOrdinal = trainingOrdinal - missedBefore;
+      const session = this.trainingSession(context, week, date, availability, effectiveOrdinal);
+      if (!missedThisWeek.has(date)) trainingOrdinal += 1;
       return session;
     });
     return {
@@ -493,6 +510,11 @@ export class GoalCyclePlanner {
       const sessionLocation = context.facts.profile.value.locations?.find(
         (item) => item.id === availability.locationId,
       );
+      const trainingCommitment = context.facts.goalContract.value.commitmentPreferences?.training;
+      if (trainingCommitment === "minimal") {
+        context.reasonCodes.push("minimal_commitment_simplified_structure");
+        context.traceCollector.constraintEvents.push(`minimal_commitment_simplified:${date}`);
+      }
       templates = sessionTemplateFor(selection.rotation, ordinal).filter((template) => {
         // 器械不可行的 slot 丢弃并记录（如居家无水平拉的徒手变式），不让整份计划 infeasible
         const feasible = this.knowledge
@@ -508,10 +530,11 @@ export class GoalCyclePlanner {
         }
         return feasible;
       });
-      const target = weeklyDirectSetTarget(strategies, context.facts.profile.value.trainingExperience);
+      const targetBand = weeklyDirectSetTarget(strategies, context.facts.profile.value.trainingExperience);
+      const target = trainingCommitmentTarget(targetBand, context.facts.goalContract.value.commitmentPreferences?.training);
       plannedSets = {
-        primary: setsPerSlot(target.default, selection.exposuresPerWeek, "primary"),
-        maintenance: setsPerSlot(target.default, selection.exposuresPerWeek, "maintenance"),
+        primary: setsPerSlot(target, selection.exposuresPerWeek, "primary"),
+        maintenance: setsPerSlot(target, selection.exposuresPerWeek, "maintenance"),
         optional: 1,
       };
     } else {
@@ -1479,6 +1502,48 @@ function buildPlannerTrace(
     constraintEvents: context.traceCollector.constraintEvents,
     weeklyVolume,
     outcome: { kind, reasonCodes: [...context.reasonCodes] },
+  };
+}
+
+
+/** 计划级营养指导：目标定方向，饮食意愿定约束强度（flexible=最小有效约束，证据支持）。 */
+function nutritionGuidanceFor(facts: PlannerFacts): import("../coach/domain").NutritionGuidanceData {
+  const goal = facts.goalContract.value.primaryGoal;
+  const commitment = facts.goalContract.value.commitmentPreferences?.nutrition ?? "standard";
+  const committed = [...facts.nutritionStrategies].sort((a, b) => b.revision - a.revision)[0];
+  const calorieDirection =
+    goal === "hypertrophy" ? "small_surplus" as const
+    : goal === "fat_loss_preserve_lean_mass" ? "deficit" as const
+    : "maintenance" as const;
+  const proteinFloorPerKg = goal === "fat_loss_preserve_lean_mass" ? 1.8 : 1.6;
+  const mode = commitment === "flexible" ? "minimal_constraint" as const : commitment === "strict" ? "full_targets" as const : "standard" as const;
+  return {
+    mode,
+    proteinFloorPerKg,
+    calorieDirection,
+    tracking:
+      mode === "minimal_constraint"
+        ? "只记蛋白是否达标+饱腹感（简化轨道）"
+        : mode === "full_targets"
+          ? "完整记录热量与宏量营养素"
+          : "记录关键项（蛋白与趋势）",
+    ...(committed ? { committedStrategyRef: { id: committed.value.id, revision: committed.revision } } : {}),
+    note:
+      mode === "minimal_constraint"
+        ? "先只保蛋白底线和能量方向，其他随习惯；想更精确随时说。弹性约束的长期效果更好。"
+        : mode === "full_targets"
+          ? "按完整目标追踪；连续依从性差时自动降档为简化轨道。"
+          : "按默认策略追踪，趋势不对再调整。",
+  };
+}
+
+/** 计划级恢复指导。 */
+function recoveryGuidanceFor(facts: PlannerFacts): import("../coach/domain").RecoveryGuidanceData {
+  const hasActive = facts.recoveryConstraints.some((item) => item.value.level !== "normal");
+  return {
+    sleepNote: "规律睡眠是恢复主线；设备分数只做参考趋势",
+    restDayIntent: hasActive ? "当前有恢复约束，优先执行降级安排" : "休息日可散步/轻活动；酸痛不单独决定减量",
+    deloadPolicy: "减量由表现与恢复信号触发，不按日历强制",
   };
 }
 

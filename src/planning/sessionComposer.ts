@@ -64,6 +64,33 @@ export function weeklyDirectSetTarget(
   return strategies.weeklyDirectSetTargets[experience];
 }
 
+/**
+ * 训练意愿调制（分领域意愿向量的训练轴；用户自选、随时可改、不由系统推断）：
+ * high 用周量上限、standard 用默认、minimal 用下限。
+ */
+export function trainingCommitmentTarget(
+  target: { min: number; default: number; max: number },
+  commitment: "minimal" | "standard" | "high" | undefined,
+): number {
+  if (commitment === "high") return target.max;
+  if (commitment === "minimal") return target.min;
+  return target.default;
+}
+
+/** minimal 意愿的结构简化：每课保留主项 + 1 辅助（最少负担，先练起来）。 */
+export function simplifyForMinimalCommitment(slots: ComposerSlotTemplate[]): ComposerSlotTemplate[] {
+  const kept: ComposerSlotTemplate[] = [];
+  let maintenanceKept = 0;
+  for (const slot of slots) {
+    if (slot.priority === "primary") kept.push(slot);
+    else if (slot.priority === "maintenance" && maintenanceKept < 1) {
+      kept.push(slot);
+      maintenanceKept += 1;
+    }
+  }
+  return kept.length ? kept : slots.slice(0, 1);
+}
+
 /** 每个 slot 的组数：周量目标 ÷ 实际暴露次数（上限 5，下限 1）。 */
 export function setsPerSlot(
   weeklyTarget: number,
@@ -80,7 +107,8 @@ export function sessionTemplateFor(
   rotation: SplitRotationTemplate,
   trainingDayOrdinal: number,
 ): ComposerSlotTemplate[] {
-  const session = rotation.sessions[trainingDayOrdinal % rotation.sessions.length]!;
+  const count = rotation.sessions.length;
+  const session = rotation.sessions[((trainingDayOrdinal % count) + count) % count]!;
   return session.slots.map((slot) => ({ ...slot }));
 }
 

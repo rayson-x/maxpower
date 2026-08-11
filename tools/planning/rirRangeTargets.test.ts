@@ -60,7 +60,7 @@ function request(overrides: Partial<PlannerRequest> = {}): PlannerRequest {
   };
 }
 
-test("无历史：处方带校准 RIR 区间 4-5，标量兼容中点", () => {
+test("无历史：计划带校准 RIR 区间 4-5，标量兼容中点", () => {
   const decision = planner.plan(request());
   assert.equal(decision.kind, "plan_proposal");
   if (decision.kind !== "plan_proposal") return;
@@ -75,7 +75,7 @@ test("无历史：处方带校准 RIR 区间 4-5，标量兼容中点", () => {
   }
 });
 
-test("有历史：处方带工作 RIR 区间 2-4，不塌缩为标量", () => {
+test("有历史：计划带工作 RIR 区间 2-4，不塌缩为标量", () => {
   const bench = registry
     .search({ movementPattern: "horizontal_push", loadModes: ["barbell"] })
     .find((exercise) => exercise.identity.movement === "bench_press")!;
