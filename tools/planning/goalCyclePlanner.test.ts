@@ -288,11 +288,12 @@ test("schedule infeasible 不会伪造完整 Session，短时容量删除低优�
   );
   assert.equal(bounded.kind, "plan_proposal");
   if (bounded.kind !== "plan_proposal") return;
-  assert.ok(bounded.reasonCodes.includes("low_priority_stimulus_removed_for_capacity"));
+  // ticket 03：时间不强制裁剪——完整保留 + 超预算标记，取舍由用户选择
+  assert.ok(bounded.reasonCodes.includes("time_budget_exceeded_full_plan_kept"));
   assert.ok(
     bounded.planRevision.sessions
       .filter((session) => session.kind !== "rest")
-      .every((session) => (session.stimulusSlots?.length ?? 0) === 1),
+      .some((session) => (session.stimulusSlots?.length ?? 0) > 1),
   );
 });
 

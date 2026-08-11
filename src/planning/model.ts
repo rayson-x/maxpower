@@ -97,6 +97,8 @@ export interface PlannerRequest {
   historicalPerformance?: readonly HistoricalPerformance[];
   /** 个人实测休息节奏（秒，observed_calibration 中位数）；休息建议按其在安全带宽内个性化。 */
   personalRestTempoSeconds?: number;
+  /** 用户偏好的分化轮转模板 id（策略集 splitRotations）；不提供时按可执行性自动选择。 */
+  preferredSplitId?: string;
   consecutiveDeviationCount?: number;
   missedSessionDates?: readonly string[];
   requestedScope?: "this_session_only" | "future_preference" | "lock" | "future_plan";

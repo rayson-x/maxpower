@@ -450,6 +450,8 @@ export interface WeekPlanData {
   sessions: readonly PlannedSessionData[];
   stimulusBudget: readonly StimulusBudgetData[];
   materializedAt: string;
+  /** 周量账本（ticket 03）：每肌群本周直接组数，由物化内容求和得出。 */
+  weeklyDirectSets?: Readonly<Record<string, number>>;
 }
 
 export interface PlanRevisionData {

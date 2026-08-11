@@ -275,6 +275,47 @@ export interface KnowledgePack {
   wikiDocuments: readonly WikiDocumentRef[];
   /** 安全词表（ticket 09/07）：禁止声称清单与领域锚定词，随包版本化更新。 */
   safetyLexicon?: SafetyLexicon;
+  /** 编排策略（ticket 03）：分化模板/课内架构/周量目标/组成本，Composer 的机器输入。 */
+  programStrategies?: ProgramStrategies;
+}
+
+/** 分化轮转模板：一轮中每次训练的 slot 组成。 */
+export interface SplitRotationTemplate {
+  id: string;
+  nameZh: string;
+  /** 轮转中的一次训练：slot 列表。 */
+  sessions: readonly {
+    id: string;
+    focusZh: string;
+    slots: readonly {
+      movementPattern: MovementPattern;
+      muscleGroups: readonly string[];
+      priority: "primary" | "maintenance" | "optional";
+      fatigueIntent: "low" | "medium" | "high";
+    }[];
+  }[];
+  /** 该轮转一圈每个肌群的暴露次数（用于周量换算）。 */
+  exposuresPerCycle: number;
+  /** 适用每周训练天数范围。 */
+  suitableWeeklyDays: readonly [number, number];
+}
+
+export interface ProgramStrategies {
+  semanticVersion: string;
+  splitRotations: readonly SplitRotationTemplate[];
+  /** 周量目标（直接组/肌群/周）：TP-VOL-BASE 分档。 */
+  weeklyDirectSetTargets: {
+    beginner: { min: number; default: number; max: number };
+    intermediate: { min: number; default: number; max: number };
+    advanced: { min: number; default: number; max: number };
+  };
+  /** 组成本（分钟/组，估算用，标注为估计；实测后按个人节奏校准）。 */
+  setCostModel: {
+    warmupMinutes: number;
+    transitionMinutesPerSwitch: number;
+    workSetMinutes: number;
+    restSecondsByPriority: { primary: number; maintenance: number; optional: number; high_fatigue: number };
+  };
 }
 
 /** 禁止声称规则：patterns 全部命中（AND）才拦截，降低误伤。 */

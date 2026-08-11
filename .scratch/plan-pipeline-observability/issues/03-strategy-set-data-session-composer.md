@@ -6,10 +6,14 @@
 
 **Status:** ready-for-agent
 
-- [ ] 策略集内容（分化模板/三层架构/课表模板/组成本）进知识包 JSON 且通过签名/hash 校验，随包版本化更新
-- [ ] 3 天/周 → 全身 ×3，每肌群每周 ≥2 次暴露、约 6 直接组（TP-VOL-BASE 起步区间）
-- [ ] 75 分钟输入产出完整方案 + 预计时长（估算标注）；不再按 maxSlots 静默裁剪
-- [ ] 三分化轮转模板可用：胸+三头/背+二头/肩+腿，练 3 休 1 时每肌群约 1.75 次/周且周量下限达标
-- [ ] 无确认历史 → 校准语义（RIR 4-5、负荷 unknown 或保守锚点）；有历史 → 按上次表现锚定
-- [ ] 周量账本：每个肌群的每周直接组数可计算、可断言
-- [ ] 静态 sessionTemplates 轮换表退役，既有 planner 测试更新后全绿
+- [x] 策略集内容（分化模板/三层架构/课表模板/组成本）进知识包 JSON 且通过签名/hash 校验，随包版本化更新
+- [x] 3 天/周 → 全身 ×3，每肌群每周 ≥2 次暴露、约 6 直接组（TP-VOL-BASE 起步区间）
+- [x] 75 分钟输入产出完整方案 + 预计时长（估算标注）；不再按 maxSlots 静默裁剪
+- [x] 三分化轮转模板可用：胸+三头/背+二头/肩+腿，练 3 休 1 时每肌群约 1.75 次/周且周量下限达标
+- [x] 无确认历史 → 校准语义（RIR 4-5、负荷 unknown 或保守锚点）；有历史 → 按上次表现锚定
+- [x] 周量账本：每个肌群的每周直接组数可计算、可断言
+- [x] 静态 sessionTemplates 轮换表退役，既有 planner 测试更新后全绿
+
+## Comments
+
+- 2026-08-11 完成：知识包新增 programStrategies（4 个分化轮转模板/周量目标分档/组成本模型），纳入 contentHash 与签名校验；`src/planning/sessionComposer.ts` 替代静态轮换表（selectSplitRotation/setsPerSlot/sessionTemplateFor/volumeLedgerFromSessions）；时间不再静默裁剪（超预算标记 time_budget_exceeded_full_plan_kept，取舍留用户）；无历史组数保守起点按经验分档（新手 2/其他 3）；器械不可行 slot 丢弃+记录不崩；WeekPlanData.weeklyDirectSets 周量账本。旧 sessionTemplates 保留为 pack 缺策略时的兜底（内置包恒有策略，生产不走）。测试 4 例（sessionComposer.test.ts），全量 759 绿。

@@ -193,6 +193,11 @@ export class KnowledgePackRegistry implements MotionCapabilityResolver {
     return this.pack.safetyLexicon;
   }
 
+  /** 编排策略（分化模板/周量目标/组成本），未随包提供时为 undefined。 */
+  programStrategies() {
+    return this.pack.programStrategies;
+  }
+
   search(input: ExerciseSearchInput): readonly ExerciseVariant[] {
     const query = input.query?.trim().toLocaleLowerCase() ?? "";
     return this.pack.exerciseCatalog.variants
@@ -556,6 +561,7 @@ function computePackHash(pack: KnowledgePack): string {
     executableRulePacks: pack.executableRulePacks,
     wikiDocuments: pack.wikiDocuments,
     safetyLexicon: pack.safetyLexicon ?? null,
+    programStrategies: pack.programStrategies ?? null,
   });
 }
 

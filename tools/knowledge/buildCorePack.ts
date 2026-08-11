@@ -17,6 +17,7 @@ import {
   type SourceRef,
   type StimulusContract,
 } from "../../src/knowledge/model";
+import type { ProgramStrategies } from "../../src/knowledge/model";
 
 const CLASSIFICATIONS: readonly KnowledgeClassification[] = [
   "EvidenceFact",
@@ -436,6 +437,170 @@ const SAFETY_LEXICON = {
   ],
 };
 
+
+/** 编排策略种子（ticket 03）：源自 program-strategy-set.md（四标签纪律见该文档）。 */
+const PROGRAM_STRATEGIES: ProgramStrategies = {
+  semanticVersion: "1.0.0",
+  splitRotations: [
+    {
+      id: "full_body",
+      nameZh: "全身训练",
+      sessions: [
+        {
+          id: "full_a",
+          focusZh: "全身 A",
+          slots: [
+            { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "horizontal_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "shoulder_abduction", muscleGroups: ["lateral_deltoid"], priority: "maintenance", fatigueIntent: "low" },
+            { movementPattern: "core_anti_extension", muscleGroups: ["core"], priority: "maintenance", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "full_b",
+          focusZh: "全身 B",
+          slots: [
+            { movementPattern: "hip_hinge", muscleGroups: ["glutes", "hamstrings"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "vertical_push", muscleGroups: ["deltoids"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "lunge", muscleGroups: ["quadriceps", "glutes"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "elbow_flexion", muscleGroups: ["biceps"], priority: "optional", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "full_c",
+          focusZh: "全身 C",
+          slots: [
+            { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "hip_hinge", muscleGroups: ["glutes", "hamstrings"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "elbow_extension", muscleGroups: ["triceps"], priority: "optional", fatigueIntent: "low" },
+          ],
+        },
+      ],
+      exposuresPerCycle: 3,
+      suitableWeeklyDays: [2, 3],
+    },
+    {
+      id: "upper_lower",
+      nameZh: "上下肢分化",
+      sessions: [
+        {
+          id: "upper_a",
+          focusZh: "上肢",
+          slots: [
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "horizontal_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "vertical_push", muscleGroups: ["deltoids"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "elbow_flexion", muscleGroups: ["biceps"], priority: "optional", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "lower_a",
+          focusZh: "下肢",
+          slots: [
+            { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "hip_hinge", muscleGroups: ["glutes", "hamstrings"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "lunge", muscleGroups: ["quadriceps", "glutes"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "knee_flexion", muscleGroups: ["hamstrings"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "core_anti_extension", muscleGroups: ["core"], priority: "optional", fatigueIntent: "low" },
+          ],
+        },
+      ],
+      exposuresPerCycle: 1,
+      suitableWeeklyDays: [4, 4],
+    },
+    {
+      id: "push_pull_legs",
+      nameZh: "推拉腿",
+      sessions: [
+        {
+          id: "push",
+          focusZh: "推（胸肩三头）",
+          slots: [
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "vertical_push", muscleGroups: ["deltoids"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "shoulder_abduction", muscleGroups: ["lateral_deltoid"], priority: "maintenance", fatigueIntent: "low" },
+            { movementPattern: "elbow_extension", muscleGroups: ["triceps"], priority: "maintenance", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "pull",
+          focusZh: "拉（背二头）",
+          slots: [
+            { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "horizontal_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "shoulder_horizontal_abduction", muscleGroups: ["rear_deltoid"], priority: "maintenance", fatigueIntent: "low" },
+            { movementPattern: "elbow_flexion", muscleGroups: ["biceps"], priority: "maintenance", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "legs",
+          focusZh: "腿",
+          slots: [
+            { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "hip_hinge", muscleGroups: ["glutes", "hamstrings"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "lunge", muscleGroups: ["quadriceps", "glutes"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "knee_flexion", muscleGroups: ["hamstrings"], priority: "optional", fatigueIntent: "medium" },
+          ],
+        },
+      ],
+      exposuresPerCycle: 1,
+      suitableWeeklyDays: [4, 6],
+    },
+    {
+      id: "three_way_rotation",
+      nameZh: "三分化轮转（胸三头/背二头/肩腿）",
+      sessions: [
+        {
+          id: "chest_triceps",
+          focusZh: "胸+三头",
+          slots: [
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "elbow_extension", muscleGroups: ["triceps"], priority: "maintenance", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "back_biceps",
+          focusZh: "背+二头",
+          slots: [
+            { movementPattern: "vertical_pull", muscleGroups: ["back"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "horizontal_pull", muscleGroups: ["back"], priority: "maintenance", fatigueIntent: "medium" },
+            { movementPattern: "elbow_flexion", muscleGroups: ["biceps"], priority: "maintenance", fatigueIntent: "low" },
+          ],
+        },
+        {
+          id: "shoulders_legs",
+          focusZh: "肩+腿",
+          slots: [
+            { movementPattern: "vertical_push", muscleGroups: ["deltoids"], priority: "primary", fatigueIntent: "medium" },
+            { movementPattern: "squat", muscleGroups: ["quadriceps", "glutes"], priority: "primary", fatigueIntent: "high" },
+            { movementPattern: "shoulder_abduction", muscleGroups: ["lateral_deltoid"], priority: "maintenance", fatigueIntent: "low" },
+            { movementPattern: "hip_hinge", muscleGroups: ["glutes", "hamstrings"], priority: "maintenance", fatigueIntent: "medium" },
+          ],
+        },
+      ],
+      exposuresPerCycle: 1,
+      suitableWeeklyDays: [3, 6],
+    },
+  ],
+  weeklyDirectSetTargets: {
+    beginner: { min: 2, default: 4, max: 8 },
+    intermediate: { min: 4, default: 6, max: 10 },
+    advanced: { min: 6, default: 8, max: 12 },
+  },
+  setCostModel: {
+    warmupMinutes: 8,
+    transitionMinutesPerSwitch: 2,
+    workSetMinutes: 0.75,
+    restSecondsByPriority: { primary: 120, maintenance: 90, optional: 75, high_fatigue: 180 },
+  },
+};
+
 export function buildCoreKnowledgePack(): KnowledgePack {
   const exerciseCatalog = buildCatalog();
   const executableRulePacks = [
@@ -483,6 +648,7 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     executableRulePacks,
     wikiDocuments,
     safetyLexicon: SAFETY_LEXICON,
+    programStrategies: PROGRAM_STRATEGIES,
   });
   return {
     manifest: {
@@ -495,6 +661,7 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     executableRulePacks,
     wikiDocuments,
     safetyLexicon: SAFETY_LEXICON,
+    programStrategies: PROGRAM_STRATEGIES,
   };
 }
 

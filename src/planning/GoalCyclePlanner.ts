@@ -44,6 +44,14 @@ import {
   type TrainingRulePackDescriptor,
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
+import {
+  selectSplitRotation,
+  sessionTemplateFor,
+  setsPerSlot,
+  weeklyDirectSetTarget,
+  weeklyVolumeLedger,
+  volumeLedgerFromSessions,
+} from "./sessionComposer";
 
 const DAY_MS = 86_400_000;
 const DEFAULT_MESOCYCLE_WEEKS = 6;
@@ -372,9 +380,6 @@ export class GoalCyclePlanner {
     const reasonCodes = [...context.reasonCodes];
     if (context.request.missedSessionDates?.length) {
       reasonCodes.push("missed_sessions_do_not_create_unbounded_debt");
-      if (context.request.missedSessionDates.length > context.schedule.length) {
-        reasonCodes.push("low_priority_stimulus_removed_for_capacity");
-      }
     }
     if (context.facts.recoveryConstraints.some((item) => item.value.level !== "normal")) {
       reasonCodes.push("active_recovery_constraint_applied_after_hard_constraints");
@@ -428,6 +433,7 @@ export class GoalCyclePlanner {
       sessions,
       stimulusBudget: week.stimulusBudget,
       materializedAt: context.request.currentDate,
+      weeklyDirectSets: volumeLedgerFromSessions(sessions),
     };
   }
 
@@ -462,20 +468,59 @@ export class GoalCyclePlanner {
     const useCardio = goal === "fat_loss_preserve_lean_mass" && ordinal === context.schedule.length - 1 && !isDeloadWeek;
     const recovery = strongestRecovery(context.facts, context.request.currentDate);
     const useRecovery = recovery === "recovery_priority" || recovery === "pause_and_confirm";
-    const templates = useRecovery
-      ? ([{ movementPattern: "recovery", muscleGroups: [], priority: "maintenance", fatigueIntent: "low" }] satisfies SlotTemplate[])
-      : useCardio
-        ? ([{ movementPattern: "cardio", muscleGroups: ["cardiorespiratory"], priority: "maintenance", fatigueIntent: "low" }] satisfies SlotTemplate[])
-        : sessionTemplates(goal, ordinal, isBodyweightOnly(context.availableEquipment));
-    const maxSlots = Math.max(1, Math.floor(availability.availableMinutes / 12));
+    const strategies = this.knowledge.programStrategies();
+    let plannedSets: { primary: number; maintenance: number; optional: number } | undefined;
+    let templates: SlotTemplate[];
+    if (useRecovery) {
+      templates = [{ movementPattern: "recovery", muscleGroups: [], priority: "maintenance", fatigueIntent: "low" }];
+    } else if (useCardio) {
+      templates = [{ movementPattern: "cardio", muscleGroups: ["cardiorespiratory"], priority: "maintenance", fatigueIntent: "low" }];
+    } else if (strategies) {
+      // 组装器（ticket 03）：分化轮转 × 周量目标驱动，替代静态模板表
+      const selection = selectSplitRotation(strategies, context.schedule.length, context.request.preferredSplitId);
+      context.reasonCodes.push(selection.reasonCode);
+      const sessionLocation = context.facts.profile.value.locations?.find(
+        (item) => item.id === availability.locationId,
+      );
+      templates = sessionTemplateFor(selection.rotation, ordinal).filter((template) => {
+        // 器械不可行的 slot 丢弃并记录（如居家无水平拉的徒手变式），不让整份计划 infeasible
+        const feasible = this.knowledge
+          .search({ movementPattern: template.movementPattern, limit: 500 })
+          .some(
+            (variant) =>
+              variant.status === "active" &&
+              equipmentSatisfied(variant.equipment.requirement, context.availableEquipment, sessionLocation?.environment),
+          );
+        if (!feasible) context.reasonCodes.push(`slot_dropped_no_feasible_variant:${template.movementPattern}`);
+        return feasible;
+      });
+      const target = weeklyDirectSetTarget(strategies, context.facts.profile.value.trainingExperience);
+      plannedSets = {
+        primary: setsPerSlot(target.default, selection.exposuresPerWeek, "primary"),
+        maintenance: setsPerSlot(target.default, selection.exposuresPerWeek, "maintenance"),
+        optional: 1,
+      };
+    } else {
+      templates = sessionTemplates(goal, ordinal, isBodyweightOnly(context.availableEquipment));
+    }
     const boundedTemplates = templates
       // TP-DELOAD-CONTENT-001：deload 周先删可选/低优先级刺激
       .filter((template) => !isDeloadWeek || template.priority !== "optional")
-      .sort((left, right) => priorityRank(left.priority) - priorityRank(right.priority))
-      .slice(0, maxSlots);
-    if (boundedTemplates.length < templates.length) context.reasonCodes.push("time_capacity_removed_optional_stimulus");
+      .sort((left, right) => priorityRank(left.priority) - priorityRank(right.priority));
+    // ticket 03：时间不强制裁剪——完整推荐 + 预计时长；明显超预算时给档位标记，由用户选择
+    if (!useRecovery && !useCardio && strategies) {
+      const cost = strategies.setCostModel;
+      const estimatedMinutes = cost.warmupMinutes + boundedTemplates.reduce((sum, template, index) => {
+        const sets = plannedSets ? plannedSets[template.priority] : template.priority === "primary" ? 3 : template.priority === "maintenance" ? 2 : 1;
+        const restSeconds = template.fatigueIntent === "high" ? cost.restSecondsByPriority.high_fatigue : cost.restSecondsByPriority[template.priority];
+        return sum + sets * (cost.workSetMinutes + restSeconds / 60) + (index > 0 ? cost.transitionMinutesPerSwitch : 0);
+      }, 0);
+      if (estimatedMinutes > availability.availableMinutes * 1.15) {
+        context.reasonCodes.push("time_budget_exceeded_full_plan_kept");
+      }
+    }
     const slots = boundedTemplates.map((template, slotIndex) =>
-      this.resolveStimulusSlot(context, week, date, availability, ordinal, slotIndex, template),
+      this.resolveStimulusSlot(context, week, date, availability, ordinal, slotIndex, template, plannedSets),
     );
     // TP-DELOAD-CONTENT-001：减组、远离力竭、保留主动作技术暴露；不写死固定减幅
     const deloadedSlots = isDeloadWeek
@@ -532,6 +577,7 @@ export class GoalCyclePlanner {
     sessionOrdinal: number,
     slotIndex: number,
     template: SlotTemplate,
+    plannedSets?: { primary: number; maintenance: number; optional: number },
   ): StimulusSlotData {
     const slotId = `stimulus-${stableHash({ week: week.id, date, sessionOrdinal, slotIndex, template })}`;
     const direct = directChoiceFor(context.request.directChoices ?? [], slotId, sessionOrdinal, slotIndex);
@@ -566,6 +612,8 @@ export class GoalCyclePlanner {
       hasHistory,
       availability.availableMinutes,
       context.request.personalRestTempoSeconds,
+      plannedSets,
+      context.facts.profile.value.trainingExperience === "beginner" ? 2 : 3,
     );
     const lockedFields = context.facts.mandate.value.locks
       ?.filter((lock) => lock.field === "exercise" || lock.field === "sets" || lock.field === "load")
@@ -962,10 +1010,15 @@ function prescriptionFor(
   hasHistory: boolean,
   availableMinutes: number,
   personalRestTempoSeconds?: number,
+  plannedSets?: { primary: number; maintenance: number; optional: number },
+  noHistorySetCap = 2,
 ) {
   const reduction = recovery === "slight_reduction" ? 1 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 2 : 0;
-  const requestedSets = priority === "primary" ? 3 : priority === "maintenance" ? 2 : 1;
-  const setCount = Math.max(1, Math.min(hasHistory ? requestedSets : 2, requestedSets) - reduction);
+  const requestedSets = plannedSets
+    ? plannedSets[priority]
+    : priority === "primary" ? 3 : priority === "maintenance" ? 2 : 1;
+  // 无精确历史的保守起点：新手 2 组；有训练经验/力量基线者 3 组（负荷仍不锚定）
+  const setCount = Math.max(1, Math.min(hasHistory ? requestedSets : noHistorySetCap, requestedSets) - reduction);
   // 标量中点仅为旧消费者兼容；区间才是计划的权威语义（TP-RIR-001）。
   const targetRir = Math.round((targetRirRange.min + targetRirRange.max) / 2);
   if (mode === "timed") {
