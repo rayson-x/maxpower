@@ -2,3 +2,4 @@ export { GoalCyclePlanner, PLANNER_CONSTRAINT_PRIORITY } from "./GoalCyclePlanne
 export { STRATEGY_CATALOG, selectAdaptiveStrategy } from "./adaptiveStrategy";
 export type * from "./model";
 export type * from "./adaptiveStrategy";
+export * from "./goalTimeline";

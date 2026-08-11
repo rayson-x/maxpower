@@ -1,25 +1,24 @@
 import type { GoalContractData, UserProfileData } from "../coach/domain";
+import { copy, type LocalizedText, type Locale } from "./copy";
 import { bodyMassStateOf } from "./personTiering";
 
 /**
- * 目标 → 时间反推（2026-08-12 用户拍板的设计方向）。
+ * 目标 → 时间反推（数据自适应版，2026-08-12 用户拍板）。
  *
- * 正确顺序：
- *   目标（体脂/体重/围度）→ 需要多少变化 → 折算总能量差 →
- *   按安全的每日赤字上限平摊 → 达成目标的最快天数 → 再推导不同速度档
+ * 核心原则：**数据可得性决定规划的精细度**。
+ *   用户提供了精确数据（当前体脂率 + 目标体脂率）→ 给精确反推（天数 + 三档）
+ *   没有 → 退回体重趋势兜底（周降幅区间 + 每周自校准），绝不编造起点
  *
- * 与旧思路相反（先给计划再标时间）。现在是**时间从目标算出来**，不是拍出来的。
- *
- * 所有常数是产品规则（D）；体脂→热量的换算是近似（1kg 体脂 ≈ 7700 kcal），
- * 标注为估算、需用实际体重趋势校准。
+ * 诚实性约束：
+ * - 用户可能不愿/不能提供体脂率、围度、骨架、照片。唯一低成本可靠的输入是体重趋势。
+ * - 无精确数据时给**区间**和"取决于执行"，不给假精确的单点周数。
+ * - 目标优先用可观察状态（"能看到腹肌轮廓"）而非必须仪器的数字。
  */
 
-/** 1kg 体脂对应的能量（近似，产品规则 D）。 */
 export const KCAL_PER_KG_FAT = 7700;
 
-/** 按体型的安全日赤字上限（kcal/天）——赤字上限由体脂保护能力决定。 */
-export function maxDailyDeficitKcal(bodyMassState: ReturnType<typeof bodyMassStateOf>["state"]): number {
-  switch (bodyMassState) {
+export function maxDailyDeficitKcal(state: "low" | "normal" | "high" | "very_high"): number {
+  switch (state) {
     case "very_high": return 900;
     case "high": return 700;
     case "normal": return 500;
@@ -27,7 +26,6 @@ export function maxDailyDeficitKcal(bodyMassState: ReturnType<typeof bodyMassSta
   }
 }
 
-/** 由当前与目标体脂率，估算需要减掉的脂肪量（kg）。 */
 export function fatToLoseKg(input: {
   weightKg: number;
   currentBodyFatPercent?: number;
@@ -36,97 +34,121 @@ export function fatToLoseKg(input: {
   const { weightKg, currentBodyFatPercent, targetBodyFatPercent } = input;
   if (currentBodyFatPercent === undefined || targetBodyFatPercent === undefined) return undefined;
   if (targetBodyFatPercent >= currentBodyFatPercent) return 0;
-  // 当前脂肪量与目标脂肪量（近似假设瘦体重不变）
   const currentFatKg = weightKg * (currentBodyFatPercent / 100);
   const leanKg = weightKg - currentFatKg;
-  // 目标体重：保持瘦体重，目标体脂率 → 目标体重 = lean / (1 - targetBF)
   const targetWeight = leanKg / (1 - targetBodyFatPercent / 100);
   return Math.max(0, weightKg - targetWeight);
 }
 
-export interface GoalTimeEstimate {
-  /** 需要减掉的脂肪量（kg）。 */
+export interface GoalTimeline {
+  /** 数据精细度：精确反推 / 体重趋势兜底。 */
+  precision: "precise" | "weight_trend_fallback";
+  // ── 精确模式（用户给了当前+目标体脂率）──
   fatToLoseKg?: number;
-  /** 所需总能量差（kcal）。 */
   totalDeficitKcal?: number;
-  /** 该用户的安全日赤字上限（kcal/天）。 */
-  maxDailyDeficitKcal: number;
-  /** 理论最快达成天数（用足安全上限）。 */
   fastestDays?: number;
-  /** 三个速度档的时间估算。 */
-  paceOptions: readonly {
+  paceOptions?: readonly {
     pace: "aggressive" | "standard" | "gentle";
     dailyDeficitKcal: number;
     days: number;
     weeks: number;
-    note: string;
+    note: LocalizedText;
   }[];
-  /** 是否能估算（缺当前体脂率则不能）。 */
-  estimable: boolean;
-  /** 不能估算时要问什么。 */
-  missing?: string;
+  // ── 兜底模式（只有体重）──
+  /** 每周体重变化目标（%体重/周）。 */
+  weeklyWeightChangeTarget?: { min: number; max: number };
+  /** 给用户的诚实说明（区间 + 取决于执行）；多语言资源，按 locale 解析。 */
+  fallbackNote?: LocalizedText;
+  /** 缺什么精确数据（补齐后可升级为精确模式）。 */
+  upgradableWith?: LocalizedText;
 }
 
 /**
- * 目标 → 时间反推主函数。
- * 缺当前体脂率时返回不可估算 + 要问的问题（绝不编造起点）。
+ * 目标时间反推。有精确数据→精确；没有→体重趋势兜底。
  */
 export function estimateTimeToGoal(
   profile: UserProfileData,
   goal: GoalContractData,
-): GoalTimeEstimate {
+): GoalTimeline {
   const { state } = bodyMassStateOf(profile);
   const maxDeficit = maxDailyDeficitKcal(state);
   const weightKg = profile.demographics?.currentWeight?.value;
-
+  const currentBf = goal.targets?.currentBodyFat?.value;
   const targetBf = goal.targets?.targetBodyFat?.value;
-  // 当前体脂率：用户测量/估算输入（targets.currentBodyFat），没有就问，不编造起点
-  const currentBfValue = goal.targets?.currentBodyFat?.value;
 
-  if (weightKg === undefined || targetBf === undefined || currentBfValue === undefined) {
+  const hasPrecise = weightKg !== undefined && currentBf !== undefined && targetBf !== undefined;
+
+  if (hasPrecise) {
+    const fatKg = fatToLoseKg({ weightKg, currentBodyFatPercent: currentBf, targetBodyFatPercent: targetBf }) ?? 0;
+    const totalDeficit = fatKg * KCAL_PER_KG_FAT;
+    const options = (["aggressive", "standard", "gentle"] as const).map((pace) => {
+      const dailyDeficit =
+        pace === "aggressive" ? maxDeficit : pace === "standard" ? Math.round(maxDeficit * 0.7) : Math.round(maxDeficit * 0.45);
+      const days = Math.ceil(totalDeficit / dailyDeficit);
+      return {
+        pace,
+        dailyDeficitKcal: dailyDeficit,
+        days,
+        weeks: Math.ceil(days / 7),
+        note:
+          pace === "aggressive"
+            ? copy({
+                en: "Fastest path: max safe daily deficit; requires strict load retention, high protein and a circuit-breaker",
+                zh: "最快路径：每天顶到安全赤字上限，需严格保负荷+高蛋白+熔断机制",
+              })
+            : pace === "standard"
+              ? copy({
+                  en: "Balanced path: moderate deficit, better lean-mass protection and adherence",
+                  zh: "平衡路径：赤字适中，瘦体重保护更好，依从性更高",
+                })
+              : copy({
+                  en: "Gentle path: smallest deficit, minimal impact on training performance",
+                  zh: "稳健路径：赤字最小，几乎不影响训练表现",
+                }),
+      };
+    });
     return {
-      maxDailyDeficitKcal: maxDeficit,
-      paceOptions: [],
-      estimable: false,
-      missing:
-        weightKg === undefined
-          ? "需要你的当前体重"
-          : targetBf === undefined
-            ? "需要你的目标体脂率"
-            : "需要你的当前体脂率（可以估算，或告诉我大概范围）",
+      precision: "precise",
+      fatToLoseKg: Math.round(fatKg * 10) / 10,
+      totalDeficitKcal: Math.round(totalDeficit),
+      fastestDays: Math.ceil(totalDeficit / maxDeficit),
+      paceOptions: options,
     };
   }
 
-  const fatKg = fatToLoseKg({ weightKg, currentBodyFatPercent: currentBfValue, targetBodyFatPercent: targetBf });
-  if (fatKg === undefined) {
-    return { maxDailyDeficitKcal: maxDeficit, paceOptions: [], estimable: false, missing: "体脂数据无效" };
-  }
-  const totalDeficit = fatKg * KCAL_PER_KG_FAT;
-
-  const options = (["aggressive", "standard", "gentle"] as const).map((pace) => {
-    const dailyDeficit =
-      pace === "aggressive" ? maxDeficit : pace === "standard" ? Math.round(maxDeficit * 0.7) : Math.round(maxDeficit * 0.45);
-    const days = Math.ceil(totalDeficit / dailyDeficit);
-    return {
-      pace,
-      dailyDeficitKcal: dailyDeficit,
-      days,
-      weeks: Math.ceil(days / 7),
-      note:
-        pace === "aggressive"
-          ? "最快路径：每天顶到安全赤字上限，需严格保负荷+高蛋白+熔断机制"
-          : pace === "standard"
-            ? "平衡路径：赤字适中，瘦体重保护更好，依从性更高"
-            : "稳健路径：赤字最小，几乎不影响训练表现，适合不想太克制",
-    };
-  });
+  // 兜底：只有体重（甚至体重也可能缺），给周降幅区间 + 诚实说明
+  const weeklyTarget = (() => {
+    switch (state) {
+      case "very_high": return { min: 0.5, max: 1.0 };
+      case "high": return { min: 0.4, max: 0.8 };
+      case "normal": return { min: 0.3, max: 0.6 };
+      case "low": return { min: 0.2, max: 0.4 };
+    }
+  })();
+  const weeklyKg = weightKg
+    ? {
+        minKg: Math.round((weeklyTarget.min / 100) * weightKg * 10) / 10,
+        maxKg: Math.round((weeklyTarget.max / 100) * weightKg * 10) / 10,
+      }
+    : undefined;
 
   return {
-    fatToLoseKg: Math.round(fatKg * 10) / 10,
-    totalDeficitKcal: Math.round(totalDeficit),
-    maxDailyDeficitKcal: maxDeficit,
-    fastestDays: Math.ceil(totalDeficit / maxDeficit),
-    paceOptions: options,
-    estimable: true,
+    precision: "weight_trend_fallback",
+    weeklyWeightChangeTarget: weeklyTarget,
+    fallbackNote: copy({
+      en:
+        "I won't invent a precise timeline without body-fat data. " +
+        `For your build, a reasonable rate is ${weeklyTarget.min}-${weeklyTarget.max}% of body weight per week` +
+        (weeklyKg ? ` (about ${weeklyKg.minKg}-${weeklyKg.maxKg} kg)` : "") +
+        ". Set your goal by a state you can see yourself (e.g. 'visible ab outline'), and we track progress with real weekly weight trends — how far and how fast depends on execution, and we calibrate as we go. Tell me your current and target body fat for a more precise estimate.",
+      zh:
+        "没有体脂率数据，我不给你编一个精确周数。" +
+        `按你的体型，合理的速度是每周掉体重的 ${weeklyTarget.min}-${weeklyTarget.max}%` +
+        (weeklyKg ? `（约 ${weeklyKg.minKg}-${weeklyKg.maxKg} kg）` : "") +
+        "。目标用你能自己看到的状态来定（比如「能看到腹肌轮廓」），" +
+        "每周用真实体重趋势看进展——能持续多久、到什么程度，取决于执行，我们边走边校准。" +
+        "如果你能告诉我当前体脂率和目标，我可以给出更精确的时间估算。",
+    }),
+    upgradableWith: copy({ en: "current + target body-fat %", zh: "当前体脂率 + 目标体脂率" }),
   };
 }

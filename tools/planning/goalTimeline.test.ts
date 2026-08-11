@@ -53,35 +53,43 @@ test("安全日赤字上限随体型分档：体脂越高上限越大", () => {
 
 test("完整反推：目标 18%→12%（75kg 正常 BMI）给出最快天数与三档", () => {
   const estimate = estimateTimeToGoal(profile(75, 178), goal(18, 12));
-  assert.equal(estimate.estimable, true);
+  assert.equal(estimate.precision, "precise");
   assert.ok(estimate.fatToLoseKg !== undefined && estimate.fatToLoseKg > 4 && estimate.fatToLoseKg < 6);
   assert.ok(estimate.totalDeficitKcal !== undefined && estimate.totalDeficitKcal > 30000);
   assert.ok(estimate.fastestDays !== undefined && estimate.fastestDays > 0);
-  assert.equal(estimate.paceOptions.length, 3);
+  assert.equal(estimate.paceOptions?.length, 3);
 
-  const [aggressive, standard, gentle] = estimate.paceOptions;
-  assert.ok(aggressive!.dailyDeficitKcal === estimate.maxDailyDeficitKcal, "激进档应顶到安全上限");
+  const [aggressive, standard, gentle] = estimate.paceOptions!;
   assert.ok(aggressive!.days < standard!.days && standard!.days < gentle!.days, "越激进越快");
-  // 最快 ≈ 38500 / 500 ≈ 77 天 ≈ 11 周
   assert.ok(estimate.fastestDays >= 70 && estimate.fastestDays <= 85, `最快天数应约 77 天，实际 ${estimate.fastestDays}`);
 });
 
-test("缺当前体脂率 → 不可估算且明确要问什么（绝不编造起点）", () => {
+test("缺当前体脂率 → 退回体重趋势兜底，给出区间与可观察目标（不编造精确周数）", () => {
   const estimate = estimateTimeToGoal(profile(75, 178), goal(undefined, 12));
-  assert.equal(estimate.estimable, false);
-  assert.ok(estimate.missing?.includes("当前体脂率"));
-
-  const noTarget = estimateTimeToGoal(profile(75, 178), goal(18, undefined));
-  assert.equal(noTarget.estimable, false);
-  assert.ok(noTarget.missing?.includes("目标体脂率"));
+  assert.equal(estimate.precision, "weight_trend_fallback");
+  assert.ok(estimate.weeklyWeightChangeTarget, "兜底应给周降幅区间");
+  assert.ok(estimate.fallbackNote?.zh.includes("取决于执行"), "兜底说明要诚实");
+  assert.ok((estimate.fallbackNote?.en.length ?? 0) > 20, "兜底说明应有英文");
+  assert.ok(estimate.upgradableWith?.zh.includes("体脂率") && estimate.upgradableWith?.en.length > 0, "要说明补什么能升级精确模式");
 });
 
-test("缺体重 → 不可估算", () => {
+test("缺体重 → 兜底，但周降幅只能给百分比（无公斤换算）", () => {
   const p = profile(75, 178);
   delete (p.demographics as { currentWeight?: unknown }).currentWeight;
   const estimate = estimateTimeToGoal(p, goal(18, 12));
-  assert.equal(estimate.estimable, false);
-  assert.ok(estimate.missing?.includes("体重"));
+  assert.equal(estimate.precision, "weight_trend_fallback");
+  assert.ok(estimate.weeklyWeightChangeTarget);
+  assert.ok(!estimate.fallbackNote?.zh.includes("kg）"), "无体重时不给公斤换算");
+});
+
+test("有精确数据用精确，没有就兜底——两种模式互斥且都可用", () => {
+  const precise = estimateTimeToGoal(profile(75, 178), goal(18, 12));
+  assert.equal(precise.precision, "precise");
+  assert.ok(precise.paceOptions);
+
+  const fallback = estimateTimeToGoal(profile(75, 178), goal(undefined, 12));
+  assert.equal(fallback.precision, "weight_trend_fallback");
+  assert.equal(fallback.paceOptions, undefined);
 });
 
 test("目标不低于当前体脂 → 需减 0，时间 0", () => {
