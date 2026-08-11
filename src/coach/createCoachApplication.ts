@@ -377,6 +377,8 @@ export class CoachApplication {
     const priorGoalCycle = [...projection.goalCycles].sort(
       (left, right) => right.revision - left.revision,
     )[0];
+    // 数据桥（ticket 02）：从 workout 聚合组装 planner 的历史表现（所有 replan 入口统一受益）
+    const historicalPerformance = assembleHistoricalPerformance(projection.workouts);
     return this.planner.plan({
       ...input,
       facts: {
@@ -392,6 +394,7 @@ export class CoachApplication {
         ...(priorGoalCycle ? { priorGoalCycle } : {}),
         ...(projection.plan ? { priorPlan: projection.plan } : {}),
       },
+      ...(historicalPerformance.length ? { historicalPerformance } : {}),
     });
   }
 
@@ -5347,6 +5350,39 @@ export class CoachApplication {
         },
       },
     });
+    // 数据桥（ticket 02）：user_confirmed 的组逐条写成 timeline historicalSet 事实，
+    // 让 planner 的 history 不再为空——后续计划按真实表现进阶。
+    for (const set of workout.setOutcomes) {
+      if (set.source !== "user_confirmed" || !set.actualLoad || set.actualReps === undefined) continue;
+      await this.recordTimelineFact({
+        userId: input.userId,
+        idempotencyKey: `${input.idempotencyKey}:historical-set:${set.id}`,
+        fact: {
+          kind: "training",
+          historicalSet: {
+            exerciseVariantId: set.exerciseVariantId,
+            load: set.actualLoad,
+            reps: set.actualReps,
+            ...(set.actualRir !== undefined ? { rir: set.actualRir } : {}),
+          },
+          confidence: "confirmed",
+        },
+        envelope: {
+          time: { startedAt: now, timezoneOffsetMinutes: new Date(now).getTimezoneOffset() * -1 },
+          provenance: {
+            origin: "manual",
+            recordingMethod: "manual_entry",
+            dataStatus: "available",
+            confidence: "confirmed",
+            sourceRecordId: `${input.workoutId}:set:${set.id}`,
+          },
+          privacyClass: "sensitive",
+          evidenceRefs: [],
+          layer: "canonical_projection",
+          causalRefs: [`workout_session:${input.workoutId}`, `set_outcome:${set.id}`],
+        },
+      });
+    }
     return outcome;
   }
 
@@ -5439,7 +5475,11 @@ export class CoachApplication {
     const currentDate = input.outcome.completedAt.slice(0, 10);
     const window = localCalendarWeek(currentDate);
     if (!window) return undefined;
-    const missedSessionDates = recentPartialWorkoutDates(projection.workouts, input.outcome.completedAt);
+    const missedSessionDates = recentPartialWorkoutDates(
+      projection.workouts,
+      input.outcome.completedAt,
+      projection.plan,
+    );
     const activeGoalCycle = projection.goalCycles
       .filter((cycle) => cycle.value.goalContractRef.id === projection.goalContract?.value.id)
       .sort((left, right) => right.revision - left.revision)[0];
@@ -8564,6 +8604,7 @@ function hasMeasuredValue(fact: import("./domain").TimelineFact): boolean {
     case "nutrition":
       return fact.energy !== undefined;
     case "activity":
+      return fact.duration !== undefined || fact.energyExpenditure !== undefined;
     case "sleep":
       return fact.duration !== undefined;
     case "recovery":
@@ -8950,17 +8991,31 @@ function localNoonToIso(localDate: string, timezoneOffsetMinutes: number): strin
 function recentPartialWorkoutDates(
   workouts: readonly import("./domain").WorkoutProjection[],
   completedAt: string,
+  plan?: import("./domain").Revisioned<import("./domain").PlanRevisionData>,
 ): readonly string[] {
   const end = Date.parse(completedAt);
   const start = end - 14 * 24 * 60 * 60 * 1_000;
-  return workouts
+  const partialDates = workouts
     .flatMap((workout) => workout.outcome ? [workout.outcome] : [])
     .filter((outcome) => outcome.status === "partial" || outcome.status === "abandoned")
     .filter((outcome) => {
       const occurred = Date.parse(outcome.completedAt);
       return Number.isFinite(occurred) && occurred >= start && occurred <= end;
     })
-    .map((outcome) => outcome.completedAt.slice(0, 10))
+    .map((outcome) => outcome.completedAt.slice(0, 10));
+  // ticket 02：计划了但从未开始的课也算缺席（scheduledFor 在窗口内、早于完成日、无对应 workout）
+  const startedSessionIds = new Set(
+    workouts.map((workout) => workout.prescriptionRef?.sessionPrescriptionId).filter(Boolean),
+  );
+  const neverStartedDates = (plan?.value.sessions ?? [])
+    .filter((session) => session.tasks.length > 0)
+    .filter((session) => {
+      const day = Date.parse(`${session.scheduledFor}T23:59:59.000Z`);
+      return Number.isFinite(day) && day >= start && day < end;
+    })
+    .filter((session) => !startedSessionIds.has(session.id))
+    .map((session) => session.scheduledFor);
+  return [...partialDates, ...neverStartedDates]
     .filter((date, index, values) => values.indexOf(date) === index)
     .sort();
 }
@@ -9399,4 +9454,26 @@ function muscleSummaryLine(variant: import("../knowledge").ExerciseVariant): str
     .filter((entry) => entry.role === "secondary_intent")
     .map((entry) => entry.muscleId);
   return `预计参与肌群（动作学策展，非当次激活观测）：主要 ${primary.join("、") || "未标注"}；次要 ${secondary.join("、") || "无"}`;
+}
+
+/** 数据桥（ticket 02）：从 workout 聚合组装 planner 的历史表现。 */
+function assembleHistoricalPerformance(
+  workouts: readonly import("./domain").WorkoutProjection[],
+): import("../planning").HistoricalPerformance[] {
+  return workouts
+    .filter((workout) => workout.status === "completed" || workout.status === "partial")
+    .flatMap((workout) =>
+      workout.setOutcomes
+        .filter((set) => set.source === "user_confirmed" && set.actualLoad && set.actualReps !== undefined)
+        .map((set) => ({
+          exerciseVariantId: set.exerciseVariantId,
+          occurredAt:
+            workout.outcome?.completedAt ?? `${workout.frozenPrescription.scheduledFor}T00:00:00.000Z`,
+          load: set.actualLoad!,
+          reps: set.actualReps!,
+          ...(set.actualRir !== undefined ? { rir: set.actualRir } : {}),
+          confidence: "confirmed" as const,
+          evidenceRef: `workout:${workout.id}:set:${set.id}`,
+        })),
+    );
 }

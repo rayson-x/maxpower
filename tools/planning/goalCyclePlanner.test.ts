@@ -353,7 +353,7 @@ test("闭环事件无 typed diff 时返回 no_change，不产生伪 revision", (
   );
   assert.equal(unchanged.kind, "no_change");
   if (unchanged.kind !== "no_change") return;
-  assert.deepEqual(unchanged.reasonCodes, ["single_session_outcome_updates_forecast_only"]);
+  assert.deepEqual(unchanged.reasonCodes, ["typed_diff_empty", "single_session_outcome_updates_forecast_only"]);
   assert.equal(unchanged.forecastUpdate?.shouldProposeAdjustment, false);
   assert.equal(unchanged.forecastUpdate?.scenarios.length, 3);
 });

@@ -142,7 +142,11 @@ test("WorkoutSession 在同一执行实体中切换记录/监控、提交真实�
   assert.equal(sessionOutcome.status, "completed");
   const projection = await app.readDomainProjection({ userId: "u1" });
   assert.equal(projection.workouts[0]?.status, "completed");
-  assert.equal(projection.timeline.current.length, 1);
+  const trainingFacts = projection.timeline.current.filter((event) => event.fact.kind === "training");
+  const historicalSetFacts = trainingFacts.filter((event) => event.fact.kind === "training" && event.fact.historicalSet);
+  // ticket 02：1 条完成事实 + 每组一条 historicalSet
+  assert.equal(trainingFacts.length - historicalSetFacts.length, 1);
+  assert.equal(historicalSetFacts.length, 2);
   assert.equal(projection.timeline.current[0]?.fact.kind, "training");
 });
 

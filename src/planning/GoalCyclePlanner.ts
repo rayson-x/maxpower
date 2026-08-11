@@ -131,27 +131,6 @@ export class GoalCyclePlanner {
 
     const context = this.context(request, pins, trainingRule.pack.descriptor);
     const goalCycle = this.buildGoalCycle(context, frontier);
-    if (
-      request.trigger === "session_completed" &&
-      (request.consecutiveDeviationCount ?? 0) < 2 &&
-      request.facts.priorPlan
-    ) {
-      const confidence = clamp(
-        0.35 + (context.history.length ? 0.2 : 0) + (context.facts.recoveryConstraints.length ? 0.1 : 0),
-        0.2,
-        0.8,
-      );
-      return {
-        kind: "no_change",
-        reasonCodes: ["single_session_outcome_updates_forecast_only"],
-        factFrontier: frontier,
-        forecastUpdate: {
-          scenarios: forecastScenarios(request, goalCycle, confidence),
-          reviewKind: reviewKind(request.currentDate, goalCycle),
-          shouldProposeAdjustment: false,
-        },
-      };
-    }
     const planRevision = this.materializeNearTerm(context, goalCycle);
     const unresolved = planRevision.sessions.flatMap((session) =>
       (session.stimulusSlots ?? []).filter((slot) => slot.exerciseSlot.status === "unresolved"),
@@ -165,6 +144,24 @@ export class GoalCyclePlanner {
 
     const diff = computeDiff(request.facts.priorPlan?.value, planRevision, context.reasonCodes);
     if (request.facts.priorPlan && diff.length === 0) {
+      // 无实质变化：session_completed 只更新 forecast，不重印计划
+      if (request.trigger === "session_completed") {
+        const confidence = clamp(
+          0.35 + (context.history.length ? 0.2 : 0) + (context.facts.recoveryConstraints.length ? 0.1 : 0),
+          0.2,
+          0.8,
+        );
+        return {
+          kind: "no_change",
+          reasonCodes: ["typed_diff_empty", "single_session_outcome_updates_forecast_only"],
+          factFrontier: frontier,
+          forecastUpdate: {
+            scenarios: forecastScenarios(request, goalCycle, confidence),
+            reviewKind: reviewKind(request.currentDate, goalCycle),
+            shouldProposeAdjustment: false,
+          },
+        };
+      }
       return { kind: "no_change", reasonCodes: ["typed_diff_empty"], factFrontier: frontier };
     }
 
@@ -424,7 +421,7 @@ export class GoalCyclePlanner {
       return session;
     });
     return {
-      id: `week-plan-${stableHash({ week: week.id, frontier: factFrontier(context.facts) })}`,
+      id: `week-plan-${stableHash({ week: week.id })}`,
       ordinal: week.ordinal,
       startDate: week.startDate,
       endDate: week.endDate,
@@ -463,7 +460,7 @@ export class GoalCyclePlanner {
     const goal = context.facts.goalContract.value.primaryGoal;
     const isDeloadWeek = week.intent === "planned_recovery_and_formal_review";
     const useCardio = goal === "fat_loss_preserve_lean_mass" && ordinal === context.schedule.length - 1 && !isDeloadWeek;
-    const recovery = strongestRecovery(context.facts);
+    const recovery = strongestRecovery(context.facts, context.request.currentDate);
     const useRecovery = recovery === "recovery_priority" || recovery === "pause_and_confirm";
     const templates = useRecovery
       ? ([{ movementPattern: "recovery", muscleGroups: [], priority: "maintenance", fatigueIntent: "low" }] satisfies SlotTemplate[])
@@ -562,7 +559,7 @@ export class GoalCyclePlanner {
       template.priority,
       template,
       goal,
-      strongestRecovery(context.facts),
+      strongestRecovery(context.facts, context.request.currentDate),
       hasHistory
         ? context.trainingRule.defaults.workingRir
         : context.trainingRule.defaults.calibrationRir,
@@ -1177,10 +1174,14 @@ function strengthBaselineForExercise(
   return undefined;
 }
 
-function strongestRecovery(facts: PlannerFacts): "normal" | "slight_reduction" | "recovery_priority" | "pause_and_confirm" {
+function strongestRecovery(
+  facts: PlannerFacts,
+  currentDate: string,
+): "normal" | "slight_reduction" | "recovery_priority" | "pause_and_confirm" {
   const rank = { normal: 0, slight_reduction: 1, recovery_priority: 2, pause_and_confirm: 3 } as const;
   return facts.recoveryConstraints
-    .filter((candidate) => candidate.value.validUntil >= new Date(0).toISOString().slice(0, 10))
+    // 过期约束不生效（此前与 1970-01-01 比较导致任何约束永久生效）
+    .filter((candidate) => candidate.value.validUntil >= currentDate)
     .map((candidate) => candidate.value.level)
     .sort((left, right) => rank[right] - rank[left])[0] ?? "normal";
 }
@@ -1222,7 +1223,10 @@ function computeDiff(
 function comparablePlan(plan: PlanRevisionData) {
   return {
     goalContractRef: plan.goalContractRef,
-    goalCycleRef: plan.goalCycleRef,
+    // goalCycle 的 id 由内容哈希决定；revision 是存储 provenance，不参与"计划是否变化"的判定
+    goalCycleRef: plan.goalCycleRef
+      ? { kind: plan.goalCycleRef.kind, id: plan.goalCycleRef.id }
+      : undefined,
     materializedWeeks: plan.materializedWeeks,
     futureIntentRefs: plan.futureIntentRefs,
     sessions: plan.sessions,
