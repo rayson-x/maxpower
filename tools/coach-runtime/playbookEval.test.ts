@@ -78,9 +78,13 @@ function appWith(app: CoachApplication, provider: ScriptedLLMProvider): CoachApp
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const anyApp = app as any;
   const deps = anyApp.dependencies ?? {};
+  let seq = 100000; // 与原 app 的 id 序列错开，避免重复 id 冲突
   return new CoachApplication({
     ledger: deps.ledger,
-    runtime: deps.runtime,
+    runtime: {
+      now: deps.runtime.now,
+      nextId: (prefix: string) => `${prefix}-alt-${++seq}`,
+    },
     llmProvider: provider,
     knowledgeToolsEnabled: deps.knowledgeToolsEnabled ?? false,
     actionToolsEnabled: deps.actionToolsEnabled ?? false,
@@ -190,4 +194,102 @@ test("playbook 版本钉入 context manifest", async () => {
   await app2.sendCoachTurn({ sessionId: session.id, text: "看看" });
   const manifest = provider.requests[0]?.contextManifest;
   assert.equal(manifest?.playbookVersion, "playbook-2026-08-11/v1");
+});
+
+test("explain_rule 命中返回规则包与证据锚点，未命中 typed unknown", async () => {
+  const { app, ledger } = fixture({ knowledgeToolsEnabled: true, actionToolsEnabled: true });
+  const session = await bootstrap(app);
+  await runTurn(app, session.id, "knowledge.explain_rule", { ruleId: "maxpower.training.hypertrophy" });
+  let snapshot = await ledger.read();
+  let brief = snapshot.artifacts.filter((item) => item.kind === "evidence_brief").at(-1);
+  assert.ok(brief && "summary" in brief && brief.summary.some((line: string) => line.includes("performance_progression")));
+
+  await runTurn(app, session.id, "knowledge.explain_rule", { ruleId: "no.such.rule" });
+  snapshot = await ledger.read();
+  brief = snapshot.artifacts.filter((item) => item.kind === "evidence_brief").at(-1);
+  assert.ok(brief?.missingness.includes("rule_not_in_pack"));
+});
+
+test("意图「报组」→ workout.report_set → 组以 user_confirmed 落账", async () => {
+  const { app, ledger } = fixture({ knowledgeToolsEnabled: true, actionToolsEnabled: true });
+  const session = await bootstrap(app);
+  const previewArtifact = (await ledger.read()).artifacts.find(
+    (item) => item.kind === "evidence_brief" && "planningPreview" in item && item.planningPreview,
+  );
+  await app.confirmPlanningPreview({ userId: "user-1", previewId: previewArtifact!.id, idempotencyKey: "confirm-plan" });
+  const plan = (await app.readDomainProjection({ userId: "user-1" })).plan!.value;
+  const trainingSession = plan.sessions.find((item) => item.tasks.length > 0)!;
+  await app.prepareWorkoutSession({
+    userId: "user-1",
+    workoutId: "workout-rt",
+    prescriptionRef: { planId: plan.id, planRevision: 1, sessionPrescriptionId: trainingSession.id },
+    idempotencyKey: "prep-rt",
+  });
+  await app.activateWorkoutSession({ userId: "user-1", workoutId: "workout-rt", idempotencyKey: "act-rt" });
+  await runTurn(app, session.id, "workout.report_set", { workoutId: "workout-rt", actualReps: 8, actualLoadKg: 60, actualRir: 3 });
+  const workout = (await app.readDomainProjection({ userId: "user-1" })).workouts.find((item) => item.id === "workout-rt");
+  assert.equal(workout?.setOutcomes[0]?.actualLoad?.value, 60);
+  assert.equal(workout?.setOutcomes[0]?.source, "user_confirmed");
+});
+
+test("非法工具输入被 schema 拒绝", async () => {
+  const { app } = fixture({ knowledgeToolsEnabled: true, actionToolsEnabled: true });
+  const session = await bootstrap(app);
+  const provider = new ScriptedLLMProvider([
+    { type: "tool-call", toolCallId: "bad-1", toolName: "nutrition.record_observation", input: { items: [] } },
+    { type: "completed" },
+  ]);
+  const app2 = appWith(app, provider);
+  await app2.sendCoachTurn({ sessionId: session.id, text: "记录" });
+  const snapshot = await (app as unknown as { ledger: InMemoryCoachLedger }).ledger.read();
+  const failed = snapshot.toolCalls.find((call) => call.id === "bad-1");
+  assert.ok(!failed || failed.status === "output_error", "空 items 应被拒绝");
+});
+
+test("playbook 文本覆盖三形态路由（静态断言）", async () => {
+  const { readFileSync } = await import("node:fs");
+  const playbook = readFileSync("src/coach/playbook.ts", "utf8");
+  for (const expected of [
+    "nutrition.record_observation",
+    "plan.substitute_exercise",
+    "workout.report_set",
+    "plan.trigger_replan_with_context",
+    "knowledge.lookup_exercise",
+    "knowledge.explain_rule",
+    "先查后答",
+  ]) {
+    assert.ok(playbook.includes(expected), `playbook 缺 ${expected}`);
+  }
+});
+
+test("替换动作时可指定目标动作 id", async () => {
+  const { app, ledger } = fixture({ knowledgeToolsEnabled: true, actionToolsEnabled: true });
+  const session = await bootstrap(app);
+  const previewArtifact = (await ledger.read()).artifacts.find(
+    (item) => item.kind === "evidence_brief" && "planningPreview" in item && item.planningPreview,
+  );
+  await app.confirmPlanningPreview({ userId: "user-1", previewId: previewArtifact!.id, idempotencyKey: "confirm-plan" });
+  const plan = (await app.readDomainProjection({ userId: "user-1" })).plan!.value;
+  const task = plan.sessions.flatMap((item) => item.tasks)[0]!;
+  await runTurn(app, session.id, "plan.substitute_exercise", {
+    taskId: task.id,
+    replacementExerciseId: "dumbbell_bench_press.flat.standard",
+    reason: "杠铃被占用",
+  });
+  const snapshot = await ledger.read();
+  assert.ok(snapshot.artifacts.some((item) => item.kind === "exercise_substitution"));
+});
+
+test("带 note 的领域外提问不产生任何 artifact（静默读完）", async () => {
+  const { app, ledger } = fixture({ knowledgeToolsEnabled: true, actionToolsEnabled: true });
+  const session = await bootstrap(app);
+  const provider = new ScriptedLLMProvider([
+    { type: "text-delta", delta: "这个问题超出我的服务范围，建议咨询相关专业人士。" },
+    { type: "completed" },
+  ]);
+  const app2 = appWith(app, provider);
+  const before = (await ledger.read()).artifacts.length;
+  await app2.sendCoachTurn({ sessionId: session.id, text: "帮我写个 Python 脚本" });
+  const after = (await ledger.read()).artifacts.length;
+  assert.equal(after, before, "纯文本回答不产生 artifact");
 });

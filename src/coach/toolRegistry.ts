@@ -314,7 +314,7 @@ export class CoachToolRegistry {
     if (input.call.toolName === "workout.report_set") {
       if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
       const parsed = parseExactObject(input.call.input, ["workoutId", "actualReps", "actualLoadKg", "actualRir"]);
-      if (typeof parsed.workoutId !== "string" || !parsed.workout || typeof parsed.actualReps !== "number" || !Number.isInteger(parsed.actualReps)) {
+      if (typeof parsed.workoutId !== "string" || !parsed.workoutId || typeof parsed.actualReps !== "number" || !Number.isInteger(parsed.actualReps)) {
         throw new ToolSchemaError("invalid_tool_input");
       }
       const result = await this.handlers.reportWorkoutSet(

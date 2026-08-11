@@ -1,6 +1,14 @@
 import { Platform } from "react-native";
 
 import { CoachApplication, InMemoryCoachLedger } from "../../coach";
+import {
+  createTraceWriter,
+  createExpoTraceFileSystem,
+} from "../../observability";
+import {
+  InMemoryPersonalKnowledgeStore,
+  PersonalKnowledgeLayer,
+} from "../../knowledge/personalLayer";
 import type { NotificationPort } from "../../coach/ports";
 import { InMemoryMediaBlobStore, InMemorySecureCredentialPort, WebCryptoBackupCryptoPort } from "../../privacy";
 import type { AccountRuntime, AccountRuntimeCreateInput } from "../auth/model";
@@ -45,6 +53,7 @@ export interface MobileAccountRuntime extends AccountRuntime {
 
 export interface MobileAccountRuntimeOptions {
   apiBaseUrl: string;
+  allowInsecureHttp?: boolean;
   fetch?: CloudProductDataFetch;
 }
 
@@ -74,6 +83,9 @@ export async function createMobileAccountRuntime(
     accountId: input.accountId,
     client: new CloudProductDataClient({
       baseUrl: apiBaseUrl,
+      ...(options?.allowInsecureHttp === undefined
+        ? {}
+        : { allowInsecureHttp: options.allowInsecureHttp }),
       accessToken: input.accessToken,
       ...(options?.fetch ? { fetch: options.fetch } : {}),
     }),
@@ -114,6 +126,9 @@ export async function createMobileAccountRuntime(
     };
     const cloudCoach = createCloudCoachServices({
       apiBaseUrl,
+      ...(options?.allowInsecureHttp === undefined
+        ? {}
+        : { allowInsecureHttp: options.allowInsecureHttp }),
       accountId: input.accountId,
       accessTokens,
       accountSignal: input.signal,
@@ -122,6 +137,9 @@ export async function createMobileAccountRuntime(
     });
     const cloudMediaLibrary = new CloudMediaLibrary({
       apiBaseUrl,
+      ...(options?.allowInsecureHttp === undefined
+        ? {}
+        : { allowInsecureHttp: options.allowInsecureHttp }),
       accountId: input.accountId,
       accessTokens,
       byteTransfer: new XhrMediaByteTransferPort(),

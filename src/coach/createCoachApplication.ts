@@ -5209,7 +5209,70 @@ export class CoachApplication {
       expectedRevision: workout.revision,
       outcome,
     });
+    await this.maybeProposeNextSetAdjustment(input.userId, input.workoutId, outcome);
     return outcome;
+  }
+
+  /**
+   * realtime 主动提案（形态②，ticket 06）：确认一组后——
+   * 休息过短给出延长建议；规则包对下一组有具体调整时生成提案 artifact。
+   * 只呈现与记录，确认经既有 revise/confirm 路径；不直接改训练。
+   */
+  private async maybeProposeNextSetAdjustment(
+    userId: string,
+    workoutId: string,
+    outcome: import("./domain").SetOutcomeData,
+  ): Promise<void> {
+    const now = this.runtime.now();
+    const proposals: string[] = [];
+    if (outcome.restDeviation === "too_short") {
+      proposals.push("这组休息时间明显短于建议值，下一组建议延长休息到目标区间再开始");
+    }
+    let ruleProposal: import("../workout").WorkoutNextSetRecommendation | undefined;
+    try {
+      const recommendation = await this.recommendNextWorkoutSet({
+        userId,
+        workoutId,
+        sourceOutcomeId: outcome.id,
+      });
+      if (recommendation.status === "proposal" && recommendation.change) {
+        ruleProposal = recommendation;
+        proposals.unshift(`规则建议调整下一组：${recommendation.reason}`);
+      }
+    } catch {
+      // 评估不可用时不出提案（保持训练不被打断）
+    }
+    if (!proposals.length) return;
+    const artifact: import("./model").EvidenceBriefArtifact = {
+      id: `next-set-proposal-${stableHash({ workoutId, outcome: outcome.id })}`,
+      kind: "evidence_brief",
+      userId,
+      title: "下一组建议",
+      summary: proposals,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [{ kind: "workout", ref: workoutId }],
+      evidenceRefs: [{ aggregate: "workout", id: workoutId, revision: 0 }],
+      missingness: [],
+      capabilityBoundary: [
+        "只是建议：确认后才应用到未开始的组，当前组不受影响",
+        "不基于休息偏差惩罚训练量",
+      ],
+      hash: stableHash({ workoutId, outcome: outcome.id, rule: ruleProposal?.decision.decision }),
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    await this.ledger.commit({
+      kind: "domain",
+      userId,
+      actorId: "rule_engine",
+      intent: "workout.next_set_proposal",
+      expectedRevisions: [],
+      domainEvents: [],
+      artifacts: [artifact],
+      idempotencyKey: `next-set-proposal:${outcome.id}`,
+      recordedAt: now,
+    });
   }
 
   /**

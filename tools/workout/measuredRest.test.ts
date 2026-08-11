@@ -123,3 +123,20 @@ test("完成训练后实测休息沉淀为个人节奏校准，后续计划引�
   assert.equal(tempo?.kind, "observed_calibration");
   assert.equal(tempo?.value?.medianRestSeconds, 135); // median(120, 150)
 });
+
+test("休息过短确认后产生下一组建议 artifact（主动提案，不直接改训练）", async () => {
+  const { app, advanceMonotonic } = fixture();
+  await bootstrapPlan(app);
+  await startWorkout(app);
+  await app.confirmCurrentSet({ userId: "u1", workoutId: "workout-1", confirmAsPlanned: true, idempotencyKey: "s1" });
+  await app.startRestTimer({ userId: "u1", workoutId: "workout-1", duration: { value: 90, unit: "seconds" }, idempotencyKey: "rest-1" });
+  advanceMonotonic(30_000);
+  await app.confirmCurrentSet({ userId: "u1", workoutId: "workout-1", confirmAsPlanned: true, idempotencyKey: "s2" });
+
+  const snapshot = await app.readDomainProjection({ userId: "u1" });
+  void snapshot;
+  const artifacts = (await (app as unknown as { ledger: { read(): Promise<{ artifacts: readonly import("../../src/coach/model").Artifact[] }> } }).ledger.read()).artifacts;
+  const proposal = artifacts.find((item) => item.kind === "evidence_brief" && item.title === "下一组建议");
+  assert.ok(proposal, "休息过短应产生下一组建议 artifact");
+  assert.ok(proposal?.capabilityBoundary.some((line) => line.includes("确认后才应用")));
+});
