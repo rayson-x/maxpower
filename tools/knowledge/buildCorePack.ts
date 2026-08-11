@@ -1,6 +1,6 @@
 import type { EquipmentRequirement } from "../../src/coach/domain";
 import { stableHash } from "../../src/coach/stable";
-import { buildKnowledgePassages } from "./buildPassages";
+import { buildKnowledgePassages, buildDistilledLayers } from "./buildPassages";
 import {
   EXERCISE_CATALOG_SCHEMA_VERSION,
   KNOWLEDGE_PACK_SCHEMA_VERSION,
@@ -1727,6 +1727,14 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     safetyLexicon: SAFETY_LEXICON,
     programStrategies: PROGRAM_STRATEGIES,
   });
+  // 蒸馏层（L1 keypoint / L2 gist）：从已入库的 L0 段落做确定性抽取
+  const basePassages = PROGRAM_STRATEGIES.passages ?? [];
+  const { keypoints, gists } = buildDistilledLayers(basePassages);
+  const programStrategies = {
+    ...PROGRAM_STRATEGIES,
+    keypoints,
+    gists,
+  };
   return {
     manifest: {
       ...manifestContent,
@@ -1738,7 +1746,7 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     executableRulePacks,
     wikiDocuments,
     safetyLexicon: SAFETY_LEXICON,
-    programStrategies: PROGRAM_STRATEGIES,
+    programStrategies,
   };
 }
 

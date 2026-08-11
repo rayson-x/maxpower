@@ -329,6 +329,47 @@ export interface SplitRotationTemplate {
  * 纪律：段落是从已审核的知识页切出来的原文，**不是模型生成的摘要**。
  * agent 只能引用这里的内容；检索不到时必须明说不知道，不得用模型先验补答。
  */
+/**
+ * 知识层级（参考 TencentDB Agent Memory 的抽象金字塔思想，见 docs/adr 或调研）。
+ *
+ * 三层、自顶向下检索，目的是减少 token 消耗：
+ *   L2 摘要（gist，~1-2 句）   ← 默认先答这层，token 最少
+ *   L1 事实/结论（keypoint）   ← 需要细节时下钻
+ *   L0 原文段落（passage）     ← 需要出处/原文时下钻
+ *
+ * 纪律：上层是下层的**确定性蒸馏**，不是模型生成的新内容——
+ * gist 与 keypoint 都指回 passage（drillDown），保留完整可追溯链，
+ * 绝不出现"蒸馏出来的说法在原文里找不到依据"。
+ */
+
+/** L2：一句话要点（检索默认命中的最小单元）。 */
+export interface KnowledgeGist {
+  id: string;
+  /** 归属的文档小节。 */
+  sectionKey: string;
+  docTitle: string;
+  topic: KnowledgePassage["topic"];
+  /** 一句话要点（构建时从小节首条结论抽取）。 */
+  gist: string;
+  keywords: readonly string[];
+  citationRefs: readonly string[];
+  tier: KnowledgePassage["tier"];
+  /** 下钻：该要点对应的 L0 段落 id。 */
+  passageIds: readonly string[];
+}
+
+/** L1：一个完整结论（含边界），下钻时的中间层。 */
+export interface KnowledgeKeypoint {
+  id: string;
+  passageId: string;
+  docTitle: string;
+  sectionPath: readonly string[];
+  /** 该段落的结论句（抽取的小结/粗体结论）。 */
+  point: string;
+  citationRefs: readonly string[];
+  tier: KnowledgePassage["tier"];
+}
+
 export interface KnowledgePassage {
   id: string;
   /** 来源文档路径（可追溯到仓库里的知识页）。 */
@@ -475,8 +516,12 @@ export interface ProgramStrategies {
   dietStrategies?: readonly DietStrategyDeclaration[];
   /** 文献引用库：计划里的 evidenceRef 由此解析为可展示的一手来源。 */
   citations?: readonly EvidenceCitation[];
-  /** Agent 可检索的知识段落（客户端知识库）。 */
+  /** Agent 可检索的知识段落（客户端知识库，L0 原文层）。 */
   passages?: readonly KnowledgePassage[];
+  /** L2 摘要层（检索默认命中）。 */
+  gists?: readonly KnowledgeGist[];
+  /** L1 事实层（下钻中间层）。 */
+  keypoints?: readonly KnowledgeKeypoint[];
   /** 进食状态编排策略（按训练类型）。 */
   sessionFuelingPolicies?: readonly SessionFuelingPolicy[];
   /** 空腹训练适格性规则表。 */

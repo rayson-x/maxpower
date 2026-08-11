@@ -374,6 +374,92 @@ function splitDocument(markdown: string, docTitle: string, sourcePath: string): 
   return passages;
 }
 
+/**
+ * 蒸馏层构建（L1 keypoint / L2 gist）：从 L0 段落做**确定性抽取**，不生成新内容。
+ *
+ * 抽取规则（保守——抽不出就不建，绝不编造）：
+ *   keypoint = 段落里以"结论先行/关键/核心/要点/底线/bottom line"开头的句子，
+ *              或第一个粗体结论句；抽不出就用段落首句（截断）
+ *   gist     = 小节内各 keypoint 的第一条，或该小节所有段落的最强结论句
+ */
+
+const KEYPOINT_MARKERS = [
+  /^\s*[-*]?\s*\*\*(.{10,200}?)\*\*/m,   // 首个粗体结论
+  /结论先行[:：]\s*\*\*(.{10,300}?)\*\*/, // 结论先行块
+  /^(?:结论|要点|底线|关键|核心)[:：]\s*(.{10,200})$/m,
+];
+
+function extractKeypoint(passage: KnowledgePassage): string {
+  for (const pattern of KEYPOINT_MARKERS) {
+    const match = pattern.exec(passage.text);
+    if (match?.[1]) return match[1].trim();
+  }
+  // 兜底：第一段非表格、非引用、非标题的句子
+  const line = passage.text
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length >= 20 && !l.startsWith("|") && !l.startsWith(">") && !l.startsWith("#"));
+  const first = (line ?? passage.text).replace(/\*\*/g, "");
+  return first.length > 200 ? `${first.slice(0, 200)}…` : first;
+}
+
+/** 蒸馏出 L1 与 L2（只给有实质内容的段落建层）。 */
+export function buildDistilledLayers(passages: readonly KnowledgePassage[]): {
+  keypoints: readonly import("../../src/knowledge/model").KnowledgeKeypoint[];
+  gists: readonly import("../../src/knowledge/model").KnowledgeGist[];
+} {
+  const keypoints: import("../../src/knowledge/model").KnowledgeKeypoint[] = [];
+  const bySection = new Map<string, KnowledgePassage[]>();
+
+  for (const passage of passages) {
+    const sectionKey = `${passage.docTitle}::${passage.sectionPath.join(" › ") || passage.docTitle}`;
+    if (!bySection.has(sectionKey)) bySection.set(sectionKey, []);
+    bySection.get(sectionKey)!.push(passage);
+
+    const point = cleanGist(extractKeypoint(passage), passage);
+    keypoints.push({
+      id: `kp-${passage.id.slice(8)}`,
+      passageId: passage.id,
+      docTitle: passage.docTitle,
+      sectionPath: passage.sectionPath,
+      point,
+      citationRefs: passage.citationRefs,
+      tier: passage.tier,
+    });
+  }
+
+  const gists: import("../../src/knowledge/model").KnowledgeGist[] = [];
+  for (const [sectionKey, group] of bySection) {
+    // gist 取该小节证据等级最高、最短的一条 keypoint（摘要要短）
+    const best = [...group].sort((a, b) => {
+      const rank = (tier: string) => (tier === "A" ? 0 : tier === "B" ? 1 : tier === "C" ? 2 : tier === "D" ? 3 : 4);
+      return rank(a.tier) - rank(b.tier) || a.text.length - b.text.length;
+    })[0]!;
+    const point = cleanGist(extractKeypoint(best), best);
+    const keywords = [...new Set(group.flatMap((passage) => passage.keywords))];
+    const citationRefs = [...new Set(group.flatMap((passage) => passage.citationRefs))];
+    const tier = group.some((passage) => passage.tier === "A")
+      ? ("A" as const)
+      : group.some((passage) => passage.tier === "B")
+        ? ("B" as const)
+        : group.some((passage) => passage.tier === "C")
+          ? ("C" as const)
+          : ("D" as const);
+    gists.push({
+      id: `gist-${stableHash(sectionKey).slice(0, 16)}`,
+      sectionKey,
+      docTitle: best.docTitle,
+      topic: best.topic,
+      gist: point.length > 160 ? `${point.slice(0, 160)}…` : point,
+      keywords,
+      citationRefs,
+      tier,
+      passageIds: group.map((passage) => passage.id),
+    });
+  }
+  return { keypoints, gists };
+}
+
 /** 构建全部知识段落（缺失的文档跳过并记录，不静默）。 */
 export interface PassageBuildReport {
   passages: readonly KnowledgePassage[];
@@ -473,4 +559,25 @@ if (require.main === module) {
     return acc;
   }, {});
   console.log(`  内容过滤剔除：${excludedByContent.length} 段 ${JSON.stringify(byLabel)}`);
+}
+
+/**
+ * 蒸馏层的质量规则（保守抽取，宁可短不可假）：
+ * - 是问题（以"？"或"?"结尾）→ 替换为该小节的证据句
+ * - 是"流传说法"转述 → 替换为证据句（流传说法本身不是结论）
+ * - 超过 ~120 字符（标题堆叠/未截断）→ 截断
+ */
+function cleanGist(point: string, passage: KnowledgePassage): string {
+  let result = point;
+  const isQuestion = /[？?]$/.test(result.trim());
+  const isRumor = /^流传说法|^民间说法|^很多人认为/.test(result.trim());
+  if (isQuestion || isRumor) {
+    // 找该小节里的"证据/结论"句作为要点
+    const evidence = passage.text
+      .split("\n")
+      .map((line) => line.trim().replace(/^\*\*|\*\*$/g, ""))
+      .find((line) => line.length >= 15 && /^(证据|结论|答案|实际上|但其实|事实上)/.test(line));
+    if (evidence) result = evidence.replace(/\*\*/g, "");
+  }
+  return result.length > 140 ? `${result.slice(0, 140)}…` : result;
 }
