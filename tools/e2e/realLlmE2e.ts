@@ -24,7 +24,7 @@ const BASE_URL = process.env.MAXPOWER_E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const EMAIL = process.env.MAXPOWER_E2E_EMAIL ?? "";
 const PASSWORD = process.env.MAXPOWER_E2E_PASSWORD ?? "";
 const SKIP_LLM = process.env.MAXPOWER_E2E_SKIP_LLM === "1";
-const ONLY = (process.env.MAXPOWER_E2E_PERSONAS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const ONLY = (process.env.MAXPOWER_E2E_PERSONAS ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
 const CURRENT_DATE = "2026-08-12";
 
 async function login(): Promise<{ accountId: string; accessToken: string }> {
@@ -168,7 +168,7 @@ async function runPersona(
 }
 
 async function main() {
-  const personas = PERSONA_MATRIX.filter((p) => !ONLY.length || ONLY.some((x) => p.id.startsWith(x)));
+  const personas = PERSONA_MATRIX.filter((p) => !ONLY.length || ONLY.some((x: string) => p.id.startsWith(x)));
   console.log(`人设 ${personas.length} 个${SKIP_LLM ? "（跳过 LLM）" : "（真实 LLM 在环）"}\n`);
 
   let resolver: MaxPowerPiCoachProviderResolver | undefined;
