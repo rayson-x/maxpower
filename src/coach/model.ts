@@ -186,6 +186,7 @@ export type ArtifactKind =
   | "weekly_coach_report"
   | "mesocycle_review"
   | "evidence_brief"
+  | "plan_trace"
   | "nutrition_observation_draft"
   | "nutrition_change_proposal"
   | "recovery_brief"
@@ -392,6 +393,14 @@ export interface MesocycleReviewArtifact extends ArtifactBase {
   linkedProposalArtifactId?: string;
 }
 
+/** 规划推理链 artifact（ticket 04）：随 PlanRevision 幂等持久化，无 trace 不提交。 */
+export interface PlanTraceArtifact extends ArtifactBase {
+  kind: "plan_trace";
+  userId: string;
+  planId: string;
+  trace: import("../planning").PlannerTrace;
+}
+
 /** Evidence-only explanation for a card or coach answer, never a fact write. */
 export interface EvidenceBriefArtifact extends ArtifactBase {
   kind: "evidence_brief";
@@ -469,6 +478,7 @@ export type Artifact =
   | WeeklyCoachReportArtifact
   | MesocycleReviewArtifact
   | EvidenceBriefArtifact
+  | PlanTraceArtifact
   | NutritionObservationDraftArtifact
   | NutritionChangeProposalArtifact
   | RecoveryBriefArtifact
@@ -555,6 +565,8 @@ export type CoachRunEvent =
         | "stale"
         | "terminal_failure";
       message: string;
+      /** 用户报错时口播/粘贴的短码；支持方按它拉出完整行为链（traceShortCode）。 */
+      shortCode?: string;
       occurredAt: string;
     }
   | {
@@ -1013,4 +1025,6 @@ export interface LedgerSnapshot {
   healthImportStates: readonly HealthImportState[];
   replicaSyncStates: readonly import("../sync").ReplicaSyncState[];
   pendingReplicaEnvelopes: readonly import("../sync").PendingReplicaEnvelope[];
+  /** 远程 trace 上报的离线 outbox；授权关闭时永远为空。 */
+  traceOutbox: readonly import("../observability/model").TraceOutboxEntry[];
 }

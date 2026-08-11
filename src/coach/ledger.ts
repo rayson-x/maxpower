@@ -30,6 +30,7 @@ import {
   type DomainProjectionQuery,
   type OutboxEntry,
 } from "./domain";
+import { TRACE_OUTBOX_RETENTION, type TraceOutboxEntry } from "../observability/model";
 import { clone, stableHash } from "./stable";
 import {
   ONBOARDING_DRAFT_SCHEMA_VERSION,
@@ -81,6 +82,7 @@ export const EMPTY_LEDGER_SNAPSHOT: LedgerSnapshot = {
   healthImportStates: [],
   replicaSyncStates: [],
   pendingReplicaEnvelopes: [],
+  traceOutbox: [],
 };
 
 export class InMemoryCoachLedger implements CoachLedger {
@@ -292,6 +294,10 @@ export interface DomainAtomicCommit {
   updateOutbox?: readonly OutboxEntry[];
   replicaSyncStates?: readonly import("../sync").ReplicaSyncState[];
   pendingReplicaEnvelopes?: readonly import("../sync").PendingReplicaEnvelope[];
+  /** 新入队的远程 trace 条目；已存在同 eventId 的条目会被忽略（插入即去重）。 */
+  traceOutbox?: readonly TraceOutboxEntry[];
+  /** 既有 trace 条目的状态推进；只有本地调度器可以写。 */
+  updateTraceOutbox?: readonly TraceOutboxEntry[];
   idempotencyKey: string;
   recordedAt: string;
 }
@@ -482,11 +488,37 @@ export function applyDomainAtomicCommitTransition(
       throw new LedgerConflictError("invalid_reference");
     }
   }
+  for (const entry of input.traceOutbox ?? []) {
+    if (
+      entry.userId !== input.userId ||
+      entry.id !== entry.eventId ||
+      entry.eventId !== entry.envelope.eventId ||
+      !entry.payloadHash ||
+      !entry.deviceId ||
+      entry.status !== "pending"
+    ) {
+      throw new LedgerConflictError("invalid_reference");
+    }
+  }
+  for (const updated of input.updateTraceOutbox ?? []) {
+    const current = snapshot.traceOutbox.find((entry) => entry.id === updated.id);
+    if (
+      !current ||
+      current.userId !== input.userId ||
+      current.userId !== updated.userId ||
+      current.eventId !== updated.eventId ||
+      current.payloadHash !== updated.payloadHash ||
+      current.deviceId !== updated.deviceId ||
+      (current.status !== "pending" && current.status !== updated.status)
+    ) {
+      throw new LedgerConflictError("invalid_reference");
+    }
+  }
   if (
     (input.sessions ?? []).some((session) => session.userId !== input.userId) ||
     (input.artifacts ?? []).some(
       (artifact) =>
-        (artifact.kind === "replan_evaluation" || artifact.kind === "goal_forecast" || artifact.kind === "weekly_coach_report" || artifact.kind === "mesocycle_review" || artifact.kind === "evidence_brief" || artifact.kind === "exercise_substitution" || artifact.kind === "nutrition_observation_draft" || artifact.kind === "nutrition_change_proposal" || artifact.kind === "recovery_brief" || artifact.kind === "nutrition_strategy" || artifact.kind === "safety_hold") &&
+        (artifact.kind === "replan_evaluation" || artifact.kind === "goal_forecast" || artifact.kind === "weekly_coach_report" || artifact.kind === "mesocycle_review" || artifact.kind === "evidence_brief" || artifact.kind === "plan_trace" || artifact.kind === "exercise_substitution" || artifact.kind === "nutrition_observation_draft" || artifact.kind === "nutrition_change_proposal" || artifact.kind === "recovery_brief" || artifact.kind === "nutrition_strategy" || artifact.kind === "safety_hold") &&
         artifact.userId !== input.userId,
     ) ||
     (input.actionEvents ?? []).some((action) => action.userId !== input.userId) ||
@@ -582,6 +614,12 @@ export function applyDomainAtomicCommitTransition(
     healthImportStates: upsertById(snapshot.healthImportStates, input.healthImportStates ?? []),
     replicaSyncStates: upsertById(snapshot.replicaSyncStates, input.replicaSyncStates ?? []),
     pendingReplicaEnvelopes: upsertById(snapshot.pendingReplicaEnvelopes, input.pendingReplicaEnvelopes ?? []),
+    traceOutbox: retainTraceOutbox(
+      upsertById(
+        appendMissingById(snapshot.traceOutbox, input.traceOutbox ?? []),
+        input.updateTraceOutbox ?? [],
+      ),
+    ),
     actionTokens: snapshot.actionTokens.map((token) =>
       consumedTokens.has(token.token) ? { ...token, consumedAt: input.recordedAt } : token,
     ).concat(input.issueTokens ?? [])
@@ -615,6 +653,7 @@ export function normalizeLedgerSnapshot(snapshot: Partial<LedgerSnapshot>): Ledg
     healthImportStates: snapshot.healthImportStates ?? [],
     replicaSyncStates: snapshot.replicaSyncStates ?? [],
     pendingReplicaEnvelopes: snapshot.pendingReplicaEnvelopes ?? [],
+    traceOutbox: snapshot.traceOutbox ?? [],
   };
   return clone(normalized);
 }
@@ -1091,7 +1130,7 @@ function validateEventUnits(event: DomainEvent): void {
       }
     }
     if (
-      (fact.kind === "activity" && !validDuration(fact.duration)) ||
+      (fact.kind === "activity" && (!validDuration(fact.duration) || !validEnergy(fact.energyExpenditure))) ||
       (fact.kind === "sleep" && !validDuration(fact.duration)) ||
       (fact.kind === "nutrition" && !validEnergy(fact.energy)) ||
       (fact.kind === "recovery" &&
@@ -1141,6 +1180,8 @@ function hasRuntimeMutation(input: DomainAtomicCommit): boolean {
       input.updateOutbox?.length ||
       input.replicaSyncStates?.length ||
       input.pendingReplicaEnvelopes?.length ||
+      input.traceOutbox?.length ||
+      input.updateTraceOutbox?.length ||
       input.consumeTokens?.length ||
       input.issueTokens?.length,
   );
@@ -1218,6 +1259,37 @@ function validateRuntimeCas(snapshot: LedgerSnapshot, input: DomainAtomicCommit)
 function upsertById<T extends { id: string }>(current: readonly T[], incoming: readonly T[]): T[] {
   const ids = new Set(incoming.map((item) => item.id));
   return [...current.filter((item) => !ids.has(item.id)), ...incoming];
+}
+
+/** 插入即去重：同一 eventId 重复入队（补发、崩溃回填）不产生第二条。 */
+function appendMissingById<T extends { id: string }>(
+  current: readonly T[],
+  incoming: readonly T[],
+): T[] {
+  const known = new Set(current.map((item) => item.id));
+  const added: T[] = [];
+  for (const item of incoming) {
+    if (known.has(item.id)) continue;
+    known.add(item.id);
+    added.push(item);
+  }
+  return [...current, ...added];
+}
+
+/**
+ * 诊断数据不能无界增长：超出保留上限时先丢最旧的已终结条目，
+ * 仍待补发的 pending 条目永远保留。
+ */
+function retainTraceOutbox(entries: readonly TraceOutboxEntry[]): TraceOutboxEntry[] {
+  if (entries.length <= TRACE_OUTBOX_RETENTION) return [...entries];
+  const settled = entries.filter((entry) => entry.status !== "pending");
+  const dropped = new Set(
+    [...settled]
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .slice(0, entries.length - TRACE_OUTBOX_RETENTION)
+      .map((entry) => entry.id),
+  );
+  return entries.filter((entry) => !dropped.has(entry.id));
 }
 
 export function upsertSession(snapshot: LedgerSnapshot, session: CoachSession): LedgerSnapshot {

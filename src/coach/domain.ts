@@ -454,6 +454,11 @@ export interface WeekPlanData {
   weeklyDirectSets?: Readonly<Record<string, number>>;
 }
 
+export interface PlanCustomizationRecord {
+  change: import("./model").PlanEditChange;
+  appliedAt: string;
+}
+
 export interface PlanRevisionData {
   id: string;
   goalContractRef: DomainAggregateRef<"goal_contract">;
@@ -472,6 +477,8 @@ export interface PlanRevisionData {
   explanation?: import("../planning").RecommendationExplanation;
   adaptiveForecasts?: readonly import("../planning").AdaptiveForecastScenario[];
   sessions: readonly PlannedSessionData[];
+  /** 用户确认前的定制记录（ticket 04）：每处修改带 provenance。 */
+  customizations?: readonly PlanCustomizationRecord[];
 }
 
 export interface PlannedSessionRef {

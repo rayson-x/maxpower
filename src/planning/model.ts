@@ -111,6 +111,30 @@ export interface PlanDiffEntry {
   reasonCode: string;
 }
 
+/** 规划推理链（ticket 04）：每次规划产出，随 PlanRevision 幂等持久化；无 trace 不提交。 */
+export interface PlannerTrace {
+  /** 输入指纹：request 参数 + 事实修订集。同指纹必出同计划（确定性回放）。 */
+  inputFingerprint: string;
+  historySummary: { count: number; exerciseIds: readonly string[] };
+  splitSelection?: { rotationId: string; exposuresPerWeek: number; reasonCode: string };
+  slots: readonly {
+    slotId: string;
+    date: string;
+    movementPattern: string;
+    selectedExerciseId?: string;
+    selectedScore?: number;
+    hardFilteredCount: number;
+    dropReasons: readonly string[];
+    setCount?: number;
+    repRange?: { min: number; max: number };
+    targetRirRange?: { min: number; max: number };
+    loadStatus: "anchored" | "calibration" | "unknown" | "none";
+  }[];
+  constraintEvents: readonly string[];
+  weeklyVolume: Readonly<Record<string, number>>;
+  outcome: { kind: "plan_proposal" | "no_change" | "infeasible_plan"; reasonCodes: readonly string[] };
+}
+
 export interface PlanProposal {
   kind: "plan_proposal";
   id: string;
@@ -136,6 +160,7 @@ export interface PlanProposal {
   nutritionStrategy?: PlanningNutritionStrategy;
   recoveryStrategy?: RecoveryStrategy;
   explanation?: RecommendationExplanation;
+  trace: PlannerTrace;
 }
 
 export interface InfeasiblePlan {

@@ -96,6 +96,11 @@ interface SlotTemplate {
 interface PlanningContext {
   request: PlannerRequest;
   facts: PlannerFacts;
+  traceCollector: {
+    slots: import("./model").PlannerTrace["slots"][number][];
+    constraintEvents: string[];
+    splitSelection?: import("./model").PlannerTrace["splitSelection"];
+  };
   pins: ReturnType<KnowledgePackRegistry["versionPins"]>;
   availableEquipment: ReadonlySet<string>;
   schedule: readonly ScheduleAvailability[];
@@ -206,6 +211,7 @@ export class GoalCyclePlanner {
     return {
       request,
       facts: request.facts,
+      traceCollector: { slots: [], constraintEvents: [] },
       pins,
       availableEquipment,
       schedule,
@@ -479,6 +485,11 @@ export class GoalCyclePlanner {
       // 组装器（ticket 03）：分化轮转 × 周量目标驱动，替代静态模板表
       const selection = selectSplitRotation(strategies, context.schedule.length, context.request.preferredSplitId);
       context.reasonCodes.push(selection.reasonCode);
+      context.traceCollector.splitSelection = {
+        rotationId: selection.rotation.id,
+        exposuresPerWeek: selection.exposuresPerWeek,
+        reasonCode: selection.reasonCode,
+      };
       const sessionLocation = context.facts.profile.value.locations?.find(
         (item) => item.id === availability.locationId,
       );
@@ -491,7 +502,10 @@ export class GoalCyclePlanner {
               variant.status === "active" &&
               equipmentSatisfied(variant.equipment.requirement, context.availableEquipment, sessionLocation?.environment),
           );
-        if (!feasible) context.reasonCodes.push(`slot_dropped_no_feasible_variant:${template.movementPattern}`);
+        if (!feasible) {
+          context.reasonCodes.push(`slot_dropped_no_feasible_variant:${template.movementPattern}`);
+          context.traceCollector.constraintEvents.push(`slot_dropped_no_feasible_variant:${template.movementPattern}`);
+        }
         return feasible;
       });
       const target = weeklyDirectSetTarget(strategies, context.facts.profile.value.trainingExperience);
@@ -517,6 +531,7 @@ export class GoalCyclePlanner {
       }, 0);
       if (estimatedMinutes > availability.availableMinutes * 1.15) {
         context.reasonCodes.push("time_budget_exceeded_full_plan_kept");
+        context.traceCollector.constraintEvents.push(`time_budget_exceeded:${date}`);
       }
     }
     const slots = boundedTemplates.map((template, slotIndex) =>
@@ -615,6 +630,23 @@ export class GoalCyclePlanner {
       plannedSets,
       context.facts.profile.value.trainingExperience === "beginner" ? 2 : 3,
     );
+    context.traceCollector.slots.push({
+      slotId,
+      date,
+      movementPattern: template.movementPattern,
+      selectedExerciseId: selected.exercise.id,
+      selectedScore: selected.score,
+      hardFilteredCount: candidates.length - ranked.length,
+      dropReasons: selected.reasons,
+      setCount: prescription.setCount,
+      ...(prescription.repRange ? { repRange: prescription.repRange } : {}),
+      ...(prescription.targetRirRange ? { targetRirRange: prescription.targetRirRange } : {}),
+      loadStatus: context.history.some(
+        (entry) => entry.exerciseVariantId === selected.exercise.id && entry.confidence === "confirmed",
+      )
+        ? "anchored"
+        : "calibration",
+    });
     const lockedFields = context.facts.mandate.value.locks
       ?.filter((lock) => lock.field === "exercise" || lock.field === "sets" || lock.field === "load")
       .map((lock) => lock.field) ?? [];
@@ -830,6 +862,7 @@ export class GoalCyclePlanner {
     };
     return {
       kind: "plan_proposal",
+      trace: buildPlannerTrace(context, "plan_proposal", planRevision),
       id: `plan-proposal-${stableHash(payload)}`,
       baseRevisions: frontier,
       goalCycle,
@@ -1412,6 +1445,41 @@ function assertPlannerRequest(request: PlannerRequest): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(request.currentDate)) throw new Error("invalid_current_date");
   if (request.facts.goalContract.value.status === "draft") throw new Error("goal_contract_not_active");
   if (request.facts.goalContract.value.primaryGoal === undefined) throw new Error("primary_goal_required");
+}
+
+
+/** PlannerTrace 构建（ticket 04）：同一输入指纹必出同一计划，trace 随计划持久化。 */
+function buildPlannerTrace(
+  context: PlanningContext,
+  kind: "plan_proposal" | "no_change" | "infeasible_plan",
+  planRevision?: PlanRevisionData,
+): import("./model").PlannerTrace {
+  const weeklyVolume: Record<string, number> = {};
+  for (const week of planRevision?.materializedWeeks ?? []) {
+    for (const [muscle, sets] of Object.entries(week.weeklyDirectSets ?? {})) {
+      weeklyVolume[muscle] = (weeklyVolume[muscle] ?? 0) + sets;
+    }
+  }
+  return {
+    inputFingerprint: stableHash({
+      trigger: context.request.trigger,
+      currentDate: context.request.currentDate,
+      frontier: factFrontier(context.facts),
+      history: context.history.map((entry) => entry.evidenceRef),
+      pins: context.pins,
+    }),
+    historySummary: {
+      count: context.history.length,
+      exerciseIds: [...new Set(context.history.map((entry) => entry.exerciseVariantId))],
+    },
+    ...(context.traceCollector.splitSelection
+      ? { splitSelection: context.traceCollector.splitSelection }
+      : {}),
+    slots: context.traceCollector.slots,
+    constraintEvents: context.traceCollector.constraintEvents,
+    weeklyVolume,
+    outcome: { kind, reasonCodes: [...context.reasonCodes] },
+  };
 }
 
 function mondayOf(date: string): string {

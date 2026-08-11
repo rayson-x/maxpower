@@ -445,6 +445,25 @@ export class CoachApplication {
       : decision.kind === "infeasible_plan"
         ? decision.reasonCodes
         : decision.reasonCodes;
+    const traceArtifact: import("./model").PlanTraceArtifact | undefined =
+      decision.kind === "plan_proposal"
+        ? {
+            id: `plan-trace-${decision.trace.inputFingerprint}`,
+            kind: "plan_trace",
+            userId: input.userId,
+            schemaVersion: 1,
+            renderVersion: 1,
+            createdAt: now,
+            contextRefs: [{ kind: "today", ref: input.currentDate }],
+            evidenceRefs: decision.evidenceRefs,
+            missingness: decision.missing,
+            capabilityBoundary: ["规划推理链只读展示，不构成事实写入"],
+            hash: stableHash({ trace: decision.trace }),
+            knowledgePins: decision.knowledgePins,
+            planId: decision.planRevision.id,
+            trace: decision.trace,
+          }
+        : undefined;
     const artifact: EvidenceBriefArtifact = {
       id: artifactId,
       kind: "evidence_brief",
@@ -484,7 +503,7 @@ export class CoachApplication {
       intent: input.recomputeOf ? "planning.preview.recompute" : "planning.preview",
       expectedRevisions: refs,
       domainEvents: [],
-      artifacts: [artifact],
+      artifacts: traceArtifact ? [artifact, traceArtifact] : [artifact],
       actionEvents: [{
         id: this.runtime.nextId("action"),
         userId: input.userId,
@@ -572,6 +591,8 @@ export class CoachApplication {
     previewId: string;
     idempotencyKey: string;
     deviceId?: string;
+    /** 确认前定制（ticket 04）：调整/删除动作任务，每处修改记录 provenance。 */
+    edits?: readonly import("./model").PlanEditChange[];
   }): Promise<PlannerDecision> {
     const snapshot = await this.ledger.read();
     const preview = snapshot.artifacts.find(
@@ -580,6 +601,13 @@ export class CoachApplication {
     );
     if (!preview?.planningPreview) throw new Error("planning_preview_not_found");
     if (preview.planningPreview.status !== "awaiting_confirmation") throw new Error("planning_preview_not_confirmable");
+    // ticket 04：无 trace 不提交
+    if (preview.planningPreview.status === "awaiting_confirmation") {
+      const expectedTraceId = `plan-trace-${preview.planningPreview.proposal.trace.inputFingerprint}`;
+      if (!snapshot.artifacts.some((item) => item.id === expectedTraceId && item.kind === "plan_trace")) {
+        throw new Error("plan_trace_missing");
+      }
+    }
     const current = await this.previewGoalCycle({
       userId: input.userId,
       currentDate: preview.planningPreview.request.currentDate,
@@ -644,6 +672,7 @@ export class CoachApplication {
       idempotencyKey: input.idempotencyKey,
       confirmedPreview: preview,
       ...(input.deviceId ? { deviceId: input.deviceId } : {}),
+      ...(input.edits?.length ? { customizations: input.edits } : {}),
     });
   }
 
@@ -715,10 +744,15 @@ export class CoachApplication {
     idempotencyKey: string;
     deviceId?: string;
     confirmedPreview?: EvidenceBriefArtifact;
+    customizations?: readonly import("./model").PlanEditChange[];
   }): Promise<PlannerDecision> {
     const { confirmedPreview, ...plannerInput } = input;
-    const decision = await this.previewGoalCycle(plannerInput);
-    if (decision.kind !== "plan_proposal") return decision;
+    const rawDecision = await this.previewGoalCycle(plannerInput);
+    if (rawDecision.kind !== "plan_proposal") return rawDecision;
+    const recordedAtEarly = this.runtime.now();
+    const decision = input.customizations?.length
+      ? { ...rawDecision, planRevision: applyPlanEditChanges(rawDecision.planRevision, input.customizations, recordedAtEarly) }
+      : rawDecision;
     const snapshot = await this.ledger.read();
     const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
     const existingCycle = domain.goalCycles.find((cycle) => cycle.value.id === decision.goalCycle.id);
@@ -9550,4 +9584,66 @@ function assembleHistoricalPerformance(
           evidenceRef: `workout:${workout.id}:set:${set.id}`,
         })),
     );
+}
+
+/** 确认前定制应用（ticket 04）：调整/删除任务，每处修改带 provenance 记录进 revision。 */
+function applyPlanEditChanges(
+  revision: import("./domain").PlanRevisionData,
+  edits: readonly import("./model").PlanEditChange[],
+  appliedAt: string,
+): import("./domain").PlanRevisionData {
+  let sessions = revision.sessions.map((session) => ({ ...session, tasks: [...session.tasks] }));
+  for (const edit of edits) {
+    if (edit.kind === "remove_task") {
+      sessions = sessions.map((session) => ({
+        ...session,
+        tasks: session.tasks.filter((task) => task.id !== edit.taskId),
+      }));
+      continue;
+    }
+    if (edit.kind === "adjust_task") {
+      sessions = sessions.map((session) => ({
+        ...session,
+        tasks: session.tasks.map((task) => {
+          if (task.id !== edit.taskId) return task;
+          let sets = task.sets;
+          if (edit.sets !== undefined) {
+            const count = Math.max(1, Math.min(20, edit.sets));
+            const last = sets.at(-1);
+            sets = Array.from({ length: count }, (_, index) =>
+              sets[index] ?? { ...last!, id: `${last?.id ?? "set"}-ext${index}` });
+          }
+          return {
+            ...task,
+            sets: sets.map((set) => ({
+              ...set,
+              ...(edit.reps ? { targetReps: parseRepRangeText(edit.reps) ?? set.targetReps } : {}),
+              ...(edit.loadKg !== undefined ? { targetLoad: { value: edit.loadKg, unit: "kg" as const } } : {}),
+              ...(edit.targetRir !== undefined
+                ? { targetRir: edit.targetRir, targetRirRange: { min: edit.targetRir, max: edit.targetRir } }
+                : {}),
+              ...(edit.restSeconds !== undefined
+                ? { rest: { value: edit.restSeconds, unit: "seconds" as const } }
+                : {}),
+            })),
+          };
+        }),
+      }));
+    }
+  }
+  return {
+    ...revision,
+    id: `${revision.id}:custom-${stableHash(edits).slice(0, 16)}`,
+    sessions,
+    customizations: [
+      ...(revision.customizations ?? []),
+      ...edits.map((change) => ({ change, appliedAt })),
+    ],
+  };
+}
+
+function parseRepRangeText(reps: string): { min: number; max: number } | undefined {
+  const match = reps.match(/^(\d+)(?:-(\d+))?$/);
+  if (!match) return undefined;
+  return { min: Number(match[1]), max: Number(match[2] ?? match[1]) };
 }

@@ -10,7 +10,7 @@ const plan = {
 };
 
 test("Replanner 只接受闭合 trigger，相同业务语义不会写空计划变更", () => {
-  const candidate = { kind: "plan_proposal" as const, id: "candidate", baseRevisions: [], goalCycle: {} as never, planRevision: plan, diff: [], scope: "future_plan" as const, reasonCodes: [], evidenceRefs: [], missing: [], conflicts: [], knowledgePins: pins, confidence: 0.5, requiresConfirmation: true, executionClass: "confirmation_required" as const, expectedReviewAt: "2026-08-15", forecasts: [] };
+  const candidate = { kind: "plan_proposal" as const, trace: { inputFingerprint: "fixture", historySummary: { count: 0, exerciseIds: [] }, slots: [], constraintEvents: [], weeklyVolume: {}, outcome: { kind: "plan_proposal" as const, reasonCodes: [] } }, id: "candidate", baseRevisions: [], goalCycle: {} as never, planRevision: plan, diff: [], scope: "future_plan" as const, reasonCodes: [], evidenceRefs: [], missing: [], conflicts: [], knowledgePins: pins, confidence: 0.5, requiresConfirmation: true, executionClass: "confirmation_required" as const, expectedReviewAt: "2026-08-15", forecasts: [] };
   const evalA = evaluateReplan({
     id: "r", trigger: { id: "t", kind: "user_requested", actor: "user", occurredAt: "2026-08-08T00:00:00Z", causationId: "c", idempotencyKey: "i" }, evaluatedAt: "2026-08-08T00:00:00Z", currentPlan: plan, candidate, frontier: [], window: { start: "2026-08-08", end: "2026-08-15" }, ruleVersion: "v1",
   });
@@ -60,7 +60,7 @@ test("语义 diff 忽略 revision/id 噪音，周报以实际 SetOutcome 而不�
 
 test("同一类普通重规划在稳定窗口内保留评估和预测，但不重复推动 Proposal；恢复降级不受冷却阻塞", () => {
   const candidate = {
-    kind: "plan_proposal" as const,
+    kind: "plan_proposal" as const, trace: { inputFingerprint: "fixture", historySummary: { count: 0, exerciseIds: [] }, slots: [], constraintEvents: [], weeklyVolume: {}, outcome: { kind: "plan_proposal" as const, reasonCodes: [] } },
     id: "candidate-stability",
     baseRevisions: [],
     goalCycle: {} as never,
