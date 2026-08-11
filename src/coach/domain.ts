@@ -608,6 +608,14 @@ export interface PlanRevisionData {
   effectiveFrom: string;
   knowledgePins: import("../knowledge/model").KnowledgeVersionPins;
   materializedWeeks?: readonly WeekPlanData[];
+  /**
+   * 用户视角的"接下来 7 天"（滚动窗口，跨日历周拼接）。
+   *
+   * 为什么需要：materializedWeeks 按日历周组织（周量账本需要固定周边界），
+   * 但用户在周三打开应用时期待看到完整的一周安排，而不是"本周剩余 4 天"。
+   * 这是纯派生视图，不参与引擎决策。
+   */
+  upcomingSevenDays?: readonly PlannedSessionData[];
   futureIntentRefs?: readonly string[];
   reasonCodes?: readonly string[];
   strategySelection?: import("../planning").StrategySelection;
@@ -628,21 +636,7 @@ export interface PlanRevisionData {
   /** 人群分层说明（recomp 可行性与阶段提示，用户可读）。 */
   personaTieringNote?: string;
   /** 目标→时间反推（体脂目标存在时）：最快天数 + 三档速度 + 所需总能量差。 */
-  goalTimeline?: {
-    fatToLoseKg?: number;
-    totalDeficitKcal?: number;
-    maxDailyDeficitKcal: number;
-    fastestDays?: number;
-    paceOptions: readonly {
-      pace: "aggressive" | "standard" | "gentle";
-      dailyDeficitKcal: number;
-      days: number;
-      weeks: number;
-      note: string;
-    }[];
-    estimable: boolean;
-    missing?: string;
-  };
+  goalTimeline?: import("../planning/goalTimeline").GoalTimeline;
   /** 饮食×训练耦合结果（碳水日型 + 冲突说明），见 src/planning/dietTrainingGraph.ts。 */
   dietTrainingCoupling?: {
     strategyId: string;

@@ -4,5 +4,5 @@
     "resolveJsonModule": true, "outDir": ".test-build", "rootDir": ".",
     "strict": true, "skipLibCheck": true, "types": ["node"], "noEmitOnError": true, "ignoreDeprecations": "6.0"
   },
-  "include": ["tools/planning/**/*.test.ts", "tools/knowledge/**/*.test.ts", "tools/nutrition/**/*.test.ts", "tools/i18n/**/*.test.ts", "tools/e2e/**/*.test.ts", "tools/coach-runtime/**/*.test.ts", "tools/workout/**/*.test.ts"]
+  "include": ["tools/planning/**/*.test.ts", "tools/knowledge/**/*.test.ts", "tools/nutrition/**/*.test.ts", "tools/i18n/**/*.test.ts", "tools/e2e/realLlmE2e.ts", "tools/e2e/**/*.test.ts", "tools/coach-runtime/**/*.test.ts", "tools/workout/**/*.test.ts"]
 }

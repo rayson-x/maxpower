@@ -186,3 +186,42 @@ test("emphasis 肌群周量提升但不得超过单肌群周量硬上限（防�
     "发生封顶时必须留痕",
   );
 });
+
+// ─── 滚动 7 天视图与恢复保护（2026-08-12）───
+
+test("滚动 7 天视图：从当前日起满 7 天，力量日数量与声明频率一致", () => {
+  // 周三（2026-08-12）开始规划：日历周只剩 4 天，但用户期待看到完整一周
+  const decision = planFor({ goal: "hypertrophy", goalType: "hypertrophy" });
+  const plan = couplingOf(decision);
+  const seven = plan.upcomingSevenDays ?? [];
+  assert.equal(seven.length, 7, `滚动窗口应覆盖 7 天，实际 ${seven.length}`);
+  assert.equal(seven[0]?.scheduledFor, "2026-08-03", "应从当前日开始");
+  const strengthDays = seven.filter((s) => s.tasks.length > 0 && s.kind !== "cardio").length;
+  assert.equal(strengthDays, 4, `力量日应等于声明频率 4，实际 ${strengthDays}`);
+});
+
+test("恢复保护：每周至少保留 1 天完全无结构化安排（有氧不得填满所有休息日）", () => {
+  // 高频 + 有氧需求的减脂场景最容易被排满
+  const decision = planFor({ goal: "fat_loss_preserve_lean_mass", goalType: "fat_loss" });
+  const plan = couplingOf(decision);
+  const seven = plan.upcomingSevenDays ?? [];
+  const fullRest = seven.filter((s) => s.tasks.length === 0).length;
+  assert.ok(fullRest >= 1, `滚动 7 天内应至少 1 天完全休息，实际 ${fullRest}`);
+});
+
+test("有氧被上限截断时必须留审计记录", () => {
+  const decision = planFor({ goal: "fat_loss_preserve_lean_mass", goalType: "fat_loss" });
+  assert.equal(decision.kind, "plan_proposal");
+  if (decision.kind !== "plan_proposal") return;
+  const plan = decision.planRevision;
+  const seven = plan.upcomingSevenDays ?? [];
+  const aerobic = seven.filter((s) => s.kind === "cardio").length;
+  const fullRest = seven.filter((s) => s.tasks.length === 0).length;
+  // 如果有氧被截断（休息日恰好只剩 1 天），必须有 reason code
+  if (fullRest === 1 && aerobic > 0) {
+    assert.ok(
+      decision.reasonCodes.some((code) => code.includes("preserve_full_rest_day")),
+      `截断有氧必须留痕，实际 codes: ${decision.reasonCodes.filter((c) => c.includes("aerobic")).join(",")}`,
+    );
+  }
+});

@@ -550,6 +550,8 @@ export class GoalCyclePlanner {
       ...(coupling ? { dietTrainingCoupling: coupling.output } : {}),
       personaTieringNote: tiering.recompNoteZh,
       goalTimeline: estimateTimeToGoal(context.facts.profile.value, context.facts.goalContract.value),
+      // 用户视角的滚动 7 天（跨日历周拼接；不参与引擎决策）
+      upcomingSevenDays: upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate),
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -733,6 +735,27 @@ export class GoalCyclePlanner {
       context.reasonCodes.push("aerobic_required_but_no_feasible_modality");
       return sessions;
     }
+    // 恢复保护：每周至少保留 1 天完全无结构化安排。
+    // 有氧即使是低强度步行，排满 7 天也会压依从性与心理负担（尤其恢复意愿非 high 时）。
+    const fillableRestDays = sessions.filter(
+      (session) =>
+        session.kind === "rest"
+        && session.tasks.length === 0
+        && session.scheduledFor >= context.request.currentDate,
+    ).length;
+    if (toAdd >= fillableRestDays && fillableRestDays > 0) {
+      toAdd = Math.max(0, fillableRestDays - 1);
+      context.reasonCodes.push("aerobic_capped_to_preserve_full_rest_day");
+    }
+    if (toAdd === 0) {
+      // 恢复保护优先于有氧配额，但不足必须显式可见（不静默降级）：
+      // 训练日已占满可用日程时，剩余有氧留给用户在力量日后自选。
+      if (existing === 0) {
+        context.reasonCodes.push("aerobic_below_public_health_baseline_rest_day_priority");
+      }
+      return sessions;
+    }
+
     const result = sessions.map((session) => {
       if (toAdd === 0) return session;
       const isRest = session.kind === "rest" && session.tasks.length === 0;
@@ -2228,6 +2251,25 @@ function absoluteNutritionTargets(
 
 function goal2ProteinPerKg(goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass"): { min: number; max: number } {
   return goal === "fat_loss_preserve_lean_mass" ? { min: 1.6, max: 2.2 } : { min: 1.4, max: 2.0 };
+}
+
+
+/**
+ * 从物化周里取"从 currentDate 起的 7 天"（滚动窗口）。
+ *
+ * 为什么：materializedWeeks 按日历周组织（周量账本需要固定边界），
+ * 但用户周三打开应用时期待看到完整一周，而不是本周剩余 4 天。
+ */
+function upcomingSevenDaysFrom(
+  weeks: readonly import("../coach/domain").WeekPlanData[],
+  currentDate: string,
+): readonly import("../coach/domain").PlannedSessionData[] {
+  const start = currentDate;
+  const end = addDays(currentDate, 6);
+  return weeks
+    .flatMap((week) => week.sessions)
+    .filter((session) => session.scheduledFor >= start && session.scheduledFor <= end)
+    .sort((left, right) => left.scheduledFor.localeCompare(right.scheduledFor));
 }
 
 function nutritionGuidanceFor(
