@@ -1718,16 +1718,8 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     capabilityFlags: ["offline_catalog", "typed_rule_manifest", "unknown_preservation"],
     compatibility: { minAppSchema: 1, maxAppSchema: 1 },
   };
-  const contentHash = stableHash({
-    manifest: manifestContent,
-    classifications,
-    exerciseCatalog,
-    executableRulePacks,
-    wikiDocuments,
-    safetyLexicon: SAFETY_LEXICON,
-    programStrategies: PROGRAM_STRATEGIES,
-  });
-  // 蒸馏层（L1 keypoint / L2 gist）：从已入库的 L0 段落做确定性抽取
+  // 蒸馏层（L1 keypoint / L2 gist）：从已入库的 L0 段落做确定性抽取。
+  // 注意：必须在算 contentHash 之前合并——签名覆盖的是最终内容，含蒸馏层。
   const basePassages = PROGRAM_STRATEGIES.passages ?? [];
   const { keypoints, gists } = buildDistilledLayers(basePassages);
   const programStrategies = {
@@ -1735,6 +1727,15 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     keypoints,
     gists,
   };
+  const contentHash = stableHash({
+    manifest: manifestContent,
+    classifications,
+    exerciseCatalog,
+    executableRulePacks,
+    wikiDocuments,
+    safetyLexicon: SAFETY_LEXICON,
+    programStrategies,
+  });
   return {
     manifest: {
       ...manifestContent,

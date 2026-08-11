@@ -477,6 +477,48 @@ export interface FastedTrainingRule {
   evidenceRefs: readonly string[];
 }
 
+/**
+ * 特殊人群进食范围规则（医疗敏感，只用临床指南级证据）。
+ *
+ * 定位：**进食范围提醒**，不是饮食治疗处方。第一版只做热量估算，
+ * 但用户记录食物时，若其档案有健康状况，我们给出"这类食物要注意"的提醒。
+ *
+ * 纪律：
+ * - 只收临床指南/立场声明/系统综述（ADA、AHA/ACC、KDIGO、ACOG、ESPEN、DASH）
+ * - 每条必须带 `referralBoundary`（何时必须咨询医生/注册营养师）
+ * - 命中的是**方向性提醒**（"这类注意钠"），不是精确克数（那需要个体化医嘱）
+ */
+export interface NutritionGuardrailRule {
+  id: string;
+  /** 适用的健康状况（结构化，不做文本匹配）。 */
+  condition:
+    | "hypertension"
+    | "type2_diabetes"
+    | "dyslipidemia"
+    | "chronic_kidney_disease"
+    | "gout"
+    | "osteoporosis"
+    | "pregnancy"
+    | "lactation"
+    | "eating_disorder_risk"
+    | "on_medication";
+  /** 触发提醒的食物类别（结构化标签，供食物分类匹配）。 */
+  foodCategory: string;
+  /** 方向：提醒注意 / 建议限制 / 建议优先。 */
+  direction: "caution" | "limit" | "prefer";
+  /** 用户可读的提醒文案（中文）。 */
+  messageZh: string;
+  /** 用户可读的提醒文案（英文）。 */
+  messageEn: string;
+  /** 何时必须咨询专业人士（必填——这是这类内容的核心）。 */
+  referralBoundaryZh: string;
+  referralBoundaryEn: string;
+  /** 指南来源（citation id）。 */
+  citationRef: string;
+  /** 证据等级：这类内容只接受 A（指南/系统综述）。 */
+  tier: "A";
+}
+
 export interface DietStrategyDeclaration {
   id: string;
   nameZh: string;
@@ -526,6 +568,8 @@ export interface ProgramStrategies {
   sessionFuelingPolicies?: readonly SessionFuelingPolicy[];
   /** 空腹训练适格性规则表。 */
   fastedTrainingRules?: readonly FastedTrainingRule[];
+  /** 特殊人群进食范围规则（医疗敏感；只用临床指南级证据）。 */
+  nutritionGuardrails?: readonly NutritionGuardrailRule[];
   splitRotations: readonly SplitRotationTemplate[];
   /** 周量目标（直接组/肌群/周）：TP-VOL-BASE 分档。 */
   weeklyDirectSetTargets: {

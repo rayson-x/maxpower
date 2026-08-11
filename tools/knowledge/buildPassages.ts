@@ -70,6 +70,18 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
     ],
   },
   {
+    path: "docs/research/2026-08-12-postpartum-and-womens-fitness-evidence.md",
+    title: "产后与女性健身证据",
+    publish: true,
+    excludeSections: [/待核验/, /调研|目的|纪律|方法/],
+  },
+  {
+    path: "docs/research/2026-08-12-posture-and-corrective-exercise-evidence.md",
+    title: "体态与矫正训练证据",
+    publish: true,
+    excludeSections: [/目的|纪律|证据等级/, /待核验/, /遗留缺口/],
+  },
+  {
     path: "docs/research/2026-08-12-overseas-exercise-science-evidence.md",
     title: "海外运动科学证据（补剂/睡眠/周期化/热身/性别/人群）",
     publish: true,
@@ -165,6 +177,11 @@ const CITATION_PATTERNS: readonly { ref: string; patterns: readonly RegExp[] }[]
   { ref: "acsm_2007_fluid_replacement", patterns: [/17277604/] },
   { ref: "sleep_loss_performance_meta_2022", patterns: [/35708888/] },
   { ref: "sleep_muscle_strength_2018", patterns: [/29422383/] },
+  { ref: "christensen_2008_spinal_curves_pain", patterns: [/19028253/] },
+  { ref: "laird_2014_lumbar_lordosis", patterns: [/25012528/] },
+  { ref: "swain_2020_posture_back_pain", patterns: [/31451200/] },
+  { ref: "mahmoud_2019_forward_head_neck_pain", patterns: [/31773477/] },
+  { ref: "richards_2021_sitting_neck_pain", patterns: [/33444448/] },
 ];
 
 
@@ -237,6 +254,15 @@ const EN_ZH_TERMS: readonly (readonly [RegExp, readonly string[]])[] = [
   [/\bwarm-?up/i, ["热身"]],
   [/\bstretch/i, ["拉伸"]],
   [/\bcluster set|velocity[- ]based|PAP|postactivation/i, ["集群组", "PAP"]],
+  [/\bposture\b/i, ["体态", "姿势"]],
+  [/\brounded shoulder|forward shoulder/i, ["圆肩"]],
+  [/\bforward head/i, ["头前伸"]],
+  [/\banterior pelvic tilt|APT\b/i, ["骨盆前倾"]],
+  [/\bscapular|winging/i, ["肩胛", "翼状"]],
+  [/\bneck pain|cervical/i, ["颈痛"]],
+  [/\blow back pain|back pain|lumbar/i, ["腰痛"]],
+  [/\bcorrective exercise/i, ["矫正训练"]],
+  [/\bsitting|sedentary/i, ["久坐"]],
 ];
 
 /** 主题标签（语言无关，供按主题限定检索）。 */
