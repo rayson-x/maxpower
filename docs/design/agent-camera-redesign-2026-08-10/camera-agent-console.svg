@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200">
+  <defs>
+    <style>
+      text { font-family: Heiti SC, sans-serif; fill: #171914; }
+      .display { font-weight: 800; letter-spacing: -1px; }
+      .mono { font-family: Menlo, monospace; letter-spacing: .8px; }
+      .white { fill: #f8f8f4; }
+      .lime { fill: #c8f72d; }
+      .limeInk { fill: #344700; }
+      .muted { fill: #777b73; }
+      .dim { fill: #9da198; }
+      .tiny { font-size: 9px; }
+      .small { font-size: 11px; }
+      .body { font-size: 13px; }
+      .phoneTitle { font-size: 16px; font-weight: 800; }
+      .label { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+      .line { stroke: #353a34; stroke-width: 1; }
+    </style>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="17" stdDeviation="17" flood-color="#161814" flood-opacity=".17"/></filter>
+  </defs>
+
+  <rect width="1920" height="1200" fill="#e9ebe5"/>
+  <text x="62" y="62" class="label limeInk">MAXPOWER / CAMERA COACH CONSOLE</text>
+  <text x="62" y="113" class="display" font-size="41">视频识别里的双向 Agent Stream</text>
+  <text x="62" y="148" font-size="15" class="muted">相机不中断，输入输出始终可达；STT、流式文本和 TTS 在同一个可收起 Console 中完成。</text>
+
+  <!-- 01 compact -->
+  <g transform="translate(50 190)" filter="url(#shadow)">
+    <rect width="290" height="800" rx="42" fill="#050705"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#0d110e"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#030503"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="141" y="56" width="65" height="23" rx="11" fill="#242924" stroke="#464c44"/><text x="173" y="72" text-anchor="middle" class="tiny white">后置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#21301d" stroke="#6a8521"/><text x="145" y="112" text-anchor="middle" class="tiny lime">✓ 全身入框 · 正在计数</text>
+    <g stroke="#c8f72d" stroke-width="3.3" stroke-linecap="round" fill="#f7f6f1"><circle cx="103" cy="223" r="16"/><line x1="118" y1="235" x2="151" y2="278"/><line x1="151" y1="278" x2="190" y2="292"/><line x1="151" y1="278" x2="134" y2="333"/><line x1="190" y1="292" x2="223" y2="329"/><line x1="134" y1="333" x2="97" y2="376"/><line x1="134" y1="333" x2="181" y2="381"/><line x1="104" y1="263" x2="175" y2="240"/><line x1="175" y1="240" x2="224" y2="236"/></g>
+    <text x="29" y="416" class="display lime" font-size="62">06</text><text x="31" y="437" class="tiny white mono">REPS · LOWERING</text>
+
+    <rect x="20" y="461" width="250" height="208" rx="22" fill="#171a17" stroke="#3b4038"/>
+    <rect x="20" y="461" width="4" height="65" rx="2" fill="#c8f72d"/>
+    <text x="37" y="480" class="tiny lime mono">LOCAL VISION · 即时</text><text x="37" y="504" class="small white" font-weight="800">动作稳定，保持当前节奏</text><text x="252" y="504" text-anchor="end" class="tiny" fill="#8f958b">94%</text>
+    <line x1="35" y1="526" x2="255" y2="526" class="line"/>
+    <text x="37" y="547" class="tiny" fill="#9ca298">COACH STREAM · 生成中</text>
+    <text x="37" y="571" class="small white">这组前 6 次节奏稳定，先保持重量，</text><text x="37" y="590" class="small white">结束后再结合 RIR 判断下一组</text><rect x="212" y="580" width="2" height="13" fill="#c8f72d"/>
+    <rect x="31" y="608" width="228" height="44" rx="15" fill="#242824" stroke="#474c45"/>
+    <text x="45" y="635" class="small" fill="#aeb3aa">问当前动作或告诉我体感…</text>
+    <circle cx="237" cy="630" r="15" fill="#c8f72d"/><text x="237" y="636" text-anchor="middle" font-size="16">⌁</text>
+    <rect x="26" y="693" width="46" height="46" rx="16" fill="#262b26"/><text x="49" y="722" text-anchor="middle" class="white" font-size="18">×</text>
+    <rect x="82" y="693" width="136" height="46" rx="16" fill="#e85c3a"/><text x="150" y="722" text-anchor="middle" class="small white" font-weight="800">结束本组</text>
+    <rect x="228" y="693" width="36" height="46" rx="16" fill="#262b26"/><text x="246" y="721" text-anchor="middle" class="lime" font-size="15">⌃</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">01 · 收起态始终可输入输出</text>
+  </g>
+
+  <!-- 02 STT -->
+  <g transform="translate(365 190)" filter="url(#shadow)">
+    <rect width="290" height="800" rx="42" fill="#050705"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#0d110e"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#030503"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="141" y="56" width="65" height="23" rx="11" fill="#242924" stroke="#464c44"/><text x="173" y="72" text-anchor="middle" class="tiny white">后置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#21301d" stroke="#6a8521"/><text x="145" y="112" text-anchor="middle" class="tiny lime">相机继续识别 · Console 已展开</text>
+    <g opacity=".58" stroke="#c8f72d" stroke-width="3" stroke-linecap="round" fill="#f7f6f1"><circle cx="145" cy="186" r="14"/><line x1="145" y1="200" x2="145" y2="277"/><line x1="145" y1="219" x2="103" y2="242"/><line x1="145" y1="219" x2="190" y2="242"/><line x1="145" y1="277" x2="119" y2="331"/><line x1="145" y1="277" x2="171" y2="331"/></g>
+    <text x="27" y="326" class="display lime" font-size="45">06</text><text x="29" y="345" class="tiny white mono">REPS</text>
+
+    <rect x="10" y="363" width="270" height="419" rx="28" fill="#f7f6f1"/>
+    <rect x="111" y="374" width="68" height="5" rx="3" fill="#c9c7bf"/>
+    <text x="28" y="409" class="phoneTitle">Coach · 当前组</text><text x="254" y="407" text-anchor="end" class="tiny muted">相机未暂停</text>
+    <rect x="26" y="430" width="238" height="66" rx="16" fill="#ffffff" stroke="#d8d6cc"/>
+    <text x="41" y="451" class="tiny muted">上一条 Coach</text><text x="41" y="473" class="small">保持重量，结束后结合 RIR 判断。</text><text x="244" y="473" text-anchor="end" class="muted">◖</text>
+    <text x="145" y="535" text-anchor="middle" class="tiny limeInk mono">STT · LISTENING</text>
+    <g transform="translate(62 553)" stroke="#82ad10" stroke-width="3" stroke-linecap="round"><line x1="0" y1="18" x2="0" y2="34"/><line x1="12" y1="10" x2="12" y2="42"/><line x1="24" y1="4" x2="24" y2="48"/><line x1="36" y1="14" x2="36" y2="38"/><line x1="48" y1="8" x2="48" y2="44"/><line x1="60" y1="17" x2="60" y2="35"/><line x1="72" y1="2" x2="72" y2="50"/><line x1="84" y1="12" x2="84" y2="40"/><line x1="96" y1="7" x2="96" y2="45"/><line x1="108" y1="17" x2="108" y2="35"/><line x1="120" y1="10" x2="120" y2="42"/><line x1="132" y1="15" x2="132" y2="37"/><line x1="144" y1="6" x2="144" y2="46"/><line x1="156" y1="14" x2="156" y2="38"/></g>
+    <text x="145" y="627" text-anchor="middle" class="body" font-weight="800">“右肩有一点紧，但不痛…”</text>
+    <text x="145" y="651" text-anchor="middle" class="tiny muted">临时转写 · 结束后再发送</text>
+    <rect x="28" y="680" width="96" height="44" rx="16" fill="#eceae3"/><text x="76" y="708" text-anchor="middle" class="small" font-weight="800">取消</text>
+    <rect x="134" y="680" width="128" height="44" rx="16" fill="#151714"/><text x="198" y="708" text-anchor="middle" class="small white" font-weight="800">结束并发送</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">02 · STT 监听与临时转写</text>
+  </g>
+
+  <!-- 03 streaming -->
+  <g transform="translate(680 190)" filter="url(#shadow)">
+    <rect width="290" height="800" rx="42" fill="#050705"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#0d110e"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#030503"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="141" y="56" width="65" height="23" rx="11" fill="#242924" stroke="#464c44"/><text x="173" y="72" text-anchor="middle" class="tiny white">后置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#21301d" stroke="#6a8521"/><text x="145" y="112" text-anchor="middle" class="tiny lime">动作识别仍在运行</text>
+    <g opacity=".55" stroke="#c8f72d" stroke-width="3" stroke-linecap="round" fill="#f7f6f1"><circle cx="145" cy="185" r="14"/><line x1="145" y1="199" x2="145" y2="276"/><line x1="145" y1="218" x2="103" y2="241"/><line x1="145" y1="218" x2="190" y2="241"/><line x1="145" y1="276" x2="119" y2="330"/><line x1="145" y1="276" x2="171" y2="330"/></g>
+    <text x="27" y="326" class="display lime" font-size="45">06</text><text x="29" y="345" class="tiny white mono">REPS</text>
+    <rect x="10" y="363" width="270" height="419" rx="28" fill="#f7f6f1"/>
+    <rect x="111" y="374" width="68" height="5" rx="3" fill="#c9c7bf"/>
+    <text x="28" y="409" class="phoneTitle">Coach Stream</text>
+    <rect x="205" y="389" width="57" height="27" rx="13" fill="#edf4d8"/><circle cx="218" cy="402" r="4" fill="#8ecb11"/><text x="229" y="406" class="tiny limeInk">生成中</text>
+    <rect x="26" y="432" width="238" height="61" rx="15" fill="#ffffff" stroke="#d8d6cc"/>
+    <text x="40" y="452" class="tiny muted">你 · STT</text><text x="40" y="475" class="small">右肩有一点紧，但不痛。</text>
+    <g transform="translate(27 514)"><circle cx="8" cy="8" r="8" fill="#c8f72d"/><text x="26" y="12" class="tiny" font-weight="800">读取当前组记录</text><text x="217" y="12" text-anchor="end" class="tiny limeInk">完成</text><circle cx="8" cy="39" r="8" fill="#c8f72d"/><text x="26" y="43" class="tiny" font-weight="800">检查疼痛与安全边界</text><text x="217" y="43" text-anchor="end" class="tiny limeInk">完成</text><circle cx="8" cy="70" r="8" fill="#151714"/><circle cx="8" cy="70" r="3" fill="#c8f72d"/><text x="26" y="74" class="tiny" font-weight="800">组织下一步建议</text><text x="217" y="74" text-anchor="end" class="tiny muted">进行中</text></g>
+    <rect x="26" y="610" width="238" height="90" rx="17" fill="#151714"/>
+    <text x="41" y="635" class="tiny lime mono">COACH STREAM</text><text x="41" y="660" class="small white">既然是紧而不痛，先停止相机监控并</text><text x="41" y="679" class="small white">做一次无负重活动度检查；如果出现</text><rect x="231" y="668" width="2" height="14" fill="#c8f72d"/>
+    <rect x="28" y="718" width="234" height="42" rx="14" fill="#ffffff" stroke="#d8d6cc"/><text x="42" y="744" class="small muted">可继续输入，或点击停止生成</text><circle cx="240" cy="739" r="13" fill="#151714"/><rect x="236" y="735" width="8" height="8" rx="1" fill="#c8f72d"/>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">03 · Token 与工具进度流</text>
+  </g>
+
+  <!-- 04 TTS -->
+  <g transform="translate(995 190)" filter="url(#shadow)">
+    <rect width="290" height="800" rx="42" fill="#050705"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#0d110e"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#030503"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="141" y="56" width="65" height="23" rx="11" fill="#242924" stroke="#464c44"/><text x="173" y="72" text-anchor="middle" class="tiny white">前置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#332c17" stroke="#a17d24"/><text x="145" y="112" text-anchor="middle" class="tiny" fill="#ffd67a">已暂停计数 · 画面仍可见</text>
+    <g opacity=".38" stroke="#c8f72d" stroke-width="3" stroke-linecap="round" fill="#f7f6f1"><circle cx="145" cy="185" r="14"/><line x1="145" y1="199" x2="145" y2="276"/><line x1="145" y1="218" x2="103" y2="241"/><line x1="145" y1="218" x2="190" y2="241"/><line x1="145" y1="276" x2="119" y2="330"/><line x1="145" y1="276" x2="171" y2="330"/></g>
+    <text x="27" y="326" class="display lime" font-size="45">06</text><text x="29" y="345" class="tiny white mono">REPS · PAUSED</text>
+    <rect x="10" y="363" width="270" height="419" rx="28" fill="#f7f6f1"/>
+    <rect x="111" y="374" width="68" height="5" rx="3" fill="#c9c7bf"/>
+    <text x="28" y="409" class="phoneTitle">Coach · 建议完成</text><text x="252" y="407" text-anchor="end" class="tiny limeInk">已保存</text>
+    <rect x="26" y="430" width="238" height="180" rx="18" fill="#ffffff" stroke="#d8d6cc"/><rect x="26" y="430" width="4" height="180" rx="2" fill="#e85c3a"/>
+    <text x="42" y="454" class="tiny" fill="#9c3e28" font-weight="800">体感优先于相机判断</text><text x="42" y="481" class="phoneTitle">先暂停这一组</text>
+    <text x="42" y="508" class="small muted">做一次无负重活动度检查。如果紧感</text><text x="42" y="527" class="small muted">消失，可降低 2.5 kg 再尝试；出现</text><text x="42" y="546" class="small muted">疼痛、麻木或无力则结束该动作。</text>
+    <rect x="42" y="565" width="87" height="27" rx="13" fill="#eceae3"/><text x="85" y="583" text-anchor="middle" class="tiny" font-weight="800">保持原安排</text><rect x="137" y="565" width="110" height="27" rx="13" fill="#151714"/><text x="192" y="583" text-anchor="middle" class="tiny white" font-weight="800">调整下一组</text>
+    <rect x="26" y="627" width="238" height="57" rx="17" fill="#151714"/>
+    <circle cx="51" cy="655" r="16" fill="#c8f72d"/><text x="51" y="661" text-anchor="middle" font-size="17">Ⅱ</text>
+    <text x="77" y="651" class="tiny lime mono">TTS · SPEAKING</text><text x="77" y="670" class="tiny white">00:08 / 00:19</text>
+    <rect x="176" y="651" width="49" height="4" rx="2" fill="#3b4038"/><rect x="176" y="651" width="21" height="4" rx="2" fill="#c8f72d"/><text x="246" y="661" text-anchor="middle" class="lime" font-size="16">◖</text>
+    <rect x="28" y="701" width="234" height="43" rx="14" fill="#ffffff" stroke="#d8d6cc"/><text x="42" y="728" class="small muted">打断、追问或补充体感…</text><circle cx="240" cy="723" r="13" fill="#151714"/><text x="240" y="728" text-anchor="middle" class="lime">⌁</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">04 · 完整句 TTS 与可执行卡</text>
+  </g>
+
+  <!-- notes -->
+  <g transform="translate(1340 205)">
+    <text class="label limeInk">DUPLEX CONTRACT</text><text y="42" class="display" font-size="28">两条流，四个独立状态机</text>
+    <text y="77" class="body muted">视觉识别不等待 LLM；语音和文字流也不会</text><text y="99" class="body muted">阻止结束本组、关闭监控或回到手动记录。</text>
+    <g transform="translate(0 137)">
+      <rect width="500" height="71" rx="18" fill="#151714"/><text x="20" y="27" class="tiny lime mono">LOCAL VISION</text><text x="20" y="51" class="body white" font-weight="800">frame → rep / phase / live cue　·　本地低延迟</text>
+      <rect y="83" width="500" height="71" rx="18" fill="#ffffff" stroke="#d8d6cc"/><text x="20" y="110" class="tiny limeInk mono">COACH STREAM</text><text x="20" y="134" class="body" font-weight="800">STT / text → tool / delta / artifact → TTS</text>
+    </g>
+    <text y="335" class="label">状态规则</text>
+    <g transform="translate(0 361)">
+      <circle cx="8" cy="7" r="5" fill="#8ecb11"/><text x="24" y="12" class="small" font-weight="800">STT 临时转写与已发送消息视觉上不同</text>
+      <circle cx="8" cy="48" r="5" fill="#8ecb11"/><text x="24" y="53" class="small" font-weight="800">流式文本按 token 更新，工具进度单独展示</text>
+      <circle cx="8" cy="89" r="5" fill="#8ecb11"/><text x="24" y="94" class="small" font-weight="800">TTS 只朗读已完成句，避免 token 级卡顿</text>
+      <circle cx="8" cy="130" r="5" fill="#8ecb11"/><text x="24" y="135" class="small" font-weight="800">用户开始说话时立即停止 TTS，保留文本</text>
+      <circle cx="8" cy="171" r="5" fill="#8ecb11"/><text x="24" y="176" class="small" font-weight="800">任何错误都不遮挡结束本组与降级入口</text>
+      <circle cx="8" cy="212" r="5" fill="#8ecb11"/><text x="24" y="217" class="small" font-weight="800">前后摄像头可切换；切换后重新验证入框</text>
+    </g>
+    <rect y="620" width="500" height="175" rx="24" fill="#ffffff" stroke="#d8d6cc"/>
+    <text x="23" y="651" class="label">训练中默认行为</text>
+    <text x="23" y="686" class="small muted">Console 默认收起但持续显示最新输出；点击、上滑或</text><text x="23" y="709" class="small muted">开始 STT 后展开。键盘打开时，视频保留至少 42% 高度。</text>
+    <text x="23" y="741" class="small muted">切换摄像头会暂停计数、保留当前组和已确认次数，</text><text x="23" y="764" class="small muted">重新通过入框检查后自动恢复。</text>
+    <rect y="824" width="500" height="148" rx="24" fill="#151714"/>
+    <text x="23" y="856" class="tiny lime mono">ACCESSIBILITY / AUDIO</text>
+    <text x="23" y="889" class="body white" font-weight="800">字幕永远存在，TTS 永远可关闭</text>
+    <text x="23" y="918" class="small" fill="#aeb3aa">播放状态、临时转写、流式状态和来源标签都必须</text><text x="23" y="941" class="small" fill="#aeb3aa">由无障碍服务读取，不能只靠颜色或动画表达。</text>
+  </g>
+</svg>

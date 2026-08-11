@@ -8,6 +8,7 @@ import {
   type ExerciseCatalogArtifact,
   type ExerciseConcept,
   type ExerciseConceptId,
+  type DietStrategyDeclaration,
   type ExerciseEquipmentDescriptor,
   type ExerciseVariant,
   type KnowledgeClassification,
@@ -84,42 +85,44 @@ interface FamilySeed {
   fatigue?: StimulusContract["fatigueCost"];
   /** 结构化冲击/关节负荷（供低冲击约束硬过滤）。 */
   impact?: { level: "low" | "moderate" | "high"; loadedJoints: readonly string[] };
+  /** 力学分类：复合（多关节）/ 孤立（单关节）。主项优先复合。 */
+  mechanic?: "compound" | "isolation";
 }
 
 const FAMILIES: readonly FamilySeed[] = [
-  { movement: "bench_press", nameZh: "卧推", nameEn: "Bench press", pattern: "horizontal_push", primary: ["chest"], secondary: ["triceps", "anterior_deltoid"], loadModes: ["barbell", "dumbbell", "machine", "cable"], variations: ["standard"], angles: ["flat", "incline", "decline"], grips: ["standard", "close"], supports: ["bench"], aliases: ["推胸"] },
-  { movement: "push_up", nameZh: "俯卧撑", nameEn: "Push-up", pattern: "horizontal_push", primary: ["chest"], secondary: ["triceps", "anterior_deltoid"], loadModes: ["bodyweight", "band"], variations: ["standard", "knee", "incline", "decline", "paused"], angles: ["floor"], supports: ["free"], prescriptionMode: "bodyweight_reps" },
-  { movement: "chest_fly", nameZh: "飞鸟", nameEn: "Chest fly", pattern: "horizontal_push", primary: ["chest"], secondary: ["anterior_deltoid"], loadModes: ["dumbbell", "cable", "machine", "band"], variations: ["standard"], angles: ["flat", "incline"], supports: ["supported"] },
-  { movement: "overhead_press", nameZh: "肩上推举", nameEn: "Overhead press", pattern: "vertical_push", primary: ["deltoids"], secondary: ["triceps"], loadModes: ["barbell", "dumbbell", "machine", "kettlebell"], variations: ["standard"], angles: ["standing", "seated"], supports: ["free", "back_supported"] },
-  { movement: "row", nameZh: "划船", nameEn: "Row", pattern: "horizontal_pull", primary: ["back"], secondary: ["biceps", "rear_deltoid"], loadModes: ["barbell", "dumbbell", "machine", "cable", "band", "kettlebell"], variations: ["standard"], angles: ["bent_over", "seated"], grips: ["neutral", "pronated"], supports: ["free", "chest_supported"] },
-  { movement: "lat_pulldown", nameZh: "高位下拉", nameEn: "Lat pulldown", pattern: "vertical_pull", primary: ["back"], secondary: ["biceps"], loadModes: ["cable", "machine", "band"], variations: ["standard"], angles: ["seated", "kneeling"], grips: ["wide", "neutral", "supinated"], supports: ["supported"] },
-  { movement: "pull_up", nameZh: "引体向上", nameEn: "Pull-up", pattern: "vertical_pull", primary: ["back"], secondary: ["biceps"], loadModes: ["bodyweight", "band"], variations: ["standard"], angles: ["hanging"], grips: ["pronated", "neutral", "supinated"], supports: ["free"], prescriptionMode: "bodyweight_reps" },
-  { movement: "straight_arm_pulldown", nameZh: "直臂下压", nameEn: "Straight-arm pulldown", pattern: "vertical_pull", primary: ["back"], secondary: [], loadModes: ["cable", "band"], variations: ["standard", "rope"], angles: ["standing", "kneeling"] },
-  { movement: "squat", nameZh: "深蹲", nameEn: "Squat", pattern: "squat", primary: ["quadriceps", "glutes"], secondary: ["adductors"], loadModes: ["bodyweight", "barbell", "dumbbell", "kettlebell", "machine", "band"], variations: ["standard"], angles: ["shoulder_width", "wide", "narrow"], supports: ["free"] },
-  { movement: "deadlift", nameZh: "硬拉", nameEn: "Deadlift", pattern: "hip_hinge", primary: ["posterior_chain"], secondary: ["back"], loadModes: ["barbell", "dumbbell", "kettlebell", "band"], variations: ["conventional", "romanian"], angles: ["standard"], supports: ["free"], fatigue: "high" },
-  { movement: "hip_thrust", nameZh: "臀推", nameEn: "Hip thrust", pattern: "hip_hinge", primary: ["glutes"], secondary: ["hamstrings"], loadModes: ["bodyweight", "barbell", "dumbbell", "machine"], variations: ["standard"], angles: ["floor", "bench_supported"], supports: ["supported"] },
-  { movement: "lunge", nameZh: "弓步", nameEn: "Lunge", pattern: "lunge", primary: ["quadriceps", "glutes"], secondary: ["adductors"], loadModes: ["bodyweight", "barbell", "dumbbell", "kettlebell"], variations: ["reverse", "forward", "walking"], angles: ["standard"], unilateral: ["alternating"] },
-  { movement: "split_squat", nameZh: "分腿蹲", nameEn: "Split squat", pattern: "lunge", primary: ["quadriceps", "glutes"], secondary: [], loadModes: ["bodyweight", "barbell", "dumbbell", "kettlebell"], variations: ["standard", "rear_foot_elevated"], angles: ["standard"], unilateral: ["left", "right"] },
-  { movement: "leg_press", nameZh: "腿举", nameEn: "Leg press", pattern: "squat", primary: ["quadriceps", "glutes"], secondary: [], loadModes: ["machine"], variations: ["standard"], angles: ["shoulder_width", "wide", "narrow", "high_foot"], supports: ["supported"] },
-  { movement: "knee_extension", nameZh: "腿屈伸", nameEn: "Knee extension", pattern: "knee_extension", primary: ["quadriceps"], secondary: [], loadModes: ["machine", "band"], variations: ["standard"], angles: ["seated"], unilateral: ["bilateral", "left", "right"], supports: ["supported"] },
-  { movement: "knee_flexion", nameZh: "腿弯举", nameEn: "Leg curl", pattern: "knee_flexion", primary: ["hamstrings"], secondary: [], loadModes: ["machine", "band"], variations: ["seated", "lying", "standing"], angles: ["standard"], supports: ["supported"] },
-  { movement: "lateral_raise", nameZh: "侧平举", nameEn: "Lateral raise", pattern: "shoulder_abduction", primary: ["lateral_deltoid"], secondary: [], loadModes: ["dumbbell", "cable", "band", "machine"], variations: ["standard", "lean_away"], angles: ["standing"], unilateral: ["bilateral", "left", "right"] },
-  { movement: "front_raise", nameZh: "前平举", nameEn: "Front raise", pattern: "shoulder_flexion", primary: ["anterior_deltoid"], secondary: [], loadModes: ["dumbbell", "cable", "band", "barbell"], variations: ["standard"], angles: ["standing"], unilateral: ["bilateral", "alternating"] },
-  { movement: "rear_delt_fly", nameZh: "后束飞鸟", nameEn: "Rear-delt fly", pattern: "shoulder_horizontal_abduction", primary: ["rear_deltoid"], secondary: ["upper_back"], loadModes: ["dumbbell", "cable", "band", "machine"], variations: ["standard"], angles: ["standing", "chest_supported"] },
-  { movement: "external_rotation", nameZh: "肩外旋", nameEn: "Shoulder external rotation", pattern: "shoulder_external_rotation", primary: ["rotator_cuff"], secondary: [], loadModes: ["cable", "band"], variations: ["elbow_at_side", "ninety_degree"], angles: ["standing"], unilateral: ["left", "right"], fatigue: "low" },
-  { movement: "biceps_curl", nameZh: "肱二头弯举", nameEn: "Biceps curl", pattern: "elbow_flexion", primary: ["biceps"], secondary: ["forearms"], loadModes: ["barbell", "dumbbell", "cable", "band", "machine"], variations: ["standard"], angles: ["standing", "seated"], grips: ["supinated", "neutral", "pronated"] },
-  { movement: "triceps_extension", nameZh: "肱三头伸展", nameEn: "Triceps extension", pattern: "elbow_extension", primary: ["triceps"], secondary: [], loadModes: ["dumbbell", "cable", "band", "machine"], variations: ["pushdown", "overhead", "lying"], angles: ["standard"] },
-  { movement: "calf_raise", nameZh: "提踵", nameEn: "Calf raise", pattern: "ankle_plantarflexion", primary: ["calves"], secondary: [], loadModes: ["bodyweight", "barbell", "dumbbell", "machine"], variations: ["standing", "seated"], angles: ["standard"], unilateral: ["bilateral", "left", "right"] },
-  { movement: "plank", nameZh: "平板支撑", nameEn: "Plank", pattern: "core_anti_extension", primary: ["core"], secondary: [], loadModes: ["bodyweight"], variations: ["kneeling", "standard", "long_lever", "side_left", "side_right", "body_saw"], angles: ["floor"], prescriptionMode: "timed", fatigue: "low" },
-  { movement: "anti_rotation_press", nameZh: "抗旋推", nameEn: "Anti-rotation press", pattern: "core_anti_rotation", primary: ["core"], secondary: [], loadModes: ["cable", "band"], variations: ["standing", "half_kneeling"], angles: ["standard"], unilateral: ["left", "right"], fatigue: "low" },
-  { movement: "crunch", nameZh: "卷腹", nameEn: "Crunch", pattern: "core_flexion", primary: ["core"], secondary: [], loadModes: ["bodyweight", "cable", "machine"], variations: ["standard", "reverse"], angles: ["floor"], fatigue: "low" },
-  { movement: "march", nameZh: "踏步", nameEn: "March", pattern: "locomotion", primary: ["legs"], secondary: [], loadModes: ["bodyweight"], variations: ["in_place", "lateral", "knee_raise", "step_jack"], angles: ["standing"], impact: { level: "low", loadedJoints: ["knee", "ankle"] }, prescriptionMode: "timed", fatigue: "low" },
-  { movement: "walk", nameZh: "步行", nameEn: "Walk", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["none", "cardio_machine"], variations: ["easy", "brisk", "incline"], angles: ["standard"], impact: { level: "low", loadedJoints: ["knee", "ankle"] }, prescriptionMode: "distance", fatigue: "low" },
-  { movement: "cycle", nameZh: "骑行", nameEn: "Cycling", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["cardio_machine"], variations: ["upright", "recumbent", "spin"], angles: ["standard"], impact: { level: "low", loadedJoints: ["knee"] }, prescriptionMode: "timed", fatigue: "medium" },
-  { movement: "elliptical", nameZh: "椭圆机", nameEn: "Elliptical", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["cardio_machine"], variations: ["steady", "interval"], angles: ["standard"], impact: { level: "low", loadedJoints: ["knee"] }, prescriptionMode: "timed" },
-  { movement: "stair_climb", nameZh: "爬楼", nameEn: "Stair climb", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["none", "cardio_machine"], variations: ["steady", "interval"], angles: ["standard"], impact: { level: "moderate", loadedJoints: ["knee"] }, prescriptionMode: "timed" },
-  { movement: "mobility_flow", nameZh: "灵活性活动", nameEn: "Mobility flow", pattern: "mobility", primary: [], secondary: [], loadModes: ["none"], variations: ["ankle", "hip", "thoracic", "shoulder", "wrist", "full_body"], angles: ["gentle"], prescriptionMode: "timed", fatigue: "low" },
-  { movement: "recovery_activity", nameZh: "恢复活动", nameEn: "Recovery activity", pattern: "recovery", primary: [], secondary: [], loadModes: ["none"], variations: ["breathing", "easy_walk", "gentle_stretch", "rest"], angles: ["gentle"], prescriptionMode: "timed", fatigue: "low" },
+  { movement: "bench_press", mechanic: "compound", nameZh: "卧推", nameEn: "Bench press", pattern: "horizontal_push", primary: ["chest"], secondary: ["triceps", "anterior_deltoid"], loadModes: ["barbell", "dumbbell", "machine", "cable"], variations: ["standard"], angles: ["flat", "incline", "decline"], grips: ["standard", "close"], supports: ["bench"], aliases: ["推胸"] },
+  { movement: "push_up", mechanic: "compound", nameZh: "俯卧撑", nameEn: "Push-up", pattern: "horizontal_push", primary: ["chest"], secondary: ["triceps", "anterior_deltoid"], loadModes: ["bodyweight", "band"], variations: ["standard", "knee", "incline", "decline", "paused"], angles: ["floor"], supports: ["free"], prescriptionMode: "bodyweight_reps" },
+  { movement: "chest_fly", mechanic: "isolation", nameZh: "飞鸟", nameEn: "Chest fly", pattern: "horizontal_push", primary: ["chest"], secondary: ["anterior_deltoid"], loadModes: ["dumbbell", "cable", "machine", "band"], variations: ["standard"], angles: ["flat", "incline"], supports: ["supported"] },
+  { movement: "overhead_press", mechanic: "compound", nameZh: "肩上推举", nameEn: "Overhead press", pattern: "vertical_push", primary: ["deltoids"], secondary: ["triceps"], loadModes: ["barbell", "dumbbell", "machine", "kettlebell"], variations: ["standard"], angles: ["standing", "seated"], supports: ["free", "back_supported"] },
+  { movement: "row", mechanic: "compound", nameZh: "划船", nameEn: "Row", pattern: "horizontal_pull", primary: ["back"], secondary: ["biceps", "rear_deltoid"], loadModes: ["barbell", "dumbbell", "machine", "cable", "band", "kettlebell"], variations: ["standard"], angles: ["bent_over", "seated"], grips: ["neutral", "pronated"], supports: ["free", "chest_supported"] },
+  { movement: "lat_pulldown", mechanic: "compound", nameZh: "高位下拉", nameEn: "Lat pulldown", pattern: "vertical_pull", primary: ["back"], secondary: ["biceps"], loadModes: ["cable", "machine", "band"], variations: ["standard"], angles: ["seated", "kneeling"], grips: ["wide", "neutral", "supinated"], supports: ["supported"] },
+  { movement: "pull_up", mechanic: "compound", nameZh: "引体向上", nameEn: "Pull-up", pattern: "vertical_pull", primary: ["back"], secondary: ["biceps"], loadModes: ["bodyweight", "band"], variations: ["standard"], angles: ["hanging"], grips: ["pronated", "neutral", "supinated"], supports: ["free"], prescriptionMode: "bodyweight_reps" },
+  { movement: "straight_arm_pulldown", mechanic: "compound", nameZh: "直臂下压", nameEn: "Straight-arm pulldown", pattern: "vertical_pull", primary: ["back"], secondary: [], loadModes: ["cable", "band"], variations: ["standard", "rope"], angles: ["standing", "kneeling"] },
+  { movement: "squat", mechanic: "compound", nameZh: "深蹲", nameEn: "Squat", pattern: "squat", primary: ["quadriceps", "glutes"], secondary: ["adductors"], loadModes: ["bodyweight", "barbell", "dumbbell", "kettlebell", "machine", "band"], variations: ["standard"], angles: ["shoulder_width", "wide", "narrow"], supports: ["free"] },
+  { movement: "deadlift", mechanic: "compound", nameZh: "硬拉", nameEn: "Deadlift", pattern: "hip_hinge", primary: ["posterior_chain"], secondary: ["back"], loadModes: ["barbell", "dumbbell", "kettlebell", "band"], variations: ["conventional", "romanian"], angles: ["standard"], supports: ["free"], fatigue: "high" },
+  { movement: "hip_thrust", mechanic: "compound", nameZh: "臀推", nameEn: "Hip thrust", pattern: "hip_hinge", primary: ["glutes"], secondary: ["hamstrings"], loadModes: ["bodyweight", "barbell", "dumbbell", "machine"], variations: ["standard"], angles: ["floor", "bench_supported"], supports: ["supported"] },
+  { movement: "lunge", mechanic: "compound", nameZh: "弓步", nameEn: "Lunge", pattern: "lunge", primary: ["quadriceps", "glutes"], secondary: ["adductors"], loadModes: ["bodyweight", "barbell", "dumbbell", "kettlebell"], variations: ["reverse", "forward", "walking"], angles: ["standard"], unilateral: ["alternating"] },
+  { movement: "split_squat", mechanic: "compound", nameZh: "分腿蹲", nameEn: "Split squat", pattern: "lunge", primary: ["quadriceps", "glutes"], secondary: [], loadModes: ["bodyweight", "barbell", "dumbbell", "kettlebell"], variations: ["standard", "rear_foot_elevated"], angles: ["standard"], unilateral: ["left", "right"] },
+  { movement: "leg_press", mechanic: "compound", nameZh: "腿举", nameEn: "Leg press", pattern: "squat", primary: ["quadriceps", "glutes"], secondary: [], loadModes: ["machine"], variations: ["standard"], angles: ["shoulder_width", "wide", "narrow", "high_foot"], supports: ["supported"] },
+  { movement: "knee_extension", mechanic: "isolation", nameZh: "腿屈伸", nameEn: "Knee extension", pattern: "knee_extension", primary: ["quadriceps"], secondary: [], loadModes: ["machine", "band"], variations: ["standard"], angles: ["seated"], unilateral: ["bilateral", "left", "right"], supports: ["supported"] },
+  { movement: "knee_flexion", mechanic: "isolation", nameZh: "腿弯举", nameEn: "Leg curl", pattern: "knee_flexion", primary: ["hamstrings"], secondary: [], loadModes: ["machine", "band"], variations: ["seated", "lying", "standing"], angles: ["standard"], supports: ["supported"] },
+  { movement: "lateral_raise", mechanic: "isolation", nameZh: "侧平举", nameEn: "Lateral raise", pattern: "shoulder_abduction", primary: ["lateral_deltoid"], secondary: [], loadModes: ["dumbbell", "cable", "band", "machine"], variations: ["standard", "lean_away"], angles: ["standing"], unilateral: ["bilateral", "left", "right"] },
+  { movement: "front_raise", mechanic: "compound", nameZh: "前平举", nameEn: "Front raise", pattern: "shoulder_flexion", primary: ["anterior_deltoid"], secondary: [], loadModes: ["dumbbell", "cable", "band", "barbell"], variations: ["standard"], angles: ["standing"], unilateral: ["bilateral", "alternating"] },
+  { movement: "rear_delt_fly", mechanic: "isolation", nameZh: "后束飞鸟", nameEn: "Rear-delt fly", pattern: "shoulder_horizontal_abduction", primary: ["rear_deltoid"], secondary: ["upper_back"], loadModes: ["dumbbell", "cable", "band", "machine"], variations: ["standard"], angles: ["standing", "chest_supported"] },
+  { movement: "external_rotation", mechanic: "compound", nameZh: "肩外旋", nameEn: "Shoulder external rotation", pattern: "shoulder_external_rotation", primary: ["rotator_cuff"], secondary: [], loadModes: ["cable", "band"], variations: ["elbow_at_side", "ninety_degree"], angles: ["standing"], unilateral: ["left", "right"], fatigue: "low" },
+  { movement: "biceps_curl", mechanic: "isolation", nameZh: "肱二头弯举", nameEn: "Biceps curl", pattern: "elbow_flexion", primary: ["biceps"], secondary: ["forearms"], loadModes: ["barbell", "dumbbell", "cable", "band", "machine"], variations: ["standard"], angles: ["standing", "seated"], grips: ["supinated", "neutral", "pronated"] },
+  { movement: "triceps_extension", mechanic: "isolation", nameZh: "肱三头伸展", nameEn: "Triceps extension", pattern: "elbow_extension", primary: ["triceps"], secondary: [], loadModes: ["dumbbell", "cable", "band", "machine"], variations: ["pushdown", "overhead", "lying"], angles: ["standard"] },
+  { movement: "calf_raise", mechanic: "isolation", nameZh: "提踵", nameEn: "Calf raise", pattern: "ankle_plantarflexion", primary: ["calves"], secondary: [], loadModes: ["bodyweight", "barbell", "dumbbell", "machine"], variations: ["standing", "seated"], angles: ["standard"], unilateral: ["bilateral", "left", "right"] },
+  { movement: "plank", mechanic: "isolation", nameZh: "平板支撑", nameEn: "Plank", pattern: "core_anti_extension", primary: ["core"], secondary: [], loadModes: ["bodyweight"], variations: ["kneeling", "standard", "long_lever", "side_left", "side_right", "body_saw"], angles: ["floor"], prescriptionMode: "timed", fatigue: "low" },
+  { movement: "anti_rotation_press", mechanic: "compound", nameZh: "抗旋推", nameEn: "Anti-rotation press", pattern: "core_anti_rotation", primary: ["core"], secondary: [], loadModes: ["cable", "band"], variations: ["standing", "half_kneeling"], angles: ["standard"], unilateral: ["left", "right"], fatigue: "low" },
+  { movement: "crunch", mechanic: "isolation", nameZh: "卷腹", nameEn: "Crunch", pattern: "core_flexion", primary: ["core"], secondary: [], loadModes: ["bodyweight", "cable", "machine"], variations: ["standard", "reverse"], angles: ["floor"], fatigue: "low" },
+  { movement: "march", mechanic: "compound", nameZh: "踏步", nameEn: "March", pattern: "locomotion", primary: ["legs"], secondary: [], loadModes: ["bodyweight"], variations: ["in_place", "lateral", "knee_raise", "step_jack"], angles: ["standing"], impact: { level: "low", loadedJoints: ["knee", "ankle"] }, prescriptionMode: "timed", fatigue: "low" },
+  { movement: "walk", mechanic: "compound", nameZh: "步行", nameEn: "Walk", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["none", "cardio_machine"], variations: ["easy", "brisk", "incline"], angles: ["standard"], impact: { level: "low", loadedJoints: ["knee", "ankle"] }, prescriptionMode: "distance", fatigue: "low" },
+  { movement: "cycle", mechanic: "compound", nameZh: "骑行", nameEn: "Cycling", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["cardio_machine"], variations: ["upright", "recumbent", "spin"], angles: ["standard"], impact: { level: "low", loadedJoints: ["knee"] }, prescriptionMode: "timed", fatigue: "medium" },
+  { movement: "elliptical", mechanic: "compound", nameZh: "椭圆机", nameEn: "Elliptical", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["cardio_machine"], variations: ["steady", "interval"], angles: ["standard"], impact: { level: "low", loadedJoints: ["knee"] }, prescriptionMode: "timed" },
+  { movement: "stair_climb", mechanic: "compound", nameZh: "爬楼", nameEn: "Stair climb", pattern: "cardio", primary: ["cardiorespiratory"], secondary: ["legs"], loadModes: ["none", "cardio_machine"], variations: ["steady", "interval"], angles: ["standard"], impact: { level: "moderate", loadedJoints: ["knee"] }, prescriptionMode: "timed" },
+  { movement: "mobility_flow", mechanic: "compound", nameZh: "灵活性活动", nameEn: "Mobility flow", pattern: "mobility", primary: [], secondary: [], loadModes: ["none"], variations: ["ankle", "hip", "thoracic", "shoulder", "wrist", "full_body"], angles: ["gentle"], prescriptionMode: "timed", fatigue: "low" },
+  { movement: "recovery_activity", mechanic: "compound", nameZh: "恢复活动", nameEn: "Recovery activity", pattern: "recovery", primary: [], secondary: [], loadModes: ["none"], variations: ["breathing", "easy_walk", "gentle_stretch", "rest"], angles: ["gentle"], prescriptionMode: "timed", fatigue: "low" },
 ];
 
 /**
@@ -292,6 +295,7 @@ function buildCatalog(): ExerciseCatalogArtifact {
                     ],
                     ...(loadMode === "bodyweight" ? { bodyweightDifficultyNodeId: id } : {}),
                     ...(family.impact ? { impact: family.impact } : {}),
+                    ...(family.mechanic ? { mechanic: family.mechanic } : {}),
                     status: "active",
                     sourceRefs: ["maxpower.exercise-wiki.v1"],
                     unknownFields: ["individual_load_history", "motion_capability"],
@@ -465,8 +469,94 @@ const SAFETY_LEXICON = {
 
 
 /** 编排策略种子（ticket 03）：源自 program-strategy-set.md（四标签纪律见该文档）。 */
+/**
+ * 饮食策略库（供需图供给侧）。每条只声明四维供给与目标适配度，不含训练规则。
+ * 证据说明：碳水 g/kg 区间来自 AND/DC/ACSM 联合立场（Thomas 2016）——那是**能量平衡下
+ * 为表现供能**的标准；减脂期总能量受赤字约束，实际会落在区间下段甚至更低。
+ * 蛋白区间来自 ISSN 2017（1.4-2.0 g/kg；减脂保肌取上段）。
+ * supports 与 goalFit 的档位是产品规则（D），依据是糖原依赖性与容量驱动的方向性结论。
+ */
+const DIET_STRATEGIES: readonly DietStrategyDeclaration[] = [
+  {
+    id: "carb_cycling",
+    nameZh: "碳循环",
+    carbAvailability: {
+      pattern: "cycled",
+      byDayType: { high: { min: 4, max: 6 }, moderate: { min: 2.5, max: 4 }, low: { min: 1, max: 2.5 } },
+    },
+    proteinPolicy: { perKgMin: 1.6, perKgMax: 2.2 },
+    fatFloorPercentOfEnergy: 20,
+    supports: { highIntensityWork: "full", highVolumeWork: "full", lowIntensityAerobic: "full" },
+    goalFit: { hypertrophy: "good", strength: "good", fatLoss: "good" },
+    goalFitNote: "碳水集中在糖原需求大的训练日，非训练日下调——按需供能的天然形式",
+    evidenceTier: "D",
+    sourceRefs: ["impey_2018_fuel_for_the_work_required", "thomas_2016_nutrition_athletic_performance"],
+  },
+  {
+    id: "even_carbs",
+    nameZh: "均衡碳水（不循环）",
+    carbAvailability: {
+      pattern: "constant",
+      byDayType: { high: { min: 3, max: 5 }, moderate: { min: 3, max: 5 }, low: { min: 3, max: 5 } },
+    },
+    proteinPolicy: { perKgMin: 1.6, perKgMax: 2.2 },
+    fatFloorPercentOfEnergy: 20,
+    supports: { highIntensityWork: "full", highVolumeWork: "full", lowIntensityAerobic: "full" },
+    goalFit: { hypertrophy: "good", strength: "good", fatLoss: "good" },
+    goalFitNote: "最简单可执行；等热量下与碳循环的减脂效果无差异",
+    evidenceTier: "B",
+    sourceRefs: ["hall_guo_controlled_feeding", "thomas_2016_nutrition_athletic_performance"],
+  },
+  {
+    id: "low_carb",
+    nameZh: "低碳",
+    carbAvailability: {
+      pattern: "cycled",
+      byDayType: { high: { min: 2, max: 3 }, moderate: { min: 1.5, max: 2 }, low: { min: 0.8, max: 1.5 } },
+    },
+    proteinPolicy: { perKgMin: 1.8, perKgMax: 2.2 },
+    fatFloorPercentOfEnergy: 25,
+    supports: { highIntensityWork: "limited", highVolumeWork: "limited", lowIntensityAerobic: "full" },
+    goalFit: { hypertrophy: "workable_with_tradeoffs", strength: "workable_with_tradeoffs", fatLoss: "good" },
+    goalFitNote: "减脂由赤字驱动，低碳本身无额外优势；高强度容量会受一定限制",
+    evidenceTier: "B",
+    sourceRefs: ["hall_2015_cell_metabolism_fat_vs_carb_restriction"],
+  },
+  {
+    id: "ketogenic",
+    nameZh: "生酮",
+    carbAvailability: {
+      pattern: "very_low",
+      byDayType: { high: { min: 0.3, max: 0.7 }, moderate: { min: 0.2, max: 0.5 }, low: { min: 0.2, max: 0.5 } },
+    },
+    proteinPolicy: { perKgMin: 1.6, perKgMax: 2.0 },
+    fatFloorPercentOfEnergy: 60,
+    supports: { highIntensityWork: "poor", highVolumeWork: "poor", lowIntensityAerobic: "full" },
+    goalFit: { hypertrophy: "poor", strength: "workable_with_tradeoffs", fatLoss: "workable_with_tradeoffs" },
+    goalFitNote: "减脂可行（赤字仍是驱动力），但糖原长期很低会压住高强度容量——而容量是增肌的主驱动，所以增肌适配度低",
+    evidenceTier: "D",
+    sourceRefs: ["hall_guo_controlled_feeding", "impey_2018_fuel_for_the_work_required"],
+  },
+  {
+    id: "higher_carb_surplus",
+    nameZh: "高碳（增肌期）",
+    carbAvailability: {
+      pattern: "cycled",
+      byDayType: { high: { min: 5, max: 7 }, moderate: { min: 4, max: 5.5 }, low: { min: 3, max: 4.5 } },
+    },
+    proteinPolicy: { perKgMin: 1.6, perKgMax: 2.0 },
+    fatFloorPercentOfEnergy: 20,
+    supports: { highIntensityWork: "full", highVolumeWork: "full", lowIntensityAerobic: "full" },
+    goalFit: { hypertrophy: "good", strength: "good", fatLoss: "workable_with_tradeoffs" },
+    goalFitNote: "支撑高容量训练；增肌期不需要低碳日，用中碳作下限",
+    evidenceTier: "B",
+    sourceRefs: ["thomas_2016_nutrition_athletic_performance", "acsm_2026_resistance_training"],
+  },
+];
+
 const PROGRAM_STRATEGIES: ProgramStrategies = {
-  semanticVersion: "1.0.0",
+  semanticVersion: "1.1.0",
+  dietStrategies: DIET_STRATEGIES,
   splitRotations: [
     {
       id: "full_body",

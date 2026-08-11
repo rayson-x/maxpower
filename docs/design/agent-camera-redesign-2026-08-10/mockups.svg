@@ -1,0 +1,342 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="3600" viewBox="0 0 1920 3600">
+  <defs>
+    <style>
+      text { font-family: Heiti SC, sans-serif; fill: #171914; }
+      .display { font-family: Heiti SC, sans-serif; font-weight: 800; letter-spacing: -1px; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .7px; }
+      .muted { fill: #73776f; }
+      .quiet { fill: #a0a39c; }
+      .white { fill: #f8f8f4; }
+      .lime { fill: #c8f72d; }
+      .limeInk { fill: #314400; }
+      .terra { fill: #e85c3a; }
+      .line { stroke: #d8d6cc; stroke-width: 1; }
+      .darkLine { stroke: #353931; stroke-width: 1; }
+      .label { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; }
+      .caption { font-size: 15px; fill: #64685f; }
+      .small { font-size: 11px; }
+      .tiny { font-size: 9px; }
+      .phoneTitle { font-size: 16px; font-weight: 800; }
+      .shadow { filter: drop-shadow(0 18px 26px rgba(20,22,18,.14)); }
+    </style>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#1a1c18" flood-opacity=".16"/>
+    </filter>
+  </defs>
+
+  <!-- DIRECTION A -->
+  <g id="direction-a">
+    <rect width="1920" height="1200" fill="#eceae3"/>
+    <text x="64" y="64" class="label limeInk">MAXPOWER / PRODUCT DIRECTION 01</text>
+    <text x="64" y="116" class="display" font-size="42">Command Dock · 回到最初 Demo</text>
+    <rect x="796" y="78" width="86" height="32" rx="16" fill="#c8f72d"/>
+    <text x="839" y="99" text-anchor="middle" class="small" font-weight="800">推荐</text>
+    <text x="64" y="151" class="caption">Coach 是跨页面输入层；不漂浮、不遮挡。相机是训练执行模式，不是工程控制台。</text>
+
+    <!-- A1 Today -->
+    <g transform="translate(50 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/>
+      <rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/>
+      <rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="27" y="72" class="tiny" font-weight="700">09:41</text>
+      <text x="243" y="72" class="tiny" text-anchor="end">5G  ▮▮▮</text>
+      <text x="28" y="112" class="display" font-size="28">今天</text>
+      <text x="242" y="110" text-anchor="end" class="small muted">8 月 10 日</text>
+      <rect x="26" y="133" width="238" height="54" rx="16" fill="#ffffff" stroke="#e1dfd7"/>
+      <circle cx="45" cy="160" r="6" fill="#8ecb11"/>
+      <text x="60" y="157" class="small" font-weight="800">最近的调整仍可撤销</text>
+      <text x="60" y="173" class="tiny muted">训练量 -1 组 · 查看依据 ›</text>
+      <rect x="26" y="202" width="238" height="252" rx="27" fill="#10120f"/>
+      <text x="46" y="232" class="tiny lime mono">TODAY / UPPER A</text>
+      <text x="46" y="270" class="display white" font-size="28">上肢推</text>
+      <text x="46" y="293" class="small" fill="#a9ada5">卧推优先 · 附件组控制疲劳</text>
+      <line x1="46" y1="316" x2="242" y2="316" class="darkLine"/>
+      <text x="46" y="343" class="display white" font-size="20">54′</text><text x="46" y="361" class="tiny" fill="#858a80">预计时长</text>
+      <text x="117" y="343" class="display white" font-size="20">17</text><text x="117" y="361" class="tiny" fill="#858a80">工作组</text>
+      <text x="181" y="343" class="display white" font-size="20">RIR 2</text><text x="181" y="361" class="tiny" fill="#858a80">主项目标</text>
+      <rect x="44" y="386" width="202" height="48" rx="24" fill="#ffffff"/>
+      <text x="63" y="416" class="phoneTitle">开始训练</text>
+      <circle cx="221" cy="410" r="18" fill="#c8f72d"/><text x="221" y="416" text-anchor="middle" font-size="18" font-weight="900">→</text>
+      <text x="28" y="487" class="small muted" font-weight="800">快捷操作</text>
+      <rect x="26" y="500" width="73" height="28" rx="14" fill="#e9e7de"/><text x="62" y="518" text-anchor="middle" class="tiny">调整今天</text>
+      <rect x="105" y="500" width="73" height="28" rx="14" fill="#e9e7de"/><text x="141" y="518" text-anchor="middle" class="tiny">记录饮食</text>
+      <rect x="184" y="500" width="80" height="28" rx="14" fill="#e9e7de"/><text x="224" y="518" text-anchor="middle" class="tiny">解释恢复</text>
+      <rect x="20" y="614" width="250" height="72" rx="22" fill="#f4f3ee" stroke="#d8d6cc"/>
+      <rect x="27" y="622" width="236" height="40" rx="15" fill="#ffffff" stroke="#d8d6cc"/>
+      <circle cx="48" cy="642" r="11" fill="#151714"/><circle cx="48" cy="642" r="4" fill="#c8f72d"/>
+      <text x="67" y="646" class="small muted">问 Coach 或告诉我今天的变化</text>
+      <rect x="230" y="627" width="28" height="30" rx="10" fill="#151714"/><text x="244" y="648" text-anchor="middle" class="white" font-size="18">＋</text>
+      <g transform="translate(29 670)"><text x="16" y="16" text-anchor="middle" class="tiny" font-weight="800">⌂</text><text x="16" y="30" text-anchor="middle" class="tiny">今天</text><text x="76" y="16" text-anchor="middle" class="tiny muted">▦</text><text x="76" y="30" text-anchor="middle" class="tiny muted">计划</text><text x="136" y="16" text-anchor="middle" class="tiny muted">◔</text><text x="136" y="30" text-anchor="middle" class="tiny muted">进展</text><text x="196" y="16" text-anchor="middle" class="tiny muted">○</text><text x="196" y="30" text-anchor="middle" class="tiny muted">我的</text></g>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">01 · 今日页入口</text>
+    </g>
+
+    <!-- A2 Full coach -->
+    <g transform="translate(365 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/>
+      <rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/>
+      <rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="26" y="76" font-size="22">‹</text><text x="52" y="73" class="phoneTitle">MaxPower Coach</text>
+      <text x="250" y="72" text-anchor="end" class="tiny muted">历史</text>
+      <rect x="26" y="94" width="238" height="48" rx="15" fill="#ffffff" stroke="#d8d6cc"/>
+      <circle cx="46" cy="118" r="9" fill="#151714"/><text x="46" y="122" text-anchor="middle" class="lime" font-size="10">↗</text>
+      <text x="63" y="115" class="small" font-weight="800">当前上下文 · 今日上肢推</text>
+      <text x="63" y="130" class="tiny muted">计划 v12 · 可移除或切换</text>
+      <rect x="26" y="162" width="202" height="42" rx="14" fill="#ffffff"/>
+      <text x="38" y="187" class="small">为什么今天卧推少一组？</text>
+      <rect x="40" y="220" width="224" height="220" rx="18" fill="#ffffff" stroke="#d8d6cc"/>
+      <rect x="40" y="220" width="4" height="220" rx="2" fill="#94c90f"/>
+      <text x="56" y="244" class="tiny limeInk mono">PLAN CHANGE / EXPLAINED</text>
+      <text x="56" y="272" class="display" font-size="20">只调整今天，不改下周</text>
+      <text x="56" y="298" class="small muted">上次末组未达到目标次数，昨晚睡眠</text>
+      <text x="56" y="316" class="small muted">比个人均值少 48 分钟。</text>
+      <rect x="56" y="337" width="83" height="53" rx="12" fill="#f1efe8"/>
+      <text x="67" y="354" class="tiny muted">原计划</text><text x="67" y="376" class="small" font-weight="800">65 kg × 4</text>
+      <text x="150" y="371" text-anchor="middle" font-size="18">→</text>
+      <rect x="162" y="337" width="83" height="53" rx="12" fill="#edf4d8"/>
+      <text x="173" y="354" class="tiny muted">今天</text><text x="173" y="376" class="small" font-weight="800">62.5 × 3</text>
+      <text x="56" y="416" class="tiny muted">依据：训练记录 · 睡眠 · 规则引擎</text>
+      <rect x="40" y="457" width="224" height="105" rx="18" fill="#151714"/>
+      <text x="56" y="480" class="tiny lime mono">NEXT ACTION</text>
+      <text x="56" y="507" class="phoneTitle white">保持 RIR 2，再决定下一组</text>
+      <text x="56" y="529" class="tiny" fill="#a7aba2">建议不会自动覆盖你的记录</text>
+      <rect x="165" y="536" width="83" height="20" rx="10" fill="#c8f72d"/><text x="207" y="550" text-anchor="middle" class="tiny" font-weight="800">查看完整依据</text>
+      <rect x="20" y="680" width="250" height="78" rx="20" fill="#f4f3ee" stroke="#d8d6cc"/>
+      <text x="30" y="698" class="tiny muted">今日训练</text>
+      <rect x="28" y="708" width="234" height="40" rx="14" fill="#ffffff" stroke="#d8d6cc"/>
+      <text x="42" y="733" class="small muted">继续追问…</text><circle cx="241" cy="728" r="14" fill="#151714"/><text x="241" y="734" text-anchor="middle" class="lime" font-size="16">↑</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">02 · 全屏 Coach</text>
+    </g>
+
+    <!-- A3 Camera setup -->
+    <g transform="translate(680 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/>
+      <rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/>
+      <rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="26" y="77" font-size="22">‹</text><text x="52" y="73" class="phoneTitle">设置训练机位</text>
+      <text x="26" y="112" class="display" font-size="27">先让相机看清你</text>
+      <text x="26" y="135" class="small muted">杠铃卧推 · 正侧 45° · 本机分析</text>
+      <rect x="26" y="154" width="238" height="286" rx="24" fill="#151815"/>
+      <rect x="45" y="176" width="200" height="210" rx="18" fill="#272b26" stroke="#565c51"/>
+      <path d="M70 197h28M70 197v28M220 197h-28M220 197v28M70 363h28M70 363v-28M220 363h-28M220 363v-28" fill="none" stroke="#c8f72d" stroke-width="3"/>
+      <circle cx="145" cy="231" r="18" fill="none" stroke="#c8f72d" stroke-width="3"/>
+      <line x1="145" y1="249" x2="145" y2="307" stroke="#c8f72d" stroke-width="3"/>
+      <line x1="145" y1="264" x2="112" y2="294" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="264" x2="184" y2="285" stroke="#c8f72d" stroke-width="3"/>
+      <line x1="145" y1="307" x2="119" y2="350" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="307" x2="181" y2="348" stroke="#c8f72d" stroke-width="3"/>
+      <rect x="61" y="397" width="168" height="28" rx="14" fill="#263022" stroke="#728d25"/>
+      <circle cx="77" cy="411" r="4" fill="#c8f72d"/><text x="89" y="415" class="tiny white">全身入框后会自动继续</text>
+      <text x="29" y="477" class="small" font-weight="800">准备检查</text>
+      <g transform="translate(29 496)"><circle cx="9" cy="9" r="9" fill="#c8f72d"/><text x="9" y="13" text-anchor="middle" class="tiny">✓</text><text x="27" y="13" class="small">支架距训练位约 2–3 米</text><circle cx="9" cy="41" r="9" fill="#c8f72d"/><text x="9" y="45" text-anchor="middle" class="tiny">✓</text><text x="27" y="45" class="small">镜头可见头、手和脚</text><circle cx="9" cy="73" r="9" fill="#eceae3" stroke="#9fa29a"/><text x="27" y="77" class="small">确认无他人进入画面</text></g>
+      <rect x="26" y="603" width="238" height="54" rx="27" fill="#151714"/><text x="47" y="637" class="phoneTitle white">开始检测</text><circle cx="238" cy="630" r="18" fill="#c8f72d"/><text x="238" y="636" text-anchor="middle" font-size="18">→</text>
+      <text x="145" y="680" text-anchor="middle" class="tiny muted">没有合适机位？改为仅记录训练</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">03 · 相机准备</text>
+    </g>
+
+    <!-- A4 Live camera -->
+    <g transform="translate(995 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#050705"/>
+      <rect x="10" y="18" width="270" height="764" rx="34" fill="#0e120f"/>
+      <rect x="106" y="28" width="78" height="22" rx="11" fill="#050705"/>
+      <text x="26" y="72" class="tiny white" font-weight="800">‹  杠铃卧推</text><text x="250" y="72" text-anchor="end" class="tiny" fill="#ff8a6b">● REC 00:18</text>
+      <rect x="26" y="92" width="92" height="30" rx="15" fill="#1c2519" stroke="#668120"/><circle cx="42" cy="107" r="4" fill="#c8f72d"/><text x="53" y="111" class="tiny lime">下放阶段</text>
+      <rect x="26" y="132" width="238" height="34" rx="12" fill="#20301c" stroke="#668120"/><text x="145" y="153" text-anchor="middle" class="tiny lime">✓ 全身入框 · 机位合格</text>
+      <ellipse cx="151" cy="467" rx="96" ry="23" fill="#090a09"/>
+      <g stroke="#c8f72d" stroke-width="3.4" stroke-linecap="round" fill="#f7f6f1">
+        <circle cx="103" cy="280" r="16"/><line x1="118" y1="292" x2="151" y2="335"/><line x1="151" y1="335" x2="190" y2="349"/><line x1="151" y1="335" x2="134" y2="390"/><line x1="190" y1="349" x2="223" y2="386"/><line x1="134" y1="390" x2="97" y2="433"/><line x1="134" y1="390" x2="181" y2="438"/><line x1="104" y1="320" x2="175" y2="297"/><line x1="175" y1="297" x2="224" y2="293"/>
+      </g>
+      <text x="28" y="429" class="display lime" font-size="66">06</text><text x="31" y="450" class="tiny white mono">REPS</text>
+      <g transform="translate(200 402)"><rect width="52" height="20" rx="8" fill="#171b17"/><text x="26" y="14" text-anchor="middle" class="tiny white">有效帧 94%</text><rect y="25" width="52" height="20" rx="8" fill="#171b17"/><text x="26" y="39" text-anchor="middle" class="tiny white">高置信度</text></g>
+      <rect x="24" y="505" width="242" height="76" rx="17" fill="#151915" stroke="#3e443a"/>
+      <rect x="24" y="505" width="4" height="76" rx="2" fill="#c8f72d"/>
+      <circle cx="47" cy="532" r="11" fill="#c8f72d"/><text x="47" y="536" text-anchor="middle" class="tiny">↗</text>
+      <text x="65" y="530" class="small white" font-weight="800">动作稳定，保持当前节奏</text>
+      <text x="65" y="548" class="tiny" fill="#959b91">右肘轨迹正常 · 本地识别</text>
+      <text x="65" y="566" class="tiny" fill="#6f746c">提示只描述画面可见动作</text>
+      <rect x="26" y="611" width="48" height="48" rx="16" fill="#232823" stroke="#464c43"/><text x="50" y="641" text-anchor="middle" class="white" font-size="18">×</text>
+      <rect x="83" y="611" width="126" height="48" rx="16" fill="#e85c3a"/><text x="146" y="641" text-anchor="middle" class="white" font-size="14" font-weight="800">结束本组</text>
+      <rect x="218" y="611" width="48" height="48" rx="16" fill="#232823" stroke="#464c43"/><text x="242" y="641" text-anchor="middle" class="lime" font-size="18">⌁</text>
+      <text x="145" y="687" text-anchor="middle" class="tiny" fill="#868b83">诊断数据隐藏在开发者模式</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">04 · 实时训练</text>
+    </g>
+
+    <g transform="translate(1340 216)">
+      <text class="label limeInk" y="0">WHY THIS WORKS</text>
+      <text y="42" class="display" font-size="28">一条完整的任务路径</text>
+      <text y="78" class="caption">最接近仓库早期 Demo，也最符合当前</text>
+      <text y="101" class="caption">“今天 / 计划 / 进展 / 我的”的产品结构。</text>
+      <g transform="translate(0 144)">
+        <circle cx="12" cy="10" r="10" fill="#c8f72d"/><text x="12" y="14" text-anchor="middle" class="tiny" font-weight="900">1</text><text x="34" y="14" class="small" font-weight="800">Agent 入口属于底部 Dock，不覆盖卡片</text>
+        <circle cx="12" cy="54" r="10" fill="#c8f72d"/><text x="12" y="58" text-anchor="middle" class="tiny" font-weight="900">2</text><text x="34" y="58" class="small" font-weight="800">长回答进入全屏，结构化产物不塞进抽屉</text>
+        <circle cx="12" cy="98" r="10" fill="#c8f72d"/><text x="12" y="102" text-anchor="middle" class="tiny" font-weight="900">3</text><text x="34" y="102" class="small" font-weight="800">相机先设置机位，再进入无干扰 HUD</text>
+        <circle cx="12" cy="142" r="10" fill="#c8f72d"/><text x="12" y="146" text-anchor="middle" class="tiny" font-weight="900">4</text><text x="34" y="146" class="small" font-weight="800">保留“仅记录”降级，不强迫开启相机</text>
+      </g>
+      <rect y="350" width="500" height="178" rx="24" fill="#151714"/>
+      <text x="24" y="382" class="tiny lime mono">CAMERA INFORMATION PRIORITY</text>
+      <text x="24" y="418" class="phoneTitle white">入框状态 → 次数 → 一个动作提示</text>
+      <line x1="24" y1="441" x2="476" y2="441" class="darkLine"/>
+      <text x="24" y="469" class="small" fill="#aeb2a9">FPS、模型档位、推理耗时只对调试人员有价值，</text>
+      <text x="24" y="492" class="small" fill="#aeb2a9">不应与训练者争夺注意力。</text>
+      <rect y="560" width="500" height="152" rx="24" fill="#ffffff" stroke="#d8d6cc"/>
+      <text x="24" y="593" class="label">主要风险</text>
+      <text x="24" y="625" class="small muted">Dock 占用约 74px 高度，需要在所有页面预留一致</text>
+      <text x="24" y="648" class="small muted">的安全区；键盘弹出后必须切为全屏对话。</text>
+      <text x="24" y="684" class="tiny limeInk" font-weight="800">推荐作为 V1 的基础信息架构</text>
+    </g>
+  </g>
+
+  <!-- DIRECTION B -->
+  <g id="direction-b" transform="translate(0 1200)">
+    <rect width="1920" height="1200" fill="#f4f1e9"/>
+    <text x="64" y="64" class="label" fill="#9c3e28">MAXPOWER / PRODUCT DIRECTION 02</text>
+    <text x="64" y="116" class="display" font-size="42">Inline Coach Rail · 内容内联</text>
+    <text x="64" y="151" class="caption">Coach 只在“有依据、能行动”时出现；没有永久入口，页面本身就是工作台。</text>
+
+    <!-- B1 Today with inline rail -->
+    <g transform="translate(50 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="27" y="72" class="tiny" font-weight="700">09:41</text><text x="243" y="72" text-anchor="end" class="tiny">5G  ▮▮▮</text>
+      <text x="27" y="112" class="display" font-size="28">今天</text><text x="247" y="110" text-anchor="end" class="small muted">日历</text>
+      <rect x="26" y="134" width="238" height="116" rx="22" fill="#ffffff" stroke="#d8d6cc"/>
+      <text x="42" y="158" class="tiny limeInk mono">COACH BRIEF / 08:30</text>
+      <text x="42" y="185" class="phoneTitle">今天可以按计划训练</text>
+      <text x="42" y="205" class="small muted">睡眠略低，但尚未触发减量。</text>
+      <text x="42" y="228" class="tiny" fill="#9c3e28" font-weight="800">查看依据与可调选项  →</text>
+      <rect x="26" y="266" width="238" height="258" rx="27" fill="#10120f"/>
+      <text x="45" y="296" class="tiny lime mono">TODAY / UPPER A</text><text x="45" y="335" class="display white" font-size="29">上肢推</text><text x="45" y="359" class="small" fill="#a9ada5">卧推优先 · 17 工作组</text>
+      <line x1="45" y1="383" x2="244" y2="383" class="darkLine"/><text x="45" y="410" class="small white" font-weight="800">杠铃卧推</text><text x="235" y="410" text-anchor="end" class="small" fill="#a9ada5">4 × 8</text><text x="45" y="438" class="small white" font-weight="800">上斜哑铃推</text><text x="235" y="438" text-anchor="end" class="small" fill="#a9ada5">3 × 10</text>
+      <rect x="44" y="463" width="202" height="44" rx="22" fill="#ffffff"/><text x="61" y="491" class="small" font-weight="800">开始训练</text><text x="224" y="492" text-anchor="middle" font-size="18">→</text>
+      <text x="28" y="561" class="small muted" font-weight="800">今天的摄入</text>
+      <circle cx="64" cy="610" r="29" fill="none" stroke="#e1dfd7" stroke-width="8"/><path d="M64 581a29 29 0 1 1-20 50" fill="none" stroke="#8ecb11" stroke-width="8" stroke-linecap="round"/><text x="64" y="614" text-anchor="middle" class="small" font-weight="800">72%</text>
+      <text x="110" y="601" class="small" font-weight="800">还可摄入 607 kcal</text><text x="110" y="621" class="tiny muted">今天有训练，目标已上调 160 kcal</text><text x="110" y="642" class="tiny limeInk" font-weight="800">为什么会变？</text>
+      <line x1="22" y1="694" x2="268" y2="694" class="line"/>
+      <g transform="translate(29 708)"><text x="16" y="16" text-anchor="middle" class="tiny" font-weight="800">⌂</text><text x="16" y="30" text-anchor="middle" class="tiny">今天</text><text x="76" y="16" text-anchor="middle" class="tiny muted">▦</text><text x="76" y="30" text-anchor="middle" class="tiny muted">计划</text><text x="136" y="16" text-anchor="middle" class="tiny muted">◔</text><text x="136" y="30" text-anchor="middle" class="tiny muted">进展</text><text x="196" y="16" text-anchor="middle" class="tiny muted">○</text><text x="196" y="30" text-anchor="middle" class="tiny muted">我的</text></g>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">01 · 内联简报</text>
+    </g>
+
+    <!-- B2 Context detail -->
+    <g transform="translate(365 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="26" y="76" font-size="22">‹</text><text x="52" y="73" class="phoneTitle">今日判断</text><text x="248" y="72" text-anchor="end" class="tiny muted">Coach</text>
+      <text x="26" y="116" class="display" font-size="27">为什么仍按计划？</text>
+      <rect x="26" y="142" width="238" height="150" rx="22" fill="#151714"/>
+      <text x="44" y="169" class="tiny lime mono">DECISION SUMMARY</text><text x="44" y="203" class="phoneTitle white">训练不减量，主项先观察</text>
+      <text x="44" y="226" class="small" fill="#aeb2a9">睡眠 -48 分钟，但最近 3 次完成度</text><text x="44" y="244" class="small" fill="#aeb2a9">稳定，且没有疼痛或恢复警报。</text>
+      <rect x="44" y="258" width="89" height="22" rx="11" fill="#2a3027"/><text x="88" y="273" text-anchor="middle" class="tiny lime">规则未触发</text>
+      <text x="28" y="330" class="small" font-weight="800">系统用了什么</text>
+      <g transform="translate(26 346)"><rect width="238" height="53" rx="14" fill="#ffffff"/><circle cx="20" cy="26" r="9" fill="#c8f72d"/><text x="38" y="23" class="small" font-weight="800">最近训练完成度</text><text x="38" y="39" class="tiny muted">3 / 3 次完成目标范围</text><text x="215" y="31" text-anchor="middle" class="small" font-weight="800">稳定</text><rect y="61" width="238" height="53" rx="14" fill="#ffffff"/><circle cx="20" cy="87" r="9" fill="#f1b24a"/><text x="38" y="84" class="small" font-weight="800">昨晚睡眠</text><text x="38" y="100" class="tiny muted">较 14 日个人均值少 48 分钟</text><text x="215" y="92" text-anchor="middle" class="small" font-weight="800">偏低</text><rect y="122" width="238" height="53" rx="14" fill="#ffffff"/><circle cx="20" cy="148" r="9" fill="#c8f72d"/><text x="38" y="145" class="small" font-weight="800">疼痛与恢复反馈</text><text x="38" y="161" class="tiny muted">未报告异常</text><text x="215" y="153" text-anchor="middle" class="small" font-weight="800">正常</text></g>
+      <text x="28" y="554" class="small" font-weight="800">如果体感不对</text>
+      <rect x="26" y="570" width="114" height="45" rx="15" fill="#ffffff" stroke="#d8d6cc"/><text x="83" y="598" text-anchor="middle" class="small" font-weight="800">调整今天</text><rect x="150" y="570" width="114" height="45" rx="15" fill="#151714"/><text x="207" y="598" text-anchor="middle" class="small white" font-weight="800">继续询问</text>
+      <text x="28" y="653" class="tiny muted">结论来自规则与可追溯记录；LLM 只负责解释。</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">02 · 解释详情</text>
+    </g>
+
+    <!-- B3 Setup checklist -->
+    <g transform="translate(680 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="26" y="76" font-size="22">‹</text><text x="52" y="73" class="phoneTitle">训练监控</text>
+      <text x="26" y="114" class="display" font-size="27">三步摆好机位</text><text x="26" y="138" class="small muted">侧平举 · 正面 · 仅本机处理</text>
+      <g transform="translate(26 165)"><line x1="13" y1="18" x2="13" y2="194" stroke="#d8d6cc" stroke-width="2"/><circle cx="13" cy="18" r="13" fill="#151714"/><text x="13" y="23" text-anchor="middle" class="tiny lime">1</text><text x="39" y="17" class="small" font-weight="800">把手机固定在胸口高度</text><text x="39" y="36" class="tiny muted">不要手持；保持画面稳定</text><circle cx="13" cy="86" r="13" fill="#151714"/><text x="13" y="91" text-anchor="middle" class="tiny lime">2</text><text x="39" y="85" class="small" font-weight="800">站到 2–3 米外</text><text x="39" y="104" class="tiny muted">双手举起时仍完整入镜</text><circle cx="13" cy="154" r="13" fill="#151714"/><text x="13" y="159" text-anchor="middle" class="tiny lime">3</text><text x="39" y="153" class="small" font-weight="800">做一次测试动作</text><text x="39" y="172" class="tiny muted">系统先确认机位，再开始计数</text></g>
+      <rect x="26" y="379" width="238" height="190" rx="23" fill="#191c18"/>
+      <line x1="68" y1="530" x2="218" y2="530" stroke="#4a4f47"/><rect x="73" y="420" width="52" height="93" rx="9" fill="#2b302a" stroke="#686e65"/><circle cx="99" cy="444" r="5" fill="#c8f72d"/><line x1="99" y1="513" x2="76" y2="539" stroke="#6d726a"/><line x1="99" y1="513" x2="122" y2="539" stroke="#6d726a"/>
+      <circle cx="188" cy="438" r="13" fill="none" stroke="#c8f72d" stroke-width="2.5"/><line x1="188" y1="451" x2="188" y2="489" stroke="#c8f72d" stroke-width="2.5"/><line x1="188" y1="463" x2="164" y2="477" stroke="#c8f72d" stroke-width="2.5"/><line x1="188" y1="463" x2="214" y2="477" stroke="#c8f72d" stroke-width="2.5"/><line x1="188" y1="489" x2="173" y2="526" stroke="#c8f72d" stroke-width="2.5"/><line x1="188" y1="489" x2="204" y2="526" stroke="#c8f72d" stroke-width="2.5"/>
+      <path d="M128 452 Q150 438 169 448" fill="none" stroke="#e85c3a" stroke-width="2" stroke-dasharray="4 4"/><text x="145" y="424" text-anchor="middle" class="tiny white">镜头正对身体中心</text>
+      <rect x="26" y="595" width="238" height="54" rx="27" fill="#151714"/><text x="47" y="629" class="phoneTitle white">开始机位测试</text><circle cx="238" cy="622" r="18" fill="#c8f72d"/><text x="238" y="628" text-anchor="middle" font-size="18">→</text>
+      <text x="145" y="676" text-anchor="middle" class="tiny muted">跳过相机，使用手动记录</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">03 · 教学式准备</text>
+    </g>
+
+    <!-- B4 Split deck camera -->
+    <g transform="translate(995 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#050705"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#0e120f"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#050705"/>
+      <text x="26" y="72" class="tiny white" font-weight="800">‹  侧平举</text><text x="250" y="72" text-anchor="end" class="tiny" fill="#ff8a6b">● 00:24</text>
+      <rect x="25" y="91" width="240" height="34" rx="12" fill="#20301c" stroke="#668120"/><text x="145" y="112" text-anchor="middle" class="tiny lime">✓ 入框良好 · 可开始动作</text>
+      <g stroke="#c8f72d" stroke-width="3" stroke-linecap="round" fill="#f7f6f1"><circle cx="145" cy="205" r="16"/><line x1="145" y1="221" x2="145" y2="323"/><line x1="145" y1="246" x2="86" y2="267"/><line x1="145" y1="246" x2="205" y2="267"/><line x1="145" y1="323" x2="118" y2="402"/><line x1="145" y1="323" x2="172" y2="402"/></g>
+      <text x="31" y="380" class="display lime" font-size="58">09</text><text x="33" y="400" class="tiny white mono">REPS</text>
+      <rect x="10" y="446" width="270" height="336" rx="0" fill="#181b17"/>
+      <rect x="28" y="464" width="234" height="56" rx="16" fill="#232820"/><circle cx="50" cy="492" r="10" fill="#c8f72d"/><text x="50" y="496" text-anchor="middle" class="tiny">✓</text><text x="69" y="488" class="small white" font-weight="800">幅度稳定</text><text x="69" y="506" class="tiny" fill="#959b91">下一次保持相同节奏</text>
+      <text x="29" y="551" class="tiny" fill="#858a80">当前组</text><text x="29" y="579" class="phoneTitle white">8 kg × 12 次 · RIR 2</text>
+      <rect x="28" y="602" width="234" height="44" rx="14" fill="#2a2f29"/><text x="42" y="629" class="small white">告诉 Coach 我的体感</text><text x="242" y="629" text-anchor="end" class="lime">⌁</text>
+      <rect x="28" y="661" width="54" height="48" rx="16" fill="#2a2f29"/><text x="55" y="691" text-anchor="middle" class="white" font-size="18">×</text><rect x="91" y="661" width="171" height="48" rx="16" fill="#e85c3a"/><text x="176" y="691" text-anchor="middle" class="small white" font-weight="800">结束本组</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">04 · 分层控制台</text>
+    </g>
+
+    <g transform="translate(1340 216)">
+      <text class="label" fill="#9c3e28">WHY THIS WORKS</text><text y="42" class="display" font-size="28">最安静、最内容导向</text>
+      <text y="78" class="caption">没有永久 Agent 控件。只有当系统有清晰判断</text><text y="101" class="caption">或用户进入具体证据页时，才出现 Coach。</text>
+      <g transform="translate(0 144)"><circle cx="8" cy="8" r="5" fill="#e85c3a"/><text x="24" y="13" class="small" font-weight="800">首屏更清爽，训练与摄入仍是主角</text><circle cx="8" cy="52" r="5" fill="#e85c3a"/><text x="24" y="57" class="small" font-weight="800">每条建议天然绑定来源和动作</text><circle cx="8" cy="96" r="5" fill="#e85c3a"/><text x="24" y="101" class="small" font-weight="800">相机画面与控制区物理分层，误触更少</text><circle cx="8" cy="140" r="5" fill="#e85c3a"/><text x="24" y="145" class="small" font-weight="800">机位教学更适合第一次使用</text></g>
+      <rect y="350" width="500" height="170" rx="24" fill="#ffffff" stroke="#d8d6cc"/><text x="24" y="383" class="label">主要风险</text><text x="24" y="419" class="small muted">当页面没有主动建议时，用户可能找不到自由提问入口。</text><text x="24" y="445" class="small muted">需要在页面“更多”菜单和空状态中保持一致入口，</text><text x="24" y="468" class="small muted">否则 Agent 能力会显得被动。</text><text x="24" y="500" class="tiny" fill="#9c3e28" font-weight="800">适合“少打扰、强证据”的专业感路线</text>
+      <rect y="550" width="500" height="145" rx="24" fill="#151714"/><text x="24" y="582" class="tiny lime mono">CAMERA MODE</text><text x="24" y="617" class="phoneTitle white">画面负责观察，底板负责操作</text><text x="24" y="646" class="small" fill="#aeb2a9">适合需要大量组间记录和下一组调整的力量训练。</text><text x="24" y="670" class="small" fill="#aeb2a9">代价是实际画面面积比方向 A 小。</text>
+    </g>
+  </g>
+
+  <!-- DIRECTION C -->
+  <g id="direction-c" transform="translate(0 2400)">
+    <rect width="1920" height="1200" fill="#e9ebe5"/>
+    <text x="64" y="64" class="label" fill="#35460d">MAXPOWER / PRODUCT DIRECTION 03</text>
+    <text x="64" y="116" class="display" font-size="42">Coach Hub · 明确的中心入口</text>
+    <text x="64" y="151" class="caption">把 Coach 做成底部导航的中心工作区：易发现、不悬浮，但会增加一次上下文切换。</text>
+
+    <!-- C1 clean Today + center tab -->
+    <g transform="translate(50 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="27" y="72" class="tiny" font-weight="700">09:41</text><text x="243" y="72" text-anchor="end" class="tiny">5G  ▮▮▮</text>
+      <text x="27" y="112" class="display" font-size="28">今天</text><text x="247" y="110" text-anchor="end" class="small muted">8 月 10 日</text>
+      <rect x="26" y="136" width="238" height="294" rx="28" fill="#10120f"/><text x="46" y="168" class="tiny lime mono">ACTIVE PROGRAM / W4</text><text x="46" y="210" class="display white" font-size="30">上肢推</text><text x="46" y="236" class="small" fill="#a9ada5">卧推优先 · 54 分钟</text><line x1="46" y1="258" x2="244" y2="258" class="darkLine"/><text x="46" y="288" class="small white" font-weight="800">杠铃卧推</text><text x="235" y="288" text-anchor="end" class="small" fill="#a9ada5">4 × 8</text><text x="46" y="316" class="small white" font-weight="800">上斜哑铃推</text><text x="235" y="316" text-anchor="end" class="small" fill="#a9ada5">3 × 10</text><rect x="44" y="360" width="202" height="50" rx="25" fill="#ffffff"/><text x="63" y="391" class="phoneTitle">开始训练</text><circle cx="222" cy="385" r="18" fill="#c8f72d"/><text x="222" y="391" text-anchor="middle" font-size="18">→</text>
+      <rect x="26" y="447" width="238" height="127" rx="22" fill="#ffffff" stroke="#d8d6cc"/><text x="42" y="475" class="small muted" font-weight="800">今日摄入</text><text x="42" y="516" class="display" font-size="30">2,166</text><text x="42" y="537" class="tiny muted">kcal · 训练日目标</text><rect x="163" y="476" width="84" height="28" rx="14" fill="#edf4d8"/><text x="205" y="494" text-anchor="middle" class="tiny limeInk" font-weight="800">可多吃 160</text><text x="163" y="532" class="tiny muted">运动后自动更新</text>
+      <line x1="22" y1="660" x2="268" y2="660" class="line"/>
+      <g transform="translate(22 674)"><text x="18" y="16" text-anchor="middle" class="tiny" font-weight="800">⌂</text><text x="18" y="31" text-anchor="middle" class="tiny">今天</text><text x="67" y="16" text-anchor="middle" class="tiny muted">▦</text><text x="67" y="31" text-anchor="middle" class="tiny muted">计划</text><circle cx="116" cy="12" r="22" fill="#151714"/><text x="116" y="18" text-anchor="middle" class="lime" font-size="20">↗</text><text x="116" y="43" text-anchor="middle" class="tiny" font-weight="800">Coach</text><text x="165" y="16" text-anchor="middle" class="tiny muted">◔</text><text x="165" y="31" text-anchor="middle" class="tiny muted">进展</text><text x="214" y="16" text-anchor="middle" class="tiny muted">○</text><text x="214" y="31" text-anchor="middle" class="tiny muted">我的</text></g>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">01 · 中心导航入口</text>
+    </g>
+
+    <!-- C2 Coach hub -->
+    <g transform="translate(365 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#f7f6f1"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#151714"/>
+      <text x="27" y="72" class="tiny" font-weight="700">09:41</text><text x="243" y="72" text-anchor="end" class="tiny">计划 v12</text>
+      <text x="27" y="113" class="display" font-size="28">Coach</text><text x="248" y="110" text-anchor="end" class="small muted">记录</text>
+      <rect x="26" y="132" width="238" height="45" rx="15" fill="#ffffff" stroke="#d8d6cc"/><circle cx="48" cy="155" r="10" fill="#151714"/><circle cx="48" cy="155" r="4" fill="#c8f72d"/><text x="68" y="159" class="small muted">问计划、进展或恢复…</text><text x="244" y="160" text-anchor="middle" class="limeInk">＋</text>
+      <text x="28" y="211" class="tiny limeInk mono">DAILY BRIEFING</text><text x="28" y="243" class="display" font-size="24">今天无需额外减量</text><text x="28" y="266" class="small muted">按原计划训练；主项后再判断疲劳。</text>
+      <rect x="26" y="289" width="238" height="104" rx="19" fill="#151714"/><text x="42" y="315" class="tiny lime mono">TODAY</text><text x="42" y="343" class="phoneTitle white">上肢推 · 54′ · 17 组</text><text x="42" y="366" class="tiny" fill="#aeb2a9">开始训练时可选择相机监控</text><text x="239" y="370" text-anchor="end" class="lime">→</text>
+      <rect x="26" y="408" width="114" height="100" rx="19" fill="#ffffff" stroke="#d8d6cc"/><text x="42" y="434" class="tiny muted">摄入目标</text><text x="42" y="465" class="display" font-size="22">2,166</text><text x="42" y="486" class="tiny limeInk">训练日 +8%</text>
+      <rect x="150" y="408" width="114" height="100" rx="19" fill="#ffffff" stroke="#d8d6cc"/><text x="166" y="434" class="tiny muted">最近趋势</text><text x="166" y="465" class="display" font-size="22">-0.4kg</text><text x="166" y="486" class="tiny limeInk">目标区间</text>
+      <text x="28" y="545" class="small" font-weight="800">常用任务</text><rect x="26" y="560" width="238" height="45" rx="14" fill="#ffffff"/><text x="42" y="588" class="small">调整今天的训练</text><text x="240" y="588" text-anchor="end">›</text><rect x="26" y="613" width="238" height="45" rx="14" fill="#ffffff"/><text x="42" y="641" class="small">规划本周摄入</text><text x="240" y="641" text-anchor="end">›</text>
+      <line x1="22" y1="682" x2="268" y2="682" class="line"/><text x="145" y="721" text-anchor="middle" class="tiny muted">今天　计划　 <tspan class="limeInk" font-weight="800">Coach</tspan>　进展　我的</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">02 · Coach Hub</text>
+    </g>
+
+    <!-- C3 Camera focus setup -->
+    <g transform="translate(680 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#10120f"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#121512"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#050705"/>
+      <text x="26" y="75" class="small white">‹</text><text x="52" y="73" class="phoneTitle white">快速校准</text><text x="250" y="72" text-anchor="end" class="tiny" fill="#aeb2a9">跳过</text>
+      <rect x="26" y="97" width="238" height="390" rx="24" fill="#202420" stroke="#454b43"/>
+      <path d="M48 122h35M48 122v35M242 122h-35M242 122v35M48 462h35M48 462v-35M242 462h-35M242 462v-35" fill="none" stroke="#c8f72d" stroke-width="3"/>
+      <circle cx="145" cy="208" r="20" fill="none" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="228" x2="145" y2="336" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="254" x2="92" y2="292" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="254" x2="201" y2="292" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="336" x2="111" y2="424" stroke="#c8f72d" stroke-width="3"/><line x1="145" y1="336" x2="180" y2="424" stroke="#c8f72d" stroke-width="3"/>
+      <rect x="42" y="431" width="206" height="38" rx="19" fill="#293526"/><text x="145" y="455" text-anchor="middle" class="small lime" font-weight="800">站好后保持 2 秒</text>
+      <text x="27" y="530" class="display white" font-size="25">正在确认机位</text><text x="27" y="555" class="small" fill="#aeb2a9">头部、双手、双脚均可见</text>
+      <g transform="translate(27 585)"><rect width="236" height="8" rx="4" fill="#31362f"/><rect width="172" height="8" rx="4" fill="#c8f72d"/><text y="32" class="tiny" fill="#aeb2a9">动作  ✓　机位  ✓　画面  2/3</text></g>
+      <rect x="26" y="660" width="238" height="48" rx="16" fill="#2a2f29"/><text x="145" y="690" text-anchor="middle" class="small white" font-weight="800">改为仅记录</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">03 · 沉浸式校准</text>
+    </g>
+
+    <!-- C4 Camera voice-first -->
+    <g transform="translate(995 190)" filter="url(#softShadow)">
+      <rect width="290" height="800" rx="42" fill="#050705"/><rect x="10" y="18" width="270" height="764" rx="34" fill="#0d110e"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#050705"/>
+      <text x="26" y="72" class="tiny white" font-weight="800">‹  杠铃卧推</text><text x="250" y="72" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+      <circle cx="145" cy="288" r="118" fill="none" stroke="#2e342d" stroke-width="1" stroke-dasharray="4 7"/>
+      <g stroke="#c8f72d" stroke-width="3.4" stroke-linecap="round" fill="#f7f6f1"><circle cx="103" cy="255" r="16"/><line x1="118" y1="267" x2="151" y2="310"/><line x1="151" y1="310" x2="190" y2="324"/><line x1="151" y1="310" x2="134" y2="365"/><line x1="190" y1="324" x2="223" y2="361"/><line x1="134" y1="365" x2="97" y2="408"/><line x1="134" y1="365" x2="181" y2="413"/><line x1="104" y1="295" x2="175" y2="272"/><line x1="175" y1="272" x2="224" y2="268"/></g>
+      <rect x="62" y="98" width="166" height="31" rx="15" fill="#20301c" stroke="#668120"/><text x="145" y="118" text-anchor="middle" class="tiny lime">画面稳定 · 正在计数</text>
+      <text x="28" y="465" class="display lime" font-size="70">06</text><text x="31" y="487" class="tiny white mono">REPS · LOWERING</text>
+      <rect x="26" y="516" width="238" height="72" rx="18" fill="#151915" stroke="#3e443a"/><text x="43" y="541" class="tiny lime mono">LIVE CUE</text><text x="43" y="568" class="phoneTitle white">保持当前节奏</text><circle cx="235" cy="552" r="18" fill="#c8f72d"/><text x="235" y="558" text-anchor="middle" font-size="17">✓</text>
+      <rect x="26" y="612" width="48" height="48" rx="24" fill="#272c27"/><text x="50" y="642" text-anchor="middle" class="white" font-size="18">×</text>
+      <rect x="87" y="606" width="116" height="60" rx="30" fill="#e85c3a"/><text x="145" y="632" text-anchor="middle" class="small white" font-weight="800">结束本组</text><text x="145" y="649" text-anchor="middle" class="tiny white">06 次已确认</text>
+      <rect x="216" y="612" width="48" height="48" rx="24" fill="#c8f72d"/><text x="240" y="642" text-anchor="middle" font-size="18">⌁</text>
+      <text x="145" y="696" text-anchor="middle" class="tiny" fill="#aeb2a9">按住右键告诉 Coach 体感</text>
+      <text x="145" y="825" text-anchor="middle" class="phoneTitle">04 · 语音优先 HUD</text>
+    </g>
+
+    <g transform="translate(1340 216)">
+      <text class="label" fill="#35460d">WHY THIS WORKS</text><text y="42" class="display" font-size="28">最容易理解 Agent 在哪里</text><text y="78" class="caption">Coach 不再漂浮，但成为一个稳定导航目的地。</text><text y="101" class="caption">适合希望突出 AI 品牌心智的产品路线。</text>
+      <g transform="translate(0 144)"><circle cx="8" cy="8" r="5" fill="#8ecb11"/><text x="24" y="13" class="small" font-weight="800">入口显著，第一次使用无需猜测</text><circle cx="8" cy="52" r="5" fill="#8ecb11"/><text x="24" y="57" class="small" font-weight="800">Coach Hub 可承载长计划和跨域简报</text><circle cx="8" cy="96" r="5" fill="#8ecb11"/><text x="24" y="101" class="small" font-weight="800">相机用校准态与训练态建立强模式感</text><circle cx="8" cy="140" r="5" fill="#8ecb11"/><text x="24" y="145" class="small" font-weight="800">语音在训练中比键盘更自然</text></g>
+      <rect y="350" width="500" height="178" rx="24" fill="#ffffff" stroke="#d8d6cc"/><text x="24" y="383" class="label">主要风险</text><text x="24" y="419" class="small muted">会把 Agent 从当前任务中抽离：用户在“今天”看到问题，</text><text x="24" y="442" class="small muted">需要切到 Coach，再重新理解上下文。底部五项导航也更拥挤。</text><text x="24" y="474" class="small muted">这与仓库已有的产品研究结论相冲突，因此不建议 V1 默认。</text><text x="24" y="506" class="tiny" fill="#35460d" font-weight="800">适合 AI 品牌优先，而不是执行效率优先</text>
+      <rect y="560" width="500" height="152" rx="24" fill="#151714"/><text x="24" y="592" class="tiny lime mono">CAMERA MODE</text><text x="24" y="627" class="phoneTitle white">最少文字 + 语音体感输入</text><text x="24" y="656" class="small" fill="#aeb2a9">视觉负担最低，但语音识别、噪声环境和隐私提示</text><text x="24" y="679" class="small" fill="#aeb2a9">需要单独验证，不能成为唯一入口。</text>
+    </g>
+  </g>
+</svg>

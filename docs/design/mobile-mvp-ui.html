@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MaxPower · 移动端 MVP 交互原型</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=ZCOOL+QingKe+HuangYou&family=Noto+Sans+SC:wght@400;500;700;900&family=Archivo:wght@500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F7F6F2; --paper-2:#EFEEE8; --ink:#16181D; --ink-2:#5A5E66; --ink-3:#9A9EA6;
+  --lime:#C6F135; --lime-deep:#9BC918; --lime-ink:#3D4D00;
+  --terra:#E85C3A; --terra-soft:#FDE9E2;
+  --dark:#0E100E; --dark-2:#181B17; --line:rgba(22,24,29,.1);
+  --radius:18px;
+  --font-disp:'ZCOOL QingKe HuangYou','Noto Sans SC',sans-serif;
+  --font-body:'Noto Sans SC','PingFang SC',sans-serif;
+  --font-num:'Archivo','Noto Sans SC',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+body{background:#23252B;font-family:var(--font-body);color:var(--ink);min-height:100vh;display:flex;overflow:hidden}
+
+/* ============ 左侧导航 ============ */
+.rail{width:220px;min-height:100vh;padding:32px 20px;display:flex;flex-direction:column;gap:6px;border-right:1px solid rgba(255,255,255,.07)}
+.rail .logo{color:#fff;font-family:var(--font-disp);font-size:22px;letter-spacing:1px;margin-bottom:4px}
+.rail .logo em{color:var(--lime);font-style:normal}
+.rail .sub{color:rgba(255,255,255,.35);font-size:11px;margin-bottom:28px;line-height:1.6}
+.nav-item{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;color:rgba(255,255,255,.55);font-size:13px;cursor:pointer;transition:.25s;border:1px solid transparent}
+.nav-item .n{font-family:var(--font-mono);font-size:10px;color:rgba(255,255,255,.3);width:18px}
+.nav-item:hover{color:#fff;background:rgba(255,255,255,.05)}
+.nav-item.active{color:var(--lime);background:rgba(198,241,53,.08);border-color:rgba(198,241,53,.2)}
+.nav-item.active .n{color:var(--lime)}
+.rail .foot{margin-top:auto;color:rgba(255,255,255,.25);font-size:10px;line-height:1.8}
+
+/* ============ 舞台 ============ */
+.stage{flex:1;display:flex;align-items:center;justify-content:center;gap:48px;padding:40px;overflow:auto}
+.phone{width:390px;height:844px;border-radius:52px;background:var(--paper);position:relative;overflow:hidden;box-shadow:0 40px 100px rgba(0,0,0,.55),0 0 0 10px #111,0 0 0 12px #333;flex-shrink:0}
+.phone.dark{background:var(--dark)}
+.notch{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:110px;height:30px;background:#0a0a0a;border-radius:20px;z-index:60}
+.screen{position:absolute;inset:0;display:none;flex-direction:column;animation:fadeUp .45s cubic-bezier(.22,1,.36,1)}
+.screen.on{display:flex}
+@keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+/* ============ 右侧说明 ============ */
+.notes{width:300px;color:rgba(255,255,255,.75);flex-shrink:0}
+.notes h2{color:#fff;font-size:20px;margin-bottom:4px;font-family:var(--font-disp);letter-spacing:1px}
+.notes .tagline{color:var(--lime);font-size:11px;font-family:var(--font-mono);margin-bottom:20px}
+.notes p{font-size:13px;line-height:1.9;color:rgba(255,255,255,.6);margin-bottom:14px}
+.notes .k{color:#fff;font-weight:700}
+.notes ul{list-style:none;margin-bottom:14px}
+.notes li{font-size:12.5px;line-height:1.8;color:rgba(255,255,255,.55);padding-left:16px;position:relative;margin-bottom:6px}
+.notes li::before{content:'';position:absolute;left:0;top:9px;width:6px;height:6px;border-radius:2px;background:var(--lime)}
+.note-block{display:none}.note-block.on{display:block}
+
+/* ============ 通用组件 ============ */
+.statusbar{height:54px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 28px 6px;font-size:13px;font-weight:700;flex-shrink:0}
+.dark .statusbar{color:#fff}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700}
+.chip.lime{background:var(--lime);color:var(--lime-ink)}
+.chip.out{border:1.5px solid var(--ink-3);color:var(--ink-2)}
+.chip.terra{background:var(--terra-soft);color:var(--terra)}
+.chip.ghost{background:rgba(255,255,255,.12);color:#fff;backdrop-filter:blur(8px)}
+.cta{height:56px;border-radius:18px;background:var(--ink);color:#fff;font-size:16px;font-weight:900;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border:none;font-family:var(--font-body);transition:.2s;letter-spacing:2px}
+.cta:active{transform:scale(.97)}
+.cta.lime{background:var(--lime);color:var(--lime-ink)}
+.card{background:#fff;border-radius:var(--radius);box-shadow:0 2px 12px rgba(22,24,29,.05)}
+
+/* ============ S1 动作库 ============ */
+.s1-header{padding:8px 24px 0}
+.s1-header .brand{display:flex;align-items:baseline;justify-content:space-between}
+.s1-header h1{font-family:var(--font-disp);font-size:30px;letter-spacing:2px}
+.s1-header h1 em{font-style:normal;color:var(--lime-deep)}
+.s1-header .date{font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+.search{margin:16px 24px 0;height:44px;background:#fff;border-radius:14px;display:flex;align-items:center;padding:0 16px;gap:10px;color:var(--ink-3);font-size:14px;box-shadow:0 2px 10px rgba(22,24,29,.04)}
+.seg{display:flex;margin:14px 24px 0;background:var(--paper-2);border-radius:12px;padding:4px}
+.seg div{flex:1;text-align:center;padding:8px 0;font-size:12.5px;font-weight:700;color:var(--ink-2);border-radius:9px;cursor:pointer;transition:.2s}
+.seg div.on{background:#fff;color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.groups{flex:1;overflow-y:auto;padding:18px 24px 24px;scrollbar-width:none}
+.groups::-webkit-scrollbar{display:none}
+.g-title{display:flex;align-items:center;gap:10px;font-size:13px;font-weight:900;margin:18px 0 10px;color:var(--ink-2)}
+.g-title:first-child{margin-top:0}
+.g-title .cnt{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);font-weight:500}
+.g-title .line{flex:1;height:1px;background:var(--line)}
+.ex-row{background:#fff;border-radius:16px;padding:14px 16px;display:flex;align-items:center;gap:13px;margin-bottom:8px;cursor:pointer;transition:.2s;box-shadow:0 1px 6px rgba(22,24,29,.04)}
+.ex-row:active{transform:scale(.98)}
+.ex-ico{width:44px;height:44px;border-radius:13px;background:var(--paper-2);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;position:relative}
+.ex-ico.calib::after{content:'';position:absolute;right:-2px;top:-2px;width:12px;height:12px;border-radius:50%;background:var(--lime);border:2.5px solid #fff}
+.ex-info{flex:1;min-width:0}
+.ex-name{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.ex-meta{font-size:11px;color:var(--ink-3);margin-top:3px;display:flex;gap:8px;font-family:var(--font-mono)}
+.ex-cam{font-size:10px;color:var(--ink-2);background:var(--paper-2);padding:2px 8px;border-radius:6px;font-family:var(--font-mono)}
+.tabbar{height:78px;background:#fff;border-top:1px solid var(--line);display:flex;align-items:flex-start;padding:12px 8px 0;flex-shrink:0}
+.tabbar .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;color:var(--ink-3);cursor:pointer}
+.tabbar .tab.on{color:var(--ink)}
+.tabbar .tab .dot{width:22px;height:22px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px}
+.tabbar .tab.on .dot{background:var(--lime)}
+
+/* ============ S2 机位引导 ============ */
+.s2-scroll{flex:1;overflow-y:auto;scrollbar-width:none}
+.s2-scroll::-webkit-scrollbar{display:none}
+.back-bar{display:flex;align-items:center;gap:12px;padding:4px 24px 0}
+.back-btn{width:38px;height:38px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.05)}
+.back-bar .t{font-size:13px;color:var(--ink-2);font-weight:700}
+.s2-hero{padding:14px 24px 0}
+.s2-hero h1{font-family:var(--font-disp);font-size:34px;letter-spacing:2px;line-height:1.1}
+.s2-hero .en{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);margin-top:2px;letter-spacing:1px}
+.s2-hero .tags{display:flex;gap:8px;margin-top:12px}
+.mode-card{margin:16px 24px 0;padding:16px}
+.mode-card .mc-t{font-size:12px;font-weight:900;color:var(--ink-2);margin-bottom:10px;letter-spacing:1px}
+.mode-row{display:flex;gap:10px}
+.mode-opt{flex:1;border:2px solid var(--paper-2);border-radius:14px;padding:12px;cursor:pointer;transition:.2s}
+.mode-opt.on{border-color:var(--lime-deep);background:rgba(198,241,53,.12)}
+.mode-opt .mo-t{font-size:14px;font-weight:900;display:flex;align-items:center;gap:6px}
+.mode-opt .mo-d{font-size:11px;color:var(--ink-2);margin-top:4px;line-height:1.5}
+.cam-card{margin:14px 24px 0;padding:18px 16px;display:flex;gap:14px;align-items:center}
+.cam-svg{flex-shrink:0}
+.cam-info .ci-t{font-size:15px;font-weight:900;margin-bottom:4px}
+.cam-info .ci-d{font-size:12px;color:var(--ink-2);line-height:1.7}
+.check-list{margin:14px 24px 0;padding:6px 16px}
+.check-item{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
+.check-item:last-child{border:none}
+.check-item .ck{width:20px;height:20px;border-radius:50%;background:var(--lime);color:var(--lime-ink);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;flex-shrink:0}
+.check-item .ck.wait{background:var(--paper-2);color:var(--ink-3)}
+.s2-cta{padding:16px 24px 26px;flex-shrink:0}
+
+/* ============ S3 实时识别 ============ */
+.cam-bg{position:absolute;inset:0;background:
+  radial-gradient(120% 80% at 50% 0%,#2A2F26 0%,#14170F 55%,#0A0C07 100%)}
+.cam-grid{position:absolute;inset:0;opacity:.14;background-image:linear-gradient(rgba(198,241,53,.5) 1px,transparent 1px),linear-gradient(90deg,rgba(198,241,53,.5) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(80% 60% at 50% 45%,#000 30%,transparent 75%)}
+.hud-top{position:relative;z-index:10;display:flex;justify-content:space-between;align-items:flex-start;padding:58px 20px 0}
+.phase-pill{background:rgba(14,16,14,.65);backdrop-filter:blur(12px);border:1px solid rgba(198,241,53,.3);color:var(--lime);padding:8px 16px;border-radius:99px;font-size:13px;font-weight:900;display:flex;align-items:center;gap:8px}
+.phase-pill .pulse{width:8px;height:8px;border-radius:50%;background:var(--lime);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+.rec-chip{display:flex;align-items:center;gap:7px;background:rgba(232,92,58,.18);border:1px solid rgba(232,92,58,.5);color:#FF8A6B;padding:8px 14px;border-radius:99px;font-size:12px;font-weight:900;font-family:var(--font-mono)}
+.rec-chip .rd{width:8px;height:8px;border-radius:50%;background:var(--terra);animation:pulse 1s infinite}
+.frame-banner{position:relative;z-index:10;margin:12px 20px 0;background:rgba(198,241,53,.12);border:1px solid rgba(198,241,53,.35);backdrop-filter:blur(10px);border-radius:14px;padding:10px 14px;display:flex;align-items:center;gap:10px;color:var(--lime);font-size:12.5px;font-weight:700}
+.skel-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:5}
+.rep-cluster{position:absolute;left:24px;bottom:190px;z-index:10}
+.rep-num{font-family:var(--font-disp);font-size:96px;color:#fff;line-height:.9;text-shadow:0 4px 30px rgba(198,241,53,.35)}
+.rep-num em{font-style:normal;color:var(--lime)}
+.rep-label{color:rgba(255,255,255,.55);font-size:12px;margin-top:8px;font-family:var(--font-mono);letter-spacing:2px}
+.telemetry{position:absolute;right:20px;bottom:190px;z-index:10;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.tele{background:rgba(14,16,14,.6);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:6px 12px;font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,.75)}
+.tele b{color:var(--lime);font-weight:700}
+.agent-strip{position:absolute;left:20px;right:20px;bottom:118px;z-index:10;background:rgba(14,16,14,.72);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,.1);border-left:4px solid var(--lime);border-radius:14px;padding:12px 16px;display:flex;gap:12px;align-items:center}
+.agent-dot{width:26px;height:26px;border-radius:50%;background:var(--lime);display:flex;align-items:center;justify-content:center;flex-shrink:0;position:relative}
+.agent-dot::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:1.5px solid var(--lime);animation:ring 2s infinite}
+@keyframes ring{0%{transform:scale(.8);opacity:1}100%{transform:scale(1.4);opacity:0}}
+.agent-dot span{font-size:12px}
+.agent-strip .as-t{color:#fff;font-size:13px;font-weight:700;line-height:1.5}
+.agent-strip .as-s{color:rgba(255,255,255,.4);font-size:10px;font-family:var(--font-mono);margin-top:2px}
+.hud-bottom{position:absolute;left:0;right:0;bottom:0;z-index:10;padding:0 24px 34px;display:flex;align-items:center;gap:14px}
+.end-btn{flex:1;height:56px;border-radius:18px;background:#fff;color:var(--ink);font-weight:900;font-size:15px;border:none;cursor:pointer;font-family:var(--font-body);letter-spacing:2px}
+.icon-btn{width:56px;height:56px;border-radius:18px;background:rgba(255,255,255,.12);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.15);color:#fff;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+
+/* ============ S4 报告抽屉 ============ */
+.dim{position:absolute;inset:0;background:rgba(5,6,4,.55);backdrop-filter:blur(3px);z-index:20}
+.sheet{position:absolute;left:0;right:0;bottom:0;height:72%;background:var(--paper);border-radius:28px 28px 0 0;z-index:30;display:flex;flex-direction:column;animation:sheetUp .5s cubic-bezier(.22,1,.36,1);box-shadow:0 -20px 60px rgba(0,0,0,.4)}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:none}}
+.handle{width:44px;height:5px;border-radius:99px;background:var(--ink-3);opacity:.35;margin:12px auto 4px;flex-shrink:0}
+.sheet-head{padding:10px 24px 0;display:flex;justify-content:space-between;align-items:baseline}
+.sheet-head h2{font-family:var(--font-disp);font-size:24px;letter-spacing:1px}
+.sheet-head .mono{font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+.stat-row{display:flex;gap:10px;padding:14px 24px 0}
+.stat{flex:1;background:#fff;border-radius:16px;padding:14px 12px;box-shadow:0 1px 6px rgba(22,24,29,.04)}
+.stat .v{font-family:var(--font-num);font-weight:800;font-size:24px}
+.stat .v em{font-style:normal;font-size:12px;color:var(--ink-3);font-weight:500}
+.stat .k{font-size:11px;color:var(--ink-2);margin-top:2px}
+.coach-note{margin:14px 24px 0;background:#fff;border-radius:16px;padding:16px;border-left:4px solid var(--lime);box-shadow:0 1px 6px rgba(22,24,29,.04)}
+.coach-note .cn-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.coach-note .cn-head .ad{width:18px;height:18px;border-radius:50%;background:var(--lime);position:relative}
+.coach-note .cn-head .ad::after{content:'';position:absolute;inset:-3px;border-radius:50%;border:1.5px solid var(--lime);animation:ring 2s infinite}
+.coach-note .cn-head b{font-size:13px}
+.coach-note .cn-head .local{font-family:var(--font-mono);font-size:9px;color:var(--ink-3);margin-left:auto;border:1px solid var(--line);padding:2px 8px;border-radius:99px}
+.coach-note p{font-size:13px;line-height:1.8;color:var(--ink-2)}
+.findings{margin:14px 24px 0;display:flex;flex-direction:column;gap:8px}
+.finding{display:flex;align-items:center;gap:12px;background:#fff;border-radius:14px;padding:12px 14px}
+.finding .fi{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.finding.ok .fi{background:rgba(198,241,53,.2)}
+.finding.warn .fi{background:var(--terra-soft)}
+.finding .ft{flex:1;font-size:13px;font-weight:700}
+.finding .fd{font-size:11px;color:var(--ink-3);margin-top:1px}
+.rep-bars{display:flex;gap:4px;align-items:flex-end;height:44px;padding:0 24px;margin-top:16px}
+.rep-bars .rb{flex:1;border-radius:4px 4px 2px 2px;background:var(--lime);min-height:8px;position:relative}
+.rep-bars .rb.low{background:var(--terra);opacity:.85}
+.rep-cap{padding:6px 24px 0;font-family:var(--font-mono);font-size:10px;color:var(--ink-3);display:flex;justify-content:space-between}
+.sheet-cta{margin-top:auto;padding:14px 24px 28px;display:flex;gap:10px}
+.sheet-cta .ghost-btn{flex:1;height:54px;border-radius:16px;background:#fff;border:1.5px solid var(--line);font-weight:900;font-size:14px;cursor:pointer;font-family:var(--font-body);color:var(--ink)}
+.sheet-cta .cta{flex:1.4;height:54px;font-size:14px;letter-spacing:1px}
+
+/* ============ S5 素材库 ============ */
+.lib-head{padding:8px 24px 0}
+.lib-head h1{font-family:var(--font-disp);font-size:30px;letter-spacing:2px}
+.lib-head .lh-sub{font-size:12px;color:var(--ink-2);margin-top:4px}
+.calib-card{margin:16px 24px 0;padding:16px;background:linear-gradient(135deg,#16181D,#2A2E24);color:#fff;border-radius:var(--radius)}
+.calib-card .cc-t{font-size:13px;font-weight:900;display:flex;justify-content:space-between;align-items:center}
+.calib-card .cc-t .chip{font-size:10px}
+.calib-card .cc-d{font-size:11px;color:rgba(255,255,255,.55);margin-top:6px;line-height:1.6}
+.calib-track{height:8px;border-radius:99px;background:rgba(255,255,255,.12);margin-top:12px;overflow:hidden}
+.calib-fill{height:100%;width:62%;border-radius:99px;background:var(--lime);position:relative}
+.calib-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);animation:shine 2.4s infinite}
+@keyframes shine{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.calib-card .cc-n{font-family:var(--font-mono);font-size:10px;color:var(--lime);margin-top:8px}
+.day-group{padding:20px 24px 0}
+.day-group .dg-t{font-size:12px;font-weight:900;color:var(--ink-2);margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.day-group .dg-t .line{flex:1;height:1px;background:var(--line)}
+.cap-row{background:#fff;border-radius:16px;padding:13px 14px;display:flex;align-items:center;gap:12px;margin-bottom:8px;cursor:pointer;box-shadow:0 1px 6px rgba(22,24,29,.04)}
+.cap-row:active{transform:scale(.98)}
+.cap-thumb{width:52px;height:52px;border-radius:12px;background:var(--dark-2);position:relative;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.cap-thumb .play{position:absolute;width:20px;height:20px;border-radius:50%;background:rgba(198,241,53,.9);display:flex;align-items:center;justify-content:center;font-size:8px;color:var(--lime-ink)}
+.cap-info{flex:1;min-width:0}
+.cap-info .cn{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px}
+.cap-info .cm{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);margin-top:3px}
+.cap-status{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+
+/* ============ S6 校对 ============ */
+.review-hero{margin:12px 24px 0;height:300px;border-radius:22px;background:radial-gradient(120% 100% at 50% 0%,#2A2F26,#0E100E);position:relative;overflow:hidden}
+.review-hero .cam-grid{opacity:.1}
+.timeline{margin:16px 24px 0}
+.timeline .tl-t{font-size:12px;font-weight:900;color:var(--ink-2);margin-bottom:10px;display:flex;justify-content:space-between}
+.timeline .tl-t span{font-family:var(--font-mono);font-weight:500;color:var(--ink-3)}
+.tl-track{height:56px;background:#fff;border-radius:14px;position:relative;overflow:hidden;display:flex;align-items:center;padding:0 8px;gap:3px}
+.tl-seg{flex:1;height:30px;border-radius:7px;background:rgba(198,241,53,.35);border:1.5px solid var(--lime-deep);cursor:pointer;transition:.2s;position:relative}
+.tl-seg.sel{background:var(--lime)}
+.tl-seg.rej{background:var(--paper-2);border-color:var(--ink-3);opacity:.5}
+.tl-cap{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9px;color:var(--ink-3);margin-top:6px}
+.rep-detail{margin:14px 24px 0;padding:16px}
+.rep-detail .rd-t{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.rep-detail .rd-t b{font-size:15px}
+.kv{display:flex;justify-content:space-between;font-size:12.5px;padding:9px 0;border-bottom:1px solid var(--line)}
+.kv:last-child{border:none}
+.kv .k{color:var(--ink-2)}
+.kv .v{font-family:var(--font-mono);font-weight:700}
+.kv .v.lime{color:var(--lime-deep)}
+.verdict-row{display:flex;gap:10px;padding:16px 24px 0}
+.v-btn{flex:1;height:50px;border-radius:15px;font-weight:900;font-size:14px;cursor:pointer;border:none;font-family:var(--font-body);display:flex;align-items:center;justify-content:center;gap:6px}
+.v-btn.ok{background:var(--lime);color:var(--lime-ink)}
+.v-btn.no{background:var(--terra-soft);color:var(--terra)}
+.s6-note{margin:14px 24px 0;font-size:11px;color:var(--ink-3);line-height:1.7;padding:0 4px}
+
+@media(max-width:980px){.notes{display:none}}
+@media(max-width:700px){.rail{display:none}}
+</style>
+</head>
+<body>
+
+<nav class="rail">
+  <div class="logo">Form<em>Coach</em></div>
+  <div class="sub">移动端 MVP 交互原型<br>测试 → 录制 → 校对 → 校准</div>
+  <div class="nav-item active" data-s="0"><span class="n">01</span>动作库</div>
+  <div class="nav-item" data-s="1"><span class="n">02</span>机位引导</div>
+  <div class="nav-item" data-s="2"><span class="n">03</span>实时识别 · 录制中</div>
+  <div class="nav-item" data-s="3"><span class="n">04</span>组后报告 · 抽屉</div>
+  <div class="foot">荧光青柠 = 骨架/数据签名色<br>陶土橙 = 录制/告警<br>全部本地运行 · 零上传<br>录制产物直存手机本地</div>
+</nav>
+
+<div class="stage">
+<div class="phone" id="phone">
+<div class="notch"></div>
+
+<!-- ============ S1 动作库 ============ -->
+<section class="screen on" data-s="0">
+  <div class="statusbar"><span>9:41</span><span>📶 🔋</span></div>
+  <div class="s1-header">
+    <div class="brand"><h1>动作<em>库</em></h1><span class="date">THU 08.07</span></div>
+  </div>
+  <div class="search">🔍 <span>搜索 65 个动作…</span></div>
+  <div class="seg"><div class="on">全部</div><div>已校准 · 6</div><div>模拟 · 59</div></div>
+  <div class="groups">
+    <div class="g-title">居家 · 前置 <span class="line"></span><span class="cnt">4</span></div>
+    <div class="ex-row" onclick="go(1)">
+      <div class="ex-ico calib">🚶</div>
+      <div class="ex-info"><div class="ex-name">原地踏步 <span class="chip lime">已校准</span></div>
+      <div class="ex-meta"><span>自重</span><span>·</span><span>计数权威 Rust #5</span></div></div>
+      <span class="ex-cam">正前</span>
+    </div>
+    <div class="ex-row">
+      <div class="ex-ico calib">↔️</div>
+      <div class="ex-info"><div class="ex-name">侧步并步 <span class="chip lime">已校准</span></div>
+      <div class="ex-meta"><span>自重</span><span>·</span><span>Rust #6</span></div></div>
+      <span class="ex-cam">正前</span>
+    </div>
+    <div class="g-title">背 · 后置 <span class="line"></span><span class="cnt">14</span></div>
+    <div class="ex-row" onclick="go(1)">
+      <div class="ex-ico calib">🏋️</div>
+      <div class="ex-info"><div class="ex-name">高位下拉 <span class="chip lime">已校准</span></div>
+      <div class="ex-meta"><span>绳索</span><span>·</span><span>Rust #1/3 · 个人轨迹走廊</span></div></div>
+      <span class="ex-cam">正后</span>
+    </div>
+    <div class="ex-row">
+      <div class="ex-ico">🚣</div>
+      <div class="ex-info"><div class="ex-name">杠铃划船 <span class="chip out">模拟</span></div>
+      <div class="ex-meta"><span>杠铃</span><span>·</span><span>7 段素材待校准</span></div></div>
+      <span class="ex-cam">左前45°</span>
+    </div>
+    <div class="g-title">肩 <span class="line"></span><span class="cnt">12</span></div>
+    <div class="ex-row">
+      <div class="ex-ico calib">💪</div>
+      <div class="ex-info"><div class="ex-name">坐姿推肩 <span class="chip lime">已校准</span></div>
+      <div class="ex-meta"><span>哑铃</span><span>·</span><span>Rust #2/4</span></div></div>
+      <span class="ex-cam">左前45°</span>
+    </div>
+    <div class="ex-row">
+      <div class="ex-ico">🪽</div>
+      <div class="ex-info"><div class="ex-name">侧平举 <span class="chip out">模拟</span></div>
+      <div class="ex-meta"><span>哑铃</span><span>·</span><span>先验引导 · 录满 8 次升级</span></div></div>
+      <span class="ex-cam">正前</span>
+    </div>
+    <div class="g-title">腿 <span class="line"></span><span class="cnt">16</span></div>
+    <div class="ex-row">
+      <div class="ex-ico">🦵</div>
+      <div class="ex-info"><div class="ex-name">徒手深蹲 <span class="chip out">模拟</span></div>
+      <div class="ex-meta"><span>自重</span><span>·</span><span>相位识别 · 不计数</span></div></div>
+      <span class="ex-cam">左侧</span>
+    </div>
+  </div>
+  <div class="tabbar">
+    <div class="tab on"><div class="dot">🏋️</div>动作</div>
+    <div class="tab"><div class="dot">📈</div>进展</div>
+    <div class="tab"><div class="dot">⚙️</div>我的</div>
+  </div>
+</section>
+
+<!-- ============ S2 机位引导 ============ -->
+<section class="screen" data-s="1">
+  <div class="statusbar"><span>9:41</span><span>📶 🔋</span></div>
+  <div class="s2-scroll">
+    <div class="back-bar"><div class="back-btn" onclick="go(0)">←</div><span class="t">高位下拉 · 准备</span></div>
+    <div class="s2-hero">
+      <h1>高位下拉</h1><div class="en">LAT PULLDOWN · CABLE · BILATERAL</div>
+      <div class="tags"><span class="chip lime">已校准 · Rust #1</span><span class="chip out">背部 · 垂直拉</span></div>
+    </div>
+    <div class="mode-card card">
+      <div class="mc-t">拍摄模式</div>
+      <div class="mode-row">
+        <div class="mode-opt"><div class="mo-t">🤳 前置 · 识别</div><div class="mo-d">看着屏幕做，实时计数 + 相位提示</div></div>
+        <div class="mode-opt on"><div class="mo-t">📷 后置 · 观察</div><div class="mo-d">手机架好后离开，组后看建议报告</div></div>
+      </div>
+    </div>
+    <div class="cam-card card">
+      <svg class="cam-svg" width="120" height="120" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="#E4E2DA" stroke-width="1.5" stroke-dasharray="3 4"/>
+        <circle cx="60" cy="60" r="10" fill="#16181D"/>
+        <text x="60" y="64" text-anchor="middle" font-size="8" fill="#C6F135">你</text>
+        <g font-size="7" fill="#9A9EA6" font-family="monospace">
+          <text x="56" y="12">正前</text><text x="56" y="114">正后</text>
+          <text x="4" y="62">左</text><text x="104" y="62">右</text>
+        </g>
+        <line x1="60" y1="60" x2="60" y2="106" stroke="#C6F135" stroke-width="2" stroke-dasharray="4 3"/>
+        <g transform="translate(60,108)">
+          <rect x="-9" y="-6" width="18" height="12" rx="3" fill="#16181D"/>
+          <circle cx="0" cy="0" r="3.5" fill="#C6F135"/>
+        </g>
+        <circle cx="60" cy="108" r="14" fill="none" stroke="#C6F135" stroke-width="1.5">
+          <animate attributeName="r" values="12;18;12" dur="2s" repeatCount="indefinite"/>
+          <animate attributeName="opacity" values=".8;.2;.8" dur="2s" repeatCount="indefinite"/>
+        </circle>
+      </svg>
+      <div class="cam-info">
+        <div class="ci-t">推荐机位：正后方</div>
+        <div class="ci-d">手机置于身后 2–2.5 米、高约 1 米，全身入镜。正后能看清肩胛收缩与躯干是否后仰借力。</div>
+      </div>
+    </div>
+    <div class="check-list card">
+      <div class="check-item"><span class="ck">✓</span>全身 33 个关键点在画面内</div>
+      <div class="check-item"><span class="ck">✓</span>横杆与双手可见</div>
+      <div class="check-item"><span class="ck wait">…</span>入框校验将在开拍后实时检测</div>
+    </div>
+  </div>
+  <div class="s2-cta"><button class="cta lime" onclick="go(2)">开始识别 · 录制</button></div>
+</section>
+
+<!-- ============ S3 实时识别 ============ -->
+<section class="screen" data-s="2" style="background:var(--dark)">
+  <div class="cam-bg"></div><div class="cam-grid"></div>
+  <div class="statusbar" style="color:#fff;position:relative;z-index:10"><span>9:41</span><span>📶 🔋</span></div>
+  <div class="hud-top">
+    <div class="phase-pill"><span class="pulse"></span>下放 · 离心</div>
+    <div class="rec-chip"><span class="rd"></span>REC 00:42</div>
+  </div>
+  <div class="frame-banner">✓ 全身入框 · 机位合格 · 正后视角已确认</div>
+  <div class="skel-wrap">
+    <svg width="220" height="380" viewBox="0 0 200 380" fill="none">
+      <g stroke="#C6F135" stroke-width="4" stroke-linecap="round" style="filter:drop-shadow(0 0 10px rgba(198,241,53,.6))">
+        <circle cx="100" cy="46" r="16" fill="none"/>
+        <line x1="100" y1="62" x2="100" y2="170"/>
+        <line x1="100" y1="80" x2="48" y2="110"><animate attributeName="y2" values="110;128;110" dur="2.4s" repeatCount="indefinite"/></line>
+        <line x1="100" y1="80" x2="152" y2="110"><animate attributeName="y2" values="110;128;110" dur="2.4s" repeatCount="indefinite"/></line>
+        <line x1="48" y1="110" x2="42" y2="170"><animate attributeName="y1" values="110;128;110" dur="2.4s" repeatCount="indefinite"/></line>
+        <line x1="152" y1="110" x2="158" y2="170"><animate attributeName="y1" values="110;128;110" dur="2.4s" repeatCount="indefinite"/></line>
+        <line x1="100" y1="170" x2="72" y2="250"/><line x1="100" y1="170" x2="128" y2="250"/>
+        <line x1="72" y1="250" x2="70" y2="330"/><line x1="128" y1="250" x2="130" y2="330"/>
+      </g>
+      <g fill="#fff">
+        <circle cx="48" cy="110" r="4"><animate attributeName="cy" values="110;128;110" dur="2.4s" repeatCount="indefinite"/></circle>
+        <circle cx="152" cy="110" r="4"><animate attributeName="cy" values="110;128;110" dur="2.4s" repeatCount="indefinite"/></circle>
+        <circle cx="100" cy="170" r="4"/><circle cx="72" cy="250" r="4"/><circle cx="128" cy="250" r="4"/>
+      </g>
+    </svg>
+  </div>
+  <div class="rep-cluster">
+    <div class="rep-num"><em>08</em></div>
+    <div class="rep-label">REPS · 目标 12</div>
+  </div>
+  <div class="telemetry">
+    <div class="tele"><b>24</b> FPS</div>
+    <div class="tele">有效帧 <b>96%</b></div>
+    <div class="tele">LITE · GPU</div>
+  </div>
+  <div class="agent-strip">
+    <div class="agent-dot"><span>⚡</span></div>
+    <div><div class="as-t">节奏稳定，触杆位置一致 — 保持</div><div class="as-s">OBSERVATION · 本地引擎 · 不上传</div></div>
+  </div>
+  <div class="hud-bottom">
+    <div class="icon-btn">🔀</div>
+    <button class="end-btn" onclick="go(3)">结束本组</button>
+    <div class="icon-btn">⏸</div>
+  </div>
+</section>
+
+<!-- ============ S4 报告抽屉 ============ -->
+<section class="screen" data-s="3" style="background:var(--dark)">
+  <div class="cam-bg"></div>
+  <div class="statusbar" style="color:#fff;position:relative;z-index:10"><span>9:41</span><span>📶 🔋</span></div>
+  <div class="dim"></div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div class="sheet-head"><h2>第 3 组 · 高位下拉</h2><span class="mono">19:42 · 42s</span></div>
+    <div class="stat-row">
+      <div class="stat"><div class="v">8<em> /12</em></div><div class="k">确认次数</div></div>
+      <div class="stat"><div class="v">96<em>%</em></div><div class="k">有效帧率</div></div>
+      <div class="stat"><div class="v">24<em>fps</em></div><div class="k">判定帧率</div></div>
+    </div>
+    <div class="coach-note">
+      <div class="cn-head"><span class="ad"></span><b>教练便签</b><span class="local">本地引擎 · 零上传</span></div>
+      <p>本组 8 次全部确认。第 6、8 次下拉深度略浅于组内中位，后半程注意疲劳管理；躯干稳定，无明显后仰借力。</p>
+    </div>
+    <div class="findings">
+      <div class="finding ok"><div class="fi">✓</div><div><div class="ft">躯干角度稳定</div><div class="fd">observation · torso_drift &lt; 4°</div></div></div>
+      <div class="finding warn"><div class="fi">!</div><div><div class="ft">2 次幅度相对不足</div><div class="fd">observation · rep #6 #8 amplitude −18%</div></div></div>
+    </div>
+    <div class="rep-bars">
+      <div class="rb" style="height:82%"></div><div class="rb" style="height:86%"></div><div class="rb" style="height:84%"></div>
+      <div class="rb" style="height:88%"></div><div class="rb" style="height:80%"></div><div class="rb low" style="height:64%"></div>
+      <div class="rb" style="height:78%"></div><div class="rb low" style="height:60%"></div>
+    </div>
+    <div class="rep-cap"><span>REP 1–8 · 幅度归一</span><span>橙 = 相对不足</span></div>
+    <div class="save-note" id="saveNote" style="margin:12px 24px 0;font-family:var(--font-mono);font-size:10px;color:var(--ink-3);display:flex;align-items:center;gap:8px">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--lime);display:inline-block"></span>
+      已自动保存 → 本机 Documents/captures/20260807_1942_lat_pulldown.json（+ mp4）
+    </div>
+    <div class="sheet-cta">
+      <button class="ghost-btn" onclick="go(2)">再来一组</button>
+      <button class="cta" onclick="go(0)">完成 · 返回动作库</button>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<!-- ============ 右侧说明 ============ -->
+<aside class="notes">
+  <div class="note-block on" data-s="0">
+    <h2>动作库</h2><div class="tagline">SCREEN 01 · LIBRARY</div>
+    <p><span class="k">65 个动作全量可选</span>，按部位 + 推荐机位分组。「已校准 / 模拟」两层状态用青柠实心 vs 描边 chip 区分，一眼看出能力边界。</p>
+    <ul><li>已校准动作带青柠圆点角标 = Rust 权威计数</li><li>模拟动作标注升级条件（"录满 8 次升级"）</li><li>机位标签直接印在每行（正前/正后/左前45°）</li></ul>
+  </div>
+  <div class="note-block" data-s="1">
+    <h2>机位引导</h2><div class="tagline">SCREEN 02 · CAMERA SETUP</div>
+    <p>选定动作后先落机位。俯视八向图复用 viewGating 的推荐数据，<span class="k">青柠涟漪标记推荐位</span>，文字给距离/高度/理由。</p>
+    <ul><li>前置 = 识别（看屏幕）/ 后置 = 观察（组后报告）双模式卡</li><li>入框校验 checklist，开拍后转实时检测</li><li>CTA 即"开始识别 · 录制"——录制默认开启</li></ul>
+  </div>
+  <div class="note-block" data-s="2">
+    <h2>实时识别</h2><div class="tagline">SCREEN 03 · LIVE · DARK</div>
+    <p>深色拍摄页，<span class="k">青柠发光骨架是绝对主角</span>。超大 rep 数字左下，相位 pill 顶部，REC 常驻——录制是这个 App 的一等公民，不是隐藏功能。</p>
+    <ul><li>agent 便签条：一行实时观察（本地引擎输出）</li><li>右侧 telemetry：FPS / 有效帧 / 模型档位</li><li>入框合格横幅，不合格时变陶土橙并给方向提示</li></ul>
+  </div>
+  <div class="note-block" data-s="3">
+    <h2>组后报告 · 抽屉</h2><div class="tagline">SCREEN 04 · SET REPORT</div>
+    <p>结束本组 → 底部抽屉拉起。<span class="k">「教练便签」是 agent 输出的人格化容器</span>：青柠书脊 + 脉搏圆点 + "本地引擎 · 零上传"信任标。observation_findings 中文文案化成 finding 卡，rep 幅度条一目了然。</p>
+    <ul><li>每组结束自动落盘本机存储（关键点 JSON + 可选 mp4）</li><li>不打分，只陈述证据</li></ul>
+  </div>
+</aside>
+</div>
+
+<script>
+const screens=[...document.querySelectorAll('.screen')];
+const navs=[...document.querySelectorAll('.nav-item')];
+const notes=[...document.querySelectorAll('.note-block')];
+const phone=document.getElementById('phone');
+function go(i){
+  screens.forEach(s=>s.classList.toggle('on',+s.dataset.s===i));
+  navs.forEach(n=>n.classList.toggle('active',+n.dataset.s===i));
+  notes.forEach(n=>n.classList.toggle('on',+n.dataset.s===i));
+  phone.classList.toggle('dark',i===2||i===3);
+}
+navs.forEach(n=>n.addEventListener('click',()=>go(+n.dataset.s)));
+</script>
+</body>
+</html>

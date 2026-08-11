@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$comment": "Example instance and field contract for an auditable reference corridor. Null numeric values are intentional: no reviewed high-pulldown reference cohort has established them.",
-  "schemaVersion": "form-coach-reference-trajectory-profile/v1",
+  "schemaVersion": "maxpower-reference-trajectory-profile/v1",
   "profileStatus": "research_only_unpopulated",
   "identity": {
     "exerciseId": "lat_pulldown",

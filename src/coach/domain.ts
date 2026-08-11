@@ -223,6 +223,10 @@ export interface GoalContractData {
    * 训练/饮食/作息各自独立：意愿高的领域走最佳路线，意愿低的给最小约束方案并明说 trade-off。 */
   /** 缺席处理总开关（用户自选）：shift=轮转顺延（胸背腿一轮回不错过）；skip=默认跳过，只记录。 */
   missedSessionPolicy?: "shift" | "skip";
+  /** 用户选择的饮食策略 id（供需图供给侧）；未选时按目标给默认。 */
+  dietStrategyId?: string;
+  /** 用户是否锁定该饮食策略（锁定时冲突只调训练，不建议换策略）。 */
+  dietStrategyLocked?: boolean;
   commitmentPreferences?: {
     training?: "minimal" | "standard" | "high";
     nutrition?: "flexible" | "standard" | "strict";
@@ -560,6 +564,20 @@ export interface PlanRevisionData {
   recoveryGuidance?: RecoveryGuidanceData;
   /** 校准/进阶策略（每份计划必带，防止保守起点永久化）。 */
   progressionPolicy?: ProgressionPolicyData;
+  /** 饮食×训练耦合结果（碳水日型 + 冲突说明），见 src/planning/dietTrainingGraph.ts。 */
+  dietTrainingCoupling?: {
+    strategyId: string;
+    strategyNameZh: string;
+    goalFit: "good" | "workable_with_tradeoffs" | "poor";
+    carbDayTypes: Readonly<Record<string, "high" | "moderate" | "low">>;
+    conflicts: readonly {
+      ruleId: string;
+      severity: "blocking" | "tradeoff" | "advisory";
+      code: string;
+      explanation: string;
+      defaultResolution: string;
+    }[];
+  };
 }
 
 export interface PlannedSessionRef {
@@ -784,6 +802,13 @@ export type TimelineFact =
         note?: string;
         exercises?: readonly {
           name: string;
+          /**
+           * The movement selected in the daily-log vocabulary. This is
+           * intentionally only a broad concept: it must not be promoted to
+           * an exact ExerciseVariant or comparable performance history until
+           * the user has resolved the precise equipment/variation.
+           */
+          exerciseConceptId?: string;
           sets?: readonly {
             reps?: number;
             load?: MassQuantity;

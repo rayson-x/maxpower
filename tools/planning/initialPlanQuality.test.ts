@@ -109,7 +109,18 @@ test("4 天×75 分钟的进阶健身房计划不会退化成连续三天、每�
   const resistanceSets = resistanceSessions.flatMap((session) => session.tasks).flatMap((task) => task.sets);
   assert.ok(resistanceSets.some((set) => set.targetReps?.min === 6 && set.targetReps.max === 10));
   assert.ok(resistanceSets.some((set) => set.targetReps?.min === 10 && set.targetReps.max === 15));
-  assert.ok(resistanceSets.some((set) => set.rest?.unit === "seconds" && set.rest.value === 180));
+  // 语义修正（2026-08-11）：组间休息按目标分化（力量 240-300s / 增肌 150-180s / 减脂 105-150s）。
+  // 本 fixture 是减脂目标，高疲劳主项休息为 150s；断言改为"存在长休息且落在该目标的档位内"。
+  const restValues = [...new Set(resistanceSets.map((set) => set.rest?.value).filter((value): value is number => value !== undefined))];
+  assert.ok(restValues.length >= 2, "不同优先级应有不同休息时长");
+  assert.ok(
+    restValues.some((value) => value >= 105),
+    `减脂目标的主项休息应 ≥105s，实际取值：${restValues.join("/")}`,
+  );
+  assert.ok(
+    restValues.every((value) => value <= 180),
+    `减脂目标不应出现力量目标级的超长休息，实际取值：${restValues.join("/")}`,
+  );
 
   const benchSlot = resistanceSessions
     .flatMap((session) => session.stimulusSlots ?? [])

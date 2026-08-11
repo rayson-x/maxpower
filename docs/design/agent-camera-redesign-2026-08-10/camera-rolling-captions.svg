@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200">
+  <defs>
+    <style>
+      text { font-family: Heiti SC, sans-serif; fill: #171914; }
+      .display { font-weight: 800; letter-spacing: -1px; }
+      .mono { font-family: Menlo, monospace; letter-spacing: .8px; }
+      .white { fill: #fafaf6; }
+      .lime { fill: #c8f72d; }
+      .limeInk { fill: #354800; }
+      .muted { fill: #777b73; }
+      .dim { fill: #a2a79e; }
+      .tiny { font-size: 9px; }
+      .small { font-size: 11px; }
+      .body { font-size: 13px; }
+      .phoneTitle { font-size: 16px; font-weight: 800; }
+      .label { font-size: 12px; font-weight: 800; letter-spacing: 1.4px; }
+    </style>
+    <linearGradient id="captionFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#080b08" stop-opacity="0"/><stop offset=".34" stop-color="#080b08" stop-opacity=".52"/><stop offset="1" stop-color="#080b08" stop-opacity=".96"/></linearGradient>
+    <linearGradient id="floorFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#222821"/><stop offset="1" stop-color="#080a08"/></linearGradient>
+    <filter id="phoneShadow" x="-30%" y="-30%" width="160%" height="180%"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#151813" flood-opacity=".18"/></filter>
+    <filter id="textShadow" x="-30%" y="-80%" width="160%" height="260%"><feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity=".88"/></filter>
+  </defs>
+
+  <rect width="1920" height="1200" fill="#ebece7"/>
+  <text x="62" y="62" class="label limeInk">MAXPOWER / FULL-BLEED CAMERA DIRECTION</text>
+  <text x="62" y="113" class="display" font-size="41">Coach Rolling Captions · 相机原生对话</text>
+  <text x="62" y="148" font-size="15" class="muted">相机画面始终 100% 全屏；用户输入、Agent stream、TTS 和写入确认都作为视频字幕叠层。</text>
+
+  <!-- Phone 1: passive/local + entry -->
+  <g transform="translate(50 190)" filter="url(#phoneShadow)">
+    <rect width="290" height="800" rx="42" fill="#030503"/><rect x="10" y="18" width="270" height="764" rx="34" fill="url(#floorFade)"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#020302"/>
+    <path d="M10 482h270v300H10z" fill="url(#captionFade)"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="139" y="56" width="67" height="23" rx="11" fill="#262b26" stroke="#4b5148"/><text x="172" y="72" text-anchor="middle" class="tiny white">后置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#21301d" stroke="#6c8721"/><text x="145" y="112" text-anchor="middle" class="tiny lime">✓ 全身入框 · 正在计数</text>
+    <ellipse cx="145" cy="468" rx="105" ry="25" fill="#080a08" opacity=".48"/>
+    <g stroke="#c8f72d" stroke-width="3.3" stroke-linecap="round" fill="#fafaf6"><circle cx="103" cy="225" r="16"/><line x1="118" y1="237" x2="151" y2="280"/><line x1="151" y1="280" x2="190" y2="294"/><line x1="151" y1="280" x2="134" y2="335"/><line x1="190" y1="294" x2="223" y2="331"/><line x1="134" y1="335" x2="97" y2="378"/><line x1="134" y1="335" x2="181" y2="383"/><line x1="104" y1="265" x2="175" y2="242"/><line x1="175" y1="242" x2="224" y2="238"/></g>
+    <text x="27" y="455" class="display lime" font-size="61">06</text><text x="30" y="476" class="tiny white mono">REPS · LOWERING</text>
+    <g filter="url(#textShadow)">
+      <text x="28" y="534" class="tiny" fill="#9da398">LOCAL VISION · REP 05</text><text x="28" y="555" class="small" fill="#b8bdb4">下放稳定，右肘轨迹保持一致</text>
+      <text x="28" y="586" class="tiny lime mono">LOCAL VISION · LIVE</text><text x="28" y="615" class="phoneTitle white">保持节奏，再完成两次</text>
+    </g>
+    <line x1="28" y1="638" x2="262" y2="638" stroke="#ffffff" stroke-opacity=".16"/>
+    <text x="28" y="661" class="tiny" fill="#9da398">点按或说“Coach”开始对话</text>
+    <circle cx="53" cy="704" r="23" fill="#c8f72d"/><text x="53" y="711" text-anchor="middle" font-size="20">⌁</text>
+    <rect x="87" y="681" width="130" height="46" rx="23" fill="#e85c3a"/><text x="152" y="710" text-anchor="middle" class="small white" font-weight="800">结束本组</text>
+    <circle cx="243" cy="704" r="23" fill="#242924" stroke="#4c5249"/><text x="243" y="710" text-anchor="middle" class="lime" font-size="16">⌨</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">01 · 识别字幕与对话入口</text>
+  </g>
+
+  <!-- Phone 2: user STT subtitles -->
+  <g transform="translate(365 190)" filter="url(#phoneShadow)">
+    <rect width="290" height="800" rx="42" fill="#030503"/><rect x="10" y="18" width="270" height="764" rx="34" fill="url(#floorFade)"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#020302"/>
+    <path d="M10 468h270v314H10z" fill="url(#captionFade)"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="139" y="56" width="67" height="23" rx="11" fill="#262b26" stroke="#4b5148"/><text x="172" y="72" text-anchor="middle" class="tiny white">后置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#253023" stroke="#647360"/><text x="145" y="112" text-anchor="middle" class="tiny white">相机继续识别 · TTS 已打断</text>
+    <g opacity=".58" stroke="#c8f72d" stroke-width="3.2" stroke-linecap="round" fill="#fafaf6"><circle cx="145" cy="211" r="16"/><line x1="145" y1="227" x2="145" y2="330"/><line x1="145" y1="250" x2="93" y2="278"/><line x1="145" y1="250" x2="199" y2="278"/><line x1="145" y1="330" x2="116" y2="406"/><line x1="145" y1="330" x2="175" y2="406"/></g>
+    <text x="27" y="455" class="display lime" font-size="61">06</text><text x="30" y="476" class="tiny white mono">REPS · ACTIVE</text>
+    <g filter="url(#textShadow)">
+      <text x="28" y="529" class="tiny" fill="#9da398">你 · STT 临时转写</text><text x="28" y="555" class="small" fill="#c0c4bc">右肩有一点紧，</text>
+      <text x="28" y="589" class="tiny lime mono">你 · 正在听</text><text x="28" y="620" class="phoneTitle white">但不痛，下一组怎么办？</text><rect x="246" y="605" width="2" height="18" fill="#c8f72d"/>
+    </g>
+    <g transform="translate(30 646)" stroke="#c8f72d" stroke-width="2.5" stroke-linecap="round"><line x1="0" y1="11" x2="0" y2="25"/><line x1="10" y1="4" x2="10" y2="32"/><line x1="20" y1="8" x2="20" y2="28"/><line x1="30" y1="1" x2="30" y2="35"/><line x1="40" y1="7" x2="40" y2="29"/><line x1="50" y1="3" x2="50" y2="33"/><line x1="60" y1="10" x2="60" y2="26"/><line x1="70" y1="5" x2="70" y2="31"/></g>
+    <text x="123" y="669" class="tiny" fill="#aeb3aa">停顿 1.2 秒后自动发送</text>
+    <circle cx="53" cy="714" r="23" fill="#c8f72d"/><rect x="48" y="704" width="10" height="19" rx="5" fill="#161914"/><path d="M43 716q10 12 20 0" fill="none" stroke="#161914" stroke-width="2"/>
+    <rect x="87" y="691" width="130" height="46" rx="23" fill="#e85c3a"/><text x="152" y="720" text-anchor="middle" class="small white" font-weight="800">结束本组</text>
+    <circle cx="243" cy="714" r="23" fill="#242924" stroke="#4c5249"/><text x="243" y="720" text-anchor="middle" class="white" font-size="15">×</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">02 · 用户语音滚动字幕</text>
+  </g>
+
+  <!-- Phone 3: coach stream + TTS captions -->
+  <g transform="translate(680 190)" filter="url(#phoneShadow)">
+    <rect width="290" height="800" rx="42" fill="#030503"/><rect x="10" y="18" width="270" height="764" rx="34" fill="url(#floorFade)"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#020302"/>
+    <path d="M10 442h270v340H10z" fill="url(#captionFade)"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="139" y="56" width="67" height="23" rx="11" fill="#262b26" stroke="#4b5148"/><text x="172" y="72" text-anchor="middle" class="tiny white">后置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#322b17" stroke="#9b7a25"/><text x="145" y="112" text-anchor="middle" class="tiny" fill="#ffd477">已暂停计数 · 相机画面未变</text>
+    <g opacity=".42" stroke="#c8f72d" stroke-width="3.2" stroke-linecap="round" fill="#fafaf6"><circle cx="145" cy="211" r="16"/><line x1="145" y1="227" x2="145" y2="330"/><line x1="145" y1="250" x2="93" y2="278"/><line x1="145" y1="250" x2="199" y2="278"/><line x1="145" y1="330" x2="116" y2="406"/><line x1="145" y1="330" x2="175" y2="406"/></g>
+    <text x="27" y="437" class="display lime" font-size="55">06</text><text x="30" y="457" class="tiny white mono">REPS · PAUSED</text>
+    <g filter="url(#textShadow)">
+      <text x="28" y="507" class="tiny" fill="#9da398">COACH · 上一句</text><text x="28" y="530" class="small" fill="#aeb3aa">你的体感比相机判断优先。</text>
+      <text x="28" y="565" class="tiny lime mono">COACH · STREAMING　◖ TTS</text>
+      <text x="28" y="594" class="phoneTitle white">既然是紧而不痛，</text>
+      <text x="28" y="626" class="phoneTitle white">先暂停这一组，做一次</text>
+      <text x="28" y="658" class="phoneTitle lime">无负重活动度检查</text><rect x="232" y="642" width="2" height="19" fill="#c8f72d"/>
+    </g>
+    <text x="28" y="685" class="tiny" fill="#aeb3aa">完整句生成后朗读 · 点按字幕查看依据</text>
+    <circle cx="53" cy="724" r="23" fill="#242924" stroke="#4c5249"/><text x="53" y="730" text-anchor="middle" class="lime" font-size="17">Ⅱ</text>
+    <rect x="87" y="701" width="130" height="46" rx="23" fill="#e85c3a"/><text x="152" y="730" text-anchor="middle" class="small white" font-weight="800">结束本组</text>
+    <circle cx="243" cy="724" r="23" fill="#242924" stroke="#4c5249"/><text x="243" y="730" text-anchor="middle" class="lime" font-size="15">⌁</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">03 · Coach 流式字幕 + TTS</text>
+  </g>
+
+  <!-- Phone 4: write confirmation, no camera resize -->
+  <g transform="translate(995 190)" filter="url(#phoneShadow)">
+    <rect width="290" height="800" rx="42" fill="#030503"/><rect x="10" y="18" width="270" height="764" rx="34" fill="url(#floorFade)"/><rect x="106" y="28" width="78" height="22" rx="11" fill="#020302"/>
+    <path d="M10 425h270v357H10z" fill="url(#captionFade)"/>
+    <text x="26" y="73" class="tiny white" font-weight="800">‹  杠铃卧推</text><rect x="139" y="56" width="67" height="23" rx="11" fill="#262b26" stroke="#4b5148"/><text x="172" y="72" text-anchor="middle" class="tiny white">前置 ↻</text><text x="252" y="73" text-anchor="end" class="tiny" fill="#ff8a6b">● REC</text>
+    <rect x="26" y="92" width="238" height="31" rx="15" fill="#322b17" stroke="#9b7a25"/><text x="145" y="112" text-anchor="middle" class="tiny" fill="#ffd477">建议待确认 · 尚未写入</text>
+    <g opacity=".4" stroke="#c8f72d" stroke-width="3.2" stroke-linecap="round" fill="#fafaf6"><circle cx="145" cy="205" r="16"/><line x1="145" y1="221" x2="145" y2="324"/><line x1="145" y1="244" x2="93" y2="272"/><line x1="145" y1="244" x2="199" y2="272"/><line x1="145" y1="324" x2="116" y2="400"/><line x1="145" y1="324" x2="175" y2="400"/></g>
+    <text x="27" y="432" class="display lime" font-size="53">06</text><text x="30" y="452" class="tiny white mono">REPS · PAUSED</text>
+    <g filter="url(#textShadow)">
+      <text x="28" y="500" class="tiny lime mono">COACH · 建议</text><text x="28" y="529" class="phoneTitle white">下一组降低 2.5 kg</text><text x="28" y="554" class="small" fill="#c3c7bf">62.5 kg × 8　→　60 kg × 8</text>
+      <text x="28" y="583" class="tiny" fill="#9da398">依据：你的紧感反馈 · 当前组记录</text>
+    </g>
+    <rect x="27" y="607" width="112" height="40" rx="20" fill="#272c27" stroke="#4a5048"/><text x="83" y="632" text-anchor="middle" class="small white" font-weight="800">保持原安排</text>
+    <rect x="149" y="607" width="114" height="40" rx="20" fill="#c8f72d"/><text x="206" y="632" text-anchor="middle" class="small" font-weight="800">写入下一组</text>
+    <rect x="28" y="662" width="235" height="31" rx="15" fill="#20301c" stroke="#638020"/><circle cx="45" cy="677" r="5" fill="#c8f72d"/><text x="58" y="681" class="tiny lime">写入后显示回执：可撤销</text>
+    <circle cx="53" cy="728" r="23" fill="#242924" stroke="#4c5249"/><text x="53" y="734" text-anchor="middle" class="lime" font-size="17">◖</text>
+    <rect x="87" y="705" width="130" height="46" rx="23" fill="#e85c3a"/><text x="152" y="734" text-anchor="middle" class="small white" font-weight="800">结束本组</text>
+    <circle cx="243" cy="728" r="23" fill="#242924" stroke="#4c5249"/><text x="243" y="734" text-anchor="middle" class="lime" font-size="15">⌁</text>
+    <text x="145" y="826" text-anchor="middle" class="phoneTitle">04 · 字幕转为可确认写入</text>
+  </g>
+
+  <!-- Notes -->
+  <g transform="translate(1340 205)">
+    <text class="label limeInk">CORE INVARIANT</text><text y="42" class="display" font-size="28">画面尺寸永远不变</text>
+    <text y="77" class="body muted">没有抽屉、没有聊天页压缩、没有键盘引起的</text><text y="99" class="body muted">CameraView 重排。所有状态只改变叠层内容。</text>
+    <rect y="132" width="500" height="116" rx="22" fill="#151714"/>
+    <text x="21" y="162" class="tiny lime mono">SAFE LAYERS</text><text x="21" y="192" class="body white" font-weight="800">Top chrome　·　Pose viewport　·　Caption lane　·　Controls</text><text x="21" y="220" class="small" fill="#aeb3aa">字幕最多保留 3 行：前文淡出，当前句高亮，token 光标只在末行。</text>
+    <text y="294" class="label">字幕如何变成写入</text>
+    <g transform="translate(0 320)">
+      <circle cx="9" cy="8" r="9" fill="#c8f72d"/><text x="9" y="12" text-anchor="middle" class="tiny" font-weight="900">1</text><text x="29" y="12" class="small" font-weight="800">识别 cue：只滚动显示，不写训练计划</text><text x="29" y="31" class="tiny muted">高置信度 observation 可随当前组保存来源</text>
+      <circle cx="9" cy="72" r="9" fill="#c8f72d"/><text x="9" y="76" text-anchor="middle" class="tiny" font-weight="900">2</text><text x="29" y="76" class="small" font-weight="800">STT 临时字幕：停顿确认后才成为用户消息</text><text x="29" y="95" class="tiny muted">未发送文本不进入 Coach 会话或训练记录</text>
+      <circle cx="9" cy="136" r="9" fill="#c8f72d"/><text x="9" y="140" text-anchor="middle" class="tiny" font-weight="900">3</text><text x="29" y="140" class="small" font-weight="800">Coach stream：文字完成后保存为对话消息</text><text x="29" y="159" class="tiny muted">text-delta 本身不直接写计划或当前组</text>
+      <circle cx="9" cy="200" r="9" fill="#c8f72d"/><text x="9" y="204" text-anchor="middle" class="tiny" font-weight="900">4</text><text x="29" y="204" class="small" font-weight="800">需要修改数据时，字幕下出现明确动作</text><text x="29" y="223" class="tiny muted">确认后写入并显示 receipt / undo；拒绝则不变</text>
+    </g>
+    <rect y="583" width="500" height="163" rx="23" fill="#ffffff" stroke="#d8d6cc"/>
+    <text x="22" y="615" class="label">对话交互</text>
+    <text x="22" y="650" class="small muted">默认仅显示识别字幕。点击麦克风、键盘或唤醒词开始输入；</text><text x="22" y="673" class="small muted">用户说话会立即打断 TTS。Coach 回答按句滚动并同步朗读。</text>
+    <text x="22" y="705" class="small muted">点按字幕可暂停滚动、查看完整文本与依据，但退出详情后</text><text x="22" y="728" class="small muted">相机画面仍保持相同尺寸与裁切。</text>
+    <rect y="778" width="500" height="151" rx="23" fill="#151714"/>
+    <text x="22" y="809" class="tiny lime mono">CAMERA SWITCH</text><text x="22" y="842" class="body white" font-weight="800">前置 / 后置始终在顶栏直接切换</text>
+    <text x="22" y="871" class="small" fill="#aeb3aa">切换只替换底层视频源：字幕、会话、当前组和次数不消失。</text><text x="22" y="894" class="small" fill="#aeb3aa">重新通过入框检查后恢复计数；前置镜像仅影响预览。</text>
+  </g>
+</svg>

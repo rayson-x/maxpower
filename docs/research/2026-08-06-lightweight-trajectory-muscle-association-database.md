@@ -1,6 +1,6 @@
 # 轻量级“运动轨迹 × 预计肌群”关联数据库
 
-_整理日期：2026-08-06；五分化扩展：2026-08-07。数据库 schema：`form-coach-expected-muscle-associations/v1`。_
+_整理日期：2026-08-06；五分化扩展：2026-08-07。数据库 schema：`maxpower-expected-muscle-associations/v1`。_
 
 ## 结论
 

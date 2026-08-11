@@ -4,7 +4,7 @@
 
 目前的方向应从“验证候选人是不是同一个身份”改成“持续追踪课程画面中的主体运动者”。两者的目标不同：前者容易把动作造成的体态、尺度和遮挡变化误判为换人；后者应当是**快速选中、优先保持、短暂丢失不切换、确认离场后才重选**。
 
-MediaPipe Pose Landmarker 可以提供每帧最多 `numPoses` 个姿态、33 个关键点和关键点可见度，但官方 API 没有定义“主体人物”、稳定 `track id`，也没有承诺结果数组第一个元素始终属于同一个人。[MediaPipe Web 配置文档](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js#configuration_options)只把 `numPoses` 定义为最大检测人数；[结果文档](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js#handle_and_display_results)只定义关键点坐标与 `visibility`。因此，主体选择和跨帧身份保持必须由 Form Coach 的追踪层负责，不能把 `landmarks[0]` 当成稳定主体。
+MediaPipe Pose Landmarker 可以提供每帧最多 `numPoses` 个姿态、33 个关键点和关键点可见度，但官方 API 没有定义“主体人物”、稳定 `track id`，也没有承诺结果数组第一个元素始终属于同一个人。[MediaPipe Web 配置文档](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js#configuration_options)只把 `numPoses` 定义为最大检测人数；[结果文档](https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js#handle_and_display_results)只定义关键点坐标与 `visibility`。因此，主体选择和跨帧身份保持必须由 MaxPower 的追踪层负责，不能把 `landmarks[0]` 当成稳定主体。
 
 建议第一轮修复不引入完整 ReID 神经网络。移动端可以先采用轻量的**运动连续性 + 骨架/框重叠 + 关键点可用度 + 轨迹年龄**，把颜色外观仅作为多人歧义时的弱辅助。肩宽/躯干高、人体框尺度等会随深蹲、弯腰、举手和遮挡变化，不应再作为继续输出骨架的硬身份门槛。
 
@@ -24,9 +24,9 @@ MediaPipe 的输出为归一化图像坐标、世界坐标和 `visibility`；`vi
 
 MediaPipe 当前 Pose Landmarker 图在 stream mode 中回传上一帧由关键点生成的 pose rect；当上一帧已经追踪到足够数量的姿态时会跳过新的 pose detector。检测器再次运行时，旧 rect 与新检测 rect 通过 `AssociationNormRectCalculator` 合并，`minTrackingConfidence` 被直接用于矩形关联的最小相似度。[官方源码：stream loopback、detector gate 与 rect association](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/cc/vision/pose_landmarker/pose_landmarker_graph.cc#L336-L370)
 
-这说明 MediaPipe 已经提供局部 ROI 连续性，不需要 Form Coach 再用“身体比例必须几乎不变”重复做一次严格身份验真。但它的关联仍然以矩形重叠为基础；多人交叉、快速位移、遮挡或检测器重新介入时，宿主仍需维护产品自己的主体状态。
+这说明 MediaPipe 已经提供局部 ROI 连续性，不需要 MaxPower 再用“身体比例必须几乎不变”重复做一次严格身份验真。但它的关联仍然以矩形重叠为基础；多人交叉、快速位移、遮挡或检测器重新介入时，宿主仍需维护产品自己的主体状态。
 
-此外，MediaPipe 当前只对单姿态模式启用 landmark smoothing；官方源码明确指出多人 landmark smoothing 尚不支持。[官方源码：单人 smoothing 限制](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/cc/vision/pose_landmarker/pose_landmarker_graph.cc#L303-L318) 如果 Form Coach 设置 `numPoses > 1`，应在选定主体之后自行做时间平滑，不能假设 MediaPipe 已平滑每个人。
+此外，MediaPipe 当前只对单姿态模式启用 landmark smoothing；官方源码明确指出多人 landmark smoothing 尚不支持。[官方源码：单人 smoothing 限制](https://github.com/google-ai-edge/mediapipe/blob/master/mediapipe/tasks/cc/vision/pose_landmarker/pose_landmarker_graph.cc#L303-L318) 如果 MaxPower 设置 `numPoses > 1`，应在选定主体之后自行做时间平滑，不能假设 MediaPipe 已平滑每个人。
 
 ### 3. 不得依赖候选数组顺序
 
@@ -42,9 +42,9 @@ SORT 原始论文用卡尔曼滤波预测运动，并用匈牙利算法完成检
 
 Deep SORT 在 SORT 上加入人物外观关联，原始论文报告它能跨越更长遮挡并降低 identity switches；其官方实现把新轨迹分为 tentative / confirmed / deleted，并允许 confirmed track 连续丢失 `max_age` 帧后才删除，默认 `n_init = 3`、`max_age = 30`。[Deep SORT 原始论文](https://arxiv.org/abs/1703.07402)，[官方 tracker 实现](https://github.com/nwojke/deep_sort/blob/master/deep_sort/tracker.py#L19-L38)，[官方 track 删除规则](https://github.com/nwojke/deep_sort/blob/master/deep_sort/track.py#L148-L160)
 
-ByteTrack 的核心发现是：遮挡会让真目标变成低分检测，如果直接丢弃这些检测会造成轨迹缺失和碎片；它先关联高分检测，再用低分检测恢复未匹配轨迹。[ByteTrack 原始论文](https://arxiv.org/abs/2110.06864)，[官方两阶段关联实现](https://github.com/FoundationVision/ByteTrack/blob/main/yolox/tracker/byte_tracker.py#L329-L398)。这直接支持 Form Coach 的策略：低可见度帧应降低动作证据置信度，但只要仍与主体轨迹连续，就不应立即把人物变成全 unknown 或切换到别人。
+ByteTrack 的核心发现是：遮挡会让真目标变成低分检测，如果直接丢弃这些检测会造成轨迹缺失和碎片；它先关联高分检测，再用低分检测恢复未匹配轨迹。[ByteTrack 原始论文](https://arxiv.org/abs/2110.06864)，[官方两阶段关联实现](https://github.com/FoundationVision/ByteTrack/blob/main/yolox/tracker/byte_tracker.py#L329-L398)。这直接支持 MaxPower 的策略：低可见度帧应降低动作证据置信度，但只要仍与主体轨迹连续，就不应立即把人物变成全 unknown 或切换到别人。
 
-## 建议的 Form Coach 主体追踪模型
+## 建议的 MaxPower 主体追踪模型
 
 下面的阈值是**面向当前居家健身视频的工程初值**，不是上述论文给出的通用真值；必须用项目现有全部视频做留出验证后固化。
 

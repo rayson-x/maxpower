@@ -1,0 +1,1946 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Power Agent Coach — Throwaway Prototype</title>
+    <style>
+      :root {
+        --paper: #f7f6f2;
+        --paper-2: #efeee8;
+        --paper-3: #e4e2da;
+        --ink: #16181d;
+        --ink-2: #5a5e66;
+        --ink-3: #969aa2;
+        --line: #d8d6ce;
+        --lime: #c6f135;
+        --lime-deep: #9bc918;
+        --lime-ink: #3d4d00;
+        --terra: #e85c3a;
+        --terra-soft: #fde9e2;
+        --dark: #0e100e;
+        --dark-2: #181b17;
+        --white: #ffffff;
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+        --radius-md: 16px;
+        --radius-sm: 12px;
+        --shadow: 0 28px 80px rgba(0, 0, 0, 0.28);
+        --font-display: "DIN Condensed", "Avenir Next Condensed", "PingFang SC", sans-serif;
+        --font-body: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+        --font-mono: "SFMono-Regular", "Roboto Mono", monospace;
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { min-height: 100%; }
+
+      body {
+        margin: 0;
+        background: #242621;
+        color: var(--ink);
+        font-family: var(--font-body);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      button, input { font: inherit; }
+      button { color: inherit; }
+
+      button:focus-visible,
+      input:focus-visible {
+        outline: 3px solid rgba(198, 241, 53, 0.65);
+        outline-offset: 2px;
+      }
+
+      .stage {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(240px, 320px) minmax(390px, 430px) minmax(260px, 340px);
+        justify-content: center;
+        align-items: center;
+        gap: 28px;
+        padding: 36px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .stage::before,
+      .stage::after {
+        content: "";
+        position: fixed;
+        background: var(--lime);
+        opacity: 0.7;
+        z-index: -1;
+      }
+
+      .stage::before { width: 180px; height: 8px; top: 11%; left: -44px; transform: rotate(-12deg); }
+      .stage::after { width: 8px; height: 220px; right: 7%; bottom: -54px; transform: rotate(18deg); }
+
+      .brief-panel,
+      .state-panel {
+        color: #f5f4ee;
+        align-self: center;
+      }
+
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        color: var(--lime);
+        font: 700 11px/1.2 var(--font-mono);
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before { content: ""; width: 24px; height: 2px; background: currentColor; }
+
+      .brief-panel h1 {
+        max-width: 290px;
+        margin: 0;
+        font: 800 clamp(42px, 4.2vw, 66px)/0.88 var(--font-display);
+        letter-spacing: -0.055em;
+        text-transform: uppercase;
+      }
+
+      .brief-panel .lede {
+        max-width: 285px;
+        margin: 22px 0 24px;
+        color: #c4c6be;
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .brief-list { display: grid; gap: 10px; }
+
+      .brief-item {
+        display: grid;
+        grid-template-columns: 30px 1fr;
+        gap: 10px;
+        color: #d9dbd3;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .brief-item span:first-child {
+        color: var(--lime);
+        font: 700 11px/1.4 var(--font-mono);
+      }
+
+      .phone-shell {
+        width: min(100%, 420px);
+        height: min(880px, calc(100vh - 64px));
+        min-height: 720px;
+        padding: 9px;
+        border: 1px solid #484b44;
+        border-radius: 42px;
+        background: #050605;
+        box-shadow: var(--shadow);
+        position: relative;
+      }
+
+      .phone {
+        height: 100%;
+        overflow: hidden;
+        position: relative;
+        border-radius: 34px;
+        background: var(--paper);
+        isolation: isolate;
+      }
+
+      .phone::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.12;
+        z-index: 40;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.72' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.14'/%3E%3C/svg%3E");
+        mix-blend-mode: multiply;
+      }
+
+      .device-pill {
+        position: absolute;
+        z-index: 80;
+        top: 11px;
+        left: 50%;
+        width: 108px;
+        height: 29px;
+        transform: translateX(-50%);
+        border-radius: 99px;
+        background: #050605;
+        pointer-events: none;
+      }
+
+      .app { height: 100%; position: relative; }
+
+      .screen {
+        height: 100%;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: none;
+        padding: 18px 18px 164px;
+      }
+
+      .screen::-webkit-scrollbar { display: none; }
+
+      .statusbar {
+        height: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-bottom: 17px;
+        padding: 0 5px;
+        font: 700 11px/1 var(--font-mono);
+      }
+
+      .status-icons { display: flex; gap: 5px; align-items: center; }
+      .signal { width: 15px; height: 8px; border-left: 2px solid; border-bottom: 2px solid; transform: skewX(-18deg); }
+      .battery { width: 18px; height: 9px; border: 1.5px solid; border-radius: 3px; position: relative; }
+      .battery::before { content: ""; position: absolute; inset: 1.5px; background: currentColor; border-radius: 1px; }
+
+      .topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+      .brand { display: flex; align-items: center; gap: 9px; }
+
+      .brand-mark {
+        width: 31px;
+        height: 31px;
+        display: grid;
+        place-items: center;
+        background: var(--ink);
+        color: var(--lime);
+        font: 900 20px/1 var(--font-display);
+        transform: rotate(-4deg);
+      }
+
+      .brand-name { font: 850 18px/1 var(--font-display); letter-spacing: -0.04em; text-transform: uppercase; }
+      .brand-sub { margin-top: 3px; color: var(--ink-3); font: 600 9px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+
+      .icon-button,
+      .back-button {
+        min-width: 44px;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: rgba(255,255,255,0.62);
+        display: inline-grid;
+        place-items: center;
+        cursor: pointer;
+      }
+
+      .avatar-button { position: relative; }
+      .avatar-button::after { content: ""; position: absolute; width: 8px; height: 8px; right: 1px; top: 1px; border: 2px solid var(--paper); border-radius: 50%; background: var(--terra); }
+
+      .hello { margin-bottom: 20px; }
+      .date-kicker { margin: 0 0 6px; color: var(--ink-2); font: 700 10px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+      .hello h2 { margin: 0; font: 900 34px/0.98 var(--font-display); letter-spacing: -0.045em; }
+      .hello h2 em { color: var(--terra); font-style: normal; }
+
+      .section-head { display: flex; justify-content: space-between; align-items: center; margin: 22px 2px 10px; }
+      .section-head h3 { margin: 0; font: 850 15px/1 var(--font-display); letter-spacing: -0.02em; }
+      .section-head span { color: var(--ink-3); font: 600 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
+
+      .hero-card {
+        position: relative;
+        overflow: hidden;
+        min-height: 278px;
+        padding: 20px;
+        border-radius: var(--radius-xl);
+        background: var(--dark);
+        color: var(--white);
+      }
+
+      .hero-card::after {
+        content: "05";
+        position: absolute;
+        right: -8px;
+        bottom: -28px;
+        color: rgba(255,255,255,0.055);
+        font: 900 148px/1 var(--font-display);
+        letter-spacing: -0.08em;
+      }
+
+      .hero-top { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; }
+      .program-chip,
+      .tiny-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 99px;
+        font: 700 9px/1 var(--font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      .program-chip { padding: 8px 10px; background: var(--lime); color: var(--lime-ink); }
+      .tiny-chip { padding: 7px 9px; background: rgba(255,255,255,0.1); color: #d9dbd4; }
+      .tiny-chip i { width: 6px; height: 6px; border-radius: 50%; background: var(--lime); }
+
+      .hero-title { position: relative; z-index: 2; max-width: 270px; margin: 28px 0 8px; font: 900 42px/0.9 var(--font-display); letter-spacing: -0.055em; text-transform: uppercase; }
+      .hero-meta { position: relative; z-index: 2; color: #aeb1a9; font-size: 12px; }
+      .hero-metrics { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 23px; }
+      .hero-metric { padding-top: 10px; border-top: 1px solid #353832; }
+      .hero-metric strong { display: block; font: 800 18px/1 var(--font-display); }
+      .hero-metric span { color: #858981; font: 600 8px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; }
+      .hero-actions { position: relative; z-index: 2; display: grid; grid-template-columns: 1fr 50px; gap: 10px; margin-top: 19px; }
+
+      .workout-flip {
+        height: 420px;
+        position: relative;
+        perspective: 1400px;
+      }
+
+      .workout-flip-inner {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        transform-style: preserve-3d;
+        transition: transform .72s cubic-bezier(.2,.78,.18,1);
+      }
+
+      .workout-flip-inner.is-flipped { transform: rotateY(180deg); }
+
+      .flip-live { position: absolute; inset: 0; }
+      .flip-live.flip-back { transform: none; pointer-events: auto; display: grid; grid-template-rows: auto 58px minmax(0, 1fr) 43px; gap: 10px; }
+      .card-flip-out { animation: cardFlipOut .2s ease-in both; }
+      .card-flip-in { animation: cardFlipIn .34s cubic-bezier(.18,.8,.2,1) both; }
+
+      .flip-face {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
+      }
+
+      .flip-front.hero-card { min-height: 0; height: 100%; pointer-events: auto; }
+      .flip-back { pointer-events: none; }
+      .workout-flip-inner.is-flipped .flip-front { pointer-events: none; }
+      .workout-flip-inner.is-flipped .flip-back { pointer-events: auto; }
+      .flip-front .hero-title { margin-top: 38px; }
+
+      .flip-back {
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-xl);
+        background: var(--white);
+        transform: rotateY(180deg);
+      }
+
+      .flip-back-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+      .flip-back-head h3 { margin: 7px 0 3px; font: 900 23px/.95 var(--font-display); letter-spacing: -.04em; }
+      .flip-back-head p { margin: 0; color: var(--ink-3); font: 650 8px/1.4 var(--font-mono); text-transform: uppercase; }
+
+      .flip-control {
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 11px;
+        border: 1px solid var(--line);
+        border-radius: 99px;
+        background: var(--paper);
+        color: var(--ink-2);
+        font: 750 9px/1 var(--font-mono);
+        cursor: pointer;
+      }
+
+      .flip-front .flip-control { border-color: #3a3d36; background: #242720; color: var(--lime); }
+      .flip-control b { font-size: 14px; }
+      .flip-hint { position: absolute; z-index: 4; right: 21px; bottom: 18px; color: #7d8178; font: 650 8px/1 var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+
+      .flip-stats { min-height: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; margin: 0; border: 1px solid var(--line); border-radius: 13px; background: var(--line); }
+      .flip-stat { padding: 9px; background: var(--paper); }
+      .flip-stat strong { display: block; font: 850 16px/1 var(--font-display); }
+      .flip-stat span { color: var(--ink-3); font: 650 7px/1 var(--font-mono); text-transform: uppercase; }
+      .flip-console { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--ink-3) transparent; border: 1px solid var(--line); border-radius: 14px; background: white; }
+      .flip-console::-webkit-scrollbar { width: 4px; }
+      .flip-console::-webkit-scrollbar-thumb { border-radius: 99px; background: var(--ink-3); }
+      .flip-console-row { min-height: 42px; display: grid; grid-template-columns: minmax(0,1fr) 48px 58px 26px; align-items: center; gap: 5px; padding: 6px 8px 6px 10px; border-bottom: 1px solid var(--line); }
+      .flip-console-row:last-child { border-bottom: 0; }
+      .flip-console-row strong { font-size: 10px; }
+      .flip-console-row span { color: var(--ink-2); font: 650 8px/1 var(--font-mono); text-align: right; }
+      .flip-console-row .load-next { color: var(--lime-ink); }
+      .task-edit-button { width: 26px; height: 26px; border: 0; border-radius: 8px; background: var(--paper-2); color: var(--ink-2); font-size: 9px; font-weight: 900; cursor: pointer; letter-spacing: -1px; }
+      .timeline-row { min-height: 54px; grid-template-columns: 1.05fr 1fr 75px; }
+      .timeline-row strong { line-height: 1.25; }
+      .timeline-row strong small { display: block; margin-bottom: 4px; color: var(--terra); font: 700 7px/1 var(--font-mono); text-transform: uppercase; }
+      .timeline-row span { text-align: left; line-height: 1.35; overflow-wrap: anywhere; }
+      .timeline-row span:last-child { color: var(--ink-3); }
+      .flip-back-actions { display: grid; grid-template-columns: 1.4fr 1fr; gap: 8px; margin-top: 0; }
+      .flip-back-actions .primary-button,
+      .flip-back-actions .secondary-button { min-height: 43px; font-size: 11px; }
+      .task-list-wrap { min-height: 0; position: relative; display: flex; flex-direction: column; }
+      .task-list-wrap::after { content: ""; display: none; position: absolute; z-index: 3; right: 1px; bottom: 1px; left: 1px; height: 25px; border-radius: 0 0 13px 13px; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.96)); pointer-events: none; }
+      .task-list-wrap.is-scrollable:not(:focus-within)::after { display: block; }
+      .task-list-wrap .flip-console { height: auto; flex: 1; }
+      .scenario-label { display: inline-flex; align-items: center; gap: 5px; color: var(--terra); font: 750 9px/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
+      .task-list-wrap.is-empty::after { display: none; }
+      .activity-empty { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; text-align: center; }
+      .activity-empty b { font-size: 11px; }
+      .activity-empty span { max-width: 230px; margin-top: 7px; color: var(--ink-3); font-size: 9px; line-height: 1.5; }
+      .list-mode-bar { min-height: 30px; display: flex; align-items: center; gap: 4px; padding: 0 3px 6px; }
+      .list-mode-bar button { min-height: 27px; padding: 0 10px; border: 0; border-radius: 99px; background: transparent; color: var(--ink-3); font-size: 8px; font-weight: 800; cursor: pointer; }
+      .list-mode-bar button.active { background: var(--ink); color: var(--lime); }
+      .list-mode-bar strong { font-size: 10px; }
+      .list-mode-bar span { margin-left: auto; color: var(--ink-3); font-size: 9px; }
+
+      .coach-alert { min-height: 66px; display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; margin-bottom: 12px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 17px; background: rgba(255,255,255,.78); box-shadow: 0 8px 24px rgba(32,34,29,.05); }
+      .coach-alert.pending { border-color: var(--line); background: rgba(255,255,255,.78); }
+      .coach-alert-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: var(--terra-soft); color: var(--terra); font-size: 14px; font-weight: 900; }
+      .coach-alert.pending .coach-alert-icon { background: #edf4d8; color: #6f8e0f; }
+      .coach-alert-copy small { display: block; color: var(--ink-3); font-size: 8px; font-weight: 750; }
+      .coach-alert.pending .coach-alert-copy small { color: var(--ink-3); }
+      .coach-alert-copy strong { display: block; margin-top: 3px; font-size: 11px; line-height: 1.25; }
+      .coach-alert-copy span { display: block; margin-top: 3px; color: var(--ink-2); font-size: 9px; line-height: 1.35; }
+      .coach-alert-actions { display: flex; gap: 5px; }
+      .coach-alert-actions button { min-height: 32px; padding: 0 9px; border: 0; border-radius: 99px; background: var(--paper-2); color: var(--ink-2); font-size: 9px; font-weight: 800; cursor: pointer; }
+      .coach-alert-actions button:last-child { background: var(--ink); color: white; }
+      .coach-alert.pending .coach-alert-actions button { border-color: transparent; color: var(--ink-2); }
+      .coach-alert.pending .coach-alert-actions button:last-child { color: white; }
+
+      .home-timeline { position: relative; padding: 2px 0 10px; }
+      .home-timeline::before { content: ""; position: absolute; left: 28px; top: 12px; bottom: 20px; width: 1px; background: var(--line); }
+      .timeline-event { position: relative; display: grid; grid-template-columns: 44px 1fr; gap: 10px; min-height: 66px; padding: 8px 0; }
+      .timeline-time { position: relative; padding-top: 4px; color: var(--ink-3); font: 700 8px/1 var(--font-mono); }
+      .timeline-time::after { content: ""; position: absolute; z-index: 2; right: 8px; top: 7px; width: 7px; height: 7px; border: 3px solid var(--paper); border-radius: 50%; background: var(--terra); }
+      .timeline-event.training .timeline-time::after { background: var(--lime-deep); }
+      .timeline-event-card { padding: 10px 12px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.72); }
+      .timeline-event-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .timeline-event-head small { color: var(--terra); font: 750 7px/1 var(--font-mono); text-transform: uppercase; }
+      .timeline-event-head span { color: var(--ink-3); font-size: 8px; }
+      .timeline-event-card strong { display: block; margin-top: 5px; font-size: 11px; }
+      .timeline-event-card p { margin: 4px 0 0; color: var(--ink-2); font-size: 9px; line-height: 1.45; }
+      .timeline-tools { display: flex; gap: 5px; }
+      .timeline-tools button { min-height: 31px; padding: 0 10px; border: 1px solid var(--line); border-radius: 99px; background: white; font-size: 9px; font-weight: 800; cursor: pointer; }
+
+      .calendar-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+      .calendar-heading h2 { margin: 4px 0 0; font: 900 34px/.92 var(--font-display); letter-spacing: -.05em; }
+      .calendar-mode { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 99px; background: white; }
+      .calendar-mode button { min-height: 31px; padding: 0 10px; border: 0; border-radius: 99px; background: transparent; color: var(--ink-3); font-size: 8px; font-weight: 800; cursor: pointer; }
+      .calendar-mode button.active { background: var(--ink); color: var(--lime); }
+      .month-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin: 3px 0 5px; color: var(--ink-3); font: 650 7px/1 var(--font-mono); text-align: center; }
+      .month-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+      .month-day { min-width: 0; min-height: 43px; position: relative; padding: 7px 4px; border: 1px solid transparent; border-radius: 11px; background: rgba(255,255,255,.58); cursor: pointer; text-align: left; }
+      .month-day.muted { opacity: .25; pointer-events: none; }
+      .month-day strong { display: block; font: 800 10px/1 var(--font-display); }
+      .month-day i { position: absolute; left: 6px; bottom: 6px; width: 5px; height: 5px; border-radius: 50%; background: var(--paper-3); }
+      .month-day.has-events i { background: var(--terra); }
+      .month-day.has-plan::after { content: ""; position: absolute; left: 15px; bottom: 6px; width: 5px; height: 5px; border-radius: 50%; background: var(--lime-deep); }
+      .month-day.active { border-color: var(--ink); background: var(--ink); color: white; }
+      .day-detail { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+      .day-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 7px; }
+      .day-detail-head h3 { margin: 5px 0 0; font: 850 21px/1 var(--font-display); }
+      .day-plan-binding { max-width: 150px; display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 99px; background: var(--dark); color: white; font: 650 8px/1.3 var(--font-mono); }
+      .day-plan-binding i { width: 6px; height: 6px; border-radius: 50%; background: var(--lime); }
+      button.day-plan-binding { border: 0; cursor: pointer; }
+      .day-plan-binding b { color: var(--lime); font-size: 12px; }
+
+      .primary-button,
+      .secondary-button,
+      .text-button {
+        min-height: 48px;
+        border: 0;
+        border-radius: 99px;
+        cursor: pointer;
+        font-weight: 800;
+      }
+      .primary-button { background: var(--lime); color: var(--lime-ink); }
+      .primary-button.dark { background: var(--ink); color: white; }
+      .secondary-button { border: 1px solid var(--line); background: var(--white); color: var(--ink); }
+      .text-button { min-height: 44px; background: transparent; color: var(--ink-2); }
+      .round-adjust { font-size: 20px; background: #292c27; color: var(--lime); }
+
+      .change-card {
+        padding: 16px;
+        border: 1px solid rgba(232,92,58,0.3);
+        border-left: 4px solid var(--terra);
+        border-radius: var(--radius-lg);
+        background: var(--terra-soft);
+      }
+      .change-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+      .change-tag { color: var(--terra); font: 750 9px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+      .change-card h4 { margin: 7px 0 5px; font: 850 17px/1.05 var(--font-display); }
+      .change-card p { margin: 0; color: #765145; font-size: 11px; line-height: 1.55; }
+      .undo-button { min-width: 58px; min-height: 36px; border: 1px solid rgba(232,92,58,.35); border-radius: 99px; background: rgba(255,255,255,.55); color: var(--terra); font-size: 11px; font-weight: 800; cursor: pointer; }
+
+      .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .metric-card { min-height: 118px; padding: 15px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: rgba(255,255,255,.68); }
+      .metric-card.wide { grid-column: 1 / -1; min-height: auto; }
+      .metric-label { display: flex; justify-content: space-between; color: var(--ink-2); font: 700 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .07em; }
+      .metric-card strong { display: block; margin-top: 13px; font: 900 28px/1 var(--font-display); }
+      .metric-card p { margin: 6px 0 0; color: var(--ink-2); font-size: 10px; line-height: 1.45; }
+      .meter { height: 6px; margin-top: 14px; overflow: hidden; border-radius: 99px; background: var(--paper-3); }
+      .meter > span { display: block; width: var(--meter, 68%); height: 100%; border-radius: inherit; background: var(--lime-deep); }
+
+      .brief-hero {
+        padding: 21px;
+        border: 1px solid #31342f;
+        border-radius: var(--radius-xl);
+        background: var(--dark);
+        color: white;
+      }
+      .brief-hero .coach-line { color: var(--lime); font: 700 9px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+      .brief-hero h2 { margin: 14px 0 11px; font: 900 31px/.98 var(--font-display); letter-spacing: -.045em; }
+      .brief-hero p { margin: 0; color: #bec1b8; font-size: 12px; line-height: 1.6; }
+      .brief-reasons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 18px; }
+      .brief-reason { padding: 10px 7px; border-radius: 12px; background: #1f221e; text-align: center; }
+      .brief-reason strong { display: block; color: var(--lime); font: 850 17px/1 var(--font-display); }
+      .brief-reason span { color: #8f938a; font: 650 8px/1.2 var(--font-mono); text-transform: uppercase; }
+      .brief-plan { margin-top: 10px; padding: 16px; border-radius: var(--radius-lg); background: white; border: 1px solid var(--line); }
+      .brief-plan h3 { margin: 0; font: 850 22px/1 var(--font-display); }
+      .brief-plan .row { display: flex; gap: 8px; align-items: center; margin-top: 9px; color: var(--ink-2); font-size: 11px; }
+
+      .console-header { padding: 18px; margin-bottom: 10px; border-radius: var(--radius-xl); background: var(--dark); color: white; }
+      .console-header h2 { margin: 13px 0 4px; font: 900 32px/.95 var(--font-display); letter-spacing: -.05em; }
+      .console-header p { margin: 0; color: #aeb1a9; font-size: 10px; }
+      .readiness-line { display: flex; gap: 8px; align-items: center; color: var(--lime); font: 700 9px/1 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+      .console-table { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: white; }
+      .console-row { display: grid; grid-template-columns: 1fr 62px 60px 28px; align-items: center; gap: 5px; min-height: 52px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+      .console-row:last-child { border-bottom: 0; }
+      .console-row strong { font-size: 11px; }
+      .console-row span { color: var(--ink-2); font: 650 9px/1 var(--font-mono); }
+      .delta-up { color: var(--lime-ink) !important; }
+      .log-now { width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--paper-2); cursor: pointer; }
+      .console-actions { display: grid; grid-template-columns: 1.5fr 1fr; gap: 9px; margin: 11px 0 18px; }
+      .console-stat-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--line); }
+      .console-stat { padding: 13px 9px; background: var(--paper); }
+      .console-stat strong { display: block; font: 850 19px/1 var(--font-display); }
+      .console-stat span { color: var(--ink-3); font: 650 8px/1.2 var(--font-mono); text-transform: uppercase; }
+
+      .report-hero {
+        position: relative;
+        overflow: hidden;
+        padding: 21px;
+        border-radius: var(--radius-xl);
+        background: var(--dark);
+        color: white;
+      }
+
+      .report-hero::after { content: "DONE"; position: absolute; right: -10px; bottom: -18px; color: rgba(255,255,255,.045); font: 900 78px/1 var(--font-display); }
+      .report-kicker { color: var(--lime); font: 750 9px/1 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+      .report-hero h2 { position: relative; z-index: 2; margin: 17px 0 6px; font: 900 37px/.92 var(--font-display); letter-spacing: -.05em; }
+      .report-hero > p { position: relative; z-index: 2; margin: 0; color: #aeb1a9; font-size: 11px; }
+      .report-score { position: relative; z-index: 2; display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 7px; margin-top: 20px; }
+      .report-score div { padding: 11px 8px; border-radius: 13px; background: #1e211d; }
+      .report-score strong { display: block; color: var(--lime); font: 850 20px/1 var(--font-display); }
+      .report-score span { color: #858981; font: 650 7px/1.2 var(--font-mono); text-transform: uppercase; }
+
+      .coach-verdict { margin-top: 11px; padding: 17px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: white; }
+      .coach-verdict h3 { margin: 8px 0 6px; font: 850 20px/1 var(--font-display); }
+      .coach-verdict p { margin: 0; color: var(--ink-2); font-size: 10px; line-height: 1.55; }
+      .report-signals { display: grid; gap: 8px; margin-top: 13px; }
+      .report-signal { display: grid; grid-template-columns: 25px 1fr auto; gap: 9px; align-items: center; min-height: 43px; padding-top: 8px; border-top: 1px solid var(--line); }
+      .report-signal i { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 8px; background: var(--paper-2); color: var(--terra); font-style: normal; font-weight: 800; }
+      .report-signal strong { display: block; font-size: 10px; }
+      .report-signal span { color: var(--ink-3); font-size: 8px; }
+      .report-signal b { color: var(--lime-ink); font: 750 8px/1 var(--font-mono); }
+      .next-proposal { margin-top: 11px; padding: 15px; border-left: 4px solid var(--lime-deep); border-radius: var(--radius-lg); background: #eef6d2; }
+      .next-proposal h3 { margin: 7px 0 5px; font: 850 17px/1 var(--font-display); }
+      .next-proposal p { margin: 0; color: #596137; font-size: 10px; line-height: 1.5; }
+      .report-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 11px; }
+      .report-reset { display: block; min-height: 38px; margin: 9px auto 0; border: 0; background: transparent; color: var(--ink-3); font-size: 9px; cursor: pointer; }
+
+      @keyframes cardFlipOut { to { opacity: .15; transform: rotateY(88deg) scale(.96); } }
+      @keyframes cardFlipIn { from { opacity: .15; transform: rotateY(-88deg) scale(.96); } to { opacity: 1; transform: rotateY(0) scale(1); } }
+
+      .dock {
+        position: absolute;
+        z-index: 50;
+        left: 12px;
+        right: 12px;
+        bottom: 10px;
+        padding: 8px;
+        border: 1px solid rgba(216,214,206,.86);
+        border-radius: 25px;
+        background: rgba(247,246,242,.94);
+        box-shadow: 0 12px 34px rgba(20,22,18,.14);
+        backdrop-filter: blur(18px);
+      }
+
+      .composer {
+        min-height: 49px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 6px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: white;
+      }
+      .composer-main { min-width: 0; min-height: 38px; flex: 1; display: flex; align-items: center; gap: 10px; padding: 0 0 0 8px; border: 0; background: transparent; cursor: pointer; text-align: left; }
+      .composer-orb { width: 26px; height: 26px; flex: 0 0 auto; border-radius: 50%; border: 7px solid var(--dark); box-shadow: inset 0 0 0 3px var(--lime); }
+      .composer-placeholder { flex: 1; color: var(--ink-2); font-size: 11px; }
+      .composer-plus { width: 36px; height: 36px; border: 0; border-radius: 12px; background: var(--ink); color: var(--lime); font-size: 22px; line-height: 1; cursor: pointer; }
+
+      .nav-tabs { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 7px; }
+      .nav-tab { min-height: 43px; border: 0; background: transparent; color: var(--ink-3); font-size: 9px; font-weight: 750; cursor: pointer; }
+      .nav-tab::before { content: attr(data-icon); display: block; margin-bottom: 4px; font-size: 15px; }
+      .nav-tab.active { color: var(--ink); }
+      .nav-tab.active::after { content: ""; display: block; width: 14px; height: 3px; margin: 3px auto 0; border-radius: 99px; background: var(--lime-deep); }
+
+      .placeholder-view { min-height: 570px; display: flex; flex-direction: column; }
+      .placeholder-view h2 { margin: 24px 0 9px; font: 900 42px/.92 var(--font-display); letter-spacing: -.055em; }
+      .placeholder-view p { color: var(--ink-2); font-size: 13px; line-height: 1.65; }
+      .placeholder-card { margin-top: 20px; padding: 20px; border: 1px dashed var(--ink-3); border-radius: var(--radius-xl); background: rgba(255,255,255,.55); }
+
+      .page-title { margin: 4px 0 18px; }
+      .page-title h2 { margin: 5px 0 7px; font: 900 39px/.92 var(--font-display); letter-spacing: -.055em; }
+      .page-title p { margin: 0; color: var(--ink-2); font-size: 11px; line-height: 1.55; }
+      .week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; margin-bottom: 14px; }
+      .day-button { min-width: 0; min-height: 61px; padding: 8px 2px; border: 1px solid var(--line); border-radius: 14px; background: white; cursor: pointer; }
+      .day-button span { display: block; color: var(--ink-3); font: 650 7px/1 var(--font-mono); }
+      .day-button strong { display: block; margin-top: 8px; font: 850 14px/1 var(--font-display); }
+      .day-button i { display: block; width: 5px; height: 5px; margin: 6px auto 0; border-radius: 50%; background: var(--paper-3); }
+      .day-button.training i { background: var(--terra); }
+      .day-button.done i { background: var(--lime-deep); }
+      .day-button.active { border-color: var(--ink); background: var(--ink); color: white; }
+      .day-button.active span { color: #aeb1a9; }
+      .calendar-session { padding: 17px; border-radius: var(--radius-xl); background: var(--dark); color: white; }
+      .calendar-session-head { display: flex; justify-content: space-between; align-items: flex-start; }
+      .calendar-session h3 { margin: 11px 0 5px; font: 900 27px/.95 var(--font-display); }
+      .calendar-session p { margin: 0; color: #9da098; font-size: 9px; }
+      .calendar-exercises { display: grid; gap: 1px; overflow: hidden; margin-top: 14px; border-radius: 13px; background: #32352f; }
+      .calendar-exercise { display: grid; grid-template-columns: 1fr auto 30px; gap: 8px; align-items: center; min-height: 42px; padding: 7px 10px; background: #1b1e1a; }
+      .calendar-exercise strong { font-size: 10px; }
+      .calendar-exercise span { color: #8f938a; font: 650 8px/1 var(--font-mono); }
+      .calendar-exercise button { width: 30px; height: 30px; border: 0; border-radius: 9px; background: #292c27; color: var(--lime); cursor: pointer; }
+      .plan-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 11px; }
+      .plan-tool { min-height: 91px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: white; cursor: pointer; text-align: left; }
+      .plan-tool i { color: var(--terra); font: 850 19px/1 var(--font-display); font-style: normal; }
+      .plan-tool strong { font-size: 11px; }
+      .plan-tool span { color: var(--ink-3); font-size: 8px; }
+
+      .library-search { width: 100%; min-height: 46px; padding: 0 14px; border: 1px solid var(--line); border-radius: 15px; background: white; }
+      .exercise-list { display: grid; gap: 7px; margin-top: 12px; }
+      .exercise-item { display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; align-items: center; min-height: 62px; padding: 9px; border: 1px solid var(--line); border-radius: 16px; background: white; }
+      .exercise-glyph { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; background: var(--dark); color: var(--lime); font: 850 14px/1 var(--font-display); }
+      .exercise-item strong { display: block; font-size: 11px; }
+      .exercise-item span { color: var(--ink-3); font-size: 8px; }
+      .exercise-item button { min-height: 34px; padding: 0 11px; border: 1px solid var(--line); border-radius: 99px; background: var(--paper); font-size: 9px; font-weight: 800; cursor: pointer; }
+      .field-stack { display: grid; gap: 9px; }
+      .field-stack label { color: var(--ink-2); font: 700 8px/1 var(--font-mono); text-transform: uppercase; }
+      .field-stack input,
+      .field-stack select { width: 100%; min-height: 47px; margin-top: 6px; padding: 0 12px; border: 1px solid var(--line); border-radius: 14px; background: white; }
+      .plan-manager-body { flex: 1; overflow-y: auto; padding: 14px 16px 28px; }
+      .plan-manager-list { display: grid; gap: 7px; }
+      .plan-manager-row { display: grid; grid-template-columns: 30px minmax(0,1fr) 28px; gap: 10px; align-items: center; min-height: 60px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 16px; background: white; }
+      .plan-manager-index { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: var(--paper-2); color: var(--ink-2); font: 800 10px/1 var(--font-mono); }
+      .plan-manager-copy { min-width: 0; text-align: left; }
+      .plan-manager-copy strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+      .plan-manager-copy span { display: block; margin-top: 5px; color: var(--ink-3); font-size: 9px; }
+      .plan-manager-edit { width: 28px; height: 28px; border: 0; border-radius: 9px; background: var(--paper-2); color: var(--ink-2); font-weight: 900; cursor: pointer; }
+      .plan-manager-add { width: 100%; margin-top: 10px; }
+      .danger-button { width: 100%; min-height: 44px; margin-top: 9px; border: 0; border-radius: 99px; background: transparent; color: var(--terra); font-weight: 800; cursor: pointer; }
+
+      .audit-screen { background: var(--paper); }
+      .audit-body { flex: 1; overflow-y: auto; padding: 14px 16px 30px; }
+      .audit-summary { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; padding: 17px; border-radius: 20px; background: var(--dark); color: white; }
+      .audit-summary small { color: var(--lime); font: 750 8px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+      .audit-summary strong { display: block; margin-top: 8px; font: 900 24px/.95 var(--font-display); }
+      .audit-summary p { margin: 7px 0 0; color: #92968d; font-size: 9px; line-height: 1.45; }
+      .audit-count { color: var(--lime); font: 900 35px/1 var(--font-display); }
+      .audit-filters { display: flex; gap: 5px; margin: 12px 0; }
+      .audit-filters button { min-height: 32px; padding: 0 12px; border: 1px solid var(--line); border-radius: 99px; background: white; color: var(--ink-2); font-size: 9px; font-weight: 800; cursor: pointer; }
+      .audit-filters button.active { border-color: var(--ink); background: var(--ink); color: white; }
+      .audit-list { display: grid; gap: 8px; }
+      .audit-item { position: relative; padding: 13px 13px 12px 39px; border: 1px solid var(--line); border-radius: 17px; background: white; }
+      .audit-item::before { content: ""; position: absolute; top: 17px; left: 17px; width: 8px; height: 8px; border: 2px solid var(--paper); border-radius: 50%; background: var(--ink-3); box-shadow: 0 0 0 1px var(--line); }
+      .audit-item.write::before { background: var(--terra); }
+      .audit-item.undone { opacity: .62; }
+      .audit-item-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+      .audit-item-head small { color: var(--ink-3); font: 700 7px/1.3 var(--font-mono); }
+      .audit-status { flex: 0 0 auto; padding: 4px 7px; border-radius: 99px; background: #edf4d8; color: #637f10; font-size: 7px; font-weight: 850; }
+      .audit-status.read { background: var(--paper-2); color: var(--ink-2); }
+      .audit-status.undone { background: var(--terra-soft); color: var(--terra); }
+      .audit-item h3 { margin: 7px 0 5px; font-size: 11px; line-height: 1.35; }
+      .audit-item > p { margin: 0; color: var(--ink-2); font-size: 9px; line-height: 1.5; }
+      .audit-diff { display: grid; grid-template-columns: 1fr 16px 1fr; gap: 5px; align-items: center; margin-top: 10px; padding: 9px; border-radius: 11px; background: var(--paper-2); }
+      .audit-diff small { display: block; color: var(--ink-3); font-size: 7px; }
+      .audit-diff strong { display: block; margin-top: 3px; font-size: 8px; }
+      .audit-diff b { color: var(--terra); text-align: center; }
+      .audit-evidence { margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 8px; line-height: 1.5; }
+      .audit-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 9px; }
+      .audit-foot span { color: var(--ink-3); font: 650 7px/1 var(--font-mono); }
+      .audit-foot button { min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 99px; background: white; color: var(--ink); font-size: 8px; font-weight: 850; cursor: pointer; }
+
+      .goal-card { padding: 18px; border-radius: var(--radius-xl); background: var(--dark); color: white; }
+      .goal-head { display: flex; align-items: flex-start; justify-content: space-between; }
+      .goal-head h3 { margin: 8px 0 4px; font: 900 27px/.95 var(--font-display); }
+      .goal-head p { margin: 0; color: #92968d; font-size: 9px; }
+      .range-switch { display: flex; gap: 3px; padding: 3px; border-radius: 99px; background: #242720; }
+      .range-switch button { min-height: 30px; padding: 0 9px; border: 0; border-radius: 99px; background: transparent; color: #777b73; font-size: 8px; cursor: pointer; }
+      .range-switch button.active { background: var(--lime); color: var(--lime-ink); }
+      .goal-numbers { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: end; margin-top: 19px; }
+      .goal-numbers strong { display: block; font: 900 32px/1 var(--font-display); }
+      .goal-numbers span { color: #858981; font: 650 8px/1 var(--font-mono); text-transform: uppercase; }
+      .goal-numbers b { color: var(--terra); font-size: 17px; }
+      .sparkline { width: 100%; height: 92px; margin-top: 13px; overflow: visible; }
+      .sparkline .grid { stroke: #2c2f2a; stroke-width: 1; }
+      .sparkline .line { fill: none; stroke: var(--lime); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+      .sparkline .target { fill: none; stroke: var(--terra); stroke-width: 2; stroke-dasharray: 5 5; }
+      .goal-progress { display: grid; gap: 9px; margin-top: 11px; }
+      .goal-progress-item { padding: 15px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+      .goal-progress-row { display: flex; align-items: center; justify-content: space-between; }
+      .goal-progress-item h4 { margin: 0; font-size: 11px; }
+      .goal-progress-item strong { font: 850 17px/1 var(--font-display); }
+      .goal-progress-item p { margin: 7px 0 0; color: var(--ink-2); font-size: 9px; }
+
+      .mode-list { display: grid; gap: 9px; margin-top: 14px; }
+      .mode-card { min-height: 128px; display: grid; grid-template-columns: 45px 1fr auto; gap: 12px; align-items: center; padding: 15px; border: 1px solid var(--line); border-radius: 20px; background: white; cursor: pointer; text-align: left; }
+      .mode-icon { width: 45px; height: 45px; display: grid; place-items: center; border-radius: 14px; background: var(--dark); color: var(--lime); font-size: 18px; }
+      .mode-card strong { display: block; font-size: 13px; }
+      .mode-card p { margin: 6px 0 0; color: var(--ink-2); font-size: 9px; line-height: 1.45; }
+      .mode-card b { color: var(--terra); font-size: 18px; }
+      .mode-footnote { margin-top: 12px; color: var(--ink-3); font-size: 9px; line-height: 1.55; text-align: center; }
+      .mode-toggle { min-height: 36px; padding: 0 11px; border: 1px solid #353832; border-radius: 99px; background: #1f221e; color: var(--lime); font: 700 8px/1 var(--font-mono); cursor: pointer; }
+      .log-session-card { margin-top: 32px; padding: 18px; border: 1px solid #30332d; border-radius: var(--radius-xl); background: #171a16; }
+      .log-session-card h2 { margin: 10px 0 4px; font: 900 35px/.92 var(--font-display); }
+      .log-session-card p { margin: 0; color: #92968d; font-size: 10px; }
+      .log-inputs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; margin-top: 18px; }
+      .log-input { padding: 10px; border-radius: 13px; background: #242720; }
+      .log-input span { display: block; color: #777b73; font: 650 7px/1 var(--font-mono); text-transform: uppercase; }
+      .log-input strong { display: block; margin-top: 8px; font: 850 19px/1 var(--font-display); }
+
+      .overlay {
+        position: absolute;
+        z-index: 70;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        background: var(--paper);
+        animation: enter .28s cubic-bezier(.2,.8,.2,1) both;
+      }
+
+      .overlay-sheet {
+        justify-content: flex-end;
+        padding: 14px;
+        background: rgba(14,16,14,.58);
+        backdrop-filter: blur(7px);
+      }
+
+      .sheet {
+        max-height: 82%;
+        overflow-y: auto;
+        padding: 20px;
+        border-radius: 28px;
+        background: var(--paper);
+        animation: rise .3s cubic-bezier(.2,.85,.25,1) both;
+      }
+      .sheet-handle { width: 38px; height: 4px; margin: -8px auto 18px; border-radius: 99px; background: var(--line); }
+      .sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+      .sheet h2 { margin: 0; font: 900 28px/.98 var(--font-display); letter-spacing: -.04em; }
+      .sheet-copy { margin: 8px 0 18px; color: var(--ink-2); font-size: 11px; line-height: 1.55; }
+      .choice-list { display: grid; gap: 8px; }
+      .choice-button { min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border: 1px solid var(--line); border-radius: 16px; background: white; cursor: pointer; text-align: left; }
+      .choice-button strong { display: block; font-size: 12px; }
+      .choice-button span { color: var(--ink-3); font-size: 10px; }
+      .choice-button b { color: var(--terra); font-size: 17px; }
+
+      .capability-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+      .capability-button { min-height: 112px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: white; cursor: pointer; text-align: left; }
+      .capability-button i { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 9px; background: var(--paper-2); color: var(--terra); font-style: normal; }
+      .capability-button strong { font-size: 12px; }
+      .capability-button span { color: var(--ink-3); font-size: 9px; line-height: 1.35; }
+
+      .chat-head { display: flex; align-items: center; gap: 10px; padding: 19px 15px 11px; border-bottom: 1px solid var(--line); }
+      .chat-head-title { flex: 1; }
+      .chat-head-title strong { display: block; font: 850 16px/1 var(--font-display); }
+      .chat-head-title span { color: var(--ink-3); font: 650 9px/1 var(--font-mono); text-transform: uppercase; }
+      .coach-status { color: var(--lime-ink); font: 700 9px/1 var(--font-mono); }
+      .chat-body { flex: 1; overflow-y: auto; padding: 14px 16px 140px; }
+      .context-card { padding: 13px; border-radius: 16px; background: var(--dark); color: white; }
+      .context-card .context-label { color: var(--lime); font: 700 8px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+      .context-card strong { display: block; margin-top: 8px; font: 850 16px/1 var(--font-display); }
+      .context-card p { margin: 6px 0 0; color: #aeb1a9; font-size: 9px; }
+      .messages { display: grid; gap: 10px; margin-top: 17px; }
+      .message { max-width: 86%; padding: 11px 13px; border-radius: 16px; font-size: 11px; line-height: 1.55; }
+      .message.agent { justify-self: start; border-top-left-radius: 5px; background: white; border: 1px solid var(--line); }
+      .message.user { justify-self: end; border-top-right-radius: 5px; background: var(--ink); color: white; }
+      .proposal { padding: 14px; border: 1px solid var(--line); border-radius: 18px; background: white; }
+      .proposal-kicker { color: var(--terra); font: 750 8px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+      .proposal h3 { margin: 8px 0 10px; font: 850 18px/1 var(--font-display); }
+      .diff { display: grid; grid-template-columns: 1fr 18px 1fr; gap: 6px; align-items: center; padding: 10px; border-radius: 12px; background: var(--paper-2); }
+      .diff small { display: block; color: var(--ink-3); font-size: 8px; text-transform: uppercase; }
+      .diff strong { display: block; margin-top: 4px; font-size: 10px; }
+      .diff-arrow { color: var(--terra); text-align: center; }
+      .evidence { margin: 10px 0; color: var(--ink-2); font-size: 9px; line-height: 1.5; }
+      .proposal-actions { display: grid; gap: 7px; }
+
+      .quick-prompts { display: flex; gap: 6px; overflow-x: auto; padding: 0 15px 8px; scrollbar-width: none; }
+      .quick-prompts button { flex: 0 0 auto; min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 99px; background: white; color: var(--ink-2); font-size: 10px; cursor: pointer; }
+      .chat-composer { position: absolute; z-index: 3; left: 0; right: 0; bottom: 0; padding: 7px 14px max(13px, env(safe-area-inset-bottom)); background: rgba(247,246,242,.96); border-top: 1px solid var(--line); }
+      .chat-input-row { display: flex; gap: 7px; }
+      .chat-input { min-width: 0; flex: 1; min-height: 46px; padding: 0 14px; border: 1px solid var(--line); border-radius: 17px; background: white; color: var(--ink); }
+      .send-button { width: 46px; border: 0; border-radius: 16px; background: var(--lime); color: var(--lime-ink); font-size: 18px; cursor: pointer; }
+      .permission-note { margin: 7px 3px 0; color: var(--ink-3); font: 650 8px/1.3 var(--font-mono); text-align: center; }
+
+      .session-screen { background: var(--dark); color: white; }
+      .session-screen .statusbar { color: white; }
+      .session-top { display: flex; align-items: center; justify-content: space-between; }
+      .session-screen .back-button { border-color: #353832; background: #1f221e; color: white; }
+      .session-step { color: var(--lime); font: 700 9px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+      .session-title { margin: 54px 0 9px; font: 900 51px/.86 var(--font-display); letter-spacing: -.06em; text-transform: uppercase; }
+      .session-prescription { color: #afb2aa; font-size: 13px; }
+      .session-ring { width: 222px; height: 222px; display: grid; place-items: center; margin: 42px auto 30px; border: 14px solid #252823; border-top-color: var(--lime); border-right-color: var(--lime); border-radius: 50%; transform: rotate(-22deg); }
+      .session-ring-inner { text-align: center; transform: rotate(22deg); }
+      .session-ring strong { display: block; font: 900 55px/.9 var(--font-display); }
+      .session-ring span { color: #888c84; font: 700 8px/1 var(--font-mono); text-transform: uppercase; }
+      .session-cue { padding: 15px; border-left: 3px solid var(--lime); background: #1a1d19; color: #d9dbd4; font-size: 11px; line-height: 1.5; }
+      .next-set-card { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 5px 12px; align-items: center; margin-top: 14px; padding: 13px 14px; border: 1px solid #33372f; border-radius: 17px; background: #171a16; }
+      .next-set-card small { color: #858981; font-size: 8px; font-weight: 750; }
+      .next-set-card strong { display: block; font-size: 12px; }
+      .next-set-card span { color: #aeb1a9; font-size: 9px; }
+      .next-set-card button { grid-column: 2; grid-row: 1 / span 3; min-height: 34px; padding: 0 12px; border: 1px solid #3c4038; border-radius: 99px; background: #242720; color: var(--lime); font-size: 9px; font-weight: 800; cursor: pointer; }
+      .next-set-card.changed { border-color: rgba(198,241,53,.45); }
+      .session-screen .hero-actions { margin-top: 14px; }
+      .session-finish { width: 100%; min-height: 42px; margin-top: 8px; border: 0; background: transparent; color: #81867c; font-size: 10px; cursor: pointer; }
+
+      .camera-screen { overflow: hidden; background: #080a08; color: white; }
+      .camera-screen .statusbar { position: absolute; z-index: 8; top: 18px; left: 18px; right: 18px; width: auto; margin: 0; padding: 0 5px; color: white; }
+      .camera-viewport { position: relative; width: 100%; height: 100%; overflow: hidden; background: radial-gradient(circle at 52% 38%, #50544e 0, #282c28 30%, #111411 68%, #070807 100%); }
+      .camera-viewport::before { content: ""; position: absolute; inset: 0; background: linear-gradient(118deg, rgba(255,255,255,.07), transparent 31%), linear-gradient(to top, rgba(0,0,0,.55), transparent 46%); }
+      .camera-floor { position: absolute; left: -20%; right: -20%; bottom: -15%; height: 48%; border-top: 1px solid rgba(255,255,255,.09); background: repeating-linear-gradient(90deg, transparent 0 60px, rgba(255,255,255,.035) 61px 62px), linear-gradient(to bottom, rgba(255,255,255,.025), rgba(0,0,0,.45)); transform: perspective(260px) rotateX(58deg); transform-origin: top; }
+      .camera-status { position: absolute; z-index: 8; top: 0; left: 0; right: 0; color: white; }
+      .pose-skeleton { position: absolute; z-index: 2; left: 50%; top: 48%; width: 330px; height: 430px; transform: translate(-50%,-50%); filter: drop-shadow(0 0 8px rgba(198,241,53,.23)); }
+      .pose-skeleton line, .pose-skeleton polyline { fill: none; stroke: var(--lime); stroke-width: 3.1; stroke-linecap: round; stroke-linejoin: round; }
+      .pose-skeleton circle { fill: white; stroke: var(--lime-deep); stroke-width: 1.4; }
+      .pose-person-shadow { position: absolute; z-index: 1; left: 50%; top: 54%; width: 310px; height: 92px; transform: translate(-50%,-50%) rotate(5deg); border-radius: 50%; background: rgba(8,10,8,.42); filter: blur(18px); }
+      .camera-hud-top { position: absolute; z-index: 5; top: 58px; left: 18px; right: 18px; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+      .phase-pill, .rec-chip { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px; border-radius: 99px; backdrop-filter: blur(8px); font-size: 10px; font-weight: 850; }
+      .phase-pill { border: 1px solid rgba(198,241,53,.34); background: rgba(14,16,14,.68); color: var(--lime); }
+      .phase-pill i, .rec-chip i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .rec-chip { border: 1px solid rgba(232,92,58,.5); background: rgba(232,92,58,.18); color: #ff8a6b; font-family: var(--font-mono); }
+      .frame-banner { position: absolute; z-index: 5; top: 104px; left: 18px; right: 18px; padding: 10px 13px; border: 1px solid rgba(198,241,53,.35); border-radius: 13px; background: rgba(198,241,53,.12); color: var(--lime); font-size: 10px; font-weight: 750; backdrop-filter: blur(8px); }
+      .camera-reps { position: absolute; z-index: 5; left: 20px; bottom: 210px; }
+      .camera-reps strong { display: block; color: var(--lime); font: 900 72px/.8 var(--font-display); letter-spacing: -.06em; }
+      .camera-reps span { display: block; margin-top: 10px; color: rgba(255,255,255,.58); font: 750 9px/1 var(--font-mono); letter-spacing: .18em; }
+      .camera-telemetry { position: absolute; z-index: 5; right: 18px; bottom: 211px; display: grid; gap: 6px; justify-items: end; }
+      .camera-telemetry span { padding: 6px 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 9px; background: rgba(14,16,14,.62); color: rgba(255,255,255,.74); font: 650 8px/1 var(--font-mono); backdrop-filter: blur(8px); }
+      .camera-telemetry b { color: var(--lime); }
+      .camera-agent-strip { position: absolute; z-index: 5; left: 18px; right: 18px; bottom: 126px; display: grid; grid-template-columns: 25px minmax(0,1fr) auto; gap: 10px; align-items: center; min-height: 59px; padding: 10px 11px; border: 1px solid rgba(255,255,255,.1); border-left: 4px solid var(--lime); border-radius: 14px; background: rgba(14,16,14,.75); backdrop-filter: blur(10px); }
+      .camera-agent-icon { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; background: var(--lime); color: var(--lime-ink); font-size: 11px; }
+      .camera-agent-copy strong { display: block; font-size: 10px; }
+      .camera-agent-copy span { display: block; margin-top: 4px; color: rgba(255,255,255,.42); font: 650 7px/1 var(--font-mono); }
+      .camera-agent-strip button { min-height: 32px; padding: 0 9px; border: 1px solid rgba(255,255,255,.13); border-radius: 99px; background: rgba(255,255,255,.09); color: var(--lime); font-size: 8px; font-weight: 800; cursor: pointer; }
+      .camera-controls { position: absolute; z-index: 5; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: 52px 1fr 52px; gap: 12px; align-items: center; padding: 0 22px 30px; }
+      .camera-icon-btn { width: 52px; height: 52px; border: 1px solid rgba(255,255,255,.16); border-radius: 17px; background: rgba(255,255,255,.12); color: white; font-size: 16px; font-weight: 800; cursor: pointer; backdrop-filter: blur(8px); }
+      .camera-end-btn { height: 52px; border: 0; border-radius: 17px; background: var(--terra); color: white; font-size: 13px; font-weight: 900; letter-spacing: .12em; cursor: pointer; }
+
+      /* Performance Editorial pass — compact plan hierarchy + contextual Coach drawer. */
+      .screen.nav-only { padding-bottom: 96px; }
+      .workout-flip { height: 356px; }
+      .hero-card { min-height: 0; padding: 18px; }
+      .flip-front.hero-card { display: flex; flex-direction: column; }
+      .hero-card::after { content: "W05"; right: -4px; bottom: 49px; font-size: 86px; opacity: .72; }
+      .flip-front .hero-title { max-width: 245px; margin: 26px 0 7px; font-size: 39px; line-height: .9; }
+      .hero-meta { font-size: 10px; }
+      .hero-metrics { gap: 12px; margin-top: 18px; }
+      .hero-metric { padding-top: 9px; }
+      .hero-metric strong { font-size: 17px; }
+      .hero-actions { margin-top: auto; }
+      .flip-front .hero-actions { padding-top: 16px; }
+      .program-chip { max-width: 210px; min-height: 34px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .flip-front .flip-control { min-height: 34px; }
+      .flip-back { padding: 14px; }
+      .flip-live.flip-back { grid-template-rows: auto 52px minmax(0,1fr) 43px; gap: 8px; }
+
+      .dock { border-radius: 22px; }
+      .dock.nav-only { padding: 5px 8px; }
+      .dock.nav-only .nav-tabs { margin-top: 0; }
+      .dock.drawer-active { padding: 5px 8px; }
+      .dock.drawer-active .nav-tabs { margin-top: 0; }
+      .composer { min-height: 46px; border-radius: 15px; }
+      .composer-main { min-height: 35px; }
+      .composer-plus { width: 34px; height: 34px; border-radius: 11px; }
+
+      .coach-drawer {
+        position: absolute;
+        z-index: 95;
+        left: 8px;
+        right: 8px;
+        bottom: 10px;
+        height: 80%;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid rgba(216,214,206,.92);
+        border-radius: 27px;
+        background: rgba(247,246,242,.985);
+        box-shadow: 0 -18px 60px rgba(14,16,14,.22);
+        backdrop-filter: blur(22px);
+        transform-origin: bottom center;
+        will-change: transform, opacity;
+      }
+      .coach-drawer.general { left: 12px; right: 12px; }
+      .coach-drawer.full { top: 18px; bottom: 10px; height: auto; border-radius: 28px; }
+      .coach-drawer.training { bottom: 8px; height: 80%; border-color: rgba(255,255,255,.42); }
+      .coach-drawer.training.full { top: 18px; height: auto; }
+      .coach-drawer-backdrop { position: absolute; z-index: 90; inset: 0; border: 0; background: rgba(7,8,7,.34); backdrop-filter: blur(1.5px); cursor: default; }
+      .drawer-grab { width: 100%; height: 25px; flex: 0 0 auto; display: grid; place-items: center; border: 0; background: transparent; cursor: pointer; }
+      .drawer-grab::after { content: ""; width: 36px; height: 4px; border-radius: 99px; background: var(--line); }
+      .drawer-head { min-height: 47px; display: grid; grid-template-columns: 34px minmax(0,1fr) auto; gap: 9px; align-items: center; padding: 0 13px 9px; border-bottom: 1px solid var(--line); }
+      .drawer-agent-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 11px; background: var(--ink); color: var(--lime); font-size: 14px; }
+      .drawer-title strong { display: block; font: 850 13px/1.15 var(--font-display); }
+      .drawer-title span { display: block; margin-top: 4px; color: var(--ink-3); font: 650 7px/1 var(--font-mono); text-transform: uppercase; }
+      .drawer-head-actions { display: flex; gap: 5px; }
+      .drawer-head-actions button { min-width: 32px; height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 11px; background: white; font-size: 9px; font-weight: 800; cursor: pointer; }
+      .drawer-head-actions .end-set-mini { border-color: transparent; background: var(--terra); color: white; }
+      .drawer-context { display: flex; align-items: center; gap: 8px; margin: 9px 12px 0; padding: 8px 10px; border-radius: 12px; background: var(--dark); color: white; }
+      .drawer-context i { width: 7px; height: 7px; border-radius: 50%; background: var(--lime); }
+      .drawer-context strong { min-width: 0; flex: 1; overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+      .drawer-context span { color: #8f938a; font: 650 7px/1 var(--font-mono); }
+      .drawer-body { min-height: 0; flex: 1; overflow-y: auto; padding: 10px 12px 118px; overscroll-behavior: contain; scrollbar-width: none; }
+      .coach-drawer.general .drawer-body { padding-bottom: 170px; }
+      .drawer-body::-webkit-scrollbar { display: none; }
+      .drawer-messages { display: grid; gap: 9px; }
+      .drawer-message { max-width: 88%; padding: 9px 11px; border-radius: 14px; font-size: 9px; line-height: 1.5; }
+      .drawer-message.agent { justify-self: start; border: 1px solid var(--line); border-top-left-radius: 5px; background: white; }
+      .drawer-message.user { justify-self: end; border-top-right-radius: 5px; background: var(--ink); color: white; }
+      .drawer-composer { position: absolute; z-index: 3; right: 0; bottom: 0; left: 0; padding: 7px 11px 10px; border-top: 1px solid var(--line); background: rgba(247,246,242,.97); }
+      .coach-drawer.general .drawer-composer { bottom: 55px; }
+      .drawer-prompts { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none; }
+      .drawer-prompts button { min-height: 29px; flex: 0 0 auto; padding: 0 10px; border: 1px solid var(--line); border-radius: 99px; background: white; color: var(--ink-2); font-size: 8px; font-weight: 750; cursor: pointer; }
+      .drawer-input-row { display: grid; grid-template-columns: 38px minmax(0,1fr) 40px; gap: 6px; }
+      .drawer-input-row input { min-width: 0; min-height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 13px; background: white; }
+      .voice-button, .drawer-send { border: 0; border-radius: 13px; background: var(--ink); color: var(--lime); font-size: 14px; cursor: pointer; }
+      .voice-button.listening { background: var(--terra); color: white; animation: voicePulse 1s ease-in-out infinite; }
+
+      .coach-output-card { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: white; }
+      .coach-output-card.accent { border-left: 4px solid var(--lime-deep); }
+      .coach-output-card.warn { border-left: 4px solid var(--terra); }
+      .output-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 11px 12px 0; }
+      .output-card-head span { color: var(--terra); font: 750 7px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+      .output-card-head b { color: var(--ink-3); font: 700 7px/1 var(--font-mono); }
+      .coach-output-card h3 { margin: 7px 12px 5px; font: 850 15px/1.05 var(--font-display); }
+      .coach-output-card > p { margin: 0 12px 10px; color: var(--ink-2); font-size: 8px; line-height: 1.5; }
+      .output-metrics { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; margin: 9px 11px 11px; overflow: hidden; border-radius: 11px; background: var(--line); }
+      .output-metric { padding: 9px 7px; background: var(--paper-2); }
+      .output-metric strong { display: block; font: 850 14px/1 var(--font-display); }
+      .output-metric span { color: var(--ink-3); font: 650 6px/1.2 var(--font-mono); text-transform: uppercase; }
+      .output-diff { display: grid; grid-template-columns: 1fr 18px 1fr; gap: 5px; align-items: center; margin: 9px 11px 11px; padding: 9px; border-radius: 11px; background: var(--paper-2); }
+      .output-diff small { display: block; color: var(--ink-3); font-size: 7px; }
+      .output-diff strong { display: block; margin-top: 3px; font-size: 9px; }
+      .output-diff b { color: var(--terra); text-align: center; }
+      .output-card-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 0 11px 11px; }
+      .output-card-actions button { min-height: 35px; border: 1px solid var(--line); border-radius: 11px; background: white; font-size: 8px; font-weight: 850; cursor: pointer; }
+      .output-card-actions button.primary { border-color: var(--ink); background: var(--ink); color: white; }
+      .output-source { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 11px; border-top: 1px solid var(--line); color: var(--ink-3); font: 650 6px/1.3 var(--font-mono); }
+      .live-cue { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 8px; align-items: center; }
+      .live-cue i { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; background: #edf4d8; color: var(--lime-ink); font-style: normal; font-weight: 900; }
+      .live-cue strong { display: block; font-size: 9px; }
+      .live-cue span { display: block; margin-top: 4px; color: var(--ink-3); font-size: 7px; }
+      .live-cue b { color: var(--lime-ink); font: 800 8px/1 var(--font-mono); }
+      .drawer-nav { position: absolute; z-index: 4; right: 0; bottom: 0; left: 0; height: 56px; margin: 0; padding: 4px 8px 5px; border-top: 1px solid var(--line); background: rgba(247,246,242,.985); }
+      .drawer-nav .nav-tab { min-height: 46px; }
+
+      /* The Coach surface grows out of the existing bottom operation bar. Only the
+         shell morphs; messages do not replay the entrance on every render. */
+      .coach-drawer.is-entering {
+        pointer-events: none;
+        overflow: hidden;
+        backdrop-filter: none;
+        animation: coachBubbleOpen .46s cubic-bezier(.16,1,.3,1) both;
+      }
+      .coach-drawer.is-entering > * {
+        animation: coachContentIn .22s .16s ease-out both;
+      }
+      .coach-drawer-backdrop.is-entering { animation: coachBackdropIn .34s ease-out both; }
+      .coach-drawer.is-closing {
+        pointer-events: none;
+        overflow: hidden;
+        backdrop-filter: none;
+        animation: coachBubbleClose .3s cubic-bezier(.7,0,.84,0) both;
+      }
+      .coach-drawer.is-closing > * {
+        animation: coachContentOut .12s ease-in both;
+      }
+      .coach-drawer-backdrop.is-closing { pointer-events:none; animation: coachBackdropOut .28s ease-in both; }
+
+      @keyframes coachBubbleOpen {
+        from { transform:translateY(7px) scaleX(.985) scaleY(.17); border-radius:30px / 140px; box-shadow:0 -4px 18px rgba(14,16,14,.08); }
+        to { transform:none; border-radius:27px; box-shadow:0 -18px 60px rgba(14,16,14,.22); }
+      }
+      @keyframes coachBubbleClose {
+        from { transform:none; border-radius:27px; }
+        to { transform:translateY(7px) scaleX(.985) scaleY(.17); border-radius:30px / 140px; box-shadow:0 -4px 18px rgba(14,16,14,.08); }
+      }
+      @keyframes coachContentIn { from { opacity:0; } to { opacity:1; } }
+      @keyframes coachContentOut { to { opacity:0; } }
+      @keyframes coachBackdropIn { from { opacity:0; backdrop-filter:blur(0); } to { opacity:1; backdrop-filter:blur(1.5px); } }
+      @keyframes coachBackdropOut { to { opacity:0; backdrop-filter:blur(0); } }
+      @keyframes voicePulse { 50% { transform:scale(.94); box-shadow:0 0 0 6px rgba(232,92,58,.15); } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+      }
+
+      .toast { position: absolute; z-index: 100; left: 50%; bottom: 135px; transform: translateX(-50%); padding: 10px 15px; border-radius: 99px; background: var(--ink); color: white; font-size: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.2); animation: toast .25s ease-out both; white-space: nowrap; }
+
+      .state-panel { max-width: 320px; }
+      .state-panel h2 { margin: 0 0 16px; font: 850 21px/1 var(--font-display); }
+      .state-box { padding: 16px; border: 1px solid #444740; border-radius: 18px; background: #1a1c18; }
+      .state-row { display: grid; grid-template-columns: 98px 1fr; gap: 10px; padding: 8px 0; border-bottom: 1px solid #33362f; font: 650 10px/1.4 var(--font-mono); }
+      .state-row:last-child { border-bottom: 0; }
+      .state-row span:first-child { color: #777c72; }
+      .state-row span:last-child { color: var(--lime); overflow-wrap: anywhere; }
+      .boundary-note { margin-top: 13px; padding: 14px; border-left: 3px solid var(--terra); background: #1a1c18; color: #b9bcb3; font-size: 11px; line-height: 1.6; }
+
+      .variant-switcher {
+        position: fixed;
+        z-index: 150;
+        left: 50%;
+        top: 14px;
+        display: flex;
+        gap: 4px;
+        transform: translateX(-50%);
+        padding: 5px;
+        border: 1px solid #4a4d45;
+        border-radius: 99px;
+        background: rgba(14,16,14,.9);
+        box-shadow: 0 10px 40px rgba(0,0,0,.25);
+        backdrop-filter: blur(16px);
+      }
+      .variant-switcher button { min-height: 38px; padding: 0 14px; border: 0; border-radius: 99px; background: transparent; color: #9b9f95; font-size: 10px; font-weight: 750; cursor: pointer; }
+      .variant-switcher button.active { background: var(--lime); color: var(--lime-ink); }
+
+      @keyframes enter { from { opacity: 0; transform: translateX(16px); } }
+      @keyframes rise { from { opacity: 0; transform: translateY(24px) scale(.98); } }
+      @keyframes toast { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+      @media (max-width: 1050px) {
+        .stage { grid-template-columns: minmax(390px, 430px) minmax(250px, 320px); }
+        .brief-panel { display: none; }
+      }
+
+      @media (max-width: 760px) {
+        body { background: var(--paper); }
+        .stage { display: block; min-height: 100svh; padding: 0; }
+        .state-panel { display: none; }
+        .phone-shell { width: 100%; height: 100svh; min-height: 650px; padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+        .phone { border-radius: 0; }
+        .device-pill { top: 8px; }
+        .variant-switcher { top: auto; bottom: 4px; max-width: calc(100vw - 16px); }
+        .variant-switcher button { padding: 0 10px; }
+        .dock { bottom: 45px; }
+        .screen { padding-bottom: 200px; }
+        .toast { bottom: 178px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- PROTOTYPE ONLY: throwaway UI used to validate information architecture and capability boundaries. -->
+    <main class="stage">
+      <aside class="brief-panel" aria-label="Prototype brief">
+        <p class="eyebrow">Throwaway prototype · v0.1</p>
+        <h1 id="variantTitle">Coach<br />Workbench</h1>
+        <p class="lede">不是“聊天机器人首页”，而是一个每天可执行、可解释、可撤销的训练计划工作台。</p>
+        <div class="brief-list">
+          <div class="brief-item"><span>01</span><div>先看到今天练什么，再决定要不要调整或询问。</div></div>
+          <div class="brief-item"><span>02</span><div>Agent 的建议以计划差异卡呈现，不埋在对话气泡里。</div></div>
+          <div class="brief-item"><span>03</span><div>低风险修改可自动执行并撤销，高影响修改必须预览。</div></div>
+        </div>
+      </aside>
+
+      <section class="phone-shell" aria-label="Mobile app prototype">
+        <div class="device-pill"></div>
+        <div class="phone">
+          <div id="app" class="app"></div>
+        </div>
+      </section>
+
+      <aside class="state-panel" aria-live="polite">
+        <p class="eyebrow">Visible app state</p>
+        <h2>每次点击后发生了什么</h2>
+        <div id="stateBox" class="state-box"></div>
+        <div class="boundary-note">这个面板只用于讨论能力边界，正式产品不会出现。它让“Agent 建议”和“Agent 已执行”不会被混淆。</div>
+      </aside>
+    </main>
+
+    <nav class="variant-switcher" aria-label="Switch prototype variant">
+      <button data-variant="workbench">A · 今日</button>
+      <button data-variant="briefing">B · 日简报</button>
+      <button data-variant="console">C · 训练台</button>
+    </nav>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const validVariants = ["workbench", "briefing", "console"];
+      const state = {
+        variant: validVariants.includes(params.get("v")) ? params.get("v") : "workbench",
+        view: "today",
+        overlay: null,
+        chatContext: "今日训练",
+        coachDrawer: "closed",
+        coachSurface: "general",
+        voiceListening: false,
+        trainingCoachCard: "live",
+        coachCards: [
+          { id:"plan-today", type:"plan", title:"今天的上肢推", subtitle:"卧推优先，附件组控制疲劳", meta:"计划 v12" }
+        ],
+        planVersion: 12,
+        workoutStatus: "planned",
+        cardFace: "summary",
+        completedSets: 0,
+        coachMode: null,
+        coachObserved: false,
+        planScenario: "strength",
+        cardListView: "tasks",
+        planTasks: {
+          strength: [
+            { name:"杠铃卧推", scheme:"4×8", load:"62.5 kg" },
+            { name:"上斜哑铃推", scheme:"3×10", load:"22.5 kg" },
+            { name:"坐姿肩推", scheme:"3×10", load:"少 1 组" },
+            { name:"侧平举", scheme:"4×15", load:"8 kg" },
+            { name:"绳索下压", scheme:"3×12", load:"25 kg" },
+            { name:"夹胸", scheme:"3×15", load:"20 kg" },
+            { name:"肩袖整理", scheme:"2×15", load:"轻阻力" },
+            { name:"训练后拉伸", scheme:"6 min", load:"完成" }
+          ],
+          bodyweight: [
+            { name:"动态热身", scheme:"5 min", load:"完成" },
+            { name:"俯卧撑", scheme:"4×12", load:"RIR 3" },
+            { name:"保加利亚分腿蹲", scheme:"3×10/侧", load:"自重" },
+            { name:"臀桥", scheme:"4×15", load:"停顿 2s" },
+            { name:"俯身 Y-T-W", scheme:"3×8", load:"慢速" },
+            { name:"死虫", scheme:"3×10/侧", load:"控制" },
+            { name:"平板支撑", scheme:"3×40s", load:"呼吸" },
+            { name:"全身放松", scheme:"5 min", load:"完成" }
+          ],
+          cardio: [],
+          rest: []
+        },
+        editingTaskIndex: null,
+        planManagerSource: "today",
+        activeExercise: { name:"杠铃卧推", reps:"8", load:"62.5 kg" },
+        nextSetOverride: null,
+        timelineEvents: [
+          { time: "07:32", type: "睡眠", name: "睡眠 7h 12m", detail: "HRV 58ms · 静息心率 56", source: "Health + WHOOP" },
+          { time: "08:06", type: "身体", name: "体重 82.4 kg", detail: "体脂 20.6% · 7 日趋势 -0.3kg", source: "智能体脂秤" },
+          { time: "08:28", type: "饮食", name: "早餐", detail: "约 520 kcal · 蛋白质 36g", source: "照片 + 用户确认" },
+          { time: "12:42", type: "饮食", name: "午餐", detail: "约 730 kcal · 蛋白质 48g", source: "手动记录" }
+        ],
+        timelineOverrides: {},
+        timelineTargetDate: "2026-08-08",
+        selectedDay: "2026-08-08",
+        calendarMode: "week",
+        replacementApplied: false,
+        replacementName: "上斜哑铃推",
+        customExerciseAdded: false,
+        exerciseSwapTarget: null,
+        progressRange: "12w",
+        flipping: false,
+        autoChangeApplied: true,
+        proposal: null,
+        actionLogFilter: "all",
+        actionLogSequence: 1204,
+        actionLog: [
+          { id:"ACT-1203", time:"07:34", type:"write", title:"降低今日卧推重量", detail:"只调整今天，不改变后续训练周。", before:"65 kg × 8", after:"62.5 kg × 8", evidence:"睡眠比基线少 48 分钟；上次末两组未达到目标次数。", scope:"今日计划 · v12", status:"applied", reversible:true, target:"auto-adjust" },
+          { id:"ACT-1202", time:"07:34", type:"decision", title:"生成恢复优先建议", detail:"结合恢复状态和最近两次卧推表现，选择日内降重。", evidence:"规则：维持目标次数与动作质量优先于单次负荷。", scope:"决策草稿", status:"recorded", reversible:false },
+          { id:"ACT-1201", time:"07:33", type:"read", title:"读取恢复与训练历史", detail:"读取睡眠、HRV、RIR 与最近两次卧推表现。", evidence:"Health / WHOOP · 本地训练记录", scope:"只读", status:"recorded", reversible:false }
+        ],
+        lastAction: "打开今日首页",
+        permission: "托管模式 · 日内低风险调整可自动执行",
+        messages: [
+          { role: "agent", text: "我已经读取今天的训练、最近两次卧推表现与昨晚恢复。你想执行、调整，还是先了解为什么这样安排？" }
+        ],
+        toast: null
+      };
+
+      const variantNames = {
+        workbench: "Flip Workbench",
+        briefing: "Daily Brief",
+        console: "Training Console"
+      };
+
+      function statusbar() {
+        return `<div class="statusbar"><span>9:41</span><div class="status-icons"><span class="signal"></span><span>5G</span><span class="battery"></span></div></div>`;
+      }
+
+      function workoutHero(compact = false) {
+        return `
+          <article class="hero-card"${compact ? ' style="min-height:246px"' : ""}>
+            <div class="hero-top"><span class="program-chip">增肌 · 第 5 周</span><span class="tiny-chip"><i></i> 已就绪</span></div>
+            <h3 class="hero-title">上肢推<br />力量日</h3>
+            <div class="hero-meta">卧推主项 · 胸 / 肩 / 三头</div>
+            <div class="hero-metrics">
+              <div class="hero-metric"><strong>54′</strong><span>预计时长</span></div>
+              <div class="hero-metric"><strong>17</strong><span>工作组</span></div>
+              <div class="hero-metric"><strong>7.5</strong><span>目标 RPE</span></div>
+            </div>
+            <div class="hero-actions">
+              <button class="primary-button" data-action="start-workout">开始训练</button>
+              <button class="primary-button round-adjust" data-action="open-adjust" aria-label="调整今天的训练">⌁</button>
+            </div>
+          </article>`;
+      }
+
+      function todayPlan() {
+        const plans = {
+          strength: {
+            mode: "tasks",
+            label: "健身房 · 增肌第 5 周",
+            frontTitle: "上肢推<br />力量日",
+            subtitle: "卧推主项 · 胸 / 肩 / 三头",
+            meta: "第 5 周 · 上肢推",
+            metrics: [["54′","预计时长"],["17","工作组"],["RIR 2","主项目标"]],
+            tasks: state.planTasks.strength,
+            logs: state.timelineEvents,
+            primary: "开始训练", primaryAction: "start-workout", secondary: "管理动作", secondaryAction: "manage-plan"
+          },
+          bodyweight: {
+            mode: "tasks",
+            label: "居家 · 徒手训练",
+            frontTitle: "全身徒手<br />基础日",
+            subtitle: "推 / 蹲 / 髋 / 核心 · 无器材",
+            meta: "第 3 次 · 全身徒手",
+            metrics: [["32′","预计时长"],["8","动作"],["RIR 3","目标余力"]],
+            tasks: state.planTasks.bodyweight,
+            logs: state.timelineEvents,
+            primary: "开始训练", primaryAction: "start-workout", secondary: "管理动作", secondaryAction: "manage-plan"
+          },
+          cardio: {
+            mode: "activity",
+            label: "有氧 · 自由安排",
+            frontTitle: "动一动，<br />按感觉来。",
+            subtitle: "跑步、骑行或散步都可以",
+            meta: "今天没有固定安排",
+            metrics: [["自由","方式"],["不限","时长"],["轻松","建议强度"]],
+            tasks: [],
+            logs: state.timelineEvents,
+            primary: "记录活动", primaryAction: "add-timeline", secondary: "自动整理", secondaryAction: "agent-fill-timeline"
+          },
+          rest: {
+            mode: "activity",
+            label: "休息日",
+            frontTitle: "今天，<br />好好恢复。",
+            subtitle: "完全休息，或者轻松走一走",
+            meta: "恢复日",
+            metrics: [["休息","今日安排"],["自由","轻松活动"],["明天","下次训练"]],
+            tasks: [],
+            logs: state.timelineEvents,
+            primary: "记录今天", primaryAction: "add-timeline", secondary: "自动整理", secondaryAction: "agent-fill-timeline"
+          }
+        };
+        return plans[state.planScenario];
+      }
+
+      function currentPlanTasks() {
+        return state.planTasks[state.planScenario] || [];
+      }
+
+      function taskToExercise(task) {
+        if (!task) return { name:"自由训练", reps:"8", load:"自选" };
+        const match = String(task.scheme || "").match(/×\s*([^/]+)/);
+        return { name:task.name, reps:match?.[1] || task.scheme || "自选", load:task.load || "自选" };
+      }
+
+      function combinedWorkoutCard() {
+        const flipped = state.cardFace === "console";
+        const plan = todayPlan();
+        const faceTitle = "今日计划";
+        const visibleItems = plan.tasks;
+        const rows = visibleItems.length
+          ? visibleItems.map((task,index) => `<div class="flip-console-row"><strong>${index + 1}. ${task.name}</strong><span>${task.scheme}</span><span class="${index === 0 ? "load-next" : ""}">${task.load}</span><button class="task-edit-button" data-edit-task="${index}" aria-label="编辑 ${task.name}">•••</button></div>`).join("")
+          : `<div class="activity-empty"><b>今天没有固定安排</b><span>有活动时再记下来就好。</span></div>`;
+        const listModeBar = `<div class="list-mode-bar"><strong>${plan.mode === "tasks" ? `${visibleItems.length} 个动作` : "今日安排"}</strong><span>${plan.mode === "tasks" ? plan.subtitle : "按状态决定"}</span></div>`;
+        const actionPrimary = plan.mode === "tasks" ? [plan.primary, plan.primaryAction] : ["添加记录", "add-timeline"];
+        const actionSecondary = plan.mode === "tasks" ? ["管理动作", "manage-plan"] : ["自动整理", "agent-fill-timeline"];
+        const summary = `<article class="hero-card flip-front flip-live" data-face="summary"><div class="hero-top"><button class="program-chip" data-action="open-plan-scenarios">${plan.label} ▾</button><button class="flip-control" data-action="flip-card"><span>${plan.mode === "tasks" ? `${visibleItems.length} 个动作` : "查看安排"}</span><b>›</b></button></div><h3 class="hero-title">${plan.frontTitle}</h3><div class="hero-meta">${plan.subtitle}</div><div class="hero-metrics">${plan.metrics.map(metric => `<div class="hero-metric"><strong>${metric[0]}</strong><span>${metric[1]}</span></div>`).join("")}</div><div class="hero-actions"><button class="primary-button" data-action="${plan.primaryAction}">${state.workoutStatus === "in_progress" && plan.mode === "tasks" ? "继续训练" : plan.primary}</button><button class="primary-button round-adjust" data-action="open-plan-scenarios" aria-label="切换今日安排">⌁</button></div></article>`;
+        const consoleFace = `<article class="flip-back flip-live" data-face="console"><div class="flip-back-head"><div><span class="scenario-label">${plan.label}</span><h3>${faceTitle}</h3><p>${plan.meta}</p></div><button class="flip-control" data-action="flip-card"><span>收起</span><b>‹</b></button></div><div class="flip-stats">${plan.metrics.map(metric => `<div class="flip-stat"><strong>${metric[0]}</strong><span>${metric[1]}</span></div>`).join("")}</div><div class="task-list-wrap ${!visibleItems.length ? "is-empty" : ""} ${visibleItems.length > 3 ? "is-scrollable" : ""}">${listModeBar}<div class="flip-console">${rows}</div></div><div class="flip-back-actions"><button class="primary-button dark" data-action="${actionPrimary[1]}">${state.workoutStatus === "in_progress" && plan.mode === "tasks" ? "继续训练" : actionPrimary[0]}</button><button class="secondary-button" data-action="${actionSecondary[1]}">${actionSecondary[0]}</button></div></article>`;
+        return `<section class="workout-flip" aria-label="今日计划">${flipped ? consoleFace : summary}</section>`;
+      }
+
+      function changeCard() {
+        if (!state.autoChangeApplied) return "";
+        return `
+          <article class="change-card" data-action="open-change-detail" role="button" tabindex="0">
+            <div class="change-head"><div><span class="change-tag">今天有调整</span><h4>卧推改为 62.5 kg</h4></div><button class="undo-button" data-action="undo-change">恢复</button></div>
+            <p>昨晚睡得少，今天先轻一点。</p>
+          </article>`;
+      }
+
+      function scenarioCoachStatus() {
+        if (["strength","bodyweight"].includes(state.planScenario)) return changeCard() || `<div class="metric-card wide"><div class="metric-label"><span>计划保持原样</span><span>v${state.planVersion}</span></div><p>刚才的自动调整已撤销。你仍可在训练前重新评估。</p></div>`;
+        if (state.planScenario === "cardio") return `<div class="change-card" style="border-left-color:var(--lime-deep);background:#eef6d2;border-color:#d8e7a8"><div class="change-head"><div><span class="change-tag">自由活动</span><h4>今天没有固定目标</h4></div></div><p style="color:#596137">跑步、骑行或游泳都可以，按状态来。</p></div>`;
+        return `<div class="change-card" style="border-left-color:var(--lime-deep);background:#eef6d2;border-color:#d8e7a8"><div class="change-head"><div><span class="change-tag">休息日</span><h4>今天好好恢复</h4></div></div><p style="color:#596137">完全休息，或者轻松走一走。</p></div>`;
+      }
+
+      function coachAlert() {
+        if (["strength","bodyweight"].includes(state.planScenario)) {
+          if (!state.autoChangeApplied) return `<aside class="coach-alert pending"><span class="coach-alert-icon">✓</span><div class="coach-alert-copy"><small>已恢复</small><strong>今天按原计划训练</strong></div><div class="coach-alert-actions"><button data-action="open-action-log">记录</button><button data-action="open-adjust">调整</button></div></aside>`;
+          return `<aside class="coach-alert"><span class="coach-alert-icon">↘</span><div class="coach-alert-copy"><small>训练建议</small><strong>${state.planScenario === "strength" ? "卧推改为 62.5 kg" : "分腿蹲少做 1 组"}</strong><span>${state.planScenario === "strength" ? "昨晚睡得少，今天轻一点" : "腿部恢复一般，今天少做一点"}</span></div><div class="coach-alert-actions"><button data-action="open-action-log">记录</button><button data-action="undo-change">恢复</button></div></aside>`;
+        }
+        return `<aside class="coach-alert pending"><span class="coach-alert-icon">＋</span><div class="coach-alert-copy"><small>待添加</small><strong>${state.planScenario === "cardio" ? "18:10 骑行了 37 分钟" : "20:10 步行了 29 分钟"}</strong><span>要加入今天的记录吗？</span></div><div class="coach-alert-actions"><button data-action="agent-fill-timeline" data-date="2026-08-08">查看</button><button data-action="confirm-agent-timeline" data-date="2026-08-08">加入</button></div></aside>`;
+      }
+
+      function timelineEventsMarkup(events) {
+        return events.map(event => `<article class="timeline-event ${event.type === "训练" ? "training" : ""}" data-source="${event.source}"><time class="timeline-time">${event.time}</time><div class="timeline-event-card"><div class="timeline-event-head"><small>${event.type}</small></div><strong>${event.name}</strong><p>${event.detail}</p></div></article>`).join("");
+      }
+
+      function homeTimelineSection() {
+        const events = [...state.timelineEvents].sort((a,b) => a.time.localeCompare(b.time));
+        return `<section id="todayTimeline"><div class="section-head"><div><h3>今日记录</h3><span style="display:block;margin-top:5px">8 月 8 日 · ${events.length} 项</span></div><div class="timeline-tools"><button data-action="add-timeline" data-date="2026-08-08">＋ 添加</button><button data-action="agent-fill-timeline" data-date="2026-08-08">自动整理</button></div></div><div class="home-timeline">${timelineEventsMarkup(events)}</div></section>`;
+      }
+
+      function workbenchHome() {
+        return `
+          ${statusbar()}
+          ${coachAlert()}
+          ${combinedWorkoutCard()}
+          ${homeTimelineSection()}`;
+      }
+
+      function dailyReportHome() {
+        const observationCopy = state.coachObserved ? "动作识别覆盖 83% 的有效重复，未覆盖部分不会参与技术评分。" : "本次未开启骨架观测，因此日报只分析负荷、次数、RIR 与主观反馈，不生成动作技术评分。";
+        const observationSignal = state.coachObserved ? `<div class="report-signal"><i>◇</i><div><strong>动作观测</strong><span>稳定重复 24 次 · 6 次置信度不足</span></div><b>不武断评分</b></div>` : `<div class="report-signal"><i>—</i><div><strong>动作观测</strong><span>本次未启用 Coach 摄像头模式</span></div><b>无技术结论</b></div>`;
+        return `
+          ${statusbar()}
+          <header class="hello"><p class="date-kicker">今日训练 · 19:31 完成</p><h2>练完了，计划开始<br /><em>理解你。</em></h2></header>
+          <article class="report-hero"><span class="report-kicker">上肢推 · 完整完成</span><h2>质量优先，<br />推进成立。</h2><p>实际 52 分钟 · 比预计提前 2 分钟</p><div class="report-score"><div><strong>17 / 17</strong><span>完成组</span></div><div><strong>8,780</strong><span>总负荷 kg</span></div><div><strong>1.8</strong><span>平均 RIR</span></div></div></article>
+          <article class="coach-verdict"><span class="change-tag">Agent 日报 · 基于实际表现</span><h3>主项完成，下次可以小幅推进。</h3><p>卧推四组都达到目标次数，末组仍保留约 2 次余力。${observationCopy}</p><div class="report-signals">
+            <div class="report-signal"><i>↑</i><div><strong>卧推表现</strong><span>4×8 @ 62.5 kg · RIR 2/2/2/1</span></div><b>达标</b></div>
+            <div class="report-signal"><i>≈</i><div><strong>肩推疲劳</strong><span>末组速度下降，减量决策有效</span></div><b>维持</b></div>
+            ${observationSignal}
+          </div></article>
+          <article class="next-proposal"><span class="change-tag">下次训练 · 待确认建议</span><h3>卧推恢复到 65 kg × 8</h3><p>这会影响下一次上肢推的安排，因此即使在托管模式下，也先放进计划变更预览，不直接写入长期计划。</p></article>
+          <div class="report-actions"><button class="primary-button dark" data-action="open-report-chat">和 Coach 复盘</button><button class="secondary-button" data-view="progress">查看趋势</button></div>
+          <button class="report-reset" data-action="reset-workout">重置演示，回到训练前</button>`;
+      }
+
+      function briefingHome() {
+        return `
+          ${statusbar()}
+          <header class="hello"><p class="date-kicker">今日简报 · 08:20 更新</p><h2>你的身体允许<br /><em>正常推进。</em></h2></header>
+          <article class="brief-hero">
+            <span class="coach-line">MaxPower Coach · 今日判断</span>
+            <h2>主项照常，附件组收一点。</h2>
+            <p>恢复不差，但昨晚睡眠比个人基线少 48 分钟。卧推继续推进，肩推少做 1 组，避免无效疲劳。</p>
+            <div class="brief-reasons"><div class="brief-reason"><strong>72</strong><span>恢复</span></div><div class="brief-reason"><strong>-48′</strong><span>睡眠差</span></div><div class="brief-reason"><strong>+2.1%</strong><span>主项趋势</span></div></div>
+          </article>
+          <article class="brief-plan">
+            <span class="change-tag">今天 18:30 · 训练安排</span>
+            <h3>上肢推 · 54 分钟</h3>
+            <div class="row"><span>●</span><span>卧推 4×8 @ 62.5kg · RIR 2</span></div>
+            <div class="row"><span>●</span><span>上斜哑铃推 + 绳索下压等 4 项</span></div>
+            <div class="hero-actions"><button class="primary-button dark" data-action="start-workout">按此开始</button><button class="secondary-button" data-action="open-adjust">调整</button></div>
+          </article>
+          <div class="section-head"><h3>本周路径</h3><span>减脂保肌 · 第 5 周</span></div>
+          <div class="metric-grid"><article class="metric-card"><div class="metric-label"><span>体重趋势</span><span>符合</span></div><strong>-0.4</strong><p>kg / 周 · 处于目标区间</p></article><article class="metric-card"><div class="metric-label"><span>热量建议</span><span>训练日</span></div><strong>2,240</strong><p>蛋白质 156g · 碳水前置</p></article></div>`;
+      }
+
+      function consoleHome() {
+        return `
+          ${statusbar()}
+          <article class="console-header"><div class="readiness-line">● Readiness 72 · Proceed</div><h2>Push 05 / 12</h2><p>Mesocycle: Hypertrophy Base · Week 5 · Session 3</p></article>
+          <div class="console-stat-strip"><div class="console-stat"><strong>17</strong><span>Work sets</span></div><div class="console-stat"><strong>8,640</strong><span>Load kg</span></div><div class="console-stat"><strong>54′</strong><span>Est. time</span></div></div>
+          <div class="section-head"><h3>今日计划</h3><span>第 5 周</span></div>
+          <div class="console-table">
+            <div class="console-row"><strong>杠铃卧推</strong><span>4×8</span><span class="delta-up">62.5 kg</span><button class="log-now" data-action="start-workout">›</button></div>
+            <div class="console-row"><strong>上斜哑铃推</strong><span>3×10</span><span>22.5 kg</span><button class="log-now" data-action="start-workout">›</button></div>
+            <div class="console-row"><strong>坐姿肩推</strong><span>3×10</span><span class="delta-up">-1 set</span><button class="log-now" data-action="start-workout">›</button></div>
+            <div class="console-row"><strong>侧平举</strong><span>4×15</span><span>8 kg</span><button class="log-now" data-action="start-workout">›</button></div>
+            <div class="console-row"><strong>绳索下压</strong><span>3×12</span><span>25 kg</span><button class="log-now" data-action="start-workout">›</button></div>
+          </div>
+          <div class="console-actions"><button class="primary-button dark" data-action="start-workout">开始并记录</button><button class="secondary-button" data-action="open-free-log">计划外训练</button></div>
+          ${changeCard()}`;
+      }
+
+      function timelineForDay(iso) {
+        if (state.timelineOverrides[iso]) return [...state.timelineOverrides[iso]].sort((a,b) => a.time.localeCompare(b.time));
+        if (iso === "2026-08-08") return [...state.timelineEvents].sort((a,b) => a.time.localeCompare(b.time));
+        const mock = {
+          "2026-08-03": [{time:"07:18",type:"睡眠",name:"睡眠 7h 34m",detail:"恢复稳定",source:"Health"},{time:"18:22",type:"训练",name:"下肢力量训练",detail:"61 分钟 · 18 工作组",source:"本地训练"}],
+          "2026-08-05": [{time:"08:03",type:"身体",name:"体重 82.7 kg",detail:"7 日趋势 -0.2 kg",source:"体脂秤"},{time:"19:05",type:"训练",name:"上肢拉训练",detail:"57 分钟 · 平均 RIR 2.1",source:"训练 + 相机"}],
+          "2026-08-07": [{time:"07:45",type:"睡眠",name:"睡眠 6h 46m",detail:"低于个人基线 42 分钟",source:"Health + WHOOP"},{time:"20:10",type:"活动",name:"轻松步行",detail:"31 分钟 · 3,422 步",source:"穿戴设备"}],
+          "2026-08-09": [{time:"09:10",type:"恢复",name:"晨间恢复反馈",detail:"腿部酸痛 2/5 · 精力 4/5",source:"用户手动"}]
+        };
+        return mock[iso] || [];
+      }
+
+      function planForDay(iso) {
+        return {"2026-08-03":"下肢力量 · 18:30","2026-08-05":"上肢拉 · 19:00","2026-08-08":"上肢推 · 18:30","2026-08-10":"下肢力量 · 18:30","2026-08-12":"上肢拉 · 19:00"}[iso] || "休息日";
+      }
+
+      function editableTimeline(iso) {
+        if (iso === "2026-08-08") return state.timelineEvents;
+        if (!state.timelineOverrides[iso]) state.timelineOverrides[iso] = timelineForDay(iso);
+        return state.timelineOverrides[iso];
+      }
+
+      function planPage() {
+        const week = [["一","03"],["二","04"],["三","05"],["四","06"],["五","07"],["六","08"],["日","09"]];
+        const eventDays = new Set([3,5,7,8,9,12,14,17,19,22,24,26,29]);
+        const planDays = new Set([3,5,8,10,12,15,17,19,22,24,26,29]);
+        const monthCells = [...Array(5).fill(null), ...Array.from({length:31},(_,i)=>i+1), ...Array(6).fill(null)];
+        const events = timelineForDay(state.selectedDay);
+        const selectedNumber = Number(state.selectedDay.slice(-2));
+        const selectedWeekday = ["周日","周一","周二","周三","周四","周五","周六"][new Date(`${state.selectedDay}T12:00:00`).getDay()];
+        const selectedPlan = planForDay(state.selectedDay);
+        const planBadge = selectedPlan === "休息日" ? `<span class="day-plan-binding"><i></i>${selectedPlan}</span>` : `<button class="day-plan-binding" data-action="manage-plan"><i></i>${selectedPlan}<b>›</b></button>`;
+        const calendar = state.calendarMode === "week"
+          ? `<div class="week-strip">${week.map(day => { const iso = `2026-08-${day[1]}`; return `<button class="day-button ${eventDays.has(Number(day[1])) ? "done" : ""} ${state.selectedDay === iso ? "active" : ""}" data-calendar-day="${iso}"><span>周${day[0]}</span><strong>${day[1]}</strong><i></i></button>`; }).join("")}</div>`
+          : `<div class="month-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div><div class="month-grid">${monthCells.map(day => day ? `<button class="month-day ${eventDays.has(day) ? "has-events" : ""} ${planDays.has(day) ? "has-plan" : ""} ${selectedNumber === day ? "active" : ""}" data-calendar-day="2026-08-${String(day).padStart(2,"0")}"><strong>${day}</strong><i></i></button>` : `<span class="month-day muted"></span>`).join("")}</div>`;
+        return `${statusbar()}<header class="calendar-heading"><div><p class="date-kicker">2026</p><h2>8 月</h2></div><div class="calendar-mode"><button class="${state.calendarMode === "week" ? "active" : ""}" data-calendar-mode="week">周</button><button class="${state.calendarMode === "month" ? "active" : ""}" data-calendar-mode="month">月</button></div></header>${calendar}<section class="day-detail"><div class="day-detail-head"><div><span class="change-tag">8 月 ${selectedNumber} 日 · ${selectedWeekday}</span><h3>${events.length ? `${events.length} 项记录` : "还没有记录"}</h3></div>${planBadge}</div><div class="home-timeline">${events.length ? timelineEventsMarkup(events) : `<div class="activity-empty"><b>这一天还没有记录</b><span>可以添加活动、饮食或身体状态。</span></div>`}</div><div class="timeline-tools" style="justify-content:flex-end;margin-top:7px"><button data-action="add-timeline" data-date="${state.selectedDay}">＋ 添加</button><button data-action="agent-fill-timeline" data-date="${state.selectedDay}">自动整理</button></div></section><div class="section-head"><h3>训练设置</h3></div><div class="plan-tools"><button class="plan-tool" data-action="manage-plan"><i>${currentPlanTasks().length}</i><div><strong>动作安排</strong><span>新增、编辑或删除动作</span></div></button><button class="plan-tool" data-action="open-library"><i>64</i><div><strong>动作库</strong><span>查看所有训练动作</span></div></button><button class="plan-tool" data-action="new-exercise"><i>＋</i><div><strong>新增动作</strong><span>添加常用动作</span></div></button></div>`;
+      }
+
+      function progressPage() {
+        return `${statusbar()}
+          <header class="page-title"><p class="date-kicker">目标周期 · 第 5 / 16 周</p><h2>长期进展</h2><p>训练表现用于调整下一次训练安排；体重、体脂与围度用于判断长期路径是否有效。</p></header>
+          <article class="goal-card"><div class="goal-head"><div><span class="report-kicker">主要目标 · 降脂保肌</span><h3>78 kg / 16%</h3><p>预计还有 11—14 周 · 每周重新预测</p></div><div class="range-switch"><button data-range="4w" class="${state.progressRange === "4w" ? "active" : ""}">4周</button><button data-range="12w" class="${state.progressRange === "12w" ? "active" : ""}">12周</button></div></div><div class="goal-numbers"><div><span>起点</span><strong>84.6</strong></div><b>→</b><div><span>当前 kg</span><strong>82.4</strong></div></div><svg class="sparkline" viewBox="0 0 320 92" aria-label="体重下降趋势"><path class="grid" d="M0 18H320M0 46H320M0 74H320"/><path class="target" d="M4 15L316 77"/><path class="line" d="M4 20 C28 18,38 27,61 26 S94 34,116 36 S151 40,171 47 S206 49,228 58 S269 59,292 67 S310 68,316 70"/></svg></article>
+          <div class="goal-progress"><article class="goal-progress-item"><div class="goal-progress-row"><h4>体脂率</h4><strong>21.8% → 20.6%</strong></div><p>目标 16% · 下降速度符合当前路径，暂不进一步削减热量。</p><div class="meter" style="--meter:21%"><span></span></div></article><article class="goal-progress-item"><div class="goal-progress-row"><h4>腰围</h4><strong>88.0 → 85.5 cm</strong></div><p>过去 4 周 -2.5 cm · 与体重趋势一致。</p><div class="meter" style="--meter:42%"><span></span></div></article><article class="goal-progress-item"><div class="goal-progress-row"><h4>卧推训练表现</h4><strong>+4.2%</strong></div><p>减脂期力量仍小幅增长，当前热量与训练强度配合可继续。</p><div class="meter" style="--meter:64%"><span></span></div></article></div>
+          <div class="section-head"><h3>路径判断</h3><span>Agent 每周更新</span></div><div class="change-card" style="border-left-color:var(--lime-deep);background:#eef6d2;border-color:#d8e7a8"><div class="change-head"><div><span class="change-tag">目标仍可达</span><h4>保持本周饮食与训练</h4></div></div><p style="color:#596137">只有当趋势连续两周偏离区间时，才调整热量或训练量；不根据单日体重波动改计划。</p></div>`;
+      }
+
+      function mePage() {
+        return `${statusbar()}<header class="page-title"><h2>我的</h2></header><div class="plan-tools"><button class="plan-tool" data-action="open-profile"><i>权</i><div><strong>教练权限</strong><span>选择建议如何生效</span></div></button><button class="plan-tool" data-action="open-action-log"><i>${state.actionLog.filter(item => item.type === "write" && item.status === "applied").length}</i><div><strong>Coach 操作记录</strong><span>查看依据、变更与恢复</span></div></button><button class="plan-tool" data-action="mock-data-settings"><i>数</i><div><strong>数据与同步</strong><span>管理本地数据和云端同步</span></div></button></div><div class="section-head"><h3>健康数据</h3><span>3 个来源</span></div><div class="choice-list"><div class="choice-button"><div><strong>Health / 穿戴设备</strong><span>睡眠、心率、步数、训练活动</span></div><b>✓</b></div><div class="choice-button"><div><strong>智能体脂秤</strong><span>体重、体脂与身体趋势</span></div><b>✓</b></div><div class="choice-button"><div><strong>训练记录与相机</strong><span>重量、次数、余力和动作表现</span></div><b>✓</b></div></div>`;
+      }
+
+      function placeholderView() {
+        const copy = {
+          plan: ["计划", "查看 12 周完整路径，Agent 的长期变更会在这里形成可审计的新版本。"],
+          progress: ["进展", "力量、训练量、动作质量、体重和恢复趋势共同决定下一步，不用单一分数冒充答案。"],
+          me: ["我的", "切换本地/云端、设备数据权限与 Agent 执行权限。所有核心训练记录都可离线使用。"]
+        }[state.view];
+        return `${statusbar()}<div class="placeholder-view"><p class="date-kicker">Prototype scope</p><h2>${copy[0]}</h2><p>${copy[1]}</p><div class="placeholder-card"><span class="change-tag">本轮暂不展开</span><p>先确认首页、执行入口与 Agent 决策交互。确认后再把这个模块做成下一张可点击页面。</p></div></div>`;
+      }
+
+      function navTabsMarkup(extraClass = "") {
+        return `<nav class="nav-tabs ${extraClass}" aria-label="主导航"><button class="nav-tab ${state.view === "today" ? "active" : ""}" data-icon="⌂" data-view="today">今天</button><button class="nav-tab ${state.view === "plan" ? "active" : ""}" data-icon="▦" data-view="plan">日历</button><button class="nav-tab ${state.view === "progress" ? "active" : ""}" data-icon="↗" data-view="progress">进展</button><button class="nav-tab ${state.view === "me" ? "active" : ""}" data-icon="○" data-view="me">我的</button></nav>`;
+      }
+
+      function dock() {
+        const agentEnabled = ["today","plan","progress"].includes(state.view);
+        const drawerActive = agentEnabled && state.coachDrawer !== "closed" && state.coachSurface === "general";
+        if (drawerActive) return "";
+        return `
+          <div class="dock ${!agentEnabled ? "nav-only" : ""} ${drawerActive ? "drawer-active" : ""}"${state.overlay ? ' aria-hidden="true" inert' : ""}>
+            ${agentEnabled && !drawerActive ? `<div class="composer"><button class="composer-main" data-action="open-chat"><span class="composer-orb"></span><span class="composer-placeholder">问问 Coach…</span></button><button class="composer-plus" data-action="open-capabilities" aria-label="更多操作">+</button></div>` : ""}
+            ${navTabsMarkup()}
+          </div>`;
+      }
+
+      function adjustSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="调整今天的训练"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">调整训练</span><h2>今天哪里不一样？</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><div class="choice-list">
+          <button class="choice-button" data-adjust="time"><div><strong>只有 30 分钟</strong><span>保留主项，压缩附件组</span></div><b>30′</b></button>
+          <button class="choice-button" data-adjust="equipment"><div><strong>器材不可用</strong><span>按动作模式与历史负荷替代</span></div><b>⌁</b></button>
+          <button class="choice-button" data-adjust="fatigue"><div><strong>今天明显疲劳</strong><span>结合睡眠、热身与主观感受降级</span></div><b>↓</b></button>
+          <button class="choice-button" data-adjust="other"><div><strong>其他情况</strong><span>带着今日训练进入对话</span></div><b>›</b></button>
+        </div></section></div>`;
+      }
+
+      function startModeSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="选择训练模式"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">开始训练</span><h2>怎么记录这次训练？</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><div class="mode-list"><button class="mode-card" data-mode="guided"><span class="mode-icon">◎</span><div><strong>开启教练模式</strong><p>用相机计次，并在训练中提醒动作。</p></div><b>›</b></button><button class="mode-card" data-mode="log"><span class="mode-icon">▤</span><div><strong>手动记录</strong><p>记录重量、次数和余力，不开启相机。</p></div><b>›</b></button></div><p class="mode-footnote">训练中可以随时切换。</p></section></div>`;
+      }
+
+      function planScenarioSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="切换今日安排"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">今日安排</span><h2>今天准备做什么？</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><div class="choice-list"><button class="choice-button" data-plan-scenario="strength"><div><strong>力量训练</strong><span>健身房器械与自由重量</span></div><b>杠</b></button><button class="choice-button" data-plan-scenario="bodyweight"><div><strong>徒手训练</strong><span>在家完成，不需要器材</span></div><b>徒</b></button><button class="choice-button" data-plan-scenario="cardio"><div><strong>有氧或自由活动</strong><span>跑步、骑行、游泳或散步</span></div><b>跑</b></button><button class="choice-button" data-plan-scenario="rest"><div><strong>休息</strong><span>恢复为主，活动随意</span></div><b>休</b></button></div></section></div>`;
+      }
+
+      function activityLogSheet() {
+        const cardio = state.planScenario === "cardio";
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="添加记录"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">今日记录</span><h2>添加一项记录</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><form id="timelineEventForm" class="field-stack"><label>类型<select name="type"><option>${cardio ? "有氧" : "活动"}</option><option>训练</option><option>饮食</option><option>身体</option><option>睡眠</option><option>恢复</option></select></label><label>时间<input name="time" type="time" value="18:40" required/></label><label>内容<input name="name" value="${cardio ? "户外骑行" : "轻松散步"}" required/></label><label>补充<input name="detail" value="${cardio ? "35 分钟 · 平均心率 138" : "28 分钟 · 饭后体感轻松"}"/></label><button class="primary-button dark" type="submit">保存</button></form></section></div>`;
+      }
+
+      function agentActivitySheet() {
+        const suggestions = {
+          strength: ["上肢推训练", "52 min", "来自本地训练记录：17 个工作组；RIR 已记录"],
+          bodyweight: ["居家徒手训练", "31 min", "来自计时器与部分高置信度骨架观测"],
+          cardio: ["户外骑行", "37 min", "来自健康数据：平均心率 139，18:10—18:47"],
+          rest: ["轻松步行", "29 min", "来自健康数据：连续步行 3,214 步，低强度"]
+        };
+        const item = suggestions[state.planScenario];
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="整理今日记录"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">自动整理</span><h2>发现一项活动</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><p class="sheet-copy">${item[2]}</p><div class="proposal"><span class="proposal-kicker">${item[0]}</span><h3>${item[1]}</h3><div class="proposal-actions"><button class="primary-button dark" data-action="confirm-agent-timeline">加入记录</button><button class="secondary-button" data-action="open-chat">有问题</button></div></div></section></div>`;
+      }
+
+      function actionLogSheet() {
+        const visible = state.actionLogFilter === "writes" ? state.actionLog.filter(item => item.type === "write") : state.actionLog;
+        const writeCount = state.actionLog.filter(item => item.type === "write").length;
+        const statusLabel = item => item.status === "undone" ? "已撤销" : item.type === "write" ? "已执行" : "已记录";
+        const rows = visible.map(item => `<article class="audit-item ${item.type} ${item.status === "undone" ? "undone" : ""}"><div class="audit-item-head"><small>${item.time} · ${item.id} · ${item.scope}</small><span class="audit-status ${item.type === "write" ? item.status : "read"}">${statusLabel(item)}</span></div><h3>${item.title}</h3><p>${item.detail}</p>${item.before || item.after ? `<div class="audit-diff"><div><small>之前</small><strong>${item.before || "—"}</strong></div><b>→</b><div><small>之后</small><strong>${item.after || "—"}</strong></div></div>` : ""}<div class="audit-evidence">依据：${item.evidence || "由用户指令触发"}</div><div class="audit-foot"><span>MAXPOWER COACH · 本地审计链</span>${item.reversible ? `<button data-log-id="${item.id}" data-action="${item.status === "undone" ? "redo-agent-action" : "undo-agent-action"}">${item.status === "undone" ? "重新应用" : "撤销"}</button>` : ""}</div></article>`).join("");
+        return `<section class="overlay audit-screen" role="dialog" aria-modal="true" aria-label="Coach 操作记录"><header class="chat-head"><button class="back-button" data-action="close-overlay" aria-label="返回">‹</button><div class="chat-head-title"><strong>Coach 操作记录</strong><span>APPEND-ONLY · LOCAL FIRST</span></div></header><div class="audit-body"><article class="audit-summary"><div><small>可追溯 · 可恢复</small><strong>每次操作都有来路</strong><p>读取与判断可追溯；写入保存前后差异，并可单独撤销。</p></div><span class="audit-count">${writeCount}</span></article><div class="audit-filters"><button class="${state.actionLogFilter === "all" ? "active" : ""}" data-log-filter="all">全部</button><button class="${state.actionLogFilter === "writes" ? "active" : ""}" data-log-filter="writes">有变更</button></div><div class="audit-list">${rows}</div></div></section>`;
+      }
+
+      function planManagerSheet() {
+        const tasks = currentPlanTasks();
+        return `<section class="overlay" role="dialog" aria-modal="true" aria-label="管理今日动作"><header class="chat-head"><button class="back-button" data-action="close-plan-manager" aria-label="返回">‹</button><div class="chat-head-title"><strong>今日计划</strong><span>${tasks.length} 个动作</span></div><button class="flip-control" data-action="add-plan-task">＋ 添加</button></header><div class="plan-manager-body"><div class="plan-manager-list">${tasks.map((task,index) => `<article class="plan-manager-row"><span class="plan-manager-index">${String(index + 1).padStart(2,"0")}</span><button class="plan-manager-copy" data-edit-task="${index}" style="border:0;background:transparent;padding:0;cursor:pointer"><strong>${task.name}</strong><span>${task.scheme} · ${task.load}</span></button><button class="plan-manager-edit" data-edit-task="${index}" aria-label="编辑 ${task.name}">•••</button></article>`).join("")}</div><button class="primary-button dark plan-manager-add" data-action="add-plan-task">＋ 添加动作</button></div></section>`;
+      }
+
+      function planTaskEditorSheet() {
+        const task = state.editingTaskIndex === null ? {name:"",scheme:"3×10",load:"自选"} : currentPlanTasks()[state.editingTaskIndex];
+        const editing = state.editingTaskIndex !== null;
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="${editing ? "编辑动作" : "添加动作"}"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">今日计划</span><h2>${editing ? "编辑动作" : "添加动作"}</h2></div><button class="icon-button" data-action="back-to-plan-manager" aria-label="关闭">×</button></div><form id="planTaskForm" class="field-stack" style="margin-top:16px"><label>动作<input name="name" value="${task?.name || ""}" placeholder="例如：杠铃卧推" required/></label><label>组数与次数<input name="scheme" value="${task?.scheme || "3×10"}" placeholder="例如：4×8" required/></label><label>重量或提示<input name="load" value="${task?.load || "自选"}" placeholder="例如：62.5 kg" required/></label><button class="primary-button dark" type="submit">${editing ? "保存修改" : "加入计划"}</button></form>${editing ? `<button class="danger-button" data-action="delete-plan-task">从计划中删除</button>` : ""}</section></div>`;
+      }
+
+      function exerciseLibrarySheet() {
+        const target = state.exerciseSwapTarget;
+        const nextSetMode = target === "__next_set__";
+        const actionLabel = nextSetMode ? "选择" : target ? "替换" : "查看";
+        return `<section class="overlay" role="dialog" aria-modal="true" aria-label="动作库"><header class="chat-head"><button class="back-button" data-action="${nextSetMode ? "back-to-next-set" : "close-overlay"}" aria-label="返回">‹</button><div class="chat-head-title"><strong>${nextSetMode ? "选择下一组动作" : target ? `替换 ${target}` : "动作库"}</strong><span>64 个动作</span></div><button class="flip-control" data-action="new-exercise">＋ 新增</button></header><div class="chat-body" style="padding-bottom:24px"><input class="library-search" aria-label="搜索动作" placeholder="搜索肌群、器材或动作名称…"/><div class="exercise-list">${state.customExerciseAdded ? `<article class="exercise-item"><span class="exercise-glyph">自</span><div><strong>单臂地雷管推举</strong><span>用户自建 · 肩部 · 杠铃</span></div><button data-replace="单臂地雷管推举">${actionLabel}</button></article>` : ""}<article class="exercise-item"><span class="exercise-glyph">械</span><div><strong>上斜器械推</strong><span>上胸 · 固定器械 · 推</span></div><button data-replace="上斜器械推">${actionLabel}</button></article><article class="exercise-item"><span class="exercise-glyph">哑</span><div><strong>上斜哑铃推</strong><span>上胸 · 哑铃 · 推</span></div><button data-replace="上斜哑铃推">${actionLabel}</button></article><article class="exercise-item"><span class="exercise-glyph">俯</span><div><strong>负重俯卧撑</strong><span>胸部 · 自重/杠铃片 · 推</span></div><button data-replace="负重俯卧撑">${actionLabel}</button></article><article class="exercise-item"><span class="exercise-glyph">地</span><div><strong>地板卧推</strong><span>胸/三头 · 杠铃 · 水平推</span></div><button data-replace="地板卧推">${actionLabel}</button></article></div></div></section>`;
+      }
+
+      function newExerciseSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="新增自定义动作"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">动作库</span><h2>新增动作</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><form id="newExerciseForm" class="field-stack"><label>动作名称<input name="name" value="单臂地雷管推举" required/></label><label>主要肌群<select name="muscle"><option>肩部</option><option>胸部</option><option>背部</option><option>下肢</option></select></label><label>器材<select name="equipment"><option>杠铃</option><option>哑铃</option><option>固定器械</option><option>自重</option></select></label><button class="primary-button dark" type="submit">保存</button></form></section></div>`;
+      }
+
+      function capabilitySheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="教练快捷入口"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">快捷操作</span><h2>需要帮忙吗？</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><div class="capability-grid">
+          <button class="capability-button" data-action="open-adjust"><i>↕</i><div><strong>调整今天</strong><span>时间、器材、疲劳与疼痛约束</span></div></button>
+          <button class="capability-button" data-action="open-free-log"><i>＋</i><div><strong>记录训练</strong><span>计划外训练或快速补录</span></div></button>
+          <button class="capability-button" data-capability="recovery"><i>◔</i><div><strong>解释恢复</strong><span>把睡眠与负荷翻译成建议</span></div></button>
+          <button class="capability-button" data-capability="plan"><i>⌗</i><div><strong>规划目标</strong><span>训练、饮食和恢复的完成路径</span></div></button>
+        </div></section></div>`;
+      }
+
+      function freeLogSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="自由训练"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">记录训练</span><h2>自由训练</h2></div><button class="icon-button" data-action="close-overlay" aria-label="关闭">×</button></div><div class="choice-list"><button class="choice-button" data-action="mock-log"><div><strong>添加动作</strong><span>重量、次数和余力</span></div><b>＋</b></button><button class="choice-button" data-action="mock-log"><div><strong>复制上次训练</strong><span>继续使用最近的动作和重量</span></div><b>↻</b></button><button class="choice-button" data-action="mock-log"><div><strong>边练边记</strong><span>训练中随时添加或替换动作</span></div><b>›</b></button></div></section></div>`;
+      }
+
+      function proposalMarkup() {
+        if (!state.proposal) return "";
+        return `<article class="proposal"><span class="proposal-kicker">计划变更预览 · 尚未执行</span><h3>${state.proposal.title}</h3><div class="diff"><div><small>原安排</small><strong>${state.proposal.before}</strong></div><div class="diff-arrow">→</div><div><small>建议</small><strong>${state.proposal.after}</strong></div></div><p class="evidence">依据：${state.proposal.evidence}</p><div class="proposal-actions"><button class="primary-button dark" data-action="apply-proposal">应用这次调整</button><button class="secondary-button" data-action="keep-plan">保持原计划</button><button class="text-button" data-action="focus-chat">继续讨论</button></div></article>`;
+      }
+
+      function coachCardMarkup(card) {
+        if (card.type === "plan") return `<article class="coach-output-card accent"><div class="output-card-head"><span>今日计划</span><b>${card.meta || `v${state.planVersion}`}</b></div><h3>${card.title}</h3><p>${card.subtitle}</p><div class="output-metrics"><div class="output-metric"><strong>54′</strong><span>预计时长</span></div><div class="output-metric"><strong>17</strong><span>工作组</span></div><div class="output-metric"><strong>RIR 2</strong><span>主项目标</span></div></div><div class="output-card-actions"><button data-action="ask-plan-reason">这样安排的原因</button><button class="primary" data-action="open-plan-from-drawer">查看动作</button></div><div class="output-source"><span>计划 · 历史表现 · 恢复状态</span><span>可修改</span></div></article>`;
+        if (card.type === "progress") return `<article class="coach-output-card accent"><div class="output-card-head"><span>目标路径</span><b>每周更新</b></div><h3>减脂路径仍在目标区间</h3><p>目前不需要继续降低热量，训练表现也没有出现持续下降。</p><div class="output-metrics"><div class="output-metric"><strong>-0.4</strong><span>KG / 周</span></div><div class="output-metric"><strong>11–14</strong><span>预计剩余周</span></div><div class="output-metric"><strong>+4.2%</strong><span>卧推表现</span></div></div><div class="output-card-actions"><button data-action="show-agent-card" data-card="sources">查看依据</button><button class="primary" data-view="progress">打开进展</button></div></article>`;
+        if (card.type === "sources") return `<article class="coach-output-card"><div class="output-card-head"><span>资料与依据</span><b>4 个来源</b></div><h3>这次判断用了什么</h3><p>最近 28 天体重趋势、腰围、训练完成率与卧推 e1RM。单日体重不会触发计划调整。</p><div class="output-source"><span>Health · 体脂秤 · 训练记录 · 用户反馈</span><span>09:41</span></div></article>`;
+        if (card.type === "report") return `<article class="coach-output-card"><div class="output-card-head"><span>训练报告</span><b>今日完成</b></div><h3>主项完成，推进成立</h3><p>17 / 17 工作组 · 平均 RIR 1.8；动作识别只覆盖高置信度重复。</p><div class="output-metrics"><div class="output-metric"><strong>8,780</strong><span>总负荷 KG</span></div><div class="output-metric"><strong>83%</strong><span>有效观测</span></div><div class="output-metric"><strong>52′</strong><span>实际时长</span></div></div><div class="output-card-actions"><button data-action="show-agent-card" data-card="sources">查看资料</button><button class="primary" data-action="open-action-log">操作记录</button></div></article>`;
+        return "";
+      }
+
+      function trainingCoachCards() {
+        if (state.trainingCoachCard === "set-report") return `<article class="coach-output-card accent"><div class="output-card-head"><span>第 ${Math.max(state.completedSets,1)} 组完成</span><b>骨架 + 记录</b></div><h3>8 次有效，后两次肩部略前移</h3><p>本组动作稳定度较好；末次实际余力约 1，比目标更接近力竭。</p><div class="output-metrics"><div class="output-metric"><strong>8</strong><span>确认次数</span></div><div class="output-metric"><strong>86%</strong><span>动作稳定</span></div><div class="output-metric"><strong>RIR 1</strong><span>实际余力</span></div></div><div class="output-source"><span>33 点骨架 · 有效帧 94% · 用户记录</span><span>高置信度</span></div></article><article class="coach-output-card warn"><div class="output-card-head"><span>下一组建议</span><b>尚未应用</b></div><h3>降低 2.5 kg，保持 8 次</h3><p>只影响下一组，不修改后续计划。</p><div class="output-diff"><div><small>当前</small><strong>62.5 kg × 8</strong></div><b>→</b><div><small>建议</small><strong>60 kg × 8</strong></div></div><div class="output-card-actions"><button data-action="keep-training-set">保持原安排</button><button class="primary" data-action="apply-training-adjustment">应用到下一组</button></div></article>`;
+        return `<article class="coach-output-card accent"><div class="output-card-head"><span>实时动作建议</span><b>REP 06</b></div><div style="padding:10px 12px 3px" class="live-cue"><i>✓</i><div><strong>下放稳定，继续保持当前节奏</strong><span>右肘轨迹正常 · 杠铃路径稳定</span></div><b>91%</b></div><div class="output-source"><span>骨架识别 · 本地推理 · 未上传</span><span>高置信度</span></div></article><article class="coach-output-card"><div class="output-card-head"><span>当前组</span><b>${state.activeExercise.name}</b></div><h3>${state.activeExercise.load} × ${state.activeExercise.reps} 次</h3><p>目标 RIR 2 · 已确认 6 次。训练中只给提示，计划变更排到下一组。</p><div class="output-card-actions"><button data-action="mock-voice">告诉 Coach 体感</button><button class="primary" data-action="edit-next-set">调整下一组</button></div></article>`;
+      }
+
+      function coachDrawer() {
+        if (state.coachDrawer === "closed") return "";
+        const training = state.coachSurface === "training" && state.overlay === "session";
+        const allowed = ["today","plan","progress"].includes(state.view);
+        if (!training && !allowed) return "";
+        const full = state.coachDrawer === "full";
+        const contextTitle = training ? `${state.activeExercise.name} · 第 ${Math.min(state.completedSets + 1,17)} 组` : state.workoutStatus === "complete" ? "今日训练报告" : state.view === "progress" ? "长期目标与趋势" : state.view === "plan" ? `${state.selectedDay} 日程` : "今日训练与恢复";
+        const contextMeta = training ? "实时骨架已连接" : `计划 v${state.planVersion}`;
+        const messages = state.messages.slice(-5).map(m => `<div class="drawer-message ${m.role}">${m.text}</div>`).join("");
+        const cards = training ? trainingCoachCards() : state.coachCards.map(coachCardMarkup).join("");
+        const prompts = training
+          ? `<button data-prompt="这组动作怎么样？">这组怎么样？</button><button data-prompt="我右肩有点紧">右肩有点紧</button><button data-action="edit-next-set">调整下一组</button>`
+          : `<button data-action="show-agent-card" data-card="plan">今日计划</button><button data-action="show-agent-card" data-card="progress">目标进展</button><button data-action="show-agent-card" data-card="sources">查看依据</button>`;
+        return `<button class="coach-drawer-backdrop" data-action="minimize-coach-drawer" aria-label="收起 Coach"></button><section class="coach-drawer ${training ? "training" : "general"} ${full ? "full" : "half"}" role="dialog" aria-label="MaxPower Coach 对话抽屉"><button class="drawer-grab" data-action="toggle-drawer-size" aria-label="${full ? "收回" : "展开全屏"}"></button><header class="drawer-head"><span class="drawer-agent-mark">⚡</span><div class="drawer-title"><strong>MaxPower Coach</strong><span>${state.chatContext} · 对话保持中</span></div><div class="drawer-head-actions">${training ? `<button class="end-set-mini" data-action="complete-set">结束本组</button>` : ""}<button data-action="toggle-drawer-size" aria-label="切换抽屉高度">${full ? "↘" : "↗"}</button><button data-action="minimize-coach-drawer" aria-label="收起">—</button></div></header><div class="drawer-context"><i></i><strong>${contextTitle}</strong><span>${contextMeta}</span></div><div class="drawer-body"><div class="drawer-messages">${messages}${cards}${proposalMarkup()}</div></div><div class="drawer-composer"><div class="drawer-prompts">${prompts}</div><form class="drawer-input-row" id="chatForm"><button class="voice-button ${state.voiceListening ? "listening" : ""}" type="button" data-action="mock-voice" aria-label="语音输入">${state.voiceListening ? "●" : "⌁"}</button><input id="chatInput" aria-label="给教练发消息" placeholder="${training ? "说说体感，或问当前动作…" : "问计划、进展或恢复…"}" autocomplete="off"/><button class="drawer-send" type="submit" aria-label="发送">↑</button></form></div>${training ? "" : navTabsMarkup("drawer-nav")}</section>`;
+      }
+
+      function nextSetSheet() {
+        const next = state.nextSetOverride || state.activeExercise;
+        const tasks = currentPlanTasks();
+        const customOption = tasks.some(task => task.name === next.name) ? "" : `<option value="${next.name}" data-load="${next.load}" data-reps="${next.reps}" selected>${next.name}</option>`;
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="调整下一组"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">下一组</span><h2>临时调整</h2></div><button class="icon-button" data-action="back-to-session" aria-label="关闭">×</button></div><form id="nextSetForm" class="field-stack" style="margin-top:16px"><label>动作<select name="name" id="nextExerciseSelect">${customOption}${tasks.map(task => `<option value="${task.name}" data-load="${task.load}" data-reps="${taskToExercise(task).reps}" ${task.name === next.name ? "selected" : ""}>${task.name}</option>`).join("")}</select></label><label>重量或提示<input name="load" id="nextSetLoad" value="${next.load}" required/></label><label>次数<input name="reps" id="nextSetReps" value="${next.reps}" required/></label><button class="primary-button dark" type="submit">保存下一组</button></form><button class="secondary-button" style="width:100%;margin-top:9px" data-action="open-next-set-library">从动作库选择</button>${state.nextSetOverride ? `<button class="danger-button" data-action="clear-next-set">恢复原安排</button>` : ""}</section></div>`;
+      }
+
+      function sessionOverlay() {
+        const guided = state.coachMode === "guided";
+        const next = state.nextSetOverride || state.activeExercise;
+        const logBody = `<article class="log-session-card"><span class="report-kicker">摄像头已关闭</span><h2>${state.activeExercise.name}</h2><p>第 ${Math.min(state.completedSets + 1, 17)} 工作组 · 目标 RIR 2</p><div class="log-inputs"><div class="log-input"><span>重量</span><strong>${state.activeExercise.load}</strong></div><div class="log-input"><span>次数</span><strong>${state.activeExercise.reps}</strong></div><div class="log-input"><span>RIR</span><strong>2</strong></div></div></article>`;
+        const nextCard = `<article class="next-set-card ${state.nextSetOverride ? "changed" : ""}"><small>下一组${state.nextSetOverride ? " · 已调整" : ""}</small><strong>${next.name}</strong><span>${next.load} × ${next.reps} 次</span><button data-action="edit-next-set">调整</button></article>`;
+        if (guided) {
+          return `<section class="overlay camera-screen" role="dialog" aria-modal="true" aria-label="摄像头动作识别"><div class="camera-viewport">${statusbar()}<div class="camera-floor"></div><div class="pose-person-shadow"></div><svg class="pose-skeleton" viewBox="0 0 320 420" role="img" aria-label="实时人体骨架"><line x1="66" y1="80" x2="166" y2="80"/><line x1="91" y1="245" x2="108" y2="174"/><line x1="108" y1="174" x2="105" y2="96"/><line x1="108" y1="174" x2="126" y2="98"/><line x1="91" y1="245" x2="108" y2="270"/><line x1="108" y1="270" x2="190" y2="274"/><line x1="190" y1="274" x2="239" y2="316"/><line x1="239" y1="316" x2="285" y2="346"/><line x1="190" y1="286" x2="232" y2="350"/><line x1="232" y1="350" x2="279" y2="392"/><line x1="77" y1="296" x2="213" y2="296"/><circle cx="52" cy="260" r="22"/><circle cx="91" cy="245" r="5"/><circle cx="108" cy="174" r="5"/><circle cx="105" cy="96" r="5"/><circle cx="126" cy="98" r="5"/><circle cx="108" cy="270" r="5"/><circle cx="190" cy="274" r="5"/><circle cx="190" cy="286" r="5"/><circle cx="239" cy="316" r="5"/><circle cx="232" cy="350" r="5"/><circle cx="285" cy="346" r="5"/><circle cx="279" cy="392" r="5"/></svg><div class="camera-hud-top"><span class="phase-pill"><i></i>下放阶段</span><span class="rec-chip"><i></i>REC 00:18</span></div><div class="frame-banner">✓ 全身入框 · 机位合格</div><div class="camera-reps"><strong>06</strong><span>REPS</span></div><div class="camera-telemetry"><span><b>28</b> FPS</span><span>有效帧 <b>94%</b></span><span>LITE · GPU</span></div><div class="camera-agent-strip"><span class="camera-agent-icon">⚡</span><div class="camera-agent-copy"><strong>动作稳定，继续保持当前节奏</strong><span>${state.activeExercise.name} · 本地识别 · 未上传</span></div><button data-action="open-training-coach">对话 ↑</button></div><div class="camera-controls"><button class="camera-icon-btn" data-action="toggle-coach-mode" aria-label="关闭监控">×</button><button class="camera-end-btn" data-action="complete-set">结束本组</button><button class="camera-icon-btn" data-action="open-training-coach" aria-label="打开实时 Coach">⚡</button></div></div></section>`;
+        }
+        return `<section class="overlay session-screen" role="dialog" aria-modal="true" aria-label="训练记录"><div class="screen" style="padding-bottom:24px">${statusbar()}<div class="session-top"><button class="back-button" data-action="close-overlay">‹</button><span class="session-step">${state.completedSets} / 17 组</span><button class="mode-toggle" data-action="toggle-coach-mode">开启监控</button></div>${logBody}${nextCard}<div class="hero-actions"><button class="primary-button" data-action="complete-set">完成本组 · ${state.activeExercise.reps} 次 · RIR 2</button><button class="primary-button round-adjust" data-action="open-chat">⌁</button></div><button class="session-finish" data-action="finish-workout">完成训练</button></div></section>`;
+      }
+
+      function changeDetailSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="训练调整详情"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">今日调整</span><h2>卧推轻一点</h2></div><button class="icon-button" data-action="close-overlay">×</button></div><p class="sheet-copy">上次最后两组没有完成目标次数，昨晚也比平时少睡了 48 分钟。今天先用 62.5 kg，下周计划不变。</p><div class="diff"><div><small>原计划</small><strong>65 kg × 8</strong></div><div class="diff-arrow">→</div><div><small>今天</small><strong>62.5 kg × 8</strong></div></div><div class="proposal-actions" style="margin-top:14px"><button class="secondary-button" data-action="undo-change">恢复原计划</button><button class="text-button" data-action="open-chat">问问教练</button></div></section></div>`;
+      }
+
+      function profileSheet() {
+        return `<div class="overlay overlay-sheet" role="dialog" aria-modal="true" aria-label="Coach 控制方式"><section class="sheet"><div class="sheet-handle"></div><div class="sheet-head"><div><span class="change-tag">数据与执行权限</span><h2>Coach 控制方式</h2></div><button class="icon-button" data-action="close-overlay">×</button></div><p class="sheet-copy">核心训练记录和规则引擎可完全离线；云端用于跨设备同步和更强模型，不是基础功能的前置条件。</p><div class="choice-list"><button class="choice-button" data-permission="managed"><div><strong>托管模式 · 当前</strong><span>低风险自动执行并可撤销；长期/高影响先预览</span></div><b>✓</b></button><button class="choice-button" data-permission="confirm"><div><strong>每次确认</strong><span>所有计划写入都先确认</span></div><b>○</b></button><button class="choice-button" data-permission="advice"><div><strong>只给建议</strong><span>Agent 不直接改计划</span></div><b>○</b></button></div></section></div>`;
+      }
+
+      function renderOverlay() {
+        if (state.overlay === "adjust") return adjustSheet();
+        if (state.overlay === "start-mode") return startModeSheet();
+        if (state.overlay === "plan-scenarios") return planScenarioSheet();
+        if (state.overlay === "timeline-log") return activityLogSheet();
+        if (state.overlay === "agent-timeline") return agentActivitySheet();
+        if (state.overlay === "action-log") return actionLogSheet();
+        if (state.overlay === "plan-manager") return planManagerSheet();
+        if (state.overlay === "plan-task-editor") return planTaskEditorSheet();
+        if (state.overlay === "library") return exerciseLibrarySheet();
+        if (state.overlay === "new-exercise") return newExerciseSheet();
+        if (state.overlay === "capabilities") return capabilitySheet();
+        if (state.overlay === "free-log") return freeLogSheet();
+        if (state.overlay === "session") return sessionOverlay();
+        if (state.overlay === "next-set") return nextSetSheet();
+        if (state.overlay === "change-detail") return changeDetailSheet();
+        if (state.overlay === "profile") return profileSheet();
+        return "";
+      }
+
+      function render() {
+        const hadCoachDrawer = Boolean(document.querySelector(".coach-drawer"));
+        let content;
+        if (state.view === "plan") content = planPage();
+        else if (state.view === "progress") content = progressPage();
+        else if (state.view === "me") content = mePage();
+        else if (state.workoutStatus === "complete") content = dailyReportHome();
+        else if (state.variant === "briefing") content = briefingHome();
+        else if (state.variant === "console") content = consoleHome();
+        else content = workbenchHome();
+        const agentEnabled = ["today","plan","progress"].includes(state.view);
+        document.querySelector("#app").innerHTML = `<div class="screen ${agentEnabled ? "" : "nav-only"}"${state.overlay ? ' aria-hidden="true" inert' : ""}>${content}</div>${dock()}${renderOverlay()}${coachDrawer()}${state.toast ? `<div class="toast">${state.toast}</div>` : ""}`;
+        const nextCoachDrawer = document.querySelector(".coach-drawer");
+        if (!hadCoachDrawer && nextCoachDrawer) {
+          nextCoachDrawer.classList.add("is-entering");
+          const nextBackdrop = document.querySelector(".coach-drawer-backdrop");
+          nextBackdrop?.classList.add("is-entering");
+          const finishCoachEntrance = event => {
+            if (event.target !== nextCoachDrawer || event.animationName !== "coachBubbleOpen") return;
+            nextCoachDrawer.removeEventListener("animationend", finishCoachEntrance);
+            nextCoachDrawer.classList.remove("is-entering");
+            nextBackdrop?.classList.remove("is-entering");
+          };
+          nextCoachDrawer.addEventListener("animationend", finishCoachEntrance);
+        }
+        document.querySelectorAll("[data-variant]").forEach(btn => btn.classList.toggle("active", btn.dataset.variant === state.variant));
+        document.querySelector("#variantTitle").innerHTML = variantNames[state.variant].replace(" ", "<br />");
+        renderState();
+      }
+
+      function minimizeCoachDrawer() {
+        const drawer = document.querySelector(".coach-drawer");
+        const backdrop = document.querySelector(".coach-drawer-backdrop");
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const finish = () => {
+          state.coachDrawer = "closed";
+          state.voiceListening = false;
+          state.lastAction = "收起 Coach 抽屉并保留对话";
+          render();
+        };
+        if (!drawer || reduceMotion) { finish(); return; }
+        if (drawer.classList.contains("is-closing")) return;
+        drawer.classList.remove("is-entering");
+        backdrop?.classList.remove("is-entering");
+        drawer.classList.add("is-closing");
+        backdrop?.classList.add("is-closing");
+        window.setTimeout(finish, 350);
+      }
+
+      function renderState() {
+        const rows = [
+          ["UI 方案", variantNames[state.variant]],
+          ["当前页面", state.overlay ? `overlay:${state.overlay}` : state.view],
+          ["训练状态", state.workoutStatus],
+          ["训练模式", state.coachMode || "尚未选择"],
+          ["Coach 抽屉", `${state.coachDrawer} · ${state.coachSurface}`],
+          ["骨架数据", state.coachObserved ? "存在部分高置信度观测" : "无"],
+          ["核心卡片", state.workoutStatus === "complete" ? "今日日报" : state.cardFace],
+          ["动作替换", state.replacementName],
+          ["计划动作", `${currentPlanTasks().length} 个`],
+          ["下一组", state.nextSetOverride ? `${state.nextSetOverride.name} · 已调整` : `${state.activeExercise.name} · 原安排`],
+          ["Timeline 事件", `${state.timelineEvents.length} 条 · 多源汇聚`],
+          ["Agent Action Log", `${state.actionLog.length} 条 · ${state.actionLog.filter(item => item.type === "write" && item.status === "applied").length} 个生效变更`],
+          ["计划版本", `v${state.planVersion}`],
+          ["执行权限", state.permission.split(" · ")[0]],
+          ["自动调整", state.autoChangeApplied ? "已执行，可撤销" : "未应用"],
+          ["待确认变更", state.proposal ? state.proposal.title : "无"],
+          ["最近操作", state.lastAction]
+        ];
+        document.querySelector("#stateBox").innerHTML = rows.map(row => `<div class="state-row"><span>${row[0]}</span><span>${row[1]}</span></div>`).join("");
+      }
+
+      function notify(message) {
+        state.toast = message;
+        render();
+        window.clearTimeout(notify.timer);
+        notify.timer = window.setTimeout(() => { state.toast = null; render(); }, 1900);
+      }
+
+      function recordAgentAction(entry) {
+        const id = `ACT-${state.actionLogSequence++}`;
+        const item = { id, time:"09:41", status:"recorded", reversible:false, scope:"当前会话", ...entry };
+        state.actionLog.unshift(item);
+        return item;
+      }
+
+      function restoreAgentAction(id, direction) {
+        const item = state.actionLog.find(log => log.id === id);
+        if (!item || !item.reversible) return;
+        const applying = direction === "redo";
+        if (item.target === "auto-adjust") { state.autoChangeApplied = applying; state.planTasks.strength[0].load = applying ? "62.5 kg" : "65 kg"; if (state.workoutStatus === "planned") state.activeExercise.load = state.planTasks.strength[0].load; }
+        if (item.target === "timeline") {
+          const target = editableTimeline(item.targetDate);
+          const index = target.findIndex(event => event.name === item.event?.name);
+          if (!applying && item.previousEvent && index >= 0) target[index] = { ...item.previousEvent };
+          else if (!applying && index >= 0) target.splice(index, 1);
+          if (applying && index >= 0 && item.event) target[index] = { ...item.event };
+          else if (applying && index < 0 && item.event) target.push({ ...item.event });
+        }
+        if (item.target === "plan-proposal") state.planVersion = applying ? item.versionAfter : item.versionBefore;
+        if (item.target === "next-set") state.nextSetOverride = applying ? { ...item.nextOverride } : item.previousNext ? { ...item.previousNext } : null;
+        item.status = applying ? "applied" : "undone";
+        recordAgentAction({ type:"write", title:`${applying ? "重新应用" : "撤销"}：${item.title}`, detail:`${applying ? "重新执行已保存的变更" : "使用操作前快照恢复状态"}。`, before:applying ? "已撤销" : "已执行", after:applying ? "已执行" : "已撤销", evidence:`关联操作 ${item.id}；原记录保持不变。`, scope:"恢复操作", status:"applied", reversible:false });
+        state.lastAction = `${applying ? "重新应用" : "撤销"} Agent 操作：${item.title}`;
+        state.overlay = "action-log";
+        notify(applying ? "已重新应用" : "已恢复到操作前");
+      }
+
+      function openChat(context = "今日训练") {
+        const training = state.overlay === "session" && state.workoutStatus === "in_progress";
+        state.chatContext = context;
+        state.coachSurface = training ? "training" : "general";
+        state.coachDrawer = "half";
+        if (!training) state.overlay = null;
+        state.lastAction = `展开 Coach 抽屉：${context}`;
+        render();
+        requestAnimationFrame(() => document.querySelector("#chatInput")?.focus());
+      }
+
+      function createProposal(kind) {
+        const proposals = {
+          time: { title: "压缩为 30 分钟版本", before: "5 动作 · 17 组", after: "3 动作 · 10 组", evidence: "保留卧推全部主项组；用超级组压缩胸肩三头附件训练。" },
+          equipment: { title: "替代被占用器材", before: "上斜哑铃推", after: "上斜器械推", evidence: "同一动作模式；器械可用；根据历史表现换算为 45 kg × 10。" },
+          fatigue: { title: "切换为恢复优先版本", before: "目标 RPE 7.5", after: "目标 RPE 6.5", evidence: "这是一条临时降级建议。开始热身后还会根据实际速度和 RIR 再判断。" }
+        };
+        state.proposal = proposals[kind];
+        state.messages.push({ role: "user", text: kind === "time" ? "我今天只有 30 分钟。" : kind === "equipment" ? "上斜哑铃区现在用不了。" : "我今天明显比平时疲劳。" });
+        state.messages.push({ role: "agent", text: "我做了一版只影响今天的调整。先看具体差异；应用后仍可撤销。" });
+        state.overlay = null;
+        state.coachSurface = "general";
+        state.coachDrawer = "half";
+        state.chatContext = "今日训练调整";
+        state.lastAction = `生成变更预览：${state.proposal.title}`;
+        recordAgentAction({ type:"decision", title:`生成草稿：${state.proposal.title}`, detail:"只生成可审阅的变更预览，尚未写入今日计划。", before:state.proposal.before, after:state.proposal.after, evidence:state.proposal.evidence, scope:"计划草稿" });
+        render();
+      }
+
+      function handleMessage(raw) {
+        const text = raw.trim();
+        if (!text) return;
+        state.messages.push({ role: "user", text });
+        state.proposal = null;
+        if (/30|半小时|时间/.test(text)) {
+          state.messages.push({ role: "agent", text: "可以。我会优先保留主项有效组，把附件动作合并；这是临时调整，不会破坏周计划。" });
+          state.proposal = { title: "压缩为 30 分钟版本", before: "5 动作 · 17 组", after: "3 动作 · 10 组", evidence: "保留卧推 4 个主项组；附件组按肌群周量优先级裁剪。" };
+        } else if (/肩|痛|不舒服/.test(text)) {
+          state.messages.push({ role: "agent", text: "先不继续加负荷。请标记疼痛位置、强度和是否在热身中加剧；在信息不足前，我只会建议安全降级，不会做医疗诊断。" });
+        } else if (/为什么|减重量/.test(text)) {
+          state.messages.push({ role: "agent", text: "上次同重量末两组掉到 7 和 6 次，末组 RIR 0；昨晚睡眠又低于基线。今天减 2.5 kg 是为了守住 4×8 和动作质量，不代表能力退步。" });
+        } else {
+          state.messages.push({ role: "agent", text: "我已把这条信息放进今天的训练上下文。目前还没有足够依据直接改计划；你可以补充时间、器材、疲劳或疼痛情况。" });
+        }
+        state.lastAction = `Coach 回答：${text.slice(0, 18)}`;
+        recordAgentAction({ type:"decision", title:"分析用户输入并给出回应", detail:`用户输入：${text.slice(0, 28)}${text.length > 28 ? "…" : ""}`, evidence:state.proposal ? `同时生成草稿：${state.proposal.title}` : "本次未执行任何数据写入。", scope:"对话" });
+        render();
+      }
+
+      function flipWorkoutCard() {
+        if (state.flipping) return;
+        state.flipping = true;
+        const face = document.querySelector(".flip-live");
+        const scrollTop = document.querySelector(".screen")?.scrollTop || 0;
+        face?.classList.add("card-flip-out");
+        window.setTimeout(() => {
+          state.cardFace = state.cardFace === "summary" ? "console" : "summary";
+          state.lastAction = state.cardFace === "console" ? "翻转卡片：查看今日计划" : "翻转卡片：返回工作台概览";
+          render();
+          const nextFace = document.querySelector(".flip-live");
+          const screen = document.querySelector(".screen");
+          if (screen) screen.scrollTop = scrollTop;
+          nextFace?.classList.add("card-flip-in");
+          window.setTimeout(() => { state.flipping = false; }, 360);
+        }, 190);
+      }
+
+      document.addEventListener("click", event => {
+        const variant = event.target.closest("[data-variant]");
+        if (variant) {
+          state.variant = variant.dataset.variant;
+          state.view = "today";
+          state.overlay = null;
+          state.lastAction = `切换 UI 方案：${variantNames[state.variant]}`;
+          const next = new URL(location.href); next.searchParams.set("v", state.variant); history.replaceState({}, "", next);
+          render(); return;
+        }
+
+        const view = event.target.closest("[data-view]");
+        if (view) { state.view = view.dataset.view; state.overlay = null; state.lastAction = `切换主导航：${state.view}`; render(); return; }
+
+        const calendarDay = event.target.closest("[data-calendar-day]");
+        if (calendarDay) { state.selectedDay = calendarDay.dataset.calendarDay; state.lastAction = `查看计划日历：${state.selectedDay}`; render(); return; }
+
+        const calendarMode = event.target.closest("[data-calendar-mode]");
+        if (calendarMode) { state.calendarMode = calendarMode.dataset.calendarMode; state.lastAction = `切换日历视图：${state.calendarMode}`; render(); return; }
+
+        const planScenario = event.target.closest("[data-plan-scenario]");
+        if (planScenario) { state.planScenario = planScenario.dataset.planScenario; state.cardListView = ["strength","bodyweight"].includes(state.planScenario) ? "tasks" : "timeline"; state.cardFace = "console"; state.overlay = null; state.lastAction = `切换今日场景：${state.planScenario}`; render(); return; }
+
+        const listView = event.target.closest("[data-list-view]");
+        if (listView) { state.cardListView = listView.dataset.listView; state.lastAction = `卡片切换：${state.cardListView}`; render(); return; }
+
+        const range = event.target.closest("[data-range]");
+        if (range) { state.progressRange = range.dataset.range; state.lastAction = `切换长期趋势范围：${state.progressRange}`; render(); return; }
+
+        const mode = event.target.closest("[data-mode]");
+        if (mode) { state.coachMode = mode.dataset.mode; state.coachDrawer = "closed"; state.coachSurface = "training"; state.trainingCoachCard = "live"; if (state.coachMode === "guided") state.coachObserved = true; state.workoutStatus = "in_progress"; state.activeExercise = taskToExercise(currentPlanTasks()[0]); state.nextSetOverride = null; state.overlay = "session"; state.lastAction = state.coachMode === "guided" ? "进入 Coach 监控与分析模式" : "进入仅记录模式"; render(); return; }
+
+        const taskEdit = event.target.closest("[data-edit-task]");
+        if (taskEdit) { state.editingTaskIndex = Number(taskEdit.dataset.editTask); state.overlay = "plan-task-editor"; state.lastAction = `编辑计划动作：${currentPlanTasks()[state.editingTaskIndex]?.name || "动作"}`; render(); return; }
+
+        const replacement = event.target.closest("[data-replace]");
+        if (replacement) {
+          if (state.exerciseSwapTarget === "__next_set__") { const name = replacement.dataset.replace; const planned = currentPlanTasks().find(task => task.name === name); const defaults = {"上斜器械推":{load:"45 kg",reps:"10"},"负重俯卧撑":{load:"10 kg",reps:"12"},"地板卧推":{load:"55 kg",reps:"8"},"单臂地雷管推举":{load:"20 kg",reps:"10"}}; state.nextSetOverride = planned ? taskToExercise(planned) : {name,...(defaults[name] || {load:"自选",reps:"10"})}; state.exerciseSwapTarget = null; state.overlay = "next-set"; state.lastAction = `下一组选择动作：${name}`; notify("已选择动作"); return; }
+          if (!state.exerciseSwapTarget) { state.lastAction = `查看动作：${replacement.dataset.replace}`; notify("已打开动作详情"); return; }
+          state.replacementName = replacement.dataset.replace;
+          state.replacementApplied = true;
+          state.planVersion += 1;
+          state.overlay = null;
+          state.cardFace = "console";
+          state.lastAction = `将 ${state.exerciseSwapTarget} 替换为 ${state.replacementName}`;
+          state.exerciseSwapTarget = null;
+          notify(`动作已替换 · 计划 v${state.planVersion}`);
+          return;
+        }
+
+        const adjust = event.target.closest("[data-adjust]");
+        if (adjust) {
+          if (adjust.dataset.adjust === "other") openChat("今日训练 · 自定义约束");
+          else createProposal(adjust.dataset.adjust);
+          return;
+        }
+
+        const prompt = event.target.closest("[data-prompt]");
+        if (prompt) { handleMessage(prompt.dataset.prompt); return; }
+
+        const capability = event.target.closest("[data-capability]");
+        if (capability) {
+          if (capability.dataset.capability === "recovery") {
+            state.messages.push({ role: "agent", text: "恢复 72 代表今天可以训练，但不等于适合冲极限。我会把睡眠、近期训练负荷和热身表现合在一起解释，而不是把单个分数当命令。" });
+            openChat("恢复与睡眠");
+          } else openChat("目标路径 · 训练 / 饮食 / 恢复");
+          return;
+        }
+
+        const permission = event.target.closest("[data-permission]");
+        if (permission) {
+          const values = { managed: "托管模式 · 日内低风险调整可自动执行", confirm: "每次确认 · 所有写入先预览", advice: "只给建议 · Agent 不写入计划" };
+          state.permission = values[permission.dataset.permission];
+          state.lastAction = `更新权限：${state.permission}`;
+          state.overlay = null;
+          notify("权限模式已更新"); return;
+        }
+
+        const logFilter = event.target.closest("[data-log-filter]");
+        if (logFilter) { state.actionLogFilter = logFilter.dataset.logFilter; state.lastAction = `筛选 Agent 操作记录：${state.actionLogFilter}`; render(); return; }
+
+        const actionNode = event.target.closest("[data-action]");
+        const action = actionNode?.dataset.action;
+        if (!action) return;
+        if (action === "toggle-drawer-size") { state.coachDrawer = state.coachDrawer === "full" ? "half" : "full"; state.lastAction = `Coach 抽屉：${state.coachDrawer}`; render(); return; }
+        if (action === "minimize-coach-drawer") { minimizeCoachDrawer(); return; }
+        if (action === "open-training-coach") { state.coachSurface = "training"; state.coachDrawer = "half"; state.chatContext = "训练中 · 实时动作"; state.trainingCoachCard = "live"; state.lastAction = "展开训练中的实时 Coach"; render(); return; }
+        if (action === "show-agent-card") { const type = actionNode.dataset.card; const cards = { plan:{id:"plan-today",type:"plan",title:"今天的上肢推",subtitle:"卧推优先，附件组控制疲劳",meta:`计划 v${state.planVersion}`}, progress:{id:"progress-path",type:"progress"}, sources:{id:"sources",type:"sources"}, report:{id:"today-report",type:"report"} }; const card = cards[type]; if (card && !state.coachCards.some(item => item.id === card.id)) state.coachCards.push(card); state.coachSurface = "general"; state.coachDrawer = "half"; state.lastAction = `Coach 输出卡片：${type}`; render(); return; }
+        if (action === "ask-plan-reason") { state.messages.push({role:"user",text:"为什么今天这样安排？"},{role:"agent",text:"卧推仍是本周最重要的推进项；睡眠略低于基线，所以保留主项质量，同时控制肩推附件量。"}); state.lastAction = "解释今日计划依据"; render(); return; }
+        if (action === "open-plan-from-drawer") { state.coachDrawer = "closed"; state.overlay = "plan-manager"; state.editingTaskIndex = null; state.lastAction = "从 Coach 卡片打开动作安排"; render(); return; }
+        if (action === "mock-voice") { if (state.voiceListening) return; state.voiceListening = true; state.lastAction = "训练中开始语音沟通"; render(); window.setTimeout(() => { state.voiceListening = false; state.messages.push({role:"user",text:state.coachSurface === "training" ? "我右肩有点紧，下一组要不要降一点？" : "帮我解释一下今天的安排。"}); state.messages.push({role:"agent",text:state.coachSurface === "training" ? "先不要在当前重复中改变动作。我会观察本组剩余次数；结束后给出下一组建议。" : "可以，我会把计划依据和可调整部分分开说明。"}); recordAgentAction({type:"decision",title:"处理训练中语音反馈",detail:"用户报告右肩偏紧；当前组只提示，不直接修改计划。",evidence:"用户语音 + 当前组骨架观测",scope:"训练中对话"}); render(); }, 850); return; }
+        if (action === "apply-training-adjustment") { const previousNext = state.nextSetOverride ? {...state.nextSetOverride} : null; const nextOverride = {name:state.activeExercise.name,load:"60 kg",reps:"8"}; state.nextSetOverride = nextOverride; recordAgentAction({type:"write",title:"调整下一组卧推负荷",detail:"根据本组实际 RIR 与肩部轨迹，仅降低下一组负荷。",before:`${state.activeExercise.load} × ${state.activeExercise.reps}`,after:"60 kg × 8",evidence:"第 2 组 RIR 1；后两次肩部前移；用户确认",scope:"下一组",status:"applied",reversible:true,target:"next-set",previousNext,nextOverride:{...nextOverride}}); state.messages.push({role:"agent",text:"已把下一组改为 60 kg × 8，只影响下一组，可在操作记录中撤销。"}); state.trainingCoachCard = "live"; state.lastAction = "应用 Agent 下一组调整"; notify("下一组已调整 · 可撤销"); return; }
+        if (action === "keep-training-set") { state.trainingCoachCard = "live"; state.messages.push({role:"user",text:"下一组保持原安排。"},{role:"agent",text:"好的，保持 62.5 kg × 8。我会继续观察动作质量和实际余力。"}); state.lastAction = "拒绝下一组调整"; render(); return; }
+        if (action === "flip-card") { flipWorkoutCard(); return; }
+        if (action === "manage-plan") { state.planManagerSource = state.view; state.editingTaskIndex = null; state.overlay = "plan-manager"; state.lastAction = "管理今日动作"; render(); return; }
+        if (action === "close-plan-manager") { state.overlay = null; state.cardFace = "console"; state.lastAction = "返回今日计划"; render(); return; }
+        if (action === "back-to-plan-manager") { state.overlay = "plan-manager"; state.lastAction = "返回动作列表"; render(); return; }
+        if (action === "add-plan-task") { state.editingTaskIndex = null; state.overlay = "plan-task-editor"; state.lastAction = "添加计划动作"; render(); return; }
+        if (action === "delete-plan-task") { const removed = currentPlanTasks().splice(state.editingTaskIndex, 1)[0]; state.planVersion += 1; state.editingTaskIndex = null; state.overlay = "plan-manager"; state.lastAction = `删除计划动作：${removed?.name || "动作"}`; notify("已从计划中删除"); return; }
+        if (action === "edit-next-set") { state.coachDrawer = "closed"; state.overlay = "next-set"; state.lastAction = "调整下一组"; render(); return; }
+        if (action === "back-to-session") { state.overlay = "session"; state.lastAction = "返回训练"; render(); return; }
+        if (action === "clear-next-set") { state.nextSetOverride = null; state.overlay = "session"; state.lastAction = "恢复下一组原安排"; notify("下一组已恢复"); return; }
+        if (action === "open-next-set-library") { state.exerciseSwapTarget = "__next_set__"; state.overlay = "library"; state.lastAction = "从动作库选择下一组"; render(); return; }
+        if (action === "back-to-next-set") { state.exerciseSwapTarget = null; state.overlay = "next-set"; state.lastAction = "返回下一组调整"; render(); return; }
+        if (action === "open-chat" || action === "focus-chat") openChat();
+        if (action === "open-report-chat") { state.messages.push({ role: "agent", text: "我已经把今天的完成组、RIR、训练负荷和高置信度动作观测整理成日报。下次加重仍是建议，不会在你没看到差异前写入长期计划。" }); if (!state.coachCards.some(item => item.type === "report")) state.coachCards.push({id:"today-report",type:"report"}); openChat("今日日报与下次训练"); }
+        if (action === "open-adjust") { state.overlay = "adjust"; state.lastAction = "打开训练前快速调整"; render(); }
+        if (action === "open-plan-scenarios") { state.overlay = "plan-scenarios"; state.lastAction = "切换今日计划场景"; render(); }
+        if (action === "add-timeline") { state.timelineTargetDate = actionNode.dataset.date || "2026-08-08"; state.overlay = "timeline-log"; state.lastAction = `手动添加 ${state.timelineTargetDate} Timeline 事件`; render(); }
+        if (action === "agent-fill-timeline") { state.timelineTargetDate = actionNode.dataset.date || "2026-08-08"; state.overlay = "agent-timeline"; state.lastAction = `Agent 汇聚 ${state.timelineTargetDate} 多数据源`; recordAgentAction({ type:"read", title:"汇聚活动数据并生成草稿", detail:`检查 ${state.timelineTargetDate} 的健康数据、位置与训练记录。`, evidence:"Health / GPS / 本地训练记录；只生成草稿，未写入 Timeline。", scope:"只读" }); render(); }
+        if (action === "confirm-agent-timeline") {
+          state.timelineTargetDate = actionNode.dataset.date || state.timelineTargetDate || "2026-08-08";
+          const suggestions = { strength:["训练","上肢推训练","52 分钟 · 17 个工作组","本地训练 + 相机"], bodyweight:["训练","居家徒手训练","31 分钟 · RIR 3","计时器 + 骨架"], cardio:["有氧","户外骑行","37 分钟 · 平均心率 139","Health + GPS"], rest:["活动","轻松步行","29 分钟 · 3,214 步","Health + 穿戴设备"] };
+          const item = suggestions[state.planScenario];
+          const targetTimeline = editableTimeline(state.timelineTargetDate);
+          const existing = targetTimeline.find(event => event.name === item[1]);
+          const previousEvent = existing ? { ...existing } : null;
+          if (existing) { existing.detail = item[2]; existing.source = `${existing.source} + ${item[3]}`; }
+          else targetTimeline.push({ time:"18:47", type:item[0], name:item[1], detail:item[2], source:item[3] });
+          const savedEvent = { ...(targetTimeline.find(event => event.name === item[1])) };
+          recordAgentAction({ type:"write", title:`写入今日记录：${item[1]}`, detail:existing ? "合并重复来源，保留一条事实记录。" : "将确认后的 Agent 草稿加入当天 Timeline。", before:existing ? `${previousEvent.detail} · ${previousEvent.source}` : "当天无此记录", after:`${savedEvent.detail} · ${savedEvent.source}`, evidence:`用户确认；来源：${item[3]}`, scope:`${state.timelineTargetDate} Timeline`, status:"applied", reversible:true, target:"timeline", targetDate:state.timelineTargetDate, event:savedEvent, previousEvent });
+          state.overlay = null; state.cardFace = "console"; state.cardListView = "timeline"; state.lastAction = existing ? `Timeline 去重合并：${item[1]}` : `确认 Agent Timeline 草稿：${item[1]}`; notify(existing ? "已合并重复记录" : "已加入今日记录"); return;
+        }
+        if (action === "open-library") { state.exerciseSwapTarget = event.target.closest("[data-action]")?.dataset.target || null; state.overlay = "library"; state.lastAction = state.exerciseSwapTarget ? `为 ${state.exerciseSwapTarget} 选择替代动作` : "打开动作库"; render(); }
+        if (action === "new-exercise") { state.overlay = "new-exercise"; state.lastAction = "新建自定义动作"; render(); }
+        if (action === "open-capabilities") { event.stopPropagation(); state.overlay = "capabilities"; state.lastAction = "打开 Agent 能力入口"; render(); }
+        if (action === "open-free-log") { state.overlay = "free-log"; state.lastAction = "打开计划外训练记录"; render(); }
+        if (action === "open-profile") { state.overlay = "profile"; state.lastAction = "查看数据与执行权限"; render(); }
+        if (action === "open-action-log") { state.coachDrawer = "closed"; state.overlay = "action-log"; state.lastAction = "查看 Coach 操作记录"; render(); }
+        if (action === "undo-agent-action") { restoreAgentAction(actionNode.dataset.logId, "undo"); return; }
+        if (action === "redo-agent-action") { restoreAgentAction(actionNode.dataset.logId, "redo"); return; }
+        if (action === "mock-data-settings") { state.lastAction = "查看本地与云端数据设置"; notify("数据源管理将在下一轮展开"); }
+        if (action === "open-change-detail") { state.overlay = "change-detail"; state.lastAction = "查看已执行调整的证据"; render(); }
+        if (action === "close-overlay") { state.overlay = null; state.proposal = null; state.lastAction = "返回首页"; render(); }
+        if (action === "start-workout") { if (state.workoutStatus === "in_progress" && state.coachMode) { state.overlay = "session"; state.lastAction = "继续训练"; } else { state.overlay = "start-mode"; state.lastAction = "选择 Coach 模式或仅记录模式"; } render(); }
+        if (action === "toggle-coach-mode") { state.coachDrawer = "closed"; state.coachMode = state.coachMode === "guided" ? "log" : "guided"; if (state.coachMode === "guided") state.coachObserved = true; state.lastAction = state.coachMode === "guided" ? "训练中开启 Coach 监控" : "训练中退出 Coach，保留仅记录"; notify(state.coachMode === "guided" ? "教练模式已开启" : "已切换为手动记录"); }
+        if (action === "complete-set") { state.completedSets = Math.min(state.completedSets + 1, 17); state.coachSurface = "training"; state.coachDrawer = "half"; state.trainingCoachCard = "set-report"; if (state.nextSetOverride) { state.activeExercise = {...state.nextSetOverride}; const nextName = state.activeExercise.name; state.nextSetOverride = null; state.lastAction = `完成当前组，下一组切换为 ${nextName}`; notify(`本组已记录 · 下一组 ${nextName}`); } else { state.lastAction = `记录工作组 ${state.completedSets} / 17：${state.activeExercise.reps} 次 · RIR 2`; notify("本组已记录 · 查看 Coach 分析"); } }
+        if (action === "finish-workout") { state.completedSets = 17; state.workoutStatus = "complete"; state.cardFace = "summary"; state.overlay = null; state.coachDrawer = "closed"; if (!state.timelineEvents.some(item => item.type === "训练")) { const eventRecord = { time:"19:31", type:"训练", name:state.planScenario === "bodyweight" ? "居家徒手训练" : "上肢推训练", detail:"52 分钟 · 17/17 工作组 · 平均 RIR 1.8", source:state.coachObserved ? "训练记录 + 骨架" : "本地训练记录" }; state.timelineEvents.push(eventRecord); recordAgentAction({ type:"write", title:"整理训练记录并生成日报", detail:"把本次训练结果写入当天事实记录，并生成日终摘要。", before:"无训练汇总", after:eventRecord.detail, evidence:eventRecord.source, scope:"今日 Timeline", status:"applied", reversible:true, target:"timeline", targetDate:"2026-08-08", event:{...eventRecord}, previousEvent:null }); } state.lastAction = "完成训练，写入 Timeline 并生成 Agent 日报"; notify("训练已保存 · 日报已生成"); }
+        if (action === "reset-workout") { state.workoutStatus = "planned"; state.completedSets = 0; state.coachMode = null; state.coachObserved = false; state.activeExercise = taskToExercise(currentPlanTasks()[0]); state.nextSetOverride = null; state.cardFace = "summary"; state.overlay = null; state.lastAction = "重置原型到训练前"; notify("已重置为训练前状态"); }
+        if (action === "undo-change") { event.stopPropagation(); const original = state.actionLog.find(item => item.target === "auto-adjust" && item.reversible); state.autoChangeApplied = false; state.planTasks.strength[0].load = "65 kg"; if (state.workoutStatus === "planned") state.activeExercise.load = "65 kg"; if (original) original.status = "undone"; recordAgentAction({ type:"write", title:"撤销：降低今日卧推重量", detail:"使用变更前快照恢复今天的卧推安排。", before:"62.5 kg × 8", after:"65 kg × 8", evidence:`用户操作${original ? `；关联 ${original.id}` : ""}`, scope:"恢复操作", status:"applied" }); state.overlay = null; state.lastAction = "撤销日内自动降重"; notify("已恢复 65 kg × 8"); }
+        if (action === "apply-proposal") { const applied = state.proposal; const versionBefore = state.planVersion; state.planVersion += 1; recordAgentAction({ type:"write", title:`应用计划调整：${applied?.title || "调整"}`, detail:"用户确认后写入今日计划，可从本记录单独撤销。", before:applied?.before || `计划 v${versionBefore}`, after:applied?.after || `计划 v${state.planVersion}`, evidence:applied?.evidence || "用户确认", scope:`今日计划 · v${state.planVersion}`, status:"applied", reversible:true, target:"plan-proposal", versionBefore, versionAfter:state.planVersion }); state.lastAction = `应用计划变更：${applied?.title || "调整"}`; state.proposal = null; state.overlay = null; notify(`已应用到今天 · 计划 v${state.planVersion}`); }
+        if (action === "keep-plan") { state.lastAction = "拒绝建议，保持原计划"; state.proposal = null; notify("已保持原计划"); }
+        if (action === "mock-log") { state.overlay = null; state.lastAction = "进入独立训练记录器"; notify("专业记录器将在下一轮展开"); }
+      });
+
+      document.addEventListener("submit", event => {
+        event.preventDefault();
+        if (event.target.id === "chatForm") { handleMessage(document.querySelector("#chatInput")?.value || ""); return; }
+        if (event.target.id === "planTaskForm") { const data = new FormData(event.target); const task = { name:String(data.get("name")).trim(), scheme:String(data.get("scheme")).trim(), load:String(data.get("load")).trim() }; if (state.editingTaskIndex === null) currentPlanTasks().push(task); else currentPlanTasks()[state.editingTaskIndex] = task; state.planVersion += 1; state.editingTaskIndex = null; state.overlay = "plan-manager"; state.lastAction = `保存计划动作：${task.name}`; notify("今日计划已更新"); return; }
+        if (event.target.id === "nextSetForm") { const data = new FormData(event.target); state.nextSetOverride = { name:String(data.get("name")), load:String(data.get("load")).trim(), reps:String(data.get("reps")).trim() }; state.overlay = "session"; state.lastAction = `下一组调整为 ${state.nextSetOverride.name}`; notify("下一组已更新"); return; }
+        if (event.target.id === "newExerciseForm") { state.customExerciseAdded = true; state.overlay = "library"; state.lastAction = "保存自建动作：单臂地雷管推举"; notify("已保存到本地动作库"); }
+        if (event.target.id === "timelineEventForm") { const data = new FormData(event.target); editableTimeline(state.timelineTargetDate).push({ time:data.get("time"), type:data.get("type"), name:data.get("name"), detail:data.get("detail") || "用户记录", source:"用户手动" }); state.overlay = null; state.cardFace = "console"; state.lastAction = `写入 ${state.timelineTargetDate} Timeline：${data.get("name")}`; notify("已保存"); }
+      });
+
+      document.addEventListener("input", event => {
+        if (!event.target.matches(".library-search")) return;
+        const query = event.target.value.trim().toLowerCase();
+        document.querySelectorAll(".exercise-item").forEach(item => { item.hidden = query && !item.textContent.toLowerCase().includes(query); });
+      });
+
+      document.addEventListener("change", event => {
+        if (event.target.id !== "nextExerciseSelect") return;
+        const option = event.target.selectedOptions[0];
+        const load = document.querySelector("#nextSetLoad");
+        const reps = document.querySelector("#nextSetReps");
+        if (load) load.value = option?.dataset.load || "自选";
+        if (reps) reps.value = option?.dataset.reps || "自选";
+      });
+
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape" && state.coachDrawer !== "closed") { minimizeCoachDrawer(); return; }
+        if (event.key === "Escape" && state.overlay) { state.overlay = null; state.proposal = null; state.lastAction = "键盘返回首页"; render(); }
+        if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !event.target.matches("input, textarea, select, [contenteditable='true']")) {
+          const current = validVariants.indexOf(state.variant);
+          state.variant = validVariants[(current + (event.key === "ArrowRight" ? 1 : -1) + validVariants.length) % validVariants.length];
+          state.view = "today";
+          state.overlay = null;
+          state.lastAction = `键盘切换 UI 方案：${variantNames[state.variant]}`;
+          const next = new URL(location.href); next.searchParams.set("v", state.variant); history.replaceState({}, "", next);
+          render();
+        }
+        const card = event.target.closest?.("[data-action='open-change-detail']");
+        if (card && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); state.overlay = "change-detail"; render(); }
+      });
+
+      render();
+    </script>
+  </body>
+</html>

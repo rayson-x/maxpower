@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "maxpower-blind-video-evaluation-standard/v1",
+  "status": "research_gate_not_production_promotion",
+  "unitOfIsolation": [
+    "participant",
+    "recordingSession",
+    "sourceCaptureId",
+    "device"
+  ],
+  "sameSourceDerivativesStayTogether": [
+    "videoCrop",
+    "mirror",
+    "resample",
+    "poseModelVariant",
+    "augmentation"
+  ],
+  "protocol": {
+    "fitOn": ["train"],
+    "selectOn": ["validation"],
+    "scoreAfterFreezeOn": ["test", "unseenSubject", "unseenSession", "unseenDevice", "challenge"],
+    "smallPersonalCorpusMode": "exhaustive_leave_one_source_out",
+    "labelReveal": "after_predictions_are_materialized",
+    "randomAudit": "seeded_order_for_human_spot_check_only",
+    "acceptanceAggregation": "all_eligible_held_out_sources"
+  },
+  "thresholds": {
+    "subjectSelection": {
+      "selectedForegroundFrameAccuracy": 0.99,
+      "maximumIdentitySwitchesPerSet": 0
+    },
+    "skeleton": {
+      "requiredJointPckAtTenPercentTorso": 0.95,
+      "requiredJointUsableFrameRate": 0.95,
+      "maximumOccludedOrAmbiguousFalseMeasuredRate": 0.01,
+      "longestUnsupportedPredictionMs": 150,
+      "minimumHumanKeypointFramesPerExactContext": 100
+    },
+    "actionIdentity": {
+      "macroF1": 0.95,
+      "perClassRecall": 0.95,
+      "declaredActionContextMayReplaceFreeClassification": true
+    },
+    "repAndPhase": {
+      "candidatePrecision": 0.95,
+      "candidateRecall": 0.95,
+      "exactSetSourceRate": 0.95,
+      "manualRangeAlignedRate": 0.95,
+      "peakWithinToleranceRate": 0.95,
+      "minimumEligiblePeakTruthCount": 40,
+      "startEndToleranceMs": 500,
+      "peakToleranceMs": 250,
+      "minimumIntervalIoU": 0.6,
+      "maximumFalseRepsPerCleanSet": 0.05,
+      "minimumSourceCapturesPerExactContext": 5,
+      "minimumTruthRepsPerExactContext": 40
+    },
+    "equipmentPath": {
+      "classDetectionF1": 0.95,
+      "requiredPhaseTrackCoverage": 0.95,
+      "pathPointPckAtFivePercentTorso": 0.95,
+      "maximumIdentitySwitchesPerSet": 0,
+      "minimumHumanTrajectoryFramesPerExactContext": 100
+    },
+    "techniqueQuality": {
+      "perDimensionMacroF1": 0.95,
+      "cannotJudgeF1": 0.95,
+      "minimumCuePrecision": 0.95,
+      "maximumFalseCuesPerCleanSet": 0.05,
+      "minimumIndependentExpertReviews": 2,
+      "minimumGoldExamplesPerClassAndContext": 30
+    },
+    "runtimeDelivery": {
+      "canonicalProducer": "rust_motion_sdk",
+      "platforms": ["web", "android", "ios"],
+      "byteExactFixtureParity": true,
+      "minimumProcessedFpsOnDeclaredDevice": 15,
+      "parallelCounterAllowed": false
+    }
+  },
+  "requiredSeparateReports": [
+    "subjectSelection",
+    "skeleton",
+    "actionIdentity",
+    "repAndPhase",
+    "equipmentPath",
+    "techniqueQuality",
+    "runtimeDelivery"
+  ],
+  "prohibitedShortcuts": [
+    "same_video_template_replay_as_accuracy",
+    "test_labels_or_expected_count_at_inference",
+    "wrist_points_as_barbell_truth",
+    "pose_confidence_as_keypoint_accuracy",
+    "mmfit_set_count_as_technique_quality_truth",
+    "one_blended_ai_accuracy_percentage"
+  ]
+}

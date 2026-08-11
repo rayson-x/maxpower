@@ -189,6 +189,9 @@ export interface ExerciseVariant {
   expectedMuscleAssociation: ExpectedMuscleAssociation;
   motionEvidenceRequirements: readonly MotionEvidenceRequirement[];
   bodyweightDifficultyNodeId?: string;
+  /** 力学分类（产品分类）：复合动作跨多关节，孤立动作单关节。
+   * 主项 slot 必须优先复合动作——孤立动作不能当主项（真实缺陷，2026-08-11 修）。 */
+  mechanic?: "compound" | "isolation";
   /** 结构化冲击/关节负荷（产品分类，非医学判断）：供疼痛与低冲击约束做硬过滤。
    * 缺省视为 "low"——只有明确标注 moderate/high 的动作会被低冲击约束排除。 */
   impact?: {
@@ -310,8 +313,49 @@ export interface SplitRotationTemplate {
   suitableWeeklyDays: readonly [number, number];
 }
 
+/**
+ * 饮食策略声明（供需图的"供给"侧，版本化知识资产）。
+ *
+ * 纪律：这里**只声明该策略在四个共享维度上提供什么**，不含任何训练规则。
+ * 新增一种策略 = 加一条声明；训练侧代码零修改（架构见 src/planning/dietTrainingGraph.ts）。
+ */
+export interface DietStrategyDeclaration {
+  id: string;
+  nameZh: string;
+  /** 碳水可用性：恒定 / 周期化 / 极低。 */
+  carbAvailability: {
+    pattern: "constant" | "cycled" | "very_low";
+    /** 各档位的相对碳水量（g/kg 体重/天）。减脂期受赤字约束，实际会落在区间下段。 */
+    byDayType: {
+      high: { min: number; max: number };
+      moderate: { min: number; max: number };
+      low: { min: number; max: number };
+    };
+  };
+  proteinPolicy: { perKgMin: number; perKgMax: number };
+  fatFloorPercentOfEnergy: number;
+  /** 该策略能支撑哪些类型的训练工作（C1/C2/C5 边的输入）。 */
+  supports: {
+    highIntensityWork: "full" | "limited" | "poor";
+    highVolumeWork: "full" | "limited" | "poor";
+    lowIntensityAerobic: "full";
+  };
+  /** 与各目标的适配度（用于向用户说明取舍，不用于替用户决定）。 */
+  goalFit: {
+    hypertrophy: "good" | "workable_with_tradeoffs" | "poor";
+    strength: "good" | "workable_with_tradeoffs" | "poor";
+    fatLoss: "good" | "workable_with_tradeoffs" | "poor";
+  };
+  goalFitNote?: string;
+  /** 证据等级：A/B=文献证据；D=产品默认规则；U=未知待核验。 */
+  evidenceTier: "A" | "B" | "C" | "D" | "U";
+  sourceRefs: readonly string[];
+}
+
 export interface ProgramStrategies {
   semanticVersion: string;
+  /** 饮食策略库（供需图的供给侧声明）。 */
+  dietStrategies?: readonly DietStrategyDeclaration[];
   splitRotations: readonly SplitRotationTemplate[];
   /** 周量目标（直接组/肌群/周）：TP-VOL-BASE 分档。 */
   weeklyDirectSetTargets: {

@@ -45,6 +45,12 @@ import {
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
 import {
+  evaluateCoupling,
+  glycogenDemandForDay,
+  summarizeWeeklyDemand,
+  type DayTrainingDemand,
+} from "./dietTrainingGraph";
+import {
   backfillThinSession,
   selectSplitRotation,
   sessionTemplateFor,
@@ -496,8 +502,14 @@ export class GoalCyclePlanner {
         context.reasonCodes.push(`professional_constraint_context_only:${constraint.id}`);
       }
     }
+    // 饮食 × 训练供需图（架构见 dietTrainingGraph.ts）：
+    // 从计划算训练需求 → 按饮食策略算供给 → 检冲突 → 输出碳水日型与解释
+    const coupling = this.evaluateDietTrainingCoupling(context, materializedWeeks);
     const progressionPolicy = progressionPolicyFor(materializedWeeks);
-    const reasonCodes = [...context.reasonCodes];
+    for (const event of coupling?.traceEvents ?? []) {
+      context.traceCollector.constraintEvents.push(event);
+    }
+    const reasonCodes = [...context.reasonCodes, ...(coupling?.reasonCodes ?? [])];
     if (progressionPolicy.phase === "calibration") {
       reasonCodes.push("calibration_phase_active_with_exit_criteria");
     }
@@ -527,6 +539,7 @@ export class GoalCyclePlanner {
       nutritionGuidance: nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach),
       recoveryGuidance: recoveryGuidanceFor(context.facts),
       progressionPolicy,
+      ...(coupling ? { dietTrainingCoupling: coupling.output } : {}),
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -535,6 +548,84 @@ export class GoalCyclePlanner {
       explanation: context.adaptive.explanation,
       adaptiveForecasts: context.adaptive.forecasts,
       sessions,
+    };
+  }
+
+  /**
+   * 饮食 × 训练耦合求解（供需图）。
+   * 优先级：安全边界 > 用户饮食约束 > 目标所需最小刺激 > 训练最优化。
+   * 冲突自动解不了时进 conflicts，由上层做成 trade-off 提案交用户选择。
+   */
+  private evaluateDietTrainingCoupling(
+    context: PlanningContext,
+    weeks: readonly WeekPlanData[],
+  ): {
+    output: NonNullable<PlanRevisionData["dietTrainingCoupling"]>;
+    traceEvents: readonly string[];
+    reasonCodes: readonly string[];
+  } | undefined {
+    const declarations = this.knowledge.programStrategies()?.dietStrategies;
+    if (!declarations?.length) return undefined;
+    const goal = context.facts.goalContract.value.primaryGoal;
+    const requestedId = context.facts.goalContract.value.dietStrategyId;
+    const strategy =
+      declarations.find((item) => item.id === requestedId)
+      ?? declarations.find((item) => item.id === defaultDietStrategyId(goal))
+      ?? declarations[0]!;
+
+    // 需求侧：逐日从计划内容算糖原需求
+    const week = weeks[0];
+    const days: DayTrainingDemand[] = (week?.sessions ?? []).map((session) => {
+      const slots = session.stimulusSlots ?? [];
+      const directSets = slots.reduce((sum, slot) => sum + slot.prescription.setCount, 0);
+      const isAerobic = slots.some(
+        (slot) => slot.intent.movementPattern === "cardio" || slot.intent.movementPattern === "locomotion",
+      );
+      const aerobicMinutes = isAerobic ? (session.estimatedDuration?.value ?? 0) : 0;
+      const hasHighIntensityWork = slots.some(
+        (slot) => slot.intent.priority === "primary" && slot.intent.fatigueIntent === "high",
+      );
+      return {
+        date: session.scheduledFor,
+        directSets: isAerobic ? 0 : directSets,
+        hasHighIntensityWork,
+        aerobicMinutes,
+        // 有氧强度分级尚未建模（待办）：当前一律按低强度处理，不虚报高强度
+        glycogenDemand: glycogenDemandForDay({
+          directSets: isAerobic ? 0 : directSets,
+          hasHighIntensityWork,
+          aerobicMinutes,
+          aerobicIsHighIntensity: false,
+        }),
+      };
+    });
+    const demand = summarizeWeeklyDemand(days);
+    const result = evaluateCoupling({
+      demand,
+      strategy,
+      goal,
+      dietLocked: context.facts.goalContract.value.dietStrategyLocked === true,
+    });
+    return {
+      output: {
+        strategyId: strategy.id,
+        strategyNameZh: strategy.nameZh,
+        goalFit: result.goalFit,
+        carbDayTypes: result.carbDayTypes,
+        conflicts: result.conflicts.map((conflict) => ({
+          ruleId: conflict.ruleId,
+          severity: conflict.severity,
+          code: conflict.code,
+          explanation: conflict.explanation,
+          defaultResolution: conflict.resolutions[0]?.description ?? "无自动解法，需用户选择",
+        })),
+      },
+      traceEvents: result.traceEvents,
+      reasonCodes: [
+        `diet_strategy:${strategy.id}`,
+        `diet_goal_fit:${result.goalFit}`,
+        ...result.conflicts.map((conflict) => `diet_training_conflict:${conflict.code}`),
+      ],
     };
   }
 
@@ -880,7 +971,7 @@ export class GoalCyclePlanner {
     const direct = directChoiceFor(context.request.directChoices ?? [], slotId, sessionOrdinal, slotIndex);
     const candidates = this.knowledge.search({ movementPattern: template.movementPattern, limit: 500 });
     const ranked = candidates
-      .map((exercise) => this.rankExercise(context, exercise, direct, availability.locationId))
+      .map((exercise) => this.rankExercise(context, exercise, direct, availability.locationId, template))
       .filter((candidate) => candidate.hardSatisfied)
       .sort((left, right) => right.score - left.score || left.exercise.id.localeCompare(right.exercise.id));
     const selected = ranked[0];
@@ -983,6 +1074,7 @@ export class GoalCyclePlanner {
     exercise: ExerciseVariant,
     direct: PlannerManualChoice | undefined,
     locationId: string,
+    template: SlotTemplate,
   ): {
     exercise: ExerciseVariant;
     hardSatisfied: boolean;
@@ -1058,8 +1150,18 @@ export class GoalCyclePlanner {
     const goalNeedsBarbellSpecificity =
       context.facts.goalContract.value.primaryGoal === "strength" &&
       exercise.equipment.loadMode === "barbell";
+    // 主项 slot 必须优先复合动作：孤立动作（飞鸟/侧平举/弯举）不该当主项。
+    // 维持/可选 slot 反过来更适合孤立动作（三层架构：主项-辅助-孤立）。
+    const mechanic = exercise.mechanic ?? "compound";
+    const mechanicFit =
+      template.priority === "primary"
+        ? (mechanic === "compound" ? 300 : -400)
+        : template.priority === "optional"
+          ? (mechanic === "isolation" ? 80 : 0)
+          : 0;
     const score =
       (directSelected ? 10_000 : 0) +
+      mechanicFit +
       (explicitlyPreferred ? 250 : 0) +
       (exactHistory.length ? 500 : 0) +
       (strengthBaseline ? 200 : 0) +
@@ -1080,6 +1182,7 @@ export class GoalCyclePlanner {
       ],
       reasons: [
         "hard_filters_passed",
+        `mechanic_${mechanic}_for_${template.priority}_slot`,
         ...(measurableLoad ? ["measurable_load_for_progression"] : ["load_not_measurable_progression_by_reps_only"]),
         ...(goalNeedsBarbellSpecificity ? ["barbell_specificity_for_strength_goal"] : []),
         exactHistory.length ? "exact_variant_continuity" : "cold_start_allowed_without_load_copy",
@@ -1362,15 +1465,30 @@ function isBodyweightOnly(available: ReadonlySet<string>): boolean {
 
 
 /** 休息建议：有个人实测节奏时在安全带宽内采用；否则用分级默认表。 */
+/**
+ * 组间休息（产品规则 D 级）。按目标分化：
+ * 力量目标的主项需要更长恢复以维持相对负荷（ACSM 2009 建议大重量复合动作 3-5 分钟）；
+ * 增肌主项 2-3 分钟；减脂/塑形的孤立动作可较短（代谢压力与时间效率）。
+ * 个人实测节奏（rest_tempo_seconds）覆盖默认值，但不低于该优先级的下限。
+ */
 function restSecondsFor(
   template: SlotTemplate,
   priority: StimulusIntentData["priority"],
   personalRestTempoSeconds?: number,
+  goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass" = "hypertrophy",
 ): number {
-  const fallback = template.fatigueIntent === "high" ? 180 : priority === "primary" ? 120 : priority === "maintenance" ? 90 : 75;
-  if (personalRestTempoSeconds === undefined) return fallback;
-  const floor = priority === "primary" ? 60 : 45;
-  return Math.round(Math.min(240, Math.max(floor, personalRestTempoSeconds)));
+  const byGoal = (() => {
+    if (goal === "strength") {
+      return template.fatigueIntent === "high" ? 300 : priority === "primary" ? 240 : priority === "maintenance" ? 120 : 90;
+    }
+    if (goal === "fat_loss_preserve_lean_mass") {
+      return template.fatigueIntent === "high" ? 150 : priority === "primary" ? 105 : priority === "maintenance" ? 75 : 60;
+    }
+    return template.fatigueIntent === "high" ? 180 : priority === "primary" ? 150 : priority === "maintenance" ? 90 : 75;
+  })();
+  if (personalRestTempoSeconds === undefined) return byGoal;
+  const floor = priority === "primary" ? (goal === "strength" ? 120 : 60) : 45;
+  return Math.round(Math.min(300, Math.max(floor, personalRestTempoSeconds)));
 }
 
 function prescriptionFor(
@@ -1415,7 +1533,7 @@ function prescriptionFor(
     targetRir,
     targetRirRange,
     rest: {
-      value: restSecondsFor(template, priority, personalRestTempoSeconds),
+      value: restSecondsFor(template, priority, personalRestTempoSeconds, goal),
       unit: "seconds" as const,
     },
   };
@@ -1899,6 +2017,16 @@ function pruneUnresolvedSlots(revision: PlanRevisionData): PlanRevisionData {
     return { ...week, sessions: weekSessions, weeklyDirectSets: volumeLedgerFromSessions(weekSessions) };
   });
   return { ...revision, sessions, ...(weeks ? { materializedWeeks: weeks } : {}) };
+}
+
+
+/** 目标对应的默认饮食策略（用户未选时）。可被用户显式选择覆盖。 */
+function defaultDietStrategyId(
+  goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass",
+): string {
+  if (goal === "fat_loss_preserve_lean_mass") return "carb_cycling";
+  if (goal === "strength") return "even_carbs";
+  return "higher_carb_surplus";
 }
 
 function progressionPolicyFor(
