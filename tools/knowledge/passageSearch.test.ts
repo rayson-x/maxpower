@@ -87,9 +87,10 @@ test("④ 结果带可解析的文献引用，且引用标明不能推出什么"
   assert.ok(withCitations.length > 0, "应有带文献引用的结果");
   for (const hit of withCitations) {
     for (const citation of hit.citations) {
-      assert.ok(citation.url || citation.pmid, `${citation.id} 应有可达来源`);
-      assert.ok(citation.claim.length > 10);
-      assert.ok(citation.cannotSupport.length > 0, `${citation.id} 必须标明不能推出什么`);
+      assert.ok(citation.url || citation.pmid || citation.pmcid, `${citation.id} 应有可核验标识`);
+      assert.ok(citation.claimEn.length > 10 && citation.claimZh.length > 5);
+      assert.ok(citation.cannotSupportEn.length > 0 && citation.cannotSupportZh.length > 0,
+        `${citation.id} 必须双语标明不能推出什么`);
     }
   }
 });
@@ -119,5 +120,83 @@ test("待核验（U 级）内容不会排在前面", () => {
   const result = registry.searchKnowledge({ query: term, limit: 5 });
   if (result.hits.length >= 2) {
     assert.notEqual(result.hits[0]?.passage.tier, "U", "待核验内容不应排第一");
+  }
+});
+
+test("文献库双语且英文优先：每条都有英文标题、英文结论与可核验标识", () => {
+  const citations = registry.programStrategies()?.citations ?? [];
+  assert.ok(citations.length >= 12, `文献数应 ≥12，实际 ${citations.length}`);
+  for (const citation of citations) {
+    // 面向海外市场：英文字段必填且必须是真英文（含 ASCII 字母且无中日韩字符）
+    assert.ok(citation.titleEn.length > 10, `${citation.id} 缺英文标题`);
+    assert.ok(/[A-Za-z]{4,}/.test(citation.titleEn), `${citation.id} 英文标题不是英文`);
+    assert.ok(!/[\u4e00-\u9fff]/.test(citation.titleEn), `${citation.id} 英文标题含中文`);
+    assert.ok(citation.claimEn.length > 20, `${citation.id} 缺英文结论`);
+    assert.ok(!/[\u4e00-\u9fff]/.test(citation.claimEn), `${citation.id} 英文结论含中文`);
+    assert.ok(citation.cannotSupportEn.length > 0, `${citation.id} 缺英文边界声明`);
+    assert.ok(citation.populationEn.length > 3, `${citation.id} 缺英文人群边界`);
+
+    // 中文字段同样必填（国内界面）
+    assert.ok(citation.titleZh.length > 4, `${citation.id} 缺中文标题`);
+    assert.ok(citation.claimZh.length > 10, `${citation.id} 缺中文结论`);
+    assert.ok(citation.cannotSupportZh.length > 0, `${citation.id} 缺中文边界声明`);
+
+    // 可核验：至少一个稳定标识
+    assert.ok(
+      citation.pmid || citation.pmcid || citation.url,
+      `${citation.id} 必须有 PMID / PMC / 免费链接之一`,
+    );
+    // 不用付费 DOI 链接
+    if (citation.url) {
+      assert.ok(!/doi\.org/.test(citation.url), `${citation.id} 不应使用付费 DOI 链接`);
+    }
+    // 期刊信息（便于核验）
+    assert.ok(citation.authorsShort.length > 3);
+    assert.ok(citation.year >= 2000 && citation.year <= 2030);
+  }
+  // 一手证据（A 级）应占多数——可信度要求
+  const tierA = citations.filter((citation) => citation.tier === "A").length;
+  assert.ok(tierA >= 8, `A 级文献应 ≥8，实际 ${tierA}`);
+  // PMID 覆盖率（最标准的引用标识）
+  const withPmid = citations.filter((citation) => citation.pmid).length;
+  assert.ok(withPmid >= 7, `带 PMID 的文献应 ≥7，实际 ${withPmid}`);
+});
+
+test("策展：客户端知识库不含内部内容（代码路径/实现细节/产品决策/待核验）", () => {
+  const passages = registry.programStrategies()?.passages ?? [];
+  const violations: string[] = [];
+  const forbidden: readonly (readonly [RegExp, string])[] = [
+    [/\b(src|tools)\/[\w.-]+\.tsx?/, "源码路径"],
+    [/PlannerTrace|GoalCyclePlanner|rulePack|ticket\s*\d/i, "实现细节"],
+    [/我们的立场|我们采纳|实现清单/, "产品决策"],
+    [/待核验|未核验/, "未核验标注"],
+    [/assert\.|E2E|验收断言|最小实验/, "测试与验收"],
+    [/status:\s*(proposal|draft)/i, "文档元信息"],
+  ];
+  for (const passage of passages) {
+    for (const [pattern, label] of forbidden) {
+      if (pattern.test(passage.text)) {
+        violations.push(`[${label}] ${passage.sourcePath} › ${passage.sectionPath.join(" › ")}`);
+      }
+    }
+  }
+  assert.deepEqual(violations, [], `客户端知识库混入内部内容：\n${violations.join("\n")}`);
+});
+
+test("策展：待核验（U 级）内容不发布到客户端", () => {
+  const passages = registry.programStrategies()?.passages ?? [];
+  const unverified = passages.filter((passage) => passage.tier === "U");
+  assert.deepEqual(
+    unverified.map((passage) => passage.sectionPath.join(" › ")),
+    [],
+    "未核验内容不得进入客户端知识库",
+  );
+});
+
+test("策展：剔除内部内容后，用户最需要的对照知识仍然保留", () => {
+  // 这是策展的关键权衡——不能为了干净把最有价值的内容一起剔掉
+  for (const topic of ["点减脂", "间歇性断食", "HIIT", "负荷范围", "同时增肌减脂", "空腹"]) {
+    const found = registry.searchKnowledge({ query: topic, limit: 3 });
+    assert.ok(found.hits.length > 0, `策展后仍应能检索到「${topic}」相关内容`);
   }
 });

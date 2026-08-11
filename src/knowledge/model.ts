@@ -365,61 +365,60 @@ export interface KnowledgePassage {
 export interface EvidenceCitation {
   id: string;
   tier: "A" | "B" | "C" | "D" | "U";
+  /** 英文标题（面向海外市场时的主标题；引用时优先展示）。 */
+  titleEn: string;
+  /** 中文标题（中文用户界面展示）。 */
   titleZh: string;
-  titleEn?: string;
   authorsShort: string;
   year: number;
   venue?: string;
   /** 免费可达链接（PubMed/PMC/官方 PDF 优先，不用付费 DOI）。 */
   url?: string;
+  /** PubMed 标识（最标准的可核验引用 id）。 */
   pmid?: string;
-  /** 我们采用的结论。 */
-  claim: string;
-  /** 该来源不能推出什么（防止过度声称）。 */
-  cannotSupport: readonly string[];
-  /** 适用人群边界。 */
-  population: string;
+  /** PMC 标识（开放全文）。 */
+  pmcid?: string;
+  /** 我们采用的结论（英文，海外优先）。 */
+  claimEn: string;
+  /** 我们采用的结论（中文）。 */
+  claimZh: string;
+  /** 该来源不能推出什么（英文）——防过度声称的主要手段。 */
+  cannotSupportEn: readonly string[];
+  /** 该来源不能推出什么（中文）。 */
+  cannotSupportZh: readonly string[];
+  /** 适用人群边界（英文）。 */
+  populationEn: string;
+  /** 适用人群边界（中文）。 */
+  populationZh: string;
 }
 
 /**
  * 进食状态 × 训练类型的编排策略（版本化知识，不写在代码里）。
- *
- * 纪律：数值、文案、优势/风险、证据引用**全部是数据**；
- * 代码只负责"按用户情况选哪条 + 解析引用"。
- * 这样领域专家可以审这张表，也可以云端更新，而不需要改引擎。
+ * 数值、文案、优势/风险、证据引用全部是数据；代码只负责选与解析。
  */
 export interface SessionFuelingPolicy {
   workType: "strength" | "high_intensity_aerobic" | "low_intensity_aerobic" | "walking";
-  /** 首选进食状态。 */
   preferredState: "fasted" | "light_snack" | "fed" | "post_strength";
   acceptableStates: readonly ("fasted" | "light_snack" | "fed" | "post_strength")[];
   /** 距正餐的建议最小间隔（分钟）；null = 无需间隔（散步）。 */
   minMinutesAfterFullMeal: number | null;
   /** 距小份加餐的建议最小间隔（分钟）。 */
   minMinutesAfterSnack: number | null;
-  /** 为什么这个安排可行（给用户看的因果链）。 */
   rationaleZh: string;
   advantagesZh: readonly string[];
   risksZh: readonly string[];
-  /** 该策略引用的文献 id（由 citations 库解析）。 */
   evidenceRefs: readonly string[];
-  /** 证据等级；D = 产品规则（如具体间隔分钟数）。 */
   tier: "A" | "B" | "C" | "D" | "U";
 }
 
-/**
- * 空腹训练适格性规则表（数据驱动，代码只做匹配）。
- * 每条规则命中即阻止推荐，并给出替代方案与说明。
- */
+/** 空腹训练适格性规则表（数据驱动，代码只做匹配）。 */
 export interface FastedTrainingRule {
   id: string;
-  /** 匹配条件（结构化，不做文本猜测）。 */
   when: {
     workTypeIn?: readonly ("strength" | "high_intensity_aerobic" | "low_intensity_aerobic" | "walking")[];
     plannedMinutesOver?: number;
     ageUnder?: number;
     adultNotConfirmed?: boolean;
-    /** 命中任一结构化健康标记（由 onboarding 结构化筛查产生）。 */
     healthFlagIn?: readonly string[];
     professionalClearanceRequired?: boolean;
   };

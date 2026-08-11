@@ -15,26 +15,125 @@ import type { KnowledgePassage } from "../../src/knowledge/model";
  * - 切分按 Markdown 小节，过长的小节按段落再切，保证单段可直接引用
  */
 
-/** 要打进包的知识文档（只放已审核的）。 */
-const SOURCE_DOCS: readonly { path: string; title: string }[] = [
-  { path: "docs/wiki/training-programming.md", title: "训练编程知识" },
-  { path: "docs/wiki/nutrition-strategy.md", title: "营养策略知识" },
-  { path: "docs/wiki/recovery-and-health-signals.md", title: "恢复与健康信号" },
-  { path: "docs/wiki/exercise-and-stimulus-knowledge.md", title: "动作与刺激知识" },
-  { path: "docs/wiki/program-strategy-set.md", title: "训练编排策略集" },
+/**
+ * 客户端 agent 知识库的**策展政策**。
+ *
+ * 开发知识库里有大量不该给客户端 agent 的内容：产品决策、工程实现、验收断言、
+ * 待核验清单、代码路径。agent 若把这些引给用户，等于泄露内部决策并制造困惑。
+ * 所以这里显式声明：哪些文档发布、哪些小节剔除。剔除结果会打印出来可审计。
+ */
+interface SourceDocPolicy {
+  path: string;
+  title: string;
+  /** 是否发布到客户端 agent。 */
+  publish: boolean;
+  /** 该文档中不发布的小节（匹配任一层小节标题即整段剔除）。 */
+  excludeSections?: readonly RegExp[];
+  /** 不发布的原因（publish=false 时必填，便于审计）。 */
+  reason?: string;
+}
+
+const SOURCE_DOCS: readonly SourceDocPolicy[] = [
+  // ── 领域知识页：整篇发布（本身就是给用户看的领域内容）──
+  { path: "docs/wiki/training-programming.md", title: "训练编程知识", publish: true },
+  { path: "docs/wiki/nutrition-strategy.md", title: "营养策略知识", publish: true },
+  { path: "docs/wiki/recovery-and-health-signals.md", title: "恢复与健康信号", publish: true },
+  { path: "docs/wiki/exercise-and-stimulus-knowledge.md", title: "动作与刺激知识", publish: true },
+  { path: "docs/wiki/program-strategy-set.md", title: "训练编排策略集", publish: true },
+
+  // ── 调研报告：只发布"事实与证据"部分，剔除产品决策与工程内容 ──
   {
     path: "docs/research/2026-08-11-fat-oxidation-physiology-and-fasted-cardio.md",
-    title: "脂肪氧化生理学与空腹有氧",
+    title: "脂肪氧化与空腹有氧",
+    publish: true,
+    excludeSections: [
+      /对产品设计的直接含义/,
+      /产品行为/,
+      /待核验/,
+      /怎么读这份文档/,
+      /调研起因/,
+    ],
   },
   {
     path: "docs/research/2026-08-11-fitness-claims-vs-evidence-audit.md",
-    title: "健身流派对账：说法与证据",
+    title: "常见说法与证据对照",
+    publish: true,
+    excludeSections: [
+      /我们的立场/,
+      /我们采纳与拒绝/,
+      /Part D/,
+      /Part E/,
+      /Part F/,
+      /待核验/,
+      /最小实验/,
+      /怎么读这份文档/,
+    ],
   },
   {
     path: "docs/research/2026-08-11-healthy-adult-plan-and-nutrition-acceptance-standards.md",
-    title: "健康成人计划与营养验收标准",
+    title: "健康成人训练与营养标准",
+    publish: true,
+    excludeSections: [
+      /验收断言/,
+      /建议加入/,
+      /对.{0,6}验收的含义/,
+      /产品验收规则/,
+    ],
+  },
+
+  // ── 明确不发布：纯内部内容 ──
+  {
+    path: "docs/research/2026-08-11-coach-training-curricula.md",
+    title: "教练培训体系调研",
+    publish: false,
+    reason: "内部能力缺口分析与路线图，非用户领域知识",
+  },
+  {
+    path: "docs/design/training-programming-and-nutrition-coupling-v0.1.md",
+    title: "训练与饮食耦合设计",
+    publish: false,
+    reason: "工程设计文档，含实现清单与代码引用",
   },
 ];
+
+/**
+ * 段落级内容过滤：即使小节通过，含以下内容的段落也不发布。
+ * 这是最后一道闸——防止内部内容从任何路径泄漏到用户面前。
+ */
+/** 整段剔除：这类段落通体是内部内容，没有对用户有价值的部分。 */
+const DROP_PASSAGE_PATTERNS: readonly { pattern: RegExp; label: string }[] = [
+  { pattern: /\b(src|tools)\/[\w.-]+\.tsx?/, label: "源码引用" },
+  { pattern: /PlannerTrace|GoalCyclePlanner|ticket\s*\d|rulePack|知识包/i, label: "实现细节" },
+  { pattern: /assert\.|E2E|最小实验|验收断言/, label: "测试与验收" },
+  { pattern: /status:\s*(proposal|active|draft)/i, label: "文档元信息" },
+];
+
+/**
+ * 行内剔除：段落里**混有**证据与内部决策时，只删内部那几行、保留证据。
+ * 用户最该看到的对照内容（点减脂、IF、HIIT…）恰好属于这类混合段落，
+ * 整段剔除会把最有价值的部分一起丢掉。
+ */
+const DROP_LINE_PATTERNS: readonly RegExp[] = [
+  /^\s*\*?\*?我们的立场/,
+  /^\s*\*?\*?我们采纳/,
+  /^\s*产品行为/,
+  /^\s*\|?\s*产品行为\s*\|/,
+  /产品规则（D）|产品默认值/,
+  /待核验|未核验|需要核实/,
+  /落进\s*planner|实现清单/i,
+  /\b(src|tools|docs)\/[\w.-]+\//,
+  /^```/,
+  /^\s*目标：|^\s*机制：|^\s*可操作变量：|^\s*计划输出：|^\s*验证指标：|^\s*证据锚点：/,
+];
+
+/** 按行剔除内部内容；返回 undefined 表示剩余内容不足以成段。 */
+function stripInternalLines(text: string): string | undefined {
+  const kept = text
+    .split("\n")
+    .filter((line) => !DROP_LINE_PATTERNS.some((pattern) => pattern.test(line)));
+  const result = kept.join("\n").trim();
+  return result.length >= MIN_PASSAGE_CHARS ? result : undefined;
+}
 
 /** 单段目标长度（字符）；过长的小节会被再切。 */
 const MAX_PASSAGE_CHARS = 1200;
@@ -251,25 +350,86 @@ function splitDocument(markdown: string, docTitle: string, sourcePath: string): 
 }
 
 /** 构建全部知识段落（缺失的文档跳过并记录，不静默）。 */
-export function buildKnowledgePassages(repoRoot = process.cwd()): {
+export interface PassageBuildReport {
   passages: readonly KnowledgePassage[];
-  skipped: readonly string[];
-} {
+  /** 文档不存在。 */
+  missing: readonly string[];
+  /** 按政策不发布的文档。 */
+  unpublished: readonly { path: string; reason: string }[];
+  /** 被小节政策剔除的段落数（按文档）。 */
+  excludedBySection: Readonly<Record<string, number>>;
+  /** 被内容过滤剔除的段落（含原因，可审计）。 */
+  excludedByContent: readonly { sourcePath: string; section: string; label: string }[];
+}
+
+export function buildKnowledgePassages(repoRoot = process.cwd()): PassageBuildReport {
   const passages: KnowledgePassage[] = [];
-  const skipped: string[] = [];
+  const missing: string[] = [];
+  const unpublished: { path: string; reason: string }[] = [];
+  const excludedBySection: Record<string, number> = {};
+  const excludedByContent: { sourcePath: string; section: string; label: string }[] = [];
+
   for (const doc of SOURCE_DOCS) {
-    const absolute = join(repoRoot, doc.path);
-    if (!existsSync(absolute)) {
-      skipped.push(doc.path);
+    if (!doc.publish) {
+      unpublished.push({ path: doc.path, reason: doc.reason ?? "未说明" });
       continue;
     }
-    passages.push(...splitDocument(readFileSync(absolute, "utf8"), doc.title, doc.path));
+    const absolute = join(repoRoot, doc.path);
+    if (!existsSync(absolute)) {
+      missing.push(doc.path);
+      continue;
+    }
+    const candidates = splitDocument(readFileSync(absolute, "utf8"), doc.title, doc.path);
+    for (const passage of candidates) {
+      // 小节政策
+      const sectionExcluded = (doc.excludeSections ?? []).some((pattern) =>
+        passage.sectionPath.some((section) => pattern.test(section)),
+      );
+      if (sectionExcluded) {
+        excludedBySection[doc.path] = (excludedBySection[doc.path] ?? 0) + 1;
+        continue;
+      }
+      // 整段剔除（通体内部内容）
+      const drop = DROP_PASSAGE_PATTERNS.find((entry) => entry.pattern.test(passage.text));
+      if (drop) {
+        excludedByContent.push({
+          sourcePath: doc.path,
+          section: passage.sectionPath.join(" › "),
+          label: drop.label,
+        });
+        continue;
+      }
+      // 行内剔除（混合段落：保留证据，删掉内部决策行）
+      const cleaned = stripInternalLines(passage.text);
+      if (!cleaned) {
+        excludedByContent.push({
+          sourcePath: doc.path,
+          section: passage.sectionPath.join(" › "),
+          label: "清洗后内容不足",
+        });
+        continue;
+      }
+      passages.push(
+        cleaned === passage.text
+          ? passage
+          : {
+              ...passage,
+              text: cleaned,
+              // 清洗改变了内容 → 证据等级与关键词都要按清洗后的文本重算
+              tier: inferTier(cleaned),
+              keywords: extractKeywords(cleaned, passage.sectionPath),
+              citationRefs: citationsFor(cleaned),
+              contentHash: stableHash(cleaned),
+            },
+      );
+    }
   }
-  return { passages, skipped };
+  return { passages, missing, unpublished, excludedBySection, excludedByContent };
 }
 
 if (require.main === module) {
-  const { passages, skipped } = buildKnowledgePassages();
+  const { passages, missing, unpublished, excludedBySection, excludedByContent } = buildKnowledgePassages();
+  const skipped = missing;
   const byTier = passages.reduce<Record<string, number>>((acc, passage) => {
     acc[passage.tier] = (acc[passage.tier] ?? 0) + 1;
     return acc;
@@ -277,5 +437,15 @@ if (require.main === module) {
   console.log(`built ${passages.length} passages from ${SOURCE_DOCS.length - skipped.length} docs`);
   console.log(`tiers: ${JSON.stringify(byTier)}`);
   console.log(`with citations: ${passages.filter((passage) => passage.citationRefs.length > 0).length}`);
-  if (skipped.length) console.log(`skipped (missing): ${skipped.join(", ")}`);
+  if (skipped.length) console.log(`missing docs: ${skipped.join(", ")}`);
+  console.log(`\n── 策展结果（可审计）──`);
+  for (const item of unpublished) console.log(`  不发布 ${item.path}：${item.reason}`);
+  for (const [path, count] of Object.entries(excludedBySection)) {
+    console.log(`  小节剔除 ${path}：${count} 段`);
+  }
+  const byLabel = excludedByContent.reduce<Record<string, number>>((acc, item) => {
+    acc[item.label] = (acc[item.label] ?? 0) + 1;
+    return acc;
+  }, {});
+  console.log(`  内容过滤剔除：${excludedByContent.length} 段 ${JSON.stringify(byLabel)}`);
 }

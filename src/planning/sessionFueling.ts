@@ -24,10 +24,14 @@ export type FuelingState = SessionFuelingPolicy["preferredState"];
 export interface ResolvedCitation {
   id: string;
   tier: EvidenceCitation["tier"];
+  /** 按 locale 组装的展示标签（英文优先用于海外市场）。 */
   label: string;
   url?: string;
+  /** 可核验标识（PMID 优先，其次 PMC）。 */
+  identifier?: string;
   claim: string;
   cannotSupport: readonly string[];
+  population: string;
 }
 
 export interface FuelingAdvice {
@@ -70,6 +74,8 @@ export function healthFlagsOf(profile: UserProfileData): StructuredHealthFlags {
 export function resolveCitations(
   strategies: ProgramStrategies | undefined,
   refs: readonly string[],
+  /** 展示语言；默认英文（面向海外市场，且英文标题更利于核验）。 */
+  locale: "en" | "zh" = "en",
 ): readonly ResolvedCitation[] {
   const library = strategies?.citations ?? [];
   return refs
@@ -78,10 +84,16 @@ export function resolveCitations(
     .map((citation) => ({
       id: citation.id,
       tier: citation.tier,
-      label: `${citation.authorsShort} (${citation.year})${citation.venue ? ` · ${citation.venue}` : ""} — ${citation.titleZh}`,
+      label:
+        `${citation.authorsShort} (${citation.year})` +
+        `${citation.venue ? `. ${citation.venue}` : ""}. ` +
+        `${locale === "zh" ? citation.titleZh : citation.titleEn}` +
+        `${citation.pmid ? ` PMID: ${citation.pmid}` : citation.pmcid ? ` ${citation.pmcid}` : ""}`,
       ...(citation.url ? { url: citation.url } : {}),
-      claim: citation.claim,
-      cannotSupport: citation.cannotSupport,
+      ...(citation.pmid ? { identifier: `PMID:${citation.pmid}` } : citation.pmcid ? { identifier: citation.pmcid } : {}),
+      claim: locale === "zh" ? citation.claimZh : citation.claimEn,
+      cannotSupport: locale === "zh" ? citation.cannotSupportZh : citation.cannotSupportEn,
+      population: locale === "zh" ? citation.populationZh : citation.populationEn,
     }));
 }
 
@@ -118,6 +130,8 @@ export function fuelingAdviceFor(input: {
   workType: SessionWorkType;
   plannedMinutes: number;
   profile: UserProfileData;
+  /** 展示语言；默认按档案 locale，未知时用英文。 */
+  locale?: "en" | "zh";
 }): FuelingAdvice | undefined {
   const policy = input.strategies?.sessionFuelingPolicies?.find(
     (candidate) => candidate.workType === input.workType,
@@ -149,7 +163,11 @@ export function fuelingAdviceFor(input: {
       reason: rule.reasonZh,
       ...(rule.alternativeZh ? { alternative: rule.alternativeZh } : {}),
     })),
-    citations: resolveCitations(input.strategies, policy.evidenceRefs),
+    citations: resolveCitations(
+      input.strategies,
+      policy.evidenceRefs,
+      input.locale ?? (input.profile.locale?.startsWith("zh") ? "zh" : "en"),
+    ),
     tier: policy.tier,
   };
 }

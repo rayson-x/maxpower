@@ -2110,16 +2110,15 @@ export class CoachApplication {
       limit: 4,
       ...(topic ? { topic } : {}),
     });
+    // 展示语言按用户档案；未知时用英文（面向海外市场，且英文标题更利于核验）
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    const locale: "en" | "zh" = domain.profile?.value.locale?.startsWith("zh") ? "zh" : "en";
     const now = this.runtime.now();
     const summary = result.hits.length
       ? result.hits.flatMap((hit) => [
           `〔${hit.passage.docTitle}${hit.passage.sectionPath.length ? " · " + hit.passage.sectionPath.join(" › ") : ""}〕`,
           hit.passage.text.length > 600 ? `${hit.passage.text.slice(0, 600)}…` : hit.passage.text,
-          ...hit.citations.map(
-            (citation) =>
-              `依据 [${citation.tier}] ${citation.authorsShort} ${citation.year}${citation.url ? ` ${citation.url}` : ""}` +
-              `（不能推出：${citation.cannotSupport.join("；")}）`,
-          ),
+          ...hit.citations.map((citation) => renderCitation(citation, locale)),
         ])
       : [`知识库里没有关于「${input.query}」的已审核内容。我不会用没有依据的说法补答——你可以换个说法再问，或者告诉我具体想解决什么。`];
     const artifact: import("./model").EvidenceBriefArtifact = {
@@ -10332,6 +10331,25 @@ function inferCommitmentPreferences(
 }
 
 /** 本周已过去、计划了但未开始的训练日（顺延/缺席策略的输入）。 */
+
+/** 文献引用的展示渲染（英文优先；PMID/PMC 一并给出以便核验）。 */
+function renderCitation(
+  citation: import("../knowledge/model").EvidenceCitation,
+  locale: "en" | "zh",
+): string {
+  const title = locale === "zh" ? citation.titleZh : citation.titleEn;
+  const cannot = locale === "zh" ? citation.cannotSupportZh : citation.cannotSupportEn;
+  const identifier = citation.pmid ? `PMID: ${citation.pmid}` : citation.pmcid ?? "";
+  const prefix = locale === "zh" ? "依据" : "Source";
+  const caveat = locale === "zh" ? "不能推出" : "Does not support";
+  return (
+    `${prefix} [${citation.tier}] ${citation.authorsShort} (${citation.year})` +
+    `${citation.venue ? `. ${citation.venue}` : ""}. ${title}` +
+    `${identifier ? ` ${identifier}` : ""}${citation.url ? ` ${citation.url}` : ""}` +
+    `（${caveat}：${cannot.join(locale === "zh" ? "；" : "; ")}）`
+  );
+}
+
 function currentWeekMissedDates(
   projection: import("./domain").DomainProjection,
   currentDate: string,
