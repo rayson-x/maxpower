@@ -44,6 +44,7 @@ import {
   type TrainingRulePackDescriptor,
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
+import { estimateTimeToGoal } from "./goalTimeline";
 import { tierPersona } from "./personTiering";
 import { fuelingAdviceFor } from "./sessionFueling";
 import {
@@ -548,6 +549,7 @@ export class GoalCyclePlanner {
       progressionPolicy,
       ...(coupling ? { dietTrainingCoupling: coupling.output } : {}),
       personaTieringNote: tiering.recompNoteZh,
+      goalTimeline: estimateTimeToGoal(context.facts.profile.value, context.facts.goalContract.value),
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
