@@ -127,6 +127,12 @@ export interface UserProfileData {
     sex?: "female" | "male" | "intersex" | "prefer_not_to_say" | "unknown";
     height?: LengthQuantity;
     currentWeight?: MassQuantity;
+    /**
+     * 当前围度（cm）：腰围最关键——有它就能用海军围度法估算体脂率，
+     * 从而让目标时间线进入精确模式，不必要求用户自报体脂。
+     * 键名约定：waist / neck / hip / chest / shoulder / thigh / arm
+     */
+    currentCircumferences?: Readonly<Record<string, LengthQuantity>>;
   };
   adultConfirmed?: boolean;
   returningStatus?: "new" | "returning" | "consistent";

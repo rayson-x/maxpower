@@ -44,6 +44,7 @@ import {
   type TrainingRulePackDescriptor,
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
+import { activityFactorFor } from "./bodyComposition";
 import { estimateTimeToGoal } from "./goalTimeline";
 import { tierPersona } from "./personTiering";
 import { fuelingAdviceFor } from "./sessionFueling";
@@ -2245,7 +2246,7 @@ function absoluteNutritionTargets(
     ? 10 * weight + 6.25 * height - 5 * age - 161
     : 10 * weight + 6.25 * height - 5 * age + 5;
   const freq = facts.profile.value.schedule?.weeklyFrequency ?? 3;
-  const activityFactor = freq <= 2 ? 1.375 : freq <= 4 ? 1.55 : 1.725;
+  const activityFactor = activityFactorFor(freq);
   const maintenance = Math.round(bmr * activityFactor);
 
   // 赤字/盈余换算：周降幅 %体重 → 每日千卡

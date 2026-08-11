@@ -1,5 +1,6 @@
 import type { GoalContractData, UserProfileData } from "../coach/domain";
 import { copy, type LocalizedText, type Locale } from "./copy";
+import { estimateBodyFat } from "./bodyComposition";
 import { bodyMassStateOf } from "./personTiering";
 
 /**
@@ -43,7 +44,14 @@ export function fatToLoseKg(input: {
 export interface GoalTimeline {
   /** 数据精细度：精确反推 / 体重趋势兜底。 */
   precision: "precise" | "weight_trend_fallback";
-  // ── 精确模式（用户给了当前+目标体脂率）──
+  // ── 精确模式（用户给了体脂率，或由围度/身高体重估算）──
+  /** 当前体脂率的来源与置信度（估算必须让用户看见是估算）。 */
+  bodyFatSource?: {
+    percent: number;
+    method: "navy" | "deurenberg_yap" | "navy_bmi_blend" | "user_reported";
+    confidence: "high" | "medium" | "low";
+    estimated: boolean;
+  };
   fatToLoseKg?: number;
   totalDeficitKcal?: number;
   fastestDays?: number;
@@ -73,8 +81,12 @@ export function estimateTimeToGoal(
   const { state } = bodyMassStateOf(profile);
   const maxDeficit = maxDailyDeficitKcal(state);
   const weightKg = profile.demographics?.currentWeight?.value;
-  const currentBf = goal.targets?.currentBodyFat?.value;
   const targetBf = goal.targets?.targetBodyFat?.value;
+  // 当前体脂：用户自报优先；没有就从围度/身高体重估算（不要求用户自报）
+  const estimate = goal.targets?.currentBodyFat?.value === undefined
+    ? estimateBodyFat({ profile })
+    : undefined;
+  const currentBf = goal.targets?.currentBodyFat?.value ?? estimate?.percent;
 
   const hasPrecise = weightKg !== undefined && currentBf !== undefined && targetBf !== undefined;
 
@@ -109,6 +121,16 @@ export function estimateTimeToGoal(
     });
     return {
       precision: "precise",
+      ...(estimate
+        ? {
+            bodyFatSource: {
+              percent: estimate.percent,
+              method: estimate.method,
+              confidence: estimate.confidence,
+              estimated: true,
+            },
+          }
+        : { bodyFatSource: { percent: currentBf, method: "user_reported" as const, confidence: "high" as const, estimated: false } }),
       fatToLoseKg: Math.round(fatKg * 10) / 10,
       totalDeficitKcal: Math.round(totalDeficit),
       fastestDays: Math.ceil(totalDeficit / maxDeficit),
