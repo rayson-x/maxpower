@@ -189,6 +189,12 @@ export interface ExerciseVariant {
   expectedMuscleAssociation: ExpectedMuscleAssociation;
   motionEvidenceRequirements: readonly MotionEvidenceRequirement[];
   bodyweightDifficultyNodeId?: string;
+  /** 结构化冲击/关节负荷（产品分类，非医学判断）：供疼痛与低冲击约束做硬过滤。
+   * 缺省视为 "low"——只有明确标注 moderate/high 的动作会被低冲击约束排除。 */
+  impact?: {
+    level: "low" | "moderate" | "high";
+    loadedJoints: readonly string[];
+  };
   status: "active" | "deprecated";
   replacementId?: string;
   sourceRefs: readonly string[];
@@ -289,7 +295,11 @@ export interface SplitRotationTemplate {
     focusZh: string;
     slots: readonly {
       movementPattern: MovementPattern;
+      /** 参与肌群（展示用；不用于周量记账）。 */
       muscleGroups: readonly string[];
+      /** 直接组归属肌群（周量记账唯一依据；缺省时退回 muscleGroups）。
+       * 例：深蹲的直接组记股四头，臀是参与肌群——避免同一组被多个肌群满记。 */
+      directMuscles?: readonly string[];
       priority: "primary" | "maintenance" | "optional";
       fatigueIntent: "low" | "medium" | "high";
     }[];

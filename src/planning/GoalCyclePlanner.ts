@@ -45,9 +45,10 @@ import {
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
 import {
+  backfillThinSession,
   selectSplitRotation,
   sessionTemplateFor,
-  setsPerSlot,
+  setsForSlot,
   simplifyForMinimalCommitment,
   trainingCommitmentTarget,
   weeklyDirectSetTarget,
@@ -91,6 +92,7 @@ export const PLANNER_CONSTRAINT_PRIORITY = [
 interface SlotTemplate {
   movementPattern: MovementPattern;
   muscleGroups: readonly string[];
+  directMuscles?: readonly string[];
   priority: StimulusIntentData["priority"];
   fatigueIntent: StimulusIntentData["fatigueIntent"];
 }
@@ -145,16 +147,44 @@ export class GoalCyclePlanner {
     }
 
     const context = this.context(request, pins, trainingRule.pack.descriptor);
+    // 人群边界先于一切（未成年/孕期）：结构化判定，不生成可确认计划
+    const boundary = this.evaluatePopulationBoundary(context);
+    if (boundary) return boundary;
     const goalCycle = this.buildGoalCycle(context, frontier);
-    const planRevision = this.materializeNearTerm(context, goalCycle);
+    let planRevision = this.materializeNearTerm(context, goalCycle);
     const unresolved = planRevision.sessions.flatMap((session) =>
       (session.stimulusSlots ?? []).filter((slot) => slot.exerciseSlot.status === "unresolved"),
     );
     if (unresolved.length) {
-      return this.infeasible(context, [
-        "no_exercise_satisfies_hard_constraints",
-        ...unresolved.map((slot) => `unresolved:${slot.intent.movementPattern}`),
-      ]);
+      // 局部限制不升级为整份计划不可行：丢弃无候选的 slot 并记录，保留可安全执行的训练。
+      // 只有当一份计划里一个可执行动作都不剩时，才真的 infeasible。
+      // 例外：用户显式锁定的动作不可用是真冲突——锁是用户的明确指令，
+      // 不能静默替换或丢弃，必须回到用户手上解锁。
+      const lockConflicts = unresolved.filter((slot) =>
+        slot.exerciseSlot.reasonCodes.some((code) => code.includes("locked_exercise_unavailable")),
+      );
+      if (lockConflicts.length) {
+        return this.infeasible(context, [
+          "no_exercise_satisfies_hard_constraints",
+          ...lockConflicts.map((slot) => `unresolved:${slot.intent.movementPattern}`),
+        ]);
+      }
+      for (const slot of unresolved) {
+        context.reasonCodes.push(`slot_dropped_no_candidate_under_hard_constraints:${slot.intent.movementPattern}`);
+        context.traceCollector.constraintEvents.push(`slot_dropped_hard_constraint:${slot.intent.movementPattern}`);
+      }
+      const pruned = pruneUnresolvedSlots(planRevision);
+      const remaining = pruned.sessions.reduce((sum, session) => sum + session.tasks.length, 0);
+      if (remaining === 0) {
+        return this.infeasible(context, [
+          "no_exercise_satisfies_hard_constraints",
+          ...unresolved.map((slot) => `unresolved:${slot.intent.movementPattern}`),
+        ]);
+      }
+      planRevision = {
+        ...pruned,
+        reasonCodes: [...new Set([...(pruned.reasonCodes ?? []), ...context.reasonCodes])],
+      };
     }
 
     const diff = computeDiff(request.facts.priorPlan?.value, planRevision, context.reasonCodes);
@@ -210,6 +240,11 @@ export class GoalCyclePlanner {
     }
     if (!request.facts.recoveryConstraints.length) missing.push("current_recovery_constraint");
     if (!request.facts.nutritionStrategies.length) missing.push("nutrition_strategy");
+    // 人口学缺失必须显式（禁止用推测值补齐能量/蛋白绝对量）
+    const demographics = profile.demographics;
+    if (!demographics?.currentWeight) missing.push("demographics_body_weight");
+    if (!demographics?.height) missing.push("demographics_height");
+    if (demographics?.ageYears === undefined) missing.push("demographics_age");
     return {
       request,
       facts: request.facts,
@@ -234,6 +269,63 @@ export class GoalCyclePlanner {
         knowledgePins: pins,
       }),
     };
+  }
+
+  /**
+   * 结构化人群边界（产品决策 2026-08-11）：
+   * 16 岁以下不自动生成计划（转介监护人+专业指导）；16-17 岁允许但保守标记；
+   * 孕期不自动生成计划（转介产科）。这些是不可绕过的规划边界，不靠文本匹配。
+   */
+  private evaluatePopulationBoundary(context: PlanningContext): InfeasiblePlan | undefined {
+    const profile = context.facts.profile.value;
+    const age = profile.demographics?.ageYears;
+    const pregnancy = (profile.professionalConstraints ?? []).some(
+      (constraint) => constraint.instruction.includes("孕") || constraint.sourceDescription.includes("孕"),
+    );
+    if (pregnancy) {
+      return {
+        kind: "infeasible_plan",
+        id: `infeasible-${stableHash({ boundary: "pregnancy", user: context.facts.userId })}`,
+        reasonCodes: ["population_boundary_pregnancy_requires_professional_guidance"],
+        suppressedGoals: [context.facts.goalContract.value.primaryGoal],
+        hardConflicts: ["pregnancy_requires_obstetric_clearance"],
+        minimumRelaxations: [{
+          field: "professional_clearance",
+          option: "obtain_obstetric_clearance_with_written_limits",
+          impact: "取得产科许可与限制后可按其限制生成保守计划",
+        }],
+        evidenceRefs: [],
+        knowledgePins: context.pins,
+        referral: {
+          audience: "obstetric_care_team",
+          message: "孕期的训练与营养需要产科医生指导，我不会自动生成计划。可以带着你的目标去咨询，医生给出许可与限制后我再按它安排。",
+        },
+      };
+    }
+    if (age !== undefined && age < 16) {
+      return {
+        kind: "infeasible_plan",
+        id: `infeasible-${stableHash({ boundary: "under_16", user: context.facts.userId })}`,
+        reasonCodes: ["population_boundary_under_16_requires_guardian_and_professional"],
+        suppressedGoals: [context.facts.goalContract.value.primaryGoal],
+        hardConflicts: ["under_16_requires_guardian_and_supervision"],
+        minimumRelaxations: [{
+          field: "supervision",
+          option: "guardian_consent_plus_qualified_youth_coach_onsite",
+          impact: "监护人同意且有合格教练现场指导时，可另行评估",
+        }],
+        evidenceRefs: [],
+        knowledgePins: context.pins,
+        referral: {
+          audience: "guardian_and_qualified_youth_coach",
+          message: "16 岁以下我不自动生成训练计划。建议由监护人陪同、在合格教练现场指导下开始；我可以解释动作与原则，但不下计划。",
+        },
+      };
+    }
+    if (age !== undefined && age < 18) {
+      context.reasonCodes.push("minor_conservative_progression_16_to_17");
+    }
+    return undefined;
   }
 
   private evaluateGlobalHardConstraints(
@@ -385,7 +477,11 @@ export class GoalCyclePlanner {
       .filter((week) => week.materialization === "materialized")
       .map((week) => this.materializeWeek(context, week));
     const sessions = materializedWeeks.flatMap((week) => week.sessions);
+    const progressionPolicy = progressionPolicyFor(materializedWeeks);
     const reasonCodes = [...context.reasonCodes];
+    if (progressionPolicy.phase === "calibration") {
+      reasonCodes.push("calibration_phase_active_with_exit_criteria");
+    }
     if (context.request.missedSessionDates?.length) {
       reasonCodes.push("missed_sessions_do_not_create_unbounded_debt");
     }
@@ -409,8 +505,9 @@ export class GoalCyclePlanner {
         .filter((week) => week.materialization === "intent_only")
         .map((week) => week.id),
       reasonCodes,
-      nutritionGuidance: nutritionGuidanceFor(context.facts),
+      nutritionGuidance: nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach),
       recoveryGuidance: recoveryGuidanceFor(context.facts),
+      progressionPolicy,
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -448,16 +545,132 @@ export class GoalCyclePlanner {
       if (!missedThisWeek.has(date)) trainingOrdinal += 1;
       return session;
     });
+    // 有氧：目标需要时安排在非训练日，不占用力量日（验收标准 §1 有氧条）
+    const withAerobic = this.injectAerobicSessions(context, week, sessions);
     return {
       id: `week-plan-${stableHash({ week: week.id })}`,
       ordinal: week.ordinal,
       startDate: week.startDate,
       endDate: week.endDate,
-      sessions,
+      sessions: withAerobic,
       stimulusBudget: week.stimulusBudget,
       materializedAt: context.request.currentDate,
-      weeklyDirectSets: volumeLedgerFromSessions(sessions),
+      weeklyDirectSets: volumeLedgerFromSessions(withAerobic),
     };
+  }
+
+  /**
+   * 有氧注入（验收标准 §1 有氧条 + WHO 2020 周量基线）。
+   * 触发条件：减脂目标、conditioning/health 修饰、或显式有氧承诺 floor。
+   * 安排在非训练日，绝不占用力量日；未达 WHO 周量时显式标注而非静默。
+   */
+  private injectAerobicSessions(
+    context: PlanningContext,
+    week: WeeklyIntentData,
+    sessions: readonly PlannedSessionData[],
+  ): readonly PlannedSessionData[] {
+    const requirement = aerobicRequirement(context.facts);
+    if (!requirement) return sessions;
+    const existing = sessions.filter((session) =>
+      (session.stimulusSlots ?? []).some((slot) =>
+        slot.intent.movementPattern === "cardio" || slot.intent.movementPattern === "locomotion"),
+    ).length;
+    let toAdd = Math.max(0, requirement.sessionsPerWeek - existing);
+    if (toAdd === 0) return sessions;
+
+    // 低冲击约束：跑步/跳跃被硬约束时只给低冲击器械形式
+    const lowImpactOnly = (context.facts.profile.value.exerciseConstraints ?? []).some(
+      (constraint) =>
+        (constraint.kind === "cannot_do" || constraint.kind === "do_not_recommend") &&
+        constraint.movementPattern === "locomotion",
+    );
+    const minutes = Math.max(20, Math.min(45, Math.round(requirement.minutesPerSession)));
+    // 从目录里选可执行的有氧变式：器械可行 + 低冲击约束时排除 moderate/high 冲击
+    const location = context.facts.profile.value.locations?.[0];
+    const aerobicVariant = [
+      ...this.knowledge.search({ movementPattern: "cardio", limit: 100 }),
+      ...this.knowledge.search({ movementPattern: "locomotion", limit: 100 }),
+    ]
+      .filter((variant) => variant.status === "active")
+      .filter((variant) =>
+        equipmentSatisfied(variant.equipment.requirement, context.availableEquipment, location?.environment))
+      .filter((variant) => !lowImpactOnly || (variant.impact?.level ?? "low") === "low")
+      .sort((left, right) => {
+        // 低冲击优先，其次器械要求少者优先（家庭/户外可执行）
+        const impactRank = (level?: string) => (level === "high" ? 2 : level === "moderate" ? 1 : 0);
+        const byImpact = impactRank(left.impact?.level) - impactRank(right.impact?.level);
+        if (byImpact !== 0) return byImpact;
+        return equipmentItemIds(left.equipment.requirement).length - equipmentItemIds(right.equipment.requirement).length;
+      })[0];
+    if (!aerobicVariant) {
+      context.reasonCodes.push("aerobic_required_but_no_feasible_modality");
+      return sessions;
+    }
+    const result = sessions.map((session) => {
+      if (toAdd === 0) return session;
+      const isRest = session.kind === "rest" && session.tasks.length === 0;
+      const elapsed = session.scheduledFor < context.request.currentDate;
+      if (!isRest || elapsed) return session;
+      toAdd -= 1;
+      const slotId = `slot-${stableHash({ week: week.id, date: session.scheduledFor, kind: "aerobic" })}`;
+      const slot: StimulusSlotData = {
+        id: slotId,
+        intent: {
+          movementPattern: aerobicVariant.movementPattern,
+          muscleGroups: ["cardiorespiratory"],
+          directMuscles: ["cardiorespiratory"],
+          stability: "either",
+          prescriptionMode: "timed",
+          fatigueIntent: "low",
+          priority: "maintenance",
+        },
+        prescription: { setCount: 1, duration: { value: minutes, unit: "minutes" } },
+        lockedFields: [],
+        exerciseSlot: {
+          status: "resolved",
+          exerciseVariantId: aerobicVariant.id,
+          satisfiedContracts: ["equipment", "location", "time", "impact_constraint"],
+          deviatedContracts: [],
+          requiredEquipment: equipmentItemIds(aerobicVariant.equipment.requirement),
+          performanceComparability: "cold_start",
+          coldStart: true,
+          sessionTimeImpactMinutes: minutes,
+          fatigueImpact: "low",
+          cameraCapability: "manual_only",
+          reasonCodes: [
+            `aerobic_${requirement.reason}`,
+            "moderate_intensity_talk_test",
+            ...(lowImpactOnly ? ["low_impact_only_due_to_hard_constraint"] : []),
+          ],
+        },
+      };
+      return {
+        ...session,
+        title: "有氧",
+        kind: "cardio" as const,
+        durationBudget: { value: minutes, unit: "minutes" as const },
+        estimatedDuration: { value: minutes, unit: "minutes" as const },
+        stimulusSlots: [slot],
+        tasks: [{
+          id: `task-${stableHash(slotId)}`,
+          exerciseVariantId: aerobicVariant.id,
+          stimulusSlotId: slotId,
+          mode: "timed" as const,
+          sets: [{
+            id: `set-${stableHash({ slot: slotId, setIndex: 0 })}`,
+            targetDuration: { value: minutes, unit: "minutes" as const },
+          }],
+        }],
+      };
+    });
+    if (lowImpactOnly) context.reasonCodes.push("aerobic_low_impact_only_due_to_hard_constraint");
+    const plannedMinutes = result
+      .filter((session) => session.kind === "cardio")
+      .reduce((sum, session) => sum + (session.estimatedDuration?.value ?? 0), 0);
+    if (plannedMinutes < 150) {
+      context.reasonCodes.push("aerobic_below_public_health_baseline_progressive_start");
+    }
+    return result;
   }
 
   private restSession(
@@ -488,11 +701,13 @@ export class GoalCyclePlanner {
   ): PlannedSessionData {
     const goal = context.facts.goalContract.value.primaryGoal;
     const isDeloadWeek = week.intent === "planned_recovery_and_formal_review";
-    const useCardio = goal === "fat_loss_preserve_lean_mass" && ordinal === context.schedule.length - 1 && !isDeloadWeek;
+    // 有氧不再占用力量日（改为安排在非训练日，见 materializeWeek 的 aerobic 注入）
+    const useCardio = false;
     const recovery = strongestRecovery(context.facts, context.request.currentDate);
     const useRecovery = recovery === "recovery_priority" || recovery === "pause_and_confirm";
     const strategies = this.knowledge.programStrategies();
-    let plannedSets: { primary: number; maintenance: number; optional: number } | undefined;
+    // 每个 slot 的组数由其直接肌群的真实暴露次数决定（不再按 priority 一刀切）
+    let setsForTemplate: ((template: SlotTemplate) => number) | undefined;
     let templates: SlotTemplate[];
     if (useRecovery) {
       templates = [{ movementPattern: "recovery", muscleGroups: [], priority: "maintenance", fatigueIntent: "low" }];
@@ -515,6 +730,14 @@ export class GoalCyclePlanner {
         context.reasonCodes.push("minimal_commitment_simplified_structure");
         context.traceCollector.constraintEvents.push(`minimal_commitment_simplified:${date}`);
       }
+      const slotFeasible = (template: { movementPattern: MovementPattern }) =>
+        this.knowledge
+          .search({ movementPattern: template.movementPattern, limit: 500 })
+          .some(
+            (variant) =>
+              variant.status === "active" &&
+              equipmentSatisfied(variant.equipment.requirement, context.availableEquipment, sessionLocation?.environment),
+          );
       templates = sessionTemplateFor(selection.rotation, ordinal).filter((template) => {
         // 器械不可行的 slot 丢弃并记录（如居家无水平拉的徒手变式），不让整份计划 infeasible
         const feasible = this.knowledge
@@ -530,13 +753,21 @@ export class GoalCyclePlanner {
         }
         return feasible;
       });
-      const targetBand = weeklyDirectSetTarget(strategies, context.facts.profile.value.trainingExperience);
+      // 单课内容地板：器械过滤后不足 2 个动作时，从同轮转其他课回填可行 slot
+      const beforeBackfill = templates.length;
+      templates = backfillThinSession(templates, selection.rotation, slotFeasible);
+      if (templates.length > beforeBackfill) {
+        context.reasonCodes.push("thin_session_backfilled_from_rotation");
+      }
+      const targetBand = weeklyDirectSetTarget(
+        strategies,
+        context.facts.profile.value.trainingExperience,
+        context.facts.goalContract.value.primaryGoal,
+      );
       const target = trainingCommitmentTarget(targetBand, context.facts.goalContract.value.commitmentPreferences?.training);
-      plannedSets = {
-        primary: setsPerSlot(target, selection.exposuresPerWeek, "primary"),
-        maintenance: setsPerSlot(target, selection.exposuresPerWeek, "maintenance"),
-        optional: 1,
-      };
+      const cyclesPerWeek = context.schedule.length / selection.rotation.sessions.length;
+      const rotation = selection.rotation;
+      setsForTemplate = (template) => setsForSlot(template, target, rotation, cyclesPerWeek);
     } else {
       templates = sessionTemplates(goal, ordinal, isBodyweightOnly(context.availableEquipment));
     }
@@ -548,17 +779,26 @@ export class GoalCyclePlanner {
     if (!useRecovery && !useCardio && strategies) {
       const cost = strategies.setCostModel;
       const estimatedMinutes = cost.warmupMinutes + boundedTemplates.reduce((sum, template, index) => {
-        const sets = plannedSets ? plannedSets[template.priority] : template.priority === "primary" ? 3 : template.priority === "maintenance" ? 2 : 1;
+        const sets = setsForTemplate
+          ? setsForTemplate(template)
+          : template.priority === "primary" ? 3 : template.priority === "maintenance" ? 2 : 1;
         const restSeconds = template.fatigueIntent === "high" ? cost.restSecondsByPriority.high_fatigue : cost.restSecondsByPriority[template.priority];
         return sum + sets * (cost.workSetMinutes + restSeconds / 60) + (index > 0 ? cost.transitionMinutesPerSwitch : 0);
       }, 0);
       if (estimatedMinutes > availability.availableMinutes * 1.15) {
         context.reasonCodes.push("time_budget_exceeded_full_plan_kept");
         context.traceCollector.constraintEvents.push(`time_budget_exceeded:${date}`);
+      } else if (estimatedMinutes < availability.availableMinutes * 0.7) {
+        // 显式标记时长利用不足：周量目标已满足时不硬塞组数，
+        // 但必须让用户看到"你报了 N 分钟，本课约 M 分钟"，由用户决定是否加内容。
+        context.reasonCodes.push("session_time_under_utilized_volume_target_met");
+        context.traceCollector.constraintEvents.push(
+          `session_time_under_utilized:${date}:${estimatedMinutes}/${availability.availableMinutes}`,
+        );
       }
     }
     const slots = boundedTemplates.map((template, slotIndex) =>
-      this.resolveStimulusSlot(context, week, date, availability, ordinal, slotIndex, template, plannedSets),
+      this.resolveStimulusSlot(context, week, date, availability, ordinal, slotIndex, template, setsForTemplate?.(template)),
     );
     // TP-DELOAD-CONTENT-001：减组、远离力竭、保留主动作技术暴露；不写死固定减幅
     const deloadedSlots = isDeloadWeek
@@ -615,7 +855,7 @@ export class GoalCyclePlanner {
     sessionOrdinal: number,
     slotIndex: number,
     template: SlotTemplate,
-    plannedSets?: { primary: number; maintenance: number; optional: number },
+    plannedSetCount?: number,
   ): StimulusSlotData {
     const slotId = `stimulus-${stableHash({ week: week.id, date, sessionOrdinal, slotIndex, template })}`;
     const direct = directChoiceFor(context.request.directChoices ?? [], slotId, sessionOrdinal, slotIndex);
@@ -638,20 +878,34 @@ export class GoalCyclePlanner {
     const hasHistory = context.history.some(
       (entry) => entry.exerciseVariantId === selected.exercise.id && entry.confidence === "confirmed",
     );
+    // 负荷有锚点（精确历史 或 用户自报基线）即进入工作区间；
+    // 校准区间只用于真正 unknown 的负荷，不应覆盖整份计划（验收标准 §1 RIR 条）。
+    const baselineAnchor = strengthBaselineForExercise(context.facts.profile.value, selected.exercise);
+    // 只有该动作的精确历史才构成负荷锚点。自报 1RM 缺少次数/RIR 上下文，
+    // 只能给校准起点建议（不能伪造精确工作重量，也不能因此跳过校准 RIR）。
+    const loadAnchored = hasHistory;
+    if (baselineAnchor && !hasHistory) {
+      context.reasonCodes.push("calibration_start_suggested_from_user_strength_baseline");
+    }
     const prescription = prescriptionFor(
       mode,
       template.priority,
       template,
       goal,
       strongestRecovery(context.facts, context.request.currentDate),
-      hasHistory
+      loadAnchored
         ? context.trainingRule.defaults.workingRir
         : context.trainingRule.defaults.calibrationRir,
-      hasHistory,
+      loadAnchored,
       availability.availableMinutes,
       context.request.personalRestTempoSeconds,
-      plannedSets,
-      context.facts.profile.value.trainingExperience === "beginner" ? 2 : 3,
+      plannedSetCount,
+      // 首次暴露保守起点作用于第一周；次周起向周量目标推进（验收标准 L36：
+      // 起始周量与熟练度/酸痛/依从性一起渐进，但不得永久化）。
+      // deload 周例外：那一周本就该减量，不能借"推进"抬高组数。
+      week.ordinal <= 1 || week.intent === "planned_recovery_and_formal_review"
+        ? (context.facts.profile.value.trainingExperience === "beginner" ? 2 : 3)
+        : Number.MAX_SAFE_INTEGER,
     );
     context.traceCollector.slots.push({
       slotId,
@@ -664,11 +918,7 @@ export class GoalCyclePlanner {
       setCount: prescription.setCount,
       ...(prescription.repRange ? { repRange: prescription.repRange } : {}),
       ...(prescription.targetRirRange ? { targetRirRange: prescription.targetRirRange } : {}),
-      loadStatus: context.history.some(
-        (entry) => entry.exerciseVariantId === selected.exercise.id && entry.confidence === "confirmed",
-      )
-        ? "anchored"
-        : "calibration",
+      loadStatus: hasHistory ? "anchored" : baselineAnchor ? "calibration" : "unknown",
     });
     const lockedFields = context.facts.mandate.value.locks
       ?.filter((lock) => lock.field === "exercise" || lock.field === "sets" || lock.field === "load")
@@ -820,6 +1070,30 @@ export class GoalCyclePlanner {
           ...(slot.prescription.rest ? { rest: slot.prescription.rest } : {}),
         };
         if (!exactHistory || base.targetReps === undefined) {
+          // 用户自填力量基线：给出校准起点建议（负荷状态仍为 unknown，不伪造精确工作重量）
+          const variant = this.knowledge.exerciseVariant(exerciseId);
+          const baseline = variant
+            ? strengthBaselineForExercise(context.facts.profile.value, variant)
+            : undefined;
+          if (baseline && base.targetReps !== undefined) {
+            const increment = equipmentIncrement(variant?.equipment.requirement);
+            const suggested = snapToIncrement(
+              estimateWorkingLoadFromOneRepMax(baseline, base.targetReps.max),
+              increment,
+            );
+            return {
+              ...base,
+              targetLoadStatus: "unknown",
+              calibrationStartSuggestion: {
+                load: suggested,
+                basis: "user_reported_strength_baseline",
+                evidenceRef: `profile:strength_baseline:${context.facts.profile.value.strengthBaseline?.measuredAt ?? "unknown"}`,
+                note: `按你自报的 ${baseline.value}${baseline.unit} 估算的试做起点；第一组做完报次数与 RIR，我再据实调整`,
+              },
+              calibrationIntent:
+                "start_from_the_suggested_calibration_load_then_confirm_reported_reps_and_RIR",
+            };
+          }
           return {
             ...base,
             targetLoadStatus: "unknown",
@@ -1066,12 +1340,12 @@ function prescriptionFor(
   hasHistory: boolean,
   availableMinutes: number,
   personalRestTempoSeconds?: number,
-  plannedSets?: { primary: number; maintenance: number; optional: number },
+  plannedSetCount?: number,
   noHistorySetCap = 2,
 ) {
   const reduction = recovery === "slight_reduction" ? 1 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 2 : 0;
-  const requestedSets = plannedSets
-    ? plannedSets[priority]
+  const requestedSets = plannedSetCount !== undefined
+    ? plannedSetCount
     : priority === "primary" ? 3 : priority === "maintenance" ? 2 : 1;
   // 无精确历史的保守起点：新手 2 组；有训练经验/力量基线者 3 组（负荷仍不锚定）
   const setCount = Math.max(1, Math.min(hasHistory ? requestedSets : noHistorySetCap, requestedSets) - reduction);
@@ -1122,6 +1396,7 @@ function intentFrom(
   return {
     movementPattern: template.movementPattern,
     muscleGroups: template.muscleGroups,
+    ...(template.directMuscles ? { directMuscles: template.directMuscles } : {}),
     stability: "either",
     prescriptionMode: mode,
     fatigueIntent: template.fatigueIntent,
@@ -1279,6 +1554,18 @@ function deriveHistory(facts: PlannerFacts): HistoricalPerformance[] {
         ]
       : [];
   });
+}
+
+
+/**
+ * 从用户自报 1RM 保守估算目标次数的工作负荷（产品规则 D 级，不是精确生理换算）。
+ * 用 Epley 反解得到理论 nRM，再乘 0.9 保守折扣——自报 1RM 常偏高，
+ * 且计划负荷宁低不高（首组确认后由校准阶梯上调）。
+ */
+function estimateWorkingLoadFromOneRepMax(oneRepMax: MassQuantity, targetReps: number): MassQuantity {
+  const reps = Math.max(1, Math.min(20, targetReps));
+  const theoretical = oneRepMax.value / (1 + reps / 30);
+  return { value: Math.round(theoretical * 0.9 * 10) / 10, unit: oneRepMax.unit };
 }
 
 function hasStrengthBaseline(profile: UserProfileData): boolean {
@@ -1506,21 +1793,130 @@ function buildPlannerTrace(
 }
 
 
-/** 计划级营养指导：目标定方向，饮食意愿定约束强度（flexible=最小有效约束，证据支持）。 */
-function nutritionGuidanceFor(facts: PlannerFacts): import("../coach/domain").NutritionGuidanceData {
+/**
+ * 校准/进阶策略（验收标准 §1）：保守起点必须带明确的退出条件与进阶幅度，
+ * 防止把校准期永久化。数值取自 ACSM 2009 progression model（超目标 1-2 次 → +2-10%），
+ * 标注为产品规则：个人实际进阶速度由实测表现驱动。
+ */
+
+/**
+ * 剪掉无候选的 slot（硬约束/专业限制导致），保留其余可执行内容。
+ * 局部限制不应升级为"整份计划不可行"——那等于因为不能硬拉就不让练。
+ */
+
+/**
+ * 有氧需求判定（产品规则）：减脂目标、conditioning/health 修饰、或显式有氧 floor。
+ * 数值方向来自 WHO 2020（每周 150-300 分钟中等强度）——作为渐进目标而非硬门槛。
+ */
+
+/** 从 EquipmentRequirement 树里取出 item id 列表（用于展示与排序）。 */
+function equipmentItemIds(requirement: import("../coach/domain").EquipmentRequirement): string[] {
+  if (requirement.kind === "item") return [requirement.id];
+  if (requirement.kind === "all" || requirement.kind === "any") {
+    return requirement.items.flatMap((item: import("../coach/domain").EquipmentRequirement) => equipmentItemIds(item));
+  }
+  return [];
+}
+
+function aerobicRequirement(
+  facts: PlannerFacts,
+): { sessionsPerWeek: number; minutesPerSession: number; reason: string } | undefined {
+  const goal = facts.goalContract.value;
+  const modifiers = goal.modifiers ?? [];
+  const floorText = (goal.maintenanceFloors ?? []).join(" ");
+  const floorAsksAerobic = /有氧|aerobic|cardio|心肺/i.test(floorText);
+  if (floorAsksAerobic) {
+    return { sessionsPerWeek: 1, minutesPerSession: 30, reason: "explicit_user_aerobic_floor" };
+  }
+  if (modifiers.includes("conditioning")) {
+    return { sessionsPerWeek: 2, minutesPerSession: 30, reason: "conditioning_modifier" };
+  }
+  if (goal.primaryGoal === "fat_loss_preserve_lean_mass" || modifiers.includes("health")) {
+    return { sessionsPerWeek: 1, minutesPerSession: 30, reason: "fat_loss_or_health_goal" };
+  }
+  return undefined;
+}
+
+function pruneUnresolvedSlots(revision: PlanRevisionData): PlanRevisionData {
+  const pruneSessions = <T extends { stimulusSlots?: readonly StimulusSlotData[]; tasks: readonly PlannedExerciseTask[] }>(
+    sessions: readonly T[],
+  ): T[] =>
+    sessions.map((session) => {
+      const kept = (session.stimulusSlots ?? []).filter((slot) => slot.exerciseSlot.status !== "unresolved");
+      const keptIds = new Set(kept.map((slot) => slot.id));
+      return {
+        ...session,
+        ...(session.stimulusSlots ? { stimulusSlots: kept } : {}),
+        tasks: session.tasks.filter((task) => !task.stimulusSlotId || keptIds.has(task.stimulusSlotId)),
+      };
+    });
+  const sessions = pruneSessions(revision.sessions);
+  const weeks = revision.materializedWeeks?.map((week) => {
+    const weekSessions = pruneSessions(week.sessions);
+    return { ...week, sessions: weekSessions, weeklyDirectSets: volumeLedgerFromSessions(weekSessions) };
+  });
+  return { ...revision, sessions, ...(weeks ? { materializedWeeks: weeks } : {}) };
+}
+
+function progressionPolicyFor(
+  weeks: readonly WeekPlanData[],
+): import("../coach/domain").ProgressionPolicyData {
+  const sets = weeks.flatMap((week) => week.sessions).flatMap((session) => session.tasks).flatMap((task) => task.sets);
+  const anchored = sets.filter((set) => set.targetLoadStatus === "predicted_target").length;
+  const calibrating = sets.filter((set) => set.targetLoadStatus === "unknown").length;
+  const phase = calibrating > anchored ? "calibration" as const : "working" as const;
+  return {
+    phase,
+    exitCriteria: phase === "calibration"
+      ? [
+          "该动作完成一次用户确认的组（负荷+次数+RIR 均已记录）",
+          "动作在目标次数区间内可稳定完成",
+        ]
+      : ["已锚定：按双进阶规则推进"],
+    progressionRule: "同一负荷下能比目标次数多完成 1-2 次时，先加次数到区间上界；连续两次达上界后加最小器材档（不超过 +10%）",
+    maxLoadIncrementPercent: 10,
+    ruleVersion: "TP-PERF-001",
+  };
+}
+
+/**
+ * 计划级营养指导。
+ * 方向的**唯一真源**是 adaptive 策略的 energyApproach——绝不按主目标重新推导，
+ * 否则会出现"恢复维持策略 + 热量赤字文案"这类冲突（验收标准 §2）。
+ * 饮食意愿只决定约束强度（记录负担），不决定方向。
+ */
+function nutritionGuidanceFor(
+  facts: PlannerFacts,
+  energyApproach: import("./adaptiveStrategy").PlanningNutritionStrategy["energyApproach"],
+): import("../coach/domain").NutritionGuidanceData {
   const goal = facts.goalContract.value.primaryGoal;
   const commitment = facts.goalContract.value.commitmentPreferences?.nutrition ?? "standard";
   const committed = [...facts.nutritionStrategies].sort((a, b) => b.revision - a.revision)[0];
   const calorieDirection =
-    goal === "hypertrophy" ? "small_surplus" as const
-    : goal === "fat_loss_preserve_lean_mass" ? "deficit" as const
+    energyApproach === "small_deficit" ? "deficit" as const
+    : energyApproach === "small_surplus" ? "small_surplus" as const
     : "maintenance" as const;
-  const proteinFloorPerKg = goal === "fat_loss_preserve_lean_mass" ? 1.8 : 1.6;
+  // 蛋白区间：ISSN 2017 健康运动者 1.4-2.0 g/kg；减脂保肌期取上段（产品规则 D 级）
+  const perKgBand = goal === "fat_loss_preserve_lean_mass"
+    ? { min: 1.6, max: 2.2 }
+    : { min: 1.4, max: 2.0 };
+  const bodyWeight = facts.profile.value.demographics?.currentWeight;
+  const unknowns: string[] = [];
+  if (!bodyWeight) unknowns.push("body_weight_unknown");
   const mode = commitment === "flexible" ? "minimal_constraint" as const : commitment === "strict" ? "full_targets" as const : "standard" as const;
   return {
     mode,
-    proteinFloorPerKg,
+    proteinFloorPerKg: perKgBand.min,
+    ...(bodyWeight
+      ? {
+          proteinGramsPerDay: {
+            min: Math.round(bodyWeight.value * perKgBand.min),
+            max: Math.round(bodyWeight.value * perKgBand.max),
+          },
+        }
+      : {}),
     calorieDirection,
+    // 绝对热量需要体重与活动数据；缺任一项就不输出（禁止推测 TDEE）
     tracking:
       mode === "minimal_constraint"
         ? "只记蛋白是否达标+饱腹感（简化轨道）"
@@ -1528,9 +1924,11 @@ function nutritionGuidanceFor(facts: PlannerFacts): import("../coach/domain").Nu
           ? "完整记录热量与宏量营养素"
           : "记录关键项（蛋白与趋势）",
     ...(committed ? { committedStrategyRef: { id: committed.value.id, revision: committed.revision } } : {}),
-    note:
-      mode === "minimal_constraint"
-        ? "先只保蛋白底线和能量方向，其他随习惯；想更精确随时说。弹性约束的长期效果更好。"
+    ...(unknowns.length ? { unknowns } : {}),
+    note: !bodyWeight
+      ? "还不知道你的体重，蛋白目标只能给每公斤区间；告诉我体重后我给具体克数。不会凭猜测给热量数字。"
+      : mode === "minimal_constraint"
+        ? "先只保蛋白底线和能量方向，其他随习惯；想更精确随时说。弹性约束的长期依从性更好。"
         : mode === "full_targets"
           ? "按完整目标追踪；连续依从性差时自动降档为简化轨道。"
           : "按默认策略追踪，趋势不对再调整。",

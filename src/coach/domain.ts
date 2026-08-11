@@ -244,6 +244,12 @@ export interface CoachingMandateData {
     schedule: "manual" | "confirm" | "managed_small_step";
     deload: "manual" | "confirm" | "managed_small_step";
     nutrition: "advice_only" | "confirm" | "managed_small_step";
+    /**
+     * Whether Coach may turn a clear statement made by the person in the
+     * current conversation into a Timeline record on their behalf. This never
+     * authorizes inferred, imported, or estimated facts.
+     */
+    recording?: "confirm" | "delegated";
   };
   limits?: { maxLoadIncreasePercent?: number; maxWeeklySetChange?: number };
   locks?: readonly {
@@ -374,6 +380,17 @@ export interface PlannedExerciseSet {
   targetDistance?: { value: number; unit: "m" | "km" };
   targetLoad?: MassQuantity;
   targetLoadStatus?: "unknown" | "historical_anchor" | "predicted_target";
+  /**
+   * 校准起点建议：仅当用户自报了力量基线（如 1RM）但缺少该动作的次数/RIR 上下文时给出。
+   * 这**不是**目标负荷——负荷状态仍为 unknown，首组必须由用户确认后才成为事实。
+   * 存在的意义：用户填的力量数据必须可见地影响输出，而不是被忽略。
+   */
+  calibrationStartSuggestion?: {
+    load: MassQuantity;
+    basis: "user_reported_strength_baseline";
+    evidenceRef: string;
+    note: string;
+  };
   targetLoadBasis?: {
     source: "exact_variant_history";
     evidenceRef: string;
@@ -399,6 +416,8 @@ export interface PlannedExerciseTask {
 export interface StimulusIntentData {
   movementPattern: import("../knowledge/model").MovementPattern;
   muscleGroups: readonly string[];
+  /** 直接组归属肌群（周量账本唯一依据）；缺省时退回 muscleGroups。 */
+  directMuscles?: readonly string[];
   stability: "supported" | "free" | "either";
   prescriptionMode: "weighted_reps" | "bodyweight_reps" | "timed" | "distance";
   fatigueIntent: "low" | "medium" | "high";
@@ -463,6 +482,19 @@ export interface WeekPlanData {
   weeklyDirectSets?: Readonly<Record<string, number>>;
 }
 
+/** 计划的进阶与校准阶段（验收标准 §1：起点必须带进阶路径，保守起点不得永久化）。 */
+export interface ProgressionPolicyData {
+  /** 当前是否处于校准阶段（负荷未锚定时的技术学习期）。 */
+  phase: "calibration" | "working";
+  /** 退出校准的条件（用户可读，且是确定性可判定的）。 */
+  exitCriteria: readonly string[];
+  /** 进阶条件与幅度（ACSM 2009 progression model：超出目标 1-2 次 → +2-10%）。 */
+  progressionRule: string;
+  /** 负荷增量上限（%）。 */
+  maxLoadIncrementPercent: number;
+  ruleVersion: string;
+}
+
 export interface PlanCustomizationRecord {
   change: import("./model").PlanEditChange;
   appliedAt: string;
@@ -472,9 +504,15 @@ export interface PlanCustomizationRecord {
 export interface NutritionGuidanceData {
   mode: "minimal_constraint" | "standard" | "full_targets";
   proteinFloorPerKg: number;
+  /** 体重换算后的每日蛋白区间（克）；无体重时缺省并进 unknowns。 */
+  proteinGramsPerDay?: { min: number; max: number };
   calorieDirection: "small_surplus" | "maintenance" | "deficit";
+  /** 绝对热量只在有可用体重与活动数据时给出；否则永远缺省。 */
+  energyKcalPerDay?: number;
   tracking: string;
   committedStrategyRef?: { id: string; revision: number };
+  /** 显式未知项（如 body_weight_unknown）：禁止用推测值补齐。 */
+  unknowns?: readonly string[];
   note: string;
 }
 
@@ -508,6 +546,8 @@ export interface PlanRevisionData {
   /** 营养与恢复指导（ticket：计划=训练+饮食+恢复一体）。 */
   nutritionGuidance?: NutritionGuidanceData;
   recoveryGuidance?: RecoveryGuidanceData;
+  /** 校准/进阶策略（每份计划必带，防止保守起点永久化）。 */
+  progressionPolicy?: ProgressionPolicyData;
 }
 
 export interface PlannedSessionRef {
@@ -719,6 +759,26 @@ export type TimelineFact =
   | {
       kind: "training";
       workoutSessionRef?: DomainAggregateRef<"workout_session">;
+      /**
+       * A user-reported session completed outside the guided workout flow.
+       * It deliberately keeps the user's action names separate from an exact
+       * catalog ExerciseVariant until that identity has been explicitly
+       * resolved; a free-text report must never fabricate comparable strength
+       * history for the planner.
+       */
+      reportedSession?: {
+        summary?: string;
+        duration?: DurationQuantity;
+        note?: string;
+        exercises?: readonly {
+          name: string;
+          sets?: readonly {
+            reps?: number;
+            load?: MassQuantity;
+            rir?: number;
+          }[];
+        }[];
+      };
       historicalSet?: {
         exerciseVariantId: string;
         load: MassQuantity;

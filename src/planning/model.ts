@@ -176,6 +176,11 @@ export interface InfeasiblePlan {
   }[];
   evidenceRefs: readonly FactRef[];
   knowledgePins: KnowledgeVersionPins;
+  /** 结构化转介（人群边界触发时必填）：给谁、说什么。非诊断性表述。 */
+  referral?: {
+    audience: string;
+    message: string;
+  };
 }
 
 export interface NoPlanChange {

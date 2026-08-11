@@ -111,9 +111,19 @@ test("最小新手居家徒手生成完整 GoalCycle，但只物化当前周和�
   );
   assert.equal(decision.planRevision.materializedWeeks?.length, 2);
   assert.equal(decision.planRevision.sessions.length, 14);
-  assert.equal(decision.planRevision.sessions.filter((session) => session.kind === "rest").length, 8);
+  // 语义修正（2026-08-11）：目标含 conditioning 修饰时有氧必须进入计划（WHO 周量方向），
+  // 且有氧安排在非训练日、不占用力量日。14 天 = 6 力量 + 4 有氧 + 4 休息。
+  assert.equal(decision.planRevision.sessions.filter((session) => session.kind === "rest").length, 4);
+  assert.equal(decision.planRevision.sessions.filter((session) => session.kind === "cardio").length, 4);
+  assert.equal(
+    decision.planRevision.sessions.filter((session) => session.kind === "bodyweight_reps").length,
+    6,
+    "有氧不得占用力量日",
+  );
+  // 不变量限定在力量课：计时有氧组没有负荷概念（不应被要求带 targetLoadStatus）
   assert.ok(
     decision.planRevision.sessions
+      .filter((session) => session.kind !== "cardio")
       .flatMap((session) => session.tasks)
       .every((task) => task.sets.every((set) => set.targetLoadStatus === "unknown")),
   );
@@ -234,7 +244,23 @@ test("Safety 与动作硬约束不会被历史、偏好或 camera bonus 覆盖",
       }),
     }),
   );
-  assert.equal(blockedPattern.kind, "infeasible_plan");
+  // 语义修正（2026-08-11）：局部硬约束丢弃该 slot 并记录，不再升级为整份计划不可行。
+  // 更强的不变量：被禁模式在计划里必须一个动作都没有，且必须有可执行内容留下。
+  assert.equal(blockedPattern.kind, "plan_proposal");
+  if (blockedPattern.kind === "plan_proposal") {
+    const blockedTasks = blockedPattern.planRevision.sessions
+      .flatMap((session) => session.tasks)
+      .filter((task) => registry.exerciseVariant(task.exerciseVariantId)?.movementPattern === "horizontal_push");
+    assert.equal(blockedTasks.length, 0, "被硬约束禁止的模式不得出现在计划里");
+    assert.ok(
+      blockedPattern.reasonCodes.some((code) => code.startsWith("slot_dropped_no_candidate_under_hard_constraints")),
+      "丢弃必须留下可审计记录",
+    );
+    assert.ok(
+      blockedPattern.planRevision.sessions.flatMap((session) => session.tasks).length > 0,
+      "局部限制不得导致零可执行内容",
+    );
+  }
 });
 
 test("酒店无器材、器械忙碌和锁冲突返回可解释结果", () => {

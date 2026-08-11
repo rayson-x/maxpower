@@ -63,14 +63,14 @@ test("4 天×75 分钟的进阶健身房计划不会退化成连续三天、每�
   const week = decision.planRevision.materializedWeeks?.[0];
   assert.ok(week);
   const activeSessions = week.sessions.filter((session) => session.tasks.length > 0);
+  const resistanceSessions = activeSessions.filter((session) => session.kind !== "cardio");
+  // 力量日节奏必须均匀分散（有氧日单独安排在非训练日，不参与力量节奏断言）
   assert.deepEqual(
-    activeSessions.map((session) => session.scheduledFor),
+    resistanceSessions.map((session) => session.scheduledFor),
     ["2026-08-03", "2026-08-05", "2026-08-07", "2026-08-09"],
     "默认 4 天节奏应均匀分散，不能自动排成周一、周二、周三连续训练",
   );
-
-  const resistanceSessions = activeSessions.filter((session) => session.kind !== "cardio");
-  assert.equal(resistanceSessions.length, 3);
+  assert.equal(resistanceSessions.length, 4, "4 天排程应产出 4 个力量日（有氧不占用力量日）");
   const report = buildPlanningReportSummary(decision);
   const resistanceSetCount = resistanceSessions.reduce(
     (sum, session) => sum + session.tasks.reduce((taskSum, task) => taskSum + task.sets.length, 0),
@@ -83,9 +83,27 @@ test("4 天×75 分钟的进阶健身房计划不会退化成连续三天、每�
       (sum, slot) => sum + slot.exerciseSlot.sessionTimeImpactMinutes,
       10 + Math.max(0, (session.stimulusSlots?.length ?? 0) - 1) * 2,
     );
-    assert.ok(workingSets >= 10, `${session.scheduledFor} 只有 ${workingSets} 个工作组`);
-    assert.ok(plannedMinutes >= 45, `${session.scheduledFor} 只规划了约 ${plannedMinutes} 分钟内容`);
+    // 语义修正（2026-08-11）：不用"每课总组数"当质量指标（验收标准 §1.1：总组数混合不同肌群后意义有限）。
+    // 防退化的真实判据是：动作数够、每课有实质内容、且每肌群周量在目标区间内（下方断言）。
+    assert.ok(session.tasks.length >= 4, `${session.scheduledFor} 只有 ${session.tasks.length} 个动作`);
+    assert.ok(workingSets >= 8, `${session.scheduledFor} 只有 ${workingSets} 个工作组`);
+    // 语义修正（2026-08-11）：周量目标已满足时不硬塞组数去填时间；
+    // 但时长利用不足必须显式标记，让用户决定是否加内容（不静默留白）。
+    if (plannedMinutes < 45) {
+      assert.ok(
+        decision.reasonCodes.includes("session_time_under_utilized_volume_target_met"),
+        `${session.scheduledFor} 仅 ${plannedMinutes} 分钟且未标记时长利用不足`,
+      );
+    }
     assert.equal(session.estimatedDuration?.value, Math.min(75, plannedMinutes));
+  }
+
+  // 每肌群周量必须落在该经验/目标的目标区间内（这才是防"静态模板"的实质判据）
+  const ledger = week.weeklyDirectSets ?? {};
+  for (const muscle of ["chest", "back", "quadriceps"]) {
+    const sets = ledger[muscle] ?? 0;
+    assert.ok(sets >= 6, `${muscle} 周量仅 ${sets} 组，低于减脂保肌的维持下限`);
+    assert.ok(sets <= 16, `${muscle} 周量 ${sets} 组过高`);
   }
 
   const resistanceSets = resistanceSessions.flatMap((session) => session.tasks).flatMap((task) => task.sets);

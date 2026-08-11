@@ -10,6 +10,8 @@ import type { StimulusIntentData } from "../coach/domain";
 export interface ComposerSlotTemplate {
   movementPattern: StimulusIntentData["movementPattern"];
   muscleGroups: readonly string[];
+  /** 直接组归属（周量记账）；缺省退回 muscleGroups。 */
+  directMuscles?: readonly string[];
   priority: StimulusIntentData["priority"];
   fatigueIntent: StimulusIntentData["fatigueIntent"];
 }
@@ -56,12 +58,61 @@ function exposuresFor(rotation: SplitRotationTemplate, weeklyDays: number): numb
   return rotation.exposuresPerCycle * cyclesPerWeek;
 }
 
-/** 周量目标（直接组/肌群/周）：TP-VOL-BASE 分档（D 级产品规则）。 */
+/**
+ * 每个肌群在一圈轮转里的**真实**直接暴露次数。
+ * 不能用轮转的名义 exposuresPerCycle：全身轮转里胸只出现在部分课，
+ * 用名义值会把胸的每次组数除得过小（周量不足的真根因）。
+ */
+export function directExposuresPerCycle(rotation: SplitRotationTemplate): Readonly<Record<string, number>> {
+  const counts = new Map<string, number>();
+  for (const session of rotation.sessions) {
+    for (const slot of session.slots) {
+      for (const muscle of slot.directMuscles ?? slot.muscleGroups) {
+        counts.set(muscle, (counts.get(muscle) ?? 0) + 1);
+      }
+    }
+  }
+  return Object.fromEntries(counts);
+}
+
+/** 该 slot 的每次组数：按其直接肌群在本周的真实暴露次数反推。 */
+export function setsForSlot(
+  slot: ComposerSlotTemplate,
+  weeklyTarget: number,
+  rotation: SplitRotationTemplate,
+  cyclesPerWeek: number,
+): number {
+  if (slot.priority === "optional") return 1;
+  const exposures = directExposuresPerCycle(rotation);
+  const direct = slot.directMuscles ?? slot.muscleGroups;
+  // 该 slot 的组数由"最受限"的直接肌群决定（暴露最多的那个，避免叠加超量）
+  const weeklyExposures = Math.max(
+    1,
+    ...direct.map((muscle) => (exposures[muscle] ?? 1) * cyclesPerWeek),
+  );
+  const raw = Math.ceil(weeklyTarget / weeklyExposures);
+  // 剂量地板（D8）：主要 slot 至少 2 组，维持 slot 至少 1 组
+  const floor = slot.priority === "primary" ? 2 : 1;
+  const cap = slot.priority === "primary" ? 6 : 4;
+  return Math.max(floor, Math.min(cap, raw));
+}
+
+/**
+ * 周量目标（直接组/肌群/周）：TP-VOL-BASE 分档（D 级产品规则）。
+ * 目标影响档位：增肌的群体证据方向是每肌群 ~≥10 组/周（ACSM 2026 综述），
+ * 所以增肌取分档上段；力量更依赖相对负荷而非周量，取默认段。
+ * 新手仍从保守起点渐进——"~10"是方向不是首周硬门槛。
+ */
 export function weeklyDirectSetTarget(
   strategies: ProgramStrategies,
   experience: "beginner" | "intermediate" | "advanced",
+  goal?: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass",
 ): { min: number; default: number; max: number } {
-  return strategies.weeklyDirectSetTargets[experience];
+  const band = strategies.weeklyDirectSetTargets[experience];
+  if (goal === "hypertrophy" && experience !== "beginner") {
+    return { ...band, default: band.max };
+  }
+  return band;
 }
 
 /**
@@ -134,15 +185,47 @@ export function weeklyVolumeLedger(
 
 /** 从物化后的 session 内容求和周量账本（真实产出，而非计划意图）。 */
 export function volumeLedgerFromSessions(
-  sessions: readonly { stimulusSlots?: readonly { intent: { muscleGroups: readonly string[] }; prescription: { setCount: number } }[] }[],
+  sessions: readonly { stimulusSlots?: readonly { intent: { muscleGroups: readonly string[]; directMuscles?: readonly string[] }; prescription: { setCount: number } }[] }[],
 ): Readonly<Record<string, number>> {
   const ledger = new Map<string, number>();
   for (const session of sessions) {
     for (const slot of session.stimulusSlots ?? []) {
-      for (const muscle of slot.intent.muscleGroups) {
+      for (const muscle of slot.intent.directMuscles ?? slot.intent.muscleGroups) {
         ledger.set(muscle, (ledger.get(muscle) ?? 0) + slot.prescription.setCount);
       }
     }
   }
   return Object.fromEntries(ledger);
+}
+
+/**
+ * 单课内容地板（验收标准 §1：需检查主要肌群覆盖与可学性）。
+ * 器械过滤后若一节课只剩 <2 个 slot，从同轮转其他课回填**可行**的 slot，
+ * 避免"一节课只有一个动作"这种不合格输出。
+ */
+export function backfillThinSession(
+  kept: ComposerSlotTemplate[],
+  rotation: SplitRotationTemplate,
+  isFeasible: (slot: ComposerSlotTemplate) => boolean,
+  minSlots = 2,
+): ComposerSlotTemplate[] {
+  if (kept.length >= minSlots) return kept;
+  const usedPatterns = new Set(kept.map((slot) => slot.movementPattern));
+  const candidates = rotation.sessions
+    .flatMap((session) => session.slots)
+    .filter((slot) => !usedPatterns.has(slot.movementPattern))
+    .filter((slot) => isFeasible(slot))
+    // 主项优先，其次维持项
+    .sort((left, right) => {
+      const rank = (priority: string) => (priority === "primary" ? 0 : priority === "maintenance" ? 1 : 2);
+      return rank(left.priority) - rank(right.priority);
+    });
+  const result = [...kept];
+  for (const candidate of candidates) {
+    if (result.length >= minSlots) break;
+    if (usedPatterns.has(candidate.movementPattern)) continue;
+    usedPatterns.add(candidate.movementPattern);
+    result.push({ ...candidate });
+  }
+  return result;
 }
