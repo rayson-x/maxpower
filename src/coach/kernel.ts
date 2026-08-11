@@ -1,12 +1,14 @@
 import type {
-  AdjustTaskChange,
   ContextRef,
   FactRef,
   PlanChangeProposalArtifact,
+  PlanEditChange,
+  PlanTask,
   TodayPlanArtifact,
   UserState,
 } from "./model";
 import { stableHash } from "./stable";
+import type { KnowledgeVersionPins } from "../knowledge/model";
 
 export interface TodayPlanDecisionInput {
   artifactId: string;
@@ -14,6 +16,7 @@ export interface TodayPlanDecisionInput {
   date: string;
   context: ContextRef;
   user: UserState;
+  knowledgePins: KnowledgeVersionPins;
 }
 
 /** Pure, deterministic domain decision. Store, UI, time and LLM access are forbidden here. */
@@ -39,6 +42,7 @@ export function decideTodayPlan(input: TodayPlanDecisionInput): TodayPlanArtifac
       "负重与 RIR 来自计划或用户记录，不由骨架推断",
       "这里只展示计划，不代表已完成训练",
     ],
+    knowledgePins: input.knowledgePins,
   };
   return Object.freeze({
     id: input.artifactId,
@@ -53,21 +57,17 @@ export interface PlanChangeDecisionInput {
   createdAt: string;
   context: ContextRef;
   user: UserState;
-  change: AdjustTaskChange;
+  change: PlanEditChange;
   reason: string;
   executionPolicy: PlanChangeProposalArtifact["executionPolicy"];
   supersedesArtifactId?: string;
+  knowledgePins: KnowledgeVersionPins;
 }
 
 export function decidePlanChangeProposal(
   input: PlanChangeDecisionInput,
 ): PlanChangeProposalArtifact {
-  const task = input.user.plan.tasks.find((candidate) => candidate.id === input.change.taskId);
-  if (!task) throw new Error(`Plan task not found: ${input.change.taskId}`);
-  const fields = ["sets", "reps", "loadKg", "targetRir", "restSeconds"] as const;
-  const changedFields = fields.filter((field) => input.change[field] !== undefined);
-  const before = Object.fromEntries(changedFields.map((field) => [field, task[field]]));
-  const after = Object.fromEntries(changedFields.map((field) => [field, input.change[field]]));
+  const { before, after } = describePlanEdit(input.user.plan.tasks, input.change);
   const semantic = {
     kind: "plan_change_proposal" as const,
     schemaVersion: 1 as const,
@@ -93,6 +93,7 @@ export function decidePlanChangeProposal(
       "这是待确认的计划差异，不代表已经执行",
       "负重与 RIR 不由骨架自动推断",
     ],
+    knowledgePins: input.knowledgePins,
   };
   return Object.freeze({
     id: input.artifactId,
@@ -100,4 +101,32 @@ export function decidePlanChangeProposal(
     ...semantic,
     hash: stableHash(semantic),
   });
+}
+
+function describePlanEdit(
+  tasks: readonly PlanTask[],
+  change: PlanEditChange,
+): { before: Readonly<Record<string, unknown>>; after: Readonly<Record<string, unknown>> } {
+  if (change.kind === "add_task") {
+    const index = Math.min(Math.max(change.index ?? tasks.length, 0), tasks.length);
+    return { before: { index, task: undefined }, after: { index, task: change.task } };
+  }
+  const index = tasks.findIndex((candidate) => candidate.id === change.taskId);
+  const task = tasks[index];
+  if (!task) throw new Error(`Plan task not found: ${change.taskId}`);
+  if (change.kind === "remove_task") {
+    return { before: { index, task }, after: { index, task: undefined } };
+  }
+  if (change.kind === "replace_task") {
+    return { before: { index, task }, after: { index, task: change.replacement } };
+  }
+  if (change.kind === "reorder_task") {
+    return { before: { index }, after: { index: change.toIndex } };
+  }
+  const fields = ["sets", "reps", "loadKg", "targetRir", "restSeconds"] as const;
+  const changedFields = fields.filter((field) => change[field] !== undefined);
+  return {
+    before: Object.fromEntries(changedFields.map((field) => [field, task[field]])),
+    after: Object.fromEntries(changedFields.map((field) => [field, change[field]])),
+  };
 }

@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "commonjs", "moduleResolution": "node",
+    "resolveJsonModule": true, "outDir": ".test-build", "rootDir": ".",
+    "strict": true, "skipLibCheck": true, "types": ["node"], "noEmitOnError": true, "ignoreDeprecations": "6.0"
+  },
+  "include": ["tools/planning/**/*.test.ts", "tools/knowledge/**/*.test.ts", "tools/e2e/**/*.test.ts", "tools/coach-runtime/**/*.test.ts", "tools/workout/**/*.test.ts"]
+}

@@ -12,6 +12,7 @@ import type {
   SetSummaryArtifact,
   TodayPlanArtifact,
   WeeklyCoachReportArtifact,
+  TimelineRecordDraftArtifact,
   NutritionObservationDraftArtifact,
   NutritionChangeProposalArtifact,
   RecoveryBriefArtifact,
@@ -346,6 +347,37 @@ function nutritionObservationDraftCard(artifact: Artifact, status: PresentationS
   };
 }
 
+function timelineRecordDraftCard(artifact: Artifact, status: PresentationStatus): ArtifactCardModel {
+  const draft = artifact as TimelineRecordDraftArtifact;
+  const isEstimate = draft.draft.source === "coach_estimate";
+  return {
+    renderer: "timeline-record-draft/v1",
+    eyebrow: isEstimate ? "估算待确认" : "待确认记录",
+    artifactId: draft.id,
+    title: timelineDraftTitle(draft),
+    subtitle: isEstimate ? "Coach 估算；确认后以估算来源写入记录" : "来自你刚才的陈述；确认后才会写入记录",
+    metrics: [{ label: "来源", value: isEstimate ? "Coach 估算" : "你的陈述" }],
+    taskList: [],
+    actions: [
+      { id: "confirm", label: "确认记录", enabled: status === "awaiting_user" },
+      { id: "reject", label: "不记录", enabled: status === "awaiting_user" },
+    ],
+    status,
+    evidenceLabels: [],
+    capabilityBoundary: draft.capabilityBoundary,
+  };
+}
+
+function timelineDraftTitle(artifact: TimelineRecordDraftArtifact): string {
+  const fact = artifact.draft.fact;
+  if (fact.kind === "training") return fact.reportedSession?.summary || fact.reportedSession?.exercises?.[0]?.name || "训练记录";
+  if (fact.kind === "activity") return fact.activityType;
+  if (fact.kind === "sleep") return "睡眠记录";
+  if (fact.kind === "recovery") return "恢复记录";
+  if (fact.kind === "body") return fact.measurement.metric === "body_weight" ? `体重 ${fact.measurement.quantity.value} ${fact.measurement.quantity.unit}` : `体脂 ${fact.measurement.quantity.value}%`;
+  return "待确认记录";
+}
+
 function nutritionChangeProposalCard(artifact: Artifact, status: PresentationStatus): ArtifactCardModel {
   const proposalArtifact = artifact as NutritionChangeProposalArtifact;
   const proposal = proposalArtifact.proposal;
@@ -518,6 +550,7 @@ export class ArtifactCardRegistry {
     ["mesocycle_review/1", mesocycleReviewCard],
     ["evidence_brief/1", evidenceBriefCard],
     ["plan_trace/1", planTraceCard],
+    ["timeline_record_draft/1", timelineRecordDraftCard],
     ["nutrition_observation_draft/1", nutritionObservationDraftCard],
     ["nutrition_change_proposal/1", nutritionChangeProposalCard],
     ["recovery_brief/1", recoveryBriefCard],

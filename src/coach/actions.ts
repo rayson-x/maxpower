@@ -4,10 +4,11 @@ import { LedgerConflictError } from "./ledger";
 import type {
   ActionReceiptArtifact,
   ActionTokenRecord,
-  AdjustTaskChange,
   ArtifactCardModel,
+  CoachSession,
   CoachRunEvent,
   PlanChangeProposalArtifact,
+  PlanEditChange,
   PlanTask,
   RuntimeServices,
   ToolExecutionIdentity,
@@ -17,6 +18,7 @@ import { stableHash } from "./stable";
 import { PolicyGate } from "./policy";
 import type { ActionTokenPrimitive } from "./ports";
 import { decidePlanChangeProposal } from "./kernel";
+import type { KnowledgeVersionPins } from "../knowledge/model";
 
 export class ActionPolicyError extends Error {
   constructor(
@@ -35,8 +37,46 @@ export class ActionPolicyError extends Error {
 
 const CHANGE_FIELDS = ["sets", "reps", "loadKg", "targetRir", "restSeconds"] as const;
 
-function validateChange(change: AdjustTaskChange): void {
+function validateTask(task: PlanTask): void {
+  if (
+    !task.id ||
+    !task.name.trim() ||
+    !Number.isInteger(task.sets) ||
+    task.sets < 1 ||
+    task.sets > 20 ||
+    !/^\d+(?:-\d+)?$/.test(task.reps)
+  ) {
+    throw new ActionPolicyError("invalid_change");
+  }
+}
+
+function validateChange(change: PlanEditChange): void {
+  if (change.kind === "add_task") {
+    validateTask(change.task);
+    if (change.index !== undefined && (!Number.isInteger(change.index) || change.index < 0)) {
+      throw new ActionPolicyError("invalid_change");
+    }
+    return;
+  }
+  if (change.kind === "remove_task") {
+    if (!change.taskId) throw new ActionPolicyError("invalid_change");
+    return;
+  }
+  if (change.kind === "replace_task") {
+    if (!change.taskId || typeof change.preserveStimulusIntent !== "boolean") {
+      throw new ActionPolicyError("invalid_change");
+    }
+    validateTask(change.replacement);
+    return;
+  }
+  if (change.kind === "reorder_task") {
+    if (!change.taskId || !Number.isInteger(change.toIndex) || change.toIndex < 0) {
+      throw new ActionPolicyError("invalid_change");
+    }
+    return;
+  }
   const allowedKeys = new Set(["kind", "taskId", ...CHANGE_FIELDS]);
+  allowedKeys.add("scope");
   if (
     change.kind !== "adjust_task" ||
     Object.keys(change).some((key) => !allowedKeys.has(key)) ||
@@ -62,39 +102,82 @@ function validateChange(change: AdjustTaskChange): void {
   }
 }
 
-function selectValues(task: PlanTask, change: AdjustTaskChange): Record<string, string | number | undefined> {
+function selectValues(task: PlanTask, change: Extract<PlanEditChange, { kind: "adjust_task" }>): Record<string, string | number | undefined> {
   return Object.fromEntries(
     CHANGE_FIELDS.filter((field) => change[field] !== undefined).map((field) => [field, task[field]]),
   );
 }
 
-function changedValues(change: AdjustTaskChange): Record<string, string | number | undefined> {
+function changedValues(change: Extract<PlanEditChange, { kind: "adjust_task" }>): Record<string, string | number | undefined> {
   return Object.fromEntries(
     CHANGE_FIELDS.filter((field) => change[field] !== undefined).map((field) => [field, change[field]]),
   );
 }
 
-function applyTaskChange(user: UserState, change: AdjustTaskChange, reason: string): UserState["plan"] {
+function applyTaskChange(user: UserState, change: PlanEditChange, reason: string): UserState["plan"] {
+  const tasks = [...user.plan.tasks];
+  if (change.kind === "add_task") {
+    const index = Math.min(change.index ?? tasks.length, tasks.length);
+    tasks.splice(index, 0, change.task);
+  } else {
+    const index = tasks.findIndex((task) => task.id === change.taskId);
+    if (index < 0) throw new ActionPolicyError("invalid_change");
+    if (change.kind === "remove_task") tasks.splice(index, 1);
+    else if (change.kind === "replace_task") tasks.splice(index, 1, change.replacement);
+    else if (change.kind === "reorder_task") {
+      const [task] = tasks.splice(index, 1);
+      tasks.splice(Math.min(change.toIndex, tasks.length), 0, task!);
+    } else {
+      tasks[index] = { ...tasks[index]!, ...changedValues(change) };
+    }
+  }
   return {
     ...user.plan,
     revision: user.plan.revision + 1,
     previousRevision: user.plan.revision,
     reason,
-    tasks: user.plan.tasks.map((task) =>
-      task.id === change.taskId
-        ? {
-            ...task,
-            ...changedValues(change),
-          }
-        : task,
-    ),
+    tasks,
   };
+}
+
+function actionRuleVersions(proposal: PlanChangeProposalArtifact): Record<string, string> {
+  const pins = proposal.knowledgePins;
+  if (!pins) return {};
+  return {
+    knowledgePack: pins.knowledgePack.contentHash,
+    exerciseCatalog: pins.exerciseCatalog.contentHash,
+    ...Object.fromEntries(pins.rulePacks.map((pin) => [`rulePack:${pin.id}`, pin.contentHash])),
+  };
+}
+
+function sessionWithArtifactRefs(
+  session: CoachSession,
+  artifactId: string,
+  presentationId: string,
+  updatedAt: string,
+): CoachSession {
+  return {
+    ...session,
+    revision: (session.revision ?? 1) + 1,
+    artifactIds: [...new Set([...(session.artifactIds ?? []), artifactId])],
+    presentationIds: [...new Set([...(session.presentationIds ?? []), presentationId])],
+    updatedAt,
+  };
+}
+
+function sanitizeActionLogText(value: string): string {
+  return value
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, "[redacted-email]")
+    .replace(/\b1\d{10}\b/g, "[redacted-phone]")
+    .replace(/(?:姓名|地址|住址)[:：]\s*[^，。；;]+/g, "[redacted-direct-identity]");
 }
 
 export interface ProposePlanChangeInput {
   sessionId: string;
-  change: AdjustTaskChange;
+  change: PlanEditChange;
   reason: string;
+  /** Active/completed tasks are frozen; only future work may be edited in-session. */
+  protectedTaskIds?: readonly string[];
 }
 
 export interface PlanChangeProposalResult {
@@ -126,6 +209,7 @@ export class ActionBroker {
     private readonly ledger: CoachLedger,
     private readonly runtime: RuntimeServices,
     private readonly cards: ArtifactCardRegistry,
+    private readonly knowledgePins: () => KnowledgeVersionPins,
     private readonly policy = new PolicyGate(),
     private readonly tokenPrimitive: ActionTokenPrimitive = {
       issue: (claims) => stableHash(claims),
@@ -145,8 +229,16 @@ export class ActionBroker {
     if (!user) throw new Error(`User facts not found: ${session.userId}`);
     const policy = this.policy.proposal(user);
     if (policy.result === "deny") throw new ActionPolicyError(policy.reason);
-    const task = user.plan.tasks.find((candidate) => candidate.id === input.change.taskId);
-    if (!task) throw new ActionPolicyError("invalid_change");
+    const targetId = input.change.kind === "add_task" ? undefined : input.change.taskId;
+    const task = targetId ? user.plan.tasks.find((candidate) => candidate.id === targetId) : undefined;
+    if (targetId && !task) throw new ActionPolicyError("invalid_change");
+    if (targetId && input.protectedTaskIds?.includes(targetId)) {
+      throw new ActionPolicyError("invalid_change");
+    }
+    const newTaskId = input.change.kind === "add_task" ? input.change.task.id : undefined;
+    if (newTaskId && user.plan.tasks.some((candidate) => candidate.id === newTaskId)) {
+      throw new ActionPolicyError("invalid_change");
+    }
 
     const now = this.runtime.now();
     const runId = execution?.runId ?? this.runtime.nextId("coach-run");
@@ -161,6 +253,7 @@ export class ActionBroker {
       change: input.change,
       reason: input.reason,
       executionPolicy: policy.executionPolicy,
+      knowledgePins: this.knowledgePins(),
       ...(lineage ? { supersedesArtifactId: lineage.supersedesArtifactId } : {}),
     });
     const presentation = {
@@ -194,6 +287,7 @@ export class ActionBroker {
       toolCallId,
       artifactId,
       artifactHash: artifact.hash,
+      artifactSchemaVersion: artifact.schemaVersion,
       action: "apply",
       expectedPlanRevision: user.plan.revision,
       expectedMandateRevision: user.mandate.revision,
@@ -242,12 +336,79 @@ export class ActionBroker {
         occurredAt: now,
       },
     ];
-    await this.ledger.replace({
-      ...snapshot,
-      artifacts: [...snapshot.artifacts, artifact],
-      presentations: [...snapshot.presentations, presentation],
-      runEvents: [...snapshot.runEvents, ...events],
-      actionTokens: [...snapshot.actionTokens, tokenRecord, rejectTokenRecord],
+    const updatedSession = {
+      ...session,
+      revision: (session.revision ?? 1) + 1,
+      runIds: [...new Set([...(session.runIds ?? []), runId])],
+      toolCallIds: [...new Set([...(session.toolCallIds ?? []), toolCallId])],
+      artifactIds: [...new Set([...(session.artifactIds ?? []), artifact.id])],
+      presentationIds: [...new Set([...(session.presentationIds ?? []), presentation.id])],
+      updatedAt: now,
+    };
+    await this.ledger.commit({
+      kind: "domain",
+      userId: user.userId,
+      actorId: "action_broker",
+      intent: "plan.proposal.create",
+      expectedRevisions: [],
+      expectedSessionRevisions: [{ id: session.id, revision: session.revision ?? 1 }],
+      domainEvents: [],
+      sessions: [updatedSession],
+      artifacts: [artifact],
+      presentations: [presentation],
+      runEvents: events,
+      issueTokens: [tokenRecord, rejectTokenRecord],
+      actionEvents: [
+        {
+          id: this.runtime.nextId("action"),
+          userId: user.userId,
+          occurredAt: now,
+          actor: "agent",
+          action: "proposal.created",
+          targetType: "plan",
+          targetId: user.userId,
+          scope: "plan_revision",
+          intent: sanitizeActionLogText(input.reason),
+          beforeRevision: user.plan.revision,
+          before: artifact.before,
+          after: artifact.after,
+          evidenceRefs: artifact.evidenceRefs,
+          beforeRefs: [{ aggregate: "plan", id: user.userId, revision: user.plan.revision }],
+          afterRefs: [{ aggregate: "plan", id: user.userId, revision: user.plan.revision }],
+          ruleVersions: actionRuleVersions(artifact),
+          mandateRevision: user.mandate.revision,
+          result: "allowed",
+          undoBoundary: "not_applicable",
+          sessionId: session.id,
+          runId,
+          toolCallId,
+          policyDecision:
+            policy.executionPolicy === "confirm" ? "require_confirmation" : "allow",
+          causationId: artifact.id,
+          correlationId: session.id,
+          reversible: false,
+        },
+      ],
+      toolAudit: [
+        {
+          id: this.runtime.nextId("tool-audit"),
+          userPseudonym: `local-${stableHash({ userId: user.userId })}`,
+          sessionId: session.id,
+          runId,
+          toolCallId,
+          phase: "policy_decision",
+          toolName: "plan.propose_change",
+          outcome: "passed",
+          metadata: {
+            policy: policy.executionPolicy,
+            planRevision: user.plan.revision,
+            mandateRevision: user.mandate.revision,
+          },
+          occurredAt: now,
+        },
+      ],
+      idempotencyKey: `proposal:${artifact.id}`,
+      recordedAt: now,
     });
     return {
       artifact,
@@ -332,6 +493,7 @@ export class ActionBroker {
       token.sessionId !== session.id ||
       token.artifactId !== proposal.id ||
       token.artifactHash !== proposal.hash ||
+      token.artifactSchemaVersion !== proposal.schemaVersion ||
       token.action !== "apply" ||
       token.consumedAt
     ) {
@@ -360,6 +522,7 @@ export class ActionBroker {
       evidenceRefs: proposal.evidenceRefs,
       missingness: proposal.missingness,
       capabilityBoundary: ["撤销会创建补偿版本，不删除历史"],
+      knowledgePins: proposal.knowledgePins ?? this.knowledgePins(),
     };
     const receipt: ActionReceiptArtifact = Object.freeze({
       id: receiptId,
@@ -402,21 +565,38 @@ export class ActionBroker {
       toolCallId: token.toolCallId,
       artifactId: receipt.id,
       artifactHash: receipt.hash,
+      artifactSchemaVersion: receipt.schemaVersion,
       action: "undo",
       expectedPlanRevision: nextPlan.revision,
       expectedMandateRevision: user.mandate.revision,
       expiresAt: undoExpiresAt,
       nonce: undoNonce,
     };
+    const receiptRunEvent: CoachRunEvent = {
+      type: "action-receipt",
+      sessionId: session.id,
+      runId: token.runId,
+      toolCallId: token.toolCallId,
+      artifactRef: {
+        id: receipt.id,
+        kind: receipt.kind,
+        schemaVersion: receipt.schemaVersion,
+        hash: receipt.hash,
+      },
+      occurredAt: now,
+    };
+    const updatedSession = sessionWithArtifactRefs(session, receipt.id, receiptPresentation.id, now);
     try {
       const committed = await this.ledger.commit({
         userId: user.userId,
         expectedPlanRevision: proposal.basePlanRevision,
         expectedMandateRevision: proposal.mandateRevision,
         plan: nextPlan,
+        session: updatedSession,
+        expectedSessionRevision: session.revision ?? 1,
         artifacts: [receipt],
         presentations: [{ ...proposalPresentation, status: "applied" }, receiptPresentation],
-        runEvents: [],
+        runEvents: [receiptRunEvent],
         consumeToken: token.token,
         invalidateTokens: snapshot.actionTokens
           .filter(
@@ -437,11 +617,22 @@ export class ActionBroker {
           action: "plan.change.applied",
           targetType: "plan",
           targetId: user.userId,
+          scope: "plan_revision",
+          intent: sanitizeActionLogText(proposal.reason),
           beforeRevision: user.plan.revision,
           afterRevision: nextPlan.revision,
           before: proposal.before,
           after: proposal.after,
           evidenceRefs: proposal.evidenceRefs,
+          beforeRefs: [{ aggregate: "plan", id: user.userId, revision: user.plan.revision }],
+          afterRefs: [{ aggregate: "plan", id: user.userId, revision: nextPlan.revision }],
+          ruleVersions: actionRuleVersions(proposal),
+          mandateRevision: user.mandate.revision,
+          result: "applied",
+          undoBoundary: "compensating_revision",
+          sessionId: session.id,
+          runId: token.runId,
+          toolCallId: token.toolCallId,
           policyDecision:
             proposal.executionPolicy === "managed" ? "allow" : "require_confirmation",
           ...(proposal.executionPolicy === "managed"
@@ -505,6 +696,7 @@ export class ActionBroker {
       token.sessionId !== session.id ||
       token.artifactId !== sourceReceipt.id ||
       token.artifactHash !== sourceReceipt.hash ||
+      token.artifactSchemaVersion !== sourceReceipt.schemaVersion ||
       token.consumedAt
     ) {
       throw new ActionPolicyError("invalid_token");
@@ -532,9 +724,7 @@ export class ActionBroker {
       revision: user.plan.revision + 1,
       previousRevision: user.plan.revision,
       reason: `撤销：${proposal.reason}`,
-      tasks: user.plan.tasks.map((task) =>
-        task.id === proposal.change.taskId ? { ...task, ...proposal.before } : task,
-      ),
+      tasks: undoTaskChange(user.plan.tasks, proposal.change, proposal.before),
     };
     const receiptSemantic = {
       kind: "action_receipt" as const,
@@ -549,6 +739,7 @@ export class ActionBroker {
       evidenceRefs: proposal.evidenceRefs,
       missingness: [] as string[],
       capabilityBoundary: ["补偿版本已创建；原计划与操作记录仍可查询"],
+      knowledgePins: proposal.knowledgePins ?? this.knowledgePins(),
     };
     const receipt: ActionReceiptArtifact = Object.freeze({
       id: this.runtime.nextId("artifact"),
@@ -562,15 +753,34 @@ export class ActionBroker {
       renderer: "action-receipt/v1",
       status: "ready" as const,
     };
+    const sourceReceiptPresentation = snapshot.presentations.find(
+      (presentation) => presentation.artifactId === sourceReceipt.id,
+    );
+    if (!sourceReceiptPresentation) throw new Error("ActionReceipt presentation missing");
     const undoActionId = this.runtime.nextId("action");
+    const receiptRunEvent: CoachRunEvent = {
+      type: "action-receipt",
+      sessionId: session.id,
+      runId: token.runId,
+      toolCallId: token.toolCallId,
+      artifactRef: {
+        id: receipt.id,
+        kind: receipt.kind,
+        schemaVersion: receipt.schemaVersion,
+        hash: receipt.hash,
+      },
+      occurredAt: now,
+    };
     const committed = await this.ledger.commit({
       userId: user.userId,
       expectedPlanRevision: user.plan.revision,
       expectedMandateRevision: user.mandate.revision,
       plan: nextPlan,
+      session: sessionWithArtifactRefs(session, receipt.id, receiptPresentation.id, now),
+      expectedSessionRevision: session.revision ?? 1,
       artifacts: [receipt],
-      presentations: [receiptPresentation],
-      runEvents: [],
+      presentations: [{ ...sourceReceiptPresentation, status: "undone" }, receiptPresentation],
+      runEvents: [receiptRunEvent],
       consumeToken: token.token,
       idempotencyKey: input.idempotencyKey,
       occurredAt: now,
@@ -583,11 +793,22 @@ export class ActionBroker {
         action: "plan.change.undone",
         targetType: "plan",
         targetId: user.userId,
+        scope: "plan_revision",
+        intent: `undo:${sanitizeActionLogText(proposal.reason)}`,
         beforeRevision: user.plan.revision,
         afterRevision: nextPlan.revision,
         before: proposal.after,
         after: proposal.before,
         evidenceRefs: proposal.evidenceRefs,
+        beforeRefs: [{ aggregate: "plan", id: user.userId, revision: user.plan.revision }],
+        afterRefs: [{ aggregate: "plan", id: user.userId, revision: nextPlan.revision }],
+        ruleVersions: actionRuleVersions(proposal),
+        mandateRevision: user.mandate.revision,
+        result: "undone",
+        undoBoundary: "not_reversible",
+        sessionId: session.id,
+        runId: token.runId,
+        toolCallId: token.toolCallId,
         policyDecision: "allow",
         humanDecision: "confirmed",
         causationId: sourceAction.id,
@@ -634,6 +855,7 @@ export class ActionBroker {
       token.sessionId !== session.id ||
       token.artifactId !== proposal.id ||
       token.artifactHash !== proposal.hash ||
+      token.artifactSchemaVersion !== proposal.schemaVersion ||
       token.consumedAt
     ) {
       throw new ActionPolicyError("invalid_token");
@@ -663,6 +885,7 @@ export class ActionBroker {
       evidenceRefs: proposal.evidenceRefs,
       missingness: [] as string[],
       capabilityBoundary: ["原计划未发生变化"],
+      knowledgePins: proposal.knowledgePins ?? this.knowledgePins(),
     };
     const receipt: ActionReceiptArtifact = Object.freeze({
       id: this.runtime.nextId("artifact"),
@@ -678,14 +901,29 @@ export class ActionBroker {
       renderer: "action-receipt/v1",
       status: "ready" as const,
     };
+    const receiptRunEvent: CoachRunEvent = {
+      type: "action-receipt",
+      sessionId: session.id,
+      runId: token.runId,
+      toolCallId: token.toolCallId,
+      artifactRef: {
+        id: receipt.id,
+        kind: receipt.kind,
+        schemaVersion: receipt.schemaVersion,
+        hash: receipt.hash,
+      },
+      occurredAt: now,
+    };
     const result = await this.ledger.commit({
       userId: user.userId,
       expectedPlanRevision: user.plan.revision,
       expectedMandateRevision: user.mandate.revision,
       plan: user.plan,
+      session: sessionWithArtifactRefs(session, receipt.id, presentation.id, now),
+      expectedSessionRevision: session.revision ?? 1,
       artifacts: [receipt],
       presentations: [{ ...proposalPresentation, status: "rejected" }, presentation],
-      runEvents: [],
+      runEvents: [receiptRunEvent],
       consumeToken: token.token,
       invalidateTokens: snapshot.actionTokens
         .filter(
@@ -705,10 +943,21 @@ export class ActionBroker {
         action: "plan.change.rejected",
         targetType: "plan",
         targetId: user.userId,
+        scope: "plan_revision",
+        intent: sanitizeActionLogText(proposal.reason),
         beforeRevision: user.plan.revision,
         before: proposal.before,
         after: proposal.before,
         evidenceRefs: proposal.evidenceRefs,
+        beforeRefs: [{ aggregate: "plan", id: user.userId, revision: user.plan.revision }],
+        afterRefs: [{ aggregate: "plan", id: user.userId, revision: user.plan.revision }],
+        ruleVersions: actionRuleVersions(proposal),
+        mandateRevision: user.mandate.revision,
+        result: "rejected",
+        undoBoundary: "not_reversible",
+        sessionId: session.id,
+        runId: token.runId,
+        toolCallId: token.toolCallId,
         policyDecision: "allow",
         humanDecision: "rejected",
         causationId: proposal.id,
@@ -726,4 +975,40 @@ export class ActionBroker {
     }
     return { status: "rejected", receipt, card: this.cards.render(receipt, "ready") };
   }
+}
+
+function undoTaskChange(
+  currentTasks: readonly PlanTask[],
+  change: PlanEditChange,
+  before: Readonly<Record<string, unknown>>,
+): readonly PlanTask[] {
+  const tasks = [...currentTasks];
+  if (change.kind === "add_task") {
+    return tasks.filter((task) => task.id !== change.task.id);
+  }
+  if (change.kind === "remove_task") {
+    const task = before.task as PlanTask | undefined;
+    const index = Number(before.index);
+    if (!task || !Number.isInteger(index)) throw new ActionPolicyError("stale");
+    tasks.splice(Math.min(Math.max(index, 0), tasks.length), 0, task);
+    return tasks;
+  }
+  if (change.kind === "replace_task") {
+    const task = before.task as PlanTask | undefined;
+    const index = tasks.findIndex((candidate) => candidate.id === change.replacement.id);
+    if (!task || index < 0) throw new ActionPolicyError("stale");
+    tasks.splice(index, 1, task);
+    return tasks;
+  }
+  if (change.kind === "reorder_task") {
+    const currentIndex = tasks.findIndex((candidate) => candidate.id === change.taskId);
+    const priorIndex = Number(before.index);
+    if (currentIndex < 0 || !Number.isInteger(priorIndex)) throw new ActionPolicyError("stale");
+    const [task] = tasks.splice(currentIndex, 1);
+    tasks.splice(Math.min(Math.max(priorIndex, 0), tasks.length), 0, task!);
+    return tasks;
+  }
+  return tasks.map((task) =>
+    task.id === change.taskId ? { ...task, ...before } : task,
+  );
 }

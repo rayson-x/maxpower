@@ -187,6 +187,7 @@ export type ArtifactKind =
   | "mesocycle_review"
   | "evidence_brief"
   | "plan_trace"
+  | "timeline_record_draft"
   | "nutrition_observation_draft"
   | "nutrition_change_proposal"
   | "recovery_brief"
@@ -424,6 +425,22 @@ export interface NutritionObservationDraftArtifact extends ArtifactBase {
 }
 
 /**
+ * A typed record candidate assembled from a user statement when their Coach
+ * mandate asks for a final tap before writing. The source statement remains
+ * distinct from estimates and device-derived observations.
+ */
+export interface TimelineRecordDraftArtifact extends ArtifactBase {
+  kind: "timeline_record_draft";
+  userId: string;
+  idempotencyKey: string;
+  draft: {
+    fact: import("./domain").TimelineFact;
+    occurredAt: string;
+    source: "user_statement" | "coach_estimate";
+  };
+}
+
+/**
  * A version-pinned, confirmation-gated adjustment to a committed nutrition
  * strategy. It is an immutable proposal, never an intake record or a direct
  * strategy write.
@@ -479,6 +496,7 @@ export type Artifact =
   | MesocycleReviewArtifact
   | EvidenceBriefArtifact
   | PlanTraceArtifact
+  | TimelineRecordDraftArtifact
   | NutritionObservationDraftArtifact
   | NutritionChangeProposalArtifact
   | RecoveryBriefArtifact
@@ -665,6 +683,7 @@ export interface ActionEvent {
     | "memory.changed"
     | "timeline.source_changed"
     | "fact.written"
+    | "timeline.draft.rejected"
     | "mandate.changed"
     | "data.lifecycle.changed"
     | "permission.changed"

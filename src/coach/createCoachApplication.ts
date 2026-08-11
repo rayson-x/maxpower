@@ -71,7 +71,7 @@ import {
   type PrivacySettingsOverview,
 } from "../privacy";
 import { clone, stableHash } from "./stable";
-import { CoachToolRegistry } from "./toolRegistry";
+import { CoachToolRegistry, type UserStatedRecordInput } from "./toolRegistry";
 import {
   createInstalledKnowledgePack,
   createKnowledgePackRegistry,
@@ -356,7 +356,9 @@ export class CoachApplication {
           this.actions.proposePlanChange(input, undefined, execution),
         lookupExerciseKnowledge: (input, execution) => this.lookupExerciseKnowledge(input, execution),
         explainKnowledgeRule: (input, execution) => this.explainKnowledgeRule(input, execution),
+        searchKnowledgeBase: (input, execution) => this.searchKnowledgeBase(input, execution),
         recordNutritionObservation: (input, execution) => this.recordNutritionObservationForTool(input, execution),
+        recordUserStatedReport: (input, execution) => this.recordUserStatedReportForTool(input, execution),
         substituteExercise: (input, execution) => this.substituteExerciseForTool(input, execution),
         reportWorkoutSet: (input, execution) => this.reportWorkoutSetForTool(input, execution),
         triggerReplanWithContext: (input, execution) => this.triggerReplanWithContextForTool(input, execution),
@@ -1612,9 +1614,7 @@ export class CoachApplication {
     });
   }
 
-  /**
-   * 三形态工具面（ticket 06）。全部走 artifact + 确认链；LLM 只传话。
-   */
+  /** A user-stated meal may be delegated to Coach; estimates remain review-only. */
   async recordNutritionObservationForTool(
     input: { sessionId: string; items: readonly string[]; mealSlot?: string; note?: string },
     execution?: ToolExecutionIdentity,
@@ -1623,6 +1623,7 @@ export class CoachApplication {
     const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
     if (!session) throw new Error("coach_session_not_found");
     const now = this.runtime.now();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
     const observation = {
       id: this.runtime.nextId("meal-observation"),
       mode: "simplified" as const,
@@ -1634,6 +1635,21 @@ export class CoachApplication {
       provenance: "manual" as const,
       occurredAt: now,
     };
+    if (canCoachCommitUserStatedRecord(domain.mandate?.value, now, "nutrition")) {
+      await this.confirmMealObservation({
+        userId: session.userId,
+        idempotencyKey: `coach-user-meal:${session.id}:${execution?.toolCallId ?? observation.id}`,
+        source: "manual",
+        observation,
+      });
+      return this.presentRecordedUserReport({
+        sessionId: session.id,
+        execution,
+        title: "已记录饮食",
+        summary: [input.items.join("、")],
+        scope: "timeline:nutrition:user_stated",
+      });
+    }
     const draft: import("../nutrition").NutritionObservationDraft = {
       id: observation.id,
       schemaVersion: 1,
@@ -1666,6 +1682,247 @@ export class CoachApplication {
       execution,
       artifact,
       scope: "nutrition:observation_draft",
+    });
+  }
+
+  /**
+   * Agent write path for explicit conversational reports. A Coach-generated
+   * energy estimate is deliberately held as a separate review draft even
+   * when the user has granted recording authority.
+   */
+  async recordUserStatedReportForTool(
+    input: { sessionId: string; report: UserStatedRecordInput },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    if (hasCoachEstimate(input.report) || !canCoachCommitUserStatedRecord(domain.mandate?.value, now, input.report.kind)) {
+      return this.presentTimelineRecordDraft({
+        sessionId: session.id,
+        execution,
+        report: input.report,
+      });
+    }
+    await this.recordTimelineFact({
+      userId: session.userId,
+      idempotencyKey: `coach-user-report:${session.id}:${execution?.toolCallId ?? stableHash(input.report)}`,
+      actor: { kind: "agent", id: "coach" },
+      delegatedByUser: true,
+      fact: timelineFactFromUserReport(input.report),
+      envelope: {
+        time: { startedAt: now, timezoneOffsetMinutes: new Date(now).getTimezoneOffset() * -1 },
+        provenance: {
+          origin: "manual",
+          sourceRecordId: `coach-user-report:${session.id}:${execution?.toolCallId ?? stableHash(input.report)}`,
+          recordingMethod: "manual_entry",
+          dataStatus: "available",
+          confidence: "confirmed",
+        },
+        privacyClass: "sensitive",
+        causalRefs: ["user_stated_coach_capture", `coach_session:${session.id}`],
+        evidenceRefs: [],
+        layer: "raw_observation",
+      },
+    });
+    return this.presentRecordedUserReport({
+      sessionId: session.id,
+      execution,
+      title: "已写入记录",
+      summary: [userReportSummary(input.report)],
+      scope: `timeline:${input.report.kind}:user_stated`,
+    });
+  }
+
+  private async presentTimelineRecordDraft(input: {
+    sessionId: string;
+    execution?: ToolExecutionIdentity;
+    report: UserStatedRecordInput;
+  }): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const estimate = hasCoachEstimate(input.report);
+    const draft = {
+      fact: timelineFactFromUserReport(input.report),
+      occurredAt: now,
+      source: estimate ? "coach_estimate" as const : "user_statement" as const,
+    };
+    const artifact: import("./model").TimelineRecordDraftArtifact = {
+      id: `timeline-record-draft:${stableHash({ sessionId: session.id, toolCallId: input.execution?.toolCallId, draft })}`,
+      kind: "timeline_record_draft",
+      userId: session.userId,
+      idempotencyKey: `tool:${input.execution?.toolCallId ?? stableHash(draft)}`,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [],
+      missingness: [estimate ? "coach_estimate_requires_confirmation" : "explicit_user_confirmation_required"],
+      capabilityBoundary: estimate
+        ? ["这项能量消耗来自 Coach 估算，不是你已报告的实际数值。", "确认后才会写入 Timeline，并保留为估算来源。"]
+        : ["这是你在当前对话中明确陈述的内容；确认后才会写入 Timeline。", "推测、估算和设备结论不能复用这条确认路径直接写入。"],
+      hash: stableHash(draft),
+      knowledgePins: this.knowledge.versionPins(),
+      draft,
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "timeline.record_user_report",
+      execution: input.execution,
+      artifact,
+      presentationStatus: "awaiting_user",
+      scope: "timeline:user_stated:confirmation_required",
+    });
+  }
+
+  private async presentRecordedUserReport(input: {
+    sessionId: string;
+    execution?: ToolExecutionIdentity;
+    title: string;
+    summary: readonly string[];
+    scope: string;
+    missingness?: readonly string[];
+    boundary?: readonly string[];
+  }): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const now = this.runtime.now();
+    const semantic = {
+      kind: "evidence_brief" as const,
+      userId: session.userId,
+      title: input.title,
+      summary: input.summary,
+      schemaVersion: 1 as const,
+      renderVersion: 1 as const,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [],
+      missingness: input.missingness ?? [],
+      capabilityBoundary: input.boundary ?? ["仅记录当前对话中由用户明确陈述的事实；推测和估算不会自动写入。"],
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "timeline.record_user_report",
+      execution: input.execution,
+      artifact: { id: `user-report-receipt:${stableHash({ sessionId: session.id, execution: input.execution?.toolCallId, semantic })}`, ...semantic, hash: stableHash(semantic) },
+      scope: input.scope,
+    });
+  }
+
+  async confirmTimelineRecordDraft(input: {
+    userId: string;
+    artifactId: string;
+    idempotencyKey: string;
+  }): Promise<DomainCommandResult> {
+    const snapshot = await this.ledger.read();
+    const artifact = snapshot.artifacts.find(
+      (item): item is import("./model").TimelineRecordDraftArtifact =>
+        item.id === input.artifactId && item.kind === "timeline_record_draft" && item.userId === input.userId,
+    );
+    if (!artifact) throw new Error("timeline_record_draft_not_found");
+    const result = await this.recordTimelineFact({
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      confirmedByUser: true,
+      fact: artifact.draft.fact,
+      envelope: {
+        time: { startedAt: artifact.draft.occurredAt, timezoneOffsetMinutes: new Date(artifact.draft.occurredAt).getTimezoneOffset() * -1 },
+        provenance: {
+          origin: "manual",
+          sourceRecordId: `timeline-record-draft:${artifact.id}`,
+          recordingMethod: "manual_entry",
+          dataStatus: "available",
+          confidence: "confirmed",
+        },
+        privacyClass: "sensitive",
+        causalRefs: [`timeline_record_draft:${artifact.id}`, "user_confirmed_record_draft"],
+        evidenceRefs: [],
+        layer: "raw_observation",
+      },
+    });
+    await this.updateTimelineRecordDraftPresentation({ userId: input.userId, snapshot, artifactId: artifact.id, status: "applied", idempotencyKey: `${input.idempotencyKey}:presentation` });
+    return result;
+  }
+
+  async rejectTimelineRecordDraft(input: {
+    userId: string;
+    artifactId: string;
+    idempotencyKey: string;
+  }): Promise<DomainCommandResult> {
+    const snapshot = await this.ledger.read();
+    const artifact = snapshot.artifacts.find(
+      (item): item is import("./model").TimelineRecordDraftArtifact =>
+        item.id === input.artifactId && item.kind === "timeline_record_draft" && item.userId === input.userId,
+    );
+    if (!artifact) throw new Error("timeline_record_draft_not_found");
+    const now = this.runtime.now();
+    const projection = await this.readDomainProjection({ userId: input.userId });
+    const presentation = snapshot.presentations.find((item) => item.artifactId === artifact.id && item.renderer === "timeline_record_draft/1");
+    return this.ledger.commit({
+      kind: "domain",
+      userId: input.userId,
+      actorId: input.userId,
+      intent: "timeline.record_draft.reject",
+      expectedRevisions: [],
+      domainEvents: [],
+      ...(presentation ? { presentations: [{ ...presentation, status: "rejected" as const }] } : {}),
+      actionEvents: [{
+        id: this.runtime.nextId("action"),
+        userId: input.userId,
+        occurredAt: now,
+        actor: "user",
+        action: "timeline.draft.rejected",
+        targetType: "timeline",
+        targetId: artifact.id,
+        scope: "timeline:user_stated:confirmation_required",
+        intent: "timeline.record_draft.reject",
+        before: { artifactId: artifact.id, status: "draft" },
+        after: { artifactId: artifact.id, status: "rejected" },
+        evidenceRefs: [],
+        beforeRefs: [],
+        afterRefs: [],
+        ruleVersions: knowledgeRuleVersions(this.knowledge.versionPins()),
+        mandateRevision: projection.mandate?.revision ?? 0,
+        result: "rejected",
+        undoBoundary: "not_applicable",
+        policyDecision: "allow",
+        humanDecision: "rejected",
+        causationId: artifact.id,
+        correlationId: `timeline:${input.idempotencyKey}`,
+        reversible: false,
+      }],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: now,
+    });
+  }
+
+  private async updateTimelineRecordDraftPresentation(input: {
+    userId: string;
+    snapshot: Awaited<ReturnType<CoachLedger["read"]>>;
+    artifactId: string;
+    status: "applied" | "rejected";
+    idempotencyKey: string;
+  }): Promise<void> {
+    const presentation = input.snapshot.presentations.find(
+      (item) => item.artifactId === input.artifactId && item.renderer === "timeline_record_draft/1",
+    );
+    if (!presentation || presentation.status === input.status) return;
+    await this.ledger.commit({
+      kind: "domain",
+      userId: input.userId,
+      actorId: "coach_kernel",
+      intent: "timeline.record_draft.presentation",
+      expectedRevisions: [],
+      domainEvents: [],
+      presentations: [{ ...presentation, status: input.status }],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: this.runtime.now(),
     });
   }
 
@@ -1829,6 +2086,68 @@ export class CoachApplication {
       execution,
       artifact,
       scope: `plan:replan:${input.contextType}`,
+    });
+  }
+
+  /**
+   * Agent 知识检索（客户端知识库）。
+   * 只返回知识包里已审核的原文段落 + 可解析的文献引用；
+   * 查不到时返回 typed unknown，system prompt 要求 agent 明说不知道，不得用先验补答。
+   */
+  async searchKnowledgeBase(
+    input: { sessionId: string; query: string; topic?: string },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const topic = input.topic === "training" || input.topic === "nutrition"
+      || input.topic === "recovery" || input.topic === "exercise"
+      ? input.topic
+      : undefined;
+    const result = this.knowledge.searchKnowledge({
+      query: input.query,
+      limit: 4,
+      ...(topic ? { topic } : {}),
+    });
+    const now = this.runtime.now();
+    const summary = result.hits.length
+      ? result.hits.flatMap((hit) => [
+          `〔${hit.passage.docTitle}${hit.passage.sectionPath.length ? " · " + hit.passage.sectionPath.join(" › ") : ""}〕`,
+          hit.passage.text.length > 600 ? `${hit.passage.text.slice(0, 600)}…` : hit.passage.text,
+          ...hit.citations.map(
+            (citation) =>
+              `依据 [${citation.tier}] ${citation.authorsShort} ${citation.year}${citation.url ? ` ${citation.url}` : ""}` +
+              `（不能推出：${citation.cannotSupport.join("；")}）`,
+          ),
+        ])
+      : [`知识库里没有关于「${input.query}」的已审核内容。我不会用没有依据的说法补答——你可以换个说法再问，或者告诉我具体想解决什么。`];
+    const artifact: import("./model").EvidenceBriefArtifact = {
+      id: `knowledge-search-${stableHash({ query: input.query, topic: input.topic ?? "any" })}`,
+      kind: "evidence_brief",
+      userId: session.userId,
+      title: `知识检索：${input.query}`,
+      summary,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [],
+      missingness: result.missing ? [result.missing] : [],
+      capabilityBoundary: [
+        "只返回知识包内已审核的原文段落",
+        "查不到时明确说明，不用模型先验补答",
+        "引用附带该来源不能推出什么",
+      ],
+      hash: stableHash({ query: input.query, hits: result.hits.map((hit) => hit.passage.contentHash) }),
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "knowledge.search",
+      execution,
+      artifact,
+      scope: `knowledge:search:${input.query.slice(0, 40)}`,
     });
   }
 
@@ -6810,6 +7129,23 @@ export class CoachApplication {
     const snapshot = await this.ledger.read();
     const artifact = snapshot.artifacts.find((candidate) => candidate.id === input.artifactId);
     if (!artifact) throw new Error("artifact_not_found");
+    if (artifact.kind === "timeline_record_draft") {
+      if (input.action === "confirm") {
+        return this.confirmTimelineRecordDraft({
+          userId: input.userId,
+          artifactId: artifact.id,
+          idempotencyKey: input.idempotencyKey,
+        });
+      }
+      if (input.action === "reject") {
+        return this.rejectTimelineRecordDraft({
+          userId: input.userId,
+          artifactId: artifact.id,
+          idempotencyKey: input.idempotencyKey,
+        });
+      }
+      throw new Error("artifact_action_not_supported");
+    }
     if (artifact.kind === "nutrition_observation_draft") {
       if (input.action === "confirm") {
         return this.confirmNutritionObservationDraft({
@@ -6903,13 +7239,16 @@ export class CoachApplication {
     deviceId?: string;
     /** Required for an LLM-derived food estimate; text alone is never a fact. */
     confirmedByUser?: boolean;
+    /** A clear current user statement may be recorded by their delegated Coach. */
+    delegatedByUser?: boolean;
     /** Canonical packet ingestion is a deterministic, not conversational, source. */
     deterministicTool?: "canonical_motion_packet";
   }): Promise<DomainCommandResult> {
     if (!factHasNoCompletedClaim(input.fact)) throw new Error("timeline_fact_must_be_an_experience");
     const requestedActor = input.actor ?? { kind: "user" as const, id: input.userId };
+    const userAuthorized = Boolean(input.confirmedByUser || input.delegatedByUser);
     const actor =
-      (requestedActor.kind === "agent" || requestedActor.kind === "rule_engine") && input.confirmedByUser
+      (requestedActor.kind === "agent" || requestedActor.kind === "rule_engine") && userAuthorized
         ? ({ kind: "user" as const, id: input.userId })
         : requestedActor;
     const origin = input.envelope.provenance.origin;
@@ -6918,7 +7257,7 @@ export class CoachApplication {
     }
     if (
       (actor.kind === "agent" || actor.kind === "rule_engine") &&
-      !input.confirmedByUser &&
+      !userAuthorized &&
       input.deterministicTool !== "canonical_motion_packet"
     ) {
       throw new Error("user_confirmation_required_for_agent_fact");
@@ -6939,7 +7278,7 @@ export class CoachApplication {
       actor,
       causalRefs: [
         ...input.envelope.causalRefs,
-        ...((actor !== requestedActor) ? [`confirmed_by:${input.userId}`, `proposed_by:${requestedActor.kind}:${requestedActor.id}`] : []),
+        ...((actor !== requestedActor) ? [`${input.delegatedByUser ? "delegated_by" : "confirmed_by"}:${input.userId}`, `proposed_by:${requestedActor.kind}:${requestedActor.id}`] : []),
       ],
       time: { ...input.envelope.time },
     };
@@ -9032,6 +9371,92 @@ function hasMeasuredValue(fact: import("./domain").TimelineFact): boolean {
       return fact.severity !== undefined;
     default:
       return false;
+  }
+}
+
+/**
+ * Reporting a fact is not a plan mutation: collaborative and managed Coach
+ * modes may act as the user's recorder. A manual or expired mandate leaves a
+ * confirmation boundary. This never authorizes inferred/estimated sources.
+ */
+function canCoachCommitUserStatedRecord(
+  mandate: import("./domain").CoachingMandateData | undefined,
+  now: string,
+  kind: UserStatedRecordInput["kind"] | "nutrition",
+): boolean {
+  if (!mandate || mandate.mode === "manual") return false;
+  if (mandate.validUntil && Date.parse(mandate.validUntil) < Date.parse(now)) return false;
+  if (mandate.scopes?.recording === "confirm") return false;
+  if (kind === "nutrition" && mandate.scopes?.nutrition === "advice_only") return false;
+  return true;
+}
+
+function hasCoachEstimate(report: UserStatedRecordInput): boolean {
+  return report.kind === "activity" && report.energyEstimateKcal !== undefined;
+}
+
+function timelineFactFromUserReport(report: UserStatedRecordInput): import("./domain").TimelineFact {
+  switch (report.kind) {
+    case "training":
+      return {
+        kind: "training",
+        reportedSession: {
+          ...(report.summary === undefined ? {} : { summary: report.summary }),
+          ...(report.durationMinutes === undefined ? {} : { duration: { value: report.durationMinutes, unit: "minutes" } }),
+          ...(report.note ? { note: report.note } : {}),
+          ...(report.exercises?.length ? { exercises: report.exercises.map((exercise) => ({
+            name: exercise.name,
+            ...(exercise.sets?.length ? { sets: exercise.sets.map((set) => ({
+              ...(set.reps === undefined ? {} : { reps: set.reps }),
+              ...(set.loadKg === undefined ? {} : { load: { value: set.loadKg, unit: "kg" as const } }),
+              ...(set.rir === undefined ? {} : { rir: set.rir }),
+            })) } : {}),
+          })) } : {}),
+        },
+        confidence: "confirmed",
+      };
+    case "activity": {
+      const energyKcal = report.energyKcal ?? report.energyEstimateKcal;
+      const isEstimate = report.energyEstimateKcal !== undefined;
+      return {
+        kind: "activity",
+        activityType: report.activityType,
+        ...(report.durationMinutes === undefined ? {} : { duration: { value: report.durationMinutes, unit: "minutes" } }),
+        ...(report.intensity === undefined ? {} : { intensity: report.intensity }),
+        ...(energyKcal === undefined ? {} : {
+          energyExpenditure: { value: energyKcal, unit: "kcal" },
+          energyExpenditureSource: isEstimate ? "agent_estimate" as const : "manual" as const,
+        }),
+        confidence: isEstimate ? "estimated" : "confirmed",
+      };
+    }
+    case "sleep":
+      return {
+        kind: "sleep",
+        ...(report.durationMinutes === undefined ? {} : { duration: { value: report.durationMinutes, unit: "minutes" } }),
+        ...(report.quality === undefined ? {} : { quality: report.quality }),
+        confidence: "confirmed",
+      };
+    case "recovery":
+      return { kind: "recovery", perceivedRecovery: report.perceivedRecovery, confidence: "confirmed" };
+    case "body":
+      return {
+        kind: "body",
+        measurement: report.metric === "body_weight"
+          ? { metric: "body_weight", quantity: { value: report.value, unit: "kg" } }
+          : { metric: "body_fat_percentage", quantity: { value: report.value, unit: "percent" } },
+        confidence: "confirmed",
+      };
+  }
+}
+
+function userReportSummary(report: UserStatedRecordInput): string {
+  switch (report.kind) {
+    case "training": return `${report.summary ?? report.exercises?.map((exercise) => exercise.name).join("、") ?? "训练"}${report.durationMinutes === undefined ? "" : ` · ${report.durationMinutes} min`}`;
+    case "activity": return `${report.activityType}${report.durationMinutes === undefined ? "" : ` · ${report.durationMinutes} min`}${report.energyEstimateKcal === undefined ? "" : ` · 约 ${report.energyEstimateKcal} kcal`}`;
+    case "sleep": return `睡眠${report.durationMinutes === undefined ? "" : ` · ${report.durationMinutes} min`}`;
+    case "recovery": return `恢复 · ${report.perceivedRecovery}/5`;
+    case "body": return report.metric === "body_weight" ? `体重 · ${report.value} kg` : `体脂 · ${report.value}%`;
   }
 }
 

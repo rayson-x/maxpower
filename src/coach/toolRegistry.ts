@@ -22,6 +22,37 @@ export interface CoachToolManifest {
   inputSchema: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Narrow, source-labelled facts that a Coach may record only after the user
+ * has stated them in the current conversation. Coach estimates have their
+ * own explicit field and are always held behind a confirmation boundary.
+ */
+export type UserStatedRecordInput =
+  | {
+      kind: "training";
+      summary?: string;
+      durationMinutes?: number;
+      note?: string;
+      /** Exact performance values only when the person stated them in this conversation. */
+      exercises?: readonly {
+        name: string;
+        sets?: readonly { reps?: number; loadKg?: number; rir?: number }[];
+      }[];
+    }
+  | {
+      kind: "activity";
+      activityType: string;
+      durationMinutes?: number;
+      intensity?: "easy" | "moderate" | "hard" | "unknown";
+      /** A value the person explicitly reported (for example, from their watch). */
+      energyKcal?: number;
+      /** A Coach estimate. This always creates a confirmation draft before it can be recorded. */
+      energyEstimateKcal?: number;
+    }
+  | { kind: "sleep"; durationMinutes?: number; quality?: number }
+  | { kind: "recovery"; perceivedRecovery?: number }
+  | { kind: "body"; metric: "body_weight" | "body_fat_percentage"; value: number };
+
 const EXACT_EMPTY_OBJECT = Object.freeze({ type: "object", additionalProperties: false });
 const AGENT_ADJUST_TASK_CHANGE_SCHEMA = Object.freeze({
   type: "object",
@@ -126,13 +157,24 @@ const KNOWLEDGE_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
     permissionScopes: [], riskCeiling: "none", evidenceRequirements: ["installed_knowledge_pack"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["ruleId"], properties: { ruleId: { type: "string", minLength: 1, maxLength: 160 } } },
   },
+  {
+    name: "knowledge.search", schemaVersion: 1, accessClass: "read", executionMode: "local_deterministic", offlineAvailable: true,
+    permissionScopes: [], riskCeiling: "none", evidenceRequirements: ["installed_knowledge_pack"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 2, maxLength: 200 }, topic: { enum: ["training", "nutrition", "recovery", "exercise", "any"] } } },
+  },
 ]);
 
 /**
- * 三形态工具面（ticket 06）：代为操作 / 主动提案 / 场景升级。
- * 全部走 typed action + PolicyGate + artifact 确认链，无第三种写入。
+ * Agent actions are typed and policy-gated. Clear user-stated reports may be
+ * delegated to Coach; proposals and inferred values retain a confirmation
+ * boundary.
  */
 const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
+  {
+    name: "timeline.record_user_report", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "review", evidenceRequirements: ["current_user_statement"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["kind"], properties: { kind: { enum: ["training", "activity", "sleep", "recovery", "body"] }, summary: { type: "string", maxLength: 240 }, note: { type: "string", maxLength: 480 }, exercises: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 120 }, sets: { type: "array", maxItems: 99, items: { type: "object", additionalProperties: false, properties: { reps: { type: "integer", minimum: 0, maximum: 200 }, loadKg: { type: "number", minimum: 0, maximum: 1000 }, rir: { type: "number", minimum: 0, maximum: 10 } } } } } } }, activityType: { type: "string", maxLength: 120 }, durationMinutes: { type: "number", minimum: 0, maximum: 1440 }, intensity: { enum: ["easy", "moderate", "hard", "unknown"] }, energyKcal: { type: "number", minimum: 0, maximum: 10000 }, energyEstimateKcal: { type: "number", minimum: 0, maximum: 10000 }, quality: { type: "integer", minimum: 1, maximum: 5 }, perceivedRecovery: { type: "integer", minimum: 1, maximum: 5 }, metric: { enum: ["body_weight", "body_fat_percentage"] }, value: { type: "number", minimum: 0, maximum: 1000 } } },
+  },
   {
     name: "nutrition.record_observation", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
     permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["user_stated_items"], output: "artifact_ref", outputLimit: 1,
@@ -221,8 +263,16 @@ export class CoachToolRegistry {
         input: { sessionId: string; ruleId: string },
         execution: ToolExecutionIdentity,
       ): Promise<ShowArtifactResult>;
+      searchKnowledgeBase(
+        input: { sessionId: string; query: string; topic?: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
       recordNutritionObservation(
         input: { sessionId: string; items: readonly string[]; mealSlot?: string; note?: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      recordUserStatedReport(
+        input: { sessionId: string; report: UserStatedRecordInput },
         execution: ToolExecutionIdentity,
       ): Promise<ShowArtifactResult>;
       substituteExercise(
@@ -273,6 +323,31 @@ export class CoachToolRegistry {
       }
       const result = await this.handlers.explainKnowledgeRule(
         { sessionId: input.sessionId, ruleId: parsed.ruleId.trim() },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "timeline.record_user_report") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const report = parseUserStatedRecord(input.call.input);
+      const result = await this.handlers.recordUserStatedReport(
+        { sessionId: input.sessionId, report },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "knowledge.search") {
+      if (!this.options.knowledgeToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const parsed = parseExactObject(input.call.input, ["query", "topic"]);
+      if (typeof parsed.query !== "string" || parsed.query.trim().length < 2) {
+        throw new ToolSchemaError("invalid_tool_input");
+      }
+      const result = await this.handlers.searchKnowledgeBase(
+        {
+          sessionId: input.sessionId,
+          query: parsed.query.trim(),
+          ...(typeof parsed.topic === "string" ? { topic: parsed.topic } : {}),
+        },
         { runId: input.runId, toolCallId: input.call.toolCallId },
       );
       return this.validateResultIdentity(input, result.events);
@@ -504,6 +579,84 @@ function parseExactObject(input: unknown, allowed: readonly string[]): Record<st
     throw new ToolSchemaError("invalid_tool_input");
   }
   return record;
+}
+
+function parseUserStatedRecord(input: unknown): UserStatedRecordInput {
+  const parsed = parseExactObject(input, ["kind", "summary", "note", "exercises", "activityType", "durationMinutes", "intensity", "energyKcal", "energyEstimateKcal", "quality", "perceivedRecovery", "metric", "value"]);
+  const durationMinutes = optionalBoundedNumber(parsed.durationMinutes, 0, 1440);
+  if (parsed.durationMinutes !== undefined && durationMinutes === undefined) throw new ToolSchemaError("invalid_tool_input");
+  const note = optionalString(parsed.note, 480);
+  if (parsed.note !== undefined && note === undefined) throw new ToolSchemaError("invalid_tool_input");
+  if (parsed.kind === "training") {
+    const summary = optionalString(parsed.summary, 240);
+    const exercises = parseUserReportedExercises(parsed.exercises);
+    if (!summary && !note && durationMinutes === undefined && !exercises?.length) throw new ToolSchemaError("invalid_tool_input");
+    return { kind: "training", ...(summary === undefined ? {} : { summary }), ...(durationMinutes === undefined ? {} : { durationMinutes }), ...(note ? { note } : {}), ...(exercises?.length ? { exercises } : {}) };
+  }
+  if (parsed.kind === "activity") {
+    const activityType = optionalString(parsed.activityType, 120);
+    const intensity = parsed.intensity;
+    const energyKcal = optionalBoundedNumber(parsed.energyKcal, 0, 10_000);
+    const energyEstimateKcal = optionalBoundedNumber(parsed.energyEstimateKcal, 0, 10_000);
+    if (!activityType || (intensity !== undefined && intensity !== "easy" && intensity !== "moderate" && intensity !== "hard" && intensity !== "unknown") || (parsed.energyKcal !== undefined && energyKcal === undefined) || (parsed.energyEstimateKcal !== undefined && energyEstimateKcal === undefined) || (energyKcal !== undefined && energyEstimateKcal !== undefined)) {
+      throw new ToolSchemaError("invalid_tool_input");
+    }
+    return { kind: "activity", activityType, ...(durationMinutes === undefined ? {} : { durationMinutes }), ...(intensity === undefined ? {} : { intensity }), ...(energyKcal === undefined ? {} : { energyKcal }), ...(energyEstimateKcal === undefined ? {} : { energyEstimateKcal }) };
+  }
+  if (parsed.kind === "sleep") {
+    const quality = optionalBoundedInteger(parsed.quality, 1, 5);
+    if (parsed.quality !== undefined && quality === undefined) throw new ToolSchemaError("invalid_tool_input");
+    if (durationMinutes === undefined && quality === undefined) throw new ToolSchemaError("invalid_tool_input");
+    return { kind: "sleep", ...(durationMinutes === undefined ? {} : { durationMinutes }), ...(quality === undefined ? {} : { quality }) };
+  }
+  if (parsed.kind === "recovery") {
+    const perceivedRecovery = optionalBoundedInteger(parsed.perceivedRecovery, 1, 5);
+    if (perceivedRecovery === undefined) throw new ToolSchemaError("invalid_tool_input");
+    return { kind: "recovery", perceivedRecovery };
+  }
+  if (parsed.kind === "body") {
+    const metric = parsed.metric;
+    const value = optionalBoundedNumber(parsed.value, 0, 1000);
+    if ((metric !== "body_weight" && metric !== "body_fat_percentage") || value === undefined || (metric === "body_fat_percentage" && value > 100)) throw new ToolSchemaError("invalid_tool_input");
+    return { kind: "body", metric, value };
+  }
+  throw new ToolSchemaError("invalid_tool_input");
+}
+
+function parseUserReportedExercises(value: unknown): readonly NonNullable<Extract<UserStatedRecordInput, { kind: "training" }>["exercises"]>[number][] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.length || value.length > 20) throw new ToolSchemaError("invalid_tool_input");
+  return value.map((rawExercise) => {
+    const exercise = parseExactObject(rawExercise, ["name", "sets"]);
+    const name = optionalString(exercise.name, 120);
+    if (!name) throw new ToolSchemaError("invalid_tool_input");
+    if (exercise.sets === undefined) return { name };
+    if (!Array.isArray(exercise.sets) || exercise.sets.length > 99) throw new ToolSchemaError("invalid_tool_input");
+    const sets = exercise.sets.map((rawSet) => {
+      const set = parseExactObject(rawSet, ["reps", "loadKg", "rir"]);
+      const reps = optionalBoundedInteger(set.reps, 0, 200);
+      const loadKg = optionalBoundedNumber(set.loadKg, 0, 1_000);
+      const rir = optionalBoundedNumber(set.rir, 0, 10);
+      if ((set.reps !== undefined && reps === undefined) || (set.loadKg !== undefined && loadKg === undefined) || (set.rir !== undefined && rir === undefined) || (reps === undefined && loadKg === undefined && rir === undefined)) {
+        throw new ToolSchemaError("invalid_tool_input");
+      }
+      return { ...(reps === undefined ? {} : { reps }), ...(loadKg === undefined ? {} : { loadKg }), ...(rir === undefined ? {} : { rir }) };
+    });
+    return { name, ...(sets.length ? { sets } : {}) };
+  });
+}
+
+function optionalString(value: unknown, maximum: number): string | undefined {
+  return typeof value === "string" && value.trim() && value.trim().length <= maximum ? value.trim() : undefined;
+}
+
+function optionalBoundedNumber(value: unknown, min: number, max: number): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max ? value : undefined;
+}
+
+function optionalBoundedInteger(value: unknown, min: number, max: number): number | undefined {
+  const number = optionalBoundedNumber(value, min, max);
+  return number !== undefined && Number.isInteger(number) ? number : undefined;
 }
 
 /**

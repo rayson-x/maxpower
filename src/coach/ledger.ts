@@ -1036,6 +1036,22 @@ function validateEventUnits(event: DomainEvent): void {
     (Number.isFinite(quantity.value) &&
       quantity.value >= 0 &&
       (quantity.unit === "seconds" || quantity.unit === "minutes" || quantity.unit === "hours"));
+  const validReportedTrainingSession = (
+    session: Extract<import("./domain").TimelineFact, { kind: "training" }> ["reportedSession"] | undefined,
+  ): boolean => {
+    if (!session) return true;
+    const hasContent = Boolean(session.summary?.trim() || session.note?.trim() || session.duration || session.exercises?.length);
+    if (!hasContent || !validDuration(session.duration)) return false;
+    return (session.exercises ?? []).every((exercise) =>
+      Boolean(exercise.name.trim()) &&
+      (exercise.exerciseConceptId === undefined || Boolean(exercise.exerciseConceptId.trim())) &&
+      (exercise.sets ?? []).every((set) =>
+        (set.reps === undefined || Number.isInteger(set.reps) && set.reps >= 0) &&
+        validMass(set.load) &&
+        (set.rir === undefined || set.rir >= 0 && set.rir <= 10),
+      ),
+    );
+  };
   const validBodyMeasurement = (
     measurement: Extract<import("./domain").TimelineFact, { kind: "body" }>["measurement"],
   ): boolean => {
@@ -1115,7 +1131,7 @@ function validateEventUnits(event: DomainEvent): void {
   ) {
     const fact = event.payload.fact;
     if (fact.kind === "training") {
-      if (!fact.workoutSessionRef && !fact.historicalSet) {
+      if (!fact.workoutSessionRef && !fact.historicalSet && !fact.reportedSession) {
         throw new LedgerConflictError("invalid_reference");
       }
       if (
@@ -1126,6 +1142,9 @@ function validateEventUnits(event: DomainEvent): void {
           (fact.historicalSet.rir !== undefined &&
             (fact.historicalSet.rir < 0 || fact.historicalSet.rir > 10)))
       ) {
+        throw new LedgerConflictError("invalid_unit");
+      }
+      if (!validReportedTrainingSession(fact.reportedSession)) {
         throw new LedgerConflictError("invalid_unit");
       }
     }

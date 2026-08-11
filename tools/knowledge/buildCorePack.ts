@@ -1,5 +1,6 @@
 import type { EquipmentRequirement } from "../../src/coach/domain";
 import { stableHash } from "../../src/coach/stable";
+import { buildKnowledgePassages } from "./buildPassages";
 import {
   EXERCISE_CATALOG_SCHEMA_VERSION,
   KNOWLEDGE_PACK_SCHEMA_VERSION,
@@ -856,6 +857,7 @@ const PROGRAM_STRATEGIES: ProgramStrategies = {
   dietStrategies: DIET_STRATEGIES,
   citations: EVIDENCE_CITATIONS,
   sessionFuelingPolicies: SESSION_FUELING_POLICIES,
+  passages: buildKnowledgePassages().passages,
   fastedTrainingRules: FASTED_TRAINING_RULES,
   splitRotations: [
     {

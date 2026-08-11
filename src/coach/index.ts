@@ -5,6 +5,7 @@ export {
 export type {
   CoachApplicationDependencies,
   SeedUserStateInput,
+  ShowArtifactResult,
   ShowTodayPlanResult,
   StartSessionInput,
 } from "./createCoachApplication";
@@ -28,14 +29,21 @@ export type * from "./ports";
 export {
   ContextAssembler,
   FunctionLLMProvider,
+  OpenAICompatibleProvider,
+  ProviderServiceError,
   ScriptedLLMProvider,
 } from "./adapters/provider";
 export type {
   ContextManifest,
   LLMProvider,
+  LLMProviderResolver,
   LLMProviderRequest,
+  OpenAICompatibleFetch,
+  OpenAICompatibleFetchResponse,
+  OpenAICompatibleProviderOptions,
   ProviderContext,
   ProviderEvent,
+  ProviderServiceErrorCode,
 } from "./adapters/provider";
 export { FixtureMotionRuntime } from "./adapters/motion";
 export type {
@@ -45,4 +53,11 @@ export type {
   ObserveSetResult,
 } from "./adapters/motion";
 export * from "./sqlite";
-export * from "./ui";
+export * from "../onboarding";
+export * from "../planning";
+export * from "../training-rules";
+export * from "../replanning";
+export * from "../scheduling";
+export * from "../sync";
+export * from "../privacy";
+export * from "../product";

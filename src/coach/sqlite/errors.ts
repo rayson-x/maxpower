@@ -1,4 +1,4 @@
-export const SQLITE_COACH_LEDGER_SCHEMA_VERSION = 1;
+export const SQLITE_COACH_LEDGER_SCHEMA_VERSION = 7;
 
 export class RecoverableCoachLedgerMigrationError extends Error {
   readonly code = "COACH_LEDGER_MIGRATION_RECOVERY_REQUIRED" as const;

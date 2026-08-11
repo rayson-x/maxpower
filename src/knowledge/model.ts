@@ -320,6 +320,37 @@ export interface SplitRotationTemplate {
  * 新增一种策略 = 加一条声明；训练侧代码零修改（架构见 src/planning/dietTrainingGraph.ts）。
  */
 /**
+ * Agent 可检索的知识段落（客户端知识库）。
+ *
+ * 与 `executableRulePacks`（引擎消费的确定性规则）的区别：
+ *   - 规则包 = 引擎用来**做决定**的数值与逻辑
+ *   - 知识段落 = agent 用来**回答与解释**的内容，离线可检索、必须带来源
+ *
+ * 纪律：段落是从已审核的知识页切出来的原文，**不是模型生成的摘要**。
+ * agent 只能引用这里的内容；检索不到时必须明说不知道，不得用模型先验补答。
+ */
+export interface KnowledgePassage {
+  id: string;
+  /** 来源文档路径（可追溯到仓库里的知识页）。 */
+  sourcePath: string;
+  /** 文档标题与该段落所属小节，供 agent 组织回答。 */
+  docTitle: string;
+  sectionPath: readonly string[];
+  /** 段落原文（Markdown）。 */
+  text: string;
+  /** 主题标签（语言无关；按主题限定检索用）。 */
+  topic: "training" | "nutrition" | "recovery" | "exercise" | "any";
+  /** 检索关键词（中文与英文；英文页会补中文对译词），构建时抽取。 */
+  keywords: readonly string[];
+  /** 该段落引用的文献 id（可解析为 EvidenceCitation）。 */
+  citationRefs: readonly string[];
+  /** 证据等级：段落里的声称属于哪一档。 */
+  tier: "A" | "B" | "C" | "D" | "U";
+  /** 内容哈希，用于增量更新与审计。 */
+  contentHash: string;
+}
+
+/**
  * 文献引用（版本化知识资产）。
  *
  * 用途：让计划里的每条建议都能指回一手来源——用户点得开、我们对得账。
@@ -437,6 +468,8 @@ export interface ProgramStrategies {
   dietStrategies?: readonly DietStrategyDeclaration[];
   /** 文献引用库：计划里的 evidenceRef 由此解析为可展示的一手来源。 */
   citations?: readonly EvidenceCitation[];
+  /** Agent 可检索的知识段落（客户端知识库）。 */
+  passages?: readonly KnowledgePassage[];
   /** 进食状态编排策略（按训练类型）。 */
   sessionFuelingPolicies?: readonly SessionFuelingPolicy[];
   /** 空腹训练适格性规则表。 */

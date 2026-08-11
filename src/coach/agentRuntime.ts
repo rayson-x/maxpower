@@ -10,7 +10,6 @@ import type { HumanActionCoordinator, ResumeHumanActionInput } from "./hitl";
 import { filterCoachOutput } from "./outputFilter";
 import type { ForbiddenClaimRule } from "../knowledge/model";
 import type { CoachLedger } from "./ledger";
-import { projectDomainEvents } from "./domain";
 import type { ProviderExecutionPolicy } from "./ports";
 import type {
   CoachMessage,
@@ -21,6 +20,7 @@ import type {
   RuntimeServices,
   ToolAuditRecord,
 } from "./model";
+import { traceShortCode } from "../observability/model";
 import { stableHash } from "./stable";
 import { redactDirectIdentifiers } from "./remoteRedaction";
 import type { CoachToolCall, CoachToolRegistry } from "./toolRegistry";
@@ -163,10 +163,6 @@ export class AgentRuntime {
     if (!provider) {
       return this.finishLocalOnlyRun(session, runId, now, "当前未配置语言模型；本地计划、记录与撤销仍可使用。");
     }
-    if (provider.usesNetwork && !remoteProviderAllowed(snapshot, session.userId)) {
-      return this.finishLocalOnlyRun(session, runId, now, "远程模型尚未获得授权；本地计划、记录与撤销仍可使用。");
-    }
-
     if (provider.usesNetwork) this.remoteProviderRequests += 1;
     const controller = new AbortController();
     this.activeProviderRuns.set(runId, controller);
@@ -221,6 +217,7 @@ export class AgentRuntime {
         runId: run.id,
         code: "policy_rejected",
         message: "远程模型配置已变化；请从当前对话重新开始。",
+        shortCode: traceShortCode({ traceId: run.id, sessionId: session.id }),
         occurredAt: this.runtime.now(),
       };
       await this.finishRun({ sessionId: session.id, runId: run.id, events: [failure], status: "terminated" });
@@ -233,21 +230,10 @@ export class AgentRuntime {
         runId: run.id,
         code: "terminal_failure",
         message: "Provider 不支持同 Run continuation",
+        shortCode: traceShortCode({ traceId: run.id, sessionId: session.id }),
         occurredAt: this.runtime.now(),
       };
       await this.finishRun({ sessionId: session.id, runId: run.id, events: [failure], status: "failed" });
-      return [failure];
-    }
-    if (provider.usesNetwork && !remoteProviderAllowed(snapshot, session.userId)) {
-      const failure: CoachRunEvent = {
-        type: "run-error",
-        sessionId: session.id,
-        runId: run.id,
-        code: "policy_rejected",
-        message: "远程模型授权已撤销；此轮对话未继续发送数据。",
-        occurredAt: this.runtime.now(),
-      };
-      await this.finishRun({ sessionId: session.id, runId: run.id, events: [failure], status: "terminated" });
       return [failure];
     }
     const assembled = this.contextAssembler.assemble(snapshot, session.userId, session.id, {
@@ -651,6 +637,7 @@ export class AgentRuntime {
       runId: record.runId,
       code: "invalid_tool_call",
       message: code,
+      shortCode: traceShortCode({ traceId: record.runId, sessionId: session.id }),
       occurredAt: this.runtime.now(),
     };
     return { events: [inputEvent, errorEvent, runError], suspended: false };
@@ -759,6 +746,7 @@ export class AgentRuntime {
         runId,
         code,
         message: failure.message,
+        shortCode: traceShortCode({ traceId: runId, sessionId: session.id }),
         occurredAt: this.runtime.now(),
       },
       {
@@ -792,13 +780,6 @@ export class AgentRuntime {
     });
     return events;
   }
-}
-
-function remoteProviderAllowed(snapshot: Awaited<ReturnType<CoachLedger["read"]>>, userId: string): boolean {
-  const permission = projectDomainEvents(snapshot.domainEvents, { userId }).permissions?.value;
-  // Legacy local-only ledgers predate the permission aggregate; they cannot be
-  // silently reinterpreted as a denial. New onboarding creates it explicitly.
-  return !permission || permission.remoteLlm === "granted";
 }
 
 function providerIdleTimeout(value: number | undefined): number {

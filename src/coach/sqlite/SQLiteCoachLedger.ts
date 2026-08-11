@@ -1,29 +1,31 @@
 import {
   applyAtomicCommitTransition,
+  applyDomainAtomicCommitTransition,
   type AtomicCommit,
   type AtomicCommitResult,
+  type CoachLedgerDiagnostics,
   type CoachLedger,
+  type DomainAtomicCommit,
+  type StagedLedgerRestore,
+  EMPTY_LEDGER_SNAPSHOT,
+  LedgerConflictError,
+  normalizeLedgerSnapshot,
 } from "../ledger";
 import type { LedgerSnapshot } from "../model";
-import { clone } from "../stable";
+import type {
+  DomainCommandResult,
+  DomainProjection,
+  DomainProjectionQuery,
+} from "../domain";
+import { projectDomainEvents } from "../domain";
+import { clone, stableHash } from "../stable";
 import {
   RecoverableCoachLedgerMigrationError,
   SQLITE_COACH_LEDGER_SCHEMA_VERSION,
 } from "./errors";
 import type { SQLiteDatabaseLike } from "./types";
 
-const EMPTY: LedgerSnapshot = {
-  sessions: [],
-  users: [],
-  artifacts: [],
-  presentations: [],
-  runEvents: [],
-  actionTokens: [],
-  actionEvents: [],
-  idempotency: [],
-  pendingHumanActions: [],
-  workingMemory: [],
-};
+const EMPTY: LedgerSnapshot = EMPTY_LEDGER_SNAPSHOT;
 
 const CREATE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS coach_ledger_snapshot (
@@ -39,6 +41,77 @@ interface UserVersionRow {
 interface SnapshotRow {
   payload: string;
 }
+
+interface CoachLedgerMigration {
+  from: number;
+  to: number;
+  run(ledger: SQLiteCoachLedger): Promise<void>;
+}
+
+const MIGRATIONS: readonly CoachLedgerMigration[] = [
+  {
+    from: 0,
+    to: 1,
+    async run(ledger) {
+      await ledger.createSchemaForMigration();
+      await ledger.insertEmptySnapshotForMigration();
+    },
+  },
+  {
+    from: 1,
+    to: 2,
+    async run(ledger) {
+      await ledger.createSchemaForMigration();
+      await ledger.normalizeSnapshotForMigration();
+    },
+  },
+  {
+    from: 2,
+    to: 3,
+    async run(ledger) {
+      await ledger.createSchemaForMigration();
+      await ledger.normalizeSnapshotForMigration();
+    },
+  },
+  {
+    from: 3,
+    to: 4,
+    async run(ledger) {
+      await ledger.createSchemaForMigration();
+      await ledger.normalizeSnapshotForMigration();
+    },
+  },
+  {
+    from: 4,
+    to: 5,
+    async run(ledger) {
+      // Adds replica cursor/pending-envelope fields through canonical snapshot
+      // normalization; no data is discarded during this additive migration.
+      await ledger.createSchemaForMigration();
+      await ledger.normalizeSnapshotForMigration();
+    },
+  },
+  {
+    from: 5,
+    to: 6,
+    async run(ledger) {
+      // Adds device-local remote Provider selections through canonical
+      // normalization. They intentionally remain outside replica/outbox data.
+      await ledger.createSchemaForMigration();
+      await ledger.normalizeSnapshotForMigration();
+    },
+  },
+  {
+    from: 6,
+    to: 7,
+    async run(ledger) {
+      // Adds the trace upload outbox through canonical normalization. It stays
+      // empty until the observability authorization is granted.
+      await ledger.createSchemaForMigration();
+      await ledger.normalizeSnapshotForMigration();
+    },
+  },
+];
 
 export class SQLiteCoachLedger implements CoachLedger {
   private initialization?: Promise<void>;
@@ -57,12 +130,39 @@ export class SQLiteCoachLedger implements CoachLedger {
     });
   }
 
-  async commit(input: AtomicCommit): Promise<AtomicCommitResult> {
+  async swapRestoredSnapshot(input: StagedLedgerRestore): Promise<void> {
     await this.initialize();
-    let result: AtomicCommitResult | undefined;
     await this.transaction(async () => {
       const current = await this.readInitialized();
-      const applied = applyAtomicCommitTransition(current, input);
+      if (stableHash(current) !== input.expectedSnapshotHash) {
+        throw new LedgerConflictError("stale_snapshot");
+      }
+      await this.writeInitialized(input.nextSnapshot);
+    });
+  }
+
+  async readDomainProjection(query: DomainProjectionQuery): Promise<DomainProjection> {
+    const snapshot = await this.read();
+    return projectDomainEvents(snapshot.domainEvents, query);
+  }
+
+  async diagnose(): Promise<CoachLedgerDiagnostics> {
+    const { diagnoseLedgerSnapshot } = await import("../ledger");
+    return diagnoseLedgerSnapshot(await this.read());
+  }
+
+  async commit(input: AtomicCommit): Promise<AtomicCommitResult>;
+  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
+  async commit(
+    input: AtomicCommit | DomainAtomicCommit,
+  ): Promise<AtomicCommitResult | DomainCommandResult> {
+    await this.initialize();
+    let result: AtomicCommitResult | DomainCommandResult | undefined;
+    await this.transaction(async () => {
+      const current = await this.readInitialized();
+      const applied = isDomainCommit(input)
+        ? applyDomainAtomicCommitTransition(current, input)
+        : applyAtomicCommitTransition(current, input);
       result = applied.result;
       if (applied.snapshot !== current) {
         await this.writeInitialized(applied.snapshot);
@@ -92,20 +192,19 @@ export class SQLiteCoachLedger implements CoachLedger {
         throw new RecoverableCoachLedgerMigrationError(foundVersion);
       }
 
-      if (foundVersion === 0) {
+      if (foundVersion < SQLITE_COACH_LEDGER_SCHEMA_VERSION) {
         await this.transaction(async () => {
-          await this.database.execAsync(CREATE_SCHEMA);
-          await this.database.runAsync(
-            "INSERT OR IGNORE INTO coach_ledger_snapshot (id, payload) VALUES (1, ?)",
-            JSON.stringify(EMPTY),
-          );
-          await this.database.execAsync(
-            `PRAGMA user_version = ${SQLITE_COACH_LEDGER_SCHEMA_VERSION}`,
-          );
+          let version = foundVersion;
+          while (version < SQLITE_COACH_LEDGER_SCHEMA_VERSION) {
+            const migration = MIGRATIONS.find((candidate) => candidate.from === version);
+            if (!migration) throw new RecoverableCoachLedgerMigrationError(version);
+            await migration.run(this);
+            version = migration.to;
+            await this.database.execAsync(`PRAGMA user_version = ${version}`);
+          }
         });
         return;
       }
-
       await this.database.execAsync(CREATE_SCHEMA);
     } catch (error) {
       if (error instanceof RecoverableCoachLedgerMigrationError) throw error;
@@ -119,6 +218,27 @@ export class SQLiteCoachLedger implements CoachLedger {
     );
     if (!row) return clone(EMPTY);
     return clone(normalizeSnapshot(JSON.parse(row.payload) as Partial<LedgerSnapshot>));
+  }
+
+  async createSchemaForMigration(): Promise<void> {
+    await this.database.execAsync(CREATE_SCHEMA);
+  }
+
+  async insertEmptySnapshotForMigration(): Promise<void> {
+    await this.database.runAsync(
+      "INSERT OR IGNORE INTO coach_ledger_snapshot (id, payload) VALUES (1, ?)",
+      JSON.stringify(EMPTY),
+    );
+  }
+
+  async normalizeSnapshotForMigration(): Promise<void> {
+    const row = await this.database.getFirstAsync<SnapshotRow>(
+      "SELECT payload FROM coach_ledger_snapshot WHERE id = 1",
+    );
+    const migrated = normalizeLedgerSnapshot(
+      row ? (JSON.parse(row.payload) as Partial<LedgerSnapshot>) : EMPTY,
+    );
+    await this.writeInitialized(migrated);
   }
 
   private async writeInitialized(snapshot: LedgerSnapshot): Promise<void> {
@@ -150,17 +270,12 @@ export class SQLiteCoachLedger implements CoachLedger {
   }
 }
 
+function isDomainCommit(
+  input: AtomicCommit | DomainAtomicCommit,
+): input is DomainAtomicCommit {
+  return "kind" in input && input.kind === "domain";
+}
+
 function normalizeSnapshot(snapshot: Partial<LedgerSnapshot>): LedgerSnapshot {
-  return {
-    sessions: snapshot.sessions ?? [],
-    users: snapshot.users ?? [],
-    artifacts: snapshot.artifacts ?? [],
-    presentations: snapshot.presentations ?? [],
-    runEvents: snapshot.runEvents ?? [],
-    actionTokens: snapshot.actionTokens ?? [],
-    actionEvents: snapshot.actionEvents ?? [],
-    idempotency: snapshot.idempotency ?? [],
-    pendingHumanActions: snapshot.pendingHumanActions ?? [],
-    workingMemory: snapshot.workingMemory ?? [],
-  };
+  return normalizeLedgerSnapshot(snapshot);
 }

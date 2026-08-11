@@ -4,6 +4,9 @@ import type {
   ArtifactCardModel,
   ArtifactRef,
   CoachRunEvent,
+  HumanOption,
+  PendingHumanAction,
+  PresentationRef,
   PresentationStatus,
 } from "../model";
 
@@ -15,7 +18,7 @@ export interface CoachToolPart {
   toolCallId: string;
   toolName: string;
   presentationId: string;
-  state: "input-streaming" | "output-available" | "output-error";
+  state: "input-streaming" | "input-available" | "output-available" | "output-error";
   output?: {
     artifactId?: string;
     presentationId: string;
@@ -58,12 +61,27 @@ export interface CoachLiveCuePart {
   data: { setId: string; message: string };
 }
 
+export interface CoachHumanActionPart {
+  type: "data-human-action";
+  id: string;
+  state: "awaiting_user" | "resolved";
+  data: {
+    pendingActionId: string;
+    presentationId: string;
+    runId: string;
+    toolCallId: string;
+    prompt?: string;
+    options?: readonly HumanOption[];
+  };
+}
+
 export type CoachUiPart =
   | CoachToolPart
   | CoachArtifactPart
   | CoachErrorPart
   | CoachTextPart
-  | CoachLiveCuePart;
+  | CoachLiveCuePart
+  | CoachHumanActionPart;
 
 export interface CoachStreamSnapshot {
   status: CoachStreamStatus;
@@ -83,17 +101,83 @@ export class CoachStreamProjection {
   private readonly order: string[] = [];
   private readonly artifactSlots = new Map<string, string>();
   private readonly presentationSlots = new Map<string, string>();
+  private readonly persistedPresentations = new Map<string, PresentationRef>();
+  private readonly pendingHumanActions = new Map<string, PendingHumanAction>();
   private readonly runParts = new Map<string, Set<string>>();
 
   constructor(
     artifacts: readonly Artifact[] = [],
     cards: ArtifactCardRegistry = new ArtifactCardRegistry(),
+    presentations: readonly PresentationRef[] = [],
+    pendingHumanActions: readonly PendingHumanAction[] = [],
   ) {
     artifacts.forEach((artifact) => this.artifacts.set(artifact.id, artifact));
     this.cards = cards;
+    presentations.forEach((presentation) => this.persistedPresentations.set(presentation.artifactId, presentation));
+    pendingHumanActions.forEach((pending) => this.pendingHumanActions.set(pending.id, pending));
   }
 
   accept(event: CoachRunEvent): void {
+    if (event.type === "tool-state") {
+      const id = `tool:${event.toolCallId}`;
+      const current = this.parts.get(id);
+      this.upsert({
+        type: "dynamic-tool",
+        id,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        presentationId:
+          current?.type === "dynamic-tool"
+            ? current.presentationId
+            : `tool-presentation:${event.toolCallId}`,
+        state:
+          event.state === "output-error"
+            ? "output-error"
+            : event.state === "output-available"
+              ? "output-available"
+              : event.state,
+        ...(event.errorCode ? { errorText: event.errorCode } : {}),
+      });
+      this.rememberRunPart(event.runId, id);
+      return;
+    }
+
+    if (event.type === "hitl-suspended" || event.type === "hitl-resumed") {
+      const id = `human-action:${event.pendingActionId}`;
+      const pending = this.pendingHumanActions.get(event.pendingActionId);
+      this.upsert({
+        type: "data-human-action",
+        id,
+        state: event.type === "hitl-suspended" ? "awaiting_user" : "resolved",
+        data: {
+          pendingActionId: event.pendingActionId,
+          presentationId: event.presentationId,
+          runId: event.runId,
+          toolCallId: event.toolCallId,
+          ...(pending ? { prompt: pending.prompt, options: pending.options } : {}),
+        },
+      });
+      this.rememberRunPart(event.runId, id);
+      return;
+    }
+
+    if (event.type === "action-receipt") {
+      const toolId = `tool:${event.toolCallId}`;
+      const current = this.parts.get(toolId);
+      if (current?.type === "dynamic-tool") {
+        this.upsert({
+          ...current,
+          state: "output-available",
+          output: {
+            artifactId: event.artifactRef.id,
+            presentationId: current.presentationId,
+          },
+        });
+      }
+      this.upsertReceiptCard(event);
+      return;
+    }
+
     if (event.type === "tool-started") {
       const toolPart: CoachToolPart = {
         type: "dynamic-tool",
@@ -159,7 +243,7 @@ export class CoachStreamProjection {
       return;
     }
 
-    if (event.type !== "artifact-ready") return;
+    if (event.type !== "artifact-ready" && event.type !== "artifact-updated") return;
 
     const toolPartId = `tool:${event.toolCallId}`;
     const existingTool = this.parts.get(toolPartId);
@@ -176,6 +260,10 @@ export class CoachStreamProjection {
       },
     });
 
+    const persistedPresentation = this.persistedPresentations.get(event.artifactRef.id);
+    const presentation = persistedPresentation?.id === event.presentation.id
+      ? persistedPresentation
+      : event.presentation;
     const cachedArtifact = this.artifacts.get(event.artifactRef.id);
     const artifact =
       cachedArtifact &&
@@ -186,21 +274,21 @@ export class CoachStreamProjection {
         ? cachedArtifact
         : undefined;
     const resolvedCard = artifact
-      ? this.cards.render(artifact, event.presentation.status)
+      ? this.cards.render(artifact, presentation.status)
       : undefined;
     const card =
-      resolvedCard && resolvedCard.renderer === event.presentation.renderer
+      resolvedCard && resolvedCard.renderer === presentation.renderer
         ? resolvedCard
         : fallbackCard(
             event.artifactRef,
-            event.presentation.renderer,
-            event.presentation.status,
+            presentation.renderer,
+            presentation.status,
           );
-    const startedPresentationPartId = this.presentationSlots.get(event.presentation.id);
+    const startedPresentationPartId = this.presentationSlots.get(presentation.id);
     const presentationPartId =
       this.artifactSlots.get(event.artifactRef.id) ??
       startedPresentationPartId ??
-      `presentation:${event.presentation.id}`;
+      `presentation:${presentation.id}`;
     if (
       startedPresentationPartId &&
       startedPresentationPartId !== presentationPartId
@@ -208,21 +296,44 @@ export class CoachStreamProjection {
       this.removePart(startedPresentationPartId);
     }
     this.artifactSlots.set(event.artifactRef.id, presentationPartId);
-    this.presentationSlots.set(event.presentation.id, presentationPartId);
+    this.presentationSlots.set(presentation.id, presentationPartId);
     this.upsert({
       type: "data-artifact-card",
       id: presentationPartId,
-      state: card.status === "error" ? "error" : event.presentation.status,
+      state: card.status === "error" ? "error" : presentation.status,
       data: {
         artifactId: event.artifactRef.id,
-        presentationId: event.presentation.id,
-        renderer: event.presentation.renderer,
+        presentationId: presentation.id,
+        renderer: presentation.renderer,
         card,
         message: card.status === "error" ? "卡片内容暂时不可用" : undefined,
       },
     });
     this.rememberRunPart(event.runId, toolPartId);
     this.rememberRunPart(event.runId, presentationPartId);
+  }
+
+  private upsertReceiptCard(event: Extract<CoachRunEvent, { type: "action-receipt" }>): void {
+    const artifact = this.artifacts.get(event.artifactRef.id);
+    const presentation = this.persistedPresentations.get(event.artifactRef.id);
+    if (!artifact || !presentation) return;
+    const card = this.cards.render(artifact, presentation.status);
+    const id = this.artifactSlots.get(artifact.id) ?? `presentation:${presentation.id}`;
+    this.artifactSlots.set(artifact.id, id);
+    this.presentationSlots.set(presentation.id, id);
+    this.upsert({
+      type: "data-artifact-card",
+      id,
+      state: card.status === "error" ? "error" : presentation.status,
+      data: {
+        artifactId: artifact.id,
+        presentationId: presentation.id,
+        renderer: presentation.renderer,
+        card,
+        ...(card.status === "error" ? { message: "卡片内容暂时不可用" } : {}),
+      },
+    });
+    this.rememberRunPart(event.runId, id);
   }
 
   fail(failure: CoachStreamFailure): void {
@@ -271,6 +382,8 @@ export class CoachStreamProjection {
         (part) =>
           part.state === "loading" ||
           part.state === "input-streaming" ||
+          part.state === "input-available" ||
+          part.state === "awaiting_user" ||
           part.state === "streaming",
       )
     ) {

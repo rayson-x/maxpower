@@ -1,3 +1,4 @@
+import { searchPassages } from "./passageSearch";
 import type { EquipmentRequirement } from "../coach/domain";
 import { stableHash } from "../coach/stable";
 import {
@@ -196,6 +197,18 @@ export class KnowledgePackRegistry implements MotionCapabilityResolver {
   /** 编排策略（分化模板/周量目标/组成本），未随包提供时为 undefined。 */
   programStrategies() {
     return this.pack.programStrategies;
+  }
+
+  /** Agent 知识检索（离线、确定性）。查不到返回 typed missing，禁止先验补答。 */
+  searchKnowledge(input: { query: string; limit?: number; sourcePathPrefix?: string; topic?: "training" | "nutrition" | "recovery" | "exercise" | "any" }) {
+    return searchPassages({
+      passages: this.pack.programStrategies?.passages,
+      citations: this.pack.programStrategies?.citations,
+      query: input.query,
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      ...(input.sourcePathPrefix ? { sourcePathPrefix: input.sourcePathPrefix } : {}),
+      ...(input.topic ? { topic: input.topic } : {}),
+    });
   }
 
   search(input: ExerciseSearchInput): readonly ExerciseVariant[] {
