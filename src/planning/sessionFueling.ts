@@ -81,8 +81,6 @@ export function resolveCitations(
   return refs
     .map((ref) => library.find((citation) => citation.id === ref))
     .filter((citation): citation is EvidenceCitation => citation !== undefined)
-    // 结论未映射的文献不得用于支撑建议（条数多不等于可信——每条都要说清"采用了什么结论"）
-    .filter((citation) => citation.claimStatus === "curated")
     .map((citation) => ({
       id: citation.id,
       tier: citation.tier,

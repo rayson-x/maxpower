@@ -163,6 +163,8 @@ export interface UserProfileData {
     source?: "user_confirmed" | "estimated";
   };
   historyModifiers?: {
+    /** 近期训练阶段（刚过增肌期/刚减脂/维持），影响起步策略。 */
+    recentPhase?: "bulk" | "cut" | "maintain";
     priorStrategies?: readonly string[];
     plateau?: {
       durationWeeks?: number;
@@ -227,6 +229,12 @@ export interface GoalContractData {
   dietStrategyId?: string;
   /** 用户是否锁定该饮食策略（锁定时冲突只调训练，不建议换策略）。 */
   dietStrategyLocked?: boolean;
+  /** 局部侧重肌群（塑形："想让臀/肩更明显"）；这些肌群周量提升，其余不低于维持线。 */
+  emphasisMuscles?: readonly string[];
+  /** 每日步数目标（减脂期 NEAT 是掉秤停滞主因，休息日也适用）。 */
+  dailyStepTarget?: number;
+  /** 训练史中的近期阶段（刚过增肌期/刚减脂/维持），影响起步策略。 */
+  recentPhase?: "bulk" | "cut" | "maintain";
   commitmentPreferences?: {
     training?: "minimal" | "standard" | "high";
     nutrition?: "flexible" | "standard" | "strict";
@@ -548,6 +556,10 @@ export interface NutritionGuidanceData {
   calorieDirection: "small_surplus" | "maintenance" | "deficit";
   /** 绝对热量只在有可用体重与活动数据时给出；否则永远缺省。 */
   energyKcalPerDay?: number;
+  /** 赤字幅度的周降幅目标（%体重/周，按体脂状态分档）。 */
+  weeklyRateTarget?: { min: number; max: number };
+  /** 每日步数目标（减脂期）。 */
+  dailyStepTarget?: number;
   tracking: string;
   committedStrategyRef?: { id: string; revision: number };
   /** 显式未知项（如 body_weight_unknown）：禁止用推测值补齐。 */
@@ -558,6 +570,8 @@ export interface NutritionGuidanceData {
 /** 计划级恢复指导。 */
 export interface RecoveryGuidanceData {
   sleepNote: string;
+  /** 每日步数目标（减脂期 NEAT；休息日也适用）。 */
+  dailyStepTarget?: number;
   restDayIntent: string;
   deloadPolicy: string;
 }
@@ -587,6 +601,8 @@ export interface PlanRevisionData {
   recoveryGuidance?: RecoveryGuidanceData;
   /** 校准/进阶策略（每份计划必带，防止保守起点永久化）。 */
   progressionPolicy?: ProgressionPolicyData;
+  /** 人群分层说明（recomp 可行性与阶段提示，用户可读）。 */
+  personaTieringNote?: string;
   /** 饮食×训练耦合结果（碳水日型 + 冲突说明），见 src/planning/dietTrainingGraph.ts。 */
   dietTrainingCoupling?: {
     strategyId: string;

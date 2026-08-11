@@ -44,6 +44,7 @@ import {
   type TrainingRulePackDescriptor,
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
+import { tierPersona } from "./personTiering";
 import { fuelingAdviceFor } from "./sessionFueling";
 import {
   evaluateCoupling,
@@ -53,6 +54,8 @@ import {
 } from "./dietTrainingGraph";
 import {
   backfillThinSession,
+  capWeeklyVolume,
+  directExposuresPerCycle,
   selectSplitRotation,
   sessionTemplateFor,
   setsForSlot,
@@ -506,7 +509,10 @@ export class GoalCyclePlanner {
     // 饮食 × 训练供需图（架构见 dietTrainingGraph.ts）：
     // 从计划算训练需求 → 按饮食策略算供给 → 检冲突 → 输出碳水日型与解释
     const coupling = this.evaluateDietTrainingCoupling(context, materializedWeeks);
+    // 人群分层（recomp 可行性 / 赤字幅度分档 / 低冲击偏好）
+    const tiering = tierPersona(context.facts.profile.value, context.facts.goalContract.value);
     const progressionPolicy = progressionPolicyFor(materializedWeeks);
+    context.reasonCodes.push(...tiering.reasonCodes);
     for (const event of coupling?.traceEvents ?? []) {
       context.traceCollector.constraintEvents.push(event);
     }
@@ -537,10 +543,11 @@ export class GoalCyclePlanner {
         .filter((week) => week.materialization === "intent_only")
         .map((week) => week.id),
       reasonCodes,
-      nutritionGuidance: nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach),
+      nutritionGuidance: nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach, tiering),
       recoveryGuidance: recoveryGuidanceFor(context.facts),
       progressionPolicy,
       ...(coupling ? { dietTrainingCoupling: coupling.output } : {}),
+      personaTieringNote: tiering.recompNoteZh,
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -658,15 +665,22 @@ export class GoalCyclePlanner {
     });
     // 有氧：目标需要时安排在非训练日，不占用力量日（验收标准 §1 有氧条）
     const withAerobic = this.injectAerobicSessions(context, week, sessions);
+    // 周量硬上限：单肌群直接组数不得超过天花板（防 emphasis 等叠加超量）
+    const capped = capWeeklyVolume(withAerobic);
+    if (capped.cappedMuscles.length) {
+      for (const muscle of capped.cappedMuscles) {
+        context.reasonCodes.push(`volume_capped_at_weekly_cap:${muscle}`);
+      }
+    }
     return {
       id: `week-plan-${stableHash({ week: week.id })}`,
       ordinal: week.ordinal,
       startDate: week.startDate,
       endDate: week.endDate,
-      sessions: withAerobic,
+      sessions: capped.sessions,
       stimulusBudget: week.stimulusBudget,
       materializedAt: context.request.currentDate,
-      weeklyDirectSets: volumeLedgerFromSessions(withAerobic),
+      weeklyDirectSets: volumeLedgerFromSessions(capped.sessions),
     };
   }
 
@@ -911,10 +925,44 @@ export class GoalCyclePlanner {
         context.facts.profile.value.trainingExperience,
         context.facts.goalContract.value.primaryGoal,
       );
-      const target = trainingCommitmentTarget(targetBand, context.facts.goalContract.value.commitmentPreferences?.training);
+      const baseTarget = trainingCommitmentTarget(targetBand, context.facts.goalContract.value.commitmentPreferences?.training);
+      // 局部侧重：emphasis 肌群的周量目标上调一档（其余保持，不挤掉）
+      const emphasis = new Set(context.facts.goalContract.value.emphasisMuscles ?? []);
+      if (emphasis.size) context.reasonCodes.push("emphasis_muscles_elevated_volume");
       const cyclesPerWeek = context.schedule.length / selection.rotation.sessions.length;
       const rotation = selection.rotation;
-      setsForTemplate = (template) => setsForSlot(template, target, rotation, cyclesPerWeek);
+      const emphasisExposureBoost = new Set(
+        [...emphasis].filter((muscle) => {
+          // 只给"直接暴露不足"的 emphasis 肌群补 slot（glutes 只从 hip_hinge 来一次/周）
+          const exposures = directExposuresPerCycle(rotation);
+          // 周直接暴露 <2.5 次视为不足（恰好 2 次处在边缘，emphasis 肌群应补到明确充足）
+          return (exposures[muscle] ?? 0) * cyclesPerWeek < 2.5;
+        }),
+      );
+      setsForTemplate = (template) => {
+        const isEmphasis = (template.directMuscles ?? template.muscleGroups).some((muscle) => emphasis.has(muscle));
+        const target = isEmphasis ? Math.min(targetBand.max, baseTarget + 2) : baseTarget;
+        return setsForSlot(template, target, rotation, cyclesPerWeek);
+      };
+      // emphasis 肌群直接暴露不足时，在该肌群主项课后追加一个孤立直接 slot
+      if (emphasisExposureBoost.size) {
+        templates = [...templates];
+        const existingPatterns = new Set(templates.map((item) => item.movementPattern));
+        for (const muscle of emphasisExposureBoost) {
+          const isoPattern = emphasisIsolationPatternFor(muscle);
+          // 只在该课完全没有这个模式的 slot 时补，避免叠在主项上导致过量
+          if (isoPattern && !existingPatterns.has(isoPattern)) {
+            templates.push({
+              movementPattern: isoPattern,
+              muscleGroups: [muscle],
+              directMuscles: [muscle],
+              priority: "maintenance",
+              fatigueIntent: "low",
+            });
+            context.reasonCodes.push(`emphasis_added_isolation:${muscle}`);
+          }
+        }
+      }
     } else {
       templates = sessionTemplates(goal, ordinal, isBodyweightOnly(context.availableEquipment));
     }
@@ -2058,6 +2106,21 @@ function pruneUnresolvedSlots(revision: PlanRevisionData): PlanRevisionData {
 
 
 /** 目标对应的默认饮食策略（用户未选时）。可被用户显式选择覆盖。 */
+/** emphasis 肌群对应的孤立动作模式（用于补直接暴露）。 */
+function emphasisIsolationPatternFor(muscle: string): MovementPattern | undefined {
+  const map: Record<string, MovementPattern> = {
+    glutes: "hip_hinge",           // 髋主导（臀桥/臀推是 hip_hinge 变式）
+    deltoids: "shoulder_abduction", // 侧平举
+    chest: "horizontal_push",
+    back: "horizontal_pull",
+    quadriceps: "knee_extension",
+    hamstrings: "knee_flexion",
+    biceps: "elbow_flexion",
+    triceps: "elbow_extension",
+  };
+  return map[muscle];
+}
+
 function defaultDietStrategyId(
   goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass",
 ): string {
@@ -2096,6 +2159,7 @@ function progressionPolicyFor(
 function nutritionGuidanceFor(
   facts: PlannerFacts,
   energyApproach: import("./adaptiveStrategy").PlanningNutritionStrategy["energyApproach"],
+  tiering?: ReturnType<typeof tierPersona>,
 ): import("../coach/domain").NutritionGuidanceData {
   const goal = facts.goalContract.value.primaryGoal;
   const commitment = facts.goalContract.value.commitmentPreferences?.nutrition ?? "standard";
@@ -2124,6 +2188,12 @@ function nutritionGuidanceFor(
         }
       : {}),
     calorieDirection,
+    ...(tiering?.weeklyRateTarget ? { weeklyRateTarget: tiering.weeklyRateTarget } : {}),
+    ...(tiering?.bodyMassState === "high" || tiering?.bodyMassState === "very_high"
+      ? { dailyStepTarget: 8000 }
+      : tiering && calorieDirection === "deficit"
+        ? { dailyStepTarget: 7000 }
+        : {}),
     // 绝对热量需要体重与活动数据；缺任一项就不输出（禁止推测 TDEE）
     tracking:
       mode === "minimal_constraint"

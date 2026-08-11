@@ -183,6 +183,70 @@ export function weeklyVolumeLedger(
   return Object.fromEntries(ledger);
 }
 
+/**
+ * 周量硬上限（产品规则 D）：单肌群每周直接组数的天花板。
+ * 防"侧重肌群被堆到 20+ 组"——无论上游逻辑怎么叠加都不能超。
+ * 超出的肌群按"从低到高优先级"减组（optional → maintenance），保住主项。
+ */
+export const WEEKLY_DIRECT_SETS_HARD_CAP = 14;
+
+export function capWeeklyVolume<
+  T extends {
+    stimulusSlots?: readonly {
+      id: string;
+      intent: { muscleGroups: readonly string[]; directMuscles?: readonly string[]; priority: string };
+      prescription: { setCount: number };
+    }[];
+    tasks?: readonly { stimulusSlotId?: string; sets: readonly unknown[] }[];
+  },
+>(sessions: readonly T[], cap = WEEKLY_DIRECT_SETS_HARD_CAP): { sessions: T[]; cappedMuscles: string[] } {
+  const totals = new Map<string, number>();
+  for (const session of sessions) {
+    for (const slot of session.stimulusSlots ?? []) {
+      for (const muscle of slot.intent.directMuscles ?? slot.intent.muscleGroups) {
+        totals.set(muscle, (totals.get(muscle) ?? 0) + slot.prescription.setCount);
+      }
+    }
+  }
+  const over = [...totals.entries()].filter(([, total]) => total > cap).map(([muscle]) => muscle);
+  if (!over.length) return { sessions: [...sessions], cappedMuscles: [] };
+
+  const result = sessions.map((session) => ({
+    ...session,
+    stimulusSlots: (session.stimulusSlots ?? []).map((slot) => ({ ...slot, prescription: { ...slot.prescription } })),
+    tasks: (session.tasks ?? []).map((task) => ({ ...task, sets: [...task.sets] })),
+  })) as T[];
+  for (const muscle of over) {
+    let excess = (totals.get(muscle) ?? 0) - cap;
+    const slotsFlat: { session: T; slotIndex: number; slot: NonNullable<T["stimulusSlots"]>[number] }[] = [];
+    for (const session of result) {
+      (session.stimulusSlots ?? []).forEach((slot, slotIndex) => {
+        if ((slot.intent.directMuscles ?? slot.intent.muscleGroups).includes(muscle)) {
+          slotsFlat.push({ session, slotIndex, slot });
+        }
+      });
+    }
+    slotsFlat.sort((a, b) => {
+      const rank = (p: string) => (p === "optional" ? 0 : p === "maintenance" ? 1 : 2);
+      return rank(a.slot.intent.priority) - rank(b.slot.intent.priority);
+    });
+    for (const { session, slotIndex, slot } of slotsFlat) {
+      if (excess <= 0) break;
+      const floor = slot.intent.priority === "primary" ? 2 : 1;
+      const removable = Math.min(excess, slot.prescription.setCount - floor);
+      if (removable <= 0) continue;
+      const newCount = slot.prescription.setCount - removable;
+      ((session.stimulusSlots as unknown) as { prescription: { setCount: number } }[])[slotIndex]!.prescription.setCount = newCount;
+      const task = ((session.tasks as unknown) as { stimulusSlotId?: string; sets: unknown[] }[]).find(
+        (candidate) => candidate.stimulusSlotId === slot.id,
+      );
+      if (task) task.sets = task.sets.slice(0, newCount);
+      excess -= removable;
+    }
+  }
+  return { sessions: result, cappedMuscles: over };
+}
+
 /** 从物化后的 session 内容求和周量账本（真实产出，而非计划意图）。 */
 export function volumeLedgerFromSessions(
   sessions: readonly { stimulusSlots?: readonly { intent: { muscleGroups: readonly string[]; directMuscles?: readonly string[] }; prescription: { setCount: number } }[] }[],
