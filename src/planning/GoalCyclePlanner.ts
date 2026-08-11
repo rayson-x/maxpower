@@ -44,6 +44,7 @@ import {
   type TrainingRulePackDescriptor,
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
+import { fuelingAdviceFor } from "./sessionFueling";
 import {
   evaluateCoupling,
   glycogenDemandForDay,
@@ -754,10 +755,46 @@ export class GoalCyclePlanner {
           ],
         },
       };
+      const fueling = fuelingAdviceFor({
+        strategies: this.knowledge.programStrategies(),
+        workType: "low_intensity_aerobic",
+        plannedMinutes: minutes,
+        profile: context.facts.profile.value,
+      });
       return {
         ...session,
         title: "有氧",
         kind: "cardio" as const,
+        ...(fueling
+          ? {
+              fueling: {
+                workType: fueling.workType,
+                preferredState: fueling.preferredState,
+                acceptableStates: fueling.acceptableStates,
+                minMinutesAfterFullMeal: fueling.minMinutesAfterFullMeal,
+                minMinutesAfterSnack: fueling.minMinutesAfterSnack,
+                rationale: fueling.rationale,
+                advantages: fueling.advantages,
+                risks: fueling.risks,
+                fastedEligible: fueling.fastedEligible,
+                ...(fueling.fastedBlockers.length
+                  ? {
+                      fastedBlockers: fueling.fastedBlockers.map((blocker) => blocker.ruleId),
+                      fastedNote: fueling.fastedBlockers
+                        .map((blocker) => `${blocker.reason}${blocker.alternative ? ` ${blocker.alternative}` : ""}`)
+                        .join(" "),
+                    }
+                  : {}),
+                citations: fueling.citations.map((citation) => ({
+                  id: citation.id,
+                  tier: citation.tier,
+                  label: citation.label,
+                  ...(citation.url ? { url: citation.url } : {}),
+                  claim: citation.claim,
+                })),
+              },
+            }
+          : {}),
         durationBudget: { value: minutes, unit: "minutes" as const },
         estimatedDuration: { value: minutes, unit: "minutes" as const },
         stimulusSlots: [slot],

@@ -319,6 +319,85 @@ export interface SplitRotationTemplate {
  * 纪律：这里**只声明该策略在四个共享维度上提供什么**，不含任何训练规则。
  * 新增一种策略 = 加一条声明；训练侧代码零修改（架构见 src/planning/dietTrainingGraph.ts）。
  */
+/**
+ * 文献引用（版本化知识资产）。
+ *
+ * 用途：让计划里的每条建议都能指回一手来源——用户点得开、我们对得账。
+ * 纪律（四标签）：
+ *   tier A/B = 同行评议证据（立场声明/系统综述/RCT）
+ *   tier C   = 课程或从业资料
+ *   tier D   = 产品默认规则（无外部声称）
+ *   tier U   = 待核验，**不得**用于面向用户的声称
+ * `claim` 是我们从该来源实际采用的结论；`cannotSupport` 明确它**不能**推出什么——
+ * 这一栏是防过度声称的主要手段。
+ */
+export interface EvidenceCitation {
+  id: string;
+  tier: "A" | "B" | "C" | "D" | "U";
+  titleZh: string;
+  titleEn?: string;
+  authorsShort: string;
+  year: number;
+  venue?: string;
+  /** 免费可达链接（PubMed/PMC/官方 PDF 优先，不用付费 DOI）。 */
+  url?: string;
+  pmid?: string;
+  /** 我们采用的结论。 */
+  claim: string;
+  /** 该来源不能推出什么（防止过度声称）。 */
+  cannotSupport: readonly string[];
+  /** 适用人群边界。 */
+  population: string;
+}
+
+/**
+ * 进食状态 × 训练类型的编排策略（版本化知识，不写在代码里）。
+ *
+ * 纪律：数值、文案、优势/风险、证据引用**全部是数据**；
+ * 代码只负责"按用户情况选哪条 + 解析引用"。
+ * 这样领域专家可以审这张表，也可以云端更新，而不需要改引擎。
+ */
+export interface SessionFuelingPolicy {
+  workType: "strength" | "high_intensity_aerobic" | "low_intensity_aerobic" | "walking";
+  /** 首选进食状态。 */
+  preferredState: "fasted" | "light_snack" | "fed" | "post_strength";
+  acceptableStates: readonly ("fasted" | "light_snack" | "fed" | "post_strength")[];
+  /** 距正餐的建议最小间隔（分钟）；null = 无需间隔（散步）。 */
+  minMinutesAfterFullMeal: number | null;
+  /** 距小份加餐的建议最小间隔（分钟）。 */
+  minMinutesAfterSnack: number | null;
+  /** 为什么这个安排可行（给用户看的因果链）。 */
+  rationaleZh: string;
+  advantagesZh: readonly string[];
+  risksZh: readonly string[];
+  /** 该策略引用的文献 id（由 citations 库解析）。 */
+  evidenceRefs: readonly string[];
+  /** 证据等级；D = 产品规则（如具体间隔分钟数）。 */
+  tier: "A" | "B" | "C" | "D" | "U";
+}
+
+/**
+ * 空腹训练适格性规则表（数据驱动，代码只做匹配）。
+ * 每条规则命中即阻止推荐，并给出替代方案与说明。
+ */
+export interface FastedTrainingRule {
+  id: string;
+  /** 匹配条件（结构化，不做文本猜测）。 */
+  when: {
+    workTypeIn?: readonly ("strength" | "high_intensity_aerobic" | "low_intensity_aerobic" | "walking")[];
+    plannedMinutesOver?: number;
+    ageUnder?: number;
+    adultNotConfirmed?: boolean;
+    /** 命中任一结构化健康标记（由 onboarding 结构化筛查产生）。 */
+    healthFlagIn?: readonly string[];
+    professionalClearanceRequired?: boolean;
+  };
+  severity: "block" | "caution";
+  reasonZh: string;
+  alternativeZh?: string;
+  evidenceRefs: readonly string[];
+}
+
 export interface DietStrategyDeclaration {
   id: string;
   nameZh: string;
@@ -356,6 +435,12 @@ export interface ProgramStrategies {
   semanticVersion: string;
   /** 饮食策略库（供需图的供给侧声明）。 */
   dietStrategies?: readonly DietStrategyDeclaration[];
+  /** 文献引用库：计划里的 evidenceRef 由此解析为可展示的一手来源。 */
+  citations?: readonly EvidenceCitation[];
+  /** 进食状态编排策略（按训练类型）。 */
+  sessionFuelingPolicies?: readonly SessionFuelingPolicy[];
+  /** 空腹训练适格性规则表。 */
+  fastedTrainingRules?: readonly FastedTrainingRule[];
   splitRotations: readonly SplitRotationTemplate[];
   /** 周量目标（直接组/肌群/周）：TP-VOL-BASE 分档。 */
   weeklyDirectSetTargets: {

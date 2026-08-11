@@ -482,6 +482,29 @@ export interface PlannedSessionData {
   /** Deterministic estimate from warm-up, work sets, planned rest and exercise transitions. */
   estimatedDuration?: DurationQuantity;
   stimulusSlots?: readonly StimulusSlotData[];
+  /** 进食状态编排（见 src/planning/sessionFueling.ts）：何时做、为什么可行、优势与风险。 */
+  fueling?: {
+    workType: "strength" | "high_intensity_aerobic" | "low_intensity_aerobic" | "walking";
+    preferredState: "fasted" | "light_snack" | "fed" | "post_strength";
+    acceptableStates: readonly ("fasted" | "light_snack" | "fed" | "post_strength")[];
+    minMinutesAfterFullMeal: number | null;
+    minMinutesAfterSnack: number | null;
+    rationale: string;
+    advantages: readonly string[];
+    risks: readonly string[];
+    /** 空腹是否适格（仅对可空腹的工作类型有意义）。 */
+    fastedEligible?: boolean;
+    fastedBlockers?: readonly string[];
+    fastedNote?: string;
+    /** 解析后的文献引用——让用户看到这条安排的依据。 */
+    citations?: readonly {
+      id: string;
+      tier: "A" | "B" | "C" | "D" | "U";
+      label: string;
+      url?: string;
+      claim: string;
+    }[];
+  };
   status?: "planned" | "frozen_for_workout";
   tasks: readonly PlannedExerciseTask[];
 }
