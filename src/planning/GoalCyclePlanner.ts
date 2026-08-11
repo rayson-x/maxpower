@@ -4,14 +4,14 @@ import type {
   GoalContractData,
   EquipmentRequirement,
   ExerciseResolutionData,
-  ExerciseSetPrescription,
-  ExerciseTaskPrescription,
+  PlannedExerciseSet,
+  PlannedExerciseTask,
   GoalAllocationData,
   GoalCycleData,
   MassQuantity,
   MesocycleData,
   PlanRevisionData,
-  SessionPrescriptionData,
+  PlannedSessionData,
   StimulusBudgetData,
   StimulusIntentData,
   StimulusSlotData,
@@ -436,7 +436,7 @@ export class GoalCyclePlanner {
     week: WeeklyIntentData,
     date: string,
     elapsed = false,
-  ): SessionPrescriptionData {
+  ): PlannedSessionData {
     return {
       id: `session-${stableHash({ week: week.id, date, kind: "rest" })}`,
       title: elapsed ? "已过日期 · 以 Timeline 为准" : "休息与记录",
@@ -456,7 +456,7 @@ export class GoalCyclePlanner {
     date: string,
     availability: ScheduleAvailability,
     ordinal: number,
-  ): SessionPrescriptionData {
+  ): PlannedSessionData {
     const goal = context.facts.goalContract.value.primaryGoal;
     const isDeloadWeek = week.intent === "planned_recovery_and_formal_review";
     const useCardio = goal === "fat_loss_preserve_lean_mass" && ordinal === context.schedule.length - 1 && !isDeloadWeek;
@@ -565,6 +565,7 @@ export class GoalCyclePlanner {
         : context.trainingRule.defaults.calibrationRir,
       hasHistory,
       availability.availableMinutes,
+      context.request.personalRestTempoSeconds,
     );
     const lockedFields = context.facts.mandate.value.locks
       ?.filter((lock) => lock.field === "exercise" || lock.field === "sets" || lock.field === "load")
@@ -694,15 +695,15 @@ export class GoalCyclePlanner {
     };
   }
 
-  private taskForSlot(context: PlanningContext, slot: StimulusSlotData): ExerciseTaskPrescription {
+  private taskForSlot(context: PlanningContext, slot: StimulusSlotData): PlannedExerciseTask {
     const exerciseId = slot.exerciseSlot.exerciseVariantId!;
     const exactHistory = [...context.history]
       .filter((entry) => entry.exerciseVariantId === exerciseId && entry.confidence === "confirmed")
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))[0];
-    const sets: ExerciseSetPrescription[] = Array.from(
+    const sets: PlannedExerciseSet[] = Array.from(
       { length: slot.prescription.setCount },
       (_, setIndex) => {
-        const base: ExerciseSetPrescription = {
+        const base: PlannedExerciseSet = {
           id: `set-${stableHash({ slot: slot.id, setIndex })}`,
           ...(slot.prescription.repRange ? { targetReps: slot.prescription.repRange } : {}),
           ...(slot.prescription.duration ? { targetDuration: slot.prescription.duration } : {}),
@@ -938,6 +939,19 @@ function isBodyweightOnly(available: ReadonlySet<string>): boolean {
   return !weightedEquipment.some((item) => available.has(item));
 }
 
+
+/** 休息建议：有个人实测节奏时在安全带宽内采用；否则用分级默认表。 */
+function restSecondsFor(
+  template: SlotTemplate,
+  priority: StimulusIntentData["priority"],
+  personalRestTempoSeconds?: number,
+): number {
+  const fallback = template.fatigueIntent === "high" ? 180 : priority === "primary" ? 120 : priority === "maintenance" ? 90 : 75;
+  if (personalRestTempoSeconds === undefined) return fallback;
+  const floor = priority === "primary" ? 60 : 45;
+  return Math.round(Math.min(240, Math.max(floor, personalRestTempoSeconds)));
+}
+
 function prescriptionFor(
   mode: StimulusIntentData["prescriptionMode"],
   priority: StimulusIntentData["priority"],
@@ -947,11 +961,12 @@ function prescriptionFor(
   targetRirRange: { min: number; max: number },
   hasHistory: boolean,
   availableMinutes: number,
+  personalRestTempoSeconds?: number,
 ) {
   const reduction = recovery === "slight_reduction" ? 1 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 2 : 0;
   const requestedSets = priority === "primary" ? 3 : priority === "maintenance" ? 2 : 1;
   const setCount = Math.max(1, Math.min(hasHistory ? requestedSets : 2, requestedSets) - reduction);
-  // 标量中点仅为旧消费者兼容；区间才是处方的权威语义（TP-RIR-001）。
+  // 标量中点仅为旧消费者兼容；区间才是计划的权威语义（TP-RIR-001）。
   const targetRir = Math.round((targetRirRange.min + targetRirRange.max) / 2);
   if (mode === "timed") {
     return {
@@ -974,7 +989,7 @@ function prescriptionFor(
     targetRir,
     targetRirRange,
     rest: {
-      value: template.fatigueIntent === "high" ? 180 : priority === "primary" ? 120 : priority === "maintenance" ? 90 : 75,
+      value: restSecondsFor(template, priority, personalRestTempoSeconds),
       unit: "seconds" as const,
     },
   };

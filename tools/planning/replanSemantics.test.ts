@@ -127,7 +127,7 @@ test("session_completed：历史更新后重算，diff 非空则出新 revision"
   );
   assert.equal(same.kind, "no_change");
 
-  // 新的确认历史 → 处方变化 → diff 非空 → 新 revision
+  // 新的确认历史 → 训练安排变化 → diff 非空 → 新 revision
   const withHistory = planner.plan(
     request(
       { trigger: "session_completed", historicalPerformance: [benchHistory] },
@@ -141,4 +141,25 @@ test("session_completed：历史更新后重算，diff 非空则出新 revision"
     .find((task) => task.exerciseVariantId === bench.id);
   assert.equal(anchored?.sets[0]?.targetLoadStatus, "predicted_target");
   assert.deepEqual(anchored?.sets[0]?.targetRirRange, { min: 2, max: 4 });
+});
+
+test("个人实测休息节奏在安全带宽内个性化休息建议", () => {
+  const withTempo = planner.plan(request({ personalRestTempoSeconds: 100 }));
+  assert.equal(withTempo.kind, "plan_proposal");
+  if (withTempo.kind !== "plan_proposal") return;
+  const rests = withTempo.planRevision.sessions
+    .flatMap((session) => session.stimulusSlots ?? [])
+    .map((slot) => slot.prescription.rest?.value)
+    .filter((value): value is number => value !== undefined);
+  assert.ok(rests.length > 0);
+  assert.ok(rests.every((value) => value === 100), "全部休息建议应采用个人节奏 100s");
+
+  const tooShort = planner.plan(request({ personalRestTempoSeconds: 20 }));
+  assert.equal(tooShort.kind, "plan_proposal");
+  if (tooShort.kind !== "plan_proposal") return;
+  const floorValues = tooShort.planRevision.sessions
+    .flatMap((session) => session.stimulusSlots ?? [])
+    .map((slot) => slot.prescription.rest?.value)
+    .filter((value): value is number => value !== undefined);
+  assert.ok(floorValues.every((value) => value >= 45), "过短的个人节奏被安全带宽钳制");
 });

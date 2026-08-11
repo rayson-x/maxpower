@@ -115,8 +115,8 @@ import {
   type TimelineSourceMutation,
 } from "../timeline";
 import {
-  applyUpcomingWorkoutPrescriptionChange,
-  assertOnlyUpcomingPrescriptionChanged,
+  applyUpcomingWorkoutPlanChange,
+  assertOnlyUpcomingPlannedSessionChanged,
   deriveSessionOutcome,
   hasExpiredRecoveryWindow,
   newWorkoutState,
@@ -164,6 +164,8 @@ export interface CoachApplicationDependencies extends CoachApplicationPorts {
   knowledgePackSource?: KnowledgePackSourcePort;
   /** 知识检索工具开关（ticket 06）：默认禁用，由 eval 门槛（ticket 10）翻转。 */
   knowledgeToolsEnabled?: boolean;
+  /** 个人知识层（ticket 05）：实测休息等校准值的沉淀处；缺省不启用。 */
+  personalKnowledge?: import("../knowledge/personalLayer").PersonalKnowledgeLayer;
   trainingRuleRegistry?: TrainingRulePackRegistry;
   /** Set only by AuthRoot's account-scoped runtime composition. */
   authenticatedAccountId?: string;
@@ -251,6 +253,7 @@ export class CoachApplication {
   private readonly monotonicClock: NonNullable<CoachApplicationPorts["monotonicClock"]>;
   private readonly knowledge: KnowledgePackRegistry;
   private knowledgePackLoad: KnowledgePackLoadResult | null;
+  private readonly personalKnowledge?: import("../knowledge/personalLayer").PersonalKnowledgeLayer;
   private readonly onboarding: OnboardingService;
   private readonly planner: GoalCyclePlanner;
   private readonly trainingRules: TrainingRulePackRegistry;
@@ -278,6 +281,7 @@ export class CoachApplication {
     this.authenticatedAccountId = dependencies.authenticatedAccountId;
     this.credentials = dependencies.credentials;
     this.monotonicClock = dependencies.monotonicClock ?? { nowMs: () => Date.now() };
+    this.personalKnowledge = dependencies.personalKnowledge;
     this.knowledgePackLoad = null;
     if (dependencies.knowledgeRegistry) {
       this.knowledge = dependencies.knowledgeRegistry;
@@ -379,8 +383,19 @@ export class CoachApplication {
     )[0];
     // 数据桥（ticket 02）：从 workout 聚合组装 planner 的历史表现（所有 replan 入口统一受益）
     const historicalPerformance = assembleHistoricalPerformance(projection.workouts);
+    // 个人节奏校准（ticket 05）：实测休息中位数个性化休息建议与时长估算
+    const tempoEntry = this.personalKnowledge
+      ? (await this.personalKnowledge.list(input.userId)).find(
+          (entry) => entry.key === "rest_tempo_seconds" && entry.status === "active",
+        )
+      : undefined;
+    const personalRestTempoSeconds =
+      typeof tempoEntry?.value?.medianRestSeconds === "number"
+        ? (tempoEntry.value.medianRestSeconds as number)
+        : undefined;
     return this.planner.plan({
       ...input,
+      ...(personalRestTempoSeconds !== undefined ? { personalRestTempoSeconds } : {}),
       facts: {
         userId: input.userId,
         profile: projection.profile,
@@ -4659,7 +4674,7 @@ export class CoachApplication {
   async prepareWorkoutSession(input: {
     userId: string;
     workoutId: string;
-    prescriptionRef: import("./domain").PrescriptionRef;
+    prescriptionRef: import("./domain").PlannedSessionRef;
     mode?: import("./domain").WorkoutExecutionMode;
     policy?: import("./domain").WorkoutSessionPolicy;
     idempotencyKey: string;
@@ -4891,13 +4906,39 @@ export class CoachApplication {
       ? workout.drafts.find((item) => item.id === input.draftId)
       : workout.drafts.find((item) => item.prescriptionSetId === target.set.id);
     const now = this.runtime.now();
-    const outcome = outcomeFromDraft({
-      id: this.runtime.nextId("set-outcome"),
-      target,
-      draft,
-      confirmAsPlanned: Boolean(input.confirmAsPlanned),
-      ...(input.packetRef ? { packetRef: input.packetRef } : {}),
-    });
+    // 实测休息（ticket 05）：有休息计时器时按单调钟实测经过时间；无计时器则不测，不编造。
+    const restTimer = workout.state.restTimer;
+    let measuredRestSeconds: number | undefined;
+    if (restTimer) {
+      const durationMs = restTimer.duration.unit === "seconds"
+        ? restTimer.duration.value * 1_000
+        : restTimer.duration.value * 60_000;
+      const startedMs = restTimer.deadlineMonotonicMs - durationMs;
+      measuredRestSeconds = Math.max(0, Math.round((this.monotonicClock.nowMs() - startedMs) / 1_000));
+    }
+    const plannedRestSeconds = target.set.rest
+      ? target.set.rest.unit === "seconds" ? target.set.rest.value : target.set.rest.value * 60
+      : undefined;
+    const restDeviation =
+      measuredRestSeconds !== undefined && plannedRestSeconds
+        ? measuredRestSeconds < plannedRestSeconds * 0.5
+          ? "too_short" as const
+          : measuredRestSeconds > plannedRestSeconds * 1.5
+            ? "too_long" as const
+            : "within" as const
+        : undefined;
+    const outcome = {
+      ...outcomeFromDraft({
+        id: this.runtime.nextId("set-outcome"),
+        target,
+        draft,
+        confirmAsPlanned: Boolean(input.confirmAsPlanned),
+        ...(input.packetRef ? { packetRef: input.packetRef } : {}),
+      }),
+      recordedAt: now,
+      ...(measuredRestSeconds !== undefined ? { measuredRestSeconds } : {}),
+      ...(restDeviation ? { restDeviation } : {}),
+    };
     await this.executeDomainCommand({
       type: "workout.record_set",
       meta: settingsCommandMeta(input.userId, input.idempotencyKey, now),
@@ -4943,16 +4984,16 @@ export class CoachApplication {
     return skipped;
   }
 
-  async reviseUpcomingWorkoutPrescription(input: {
+  async reviseUpcomingWorkoutPlan(input: {
     userId: string;
     workoutId: string;
-    frozenPrescription: import("./domain").SessionPrescriptionData;
+    frozenPrescription: import("./domain").PlannedSessionData;
     scope: "next_set" | "future_sets" | "future_tasks";
     reason: string;
     idempotencyKey: string;
   }): Promise<import("./domain").WorkoutProjection> {
     const workout = await this.requireWorkoutProjection(input.userId, input.workoutId);
-    assertOnlyUpcomingPrescriptionChanged({
+    assertOnlyUpcomingPlannedSessionChanged({
       before: workout.frozenPrescription,
       after: input.frozenPrescription,
       completedPrescriptionSetIds: resolvedWorkoutSetIds(workout),
@@ -4977,10 +5018,10 @@ export class CoachApplication {
    * workout.  Both the shared mobile UI and a registered Coach tool use this
    * command, so neither needs to manufacture a whole SessionPrescription.
    */
-  async editUpcomingWorkoutPrescription(input: {
+  async editUpcomingWorkoutPlan(input: {
     userId: string;
     workoutId: string;
-    change: import("./domain").UpcomingWorkoutPrescriptionChange;
+    change: import("./domain").UpcomingWorkoutPlanChange;
     reason: string;
     idempotencyKey: string;
   }): Promise<import("./domain").WorkoutProjection> {
@@ -4988,7 +5029,7 @@ export class CoachApplication {
     const currentDraft = workout.drafts.find(
       (draft) => draft.prescriptionSetId === workout.state.currentSetId,
     );
-    const applied = applyUpcomingWorkoutPrescriptionChange({
+    const applied = applyUpcomingWorkoutPlanChange({
       before: workout.frozenPrescription,
       change: input.change,
       completedPrescriptionSetIds: resolvedWorkoutSetIds(workout),
@@ -4999,7 +5040,7 @@ export class CoachApplication {
     } else if (input.change.kind === "replace_task_exercise") {
       await this.assertKnownWorkoutExerciseVariant(input.userId, input.change.replacementExerciseVariantId);
     }
-    return this.reviseUpcomingWorkoutPrescription({
+    return this.reviseUpcomingWorkoutPlan({
       userId: input.userId,
       workoutId: input.workoutId,
       frozenPrescription: applied.frozenPrescription,
@@ -5125,7 +5166,7 @@ export class CoachApplication {
     if (workout.revision !== input.recommendation.baseWorkoutRevision) {
       throw new Error("stale_next_set_recommendation");
     }
-    return this.editUpcomingWorkoutPrescription({
+    return this.editUpcomingWorkoutPlan({
       userId: input.recommendation.userId,
       workoutId: input.recommendation.workoutId,
       change: input.recommendation.change,
@@ -5382,6 +5423,39 @@ export class CoachApplication {
           causalRefs: [`workout_session:${input.workoutId}`, `set_outcome:${set.id}`],
         },
       });
+    }
+    // 个人节奏校准（ticket 05）：实测休息中位数沉淀为 observed_calibration，供时长估算个性化
+    if (this.personalKnowledge) {
+      const measured = workout.setOutcomes.flatMap((set) =>
+        set.measuredRestSeconds !== undefined ? [set.measuredRestSeconds] : []);
+      if (measured.length) {
+        const sorted = [...measured].sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+        const existing = (await this.personalKnowledge.list(input.userId))
+          .find((entry) => entry.key === "rest_tempo_seconds");
+        const next = {
+          kind: "observed_calibration" as const,
+          value: { medianRestSeconds: median },
+          evidenceWindow: {
+            from: workout.setOutcomes[0]?.recordedAt ?? now,
+            to: now,
+          },
+          sourceFactRefs: workout.setOutcomes
+            .filter((set) => set.measuredRestSeconds !== undefined)
+            .map((set) => `set_outcome:${set.id}`),
+        };
+        if (existing) {
+          await this.personalKnowledge.supersede({
+            userId: input.userId,
+            id: existing.id,
+            expectedVersion: existing.version,
+            next,
+          });
+        } else {
+          await this.personalKnowledge.put({ userId: input.userId, key: "rest_tempo_seconds", ...next });
+        }
+      }
     }
     return outcome;
   }
@@ -8667,9 +8741,9 @@ function unavailableWorkoutRuleDecision(reason: string): RuleDecision {
 }
 
 function findWorkoutPrescriptionSet(
-  prescription: import("./domain").SessionPrescriptionData,
+  prescription: import("./domain").PlannedSessionData,
   setId: string,
-): { task: import("./domain").ExerciseTaskPrescription; set: import("./domain").ExerciseSetPrescription } | undefined {
+): { task: import("./domain").PlannedExerciseTask; set: import("./domain").PlannedExerciseSet } | undefined {
   for (const task of prescription.tasks) {
     const set = task.sets.find((candidate) => candidate.id === setId);
     if (set) return { task, set };
@@ -8756,8 +8830,8 @@ function activeWorkoutLocks(
 
 function availableWorkoutLoads(
   projection: import("./domain").DomainProjection,
-  source: import("./domain").ExerciseSetPrescription,
-  next: import("./domain").ExerciseSetPrescription,
+  source: import("./domain").PlannedExerciseSet,
+  next: import("./domain").PlannedExerciseSet,
 ): readonly import("./domain").MassQuantity[] {
   const configured = projection.equipmentProfiles.flatMap((profile) =>
     (profile.value.equipment ?? [])
@@ -8773,8 +8847,8 @@ function availableWorkoutLoads(
 
 function nextUnperformedSet(workout: import("./domain").WorkoutProjection): {
   taskId: string;
-  task: import("./domain").ExerciseTaskPrescription;
-  set: import("./domain").ExerciseSetPrescription;
+  task: import("./domain").PlannedExerciseTask;
+  set: import("./domain").PlannedExerciseSet;
 } | undefined {
   const resolved = new Set(resolvedWorkoutSetIds(workout));
   for (const task of workout.frozenPrescription.tasks) {

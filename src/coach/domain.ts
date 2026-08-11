@@ -1,5 +1,5 @@
 export const DOMAIN_EVENT_SCHEMA_VERSION = 1 as const;
-export const COACH_LEDGER_SNAPSHOT_SCHEMA_VERSION = 6 as const;
+export const COACH_LEDGER_SNAPSHOT_SCHEMA_VERSION = 7 as const;
 
 export type DomainAggregateKind =
   | "user_profile"
@@ -261,6 +261,11 @@ export interface PermissionSetData {
   remoteLlm: PermissionStatus;
   cloudSync: PermissionStatus;
   mediaUpload: PermissionStatus;
+  /**
+   * 诊断 trace 上报的独立授权项。缺省（未写过）即 not_configured = 关闭，
+   * 且 remoteLlm 授权是它的前提——诊断数据不搭便车。
+   */
+  observability?: PermissionStatus;
   remoteLlmDisclosure?: {
     taskRelevantHealthTrainingNutritionSleepAndExperienceSent: true;
     directIdentityFieldsRemoved: readonly (
@@ -353,7 +358,7 @@ export interface StimulusBudgetData {
   priority: "primary" | "maintenance" | "optional";
 }
 
-export interface ExerciseSetPrescription {
+export interface PlannedExerciseSet {
   id: string;
   targetReps?: { min: number; max: number };
   targetDuration?: DurationQuantity;
@@ -369,17 +374,17 @@ export interface ExerciseSetPrescription {
   };
   calibrationIntent?: string;
   targetRir?: number;
-  /** RIR 处方区间（权威）；targetRir 标量仅为旧消费者的兼容中点。 */
+  /** 计划的 RIR 目标区间（权威）；targetRir 标量仅为旧消费者的兼容中点。 */
   targetRirRange?: { min: number; max: number };
   rest?: DurationQuantity;
 }
 
-export interface ExerciseTaskPrescription {
+export interface PlannedExerciseTask {
   id: string;
   exerciseVariantId: string;
   stimulusSlotId?: string;
   mode?: "weighted_reps" | "bodyweight_reps" | "timed" | "distance";
-  sets: readonly ExerciseSetPrescription[];
+  sets: readonly PlannedExerciseSet[];
 }
 
 export interface StimulusIntentData {
@@ -414,7 +419,7 @@ export interface StimulusSlotData {
     duration?: DurationQuantity;
     distance?: { value: number; unit: "m" | "km" };
     targetRir?: number;
-    /** RIR 处方区间（权威）；targetRir 标量仅为旧消费者的兼容中点。 */
+    /** 计划的 RIR 目标区间（权威）；targetRir 标量仅为旧消费者的兼容中点。 */
     targetRirRange?: { min: number; max: number };
     rest?: DurationQuantity;
   };
@@ -422,7 +427,7 @@ export interface StimulusSlotData {
   lockedFields: readonly string[];
 }
 
-export interface SessionPrescriptionData {
+export interface PlannedSessionData {
   id: string;
   title: string;
   scheduledFor: string;
@@ -434,7 +439,7 @@ export interface SessionPrescriptionData {
   estimatedDuration?: DurationQuantity;
   stimulusSlots?: readonly StimulusSlotData[];
   status?: "planned" | "frozen_for_workout";
-  tasks: readonly ExerciseTaskPrescription[];
+  tasks: readonly PlannedExerciseTask[];
 }
 
 export interface WeekPlanData {
@@ -442,7 +447,7 @@ export interface WeekPlanData {
   ordinal: number;
   startDate: string;
   endDate: string;
-  sessions: readonly SessionPrescriptionData[];
+  sessions: readonly PlannedSessionData[];
   stimulusBudget: readonly StimulusBudgetData[];
   materializedAt: string;
 }
@@ -464,10 +469,10 @@ export interface PlanRevisionData {
   recoveryStrategy?: import("../planning").RecoveryStrategy;
   explanation?: import("../planning").RecommendationExplanation;
   adaptiveForecasts?: readonly import("../planning").AdaptiveForecastScenario[];
-  sessions: readonly SessionPrescriptionData[];
+  sessions: readonly PlannedSessionData[];
 }
 
-export interface PrescriptionRef {
+export interface PlannedSessionRef {
   planId: string;
   planRevision: number;
   sessionPrescriptionId: string;
@@ -518,7 +523,7 @@ export interface SetDraftData {
   prescriptionSetId: string;
   exerciseVariantId: string;
   /** Copied for UI convenience only; never becomes a SetOutcome until explicit confirmation. */
-  proposedFromPrescription: ExerciseSetPrescription;
+  proposedFromPrescription: PlannedExerciseSet;
   actualLoad?: MassQuantity;
   actualReps?: number;
   actualDuration?: DurationQuantity;
@@ -561,6 +566,12 @@ export interface SetOutcomeData {
   note?: string;
   completedAs?: "confirmed_as_planned" | "user_edited" | "imported" | "camera_confirmed";
   source: "user_confirmed" | "imported" | "camera_confirmed";
+  /** 组确认时间（实测休息的计算锚点）。 */
+  recordedAt?: string;
+  /** 实测休息秒数（休息计时器的经过时间；无计时器则不测——缺失不是零）。 */
+  measuredRestSeconds?: number;
+  /** 与计划休息的偏差（产品规则：<0.5×目标=过短，>1.5×=过长）。 */
+  restDeviation?: "within" | "too_short" | "too_long";
   packetRef?: {
     id: string;
     version: number;
@@ -626,7 +637,7 @@ export interface SessionOutcomeCorrectionPatch {
  * keeps completed sets, an in-progress draft, and the immutable session
  * identity outside the editable surface.
  */
-export type UpcomingWorkoutPrescriptionChange =
+export type UpcomingWorkoutPlanChange =
   | {
       kind: "adjust_set";
       taskId: string;
@@ -642,7 +653,7 @@ export type UpcomingWorkoutPrescriptionChange =
     }
   | {
       kind: "add_task";
-      task: ExerciseTaskPrescription;
+      task: PlannedExerciseTask;
       index?: number;
     }
   | {
@@ -658,7 +669,7 @@ export type UpcomingWorkoutPrescriptionChange =
        * supplied sets may change reps/RIR/rest, but may never carry an
        * absolute target load from the prior exercise.
        */
-      replacementSets?: readonly ExerciseSetPrescription[];
+      replacementSets?: readonly PlannedExerciseSet[];
     }
   | {
       kind: "reorder_task";
@@ -684,6 +695,10 @@ export type TimelineFact =
       duration?: DurationQuantity;
       distance?: { value: number; unit: "m" | "km" };
       intensity?: "easy" | "moderate" | "hard" | "unknown";
+      /** The person's reported or explicitly confirmed exercise expenditure. */
+      energyExpenditure?: EnergyQuantity;
+      /** Keeps a reported number distinct from a conservative local/Coach estimate. */
+      energyExpenditureSource?: "manual" | "rule_estimate" | "agent_estimate";
       confidence: "confirmed" | "estimated";
     }
   | {
@@ -963,8 +978,8 @@ export type DomainEvent =
       "workout.prepared",
       "workout_session",
       {
-        prescriptionRef: PrescriptionRef;
-        frozenPrescription: SessionPrescriptionData;
+        prescriptionRef: PlannedSessionRef;
+        frozenPrescription: PlannedSessionData;
         state: WorkoutExecutionState;
       }
     >
@@ -972,8 +987,8 @@ export type DomainEvent =
       "workout.started",
       "workout_session",
       {
-        prescriptionRef: PrescriptionRef;
-        frozenPrescription: SessionPrescriptionData;
+        prescriptionRef: PlannedSessionRef;
+        frozenPrescription: PlannedSessionData;
         state?: WorkoutExecutionState;
       }
     >
@@ -983,7 +998,7 @@ export type DomainEvent =
   | DomainEventEnvelope<
       "workout.prescription_revised",
       "workout_session",
-      { frozenPrescription: SessionPrescriptionData; reason: string; scope: "next_set" | "future_sets" | "future_tasks" }
+      { frozenPrescription: PlannedSessionData; reason: string; scope: "next_set" | "future_sets" | "future_tasks" }
     >
   | DomainEventEnvelope<"workout.set_recorded", "workout_session", { outcome: SetOutcomeData }>
   | DomainEventEnvelope<"workout.set_skipped", "workout_session", { skipped: SkippedSetData }>
@@ -1189,14 +1204,14 @@ export type DomainCommand =
   | (CommandBase<"workout.start"> & {
       workoutId: string;
       expectedRevision: number;
-      prescriptionRef: PrescriptionRef;
+      prescriptionRef: PlannedSessionRef;
       mode?: WorkoutExecutionMode;
       policy?: WorkoutSessionPolicy;
     })
   | (CommandBase<"workout.prepare"> & {
       workoutId: string;
       expectedRevision: number;
-      prescriptionRef: PrescriptionRef;
+      prescriptionRef: PlannedSessionRef;
       mode: WorkoutExecutionMode;
       policy: WorkoutSessionPolicy;
     })
@@ -1219,7 +1234,7 @@ export type DomainCommand =
   | (CommandBase<"workout.revise_prescription"> & {
       workoutId: string;
       expectedRevision: number;
-      frozenPrescription: SessionPrescriptionData;
+      frozenPrescription: PlannedSessionData;
       reason: string;
       scope: "next_set" | "future_sets" | "future_tasks";
     })
@@ -1323,8 +1338,8 @@ export interface TimelineProjectionEvent {
 export interface WorkoutProjection {
   id: string;
   revision: number;
-  prescriptionRef: PrescriptionRef;
-  frozenPrescription: SessionPrescriptionData;
+  prescriptionRef: PlannedSessionRef;
+  frozenPrescription: PlannedSessionData;
   setOutcomes: readonly SetOutcomeData[];
   skippedSets?: readonly SkippedSetData[];
   /** Effective corrections; original event facts remain in the Ledger. */
@@ -1784,7 +1799,7 @@ function legacyWorkoutState(
 }
 
 function nextWorkoutPrescriptionSet(
-  prescription: SessionPrescriptionData,
+  prescription: PlannedSessionData,
   resolvedPrescriptionSetIds: readonly string[],
 ): { taskId: string; setId: string } | undefined {
   const resolved = new Set(resolvedPrescriptionSetIds);

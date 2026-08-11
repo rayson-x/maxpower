@@ -95,6 +95,8 @@ export interface PlannerRequest {
   temporaryExerciseAvailability?: readonly TemporaryExerciseAvailability[];
   directChoices?: readonly PlannerManualChoice[];
   historicalPerformance?: readonly HistoricalPerformance[];
+  /** 个人实测休息节奏（秒，observed_calibration 中位数）；休息建议按其在安全带宽内个性化。 */
+  personalRestTempoSeconds?: number;
   consecutiveDeviationCount?: number;
   missedSessionDates?: readonly string[];
   requestedScope?: "this_session_only" | "future_preference" | "lock" | "future_plan";

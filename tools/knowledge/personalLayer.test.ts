@@ -127,16 +127,23 @@ test("correction 使引用被更正事实的条目失效", async () => {
   assert.equal((await store.get("user-1", other.id))?.status, "active");
 });
 
-test("本轮无引擎/工具消费者引用个人知识层", () => {
-  const consumers = ["src/coach", "src/training-rules", "src/nutrition", "src/recovery", "src/planning"];
-  for (const dir of consumers) {
+test("引擎不直接消费个人知识层（值只经 facade 以显式入参传递）", () => {
+  // plan-pipeline-observability ticket 05 起：facade（createCoachApplication）是允许的接线点；
+  // 引擎（规则包/营养/恢复/planning）仍不得直接 import，只能消费 facade 传入的显式值。
+  const forbiddenConsumers = ["src/training-rules", "src/nutrition", "src/recovery", "src/planning"];
+  for (const dir of forbiddenConsumers) {
     for (const file of readdirSync(join(process.cwd(), dir))) {
       if (!file.endsWith(".ts")) continue;
       const content = readFileSync(join(process.cwd(), dir, file), "utf8");
       assert.ok(
         !content.includes("personalLayer"),
-        `${dir}/${file} 不应引用 personalLayer（骨架轮不接消费者）`,
+        `${dir}/${file} 不应引用 personalLayer（引擎只消费 facade 传入的显式值）`,
       );
     }
   }
+  const facade = readFileSync(join(process.cwd(), "src/coach/createCoachApplication.ts"), "utf8");
+  assert.ok(
+    facade.includes("personalKnowledge"),
+    "facade 应支持 personalKnowledge 依赖注入（ticket 05 接线点）",
+  );
 });
