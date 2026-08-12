@@ -418,44 +418,68 @@ single-variable, time-bounded hypothesis test with predeclared signal: for
 example, hold training and measurement conditions steady while changing only
 one agreed activity or intake lever, then reassess the multi-measure trend.
 
-## Risk evaluation: one evaluator, three ways to wake it
+## Risk evaluation: Timeline is the factual trigger seam
 
 Risk is not a conversational intuition and must not differ between the chat
-and a background job. `RiskEvaluator.evaluate(snapshot, trigger)` is a deep,
-deterministic Module that reads one versioned factual snapshot and returns a
-typed `RiskAssessment`. It owns target-achievability, execution-continuity,
+and a background job. The Timeline is the append-only, provenance-carrying
+record of what happened to the user. Conversation, manual logging, real-time
+execution and imports are **fact collectors**, not independent risk systems:
+they all submit a validated Timeline command. A correction appends a
+superseding event; it never silently rewrites history. The Timeline projection
+resolves the current effective facts and exposes a monotonically increasing
+`factFrontier`.
+
+`RiskEvaluator.evaluate(snapshot, trigger)` is a deep, deterministic Module
+that reads one projected Timeline snapshot and returns a typed
+`RiskAssessment`. It owns target-achievability, execution-continuity,
 stagnation, recovery/safety and evidence-quality assessment. The Home Coach
 Agent and background workers only supply a trigger; neither reimplements the
 decision.
 
 ```text
-conversation / user record / Timeline / real-time execution / scheduler / plan change
-→ append confirmed Fact or semantic domain event (or a clock wake-up)
-→ RiskEvaluationCoordinator coalesces idempotently by user + fact frontier
-→ load one ActivePlan + GoalContract + factual snapshot
+conversation ─┐
+manual record ├→ Timeline.append(command, provenance) → TimelineChanged(frontier)
+real-time ────┤                                      → RiskEvaluationCoordinator
+sync/import ──┘                                      → projected factual snapshot
+                                                        → RiskEvaluator
+
+scheduler ──────────────────────────────────────────→ RiskEvaluationDue(frontier)
+                                                        → same projected snapshot
+```
+
+```text
+RiskEvaluationCoordinator coalesces idempotently by user + fact frontier
+→ load ActivePlan + GoalContract + Timeline projection
 → RiskEvaluator.evaluate(snapshot, trigger)
 → persist RiskAssessment + trace
 → no action | request evidence | PlannerHarness proposal | safety hold
 ```
 
-### Trigger sources
+### Fact collectors and Timeline commands
 
-| Source | When it runs | What it must do | What it must not do |
-| --- | --- | --- | --- |
-| Conversation | After the Agent has recorded a material user fact, at the turn boundary | Evaluate the fresh fact and, if needed, give the Agent a typed result to explain or turn into a proposal | Infer a fact from sentiment or plan from a keyword before the record exists |
-| Direct user record | On committed nutrition, workout, recovery, body-measurement, availability or correction event | Re-evaluate without requiring the user to open chat; surface a pending review on the next open | Treat an absent record as a confirmed failure |
-| Timeline | On a semantically meaningful change: a session is completed, missed, moved, deleted, corrected, or its actual dose materially differs from plan | Update execution continuity, remaining critical slots and recovery/interaction inputs | Run a full assessment for cosmetic reordering or an unconfirmed draft |
-| Real-time recognition | On stable, provenance-carrying workout observations and on a finalized/corrected set or session | Feed actual exercise, sets, load/reps, RIR proxy, stopped-early/technical or pain flags into the current-session and future-recovery facts | Use individual pose frames, low-confidence recognition or an in-progress set as evidence of a failed long-term plan |
-| Goal / plan lifecycle | On Goal Contract edits, plan confirmation, plan expiry, confirmation rejection, or a plan becoming stale | Recompute against the new contract and reset/retain only the appropriate execution baseline | Preserve an assessment calculated for a superseded goal or plan revision |
-| Sync / import | On a deduplicated, provenance-marked import from Health or a connected source | Reconcile eligible steps, body mass, workouts and nutrition observations with local facts | Override a more trustworthy explicit correction without conflict handling |
-| Scheduled worker | Daily reconciliation, weekly trend review, and deadline/critical-session look-ahead; cadence is goal-mode and notification-preference aware | Detect accumulating deviation, joint stagnation and quiet loss of evidence while the user is not chatting | Modify a plan or send repeated punitive notifications |
+| Collector | Timeline command it may submit | Admission rule |
+| --- | --- | --- |
+| Home Coach Agent in conversation | `fact.reported`, `fact.corrected`, `availability.changed` | Every field must trace to the current statement or an existing confirmed fact; language alone does not create a hidden inference. |
+| Manual record UI | `nutrition.logged`, `body_measurement.logged`, `recovery.logged`, `workout.logged` | The user chooses/edits the values and measurement method; command carries source and timestamp. |
+| Training Timeline UI | `workout.completed`, `workout.missed`, `workout.rescheduled`, `workout.corrected` | Only a semantic state/dose change emits an event; visual reorder and drafts do not. |
+| Real-time recognition | `workout_execution.observed`, later `workout_execution.finalized` or `workout_execution.corrected` | Requires confidence, temporal completion, provenance and any required user correction; raw frames are not Timeline facts. |
+| Import/sync | `external_observation.imported` | Deduplicate and preserve source/confidence; do not overwrite a more trustworthy explicit correction. |
+| Plan lifecycle | `goal_contract.changed`, `plan_revision.committed`, `plan_revision.superseded` | Bind to revision and confirmation identity so stale assessment baselines cannot survive. |
+
+Every accepted material Timeline command creates durable `TimelineChanged` via
+an outbox. `RiskEvaluationCoordinator` classifies its factual delta and may
+coalesce several commands from the same turn/session before evaluating. It
+does **not** run expensive simulation for a cosmetic or non-material change;
+it does evaluate a relevant delta such as a changed intake, missed critical
+session, finalized lower-than-planned dose, recovery signal, measurement,
+availability loss or correction.
 
 The user-facing Agent may explicitly call `risk.evaluate` when the user asks
-what a fact means. All normal fact-write tools and Timeline mutations emit
-durable events through an outbox. This makes direct records, chat records and
-execution changes identical downstream without any regex-based route. A
-scheduled wake-up emits `RiskEvaluationDue`, which contains no invented fact;
-it only asks the same evaluator to inspect the latest snapshot.
+what a fact means, but normal flow is Timeline-first. This makes direct
+records, chat records and execution changes identical downstream without a
+regex-based route. A scheduled wake-up emits `RiskEvaluationDue`, contains no
+invented fact, and only asks the same evaluator to inspect the latest Timeline
+projection.
 
 The real-time pipeline has an explicit seam between **observation** and
 **planning fact**. Frame-level pose/rep estimates remain provisional. A
