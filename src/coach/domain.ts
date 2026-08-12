@@ -633,6 +633,19 @@ export interface PlanRevisionData {
    * 这是纯派生视图，不参与引擎决策。
    */
   upcomingSevenDays?: readonly PlannedSessionData[];
+  /**
+   * 每日能量预算（按日型严格分解，key = YYYY-MM-DD）。
+   * 训练日消耗比休息日高 200-350 kcal，给周平均会让训练日吃不够、休息日吃过量。
+   */
+  dailyEnergyBudgets?: Readonly<Record<string, {
+    bmrKcal: number;
+    neatKcal: number;
+    eatKcal: number;
+    tefKcal: number;
+    tdeeKcal: number;
+    intakeTargetKcal?: number;
+    uncertaintyKcal: number;
+  }>>;
   futureIntentRefs?: readonly string[];
   reasonCodes?: readonly string[];
   strategySelection?: import("../planning").StrategySelection;

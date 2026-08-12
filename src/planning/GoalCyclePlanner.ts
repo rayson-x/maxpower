@@ -45,6 +45,8 @@ import {
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
 import { activityFactorFor, estimateTdee } from "./bodyComposition";
+import { dailyEnergyBudget, dayActivityFromPlan } from "./dailyEnergyBudget";
+import { rotationPositionFromHistory } from "./rotationHistory";
 import { estimateTimeToGoal } from "./goalTimeline";
 import { tierPersona } from "./personTiering";
 import { fuelingAdviceFor } from "./sessionFueling";
@@ -553,6 +555,12 @@ export class GoalCyclePlanner {
       goalTimeline: estimateTimeToGoal(context.facts.profile.value, context.facts.goalContract.value),
       // 用户视角的滚动 7 天（跨日历周拼接；不参与引擎决策）
       upcomingSevenDays: upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate),
+      // 每日能量预算：按日型分解，不给周平均（训练日与休息日差 200-350 kcal）
+      dailyEnergyBudgets: dailyEnergyBudgetsFor(
+        context,
+        upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate),
+        nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach, tiering),
+      ),
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -651,7 +659,32 @@ export class GoalCyclePlanner {
         (date) => date >= week.startDate && date <= week.endDate,
       ),
     );
-    let trainingOrdinal = 0;
+    // 轮转起点：优先从训练历史推断（用户周一练了腿，周三就该接着排推/拉，
+    // 而不是从轮转第一课重来）。推断不出来才回落到 0。
+    // 直接算轮转，不能依赖 traceCollector.splitSelection——它要等第一个
+    // trainingSession 才写入，materializeWeek 先执行会拿到 undefined（首周因此失效）。
+    const strategies = this.knowledge.programStrategies();
+    const activeRotation = strategies
+      ? selectSplitRotation(strategies, context.schedule.length, context.request.preferredSplitId).rotation
+      : undefined;
+    const historyPosition = activeRotation
+      ? rotationPositionFromHistory({
+          facts: context.facts,
+          rotation: activeRotation,
+          currentDate: context.request.currentDate,
+          muscleLookup: (variantId) =>
+            this.knowledge
+              .exerciseVariant(variantId)
+              ?.expectedMuscleAssociation.associations.filter((item) => item.role === "primary_intent")
+              .map((item) => item.muscleId),
+        })
+      : undefined;
+    if (historyPosition) {
+      context.reasonCodes.push(
+        `rotation_resumed_from_history:${historyPosition.matchedDate}:next_${historyPosition.nextSessionIndex}`,
+      );
+    }
+    let trainingOrdinal = historyPosition?.nextSessionIndex ?? 0;
     const sessions = Array.from({ length: 7 }, (_, dayOffset) => {
       const date = addDays(week.startDate, dayOffset);
       const availability = sessionByWeekday.get(dayOffset + 1);
@@ -2314,6 +2347,57 @@ function upcomingSevenDaysFrom(
     .flatMap((week) => week.sessions)
     .filter((session) => session.scheduledFor >= start && session.scheduledFor <= end)
     .sort((left, right) => left.scheduledFor.localeCompare(right.scheduledFor));
+}
+
+
+/**
+ * 为滚动 7 天逐日算能量预算（严格分解，不用周平均）。
+ * 赤字取计划的每日目标与 TDEE 之差的中值；无营养目标时只给消耗不给摄入。
+ */
+function dailyEnergyBudgetsFor(
+  context: PlanningContext,
+  days: readonly import("../coach/domain").PlannedSessionData[],
+  guidance: import("../coach/domain").NutritionGuidanceData,
+): Readonly<Record<string, NonNullable<import("../coach/domain").PlanRevisionData["dailyEnergyBudgets"]>[string]>> | undefined {
+  const profile = context.facts.profile.value;
+  if (!profile.demographics?.currentWeight || !profile.demographics.height) return undefined;
+  // 每日赤字：由维持热量与目标摄入的差推出（保持与营养指导一致）
+  const maintenance = guidance.maintenanceKcalEstimate;
+  const target = guidance.dailyEnergyTargetKcal;
+  const dailyDeficit = maintenance !== undefined && target
+    ? Math.round(maintenance - (target.min + target.max) / 2)
+    : undefined;
+
+  const result: Record<string, NonNullable<import("../coach/domain").PlanRevisionData["dailyEnergyBudgets"]>[string]> = {};
+  for (const day of days) {
+    const isCardio = day.kind === "cardio";
+    const hasWork = day.tasks.length > 0;
+    // 大重量日（主项休息 ≥150s）走 heavy MET，其余中等
+    const heavy = (day.stimulusSlots ?? []).some(
+      (slot) => slot.intent.priority === "primary" && (slot.prescription.rest?.value ?? 0) >= 150,
+    );
+    const budget = dailyEnergyBudget({
+      profile,
+      day: dayActivityFromPlan({
+        kind: !hasWork ? "rest" : isCardio ? "cardio" : "strength",
+        ...(hasWork ? { minutes: day.estimatedDuration?.value ?? profile.schedule?.sessionDurationMinutes ?? 60 } : {}),
+        ...(heavy ? { intensity: "heavy" as const } : {}),
+      }),
+      ...(dailyDeficit !== undefined ? { dailyDeficitKcal: dailyDeficit } : {}),
+    });
+    if (budget) {
+      result[day.scheduledFor] = {
+        bmrKcal: budget.bmrKcal,
+        neatKcal: budget.neatKcal,
+        eatKcal: budget.eatKcal,
+        tefKcal: budget.tefKcal,
+        tdeeKcal: budget.tdeeKcal,
+        ...(budget.intakeTargetKcal !== undefined ? { intakeTargetKcal: budget.intakeTargetKcal } : {}),
+        uncertaintyKcal: budget.uncertaintyKcal,
+      };
+    }
+  }
+  return Object.keys(result).length ? result : undefined;
 }
 
 function nutritionGuidanceFor(
