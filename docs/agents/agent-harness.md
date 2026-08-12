@@ -19,6 +19,9 @@
 - A plan is never silently changed. A candidate plan is previewed, may be
   edited or rejected, and is committed only after the user confirms a still
   current proposal.
+- An event does not need an explicit "please adjust" request to receive a
+  planning impact assessment. When it can affect a plan's on-time success
+  probability, the Home Coach must obtain a non-writing Planner assessment.
 - The system has no product notion of a medical or nutritional "prescription".
   It provides plans, actions, assumptions, monitoring signals and safety
   boundaries.
@@ -92,6 +95,43 @@ The Planner Agent is an internal implementation of `PlannerHarness`, not a
 second persistent user Agent. Therefore it has no separate conversation,
 long-term memory, commit tool or independent authority.
 
+## Goal path protection and success probability
+
+A Goal Contract contains the target outcome **and** target date. Together they
+define the required pace and therefore the expected training, nutrition and
+recovery execution burden. Four weeks to lose 4% body fat and eight weeks to
+lose 4% body fat are different plans, not interchangeable presentations of one
+goal.
+
+The default is `protect_original_path`: the Agent must not silently slow the
+target date, reduce the target outcome or accept lower execution intensity.
+Only an explicit user decision creates `slowdown_consent`, which states what
+may change: date, target outcome, pace, or the acceptable probability target.
+It may be withdrawn at any time.
+
+The contract stores the goal pace implied by outcome/date, a minimum on-time
+success-probability target, forecast horizon and permitted correction envelope.
+For example, an aggressive four-week target may require the Planner to protect
+a 75% minimum on-time probability, while still forbidding unsafe training
+volume, starvation, punitive cardio or automatic commit. The Planner estimates
+probability as a versioned forecast with an uncertainty band and evidence
+coverage; it is never represented as a promise.
+
+`planner.assess_deviation` is a non-writing, low-cost planning capability. It
+returns the event's estimated impact on the current plan's on-time probability
+and one of `monitor`, `review_due`, `proposal_warranted` or `safety_hold`.
+Without `slowdown_consent`, `proposal_warranted` starts full
+`planner.propose`; the Planner must attempt the least disruptive safe,
+future-only correction that improves the original-path forecast. With explicit
+slowdown consent, it may instead return a no-change/slowdown alternative that
+states the revised date or probability. Neither path changes the current plan
+until user confirmation.
+
+For every accepted proposal, the Planner compares the estimated on-time
+probability before and after the proposed correction. A plan that adds burden
+without materially improving the forecast must be rejected as an invalid
+correction, even if it looks more "disciplined".
+
 ## Planning-mode entry: the Home Coach decides semantically
 
 The Harness exposes tools based on the current factual snapshot, not by
@@ -104,19 +144,36 @@ Use `planner.propose` when one of these is true:
 - a goal, availability, equipment, training capacity or preference changes;
 - repeated recovery/attendance/progress signals may change the strategy rather
   than only a single record;
+- `planner.assess_deviation` finds that the plan's on-time success probability
+  is below the original-path target and no explicit slowdown consent applies;
 - the user asks what a reported event means for the future plan.
 
-Do not enter planning mode merely because an event is mentioned. First use a
-recording or read tool when the user is simply reporting a fact.
+Do not enter full planning mode merely because an event is mentioned. First
+record only what the user said. If it is a plan-driver fact (for example,
+energy deviation, missed training, recovery degradation, availability loss or
+unexpected high load), the Agent also calls `planner.assess_deviation` when an
+active plan exists. The assessment, not a keyword or the user's familiarity
+with planning language, determines whether a full proposal is warranted.
 
-Example: "I indulged today" is a nutrition report, not automatically a plan
-change. The Home Coach records only what was explicitly said, responds without
-shame, and asks whether the user wants the remaining week assessed. It calls
-`planner.propose` only if the user asks to recover/adjust the plan, or if the
-user has already expressed that the event should affect future training or
-energy actions. If a known energy deviation and an adjustment request are
-present, the Planner decides whether a proposal is warranted; it may return
-`no_change` instead of manufacturing compensatory activity.
+Example: "I indulged today" is first a nutrition report. The Home Coach records
+only what was explicitly said, responds without shame, and, when an active
+plan makes the report material, calls `planner.assess_deviation`. If a known
+large deviation puts the original outcome/date path below its probability
+target, the result is `proposal_warranted` even if the user did not know to
+ask. Full Planner work may return `no_change` only when that forecast remains
+acceptable, the correction cannot improve it, or the user has explicitly
+accepted a slower path.
+
+For a four-week 4% fat-loss goal, a large excess is therefore a mandatory
+planning signal: after recording it, the Agent promptly assesses the remaining
+energy/attendance path and proactively presents the least disruptive
+future-only correction that improves the probability of achieving **4% in four
+weeks**. The card states the before/after probability, added training/activity
+burden, uncertainty and the consequence of retaining the current plan. If safe
+correction cannot restore the original path, it explicitly offers the real
+trade-off—change the target date, change the target, or accept the lower
+probability—rather than silently turning it into an eight-week plan. The user
+confirms any proposal.
 
 Example: "I slept poorly and my legs are still sore; can I train shoulders?"
 is a planning request. The Home Coach may call `planner.propose` with the
@@ -155,7 +212,12 @@ hide or reject a capability, but it must never synthesize a business tool call.
 ```ts
 type PlanningOutcome =
   | { kind: "needs_input"; questions: readonly PlannerQuestion[]; reasonCodes: readonly string[] }
-  | { kind: "no_change"; rationale: readonly Reason[]; monitoring: readonly Signal[] }
+  | {
+      kind: "no_change";
+      rationale: readonly Reason[];
+      monitoring: readonly Signal[];
+      successForecast?: SuccessForecast;
+    }
   | {
       kind: "proposal";
       proposal: VerifiedPlan;
@@ -164,6 +226,7 @@ type PlanningOutcome =
       assumptions: readonly Assumption[];
       citations: readonly PassageRef[];
       validation: ValidationReport;
+      successForecast: SuccessForecast;
       confirmationRequired: true;
     }
   | { kind: "safety_hold"; rationale: readonly Reason[]; nextStep: string };
