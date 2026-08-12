@@ -2267,8 +2267,13 @@ function absoluteNutritionTargets(
   // 三素分配：蛋白上段、脂肪下限 ~25%、碳水为平衡项
   const proteinG = goal2ProteinPerKg(facts.goalContract.value.primaryGoal);
   const proteinMid = weight * ((proteinG.min + proteinG.max) / 2);
-  const fatFloor = Math.round((dailyTarget.min * 0.25) / 9);
-  const fatCeil = Math.round((dailyTarget.max * 0.3) / 9);
+  // 脂肪：百分比法在低热量下会压穿营养下限，所以叠加按体重的绝对地板。
+  // 依据：减脂期脂肪摄入不应低于约 0.6 g/kg（激素合成与脂溶性维生素吸收），
+  // 常规推荐 0.8-1.0 g/kg。产品规则 D 级，方向有文献支撑。
+  const fatFloorByEnergy = (dailyTarget.min * 0.25) / 9;
+  const fatFloorByWeight = weight * 0.6;
+  const fatFloor = Math.round(Math.max(fatFloorByEnergy, fatFloorByWeight));
+  const fatCeil = Math.round(Math.max((dailyTarget.max * 0.3) / 9, weight * 0.9));
 
   // 碳循环各日型（按需供能）：高碳=糖原需求大的训练日，低碳=休息/低强度日
   const carbFor = (kcal: number, protein: number, fat: number, boost: number) =>
