@@ -2339,7 +2339,12 @@ function classifyExecution(
   conflicts: readonly string[],
 ): PlanProposal["executionClass"] {
   if (conflicts.length || mandate.mode !== "managed") return "confirmation_required";
-  if (trigger === "initial_plan" || trigger === "goal_changed" || trigger === "user_requested") {
+  if (
+    trigger === "initial_plan" ||
+    trigger === "goal_changed" ||
+    trigger === "user_requested" ||
+    trigger === "risk_at_risk"
+  ) {
     return "confirmation_required";
   }
   if (trigger === "session_completed") return "silent_eligible";

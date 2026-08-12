@@ -32,6 +32,40 @@ export interface CanonicalSetObservation {
   reps: readonly CanonicalRepObservation[];
 }
 
+/**
+ * The live layer may only describe stable evidence already emitted by the
+ * canonical packet. It deliberately has no rep counter, phase model, or pose
+ * coordinates of its own.
+ */
+export interface LiveSessionState {
+  sessionId: string;
+  setId: string;
+  latestPacketRef: CanonicalSetObservation["packetRef"];
+  /** Canonical finding ids that have been observed in at least two packets. */
+  stableFindingIds: readonly string[];
+  /** A cue is emitted once per stable finding per set, preventing live spam. */
+  deliveredFindingIds: readonly string[];
+}
+
+export interface CanonicalTrainingFinalization {
+  userId: string;
+  sessionId: string;
+  setId: string;
+  observation: CanonicalSetObservation;
+  confirmedReps: number;
+  userReported?: { loadKg?: number; rir?: number };
+  idempotencyKey: string;
+}
+
+/**
+ * The adapter does not own Timeline persistence. The application supplies the
+ * one Timeline admission seam, so a sealed camera result has the same
+ * provenance, deduplication and risk-trigger behaviour as every other fact.
+ */
+export interface MotionTimelineFinalizationPort {
+  finalize(input: CanonicalTrainingFinalization): Promise<"recorded" | "not_recordable">;
+}
+
 export interface MotionRuntime {
   readonly kind: string;
   observations(): AsyncIterable<CanonicalSetObservation>;
@@ -54,6 +88,7 @@ export type ObserveSetResult =
       presentationId: string;
       artifact: SetSummaryArtifact;
       card: ArtifactCardModel;
+      timelineFinalization: "recorded" | "not_recordable";
     };
 
 export class MotionCoordinator {
@@ -62,7 +97,16 @@ export class MotionCoordinator {
     private readonly runtime: RuntimeServices,
     private readonly cards: ArtifactCardRegistry,
     private readonly motionRuntime?: MotionRuntime,
+    private readonly timelineFinalization?: MotionTimelineFinalizationPort,
   ) {}
+
+  private readonly liveSessions = new Map<string, {
+    sessionId: string;
+    setId: string;
+    latestPacketRef: CanonicalSetObservation["packetRef"];
+    observationPacketsByFinding: Map<string, Set<string>>;
+    deliveredFindingIds: Set<string>;
+  }>();
 
   async replay(input: {
     sessionId: string;
@@ -106,6 +150,13 @@ export class MotionCoordinator {
         presentationId: presentation.id,
         artifact: existingSummary,
         card: this.cards.render(existingSummary, presentation.status),
+        timelineFinalization: await this.finalizeTimelineIfEligible({
+          session,
+          setId: input.setId,
+          observation: input.observation,
+          confirmedReps: input.observation.reps.filter((rep) => rep.disposition === "confirmed").length,
+          userReported: input.userReported,
+        }),
       };
     }
     const existingCue = [...snapshot.runEvents]
@@ -127,6 +178,15 @@ export class MotionCoordinator {
     const findings = supported
       ? [...new Set(reps.flatMap((rep) => rep.findings))]
       : [];
+    const liveAdvice = input.observation.sealed
+      ? undefined
+      : this.nextLiveAdvice({
+        sessionId: session.id,
+        setId: input.setId,
+        observation: input.observation,
+        supported,
+        findings,
+      });
     const cue: CoachRunEvent = {
       type: "live-cue",
       sessionId: session.id,
@@ -134,7 +194,7 @@ export class MotionCoordinator {
       presentationId,
       setId: input.setId,
       message: supported
-        ? `${confirmed.length} 次已确认${needsReview.length ? ` · ${needsReview.length} 次待复核` : ""}`
+        ? liveAdvice?.message ?? `${confirmed.length} 次已确认${needsReview.length ? ` · ${needsReview.length} 次待复核` : ""}`
         : "当前动作语境未配置可执行识别 profile，请手动记录",
       occurredAt: now,
     };
@@ -245,12 +305,115 @@ export class MotionCoordinator {
         rejectedReps: rejected.length,
       },
     });
+    const timelineFinalization = await this.finalizeTimelineIfEligible({
+      session,
+      setId: input.setId,
+      observation: input.observation,
+      confirmedReps: confirmed.length,
+      userReported: input.userReported,
+    });
+    this.liveSessions.delete(liveSessionKey(session.id, input.setId));
     return {
       status: "sealed",
       presentationId: sealedPresentationId,
       artifact,
       card: this.cards.render(artifact, "ready"),
+      timelineFinalization,
     };
+  }
+
+  /**
+   * Ephemeral state for the active set. It is never written to Timeline and
+   * therefore cannot change recovery, execution adherence, or a future plan.
+   */
+  readLiveSessionState(input: { sessionId: string; setId: string }): LiveSessionState | undefined {
+    const state = this.liveSessions.get(liveSessionKey(input.sessionId, input.setId));
+    if (!state) return undefined;
+    return {
+      sessionId: state.sessionId,
+      setId: state.setId,
+      latestPacketRef: structuredClone(state.latestPacketRef),
+      stableFindingIds: [...state.observationPacketsByFinding]
+        .filter(([, packetIds]) => packetIds.size >= 2)
+        .map(([finding]) => finding)
+        .sort(),
+      deliveredFindingIds: [...state.deliveredFindingIds].sort(),
+    };
+  }
+
+  private nextLiveAdvice(input: {
+    sessionId: string;
+    setId: string;
+    observation: CanonicalSetObservation;
+    supported: boolean;
+    findings: readonly string[];
+  }): { message: string } | undefined {
+    if (!input.supported || input.findings.length === 0) return undefined;
+    const key = liveSessionKey(input.sessionId, input.setId);
+    const state = this.liveSessions.get(key) ?? {
+      sessionId: input.sessionId,
+      setId: input.setId,
+      latestPacketRef: input.observation.packetRef,
+      observationPacketsByFinding: new Map<string, Set<string>>(),
+      deliveredFindingIds: new Set<string>(),
+    };
+    state.latestPacketRef = input.observation.packetRef;
+    const packetIdentity = [
+      input.observation.packetRef.id,
+      input.observation.packetRef.version,
+      input.observation.packetRef.hash,
+    ].join(":");
+    for (const finding of input.findings) {
+      const packets = state.observationPacketsByFinding.get(finding) ?? new Set<string>();
+      packets.add(packetIdentity);
+      state.observationPacketsByFinding.set(finding, packets);
+    }
+    this.liveSessions.set(key, state);
+    const finding = [...state.observationPacketsByFinding]
+      .map(([id, packetIds]) => ({ id, occurrences: packetIds.size }))
+      .filter((signal) =>
+        !state.deliveredFindingIds.has(signal.id) &&
+        (isImmediateSafetyFinding(signal.id) || signal.occurrences >= 2),
+      )
+      .sort((left, right) =>
+        Number(isImmediateSafetyFinding(right.id)) - Number(isImmediateSafetyFinding(left.id)) ||
+        right.occurrences - left.occurrences ||
+        left.id.localeCompare(right.id),
+      )[0];
+    if (!finding) return undefined;
+    state.deliveredFindingIds.add(finding.id);
+    return { message: liveAdviceMessage(finding.id) };
+  }
+
+  private async finalizeTimelineIfEligible(input: {
+    session: { id: string; userId: string };
+    setId: string;
+    observation: CanonicalSetObservation;
+    confirmedReps: number;
+    userReported?: { loadKg?: number; rir?: number };
+  }): Promise<"recorded" | "not_recordable"> {
+    const supported =
+      input.observation.profileCode !== 0 &&
+      input.observation.exactExecutableProfile &&
+      Boolean(input.observation.profileIdentity);
+    if (!this.timelineFinalization || !supported || input.confirmedReps < 1) return "not_recordable";
+    return this.timelineFinalization.finalize({
+      userId: input.session.userId,
+      sessionId: input.session.id,
+      setId: input.setId,
+      observation: input.observation,
+      confirmedReps: input.confirmedReps,
+      ...(input.userReported ? { userReported: input.userReported } : {}),
+      idempotencyKey: [
+        "canonical-motion-finalization",
+        input.session.userId,
+        input.session.id,
+        input.setId,
+        input.observation.packetRef.id,
+        input.observation.packetRef.version,
+        input.observation.packetRef.hash,
+      ].join(":"),
+    });
   }
 
   /**
@@ -312,6 +475,27 @@ export class MotionCoordinator {
           : "next_safe_boundary",
     };
   }
+}
+
+function liveSessionKey(sessionId: string, setId: string): string {
+  return `${sessionId}:${setId}`;
+}
+
+function isImmediateSafetyFinding(finding: string): boolean {
+  return finding.startsWith("safety_");
+}
+
+function liveAdviceMessage(finding: string): string {
+  if (isImmediateSafetyFinding(finding)) {
+    return "检测到已确认的安全停止信号：立即停止当前动作，并在继续前完成安全确认。";
+  }
+  if (finding.includes("range_below")) {
+    return "动作幅度连续低于当前识别 profile 的期望范围；下一组请先降低负重，并在可控范围内完成动作。";
+  }
+  if (finding.includes("faster_than")) {
+    return "动作节奏连续快于当前识别 profile 的期望范围；下一组请放慢节奏并保持可控。";
+  }
+  return `当前动作连续出现「${finding}」观察；下一组开始前请复核动作设置。`;
 }
 
 function validateCanonicalObservation(observation: CanonicalSetObservation): void {

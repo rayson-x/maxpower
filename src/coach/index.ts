@@ -22,9 +22,31 @@ export type {
   CoachLedger,
 } from "./ledger";
 export { ArtifactCardRegistry } from "./cards";
-export { CoachExecutionHarness } from "./executionHarness";
 export { PolicyGate } from "./policy";
 export { CoachToolRegistry, ToolSchemaError } from "./toolRegistry";
+export { projectPlannerProgress } from "./planningProgress";
+export type {
+  PlannerProgressClaimInput,
+  PlannerProgressInput,
+  PlannerProgressProposalInput,
+  PlannerProgressStage,
+  VerifiedPlannerClaim,
+} from "./planningProgress";
+export {
+  createGoalSpecificRiskAssessmentPort,
+  evaluateGoalSpecificRisk,
+} from "./goalSpecificRisk";
+export type {
+  ComparableGoalMeasurement,
+  GoalMeasurementRequirement,
+  GoalProtectionConstraints,
+  GoalSpecificRiskDecision,
+  GoalSpecificRiskObservations,
+  GoalSpecificRiskSnapshot,
+  GoalSpecificRiskSnapshotSource,
+  HypertrophyGoalContractExtension,
+  PhysiqueGoalContractExtension,
+} from "./goalSpecificRisk";
 export type * from "./model";
 export type * from "./ports";
 export {
@@ -48,8 +70,11 @@ export type {
 } from "./adapters/provider";
 export { FixtureMotionRuntime } from "./adapters/motion";
 export type {
+  CanonicalTrainingFinalization,
   CanonicalRepObservation,
   CanonicalSetObservation,
+  LiveSessionState,
+  MotionTimelineFinalizationPort,
   MotionRuntime,
   ObserveSetResult,
 } from "./adapters/motion";

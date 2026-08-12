@@ -1,4 +1,5 @@
 export * from "./model";
+export * from "./BehaviorDecisionRecord";
 export * from "./TraceRecorder";
 export * from "./LocalFileTraceSink";
 export * from "./RemoteTraceSink";

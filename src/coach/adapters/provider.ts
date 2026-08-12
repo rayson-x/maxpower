@@ -5,7 +5,6 @@ import { redactDirectIdentifiers } from "../remoteRedaction";
 import { COACH_PLAYBOOK } from "../playbook";
 import type { CoachToolManifest } from "../toolRegistry";
 import { openAiCompatibleToolName } from "./openAiToolName";
-import { CoachExecutionHarness } from "../executionHarness";
 
 export type ProviderEvent =
   | { type: "text-delta"; delta: string }
@@ -103,12 +102,43 @@ export interface LLMModelInput {
   userContent: string;
 }
 
-export interface LLMProviderResumeRequest extends LLMProviderRequest {
-  continuation: {
-    pendingActionId: string;
-    toolCallId: string;
-    output: Readonly<Record<string, unknown>>;
+/**
+ * The only tool output that is returned to the language layer. It is an
+ * immutable local artifact reference, never a raw database record or a
+ * provider-authored success claim.
+ */
+export interface ArtifactToolResult {
+  kind: "artifact_ref";
+  artifactRef: {
+    id: string;
+    kind: string;
+    schemaVersion: number;
+    hash: string;
   };
+  presentation: {
+    id: string;
+    artifactId: string;
+    renderer: string;
+    status: string;
+  };
+}
+
+export type LLMProviderContinuation =
+  | {
+      /** A human action is resumed from its durable pending-action record. */
+      pendingActionId: string;
+      toolCallId: string;
+      output: Readonly<Record<string, unknown>>;
+    }
+  | {
+      /** A local tool completed during this same Agent run. */
+      toolCallId: string;
+      toolName: string;
+      output: ArtifactToolResult;
+    };
+
+export interface LLMProviderResumeRequest extends LLMProviderRequest {
+  continuation: LLMProviderContinuation;
 }
 
 export interface LLMProvider {
@@ -524,10 +554,12 @@ export class ScriptedLLMProvider implements LLMProvider {
   readonly requests: LLMProviderRequest[] = [];
   readonly resumeRequests: LLMProviderResumeRequest[] = [];
   private failure?: Error;
+  private toolResultTurn = 0;
 
   constructor(
     private readonly events: readonly ProviderEvent[],
     private readonly resumeEvents: readonly ProviderEvent[] = [],
+    private readonly toolResultEvents: readonly (readonly ProviderEvent[])[] = [],
   ) {}
 
   failWith(error: Error): void {
@@ -553,7 +585,11 @@ export class ScriptedLLMProvider implements LLMProvider {
   async *resume(request: LLMProviderResumeRequest): AsyncIterable<ProviderEvent> {
     this.resumeRequests.push(cloneProviderRequest(request) as LLMProviderResumeRequest);
     if (this.failure) throw this.failure;
-    for (const event of this.resumeEvents) {
+    const isToolResult = "toolName" in request.continuation;
+    const events = isToolResult
+      ? this.toolResultEvents[this.toolResultTurn++] ?? []
+      : this.resumeEvents;
+    for (const event of events) {
       if (request.signal?.aborted) {
         yield { type: "cancelled", reason: "user" };
         return;
@@ -566,13 +602,6 @@ export class ScriptedLLMProvider implements LLMProvider {
 function cloneProviderRequest<T extends LLMProviderRequest>(request: T): T {
   const { signal: _signal, ...persistable } = request;
   return structuredClone(persistable) as T;
-}
-
-const executionHarness = new CoachExecutionHarness();
-
-/** Compatibility function for existing language adapters. */
-export function deterministicExecutionRoute(request: LLMProviderRequest): readonly ProviderEvent[] | undefined {
-  return executionHarness.route(request);
 }
 
 /**
@@ -604,12 +633,6 @@ export class LocalCoachProvider implements LLMProvider {
     const asksForForecast = /目标路径|完成路径|预测|预期|forecast|roadmap/.test(lower);
     const asksAboutNutrition = /饮食|营养|碳水|蛋白|热量|nutrition|calorie|protein/.test(lower);
     const asksForPlanOverview = /完整计划|本周计划|训练计划|摄入计划|饮食计划|训练和饮食|训练与饮食|training plan|meal plan|intake plan/.test(lower);
-    const executionRoute = deterministicExecutionRoute(request);
-    if (executionRoute) {
-      yield* executionRoute;
-      return;
-    }
-
     if (asksAboutSafety) {
       yield {
         type: "text-delta",

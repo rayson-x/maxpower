@@ -42,6 +42,8 @@ export type PlannerTrigger =
   | "schedule_changed"
   | "equipment_changed"
   | "goal_changed"
+  /** A goal-aware Timeline assessment found the original path at risk. */
+  | "risk_at_risk"
   | "deload_ended"
   | "user_requested";
 

@@ -4,9 +4,11 @@ import {
   type LLMProvider,
   type LLMProviderResolver,
   type LLMProviderRequest,
+  type LLMProviderResumeRequest,
   type ProviderEvent,
 } from "./adapters/provider";
 import { buildLocalAgentModelInput } from "./agentModelInput";
+import { resolveCoachCapabilities } from "./capabilityContract";
 import type { HumanActionCoordinator, ResumeHumanActionInput } from "./hitl";
 import { filterCoachOutput } from "./outputFilter";
 import type { ForbiddenClaimRule } from "../knowledge/model";
@@ -27,6 +29,7 @@ import { redactDirectIdentifiers } from "./remoteRedaction";
 import type { CoachToolCall, CoachToolRegistry } from "./toolRegistry";
 
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 45_000;
+const MAX_TOOL_RESULT_CONTINUATIONS = 8;
 
 class ProviderTimeoutError extends Error {
   readonly idleTimeoutMs: number;
@@ -133,6 +136,11 @@ export class AgentRuntime {
       runIds: [...new Set([...(session.runIds ?? []), run.id])],
       updatedAt: now,
     };
+    const toolManifest = resolveCoachCapabilities({
+      snapshot,
+      userId: session.userId,
+      tools: this.tools,
+    });
     const requestAudit = auditRecord(this.runtime, {
       userId: session.userId,
       sessionId: session.id,
@@ -143,6 +151,8 @@ export class AgentRuntime {
         provider: provider?.kind ?? "none",
         network: provider?.usesNetwork ?? false,
         contextManifestHash: run.contextManifestHash,
+        visibleToolCount: toolManifest.length,
+        visibleToolNames: toolManifest.map((tool) => tool.name).join(","),
       },
     });
     await this.ledger.commit({
@@ -173,7 +183,7 @@ export class AgentRuntime {
       userText: providerText.text,
       ...assembled,
       contextManifest: providerContextManifest,
-      toolManifest: this.tools?.manifest() ?? [],
+      toolManifest,
       modelInput: buildLocalAgentModelInput({
         userText: providerText.text,
         context: assembled.context,
@@ -185,6 +195,7 @@ export class AgentRuntime {
       return await this.consumeProviderStream({
         session,
         runId,
+        provider,
         stream: provider.stream(request),
         abortController: controller,
       });
@@ -275,12 +286,13 @@ export class AgentRuntime {
       return await this.consumeProviderStream({
         session,
         runId: run.id,
+        provider,
         stream: provider.resume({
           sessionId: session.id,
           runId: run.id,
           userText: "",
           ...assembled,
-          toolManifest: this.tools?.manifest() ?? [],
+          toolManifest: resolveCoachCapabilities({ snapshot, userId: session.userId, tools: this.tools }),
           modelInput: buildLocalAgentModelInput({
             userText: "",
             context: assembled.context,
@@ -353,69 +365,103 @@ export class AgentRuntime {
   private async consumeProviderStream(input: {
     session: CoachSession;
     runId: string;
+    provider: LLMProvider;
     stream: AsyncIterable<ProviderEvent>;
     abortController: AbortController;
   }): Promise<readonly CoachRunEvent[]> {
     const events: CoachRunEvent[] = [];
     let text = "";
     let suspended = false;
-    const iterator = input.stream[Symbol.asyncIterator]();
-    try {
-      while (true) {
-        const next = await nextProviderEvent(iterator, input.abortController, this.providerIdleTimeoutMs);
-        if (next.done) break;
-        const providerEvent = next.value;
-        // The timeout/cancel boundary is authoritative. A provider adapter
-        // which races a late event after AbortSignal must not reach a tool,
-        // Artifact or domain-adjacent commit.
-        if (input.abortController.signal.aborted) return events;
-        if (providerEvent.type === "text-delta") {
-          text += providerEvent.delta;
-          events.push({
-            type: "text-delta",
-            sessionId: input.session.id,
-            runId: input.runId,
-            delta: providerEvent.delta,
-            occurredAt: this.runtime.now(),
-          });
-          continue;
-        }
-        if (providerEvent.type === "tool-input-delta") {
-          events.push(await this.persistToolInputStreaming(input.session, input.runId, providerEvent));
-          continue;
-        }
-        if (providerEvent.type === "cancelled") {
-          if (providerEvent.reason === "user") {
-            await this.terminate(input.runId);
-            return events;
+    let stream = input.stream;
+    let continuationCount = 0;
+    let terminal = false;
+    while (!suspended && !terminal) {
+      const iterator = stream[Symbol.asyncIterator]();
+      let toolContinuation: Extract<LLMProviderResumeRequest["continuation"], { toolName: string }> | undefined;
+      try {
+        while (true) {
+          const next = await nextProviderEvent(iterator, input.abortController, this.providerIdleTimeoutMs);
+          if (next.done) {
+            terminal = true;
+            break;
           }
-          if (providerEvent.reason === "timeout") {
-            throw new ProviderTimeoutError(this.providerIdleTimeoutMs);
+          const providerEvent = next.value;
+          // The timeout/cancel boundary is authoritative. A provider adapter
+          // which races a late event after AbortSignal must not reach a tool,
+          // Artifact or domain-adjacent commit.
+          if (input.abortController.signal.aborted) return events;
+          if (providerEvent.type === "text-delta") {
+            text += providerEvent.delta;
+            events.push({
+              type: "text-delta",
+              sessionId: input.session.id,
+              runId: input.runId,
+              delta: providerEvent.delta,
+              occurredAt: this.runtime.now(),
+            });
+            continue;
           }
-          throw new ProviderStreamCancelledError(providerEvent.reason);
+          if (providerEvent.type === "tool-input-delta") {
+            events.push(await this.persistToolInputStreaming(input.session, input.runId, providerEvent));
+            continue;
+          }
+          if (providerEvent.type === "cancelled") {
+            if (providerEvent.reason === "user") {
+              await this.terminate(input.runId);
+              return events;
+            }
+            if (providerEvent.reason === "timeout") {
+              throw new ProviderTimeoutError(this.providerIdleTimeoutMs);
+            }
+            throw new ProviderStreamCancelledError(providerEvent.reason);
+          }
+          if (providerEvent.type === "completed") {
+            terminal = true;
+            break;
+          }
+          const toolEvents = await this.handleToolCall(input.session, input.runId, providerEvent);
+          events.push(...toolEvents.events);
+          if (toolEvents.suspended) {
+            suspended = true;
+            break;
+          }
+          if (toolEvents.continuation) {
+            toolContinuation = toolEvents.continuation;
+            // Calls are intentionally serial. The next model turn sees the
+            // authoritative result before it can select another capability.
+            break;
+          }
         }
-        if (providerEvent.type === "completed") {
-          events.push({
-            type: "run-completed",
-            sessionId: input.session.id,
-            runId: input.runId,
-            occurredAt: this.runtime.now(),
-          });
-          continue;
-        }
-        const toolEvents = await this.handleToolCall(input.session, input.runId, providerEvent);
-        events.push(...toolEvents.events);
-        if (toolEvents.suspended) {
-          suspended = true;
-          break;
+      } finally {
+        if (input.abortController.signal.aborted || toolContinuation) {
+          // Do not await an uncooperative adapter here: the run has already
+          // reached a terminal local state and it must not keep the UI blocked.
+          void Promise.resolve(iterator.return?.()).catch(() => undefined);
         }
       }
-    } finally {
-      if (input.abortController.signal.aborted) {
-        // Do not await an uncooperative adapter here: the run has already
-        // reached a terminal local state and it must not keep the UI blocked.
-        void Promise.resolve(iterator.return?.()).catch(() => undefined);
+      if (!toolContinuation) continue;
+      continuationCount += 1;
+      if (continuationCount > MAX_TOOL_RESULT_CONTINUATIONS) {
+        events.push({
+          type: "run-error",
+          sessionId: input.session.id,
+          runId: input.runId,
+          code: "terminal_failure",
+          message: "Agent 工具调用超过本轮上限",
+          shortCode: traceShortCode({ traceId: input.runId, sessionId: input.session.id }),
+          occurredAt: this.runtime.now(),
+        });
+        terminal = true;
+        break;
       }
+      stream = await this.resumeAfterToolResult({
+        session: input.session,
+        runId: input.runId,
+        provider: input.provider,
+        abortController: input.abortController,
+        continuation: toolContinuation,
+        continuationCount,
+      });
     }
     if (input.abortController.signal.aborted) return events;
     const locallyPersistedTypes = new Set(["tool-started", "artifact-ready", "hitl-suspended"]);
@@ -427,6 +473,68 @@ export class AgentRuntime {
       status: suspended ? "suspended" : undefined,
     });
     return events;
+  }
+
+  private async resumeAfterToolResult(input: {
+    session: CoachSession;
+    runId: string;
+    provider: LLMProvider;
+    abortController: AbortController;
+    continuation: Extract<LLMProviderResumeRequest["continuation"], { toolName: string }>;
+    continuationCount: number;
+  }): Promise<AsyncIterable<ProviderEvent>> {
+    if (!input.provider.resume) {
+      throw new Error("provider_tool_result_continuation_unsupported");
+    }
+    const snapshot = await this.ledger.read();
+    const assembled = this.contextAssembler.assemble(snapshot, input.session.userId, input.session.id, {
+      providerKind: input.provider.kind,
+      ...(input.provider.model ? { providerModel: input.provider.model } : {}),
+      requestPurpose: `coach.${input.session.context.kind}.tool_result`,
+      assembledAt: this.runtime.now(),
+    });
+    if (input.provider.usesNetwork) this.remoteProviderRequests += 1;
+    const audit = auditRecord(this.runtime, {
+      userId: input.session.userId,
+      sessionId: input.session.id,
+      runId: input.runId,
+      toolCallId: input.continuation.toolCallId,
+      toolName: input.continuation.toolName,
+      phase: "provider_request",
+      outcome: "started",
+      metadata: {
+        continuation: "tool_result",
+        continuationCount: input.continuationCount,
+        provider: input.provider.kind,
+      },
+    });
+    await this.ledger.commit({
+      kind: "domain",
+      userId: input.session.userId,
+      actorId: "agent_runtime",
+      intent: "coach_run.tool_result_continuation",
+      expectedRevisions: [],
+      domainEvents: [],
+      toolAudit: [audit],
+      idempotencyKey: `tool-result-continuation:${input.runId}:${input.continuation.toolCallId}:${input.continuationCount}`,
+      recordedAt: audit.occurredAt,
+    });
+    const request: LLMProviderResumeRequest = {
+      sessionId: input.session.id,
+      runId: input.runId,
+      userText: "",
+      ...assembled,
+      toolManifest: resolveCoachCapabilities({ snapshot, userId: input.session.userId, tools: this.tools }),
+      modelInput: buildLocalAgentModelInput({
+        userText: "",
+        context: assembled.context,
+        contextManifest: assembled.contextManifest,
+        continuation: input.continuation,
+      }),
+      signal: input.abortController.signal,
+      continuation: input.continuation,
+    };
+    return input.provider.resume(request);
   }
 
   private async persistToolInputStreaming(
@@ -482,7 +590,11 @@ export class AgentRuntime {
     session: CoachSession,
     runId: string,
     call: CoachToolCall,
-  ): Promise<{ events: readonly CoachRunEvent[]; suspended: boolean }> {
+  ): Promise<{
+    events: readonly CoachRunEvent[];
+    suspended: boolean;
+    continuation?: Extract<LLMProviderResumeRequest["continuation"], { toolName: string }>;
+  }> {
     const snapshot = await this.ledger.read();
     const existing = snapshot.toolCalls.find((candidate) => candidate.id === call.toolCallId);
     if (existing?.runId === runId && existing.status === "output_available") {
@@ -494,6 +606,9 @@ export class AgentRuntime {
             event.toolCallId === call.toolCallId,
         ),
         suspended: false,
+        continuation: existing.artifactRef
+          ? this.artifactToolContinuation(snapshot, call, existing.artifactRef)
+          : undefined,
       };
     }
     if (existing && existing.runId !== runId) throw new Error("tool_call_identity_conflict");
@@ -556,7 +671,15 @@ export class AgentRuntime {
         occurredAt: this.runtime.now(),
       };
       await this.persistToolState(session, outputRecord, outputEvent, "tool_execution", "passed", toolEvents);
-      return { events: [inputEvent, ...toolEvents, outputEvent], suspended: false };
+      const continuation = artifactEvent?.type === "artifact-ready"
+        ? this.artifactToolContinuation(
+            await this.ledger.read(),
+            call,
+            artifactEvent.artifactRef,
+            artifactEvent.presentation,
+          )
+        : undefined;
+      return { events: [inputEvent, ...toolEvents, outputEvent], suspended: false, ...(continuation ? { continuation } : {}) };
     } catch (error) {
       return this.persistToolError(
         session,
@@ -565,6 +688,29 @@ export class AgentRuntime {
         error instanceof Error ? error.message : "invalid_tool_call",
       );
     }
+  }
+
+  private artifactToolContinuation(
+    snapshot: Awaited<ReturnType<CoachLedger["read"]>>,
+    call: CoachToolCall,
+    artifactRef: NonNullable<CoachToolCallRecord["artifactRef"]>,
+    presentation = snapshot.presentations.find((item) => item.artifactId === artifactRef.id),
+  ): Extract<LLMProviderResumeRequest["continuation"], { toolName: string }> | undefined {
+    if (!presentation) return undefined;
+    return {
+      toolCallId: call.toolCallId,
+      toolName: call.toolName,
+      output: {
+        kind: "artifact_ref",
+        artifactRef,
+        presentation: {
+          id: presentation.id,
+          artifactId: presentation.artifactId,
+          renderer: presentation.renderer,
+          status: presentation.status,
+        },
+      },
+    };
   }
 
   private async persistToolState(

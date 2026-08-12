@@ -190,6 +190,8 @@ export type ArtifactKind =
   | "timeline_record_draft"
   | "nutrition_observation_draft"
   | "nutrition_change_proposal"
+  | "timeline_risk_evaluation"
+  | "planner_progress"
   | "recovery_brief"
   | "nutrition_strategy"
   | "safety_hold";
@@ -408,6 +410,18 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
   userId: string;
   title: string;
   summary: readonly string[];
+  /**
+   * Durable output of the local knowledge.search tool. PassageRefs are not
+   * generic citations: they may only support professional copy in this run.
+   */
+  knowledgeSearch?: {
+    query: string;
+    passageRefs: readonly {
+      passageId: string;
+      contentHash: string;
+      citationIds: readonly string[];
+    }[];
+  };
   planningPreview?: {
     status: "awaiting_confirmation" | "stale" | "confirmed" | "rejected";
     proposal: import("../planning").PlanProposal;
@@ -420,6 +434,8 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
       transientRecoveryConstraint?: import("./domain").RecoveryConstraintData;
       transientNextSessionFocus?: import("../planning").PlannerRequest["transientNextSessionFocus"];
     };
+    /** The durable Timeline risk evaluation that warranted this future-only preview. */
+    sourceRiskEvaluationId?: string;
     sourcePreviewId?: string;
   };
   phaseTransition?: import("../replanning").PhaseTransitionProposal;
@@ -446,6 +462,40 @@ export interface TimelineRecordDraftArtifact extends ArtifactBase {
     occurredAt: string;
     source: "user_statement" | "coach_estimate";
   };
+}
+
+/**
+ * A durable admission/check record for the Timeline → risk seam. It does not
+ * contain a risk score or a Plan proposal: those are supplied by the later
+ * risk evaluator and PlannerHarness. Keeping the admission decision durable
+ * makes an intentionally coalesced or skipped evaluation observable.
+ */
+export interface TimelineRiskEvaluationArtifact extends ArtifactBase {
+  kind: "timeline_risk_evaluation";
+  userId: string;
+  phase: "timeline_changed" | "scheduled_check";
+  disposition: "material" | "coalesced" | "skipped" | "stale" | "failed";
+  outcome: "queued" | "review_due" | "no_review" | "insufficient_evidence" | "not_evaluated";
+  timelineRevision: number;
+  sourceFactRefs: readonly FactRef[];
+  reasonCodes: readonly string[];
+  causationIds: readonly string[];
+  coalescesArtifactId?: string;
+  /** Goal-aware assessment state when an evaluator has a configured Goal Contract. */
+  achievabilityState?: import("./timelineRiskEvaluation").AchievabilityState;
+}
+
+/** A user-safe projection of a PlannerHarness lifecycle boundary. */
+export interface PlannerProgressArtifact extends ArtifactBase {
+  kind: "planner_progress";
+  userId: string;
+  stage: import("./planningProgress").PlannerProgressStage;
+  factBasis: readonly string[];
+  professionalClaims: readonly import("./planningProgress").VerifiedPlannerClaim[];
+  cannotJudge: readonly string[];
+  requestedInformation?: readonly string[];
+  proposal?: import("./planningProgress").PlannerProgressProposalInput;
+  message?: string;
 }
 
 /**
@@ -505,6 +555,8 @@ export type Artifact =
   | EvidenceBriefArtifact
   | PlanTraceArtifact
   | TimelineRecordDraftArtifact
+  | TimelineRiskEvaluationArtifact
+  | PlannerProgressArtifact
   | NutritionObservationDraftArtifact
   | NutritionChangeProposalArtifact
   | RecoveryBriefArtifact
@@ -645,6 +697,8 @@ export interface ArtifactCardModel {
   status: PresentationStatus;
   evidenceLabels: readonly string[];
   capabilityBoundary: readonly string[];
+  /** Ordered, renderer-neutral content blocks for cards that need more than metrics. */
+  sections?: readonly { title: string; items: readonly string[] }[];
 }
 
 export interface RuntimeServices {

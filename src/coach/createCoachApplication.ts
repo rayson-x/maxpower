@@ -16,6 +16,7 @@ import { HumanActionCoordinator } from "./hitl";
 import { MemoryCurator, type UpsertMemoryInput } from "./memory";
 import {
   MotionCoordinator,
+  type CanonicalTrainingFinalization,
 } from "./adapters/motion";
 import { AgentRuntime } from "./agentRuntime";
 import { planCoachStateSweep } from "./stateSweep";
@@ -30,6 +31,7 @@ import type {
   CoachSession,
   ContextRef,
   EvidenceBriefArtifact,
+  FactRef,
   HealthImportState,
   HealthMetric,
   PlanRevision,
@@ -39,6 +41,17 @@ import type {
   UserProfile,
   UserState,
 } from "./model";
+import {
+  TimelineRiskEvaluationCoordinator,
+  type TimelineRiskAssessmentPort,
+  type TimelineRiskEvaluationRecord,
+} from "./timelineRiskEvaluation";
+import {
+  BACKGROUND_TRACE_SESSION_ID,
+  buildBehaviorDecisionRecord,
+  traceUserPseudonym,
+  type BehaviorDecisionTraceRecorder,
+} from "../observability";
 import {
   DOMAIN_EVENT_SCHEMA_VERSION,
   projectDomainEvents,
@@ -72,6 +85,10 @@ import {
 } from "../privacy";
 import { clone, stableHash } from "./stable";
 import { CoachToolRegistry, type AdaptivePlanReportInput, type UserStatedRecordInput } from "./toolRegistry";
+import {
+  projectPlannerProgress,
+  type PlannerProgressInput,
+} from "./planningProgress";
 import {
   createInstalledKnowledgePack,
   createKnowledgePackRegistry,
@@ -169,6 +186,10 @@ export interface CoachApplicationDependencies extends CoachApplicationPorts {
   /** 个人知识层（ticket 05）：实测休息等校准值的沉淀处；缺省不启用。 */
   personalKnowledge?: import("../knowledge/personalLayer").PersonalKnowledgeLayer;
   trainingRuleRegistry?: TrainingRulePackRegistry;
+  /** Optional goal-aware evaluator. Timeline admission remains local even before ticket 04 supplies it. */
+  timelineRiskAssessment?: TimelineRiskAssessmentPort;
+  /** Optional audit adapter; its failure must never block Timeline admission. */
+  behaviorDecisionRecorder?: BehaviorDecisionTraceRecorder;
   /** Set only by AuthRoot's account-scoped runtime composition. */
   authenticatedAccountId?: string;
 }
@@ -237,6 +258,15 @@ export interface NutritionStrategyActionResult {
   card: ArtifactCardModel;
 }
 
+/**
+ * Public planner presentation seam. It is an immutable status card only:
+ * proposal generation and any plan write remain elsewhere and confirmation
+ * gated. `execution` binds eligible citations to the current Agent run.
+ */
+export interface PresentPlannerProgressInput extends PlannerProgressInput {
+  sessionId: string;
+}
+
 export class CoachApplication {
   private readonly cards = new ArtifactCardRegistry();
   private readonly actions: ActionBroker;
@@ -260,6 +290,8 @@ export class CoachApplication {
   private readonly planner: GoalCyclePlanner;
   private readonly trainingRules: TrainingRulePackRegistry;
   private readonly recipes: LocalRecipeEngine;
+  private readonly timelineRisk: TimelineRiskEvaluationCoordinator;
+  private readonly behaviorDecisionRecorder?: BehaviorDecisionTraceRecorder;
   private readonly nutritionObservation?: NutritionObservationPort;
   private readonly nutritionObservationResolver?: NutritionObservationProviderResolver;
   private readonly replicaSynchronizer?: ReplicaSynchronizer;
@@ -322,6 +354,7 @@ export class CoachApplication {
       this.runtime,
       this.cards,
       dependencies.motionRuntime,
+      { finalize: (input) => this.finalizeCanonicalMotionSet(input) },
     );
     this.recipes = new LocalRecipeEngine(
       this.ledger,
@@ -330,6 +363,8 @@ export class CoachApplication {
       dependencies.backgroundScheduler,
       () => knowledgeRuleVersions(this.knowledge.versionPins()),
     );
+    this.timelineRisk = new TimelineRiskEvaluationCoordinator(dependencies.timelineRiskAssessment);
+    this.behaviorDecisionRecorder = dependencies.behaviorDecisionRecorder;
     this.nutritionObservation = dependencies.nutritionObservation;
     this.nutritionObservationResolver = dependencies.nutritionObservationResolver;
     this.replicaSynchronizer = dependencies.replicaTransport
@@ -450,7 +485,14 @@ export class CoachApplication {
 
   /** Persist an immutable, local planning preview without materializing any plan facts. */
   async createPlanningPreview(
-    input: Omit<PlannerRequest, "facts"> & { userId: string; idempotencyKey: string; recomputeOf?: string; phaseTransition?: import("../replanning").PhaseTransitionProposal },
+    input: Omit<PlannerRequest, "facts"> & {
+      userId: string;
+      idempotencyKey: string;
+      recomputeOf?: string;
+      /** A durable at-risk assessment can proactively open a future-only preview. */
+      sourceRiskEvaluationId?: string;
+      phaseTransition?: import("../replanning").PhaseTransitionProposal;
+    },
   ): Promise<EvidenceBriefArtifact> {
     const { phaseTransition, ...plannerInput } = input;
     const decision = await this.previewGoalCycle(plannerInput);
@@ -466,6 +508,7 @@ export class CoachApplication {
         ...(input.transientNextSessionFocus ? { transientNextSessionFocus: input.transientNextSessionFocus } : {}),
       },
       ...(input.recomputeOf ? { recomputeOf: input.recomputeOf } : {}),
+      ...(input.sourceRiskEvaluationId ? { sourceRiskEvaluationId: input.sourceRiskEvaluationId } : {}),
       decision,
       ...(phaseTransition ? { phaseTransition } : {}),
     })}`;
@@ -478,10 +521,18 @@ export class CoachApplication {
       ? [
           `strategy:${decision.strategySelection?.primary ?? "unknown"}`,
           `forecasts:${decision.adaptiveForecasts?.length ?? 0}`,
+          ...(input.sourceRiskEvaluationId
+            ? ["当前记录使原目标路径进入风险；这里只比较未来可执行调整，确认前当前计划不变。"]
+            : []),
           "确认前不写入 GoalCycle、PlanRevision 或 Today",
         ]
       : decision.kind === "infeasible_plan"
-        ? decision.reasonCodes
+        ? [
+            ...(input.sourceRiskEvaluationId
+              ? ["在不突破恢复与安全护栏的前提下，当前没有能守住原路径的未来调整；请选择日期、目标或可接受执行负担的取舍。"]
+              : []),
+            ...decision.reasonCodes,
+          ]
         : decision.reasonCodes;
     const traceArtifact: import("./model").PlanTraceArtifact | undefined =
       decision.kind === "plan_proposal"
@@ -530,6 +581,7 @@ export class CoachApplication {
                 ...(input.transientRecoveryConstraint ? { transientRecoveryConstraint: input.transientRecoveryConstraint } : {}),
                 ...(input.transientNextSessionFocus ? { transientNextSessionFocus: input.transientNextSessionFocus } : {}),
               },
+              ...(input.sourceRiskEvaluationId ? { sourceRiskEvaluationId: input.sourceRiskEvaluationId } : {}),
               ...(input.recomputeOf ? { sourcePreviewId: input.recomputeOf } : {}),
             },
           }
@@ -594,6 +646,7 @@ export class CoachApplication {
       ...(preview.planningPreview.request.missedSessionDates?.length ? { missedSessionDates: preview.planningPreview.request.missedSessionDates } : {}),
       ...(preview.planningPreview.request.transientRecoveryConstraint ? { transientRecoveryConstraint: preview.planningPreview.request.transientRecoveryConstraint } : {}),
       ...(preview.planningPreview.request.transientNextSessionFocus ? { transientNextSessionFocus: preview.planningPreview.request.transientNextSessionFocus } : {}),
+      ...(preview.planningPreview.sourceRiskEvaluationId ? { sourceRiskEvaluationId: preview.planningPreview.sourceRiskEvaluationId } : {}),
       idempotencyKey: input.idempotencyKey,
       recomputeOf: preview.id,
     });
@@ -2301,6 +2354,13 @@ export class CoachApplication {
           ...hit.citations.map((citation) => renderCitation(citation, locale)),
         ])
       : [`知识库里没有关于「${input.query}」的已审核内容。我不会用没有依据的说法补答——你可以换个说法再问，或者告诉我具体想解决什么。`];
+    const passageRefs = result.hits.map((hit) => ({
+      passageId: hit.passage.id,
+      contentHash: hit.passage.contentHash,
+      citationIds: hit.citations
+        .filter((citation) => citation.claimStatus === "curated" && citation.tier !== "U")
+        .map((citation) => citation.id),
+    }));
     const artifact: import("./model").EvidenceBriefArtifact = {
       id: `knowledge-search-${stableHash({ query: input.query, topic: input.topic ?? "any" })}`,
       kind: "evidence_brief",
@@ -2320,6 +2380,7 @@ export class CoachApplication {
       ],
       hash: stableHash({ query: input.query, hits: result.hits.map((hit) => hit.passage.contentHash) }),
       knowledgePins: this.knowledge.versionPins(),
+      knowledgeSearch: { query: input.query, passageRefs },
     };
     return this.presentArtifactForTool({
       sessionId: session.id,
@@ -2327,6 +2388,71 @@ export class CoachApplication {
       execution,
       artifact,
       scope: `knowledge:search:${input.query.slice(0, 40)}`,
+    });
+  }
+
+  /**
+   * Presents a stable, user-visible PlannerHarness phase without exposing its
+   * hidden reasoning. Professional claims are admitted only if their
+   * PassageRefs came from `knowledge.search` in this same Agent run.
+   */
+  async presentPlannerProgress(
+    input: PresentPlannerProgressInput,
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const runPassageIds = execution
+      ? passageIdsForRun(snapshot, execution.runId)
+      : new Set<string>();
+    const projection = projectPlannerProgress(input, runPassageIds);
+    const eligibleClaims = projection.claims;
+    const now = this.runtime.now();
+    const artifact: import("./model").PlannerProgressArtifact = {
+      id: `planner-progress-${stableHash({
+        sessionId: session.id,
+        stage: input.stage,
+        runId: execution?.runId ?? "local",
+        at: now,
+        factBasis: input.factBasis,
+      })}`,
+      kind: "planner_progress",
+      userId: session.userId,
+      stage: input.stage,
+      factBasis: input.factBasis,
+      professionalClaims: eligibleClaims,
+      cannotJudge: projection.cannotJudge,
+      ...(input.requestedInformation?.length ? { requestedInformation: input.requestedInformation } : {}),
+      ...(input.proposal ? { proposal: input.proposal } : {}),
+      ...(input.message ? { message: input.message } : {}),
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [session.context],
+      evidenceRefs: [],
+      missingness: projection.cannotJudge.length ? ["professional_claim_without_current_run_passage"] : [],
+      capabilityBoundary: [
+        "展示规划阶段与已确认依据，不展示模型内部推理",
+        "计划调整必须通过独立提案和用户确认；此卡不会改写当前计划",
+        "专业解释仅使用本轮知识检索返回的 PassageRef",
+      ],
+      hash: stableHash({
+        stage: input.stage,
+        factBasis: input.factBasis,
+        professionalClaims: eligibleClaims,
+        cannotJudge: projection.cannotJudge,
+        proposal: input.proposal,
+      }),
+      knowledgePins: this.knowledge.versionPins(),
+    };
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "planner.present_progress",
+      execution,
+      artifact,
+      presentationStatus: projection.status,
+      scope: `planner:progress:${input.stage}`,
     });
   }
 
@@ -4508,6 +4634,7 @@ export class CoachApplication {
         ];
         break;
       case "goal_contract.revise":
+        assertGoalContractOriginalPathProtected(beforeProjection.goalContract?.value, command.goalContract);
         expectedRevisions = [
           {
             kind: "goal_contract",
@@ -5119,8 +5246,58 @@ export class CoachApplication {
       idempotencyKey: command.meta.idempotencyKey,
       recordedAt,
     });
-    await this.dispatchRegisteredReplanForDomainCommand(command, beforeProjection);
+    if (result.status === "committed") {
+      await this.dispatchTimelineRiskForDomainCommand(command, result);
+      await this.dispatchRegisteredReplanForDomainCommand(command, beforeProjection);
+    }
     return result;
+  }
+
+  /**
+   * Timeline is the sole long-horizon fact seam. Chat, manual capture, import
+   * and finalized execution all arrive here through a Timeline command; no
+   * caller gets a parallel risk trigger.
+   */
+  private async dispatchTimelineRiskForDomainCommand(
+    command: DomainCommand,
+    result: DomainCommandResult,
+  ): Promise<void> {
+    if (
+      command.type !== "timeline.append" &&
+      command.type !== "timeline.correct" &&
+      command.type !== "timeline.source_mutate" &&
+      command.type !== "timeline.source_tombstone"
+    ) return;
+    const projection = await this.readDomainProjection({ userId: command.meta.userId });
+    const timelineRevision = projection.timeline.revision;
+    const eventId = result.eventIds[0];
+    if (!eventId || timelineRevision === 0) return;
+    const sourceFactRefs: readonly FactRef[] = [{
+      aggregate: "timeline",
+      id: eventId,
+      revision: timelineRevision,
+    }];
+    const prior = await this.readTimelineRiskEvaluations({ userId: command.meta.userId });
+    const latestQueued = latestQueuedTimelineRiskEvaluation(prior);
+    const record = this.timelineRisk.onTimelineChanged({
+      timelineRevision,
+      sourceFactRefs,
+      causationIds: [`domain_event:${eventId}`],
+      ...(latestQueued
+        ? {
+            pending: {
+              artifactId: latestQueued.id,
+              sourceFactRefs: latestQueued.sourceFactRefs,
+              causationIds: latestQueued.causationIds,
+            },
+          }
+        : {}),
+    });
+    await this.persistTimelineRiskEvaluation({
+      userId: command.meta.userId,
+      record,
+      idempotencyKey: `timeline-risk:changed:${command.meta.idempotencyKey}:${timelineRevision}`,
+    });
   }
 
   /**
@@ -7508,6 +7685,71 @@ export class CoachApplication {
     });
   }
 
+  /**
+   * A sealed Canonical packet is evidence for an observed set, not a second
+   * workout ledger. It enters the sole Timeline admission path so provenance,
+   * deduplication and TimelineChanged risk evaluation remain identical to a
+   * manual or conversational record. Only confirmed reps are eligible; needs
+   * review and rejected candidates never become long-horizon training dose.
+   */
+  private async finalizeCanonicalMotionSet(
+    input: CanonicalTrainingFinalization,
+  ): Promise<"recorded" | "not_recordable"> {
+    if (input.confirmedReps < 1) return "not_recordable";
+    const at = this.runtime.now();
+    const result = await this.recordTimelineFact({
+      userId: input.userId,
+      idempotencyKey: input.idempotencyKey,
+      actor: { kind: "sensor", id: "motion_runtime" },
+      deterministicTool: "canonical_motion_packet",
+      fact: {
+        kind: "training",
+        reportedSession: {
+          summary: `Camera-confirmed ${input.observation.exerciseId} set`,
+          exercises: [{
+            name: input.observation.exerciseId,
+            exerciseConceptId: input.observation.exerciseId,
+            sets: [{
+              reps: input.confirmedReps,
+              ...(input.userReported?.loadKg !== undefined
+                ? { load: { value: input.userReported.loadKg, unit: "kg" as const } }
+                : {}),
+              ...(input.userReported?.rir !== undefined ? { rir: input.userReported.rir } : {}),
+            }],
+          }],
+        },
+        confidence: "confirmed",
+      },
+      envelope: {
+        time: { startedAt: at, timezoneOffsetMinutes: new Date(at).getTimezoneOffset() * -1 },
+        provenance: {
+          origin: "canonical_motion_packet",
+          recordingMethod: "canonical_packet",
+          dataStatus: "available",
+          confidence: "confirmed",
+          sourceRecordId: [
+            "canonical-set",
+            input.observation.packetRef.id,
+            input.observation.packetRef.version,
+            input.observation.packetRef.hash,
+          ].join(":"),
+          algorithmVersion: input.observation.profileIdentity,
+        },
+        privacyClass: "sensitive",
+        causalRefs: [
+          `coach_session:${input.sessionId}`,
+          `workout_set:${input.setId}`,
+          `canonical_packet:${input.observation.packetRef.id}`,
+        ],
+        evidenceRefs: [{ kind: "canonical_packet", ...input.observation.packetRef }],
+        layer: "canonical_projection",
+      },
+    });
+    return result.status === "committed" || result.status === "idempotent"
+      ? "recorded"
+      : "not_recordable";
+  }
+
   /** Committed Timeline facts are corrected append-only; direct edit is unavailable. */
   async correctTimelineFact(input: {
     userId: string;
@@ -7549,6 +7791,181 @@ export class CoachApplication {
       fact: input.fact,
       entry,
     });
+  }
+
+  /**
+   * Background entry point: it reads the newest durable Timeline frontier and
+   * never turns a missing record into a failed action. Native scheduling is
+   * intentionally outside this method; a worker invokes it with a stable key.
+   */
+  async runScheduledTimelineRiskEvaluation(input: {
+    userId: string;
+    idempotencyKey: string;
+    expectedTimelineRevision?: number;
+  }): Promise<import("./model").TimelineRiskEvaluationArtifact> {
+    const projection = await this.readDomainProjection({ userId: input.userId });
+    const queued = latestQueuedTimelineRiskEvaluation(await this.readTimelineRiskEvaluations({ userId: input.userId }));
+    const record = await this.timelineRisk.runScheduledCheck({
+      userId: input.userId,
+      timelineRevision: projection.timeline.revision,
+      factFrontier: frontierFactRefs(await this.currentDomainFrontier(input.userId)),
+      riskSnapshot: {
+        ...(projection.goalContract ? { goalContract: projection.goalContract } : {}),
+        timeline: projection.timeline.current,
+      },
+      ...(queued ? { latestQueued: toTimelineRiskRecord(queued) } : {}),
+      ...(input.expectedTimelineRevision !== undefined
+        ? { expectedTimelineRevision: input.expectedTimelineRevision }
+        : {}),
+      evaluatedAt: this.runtime.now(),
+    });
+    return this.persistTimelineRiskEvaluation({
+      userId: input.userId,
+      record,
+      idempotencyKey: `timeline-risk:scheduled:${input.idempotencyKey}:${projection.timeline.revision}`,
+    });
+  }
+
+  /** Read model for Timeline risk admission and its future goal-aware evaluation. */
+  async readTimelineRiskEvaluations(input: {
+    userId: string;
+  }): Promise<readonly import("./model").TimelineRiskEvaluationArtifact[]> {
+    const snapshot = await this.ledger.read();
+    return snapshot.artifacts
+      .filter(
+        (artifact): artifact is import("./model").TimelineRiskEvaluationArtifact =>
+          artifact.kind === "timeline_risk_evaluation" && artifact.userId === input.userId,
+      )
+      .sort(
+        (left, right) =>
+          left.timelineRevision - right.timelineRevision ||
+          left.createdAt.localeCompare(right.createdAt) ||
+          left.id.localeCompare(right.id),
+      );
+  }
+
+  private async persistTimelineRiskEvaluation(input: {
+    userId: string;
+    record: TimelineRiskEvaluationRecord;
+    idempotencyKey: string;
+  }): Promise<import("./model").TimelineRiskEvaluationArtifact> {
+    const existing = (await this.ledger.read()).artifacts.find(
+      (artifact): artifact is import("./model").TimelineRiskEvaluationArtifact =>
+        artifact.kind === "timeline_risk_evaluation" &&
+        artifact.userId === input.userId &&
+        artifact.id === timelineRiskArtifactId(input.userId, input.idempotencyKey),
+    );
+    if (existing) return existing;
+    const createdAt = this.runtime.now();
+    const artifact: import("./model").TimelineRiskEvaluationArtifact = {
+      id: timelineRiskArtifactId(input.userId, input.idempotencyKey),
+      kind: "timeline_risk_evaluation",
+      userId: input.userId,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt,
+      contextRefs: [{ kind: "progress", ref: `timeline:${input.record.timelineRevision}` }],
+      evidenceRefs: input.record.sourceFactRefs,
+      missingness: input.record.outcome === "insufficient_evidence" ? input.record.reasonCodes : [],
+      capabilityBoundary: [
+        "timeline_admission_only",
+        "does_not_change_plan",
+        "does_not_treat_missing_records_as_failure",
+      ],
+      hash: stableHash(input.record),
+      knowledgePins: this.knowledge.versionPins(),
+      phase: input.record.phase,
+      disposition: input.record.disposition,
+      outcome: input.record.outcome,
+      timelineRevision: input.record.timelineRevision,
+      sourceFactRefs: input.record.sourceFactRefs,
+      reasonCodes: input.record.reasonCodes,
+      causationIds: input.record.causationIds,
+      ...(input.record.coalescesArtifactId ? { coalescesArtifactId: input.record.coalescesArtifactId } : {}),
+      ...(input.record.achievabilityState ? { achievabilityState: input.record.achievabilityState } : {}),
+    };
+    const result = await this.ledger.commit({
+      kind: "domain",
+      userId: input.userId,
+      actorId: "timeline_risk_coordinator",
+      intent: "timeline.risk.evaluate",
+      expectedRevisions: [],
+      domainEvents: [],
+      artifacts: [artifact],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: createdAt,
+    });
+    if (result.status === "idempotent") {
+      const replay = (await this.ledger.read()).artifacts.find(
+        (candidate): candidate is import("./model").TimelineRiskEvaluationArtifact => candidate.id === artifact.id && candidate.kind === "timeline_risk_evaluation",
+      );
+      if (replay) {
+        await this.proposeFuturePlanForAtRiskTimeline(replay);
+        return replay;
+      }
+      throw new Error("timeline_risk_idempotency_artifact_missing");
+    }
+    await this.recordTimelineRiskDecision(artifact);
+    await this.proposeFuturePlanForAtRiskTimeline(artifact);
+    return artifact;
+  }
+
+  /**
+   * A risk assessment may warrant a plan review without the person knowing
+   * the planning vocabulary.  It never materializes a Plan revision: the
+   * resulting preview remains bound to the assessment and current frontier,
+   * then takes the ordinary explicit confirmation path.
+   */
+  private async proposeFuturePlanForAtRiskTimeline(
+    assessment: import("./model").TimelineRiskEvaluationArtifact,
+  ): Promise<void> {
+    if (assessment.outcome !== "review_due" || assessment.achievabilityState !== "at_risk") return;
+    const projection = await this.readDomainProjection({ userId: assessment.userId });
+    // This is a dynamic adjustment, not first-plan creation.  The onboarding
+    // path retains ownership of an absent plan.
+    if (!projection.plan || !projection.goalContract) return;
+    await this.createPlanningPreview({
+      userId: assessment.userId,
+      currentDate: assessment.createdAt.slice(0, 10),
+      trigger: "risk_at_risk",
+      requestedScope: "future_plan",
+      sourceRiskEvaluationId: assessment.id,
+      idempotencyKey: `timeline-risk:${assessment.id}:future-plan-preview`,
+    });
+  }
+
+  private async recordTimelineRiskDecision(
+    artifact: import("./model").TimelineRiskEvaluationArtifact,
+  ): Promise<void> {
+    if (!this.behaviorDecisionRecorder) return;
+    const outcome: import("../observability").BehaviorDecisionOutcome = artifact.disposition === "material"
+      ? artifact.outcome === "not_evaluated" ? "skipped" : "evaluated"
+      : artifact.disposition;
+    const reasonCodes = timelineRiskBehaviorReasonCodes(artifact);
+    try {
+      await this.behaviorDecisionRecorder.record(
+        buildBehaviorDecisionRecord({
+          traceId: `timeline-risk:${artifact.userId}:${artifact.timelineRevision}`,
+          sessionId: BACKGROUND_TRACE_SESSION_ID,
+          occurredAt: artifact.createdAt,
+          actor: "timeline_risk_coordinator",
+          userPseudonym: traceUserPseudonym(artifact.userId, stableHash),
+          deviceId: "local-device",
+          boundary: artifact.phase === "timeline_changed" ? "materiality" : "risk_evaluation",
+          outcome,
+          causationIds: artifact.causationIds.length ? artifact.causationIds : [`risk_due:${artifact.timelineRevision}`],
+          factFrontier: artifact.sourceFactRefs.map((ref) => `${ref.aggregate}:${ref.id}:${ref.revision}`),
+          versionPins: knowledgeRuleVersions(artifact.knowledgePins),
+          inputRefs: artifact.sourceFactRefs.map((ref) => `${ref.aggregate}:${ref.id}:${ref.revision}`),
+          artifactRefs: [artifact.id],
+          reasonCodes,
+          expectedSignal: artifact.outcome === "review_due" ? "user_confirmation" : "none",
+        }),
+        { userId: artifact.userId },
+      );
+    } catch {
+      // Observability is optional and must never make a durable user fact fail.
+    }
   }
 
   async tombstoneTimelineSource(input: {
@@ -8176,6 +8593,11 @@ export class CoachApplication {
 
   replayMotionRuntime(input: Parameters<MotionCoordinator["replay"]>[0]) {
     return this.motion.replay(input);
+  }
+
+  /** Read-only, ephemeral execution state for the active camera set. */
+  readLiveMotionSession(input: Parameters<MotionCoordinator["readLiveSessionState"]>[0]) {
+    return this.motion.readLiveSessionState(input);
   }
 
   scheduleSetAdjustment(input: Parameters<MotionCoordinator["scheduleAdjustment"]>[0]) {
@@ -10092,6 +10514,55 @@ function frontierFactRefs(
   });
 }
 
+function timelineRiskArtifactId(userId: string, idempotencyKey: string): string {
+  return `timeline-risk-${stableHash({ userId, idempotencyKey })}`;
+}
+
+function latestQueuedTimelineRiskEvaluation(
+  evaluations: readonly import("./model").TimelineRiskEvaluationArtifact[],
+): import("./model").TimelineRiskEvaluationArtifact | undefined {
+  return evaluations
+    .filter((evaluation) => evaluation.outcome === "queued")
+    .sort(
+      (left, right) =>
+        right.timelineRevision - left.timelineRevision ||
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.id.localeCompare(left.id),
+    )[0];
+}
+
+function toTimelineRiskRecord(
+  artifact: import("./model").TimelineRiskEvaluationArtifact,
+): TimelineRiskEvaluationRecord {
+  return {
+    phase: artifact.phase,
+    disposition: artifact.disposition,
+    outcome: artifact.outcome,
+    timelineRevision: artifact.timelineRevision,
+    sourceFactRefs: artifact.sourceFactRefs,
+    reasonCodes: artifact.reasonCodes,
+    causationIds: artifact.causationIds,
+    ...(artifact.coalescesArtifactId ? { coalescesArtifactId: artifact.coalescesArtifactId } : {}),
+    ...(artifact.achievabilityState ? { achievabilityState: artifact.achievabilityState } : {}),
+  };
+}
+
+function timelineRiskBehaviorReasonCodes(
+  artifact: import("./model").TimelineRiskEvaluationArtifact,
+): readonly import("../observability").BehaviorDecisionReasonCode[] {
+  if (artifact.disposition === "coalesced") return ["evaluation_coalesced"];
+  if (artifact.disposition === "skipped") return ["evaluation_skipped"];
+  if (artifact.disposition === "stale") return ["stale_fact_frontier"];
+  if (artifact.disposition === "failed") return ["evaluation_failed"];
+  if (artifact.phase === "timeline_changed") return ["material_change"];
+  switch (artifact.outcome) {
+    case "review_due": return ["risk_at_risk"];
+    case "no_review": return ["risk_on_path"];
+    case "insufficient_evidence": return ["risk_insufficient_evidence"];
+    default: return ["evaluation_skipped"];
+  }
+}
+
 function replanMissingness(
   evaluation: import("../replanning").ReplanEvaluation,
 ): readonly string[] {
@@ -10550,6 +11021,38 @@ function inferCommitmentPreferences(
   return { training, nutrition, recovery: "standard" };
 }
 
+/**
+ * New adaptive Goal Contracts protect their original outcome/date by default.
+ * This is a command-boundary check rather than a UI convention, so a future
+ * Agent or settings surface cannot silently turn a missed target into an
+ * easier one. Legacy contracts remain compatible until they opt into a
+ * targetMode.
+ */
+function assertGoalContractOriginalPathProtected(
+  previous: import("./domain").GoalContractData | undefined,
+  next: import("./domain").GoalContractData,
+): void {
+  if (!previous?.targetMode) return;
+  const consent = new Set(next.slowdownConsent?.allowedChanges ?? []);
+  const deadlineChanged = previous.horizon.endDate !== next.horizon.endDate;
+  const outcomeChanged =
+    previous.primaryGoal !== next.primaryGoal ||
+    previous.goalType !== next.goalType ||
+    previous.targetMode !== next.targetMode ||
+    stableHash(previous.targets ?? {}) !== stableHash(next.targets ?? {});
+  const burdenChanged =
+    previous.executionTier !== next.executionTier ||
+    previous.pace !== next.pace ||
+    stableHash(previous.commitmentPreferences ?? {}) !== stableHash(next.commitmentPreferences ?? {});
+  if (
+    (deadlineChanged && !consent.has("deadline")) ||
+    (outcomeChanged && !consent.has("target_outcome")) ||
+    (burdenChanged && !consent.has("execution_burden"))
+  ) {
+    throw new Error("explicit_slowdown_consent_required");
+  }
+}
+
 /** 本周已过去、计划了但未开始的训练日（顺延/缺席策略的输入）。 */
 
 /** 文献引用的展示渲染（英文优先；PMID/PMC 一并给出以便核验）。 */
@@ -10568,6 +11071,28 @@ function renderCitation(
     `${identifier ? ` ${identifier}` : ""}${citation.url ? ` ${citation.url}` : ""}` +
     `（${caveat}：${cannot.join(locale === "zh" ? "；" : "; ")}）`
   );
+}
+
+/** PassageRefs may only support copy in the run whose local search produced them. */
+function passageIdsForRun(snapshot: import("./model").LedgerSnapshot, runId: string): ReadonlySet<string> {
+  const artifactIds = new Set(
+    snapshot.runEvents
+      .filter((event): event is Extract<import("./model").CoachRunEvent, { type: "artifact-ready" }> =>
+        event.runId === runId && event.type === "artifact-ready",
+      )
+      .map((event) => event.artifactRef.id),
+  );
+  const passageIds = new Set<string>();
+  for (const artifact of snapshot.artifacts) {
+    if (!artifactIds.has(artifact.id) || artifact.kind !== "evidence_brief") continue;
+    for (const ref of artifact.knowledgeSearch?.passageRefs ?? []) {
+      // The passage itself is the traceable current-run evidence boundary.
+      // Citation eligibility remains a knowledge-pack concern and is not
+      // inferred by the language layer.
+      passageIds.add(ref.passageId);
+    }
+  }
+  return passageIds;
 }
 
 function currentWeekMissedDates(

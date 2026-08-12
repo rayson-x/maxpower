@@ -1040,7 +1040,9 @@ function validateEventUnits(event: DomainEvent): void {
     session: Extract<import("./domain").TimelineFact, { kind: "training" }> ["reportedSession"] | undefined,
   ): boolean => {
     if (!session) return true;
-    const hasContent = Boolean(session.summary?.trim() || session.note?.trim() || session.duration || session.exercises?.length);
+    const hasContent = Boolean(
+      session.executionStatus || session.summary?.trim() || session.note?.trim() || session.duration || session.exercises?.length,
+    );
     if (!hasContent || !validDuration(session.duration)) return false;
     return (session.exercises ?? []).every((exercise) =>
       Boolean(exercise.name.trim()) &&

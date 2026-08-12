@@ -19,7 +19,9 @@ import type {
   SafetyHoldArtifact,
   NutritionStrategyArtifact,
   MesocycleReviewArtifact,
+  PlannerProgressArtifact,
 } from "./model";
+import { projectPlannerProgress, type PlannerProgressProposalInput } from "./planningProgress";
 
 type Renderer = (artifact: Artifact, status: PresentationStatus) => ArtifactCardModel;
 
@@ -105,6 +107,44 @@ function proposalCard(artifact: Artifact, status: PresentationStatus): ArtifactC
     evidenceLabels: proposal.evidenceRefs.map((ref) => `${ref.aggregate} r${ref.revision}`),
     capabilityBoundary: proposal.capabilityBoundary,
   };
+}
+
+function plannerProgressCard(artifact: Artifact, status: PresentationStatus): ArtifactCardModel {
+  const progress = artifact as PlannerProgressArtifact;
+  const projection = projectPlannerProgress({
+    stage: progress.stage,
+    factBasis: progress.factBasis,
+    professionalClaims: progress.professionalClaims,
+    ...(progress.requestedInformation ? { requestedInformation: progress.requestedInformation } : {}),
+    ...(progress.proposal ? { proposal: progress.proposal } : {}),
+    ...(progress.message ? { message: progress.message } : {}),
+  }, new Set(progress.professionalClaims.flatMap((claim) => claim.passageIds)));
+  const presentationStatus: PresentationStatus = progress.stage === "proposal_ready" || progress.stage === "needs_input" || progress.stage === "paused"
+    ? "awaiting_user"
+    : progress.stage === "failed" ? "error" : status;
+  return {
+    renderer: "planner-progress/v1",
+    eyebrow: "计划进度",
+    artifactId: progress.id,
+    title: projection.title,
+    subtitle: projection.subtitle,
+    metrics: progress.proposal ? [{ label: "确认状态", value: confirmationLabel(progress.proposal.confirmationStatus) }] : [],
+    taskList: [],
+    actions: [],
+    status: presentationStatus,
+    evidenceLabels: progress.professionalClaims.flatMap((claim) => claim.passageIds.map((id) => `PassageRef ${id}`)),
+    capabilityBoundary: progress.capabilityBoundary,
+    sections: projection.sections,
+  };
+}
+
+function confirmationLabel(status: PlannerProgressProposalInput["confirmationStatus"]): string {
+  return {
+    awaiting_confirmation: "等待确认",
+    confirmed: "已确认",
+    rejected: "已拒绝",
+    stale: "已过期",
+  }[status] ?? "待确认";
 }
 
 function exerciseSubstitutionCard(artifact: Artifact, status: PresentationStatus): ArtifactCardModel {
@@ -583,6 +623,7 @@ export class ArtifactCardRegistry {
     ["evidence_brief/1", evidenceBriefCard],
     ["plan_trace/1", planTraceCard],
     ["timeline_record_draft/1", timelineRecordDraftCard],
+    ["planner_progress/1", plannerProgressCard],
     ["nutrition_observation_draft/1", nutritionObservationDraftCard],
     ["nutrition_change_proposal/1", nutritionChangeProposalCard],
     ["recovery_brief/1", recoveryBriefCard],

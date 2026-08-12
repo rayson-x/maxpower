@@ -245,6 +245,33 @@ export interface ProfessionalConstraint {
 export interface GoalContractData {
   id: string;
   primaryGoal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass";
+  /**
+   * The goal-specific forecast mode. It is deliberately distinct from the
+   * legacy primaryGoal training-rule key: a cut can protect lean mass, a key
+   * lift, or use the larger-body-mass starting model without changing the
+   * rest of the planning vocabulary.
+   */
+  targetMode?: "higher_body_mass_fat_loss" | "lean_mass_preserving_fat_loss" | "strength_priority_cut";
+  /** The correction envelope; it is not permission to silently weaken a goal. */
+  executionTier?: "protect_deadline" | "balanced" | "protect_sustainability";
+  /** Hard conditions that candidate plans must preserve while pursuing the target. */
+  guardrails?: {
+    minimumRecovery?: number;
+    requiredTrainingCompletion?: "key_sessions";
+  };
+  /** Comparable observations required before judging the target path. */
+  measurementPlan?: {
+    requiredMeasurements: readonly ("body_weight" | "waist_circumference" | "key_lift")[];
+  };
+  /**
+   * A specific, user-granted exception to protect_original_path. Absence is
+   * never treated as consent to move the deadline, reduce the outcome, or
+   * lower the agreed execution burden.
+   */
+  slowdownConsent?: {
+    grantedAt: string;
+    allowedChanges: readonly ("deadline" | "target_outcome" | "execution_burden")[];
+  };
   modifiers?: readonly ("conditioning" | "health")[];
   expectedDirection?: string;
   successMetrics?: readonly string[];
@@ -973,6 +1000,8 @@ export type TimelineFact =
        * history for the planner.
        */
       reportedSession?: {
+        /** A confirmed miss is a Record, not an absence of logging. */
+        executionStatus?: "completed" | "partial" | "missed";
         summary?: string;
         duration?: DurationQuantity;
         note?: string;
