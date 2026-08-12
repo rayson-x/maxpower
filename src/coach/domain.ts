@@ -248,6 +248,14 @@ export interface GoalContractData {
   dietStrategyLocked?: boolean;
   /** 局部侧重肌群（塑形："想让臀/肩更明显"）；这些肌群周量提升，其余不低于维持线。 */
   emphasisMuscles?: readonly string[];
+  /**
+   * 用户主动选择**减弱**的部位（"我不想练肩/不想腿变粗"）。
+   *
+   * 纪律：只能来自用户明确表达，系统绝不替用户推断某个部位不重要。
+   * 减到维持线而非归零——完全不练会造成结构失衡与代偿，
+   * 除非用户在 exerciseConstraints 里明确禁用该动作模式。
+   */
+  deemphasisMuscles?: readonly string[];
   /** 每日步数目标（减脂期 NEAT 是掉秤停滞主因，休息日也适用）。 */
   dailyStepTarget?: number;
   /** 训练史中的近期阶段（刚过增肌期/刚减脂/维持），影响起步策略。 */

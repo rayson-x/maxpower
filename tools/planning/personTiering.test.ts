@@ -24,6 +24,7 @@ function planFor(input: {
   goalType?: GoalContractData["goalType"];
   training?: "minimal" | "standard" | "high";
   emphasisMuscles?: readonly string[];
+  deemphasisMuscles?: readonly string[];
   dailyStepTarget?: number;
   recentPhase?: "bulk" | "cut" | "maintain";
 }): PlannerDecision {
@@ -55,6 +56,7 @@ function planFor(input: {
     status: "active",
     ...(input.training ? { commitmentPreferences: { training: input.training } } : {}),
     ...(input.emphasisMuscles ? { emphasisMuscles: input.emphasisMuscles } : {}),
+    ...(input.deemphasisMuscles ? { deemphasisMuscles: input.deemphasisMuscles } : {}),
     ...(input.dailyStepTarget !== undefined ? { dailyStepTarget: input.dailyStepTarget } : {}),
   };
   const mandate: CoachingMandateData = { id: "mandate-1", mode: "collaborative" };
@@ -223,5 +225,48 @@ test("有氧被上限截断时必须留审计记录", () => {
       decision.reasonCodes.some((code) => code.includes("preserve_full_rest_day")),
       `截断有氧必须留痕，实际 codes: ${decision.reasonCodes.filter((c) => c.includes("aerobic")).join(",")}`,
     );
+  }
+});
+
+// ─── 用户主动减弱 + 动作驱动编排（2026-08-12）───
+
+test("用户主动选择不练某部位 → 降到维持线但不归零（避免结构失衡）", () => {
+  const base = couplingOf(planFor({ goal: "hypertrophy", goalType: "hypertrophy" }));
+  const shoulderOf = (plan: typeof base) => {
+    const week = plan.materializedWeeks?.[plan.materializedWeeks.length - 1];
+    const ledger = week?.weeklyDirectSets ?? {};
+    return (ledger.deltoids ?? 0) + (ledger.lateral_deltoid ?? 0) + (ledger.rear_deltoid ?? 0);
+  };
+  const reduced = couplingOf(
+    planFor({ goal: "hypertrophy", goalType: "hypertrophy", deemphasisMuscles: ["deltoids", "lateral_deltoid", "rear_deltoid"] }),
+  );
+  assert.ok(shoulderOf(reduced) < shoulderOf(base), `减弱后应低于默认（${shoulderOf(reduced)} < ${shoulderOf(base)}）`);
+  assert.ok(shoulderOf(reduced) > 0, "不得归零——完全不练会造成结构失衡与代偿");
+});
+
+test("同肌群族的周量合并后受上限约束（肩三束不得各自 14 组合计 42）", () => {
+  const plan = couplingOf(planFor({ goal: "hypertrophy", goalType: "hypertrophy", emphasisMuscles: ["deltoids", "back"] }));
+  const week = plan.materializedWeeks?.[plan.materializedWeeks.length - 1];
+  const ledger = week?.weeklyDirectSets ?? {};
+  const shoulder = (ledger.deltoids ?? 0) + (ledger.lateral_deltoid ?? 0) + (ledger.rear_deltoid ?? 0);
+  assert.ok(shoulder <= 20, `肩三束合计不得超过族上限 20，实际 ${shoulder}`);
+});
+
+test("单课回填在同肌群内换刺激角度，不得拉进无关肌群的动作", () => {
+  const plan = couplingOf(planFor({ goal: "hypertrophy", goalType: "hypertrophy" }));
+  const days = (plan.upcomingSevenDays ?? []).filter((s) => s.tasks.length > 0 && s.kind !== "cardio");
+  for (const day of days) {
+    const slots = day.stimulusSlots ?? [];
+    const primaryMuscles = new Set(
+      slots.filter((s) => s.intent.priority === "primary").flatMap((s) => s.intent.directMuscles ?? s.intent.muscleGroups),
+    );
+    if (!primaryMuscles.size) continue;
+    // 每个维持/可选 slot 至少与本课主项肌群有交集，或属于同一推/拉功能族
+    for (const slot of slots.filter((s) => s.intent.priority !== "primary")) {
+      const muscles = slot.intent.directMuscles ?? slot.intent.muscleGroups;
+      const related = muscles.some((m) => primaryMuscles.has(m))
+        || muscles.some((m) => ["triceps", "biceps", "core", "lateral_deltoid", "rear_deltoid", "deltoids"].includes(m));
+      assert.ok(related, `${day.scheduledFor} 的 ${slot.intent.movementPattern}(${muscles}) 与本课主项肌群无关`);
+    }
   }
 });

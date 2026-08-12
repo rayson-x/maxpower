@@ -14,6 +14,14 @@ export interface ComposerSlotTemplate {
   directMuscles?: readonly string[];
   priority: StimulusIntentData["priority"];
   fatigueIntent: StimulusIntentData["fatigueIntent"];
+  /**
+   * 期望的力学类型（compound 复合 / isolation 孤立）。
+   * 用于在同一肌群内组出"主项 + 不同刺激角度的辅助"（卧推 + 上斜 + 夹胸），
+   * 而不是靠换肌群凑动作数。
+   */
+  preferMechanic?: "compound" | "isolation";
+  /** 期望的动作角度（flat / incline / decline），同肌群换角度覆盖不同区域。 */
+  preferAngle?: string;
 }
 
 export interface SplitSelection {
@@ -333,10 +341,41 @@ export function backfillThinSession(
       const rank = (priority: string) => (priority === "primary" ? 0 : priority === "maintenance" ? 1 : 2);
       return rank(left.priority) - rank(right.priority);
     });
+  // 优先在**本课已有肌群内**换角度/力学补齐（卧推 → 上斜 → 夹胸），
+  // 而不是从其他课借动作。此前胸日不足会回填垂直拉——胸日练背，解剖上不合理。
   const result = [...kept];
+  const ownMuscles = new Set(kept.flatMap((slot) => slot.directMuscles ?? slot.muscleGroups));
+  for (const slot of kept) {
+    if (result.length >= minSlots) break;
+    const muscles = slot.directMuscles ?? slot.muscleGroups;
+    // 同模式同肌群，但改用孤立动作补一个不同刺激角度
+    const alreadyIsolation = result.some(
+      (item) => item.movementPattern === slot.movementPattern && item.preferMechanic === "isolation",
+    );
+    if (alreadyIsolation) continue;
+    const complement: ComposerSlotTemplate = {
+      movementPattern: slot.movementPattern,
+      muscleGroups: [...muscles],
+      directMuscles: [...muscles],
+      priority: "maintenance",
+      fatigueIntent: "low",
+      preferMechanic: "isolation",
+    };
+    if (isFeasible(complement)) {
+      result.push(complement);
+      continue;
+    }
+    // 孤立动作不可行时换角度（上斜/下斜），仍保持同肌群
+    const angled: ComposerSlotTemplate = { ...complement, preferMechanic: undefined, preferAngle: "incline" };
+    if (isFeasible(angled)) result.push(angled);
+  }
   for (const candidate of candidates) {
     if (result.length >= minSlots) break;
     if (usedPatterns.has(candidate.movementPattern)) continue;
+    // 跨课回填时也要避免拉进与本课肌群完全无关的动作（除非实在补不满）
+    const candidateMuscles = candidate.directMuscles ?? candidate.muscleGroups;
+    const shareMuscle = candidateMuscles.some((muscle) => ownMuscles.has(muscle));
+    if (!shareMuscle && result.length >= Math.max(2, minSlots - 1)) continue;
     usedPatterns.add(candidate.movementPattern);
     result.push({ ...candidate });
   }

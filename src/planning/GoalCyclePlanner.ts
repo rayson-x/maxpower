@@ -1008,9 +1008,19 @@ export class GoalCyclePlanner {
           return (exposures[muscle] ?? 0) * cyclesPerWeek < 2.5;
         }),
       );
+      // 用户主动选择减弱的部位：降到维持线，但不归零（完全不练会造成失衡与代偿）
+      const deemphasis = new Set(context.facts.goalContract.value.deemphasisMuscles ?? []);
+      if (deemphasis.size) context.reasonCodes.push("deemphasis_muscles_reduced_to_maintenance");
       setsForTemplate = (template) => {
-        const isEmphasis = (template.directMuscles ?? template.muscleGroups).some((muscle) => emphasis.has(muscle));
-        const target = isEmphasis ? Math.min(targetBand.max, baseTarget + 2) : baseTarget;
+        const muscles = template.directMuscles ?? template.muscleGroups;
+        const isEmphasis = muscles.some((muscle) => emphasis.has(muscle));
+        const isDeemphasis = muscles.some((muscle) => deemphasis.has(muscle));
+        // 同时被强调与减弱时以减弱为准（用户明确说不想练，优先尊重）
+        const target = isDeemphasis
+          ? targetBand.min
+          : isEmphasis
+            ? Math.min(targetBand.max, baseTarget + 2)
+            : baseTarget;
         return setsForSlot(template, target, rotation, cyclesPerWeek);
       };
       // emphasis 肌群直接暴露不足时，在该肌群主项课后追加一个孤立直接 slot
@@ -1313,8 +1323,15 @@ export class GoalCyclePlanner {
         : template.priority === "optional"
           ? (mechanic === "isolation" ? 80 : 0)
           : 0;
+    // slot 显式声明的力学/角度偏好（同肌群换刺激角度：卧推 → 上斜 → 夹胸）
+    const preferMechanic = (template as { preferMechanic?: string }).preferMechanic;
+    const preferAngle = (template as { preferAngle?: string }).preferAngle;
+    const preferenceFit =
+      (preferMechanic ? (mechanic === preferMechanic ? 400 : -600) : 0) +
+      (preferAngle ? (exercise.identity.angleOrStance === preferAngle ? 350 : -200) : 0);
     const score =
       (directSelected ? 10_000 : 0) +
+      preferenceFit +
       mechanicFit +
       (explicitlyPreferred ? 250 : 0) +
       (exactHistory.length ? 500 : 0) +
