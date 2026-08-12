@@ -41,6 +41,10 @@ function request(overrides: Partial<LLMProviderRequest> = {}): LLMProviderReques
       permissionScopes: [], riskCeiling: "none", evidenceRequirements: ["current_local_plan"], output: "artifact_ref", outputLimit: 1,
       inputSchema: { type: "object", additionalProperties: false },
     }],
+    modelInput: {
+      systemPrompt: "local harness test prompt",
+      userContent: JSON.stringify({ kind: "local_harness_test" }),
+    },
     ...overrides,
   };
 }
@@ -111,6 +115,12 @@ test("OpenAI-compatible adapter 将同 Run 的 HITL continuation 作为结构化
   });
   const resumed = {
     ...request(),
+    modelInput: {
+      systemPrompt: "local harness continuation prompt",
+      userContent: JSON.stringify({
+        continuation: { pendingActionId: "pending-1", toolCallId: "provider-tool-1", output: { kind: "selected", optionId: "continue" } },
+      }),
+    },
     continuation: { pendingActionId: "pending-1", toolCallId: "provider-tool-1", output: { kind: "selected", optionId: "continue" } },
   };
   const events = [];
@@ -120,7 +130,7 @@ test("OpenAI-compatible adapter 将同 Run 的 HITL continuation 作为结构化
   assert.equal(sent.includes("provider-tool-1"), true);
 });
 
-test("训练与摄入组合请求只向远程模型暴露同版本的完整计划工具", async () => {
+test("OpenAI-compatible transport forwards the local Harness tool manifest without text routing", async () => {
   let sent: Record<string, unknown> | undefined;
   const baseTool = request().toolManifest[0]!;
   const provider = new OpenAICompatibleProvider({
@@ -142,12 +152,11 @@ test("训练与摄入组合请求只向远程模型暴露同版本的完整计�
     toolManifest,
   }))) { /* consume */ }
   const tools = sent?.tools as Array<{ function: { description: string } }>;
-  assert.equal(tools.length, 1);
+  assert.equal(tools.length, 3);
   assert.match(tools[0]!.function.description, /plan\.show_current/);
+  assert.match(tools[1]!.function.description, /nutrition\.show_strategy/);
   const systemMessage = (sent?.messages as Array<{ role: string; content: string }>).find((message) => message.role === "system")?.content ?? "";
-  assert.match(systemMessage, /cover both sides/);
-  assert.match(systemMessage, /\+?10%/);
-  assert.match(systemMessage, /materially low intake is not automatically better/);
+  assert.equal(systemMessage, "local harness test prompt");
 });
 
 test("OpenAI-compatible adapter 在无设备凭据或非 HTTPS endpoint 时 fail closed", async () => {

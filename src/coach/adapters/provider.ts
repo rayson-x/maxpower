@@ -5,7 +5,6 @@ import { redactDirectIdentifiers } from "../remoteRedaction";
 import { COACH_PLAYBOOK } from "../playbook";
 import type { CoachToolManifest } from "../toolRegistry";
 import { openAiCompatibleToolName } from "./openAiToolName";
-import { remoteCoachContext } from "./remoteCoachContext";
 import { CoachExecutionHarness } from "../executionHarness";
 
 export type ProviderEvent =
@@ -87,10 +86,21 @@ export interface LLMProviderRequest {
   /** Provider receives descriptions only; all execution stays in LocalCoachHarness. */
   toolManifest: readonly CoachToolManifest[];
   /**
+   * Fully assembled by the local Agent Harness. Remote providers only serialize
+   * this input to their LLM API; they must not append their own Coach context.
+   */
+  modelInput?: LLMModelInput;
+  /**
    * Ephemeral local lifecycle control.  It is never persisted, sent as
    * semantic context, or exposed to an Agent tool.
    */
   signal?: AbortSignal;
+}
+
+/** Transport-neutral LLM input owned by the local Harness. */
+export interface LLMModelInput {
+  systemPrompt: string;
+  userContent: string;
 }
 
 export interface LLMProviderResumeRequest extends LLMProviderRequest {
@@ -1170,12 +1180,13 @@ function openAiCompatibleRequest(input: {
   model: string;
   toolNamesByWireName: Map<string, string>;
 }) {
-  const coachContext = remoteCoachContext(input.request);
+  const modelInput = input.request.modelInput;
+  if (!modelInput) throw new Error("local_harness_model_input_missing");
   return {
     model: input.model,
     stream: true,
     parallel_tool_calls: false,
-    tools: coachContext.toolManifest.map((tool) => {
+    tools: input.request.toolManifest.map((tool) => {
       const wireName = openAiCompatibleToolName(tool.name);
       const existing = input.toolNamesByWireName.get(wireName);
       if (existing && existing !== tool.name) throw new Error("remote_provider_tool_name_collision");
@@ -1192,11 +1203,11 @@ function openAiCompatibleRequest(input: {
     messages: [
       {
         role: "system",
-        content: coachContext.systemPrompt,
+        content: modelInput.systemPrompt,
       },
       {
         role: "user",
-        content: coachContext.userContent,
+        content: modelInput.userContent,
       },
     ],
   };

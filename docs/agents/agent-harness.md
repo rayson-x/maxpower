@@ -214,6 +214,24 @@ LLM selects a visible tool
 No business tool is selected by an execution-time regex router. Hard policy may
 hide or reject a capability, but it must never synthesize a business tool call.
 
+## Cloud boundary: LLM API transport only
+
+The cloud is an authenticated, quota-controlled LLM API gateway and stream
+relay. It has no Coach Harness, Timeline, RiskEvaluator, PlannerHarness,
+PlanningEngine, ToolRegistry, fact store or plan-writing authority. The local
+`AgentHarness` assembles the model input, tool capability manifest and all
+fact-aware policy before an API call. A remote Provider only serializes that
+already-assembled model input and declared tool schemas, streams model output,
+and maps the provider wire format back to local `ProviderEvent`s.
+
+The boundary is intentionally testable: for the same local model input and
+tool manifest, every transport forwards the same capability set. It may not
+add a hidden system prompt, inspect user text to filter tools, execute a local
+business route, or reinterpret a tool call. Tool execution, result validation
+and the subsequent Agent loop remain local. Cloud authentication, quota,
+idempotency, cancellation and temporary stream resumption are transport
+responsibilities, not Harness behavior.
+
 ## Planner outcome and confirmation
 
 ```ts

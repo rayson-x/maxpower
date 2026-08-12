@@ -45,6 +45,7 @@ function request(overrides: Partial<LLMProviderRequest> = {}): LLMProviderReques
       redactionPolicyVersion: "direct-identifiers-v1",
     },
     toolManifest: [],
+    modelInput: { systemPrompt: "local harness test prompt", userContent: JSON.stringify({ kind: "local_harness_test" }) },
     ...overrides,
   };
 }

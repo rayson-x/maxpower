@@ -7,9 +7,7 @@ import type {
   LLMProviderResumeRequest,
   ProviderEvent,
 } from "../../coach/adapters/provider";
-import { deterministicExecutionRoute } from "../../coach/adapters/provider";
 import { ProviderServiceError } from "../../coach/adapters/provider";
-import { remoteCoachContext } from "../../coach/adapters/remoteCoachContext";
 import { stableHash } from "../../coach/stable";
 import { maxPowerApiOrigin } from "./cloudServiceValidation";
 import {
@@ -60,16 +58,6 @@ export class MaxPowerPiCoachProvider implements LLMProvider {
     request: LLMProviderRequest | LLMProviderResumeRequest,
   ): AsyncIterable<ProviderEvent> {
     if (this.options.accountSignal?.aborted) throw new ProviderServiceError("account_switched");
-    // Records and future-plan adjustments must follow the same deterministic
-    // route on device and in the cloud-backed Coach. The remote model remains
-    // responsible for normal language interaction only.
-    if (!("continuation" in request)) {
-      const route = deterministicExecutionRoute(request);
-      if (route) {
-        yield* route;
-        return;
-      }
-    }
     const pi = new MaxPowerPiLlmProvider({
       apiBaseUrl: this.origin,
       ...(this.options.allowInsecureHttp === undefined
@@ -115,11 +103,12 @@ export class MaxPowerPiCoachProviderResolver implements LLMProviderResolver {
 }
 
 function toPiContext(request: LLMProviderRequest | LLMProviderResumeRequest): Context {
-  const remote = remoteCoachContext(request);
+  const modelInput = request.modelInput;
+  if (!modelInput) throw new Error("local_harness_model_input_missing");
   return {
-    systemPrompt: remote.systemPrompt,
-    messages: [{ role: "user", content: remote.userContent, timestamp: Date.now() }],
-    tools: remote.toolManifest.map((tool) => ({
+    systemPrompt: modelInput.systemPrompt,
+    messages: [{ role: "user", content: modelInput.userContent, timestamp: Date.now() }],
+    tools: request.toolManifest.map((tool) => ({
       name: tool.name,
       description: `MaxPower ${tool.accessClass} tool (${tool.name})`,
       parameters: tool.inputSchema as never,

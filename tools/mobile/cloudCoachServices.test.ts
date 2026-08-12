@@ -123,6 +123,7 @@ function coachRequest(): LLMProviderRequest {
       outputLimit: 1,
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     }],
+    modelInput: { systemPrompt: "local harness test prompt", userContent: JSON.stringify({ kind: "local_harness_test" }) },
   };
 }
 
@@ -231,7 +232,7 @@ test("登录后的核心云 Coach 不被旧的本地 remoteLlm 开关阻断", as
   assert.equal(provider?.kind, "maxpower-pi-cloud");
 });
 
-test("真实云 Coach 对定性恢复换肩请求复用本地执行期路由，不依赖模型碰巧选中工具", async () => {
+test("云 Coach transport 始终调用 LLM API；它不在 provider 内执行恢复路由", async () => {
   const accountId = "account-deterministic-recovery";
   let networkCalls = 0;
   const services = createCloudCoachServices({
@@ -241,9 +242,35 @@ test("真实云 Coach 对定性恢复换肩请求复用本地执行期路由，�
     accountSignal: new AbortController().signal,
     ledger: new InMemoryCoachLedger(),
     media: new InMemoryMediaBlobStore(),
-    coachFetch: async () => {
+    coachFetch: async (_url, init) => {
       networkCalls += 1;
-      throw new Error("deterministic_route_must_not_call_remote_model");
+      const body = JSON.parse(init.body ?? "{}") as {
+        tools: Array<{ function: { name: string; description: string } }>;
+      };
+      const tool = body.tools.find((candidate) => candidate.function.description.includes("plan.adapt_from_user_report"));
+      assert.ok(tool);
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: sseBody([
+          `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{
+            index: 0,
+            id: "cloud-call-1",
+            type: "function",
+            function: {
+              name: tool?.function.name,
+              arguments: JSON.stringify({
+                kind: "recovery",
+                summary: "昨晚没睡好，前天练腿现在腿还酸，但上肢状态没问题，今天换肩练。",
+                qualitativeAssessment: "poor_sleep_localized_lower_soreness",
+                requestedTrainingFocus: "shoulders",
+              }),
+            },
+          }] }, finish_reason: "tool_calls" }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ]),
+      };
     },
   });
   const provider = await services.llmProviderResolver.resolve({ userId: accountId, sessionId: "session-recovery" });
@@ -269,11 +296,11 @@ test("真实云 Coach 对定性恢复换肩请求复用本地执行期路由，�
       inputSchema: { type: "object", additionalProperties: false },
     }],
   })) events.push(event);
-  assert.equal(networkCalls, 0);
-  assert.deepEqual(events.map((event) => event.type), ["text-delta", "tool-call", "completed"]);
+  assert.equal(networkCalls, 1);
+  assert.deepEqual(events.map((event) => event.type), ["tool-input-delta", "tool-call", "completed"]);
   assert.deepEqual(events[1], {
     type: "tool-call",
-    toolCallId: "execution-adapt-qualitative-recovery-run-recovery",
+    toolCallId: "cloud-call-1",
     toolName: "plan.adapt_from_user_report",
     input: {
       kind: "recovery",
@@ -284,10 +311,11 @@ test("真实云 Coach 对定性恢复换肩请求复用本地执行期路由，�
   });
 });
 
-test("真实云 AgentRuntime：恢复换肩 → 工具执行 → 待确认计划预览，整个链路不依赖远程模型", async () => {
+test("真实云 AgentRuntime：由 LLM tool call 触发恢复调整，而非 provider 直路由", async () => {
   const accountId = "account-cloud-runtime-recovery";
   const ledger = await grantedLedger(accountId);
   let sequence = 0;
+  let remoteToolCallSequence = 0;
   const services = createCloudCoachServices({
     apiBaseUrl: "https://api.maxpower.example",
     accountId,
@@ -295,7 +323,35 @@ test("真实云 AgentRuntime：恢复换肩 → 工具执行 → 待确认计划
     accountSignal: new AbortController().signal,
     ledger,
     media: new InMemoryMediaBlobStore(),
-    coachFetch: async () => { throw new Error("recovery_route_must_not_contact_remote_model"); },
+    coachFetch: async (_url, init) => {
+      const body = JSON.parse(init.body ?? "{}") as {
+        tools: Array<{ function: { name: string; description: string } }>;
+      };
+      const tool = body.tools.find((candidate) => candidate.function.description.includes("plan.adapt_from_user_report"));
+      assert.ok(tool);
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        body: sseBody([
+          `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{
+            index: 0,
+            id: `cloud-runtime-tool-call-${++remoteToolCallSequence}`,
+            type: "function",
+            function: {
+              name: tool?.function.name,
+              arguments: JSON.stringify({
+                kind: "recovery",
+                summary: "睡眠差，腿部酸痛，用户希望练肩。",
+                qualitativeAssessment: "poor_sleep_localized_lower_soreness",
+                requestedTrainingFocus: "shoulders",
+              }),
+            },
+          }] }, finish_reason: "tool_calls" }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ]),
+      };
+    },
   });
   const app = new CoachApplication({
     ledger,

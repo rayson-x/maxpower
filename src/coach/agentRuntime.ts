@@ -6,6 +6,7 @@ import {
   type LLMProviderRequest,
   type ProviderEvent,
 } from "./adapters/provider";
+import { buildLocalAgentModelInput } from "./agentModelInput";
 import type { HumanActionCoordinator, ResumeHumanActionInput } from "./hitl";
 import { filterCoachOutput } from "./outputFilter";
 import type { ForbiddenClaimRule } from "../knowledge/model";
@@ -173,6 +174,11 @@ export class AgentRuntime {
       ...assembled,
       contextManifest: providerContextManifest,
       toolManifest: this.tools?.manifest() ?? [],
+      modelInput: buildLocalAgentModelInput({
+        userText: providerText.text,
+        context: assembled.context,
+        contextManifest: providerContextManifest,
+      }),
       signal: controller.signal,
     };
     try {
@@ -275,6 +281,12 @@ export class AgentRuntime {
           userText: "",
           ...assembled,
           toolManifest: this.tools?.manifest() ?? [],
+          modelInput: buildLocalAgentModelInput({
+            userText: "",
+            context: assembled.context,
+            contextManifest: assembled.contextManifest,
+            continuation: run.resume,
+          }),
           signal: controller.signal,
           continuation: run.resume,
         }),
