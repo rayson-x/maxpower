@@ -384,6 +384,40 @@ safe, future-only correction improves the original-path state; otherwise the
 Agent explains that the observed execution pattern cannot support the original
 deadline without a user-approved trade-off.
 
+### Stagnation assessment distinguishes a plateau from inadequate execution
+
+Flat scale weight is not a plateau by itself. The Planner evaluates a
+mode-specific evidence window of same-protocol body-mass trend, circumference
+trend and—where applicable—performance, body-composition and recovery. It
+first asks whether the apparent zero change is distinguishable from the
+measurement and water/glycogen noise for those measures. A compact internal
+test is:
+
+```text
+stagnationEvidence = P(|bodyMassTrend| < meaningfulChangeThreshold
+                       AND |circumferenceTrend| < meaningfulChangeThreshold
+                       | comparable observations, measurement error model)
+```
+
+Only sufficiently strong `stagnationEvidence` begins diagnosis. The next branch
+uses execution evidence rather than guesswork:
+
+| Evidence pattern | Interpretation | Agent action |
+| --- | --- | --- |
+| Weight is flat but waist/target circumference is changing | Not a joint plateau; possible body-composition or fluid masking | Keep the plan, explain the conflicting measures and continue the measurement protocol. |
+| Low `coverage`, uncertain intake, falling `q_diet`/`q_train`, or an energy path outside tolerance | Execution or observation is insufficient to diagnose a physiological plateau | Record the known facts, request the smallest high-value measurement/logging improvement, and do not punish uncertainty with extra cardio or a sharper deficit. |
+| High coverage, sustained acceptable diet/training execution, comparable measurements, and joint flat trend | Candidate response plateau or unmodelled activity/energy adaptation | Reforecast the remaining path; if `at_risk`, propose one least-disruptive, future-only, safe experiment or correction for confirmation. |
+| Joint flat trend plus declining recovery/performance | The old plan may be unsustainable, not merely ineffective | Do not automatically intensify; reassess recovery, training dose and guardrails before proposing any change. |
+
+The meaningful-change threshold and required window vary by goal, measurement
+method and remaining deadline; no global "two weeks means plateau" rule is
+valid. The diagnostic result is versioned (`not_enough_evidence`,
+`execution_uncertain`, `candidate_response_plateau`, `sustainability_risk`) and
+becomes another input to `planner.assess_deviation`. A plateau correction is a
+single-variable, time-bounded hypothesis test with predeclared signal: for
+example, hold training and measurement conditions steady while changing only
+one agreed activity or intake lever, then reassess the multi-measure trend.
+
 ### Goal-specific success predicates
 
 Different goals do not merely receive different coefficients. They have
