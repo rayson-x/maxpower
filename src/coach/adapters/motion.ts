@@ -105,8 +105,8 @@ export class MotionCoordinator {
     sessionId: string;
     setId: string;
     latestPacketRef: CanonicalSetObservation["packetRef"];
-    observationPacketsByFinding: Map<string, Set<string>>;
-    deliveredFindingIds: Set<string>;
+    observationPacketsByFinding: Map<MotionRepObservationFinding, Set<string>>;
+    deliveredFindingIds: Set<MotionRepObservationFinding>;
   }>();
 
   async replay(input: {
@@ -355,8 +355,8 @@ export class MotionCoordinator {
       sessionId: input.sessionId,
       setId: input.setId,
       latestPacketRef: input.observation.packetRef,
-      observationPacketsByFinding: new Map<string, Set<string>>(),
-      deliveredFindingIds: new Set<string>(),
+      observationPacketsByFinding: new Map<MotionRepObservationFinding, Set<string>>(),
+      deliveredFindingIds: new Set<MotionRepObservationFinding>(),
     };
     state.latestPacketRef = input.observation.packetRef;
     const packetIdentity = [

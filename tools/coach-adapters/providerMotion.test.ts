@@ -155,7 +155,7 @@ test("Fixture Motion 只把 confirmed 纳入正式次数，稳定更新 live cue
       sealed: false,
       reps: [
         { id: "r1", disposition: "confirmed", findings: [] },
-        { id: "r2", disposition: "needs_review", findings: ["range_below_reference"] },
+        { id: "r2", disposition: "needs_review", findings: ["primary_range_below_expectation"] },
         { id: "r3", disposition: "rejected", findings: [] },
       ],
     },
@@ -169,7 +169,7 @@ test("Fixture Motion 只把 confirmed 纳入正式次数，稳定更新 live cue
       sealed: true,
       reps: [
         { id: "r1", disposition: "confirmed", findings: [] },
-        { id: "r2", disposition: "needs_review", findings: ["range_below_reference"] },
+        { id: "r2", disposition: "needs_review", findings: ["primary_range_below_expectation"] },
         { id: "r3", disposition: "rejected", findings: [] },
       ],
     },
