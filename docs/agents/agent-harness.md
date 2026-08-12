@@ -103,23 +103,28 @@ recovery execution burden. Four weeks to lose 4% body fat and eight weeks to
 lose 4% body fat are different plans, not interchangeable presentations of one
 goal.
 
-The default is `protect_original_path`: the Agent must not silently slow the
-target date, reduce the target outcome or accept lower execution intensity.
-Only an explicit user decision creates `slowdown_consent`, which states what
-may change: date, target outcome, pace, or the acceptable probability target.
-It may be withdrawn at any time.
+The Goal Contract also records the user's execution tier—such as
+`protect_deadline`, `balanced` or `protect_sustainability`. It controls the
+allowed correction envelope and trade-off weights; it never permits the Agent
+to silently change the target. The default is `protect_original_path`: the
+Agent must not silently slow the target date, reduce the target outcome or
+accept lower execution intensity. Only an explicit user decision creates
+`slowdown_consent`, which states what may change: date, target outcome, pace
+or allowed execution burden. It may be withdrawn at any time.
 
-The contract stores the goal pace implied by outcome/date, a minimum on-time
-success-probability target, forecast horizon and permitted correction envelope.
-For example, an aggressive four-week target may require the Planner to protect
-a 75% minimum on-time probability, while still forbidding unsafe training
-volume, starvation, punitive cardio or automatic commit. The Planner estimates
-probability as a versioned forecast with an uncertainty band and evidence
-coverage; it is never represented as a promise.
+The contract stores the goal pace implied by outcome/date, its internal risk
+acceptance policy, forecast horizon and permitted correction envelope. Until
+the product has outcome-calibrated forecasts, that policy is expressed through
+the versioned states `on_path`, `at_risk`,
+`infeasible_under_guardrails` and `insufficient_evidence`, rather than a
+pretend numeric probability. An aggressive four-week target will generally
+have a smaller deviation buffer than the same result over eight weeks, while
+still forbidding unsafe training volume, starvation, punitive cardio or
+automatic commit.
 
 `planner.assess_deviation` is a non-writing, low-cost planning capability. It
-returns the event's estimated impact on the current plan's on-time probability
-and one of `monitor`, `review_due`, `proposal_warranted` or `safety_hold`.
+returns its achievability state, the event's estimated directional impact, and
+one of `monitor`, `review_due`, `proposal_warranted` or `safety_hold`.
 Without `slowdown_consent`, `proposal_warranted` starts full
 `planner.propose`; the Planner must attempt the least disruptive safe,
 future-only correction that improves the original-path forecast. With explicit
@@ -127,10 +132,12 @@ slowdown consent, it may instead return a no-change/slowdown alternative that
 states the revised date or probability. Neither path changes the current plan
 until user confirmation.
 
-For every accepted proposal, the Planner compares the estimated on-time
-probability before and after the proposed correction. A plan that adds burden
-without materially improving the forecast must be rejected as an invalid
-correction, even if it looks more "disciplined".
+For every accepted proposal, the Planner compares the original-path
+achievability state and uncertainty before and after the proposed correction.
+Once outcome calibration exists it may additionally compare the internal
+probability estimate. A plan that adds burden without materially improving the
+forecast must be rejected as an invalid correction, even if it looks more
+"disciplined".
 
 ## Planning-mode entry: the Home Coach decides semantically
 
@@ -144,8 +151,8 @@ Use `planner.propose` when one of these is true:
 - a goal, availability, equipment, training capacity or preference changes;
 - repeated recovery/attendance/progress signals may change the strategy rather
   than only a single record;
-- `planner.assess_deviation` finds that the plan's on-time success probability
-  is below the original-path target and no explicit slowdown consent applies;
+- `planner.assess_deviation` finds the original path `at_risk` or
+  `infeasible_under_guardrails` and no explicit slowdown consent applies;
 - the user asks what a reported event means for the future plan.
 
 Do not enter full planning mode merely because an event is mentioned. First
@@ -158,8 +165,8 @@ with planning language, determines whether a full proposal is warranted.
 Example: "I indulged today" is first a nutrition report. The Home Coach records
 only what was explicitly said, responds without shame, and, when an active
 plan makes the report material, calls `planner.assess_deviation`. If a known
-large deviation puts the original outcome/date path below its probability
-target, the result is `proposal_warranted` even if the user did not know to
+large deviation puts the original outcome/date path `at_risk`, the result is
+`proposal_warranted` even if the user did not know to
 ask. Full Planner work may return `no_change` only when that forecast remains
 acceptable, the correction cannot improve it, or the user has explicitly
 accepted a slower path.
@@ -167,12 +174,12 @@ accepted a slower path.
 For a four-week 4% fat-loss goal, a large excess is therefore a mandatory
 planning signal: after recording it, the Agent promptly assesses the remaining
 energy/attendance path and proactively presents the least disruptive
-future-only correction that improves the probability of achieving **4% in four
-weeks**. The card states the before/after probability, added training/activity
-burden, uncertainty and the consequence of retaining the current plan. If safe
+future-only correction that improves the achievability of **4% in four weeks**.
+The card states the affected goal condition, added training/activity burden,
+uncertainty and the consequence of retaining the current plan. If safe
 correction cannot restore the original path, it explicitly offers the real
-trade-off—change the target date, change the target, or accept the lower
-probability—rather than silently turning it into an eight-week plan. The user
+trade-off—change the target date, change the target, or accept a less certain
+outcome—rather than silently turning it into an eight-week plan. The user
 confirms any proposal.
 
 Example: "I slept poorly and my legs are still sore; can I train shoulders?"
@@ -236,6 +243,103 @@ The Planner always returns a result, never a direct write. Confirmation binds
 `proposalId`, `toolCallId`, fact frontier, rule versions and the user decision.
 An edit becomes a new user input and creates a new candidate; it does not
 mutate the Engine output in place.
+
+## Internal goal-achievability forecast
+
+The user does not see a fabricated "success percentage". The Planner uses an
+internal, versioned forecast to decide whether a material fact requires an
+assessment or a proposal. The visible result is the decision, its reason, the
+trade-off and the next measurement—not an unjustifiably precise probability.
+
+### General formula
+
+Each goal defines a target predicate `G` at its original deadline and safety /
+maintenance predicates `S`. The internal on-time estimate is:
+
+```text
+P(on-time success) = P(G at deadline AND S throughout the path | confirmed facts,
+                       planned actions, adherence evidence, uncertainty model)
+```
+
+It is evaluated by Monte Carlo paths, not by a universal additive score:
+
+```text
+for path i in 1..N:
+  sample baseline measurement error and missing-data uncertainty
+  sample future adherence from this person's recent observed adherence
+  simulate goal-relevant progress using the selected goal model
+  simulate recovery / safety / maintenance constraints
+P = count(paths satisfying G and S) / N
+```
+
+The model records `forecastVersion`, data window, evidence coverage, sampled
+assumptions and uncertainty interval. A numeric probability may be used for an
+internal decision only after calibration criteria are met. Before then, it
+produces an `on_path`, `at_risk`, `infeasible_under_guardrails` or
+`insufficient_evidence` state; the Agent maps that state to a visible action
+such as `monitor`, `review_due`, `proposal_warranted` or `safety_hold`, rather
+than using a fake percentage.
+
+The decision compares two counterfactuals: continue the confirmed plan versus
+the least-disruptive allowed correction. A correction is valid only if it
+materially improves the original-path forecast and passes every guardrail.
+
+### Shared forecast inputs
+
+| Input family | Uses | Never infer from |
+| --- | --- | --- |
+| Target contract | outcome, deadline, pace implied by both, hard floors, explicit slowdown consent | a vague aesthetic description alone |
+| Baseline / trend | repeated body mass, circumference/body-composition method, validated strength tests, training history | one noisy weigh-in or an LLM estimate |
+| Plan dose | planned/actual training exposure, session completion, activity, intake/energy observations | declared intention as completion |
+| Response | personal weekly trend and residual error; population prior only until enough personal observations exist | a fixed `7700 kcal = 1 kg` promise |
+| Constraints | recovery, safety, schedule, equipment and user-declared unacceptable costs | absence of a report |
+
+The energy model may use energy-balance arithmetic as an initial prior, but the
+personal trend replaces it as observations accumulate. TDEE uncertainty,
+unlogged intake, activity compensation, body-composition measurement error and
+water/glycogen variation widen the distribution; they must not be hidden by a
+single predicted kilogram value.
+
+### Goal-specific success predicates
+
+Different goals do not merely receive different coefficients. They have
+different target predicates, hard floors, measurement requirements and allowed
+correction envelopes.
+
+| Goal class | `G`: target at deadline | `S`: hard maintenance / safety gates | Corrective priority |
+| --- | --- | --- | --- |
+| Higher-body-mass fat loss | target body mass/fat mass/waist trend by deadline | recovery and low-impact/safety limits | restore the remaining energy path with diet adherence and sustainable low-impact activity first |
+| Lean or small-body-mass fat loss | target fat/waist outcome by deadline | strength exposure, recovery and lean-mass protection must remain above floors | use a narrower deficit/activity envelope; if it cannot restore the path safely, surface the date/target trade-off |
+| Strength-priority cut ("heavy lifting while cutting") | fat/weight target **and** each selected lift's validated performance floor/target | no reduction that makes strength-retention forecast fail | protect strength training quality, recovery and carbohydrate/fueling fit before adding cardio or more deficit |
+| Lean-mass-preserving cut | fat/waist target | lean-mass/circumference trend where measurable, selected strength floors and effective resistance exposure | preserve protein/strength/recovery and remove optional burden before increasing energy pressure |
+| Hypertrophy | an explicit lean-mass, circumference or validated performance target | waist/fat/recovery limits selected by the user | protect progressive exposure, recovery and sustainable surplus; avoid predicting muscle gain from scale weight alone |
+| Physique / shaping | conjunction such as waist at/below target **and** shoulder/priority-muscle measure or performance proxy at/above target | proportionality preferences and recovery constraints | use phased or dual-track plans; never treat scale loss alone as success |
+
+For strength, performance must be compared on a comparable exercise, load/reps
+and RIR context; an arbitrary free-text lift is not a valid strength trend. For
+hypertrophy and shaping, if no repeatable measurement or agreed proxy exists,
+the Planner may forecast execution coverage but must return
+`insufficient_evidence` for physical-outcome probability. It then asks at most
+three high-value questions or establishes a measurement baseline.
+
+### Deviation assessment and proactive correction
+
+After a plan-driver fact is recorded, the internal sequence is:
+
+```text
+record explicit fact
+→ assess forecast of confirmed plan to original deadline
+→ if forecast remains inside the mode-specific risk acceptance policy: monitor
+→ otherwise simulate allowed correction candidates
+→ if a safe candidate materially improves the forecast: proposal_warranted
+→ if none can: explain the unavoidable target/date/execution-burden trade-off
+```
+
+Thus a large extra intake during a short, aggressive cut may proactively create
+a proposal even if the user only reported it. For the same event in a longer
+path, the forecast may remain inside its acceptance region and the Planner can
+monitor without changing anything. This is a consequence of the stated
+outcome/date and evidence, not a subjective "strictness" label.
 
 ## User-visible progress, not hidden chain of thought
 
