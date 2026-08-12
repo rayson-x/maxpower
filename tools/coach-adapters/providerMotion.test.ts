@@ -294,7 +294,7 @@ test("实时 Canonical 观察只在内存中稳定提示；封存的 confirmed �
   if (!secondLive || secondLive.status !== "live") return;
   assert.equal(secondLive.event.type, "live-cue");
   if (secondLive.event.type !== "live-cue") return;
-  assert.match(secondLive.event.message, /下一组请先降低负重/);
+  assert.match(secondLive.event.message, /确认动作路径和当前负重仍可控/);
   assert.equal((await liveApp.readDomainProjection({ userId: "user-live-state" })).timeline.current.length, 0);
   assert.deepEqual(liveApp.readLiveMotionSession({ sessionId: liveSession.id, setId: "set-live" }), {
     sessionId: liveSession.id,

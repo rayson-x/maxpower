@@ -4,6 +4,7 @@ import test from "node:test";
 import { ScriptedLLMProvider } from "../../src/coach/adapters/provider";
 import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
+import { BehaviorDecisionTraceRecorder, TraceRecorder } from "../../src/observability";
 
 function fixture(provider: ScriptedLLMProvider, actionToolsEnabled = false) {
   let sequence = 0;
@@ -102,4 +103,61 @@ test("本地能力合同会同时根据事实与 Coaching mandate 装配可见�
   assert.equal(manualTools.includes("plan.show_today"), true);
   assert.equal(manualTools.includes("plan.propose_change"), false);
   assert.equal(manualTools.includes("timeline.record_user_report"), false);
+});
+
+test("Provider 不能绕过当前能力合同调用被隐藏的工具", async () => {
+  const provider = new ScriptedLLMProvider([
+    {
+      type: "tool-call",
+      toolCallId: "hidden-plan-change",
+      toolName: "plan.propose_change",
+      input: {
+        reason: "尝试绕过手动模式",
+        change: { kind: "adjust_task", taskId: "bench", sets: 2 },
+      },
+    },
+    { type: "completed" },
+  ]);
+  const { app, ledger } = fixture(provider, true);
+  const session = await app.startSession({ userId: "manual-bypass-user", context: { kind: "plan", ref: "active" } });
+  await seed(app, "manual-bypass-user");
+  const snapshot = await ledger.read();
+  await ledger.replace({
+    ...snapshot,
+    users: snapshot.users.map((user) => user.userId === "manual-bypass-user"
+      ? { ...user, mandate: { ...user.mandate, mode: "manual" } }
+      : user),
+  });
+
+  const events = await app.sendCoachTurn({ sessionId: session.id, text: "试试改计划" });
+
+  assert.equal(events.some((event) => event.type === "run-error" && event.message === "capability_not_available"), true);
+  assert.equal((await ledger.read()).artifacts.some((artifact) => artifact.kind === "plan_change_proposal"), false);
+});
+
+test("能力可见性、工具选择与校验写入结构化决策记录而非模型思维链", async () => {
+  const envelopes: import("../../src/observability").TraceEnvelope[] = [];
+  const provider = new ScriptedLLMProvider([
+    { type: "tool-call", toolCallId: "trace-today", toolName: "plan.show_today", input: { date: "2026-08-13" } },
+    { type: "completed" },
+  ], [], [[{ type: "completed" }]]);
+  let sequence = 0;
+  const ledger = new InMemoryCoachLedger();
+  const app = new CoachApplication({
+    ledger,
+    runtime: { now: () => "2026-08-13T08:00:00.000Z", nextId: (prefix) => `${prefix}-${++sequence}` },
+    llmProvider: provider,
+    behaviorDecisionRecorder: new BehaviorDecisionTraceRecorder(new TraceRecorder([{
+      name: "capture",
+      async write(envelope) { envelopes.push(envelope); },
+    }])),
+  });
+  const session = await app.startSession({ userId: "trace-tool-user", context: { kind: "today", ref: "2026-08-13" } });
+  await seed(app, "trace-tool-user");
+  await app.sendCoachTurn({ sessionId: session.id, text: "看看今天计划" });
+
+  assert.deepEqual(envelopes.map((item) => item.metadata?.decisionBoundary), [
+    "capability_visibility", "tool_selection", "tool_validation",
+  ]);
+  assert.equal(envelopes.every((item) => !JSON.stringify(item).includes("看看今天计划")), true);
 });

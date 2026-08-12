@@ -46,6 +46,7 @@ import {
   type TimelineRiskAssessmentPort,
   type TimelineRiskEvaluationRecord,
 } from "./timelineRiskEvaluation";
+import { createFatLossTimelineRiskAssessment } from "./fatLossRiskAssessment";
 import {
   BACKGROUND_TRACE_SESSION_ID,
   buildBehaviorDecisionRecord,
@@ -186,7 +187,11 @@ export interface CoachApplicationDependencies extends CoachApplicationPorts {
   /** 个人知识层（ticket 05）：实测休息等校准值的沉淀处；缺省不启用。 */
   personalKnowledge?: import("../knowledge/personalLayer").PersonalKnowledgeLayer;
   trainingRuleRegistry?: TrainingRulePackRegistry;
-  /** Optional goal-aware evaluator. Timeline admission remains local even before ticket 04 supplies it. */
+  /**
+   * Optional extension for a product-specific Goal Contract. A conservative
+   * local evaluator is always installed; extensions may add richer predicates
+   * but cannot make Timeline admission or the default evidence boundary vanish.
+   */
   timelineRiskAssessment?: TimelineRiskAssessmentPort;
   /** Optional audit adapter; its failure must never block Timeline admission. */
   behaviorDecisionRecorder?: BehaviorDecisionTraceRecorder;
@@ -363,7 +368,9 @@ export class CoachApplication {
       dependencies.backgroundScheduler,
       () => knowledgeRuleVersions(this.knowledge.versionPins()),
     );
-    this.timelineRisk = new TimelineRiskEvaluationCoordinator(dependencies.timelineRiskAssessment);
+    this.timelineRisk = new TimelineRiskEvaluationCoordinator(
+      dependencies.timelineRiskAssessment ?? createFatLossTimelineRiskAssessment(),
+    );
     this.behaviorDecisionRecorder = dependencies.behaviorDecisionRecorder;
     this.nutritionObservation = dependencies.nutritionObservation;
     this.nutritionObservationResolver = dependencies.nutritionObservationResolver;
@@ -415,6 +422,7 @@ export class CoachApplication {
       dependencies.providerExecutionPolicy,
       dependencies.llmProviderResolver,
       this.knowledge.safetyLexicon()?.forbiddenClaims ?? [],
+      dependencies.behaviorDecisionRecorder,
     );
   }
 
@@ -588,6 +596,59 @@ export class CoachApplication {
         : {}),
       ...(phaseTransition ? { phaseTransition } : {}),
     };
+    // PlannerHarness lifecycle is durable and renderer-ready even when the
+    // trigger was a background Timeline check rather than an open chat
+    // session. It carries outcome facts only, never the planner's private
+    // reasoning trace.
+    const progressStage = decision.kind === "plan_proposal"
+      ? "proposal_ready" as const
+      : decision.kind === "infeasible_plan"
+        ? "paused" as const
+        : "failed" as const;
+    const progressProjection = projectPlannerProgress({
+      stage: progressStage,
+      factBasis: summary,
+      ...(decision.kind === "plan_proposal"
+        ? {
+            proposal: {
+              tradeoffs: input.sourceRiskEvaluationId
+                ? ["只调整尚未发生的行动；确认前当前计划保持不变。"]
+                : [],
+              executionBurden: "待确认后才会应用未来计划调整。",
+              nextVerificationSignal: "在新的事实记录后重新核对目标路径与恢复护栏。",
+              confirmationStatus: "awaiting_confirmation" as const,
+              effectAfterConfirmation: "仅创建新的未来 Plan revision。",
+            },
+          }
+        : {}),
+    }, new Set());
+    const progressArtifact: import("./model").PlannerProgressArtifact = {
+      id: `planner-progress-${stableHash({ artifactId, stage: progressStage })}`,
+      kind: "planner_progress",
+      userId: input.userId,
+      stage: progressStage,
+      factBasis: summary,
+      professionalClaims: [],
+      cannotJudge: progressProjection.cannotJudge,
+      ...(decision.kind === "plan_proposal" ? {
+        proposal: {
+          tradeoffs: input.sourceRiskEvaluationId ? ["只调整尚未发生的行动；确认前当前计划保持不变。"] : [],
+          executionBurden: "待确认后才会应用未来计划调整。",
+          nextVerificationSignal: "在新的事实记录后重新核对目标路径与恢复护栏。",
+          confirmationStatus: "awaiting_confirmation",
+          effectAfterConfirmation: "仅创建新的未来 Plan revision。",
+        },
+      } : {}),
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: now,
+      contextRefs: [{ kind: "today", ref: input.currentDate }],
+      evidenceRefs: artifact.evidenceRefs,
+      missingness: artifact.missingness,
+      capabilityBoundary: ["planner_lifecycle_status", "does_not_change_current_plan", "no_private_reasoning"],
+      hash: stableHash({ artifactId, stage: progressStage, summary }),
+      knowledgePins: artifact.knowledgePins,
+    };
     const refs = decision.kind === "plan_proposal" ? decision.baseRevisions : [];
     await this.ledger.commit({
       kind: "domain",
@@ -596,7 +657,7 @@ export class CoachApplication {
       intent: input.recomputeOf ? "planning.preview.recompute" : "planning.preview",
       expectedRevisions: refs,
       domainEvents: [],
-      artifacts: traceArtifact ? [artifact, traceArtifact] : [artifact],
+      artifacts: traceArtifact ? [artifact, traceArtifact, progressArtifact] : [artifact, progressArtifact],
       actionEvents: [{
         id: this.runtime.nextId("action"),
         userId: input.userId,
@@ -624,6 +685,29 @@ export class CoachApplication {
       idempotencyKey: input.idempotencyKey,
       recordedAt: now,
     });
+    if (this.behaviorDecisionRecorder) {
+      try {
+        await this.behaviorDecisionRecorder.record(buildBehaviorDecisionRecord({
+          traceId: input.sourceRiskEvaluationId ?? artifact.id,
+          sessionId: BACKGROUND_TRACE_SESSION_ID,
+          occurredAt: now,
+          actor: "planner_harness",
+          userPseudonym: traceUserPseudonym(input.userId, stableHash),
+          deviceId: "local-device",
+          boundary: "planner_candidate",
+          outcome: decision.kind === "plan_proposal" ? "completed" : "rejected",
+          causationIds: [input.sourceRiskEvaluationId ?? artifact.id],
+          factFrontier: artifact.evidenceRefs.map((ref) => `${ref.aggregate}:${ref.id}:${ref.revision}`),
+          versionPins: knowledgeRuleVersions(artifact.knowledgePins),
+          inputRefs: artifact.evidenceRefs.map((ref) => `${ref.aggregate}:${ref.id}:${ref.revision}`),
+          artifactRefs: [artifact.id, progressArtifact.id],
+          reasonCodes: decision.kind === "plan_proposal" ? ["planner_candidate_improves_path"] : ["planner_no_safe_candidate"],
+          expectedSignal: decision.kind === "plan_proposal" ? "user_confirmation" : "none",
+        }), { userId: input.userId });
+      } catch {
+        // Planner output must not fail if optional audit storage is unavailable.
+      }
+    }
     return artifact;
   }
 

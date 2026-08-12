@@ -8,13 +8,14 @@ import type {
 } from "../model";
 import { ArtifactCardRegistry } from "../cards";
 import { stableHash } from "../stable";
+import type { MotionRepObservationFinding } from "../../motion/motionPacket";
 
 export type RepDisposition = "confirmed" | "needs_review" | "rejected";
 
 export interface CanonicalRepObservation {
   id: string;
   disposition: RepDisposition;
-  findings: readonly string[];
+  findings: readonly MotionRepObservationFinding[];
 }
 
 export interface CanonicalSetObservation {
@@ -346,7 +347,7 @@ export class MotionCoordinator {
     setId: string;
     observation: CanonicalSetObservation;
     supported: boolean;
-    findings: readonly string[];
+    findings: readonly MotionRepObservationFinding[];
   }): { message: string } | undefined {
     if (!input.supported || input.findings.length === 0) return undefined;
     const key = liveSessionKey(input.sessionId, input.setId);
@@ -481,19 +482,19 @@ function liveSessionKey(sessionId: string, setId: string): string {
   return `${sessionId}:${setId}`;
 }
 
-function isImmediateSafetyFinding(finding: string): boolean {
-  return finding.startsWith("safety_");
+function isImmediateSafetyFinding(_finding: MotionRepObservationFinding): boolean {
+  // The current Canonical packet contract has no safety-stop finding. Keep
+  // this closed policy explicit so an arbitrary adapter string cannot invent
+  // a medical/safety conclusion.
+  return false;
 }
 
-function liveAdviceMessage(finding: string): string {
-  if (isImmediateSafetyFinding(finding)) {
-    return "检测到已确认的安全停止信号：立即停止当前动作，并在继续前完成安全确认。";
-  }
+function liveAdviceMessage(finding: MotionRepObservationFinding): string {
   if (finding.includes("range_below")) {
-    return "动作幅度连续低于当前识别 profile 的期望范围；下一组请先降低负重，并在可控范围内完成动作。";
+    return "动作幅度连续低于当前识别 profile 的参考范围；下一组开始前请确认动作路径和当前负重仍可控。";
   }
   if (finding.includes("faster_than")) {
-    return "动作节奏连续快于当前识别 profile 的期望范围；下一组请放慢节奏并保持可控。";
+    return "动作节奏连续快于当前识别 profile 的参考范围；下一组请先复核节奏是否仍然可控。";
   }
   return `当前动作连续出现「${finding}」观察；下一组开始前请复核动作设置。`;
 }

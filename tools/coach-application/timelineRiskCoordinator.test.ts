@@ -240,3 +240,24 @@ test("定时检查只读取最新 Timeline 快照；过期快照和空 Timeline 
   assert.equal(stale.outcome, "not_evaluated");
   assert.deepEqual(stale.reasonCodes, ["timeline_frontier_advanced"]);
 });
+
+test("默认本地应用始终给 Timeline 一个诚实的风险结果，而非未注册评估", async () => {
+  const { app, setNow } = createApp();
+  await bootstrap(app, {
+    targetMode: "lean_mass_preserving_fat_loss",
+    executionTier: "balanced",
+    measurementPlan: { requiredMeasurements: ["body_weight", "waist_circumference"] },
+  });
+  await app.recordTimelineFact({
+    userId: "u1",
+    idempotencyKey: "default-risk-meal",
+    fact: { kind: "nutrition", observationId: "meal-default", reportedEnergyDeviationKcal: 600, confidence: "confirmed" },
+    envelope: manualEnvelope("2026-08-12T20:00:00.000+08:00", "capture:default-risk"),
+  });
+  setNow("2026-08-12T21:00:00.000+08:00");
+
+  const assessed = await app.runScheduledTimelineRiskEvaluation({ userId: "u1", idempotencyKey: "default-risk-check" });
+  assert.equal(assessed.outcome, "review_due");
+  assert.equal(assessed.achievabilityState, "at_risk");
+  assert.notEqual(assessed.reasonCodes.includes("risk_assessment_not_registered"), true);
+});

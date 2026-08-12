@@ -54,6 +54,9 @@ test("at-risk Timeline 评估会主动提供仅未来的待确认计划；拒绝
   assert.equal(firstProposal.planningPreview?.status, "awaiting_confirmation");
   assert.equal(firstProposal.planningPreview?.sourceRiskEvaluationId, risk.id);
   assert.equal(firstProposal.planningPreview?.request.requestedScope, "future_plan");
+  assert.equal((await ledger.read()).artifacts.some(
+    (artifact) => artifact.kind === "planner_progress" && artifact.stage === "proposal_ready",
+  ), true);
   assert.equal((await app.readDomainProjection({ userId: "u1" })).plan?.revision, initialPlanRevision);
   const product = await app.readProductProjection({
     userId: "u1", date: "2026-08-08", timezoneOffsetMinutes: 480, calendarMode: "week", calendarAnchorDate: "2026-08-08",

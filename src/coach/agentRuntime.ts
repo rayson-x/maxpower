@@ -23,7 +23,16 @@ import type {
   RuntimeServices,
   ToolAuditRecord,
 } from "./model";
-import { traceShortCode } from "../observability/model";
+import {
+  BACKGROUND_TRACE_SESSION_ID,
+  buildBehaviorDecisionRecord,
+  traceShortCode,
+  traceUserPseudonym,
+  type BehaviorDecisionBoundary,
+  type BehaviorDecisionOutcome,
+  type BehaviorDecisionReasonCode,
+  type BehaviorDecisionTraceRecorder,
+} from "../observability";
 import { stableHash } from "./stable";
 import { redactDirectIdentifiers } from "./remoteRedaction";
 import type { CoachToolCall, CoachToolRegistry } from "./toolRegistry";
@@ -65,6 +74,8 @@ export class AgentRuntime {
     private readonly providerResolver?: LLMProviderResolver,
     /** 禁止声称输出过滤器规则（ticket 09），来自知识包安全词表；空数组=不启用。 */
     private readonly outputFilterRules: readonly ForbiddenClaimRule[] = [],
+    /** Optional structured audit sink; never contains prompt text or CoT. */
+    private readonly behaviorDecisionRecorder?: BehaviorDecisionTraceRecorder,
   ) {
     this.providerIdleTimeoutMs = providerIdleTimeout(providerExecutionPolicy?.idleTimeoutMs);
   }
@@ -169,6 +180,16 @@ export class AgentRuntime {
       toolAudit: [requestAudit],
       idempotencyKey: `run:start:${runId}`,
       recordedAt: now,
+    });
+    await this.recordBehaviorDecision({
+      session,
+      runId,
+      boundary: "capability_visibility",
+      outcome: "accepted",
+      reasonCodes: ["capability_visible"],
+      inputRefs: toolManifest.map((tool) => `tool:${tool.name}`),
+      causationIds: [`coach_run:${runId}`],
+      expectedSignal: "none",
     });
 
     if (!provider) {
@@ -634,6 +655,17 @@ export class AgentRuntime {
       state: "input-available",
       occurredAt: now,
     };
+    await this.recordBehaviorDecision({
+      session,
+      runId,
+      boundary: "tool_selection",
+      outcome: "accepted",
+      reasonCodes: ["tool_selected"],
+      inputRefs: [`tool:${call.toolName}`],
+      causationIds: [`tool_call:${call.toolCallId}`],
+      artifactRefs: [],
+      expectedSignal: "none",
+    });
     await this.persistToolState(session, record, inputEvent, "schema_validation", "passed");
 
     if (call.toolName === "ui.request_choice") {
@@ -651,6 +683,28 @@ export class AgentRuntime {
 
     if (!this.tools) {
       return this.persistToolError(session, record, inputEvent, "unregistered_tool");
+    }
+    // A provider may only call a capability that was assembled from the
+    // current local fact frontier and permissions. The manifest is not
+    // descriptive prompt metadata: it is an authority boundary that is
+    // rechecked immediately before every execution.
+    const currentlyVisible = resolveCoachCapabilities({
+      snapshot,
+      userId: session.userId,
+      tools: this.tools,
+    }).some((tool) => tool.name === call.toolName);
+    if (!currentlyVisible) {
+      await this.recordBehaviorDecision({
+        session,
+        runId,
+        boundary: "tool_validation",
+        outcome: "rejected",
+        reasonCodes: ["capability_hidden_by_mandate"],
+        inputRefs: [`tool:${call.toolName}`],
+        causationIds: [`tool_call:${call.toolCallId}`],
+        expectedSignal: "none",
+      });
+      return this.persistToolError(session, record, inputEvent, "capability_not_available");
     }
     try {
       const toolEvents = await this.tools.invoke({ sessionId: session.id, runId, call });
@@ -671,6 +725,17 @@ export class AgentRuntime {
         occurredAt: this.runtime.now(),
       };
       await this.persistToolState(session, outputRecord, outputEvent, "tool_execution", "passed", toolEvents);
+      await this.recordBehaviorDecision({
+        session,
+        runId,
+        boundary: "tool_validation",
+        outcome: "accepted",
+        reasonCodes: ["tool_schema_valid", "tool_policy_allowed"],
+        inputRefs: [`tool:${call.toolName}`],
+        causationIds: [`tool_call:${call.toolCallId}`],
+        artifactRefs: artifactEvent?.type === "artifact-ready" ? [artifactEvent.artifactRef.id] : [],
+        expectedSignal: artifactEvent ? "timeline_change" : "none",
+      });
       const continuation = artifactEvent?.type === "artifact-ready"
         ? this.artifactToolContinuation(
             await this.ledger.read(),
@@ -681,12 +746,57 @@ export class AgentRuntime {
         : undefined;
       return { events: [inputEvent, ...toolEvents, outputEvent], suspended: false, ...(continuation ? { continuation } : {}) };
     } catch (error) {
+      await this.recordBehaviorDecision({
+        session,
+        runId,
+        boundary: "tool_validation",
+        outcome: "rejected",
+        reasonCodes: ["tool_schema_invalid"],
+        inputRefs: [`tool:${call.toolName}`],
+        causationIds: [`tool_call:${call.toolCallId}`],
+        expectedSignal: "none",
+      });
       return this.persistToolError(
         session,
         record,
         inputEvent,
         error instanceof Error ? error.message : "invalid_tool_call",
       );
+    }
+  }
+
+  private async recordBehaviorDecision(input: {
+    session: CoachSession;
+    runId: string;
+    boundary: BehaviorDecisionBoundary;
+    outcome: BehaviorDecisionOutcome;
+    reasonCodes: readonly BehaviorDecisionReasonCode[];
+    causationIds: readonly string[];
+    inputRefs: readonly string[];
+    artifactRefs?: readonly string[];
+    expectedSignal: "none" | "timeline_change" | "user_confirmation" | "user_rejection" | "execution_observed" | "measurement_observed" | "notification_delivery";
+  }): Promise<void> {
+    if (!this.behaviorDecisionRecorder) return;
+    try {
+      await this.behaviorDecisionRecorder.record(buildBehaviorDecisionRecord({
+        traceId: input.runId,
+        sessionId: input.session.id || BACKGROUND_TRACE_SESSION_ID,
+        occurredAt: this.runtime.now(),
+        actor: "agent_runtime",
+        userPseudonym: traceUserPseudonym(input.session.userId, stableHash),
+        deviceId: "local-device",
+        boundary: input.boundary,
+        outcome: input.outcome,
+        causationIds: input.causationIds,
+        factFrontier: [],
+        versionPins: {},
+        inputRefs: input.inputRefs,
+        ...(input.artifactRefs?.length ? { artifactRefs: input.artifactRefs } : {}),
+        reasonCodes: input.reasonCodes,
+        expectedSignal: input.expectedSignal,
+      }), { userId: input.session.userId });
+    } catch {
+      // An audit sink cannot block a user-visible action or an explicit rejection.
     }
   }
 

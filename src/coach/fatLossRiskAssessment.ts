@@ -21,8 +21,16 @@ export function createFatLossTimelineRiskAssessment(): FatLossRiskAssessment {
     input: Parameters<TimelineRiskAssessmentPort["assess"]>[0],
   ): Promise<{ state: AchievabilityRiskState; reasonCodes: readonly string[] }> => {
     const contract = input.riskSnapshot?.goalContract?.value;
-    if (!contract || !isFatLossContract(contract)) {
-      return { state: "insufficient_evidence", reasonCodes: ["fat_loss_goal_contract_not_configured"] };
+    if (!contract) {
+      return { state: "insufficient_evidence", reasonCodes: ["goal_contract_not_configured"] };
+    }
+    if (!isFatLossContract(contract)) {
+      // A non-fat-loss Goal still gets a durable, honest risk outcome from the
+      // default local composition. Product-specific hypertrophy/physique
+      // adapters can replace this with their comparable-measurement predicate;
+      // no Timeline change should degrade into an unobservable "unregistered"
+      // assessment merely because that extra evidence is absent.
+      return { state: "insufficient_evidence", reasonCodes: ["goal_specific_measurements_not_configured"] };
     }
     if (!contract.horizon.endDate || !contract.targetMode || !contract.executionTier) {
       return { state: "insufficient_evidence", reasonCodes: ["fat_loss_goal_contract_incomplete"] };

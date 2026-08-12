@@ -192,7 +192,14 @@ test("可回放验收：不同说法在同一确认事实、目标合同与知�
   assert.equal(first.report.proposal.requestedScope, "future_plan");
   assert.equal(first.report.proposal.currentPlanChangedBeforeConfirmation, false);
   assert.equal(first.report.notifications.deliveredOrScheduledBeforeConfirmation, 0);
-  assert.deepEqual(first.report.observedDecisionBoundaries, ["materiality", "risk_evaluation"]);
+  assert.deepEqual(first.report.observedDecisionBoundaries, [
+    "capability_visibility",
+    "materiality",
+    "planner_candidate",
+    "risk_evaluation",
+    "tool_selection",
+    "tool_validation",
+  ]);
   assert.ok(Object.keys(first.report.knowledgePins).length > 0, "risk replay must pin its local knowledge/rule version");
 });
 
