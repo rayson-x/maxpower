@@ -15,6 +15,7 @@ export interface CloudCancellationFetch {
 
 export interface CloudInvocationCancellationClientOptions {
   apiBaseUrl: string;
+  allowInsecureHttp?: boolean;
   accountId: string;
   accessTokens: CloudServiceAccessTokenSource;
   fetch: CloudCancellationFetch;
@@ -32,7 +33,9 @@ export class CloudInvocationCancellationClient {
   private readonly retryDelayMs: number;
 
   constructor(options: CloudInvocationCancellationClientOptions) {
-    this.endpoint = new URL("/v1/invocations/cancel", maxPowerApiOrigin(options.apiBaseUrl)).toString();
+    this.endpoint = new URL("/v1/invocations/cancel", maxPowerApiOrigin(options.apiBaseUrl, {
+      allowInsecureHttp: options.allowInsecureHttp,
+    })).toString();
     this.accountId = requiredCloudText(options.accountId, "cloud_cancel_account_required");
     this.accessTokens = options.accessTokens;
     this.fetchImpl = options.fetch;

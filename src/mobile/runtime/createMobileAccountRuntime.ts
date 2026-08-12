@@ -160,6 +160,9 @@ export async function createMobileAccountRuntime(
       media,
       llmProviderResolver: cloudCoach.llmProviderResolver,
       nutritionObservationResolver: cloudCoach.nutritionObservationResolver,
+      // MVP: a clear user-stated report may be written by Coach only through
+      // the typed, mandate-gated record tools. Estimates still use a review.
+      actionToolsEnabled: true,
       backupCrypto: new WebCryptoBackupCryptoPort(),
     });
 

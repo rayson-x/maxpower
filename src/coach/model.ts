@@ -411,7 +411,15 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
   planningPreview?: {
     status: "awaiting_confirmation" | "stale" | "confirmed" | "rejected";
     proposal: import("../planning").PlanProposal;
-    request: { currentDate: string; trigger: import("../planning").PlannerTrigger; requestedScope?: import("../planning").PlannerRequest["requestedScope"] };
+    /** Complete replayable planner inputs. Confirmation must not silently drop a scheduling constraint. */
+    request: {
+      currentDate: string;
+      trigger: import("../planning").PlannerTrigger;
+      requestedScope?: import("../planning").PlannerRequest["requestedScope"];
+      missedSessionDates?: readonly string[];
+      transientRecoveryConstraint?: import("./domain").RecoveryConstraintData;
+      transientNextSessionFocus?: import("../planning").PlannerRequest["transientNextSessionFocus"];
+    };
     sourcePreviewId?: string;
   };
   phaseTransition?: import("../replanning").PhaseTransitionProposal;

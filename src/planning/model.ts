@@ -99,6 +99,16 @@ export interface PlannerRequest {
   personalRestTempoSeconds?: number;
   /** 用户偏好的分化轮转模板 id（策略集 splitRotations）；不提供时按可执行性自动选择。 */
   preferredSplitId?: string;
+  /**
+   * 仅用于待确认预览的、由明确的定性恢复事实推导出的短时约束。它不是用户
+   * 自报分数，确认前不写入 RecoveryConstraint 聚合；预览确认时必须重放。
+   */
+  transientRecoveryConstraint?: RecoveryConstraintData;
+  /**
+   * 仅用于已请求换课的恢复预览。它把下一次未开始的训练移到明确的轮转课，
+   * 后续课从该课继续；确认前绝不改写当前 PlanRevision。
+   */
+  transientNextSessionFocus?: "shoulders";
   consecutiveDeviationCount?: number;
   missedSessionDates?: readonly string[];
   requestedScope?: "this_session_only" | "future_preference" | "lock" | "future_plan";
@@ -116,7 +126,13 @@ export interface PlannerTrace {
   /** 输入指纹：request 参数 + 事实修订集。同指纹必出同计划（确定性回放）。 */
   inputFingerprint: string;
   historySummary: { count: number; exerciseIds: readonly string[] };
-  splitSelection?: { rotationId: string; exposuresPerWeek: number; reasonCode: string };
+  splitSelection?: {
+    rotationId: string;
+    exposuresPerWeek: number;
+    reasonCode: string;
+    /** 结构质量判断的输入与结论，供用户/评估器复核，不是黑箱匹配。 */
+    rationale?: readonly string[];
+  };
   slots: readonly {
     slotId: string;
     date: string;

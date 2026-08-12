@@ -45,11 +45,17 @@ import {
 } from "../training-rules";
 import { selectAdaptiveStrategy, type AdaptiveStrategyPlan } from "./adaptiveStrategy";
 import { activityFactorFor, estimateTdee } from "./bodyComposition";
-import { dailyEnergyBudget, dayActivityFromPlan } from "./dailyEnergyBudget";
+import { dailyEnergyBudget } from "./dailyEnergyBudget";
+import { historyByMuscleFrom, recoveryIntervalConflicts } from "./recoveryInterval";
+import { forecastMuscleFatigue } from "./muscleFatigue";
+import { buildContinuousTrainingQueue } from "./continuousTrainingQueue";
 import { rotationPositionFromHistory } from "./rotationHistory";
 import { estimateTimeToGoal } from "./goalTimeline";
 import { tierPersona } from "./personTiering";
 import { fuelingAdviceFor } from "./sessionFueling";
+import { aerobicPlanFor } from "./aerobicPlan";
+import { forecastCardioLoad } from "./cardioLoad";
+import { rollingEnergyAdjustmentFor } from "./rollingEnergyAdjustment";
 import {
   evaluateCoupling,
   glycogenDemandForDay,
@@ -109,6 +115,8 @@ interface SlotTemplate {
   directMuscles?: readonly string[];
   priority: StimulusIntentData["priority"];
   fatigueIntent: StimulusIntentData["fatigueIntent"];
+  preferMechanic?: "compound" | "isolation";
+  preferAngle?: string;
 }
 
 interface PlanningContext {
@@ -138,6 +146,22 @@ export class GoalCyclePlanner {
     trainingRules?: TrainingRulePackRegistry,
   ) {
     this.trainingRules = trainingRules ?? new TrainingRulePackRegistry(knowledge.versionPins());
+  }
+
+  private splitSelection(context: PlanningContext) {
+    const strategies = this.knowledge.programStrategies();
+    if (!strategies) return undefined;
+    return selectSplitRotation(
+      strategies,
+      context.schedule.length,
+      context.request.preferredSplitId,
+      {
+        trainingExperience: context.facts.profile.value.trainingExperience,
+        sessionDurationMinutes: context.facts.profile.value.schedule?.sessionDurationMinutes,
+        primaryGoal: context.facts.goalContract.value.primaryGoal,
+        emphasisMuscles: context.facts.goalContract.value.emphasisMuscles,
+      },
+    );
   }
 
   plan(request: PlannerRequest): PlannerDecision {
@@ -487,10 +511,17 @@ export class GoalCyclePlanner {
   ): PlanRevisionData {
     const mesocycle = goalCycle.phasePath?.[0];
     if (!mesocycle) throw new Error("GoalCycle has no Mesocycle");
-    const materializedWeeks = mesocycle.weeklyIntents
-      .filter((week) => week.materialization === "materialized")
-      .map((week) => this.materializeWeek(context, week));
-    const sessions = materializedWeeks.flatMap((week) => week.sessions);
+    // 轮转是「已完成训练 → 下一节」的连续队列；周边界只服务周量账本，
+    // 不能令四分化在每个新日历周从第一节重开。
+    const startingTrainingOrdinal = this.initialRotationOrdinal(context);
+    let nextTrainingOrdinal = startingTrainingOrdinal;
+    let materializedWeeks: WeekPlanData[] = [];
+    for (const week of mesocycle.weeklyIntents.filter((item) => item.materialization === "materialized")) {
+      const materialized = this.materializeWeek(context, week, nextTrainingOrdinal);
+      materializedWeeks.push(materialized.week);
+      nextTrainingOrdinal = materialized.nextTrainingOrdinal;
+    }
+    let sessions = materializedWeeks.flatMap((week) => week.sessions);
     // 专业限制审计（每条医嘱都要在推理链里留痕：应用了/无法机器执行/已过期）
     for (const constraint of context.facts.profile.value.professionalConstraints ?? []) {
       const expired = constraint.validUntil !== undefined && constraint.validUntil < context.request.currentDate;
@@ -516,6 +547,36 @@ export class GoalCyclePlanner {
     // 人群分层（recomp 可行性 / 赤字幅度分档 / 低冲击偏好）
     const tiering = tierPersona(context.facts.profile.value, context.facts.goalContract.value);
     const progressionPolicy = progressionPolicyFor(materializedWeeks);
+    // 恢复间隔：计划内 + 用户自己完成的训练一起算，冲突显式暴露（不自动重排）。
+    // 训练历史既可能是用户自由文本，也可能是已确认/导入的精确动作；两者都不能漏掉。
+    const recoveryHistoryMuscles = historyByMuscleFrom({
+      events: context.facts.timeline
+        .filter((event) => event.fact.kind === "training")
+        .map((event) => ({
+          occurredAt: event.occurredAt,
+          muscles: musclesFromTrainingFact(
+            event.fact as {
+              reportedSession?: { summary?: string; exercises?: readonly { name: string }[] };
+              historicalSet?: { exerciseVariantId?: string };
+            },
+            (variantId) =>
+              this.knowledge
+                .exerciseVariant(variantId)
+                ?.expectedMuscleAssociation.associations.filter((item) => item.role === "primary_intent")
+                .map((item) => item.muscleId),
+          ),
+        }))
+        .filter((item) => item.muscles.length > 0),
+    });
+    const recoveryConflicts = recoveryIntervalConflicts({
+      sessions: upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate).filter((session) => session.tasks.length > 0),
+      historyByMuscle: recoveryHistoryMuscles,
+    });
+    for (const conflict of recoveryConflicts) {
+      context.reasonCodes.push(
+        `recovery_interval_short:${conflict.muscle}:${conflict.actualGapDays}d_of_${conflict.requiredGapDays}d${conflict.previousFromHistory ? ":after_training_history" : ""}`,
+      );
+    }
     context.reasonCodes.push(...tiering.reasonCodes);
     for (const event of coupling?.traceEvents ?? []) {
       context.traceCollector.constraintEvents.push(event);
@@ -531,6 +592,49 @@ export class GoalCyclePlanner {
       reasonCodes.push("active_recovery_constraint_applied_after_hard_constraints");
     }
     const planId = context.facts.priorPlan?.value.id ?? `plan-${stableHash(context.facts.userId)}`;
+    let upcomingSevenDays = upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate);
+    const nutritionGuidance = nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach, tiering);
+    const targetDailyDeficit = nutritionGuidance.maintenanceKcalEstimate !== undefined && nutritionGuidance.dailyEnergyTargetKcal
+      ? Math.round(nutritionGuidance.maintenanceKcalEstimate - (nutritionGuidance.dailyEnergyTargetKcal.min + nutritionGuidance.dailyEnergyTargetKcal.max) / 2)
+      : undefined;
+    const rollingEnergyAdjustment = rollingEnergyAdjustmentFor({
+      currentDate: context.request.currentDate,
+      profile: context.facts.profile.value,
+      timeline: context.facts.timeline,
+      targetDailyDeficitKcal: targetDailyDeficit,
+      // 补偿性有氧只可借用已排在上肢力量后的低冲击有氧时段；休息日不填满。
+      futureDates: sessions
+        .filter((session) => session.scheduledFor >= context.request.currentDate && session.aerobicBlock?.placement === "after_strength")
+        .map((session) => session.scheduledFor),
+    });
+    if (rollingEnergyAdjustment.status === "gentle_rebalance") {
+      materializedWeeks = applyRollingEnergyActions(materializedWeeks, rollingEnergyAdjustment);
+      sessions = materializedWeeks.flatMap((week) => week.sessions);
+      upcomingSevenDays = upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate);
+      reasonCodes.push("rolling_energy_adjustment_applied_to_existing_low_impact_cardio");
+    }
+    const muscleFatigueForecast = forecastMuscleFatigue({
+      sessions: upcomingSevenDays,
+      history: context.history,
+      exerciseById: (id) => this.knowledge.exerciseVariant(id),
+    });
+    const cardioLoadForecast = forecastCardioLoad({
+      timeline: context.facts.timeline,
+      sessions: upcomingSevenDays,
+    });
+    const rotation = this.splitSelection(context)?.rotation;
+    const continuousTrainingQueue = rotation
+      ? buildContinuousTrainingQueue({
+          currentDate: context.request.currentDate,
+          weeklyIntents: mesocycle.weeklyIntents,
+          materializedSessions: sessions,
+          schedule: context.schedule,
+          rotation,
+          startingTrainingOrdinal,
+          fatigueForecast: muscleFatigueForecast,
+          cardioLoadForecast,
+        })
+      : undefined;
     return {
       id: planId,
       goalContractRef: goalCycle.goalContractRef,
@@ -547,20 +651,26 @@ export class GoalCyclePlanner {
         .filter((week) => week.materialization === "intent_only")
         .map((week) => week.id),
       reasonCodes,
-      nutritionGuidance: nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach, tiering),
+      nutritionGuidance,
       recoveryGuidance: recoveryGuidanceFor(context.facts),
       progressionPolicy,
       ...(coupling ? { dietTrainingCoupling: coupling.output } : {}),
       personaTieringNote: tiering.recompNoteZh,
       goalTimeline: estimateTimeToGoal(context.facts.profile.value, context.facts.goalContract.value),
       // 用户视角的滚动 7 天（跨日历周拼接；不参与引擎决策）
-      upcomingSevenDays: upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate),
+      upcomingSevenDays,
+      ...(recoveryConflicts.length ? { recoveryIntervalConflicts: recoveryConflicts } : {}),
+      muscleFatigueForecast,
+      cardioLoadForecast,
+      ...(continuousTrainingQueue ? { continuousTrainingQueue } : {}),
       // 每日能量预算：按日型分解，不给周平均（训练日与休息日差 200-350 kcal）
       dailyEnergyBudgets: dailyEnergyBudgetsFor(
         context,
-        upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate),
-        nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach, tiering),
+        upcomingSevenDays,
+        nutritionGuidance,
+        rollingEnergyAdjustment,
       ),
+      rollingEnergyAdjustment,
       strategySelection: context.adaptive.selection,
       appliedPhaseStrategy: context.adaptive.phase,
       trainingStrategy: context.adaptive.training,
@@ -650,23 +760,15 @@ export class GoalCyclePlanner {
     };
   }
 
-  private materializeWeek(context: PlanningContext, week: WeeklyIntentData): WeekPlanData {
-    const sessionByWeekday = new Map(context.schedule.map((item) => [item.weekday, item]));
-    // 轮转顺延（用户拍板 2026-08-11）：本周已错过的训练日不跳过内容，
-    // 后续训练日的轮转序号前移——胸背腿一轮回，缺席一天整体后移。
-    const missedThisWeek = new Set(
-      (context.request.missedSessionDates ?? []).filter(
-        (date) => date >= week.startDate && date <= week.endDate,
-      ),
-    );
-    // 轮转起点：优先从训练历史推断（用户周一练了腿，周三就该接着排推/拉，
-    // 而不是从轮转第一课重来）。推断不出来才回落到 0。
-    // 直接算轮转，不能依赖 traceCollector.splitSelection——它要等第一个
-    // trainingSession 才写入，materializeWeek 先执行会拿到 undefined（首周因此失效）。
-    const strategies = this.knowledge.programStrategies();
-    const activeRotation = strategies
-      ? selectSplitRotation(strategies, context.schedule.length, context.request.preferredSplitId).rotation
+  private initialRotationOrdinal(context: PlanningContext): number {
+    const activeRotation = this.splitSelection(context)?.rotation;
+    const requestedFocusIndex = context.request.transientNextSessionFocus === "shoulders"
+      ? activeRotation?.sessions.findIndex((session) => /肩/.test(session.focusZh))
       : undefined;
+    if (requestedFocusIndex !== undefined && requestedFocusIndex >= 0) {
+      context.reasonCodes.push(`transient_next_session_focus:shoulders:rotation_index_${requestedFocusIndex}`);
+      return requestedFocusIndex;
+    }
     const historyPosition = activeRotation
       ? rotationPositionFromHistory({
           facts: context.facts,
@@ -684,12 +786,33 @@ export class GoalCyclePlanner {
         `rotation_resumed_from_history:${historyPosition.matchedDate}:next_${historyPosition.nextSessionIndex}`,
       );
     }
-    let trainingOrdinal = historyPosition?.nextSessionIndex ?? 0;
+    return historyPosition?.nextSessionIndex ?? 0;
+  }
+
+  private materializeWeek(
+    context: PlanningContext,
+    week: WeeklyIntentData,
+    startingTrainingOrdinal: number,
+  ): { week: WeekPlanData; nextTrainingOrdinal: number } {
+    const sessionByWeekday = new Map(context.schedule.map((item) => [item.weekday, item]));
+    // 轮转顺延（用户拍板 2026-08-11）：本周已错过的训练日不跳过内容，
+    // 后续训练日的轮转序号前移——胸背腿一轮回，缺席一天整体后移。
+    const missedThisWeek = new Set(
+      (context.request.missedSessionDates ?? []).filter(
+        (date) => date >= week.startDate && date <= week.endDate,
+      ),
+    );
+    let trainingOrdinal = startingTrainingOrdinal;
     const sessions = Array.from({ length: 7 }, (_, dayOffset) => {
       const date = addDays(week.startDate, dayOffset);
       const availability = sessionByWeekday.get(dayOffset + 1);
       if (!availability || date < context.request.currentDate) {
         return this.restSession(context, week, date, date < context.request.currentDate);
+      }
+      // 暂停是当天不可训练的状态，不是另一种「已完成的轮转课」。
+      // 按计划日检查有效期，避免把今天的恢复状态错误延长到未来。
+      if (strongestRecovery(context.facts, date) === "pause_and_confirm") {
+        return this.pausedSession(context, week, date);
       }
       const missedBefore = context.facts.goalContract.value.missedSessionPolicy === "shift"
         ? (context.request.missedSessionDates ?? []).filter(
@@ -698,15 +821,26 @@ export class GoalCyclePlanner {
         : 0;
       const effectiveOrdinal = trainingOrdinal - missedBefore;
       const session = this.trainingSession(context, week, date, availability, effectiveOrdinal);
-      if (!missedThisWeek.has(date)) trainingOrdinal += 1;
+      if (isLowerBodyResistanceSession(session) && hasRecentHardImpactCardio(context.facts, date)) {
+        // 实际高冲击有氧是新的恢复事实：不把它当作“多一笔 kcal”忽略，
+        // 也不强行让腿课照常发生。轮转不消耗，下一可用日重算。
+        context.reasonCodes.push("lower_body_session_held_after_recent_hard_impact_cardio");
+        return this.cardioRecoveryHoldSession(context, week, date);
+      }
+      // 恢复安排、有氧、暂停都不等于完成胸/背/肩/腿中的一节；
+      // 只有可执行的抗阻课才推进队列。
+      if (!missedThisWeek.has(date) && consumesSplitRotation(session)) trainingOrdinal += 1;
       return session;
     });
     // 有氧：目标需要时安排在非训练日，不占用力量日（验收标准 §1 有氧条）
     const withAerobic = this.injectAerobicSessions(context, week, sessions);
-    // 主要肌群完全未覆盖时必须显式标注（器械缺口导致的 0 组不能静默）
+    // 主要肌群完全未覆盖时必须显式标注（器械缺口导致的 0 组不能静默）。
+    // 起始日可能落在自然周中段，轮转中的腿日会在下一周才出现；此时不能把
+    // “尚未轮到”误报为“器械无法覆盖”。
     const coverage = volumeLedgerFromSessions(withAerobic);
+    const isPartialStartWeek = context.request.currentDate > week.startDate;
     for (const muscle of ["chest", "back", "quadriceps"]) {
-      if ((coverage[muscle] ?? 0) === 0) {
+      if ((coverage[muscle] ?? 0) === 0 && !isPartialStartWeek) {
         context.reasonCodes.push(`muscle_group_uncovered_by_available_equipment:${muscle}`);
       }
     }
@@ -718,34 +852,44 @@ export class GoalCyclePlanner {
       }
     }
     return {
-      id: `week-plan-${stableHash({ week: week.id })}`,
-      ordinal: week.ordinal,
-      startDate: week.startDate,
-      endDate: week.endDate,
-      sessions: capped.sessions,
-      stimulusBudget: week.stimulusBudget,
-      materializedAt: context.request.currentDate,
-      weeklyDirectSets: volumeLedgerFromSessions(capped.sessions),
+      week: {
+        id: `week-plan-${stableHash({ week: week.id })}`,
+        ordinal: week.ordinal,
+        startDate: week.startDate,
+        endDate: week.endDate,
+        sessions: capped.sessions,
+        stimulusBudget: week.stimulusBudget,
+        materializedAt: context.request.currentDate,
+        weeklyDirectSets: volumeLedgerFromSessions(capped.sessions),
+      },
+      nextTrainingOrdinal: trainingOrdinal,
     };
   }
 
   /**
-   * 有氧注入（验收标准 §1 有氧条 + WHO 2020 周量基线）。
-   * 触发条件：减脂目标、conditioning/health 修饰、或显式有氧承诺 floor。
-   * 安排在非训练日，绝不占用力量日；未达 WHO 周量时显式标注而非静默。
+   * 有氧注入：先由目标与安全筛查生成计划，再在力量后或独立时段落位。
+   * 不是为了凑分钟数而强行塞进休息日；力量/体型目标默认先完成力量，再用
+   * 易恢复的有氧补能量消耗。每次重新物化都会重新评估恢复与时长余量。
    */
   private injectAerobicSessions(
     context: PlanningContext,
     week: WeeklyIntentData,
     sessions: readonly PlannedSessionData[],
   ): readonly PlannedSessionData[] {
-    const requirement = aerobicRequirement(context.facts);
-    if (!requirement) return sessions;
+    const aerobicPlan = aerobicPlanFor({
+      goal: context.facts.goalContract.value,
+      profile: context.facts.profile.value,
+    });
+    if (!aerobicPlan) return sessions;
+    if (strongestRecovery(context.facts, context.request.currentDate) !== "normal") {
+      context.reasonCodes.push("aerobic_held_for_current_recovery_adjustment");
+      return sessions;
+    }
     const existing = sessions.filter((session) =>
       (session.stimulusSlots ?? []).some((slot) =>
         slot.intent.movementPattern === "cardio" || slot.intent.movementPattern === "locomotion"),
     ).length;
-    let toAdd = Math.max(0, requirement.sessionsPerWeek - existing);
+    let toAdd = Math.max(0, aerobicPlan.sessionsPerWeek - existing);
     if (toAdd === 0) return sessions;
 
     // 低冲击约束：跑步/跳跃被硬约束时只给低冲击器械形式
@@ -754,7 +898,7 @@ export class GoalCyclePlanner {
         (constraint.kind === "cannot_do" || constraint.kind === "do_not_recommend") &&
         constraint.movementPattern === "locomotion",
     );
-    const minutes = Math.max(20, Math.min(45, Math.round(requirement.minutesPerSession)));
+    const minutes = Math.max(20, Math.min(45, Math.round(aerobicPlan.minutesPerSession)));
     // 从目录里选可执行的有氧变式：器械可行 + 低冲击约束时排除 moderate/high 冲击
     const location = context.facts.profile.value.locations?.[0];
     const aerobicVariant = [
@@ -776,9 +920,109 @@ export class GoalCyclePlanner {
       context.reasonCodes.push("aerobic_required_but_no_feasible_modality");
       return sessions;
     }
+
+    const makeAerobicContent = (date: string) => {
+      const slotId = `slot-${stableHash({ week: week.id, date, kind: "aerobic" })}`;
+      const slot: StimulusSlotData = {
+        id: slotId,
+        intent: {
+          movementPattern: aerobicVariant.movementPattern,
+          muscleGroups: ["cardiorespiratory"],
+          directMuscles: ["cardiorespiratory"],
+          stability: "either",
+          prescriptionMode: "timed",
+          fatigueIntent: aerobicPlan.intensity === "vigorous" ? "high" : "low",
+          priority: "maintenance",
+        },
+        prescription: { setCount: 1, duration: { value: minutes, unit: "minutes" } },
+        lockedFields: [],
+        exerciseSlot: {
+          status: "resolved",
+          exerciseVariantId: aerobicVariant.id,
+          satisfiedContracts: ["equipment", "location", "time", "impact_constraint"],
+          deviatedContracts: [],
+          requiredEquipment: equipmentItemIds(aerobicVariant.equipment.requirement),
+          performanceComparability: "cold_start",
+          coldStart: true,
+          sessionTimeImpactMinutes: minutes,
+          fatigueImpact: aerobicPlan.intensity === "vigorous" ? "high" : "low",
+          cameraCapability: "manual_only",
+          reasonCodes: [
+            ...aerobicPlan.reasonCodes,
+            ...(lowImpactOnly ? ["low_impact_only_due_to_hard_constraint"] : []),
+          ],
+        },
+      };
+      const task: PlannedExerciseTask = {
+        id: `task-${stableHash(slotId)}`,
+        exerciseVariantId: aerobicVariant.id,
+        stimulusSlotId: slotId,
+        mode: "timed",
+        sets: [{
+          id: `set-${stableHash({ slot: slotId, setIndex: 0 })}`,
+          targetDuration: { value: minutes, unit: "minutes" },
+          // 不存在外部负荷目标；unknown 明确表示没有把心率/RPE偷写成精确重量。
+          targetLoadStatus: "unknown",
+        }],
+      };
+      return { slot, task };
+    };
+
+    let result = [...sessions];
+    // 体型/力量优先时，优先附加在不含主要下肢训练的力量课后；避免把腿日恢复
+    // 与心肺工作绑死。先选择力量内容较短、余量最大的上肢课，而不是按日历顺序
+    // 抢占前两节，导致专属肩日只有 40 分钟却把有氧塞给已经接近满时长的胸日。
+    // 若没有时间余量，宁愿转独立时段，也不静默超时。
+    if (aerobicPlan.placement === "after_strength") {
+      const lowerBodyPatterns: readonly MovementPattern[] = ["squat", "hip_hinge", "lunge", "knee_extension", "knee_flexion"];
+      const eligibleDates = new Set(
+        result
+          .filter((session) => {
+            if (session.kind === "cardio" || session.kind === "rest" || session.scheduledFor < context.request.currentDate) return false;
+            const isLowerBodySession = (session.stimulusSlots ?? []).some((slot) => lowerBodyPatterns.includes(slot.intent.movementPattern));
+            const estimated = session.estimatedDuration?.value ?? 0;
+            const budget = session.durationBudget?.value ?? context.facts.profile.value.schedule?.sessionDurationMinutes ?? 0;
+            return !isLowerBodySession && budget > 0 && estimated + minutes <= budget;
+          })
+          .sort((left, right) =>
+            (left.estimatedDuration?.value ?? 0) - (right.estimatedDuration?.value ?? 0)
+            || left.scheduledFor.localeCompare(right.scheduledFor),
+          )
+          .slice(0, toAdd)
+          .map((session) => session.scheduledFor),
+      );
+      result = result.map((session) => {
+        if (toAdd === 0 || !eligibleDates.has(session.scheduledFor)) {
+          return session;
+        }
+        const estimated = session.estimatedDuration?.value ?? 0;
+        const budget = session.durationBudget?.value ?? context.facts.profile.value.schedule?.sessionDurationMinutes ?? 0;
+        const { slot, task } = makeAerobicContent(session.scheduledFor);
+        toAdd -= 1;
+        return {
+          ...session,
+          // 有氧作为新行动追加到力量课末尾，保留一次模式/器械切换的时间；
+          // 这样总时长与动作列表的时间账本一致。
+          estimatedDuration: { value: Math.min(budget, estimated + minutes + 2), unit: "minutes" },
+          stimulusSlots: [...(session.stimulusSlots ?? []), slot],
+          tasks: [...session.tasks, task],
+          aerobicBlock: {
+            placement: "after_strength",
+            role: aerobicPlan.role,
+            intensity: aerobicPlan.intensity,
+            targetRpe: aerobicPlan.targetRpe,
+            talkTest: aerobicPlan.talkTest,
+            minutes,
+            fastedEligible: false,
+            reasonCodes: aerobicPlan.reasonCodes,
+            ...(aerobicPlan.safetyNote ? { safetyNote: aerobicPlan.safetyNote } : {}),
+          },
+        };
+      });
+    }
     // 恢复保护：每周至少保留 1 天完全无结构化安排。
     // 有氧即使是低强度步行，排满 7 天也会压依从性与心理负担（尤其恢复意愿非 high 时）。
-    const fillableRestDays = sessions.filter(
+    const fillableRestDays = result.filter(
       (session) =>
         session.kind === "rest"
         && session.tasks.length === 0
@@ -794,50 +1038,21 @@ export class GoalCyclePlanner {
       if (existing === 0) {
         context.reasonCodes.push("aerobic_below_public_health_baseline_rest_day_priority");
       }
-      return sessions;
+      // 若前一阶段已把有氧附加到力量课，必须保留 result；此前返回原 sessions
+      // 会静默丢失“力量后有氧”这个已生成行动。
+      return result;
     }
 
-    const result = sessions.map((session) => {
+    result = result.map((session) => {
       if (toAdd === 0) return session;
       const isRest = session.kind === "rest" && session.tasks.length === 0;
       const elapsed = session.scheduledFor < context.request.currentDate;
       if (!isRest || elapsed) return session;
       toAdd -= 1;
-      const slotId = `slot-${stableHash({ week: week.id, date: session.scheduledFor, kind: "aerobic" })}`;
-      const slot: StimulusSlotData = {
-        id: slotId,
-        intent: {
-          movementPattern: aerobicVariant.movementPattern,
-          muscleGroups: ["cardiorespiratory"],
-          directMuscles: ["cardiorespiratory"],
-          stability: "either",
-          prescriptionMode: "timed",
-          fatigueIntent: "low",
-          priority: "maintenance",
-        },
-        prescription: { setCount: 1, duration: { value: minutes, unit: "minutes" } },
-        lockedFields: [],
-        exerciseSlot: {
-          status: "resolved",
-          exerciseVariantId: aerobicVariant.id,
-          satisfiedContracts: ["equipment", "location", "time", "impact_constraint"],
-          deviatedContracts: [],
-          requiredEquipment: equipmentItemIds(aerobicVariant.equipment.requirement),
-          performanceComparability: "cold_start",
-          coldStart: true,
-          sessionTimeImpactMinutes: minutes,
-          fatigueImpact: "low",
-          cameraCapability: "manual_only",
-          reasonCodes: [
-            `aerobic_${requirement.reason}`,
-            "moderate_intensity_talk_test",
-            ...(lowImpactOnly ? ["low_impact_only_due_to_hard_constraint"] : []),
-          ],
-        },
-      };
+      const { slot, task } = makeAerobicContent(session.scheduledFor);
       const fueling = fuelingAdviceFor({
         strategies: this.knowledge.programStrategies(),
-        workType: "low_intensity_aerobic",
+        workType: aerobicPlan.intensity === "vigorous" ? "high_intensity_aerobic" : "low_intensity_aerobic",
         plannedMinutes: minutes,
         profile: context.facts.profile.value,
       });
@@ -878,22 +1093,26 @@ export class GoalCyclePlanner {
         durationBudget: { value: minutes, unit: "minutes" as const },
         estimatedDuration: { value: minutes, unit: "minutes" as const },
         stimulusSlots: [slot],
-        tasks: [{
-          id: `task-${stableHash(slotId)}`,
-          exerciseVariantId: aerobicVariant.id,
-          stimulusSlotId: slotId,
-          mode: "timed" as const,
-          sets: [{
-            id: `set-${stableHash({ slot: slotId, setIndex: 0 })}`,
-            targetDuration: { value: minutes, unit: "minutes" as const },
-          }],
-        }],
+        tasks: [task],
+        aerobicBlock: {
+          placement: "separate_session",
+          role: aerobicPlan.role,
+          intensity: aerobicPlan.intensity,
+          targetRpe: aerobicPlan.targetRpe,
+          talkTest: aerobicPlan.talkTest,
+          minutes,
+          fastedEligible: aerobicPlan.fastedEligible && Boolean(fueling?.fastedEligible),
+          reasonCodes: aerobicPlan.reasonCodes,
+          ...(aerobicPlan.safetyNote ? { safetyNote: aerobicPlan.safetyNote } : {}),
+        },
       };
     });
     if (lowImpactOnly) context.reasonCodes.push("aerobic_low_impact_only_due_to_hard_constraint");
-    const plannedMinutes = result
-      .filter((session) => session.kind === "cardio")
-      .reduce((sum, session) => sum + (session.estimatedDuration?.value ?? 0), 0);
+    const plannedMinutes = result.reduce((sum, session) => {
+      if (session.kind === "cardio") return sum + (session.estimatedDuration?.value ?? 0);
+      // 附加在力量课后的有氧不能把整堂力量课时长再算一次。
+      return sum + (session.aerobicBlock?.minutes ?? 0);
+    }, 0);
     if (plannedMinutes < 150) {
       context.reasonCodes.push("aerobic_below_public_health_baseline_progressive_start");
     }
@@ -919,6 +1138,43 @@ export class GoalCyclePlanner {
     };
   }
 
+  private pausedSession(
+    context: PlanningContext,
+    week: WeeklyIntentData,
+    date: string,
+  ): PlannedSessionData {
+    return {
+      id: `session-${stableHash({ week: week.id, date, kind: "pause_and_confirm" })}`,
+      title: "暂停并确认",
+      scheduledFor: date,
+      knowledgePins: context.pins,
+      kind: "rest",
+      durationBudget: { value: 0, unit: "minutes" },
+      stimulusSlots: [],
+      status: "planned",
+      tasks: [],
+    };
+  }
+
+  private cardioRecoveryHoldSession(
+    context: PlanningContext,
+    week: WeeklyIntentData,
+    date: string,
+  ): PlannedSessionData {
+    return {
+      id: `session-${stableHash({ week: week.id, date, kind: "cardio_recovery_hold" })}`,
+      title: "高冲击有氧后 · 恢复确认",
+      scheduledFor: date,
+      knowledgePins: context.pins,
+      kind: "recovery",
+      durationBudget: { value: 0, unit: "minutes" },
+      estimatedDuration: { value: 0, unit: "minutes" },
+      stimulusSlots: [],
+      status: "planned",
+      tasks: [],
+    };
+  }
+
   private trainingSession(
     context: PlanningContext,
     week: WeeklyIntentData,
@@ -930,25 +1186,30 @@ export class GoalCyclePlanner {
     const isDeloadWeek = week.intent === "planned_recovery_and_formal_review";
     // 有氧不再占用力量日（改为安排在非训练日，见 materializeWeek 的 aerobic 注入）
     const useCardio = false;
-    const recovery = strongestRecovery(context.facts, context.request.currentDate);
+    const recovery = strongestRecovery(context.facts, date);
     const useRecovery = recovery === "recovery_priority" || recovery === "pause_and_confirm";
     const strategies = this.knowledge.programStrategies();
     // 每个 slot 的组数由其直接肌群的真实暴露次数决定（不再按 priority 一刀切）
     let setsForTemplate: ((template: SlotTemplate) => number) | undefined;
     let templates: SlotTemplate[];
+    let splitFocusZh: string | undefined;
     if (useRecovery) {
       templates = [{ movementPattern: "recovery", muscleGroups: [], priority: "maintenance", fatigueIntent: "low" }];
     } else if (useCardio) {
       templates = [{ movementPattern: "cardio", muscleGroups: ["cardiorespiratory"], priority: "maintenance", fatigueIntent: "low" }];
     } else if (strategies) {
       // 组装器（ticket 03）：分化轮转 × 周量目标驱动，替代静态模板表
-      const selection = selectSplitRotation(strategies, context.schedule.length, context.request.preferredSplitId);
+      const selection = this.splitSelection(context)!;
       context.reasonCodes.push(selection.reasonCode);
       context.traceCollector.splitSelection = {
         rotationId: selection.rotation.id,
         exposuresPerWeek: selection.exposuresPerWeek,
         reasonCode: selection.reasonCode,
+        rationale: selection.rationale,
       };
+      splitFocusZh = selection.rotation.sessions[
+        ((ordinal % selection.rotation.sessions.length) + selection.rotation.sessions.length) % selection.rotation.sessions.length
+      ]?.focusZh;
       const sessionLocation = context.facts.profile.value.locations?.find(
         (item) => item.id === availability.locationId,
       );
@@ -998,7 +1259,10 @@ export class GoalCyclePlanner {
       // 局部侧重：emphasis 肌群的周量目标上调一档（其余保持，不挤掉）
       const emphasis = new Set(context.facts.goalContract.value.emphasisMuscles ?? []);
       if (emphasis.size) context.reasonCodes.push("emphasis_muscles_elevated_volume");
-      const cyclesPerWeek = context.schedule.length / selection.rotation.sessions.length;
+      // 用本自然周能完成的完整轮转数分配基础周量。5 天 PPL 的平均频率是
+      // 1.67 轮，但某一周可能只有一次拉；若用平均数会把那一次拉课压到 6 组，
+      // 形成日历边界下的低剂量周。额外的残余训练日再由周量上限保护。
+      const cyclesPerWeek = Math.max(1, Math.floor(context.schedule.length / selection.rotation.sessions.length));
       const rotation = selection.rotation;
       const emphasisExposureBoost = new Set(
         [...emphasis].filter((muscle) => {
@@ -1029,8 +1293,10 @@ export class GoalCyclePlanner {
         const existingPatterns = new Set(templates.map((item) => item.movementPattern));
         for (const muscle of emphasisExposureBoost) {
           const isoPattern = emphasisIsolationPatternFor(muscle);
-          // 只在该课完全没有这个模式的 slot 时补，避免叠在主项上导致过量
-          if (isoPattern && !existingPatterns.has(isoPattern)) {
+          // 补充直接组只能挂在与该部位相容的主训练日上，不能为了凑周暴露把
+          // 肩部孤立动作塞进腿日、把背部孤立动作塞进胸日。专属训练日保留主量，
+          // 补充日只提供第二次低疲劳直接刺激。
+          if (isoPattern && !existingPatterns.has(isoPattern) && supportsEmphasisSupplement(muscle, templates)) {
             templates.push({
               movementPattern: isoPattern,
               muscleGroups: [muscle],
@@ -1071,12 +1337,44 @@ export class GoalCyclePlanner {
         );
       }
     }
-    const slots = boundedTemplates.map((template, slotIndex) =>
-      this.resolveStimulusSlot(context, week, date, availability, ordinal, slotIndex, template, setsForTemplate?.(template)),
-    );
+    const slots: StimulusSlotData[] = [];
+    for (const [slotIndex, template] of boundedTemplates.entries()) {
+      // 同一训练课的重复 pattern 可以是合理的（平板 + 上斜），但不应在目录有
+      // 可行替代时生成完全相同的动作。先保留已选动作作为软排除；无替代才回落。
+      const alreadySelected = new Set(
+        slots.flatMap((slot) => slot.exerciseSlot.exerciseVariantId ? [slot.exerciseSlot.exerciseVariantId] : []),
+      );
+      slots.push(this.resolveStimulusSlot(
+        context,
+        week,
+        date,
+        availability,
+        ordinal,
+        slotIndex,
+        template,
+        setsForTemplate?.(template),
+        alreadySelected,
+      ));
+    }
     // TP-DELOAD-CONTENT-001：减组、远离力竭、保留主动作技术暴露；不写死固定减幅
+    // 局部恢复约束按动作关联肌群过滤：例如卧推后的三头不适会移除肩日推举，
+    // 但侧束/后束等未受影响内容仍可保留。这里消费的是目录的主/次级参与，不是 direct-set 账本。
+    const avoidedAreas = recoveryAvoidedAreas(context.facts, date);
+    const recoveryFilteredSlots = avoidedAreas.size
+      ? slots.filter((slot) => {
+          const exerciseId = slot.exerciseSlot.exerciseVariantId;
+          const affected = exerciseId
+            ? this.knowledge.exerciseVariant(exerciseId)?.expectedMuscleAssociation.associations
+              .some((association) => avoidedAreas.has(association.muscleId))
+            : false;
+          if (affected) {
+            context.reasonCodes.push(`recovery_avoid_area_slot_removed:${[...avoidedAreas].sort().join("|")}:${slot.intent.movementPattern}`);
+          }
+          return !affected;
+        })
+      : slots;
     const deloadedSlots = isDeloadWeek
-      ? slots.map((slot) => ({
+      ? recoveryFilteredSlots.map((slot) => ({
           ...slot,
           prescription: {
             ...slot.prescription,
@@ -1092,7 +1390,7 @@ export class GoalCyclePlanner {
               : {}),
           },
         }))
-      : slots;
+      : recoveryFilteredSlots;
     const tasks = deloadedSlots.flatMap((slot) =>
       slot.exerciseSlot.exerciseVariantId ? [this.taskForSlot(context, slot)] : [],
     );
@@ -1105,7 +1403,7 @@ export class GoalCyclePlanner {
           : "bodyweight_reps";
     return {
       id: `session-${stableHash({ week: week.id, date, ordinal, kind })}`,
-      title: useRecovery ? "恢复安排" : useCardio ? "有氧安排" : `${goal} · 训练 ${ordinal + 1}`,
+      title: useRecovery ? "恢复安排" : useCardio ? "有氧安排" : splitFocusZh ?? `${goal} · 训练 ${ordinal + 1}`,
       scheduledFor: date,
       knowledgePins: context.pins,
       kind,
@@ -1130,13 +1428,17 @@ export class GoalCyclePlanner {
     slotIndex: number,
     template: SlotTemplate,
     plannedSetCount?: number,
+    excludedExerciseVariantIds: ReadonlySet<string> = new Set(),
   ): StimulusSlotData {
     const slotId = `stimulus-${stableHash({ week: week.id, date, sessionOrdinal, slotIndex, template })}`;
     const direct = directChoiceFor(context.request.directChoices ?? [], slotId, sessionOrdinal, slotIndex);
     const candidates = this.knowledge.search({ movementPattern: template.movementPattern, limit: 500 });
-    const ranked = candidates
+    const eligible = candidates
       .map((exercise) => this.rankExercise(context, exercise, direct, availability.locationId, template))
-      .filter((candidate) => candidate.hardSatisfied)
+      .filter((candidate) => candidate.hardSatisfied);
+    const ranked = (eligible.filter((candidate) => !excludedExerciseVariantIds.has(candidate.exercise.id)).length
+      ? eligible.filter((candidate) => !excludedExerciseVariantIds.has(candidate.exercise.id))
+      : eligible)
       .sort((left, right) => right.score - left.score || left.exercise.id.localeCompare(right.exercise.id));
     const selected = ranked[0];
     if (direct?.scope === "lock" && selected?.exercise.id !== direct.exerciseVariantId) {
@@ -1166,7 +1468,7 @@ export class GoalCyclePlanner {
       template.priority,
       template,
       goal,
-      strongestRecovery(context.facts, context.request.currentDate),
+      strongestRecovery(context.facts, date),
       loadAnchored
         ? context.trainingRule.defaults.workingRir
         : context.trainingRule.defaults.calibrationRir,
@@ -1304,6 +1606,13 @@ export class GoalCyclePlanner {
       (event) => event.fact.kind === "training" && event.fact.historicalSet?.exerciseVariantId === exercise.id,
     );
     const strengthBaseline = strengthBaselineForExercise(context.facts.profile.value, exercise);
+    // profile 的 squat / benchPress / deadlift 是传统杠铃基线。没有精确动作历史时，
+    // 它不能变成工作重量，但应让同模式动作优先被选中，避免把 80 kg 卧推错误换算为
+    // 一对哑铃的“54 kg 起点”。
+    const baselineModalityContinuity = strengthBaseline && exercise.equipment.loadMode === "barbell";
+    // 没有用户明确握距偏好时，胸日水平推的常规握距是可解释的默认；
+    // 不能因为稳定排序恰好让 close grip 被选中，把胸日的三头参与无意中抬高。
+    const defaultGripFit = template.movementPattern === "horizontal_push" && exercise.identity.grip === "standard";
     // 负荷可测量性：弹力带无法给出绝对负荷，双进阶与周量推进都无从追踪。
     // 器械可用时应优先可测量负荷；"器材条目少者优"只是可执行性的次要 tiebreaker，
     // 不能让弹力带在全套健身房里压过杠铃（真实缺陷，2026-08-11 修）。
@@ -1336,6 +1645,8 @@ export class GoalCyclePlanner {
       (explicitlyPreferred ? 250 : 0) +
       (exactHistory.length ? 500 : 0) +
       (strengthBaseline ? 200 : 0) +
+      (baselineModalityContinuity ? 120 : 0) +
+      (defaultGripFit ? 20 : 0) +
       (goalNeedsBarbellSpecificity ? 200 : 0) +
       (measurableLoad ? 150 : 0) +
       (sameLocationHistory ? 100 : 0) +
@@ -1358,6 +1669,8 @@ export class GoalCyclePlanner {
         ...(goalNeedsBarbellSpecificity ? ["barbell_specificity_for_strength_goal"] : []),
         exactHistory.length ? "exact_variant_continuity" : "cold_start_allowed_without_load_copy",
         ...(strengthBaseline ? ["user_strength_baseline_reference"] : []),
+        ...(baselineModalityContinuity ? ["barbell_modality_continuity_from_strength_baseline"] : []),
+        ...(defaultGripFit ? ["standard_grip_default_for_horizontal_push"] : []),
         directSelected ? `direct_choice:${direct?.scope}` : "goal_and_stimulus_fit",
         ...(explicitlyPreferred ? ["saved_future_preference"] : []),
         "camera_capability_is_bonus_only",
@@ -1394,8 +1707,19 @@ export class GoalCyclePlanner {
             : undefined;
           if (baseline && base.targetReps !== undefined) {
             const increment = equipmentIncrement(variant?.equipment.requirement);
+            const reportedReps = variant
+              ? strengthBaselineRepsForExercise(context.facts.profile.value, variant)
+              : undefined;
+            // 已知“80 kg × 5”时先估算对应 1RM，再反推目标次数的试做重量；
+            // 只有一个 kg 数字时不猜次数，沿用保守校准路径。
+            const calibrationOneRepMax = reportedReps
+              ? {
+                  value: baseline.value * (1 + Math.max(1, Math.min(20, reportedReps)) / 30),
+                  unit: baseline.unit,
+                }
+              : baseline;
             const suggested = snapToIncrement(
-              estimateWorkingLoadFromOneRepMax(baseline, base.targetReps.max),
+              estimateWorkingLoadFromOneRepMax(calibrationOneRepMax, base.targetReps.max),
               increment,
             );
             return {
@@ -1405,7 +1729,7 @@ export class GoalCyclePlanner {
                 load: suggested,
                 basis: "user_reported_strength_baseline",
                 evidenceRef: `profile:strength_baseline:${context.facts.profile.value.strengthBaseline?.measuredAt ?? "unknown"}`,
-                note: `按你自报的 ${baseline.value}${baseline.unit} 估算的试做起点；第一组做完报次数与 RIR，我再据实调整`,
+                note: `按你自报的 ${baseline.value}${baseline.unit}${reportedReps ? ` × ${reportedReps}` : ""} 估算的试做起点；第一组做完报次数与 RIR，我再据实调整`,
               },
               calibrationIntent:
                 "start_from_the_suggested_calibration_load_then_confirm_reported_reps_and_RIR",
@@ -1680,14 +2004,38 @@ function prescriptionFor(
   noHistorySetCap = 2,
 ) {
   const reduction = recovery === "slight_reduction" ? 1 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 2 : 0;
+  const rirIncrease = recovery === "slight_reduction" ? 1 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 2 : 0;
+  const adjustedRirRange = {
+    min: Math.min(6, targetRirRange.min + rirIncrease),
+    max: Math.min(6, targetRirRange.max + rirIncrease),
+  };
+  const adjustedRestSeconds = Math.min(
+    300,
+    restSecondsFor(template, priority, personalRestTempoSeconds, goal)
+      + (recovery === "slight_reduction" ? 15 : recovery === "recovery_priority" || recovery === "pause_and_confirm" ? 30 : 0),
+  );
   const requestedSets = plannedSetCount !== undefined
     ? plannedSetCount
     : priority === "primary" ? 3 : priority === "maintenance" ? 2 : 1;
   // 无精确历史的保守起点：新手 2 组；有训练经验/力量基线者 3 组（负荷仍不锚定）
   const setCount = Math.max(1, Math.min(hasHistory ? requestedSets : noHistorySetCap, requestedSets) - reduction);
   // 标量中点仅为旧消费者兼容；区间才是计划的权威语义（TP-RIR-001）。
-  const targetRir = Math.round((targetRirRange.min + targetRirRange.max) / 2);
+  const targetRir = Math.round((adjustedRirRange.min + adjustedRirRange.max) / 2);
   if (mode === "timed") {
+    // 核心等长不是“拿可用时长的 65%”的有氧。它是短组、组间休息明确的行动，
+    // 否则 75 分钟场地会荒谬地生成 45 分钟平板支撑。
+    if (template.movementPattern === "core_anti_extension") {
+      return {
+        setCount: 3,
+        duration: { value: 30, unit: "seconds" as const },
+        targetRir: undefined,
+        targetRirRange: undefined,
+        rest: {
+          value: adjustedRestSeconds,
+          unit: "seconds" as const,
+        },
+      };
+    }
     return {
       setCount: 1,
       duration: {
@@ -1706,9 +2054,9 @@ function prescriptionFor(
     setCount,
     repRange: repRangeFor(goal, template, hasHistory),
     targetRir,
-    targetRirRange,
+    targetRirRange: adjustedRirRange,
     rest: {
-      value: restSecondsFor(template, priority, personalRestTempoSeconds, goal),
+      value: adjustedRestSeconds,
       unit: "seconds" as const,
     },
   };
@@ -1945,6 +2293,18 @@ function strengthBaselineForExercise(
   return undefined;
 }
 
+function strengthBaselineRepsForExercise(
+  profile: UserProfileData,
+  exercise: ExerciseVariant,
+): number | undefined {
+  const baseline = profile.strengthBaseline;
+  if (!baseline) return undefined;
+  if (exercise.identity.movement === "bench_press") return baseline.benchPressReps;
+  if (exercise.identity.movement === "squat") return baseline.squatReps;
+  if (exercise.identity.movement === "deadlift") return baseline.deadliftReps;
+  return undefined;
+}
+
 function strongestRecovery(
   facts: PlannerFacts,
   currentDate: string,
@@ -1955,6 +2315,22 @@ function strongestRecovery(
     .filter((candidate) => candidate.value.validUntil >= currentDate)
     .map((candidate) => candidate.value.level)
     .sort((left, right) => rank[right] - rank[left])[0] ?? "normal";
+}
+
+/** 当前仍有效的、且由恢复 check-in 明确指定的局部回避肌群。 */
+function recoveryAvoidedAreas(facts: PlannerFacts, date: string): ReadonlySet<string> {
+  return new Set(
+    facts.recoveryConstraints
+      .filter((candidate) => candidate.value.validUntil >= date && candidate.value.level !== "normal")
+      .flatMap((candidate) => candidate.value.intentions ?? [])
+      .filter((intention) => intention.kind === "avoid_area" && Boolean(intention.area))
+      .map((intention) => intention.area!),
+  );
+}
+
+/** 只有实际抗阻课会消费四分化队列；恢复/有氧/休息保持下一节不变。 */
+function consumesSplitRotation(session: PlannedSessionData): boolean {
+  return (session.kind === "weighted_reps" || session.kind === "bodyweight_reps") && session.tasks.length > 0;
 }
 
 function classifyExecution(
@@ -2089,9 +2465,11 @@ function priorityRank(priority: SlotTemplate["priority"]): number {
 
 function estimateSlotMinutes(prescription: StimulusSlotData["prescription"]): number {
   if (prescription.duration) {
-    return prescription.duration.unit === "minutes"
-      ? Math.ceil(prescription.duration.value)
-      : Math.ceil(prescription.duration.value / 60);
+    if (prescription.duration.unit === "minutes") return Math.ceil(prescription.duration.value);
+    const restSeconds = prescription.rest?.unit === "seconds"
+      ? prescription.rest.value
+      : (prescription.rest?.value ?? 0) * 60;
+    return Math.ceil((prescription.duration.value * prescription.setCount + Math.max(0, prescription.setCount - 1) * restSeconds) / 60);
   }
   if (prescription.distance) return prescription.distance.unit === "km" ? Math.ceil(prescription.distance.value * 8) : 10;
   const restSeconds = prescription.rest?.unit === "seconds"
@@ -2109,6 +2487,49 @@ function estimateSessionMinutes(slots: readonly StimulusSlotData[], availableMin
     0,
   );
   return Math.min(availableMinutes, Math.ceil(planned));
+}
+
+/**
+ * 将滚动能量回调落进已经存在的低冲击练后有氧，而不是另起惩罚性训练日。
+ * 没有时间余量的课保持不变；对应行动仍会在下次重算时寻找下一个可用时段。
+ */
+function applyRollingEnergyActions(
+  weeks: readonly WeekPlanData[],
+  adjustment: import("./rollingEnergyAdjustment").RollingEnergyAdjustment,
+): WeekPlanData[] {
+  const actionByDate = new Map(adjustment.actions.map((action) => [action.date, action]));
+  return weeks.map((week) => {
+    const sessions = week.sessions.map((session) => {
+      const action = actionByDate.get(session.scheduledFor);
+      const block = session.aerobicBlock;
+      if (!action || !block || block.placement !== "after_strength" || action.extraLowImpactCardioMinutes <= 0) return session;
+      const currentMinutes = session.estimatedDuration?.value ?? 0;
+      const budget = session.durationBudget?.value ?? currentMinutes;
+      const extraMinutes = Math.max(0, Math.min(action.extraLowImpactCardioMinutes, budget - currentMinutes));
+      if (!extraMinutes) return session;
+      const aerobicSlot = (session.stimulusSlots ?? []).find((slot) => slot.intent.movementPattern === "cardio");
+      return {
+        ...session,
+        estimatedDuration: { value: currentMinutes + extraMinutes, unit: "minutes" as const },
+        aerobicBlock: { ...block, minutes: block.minutes + extraMinutes, reasonCodes: [...block.reasonCodes, "rolling_energy_rebalance"] },
+        stimulusSlots: (session.stimulusSlots ?? []).map((slot) =>
+          slot.id !== aerobicSlot?.id || !slot.prescription.duration || slot.prescription.duration.unit !== "minutes"
+            ? slot
+            : {
+                ...slot,
+                prescription: { ...slot.prescription, duration: { ...slot.prescription.duration, value: slot.prescription.duration.value + extraMinutes } },
+                exerciseSlot: { ...slot.exerciseSlot, sessionTimeImpactMinutes: slot.exerciseSlot.sessionTimeImpactMinutes + extraMinutes },
+              },
+        ),
+        tasks: session.tasks.map((task) =>
+          task.stimulusSlotId !== aerobicSlot?.id
+            ? task
+            : { ...task, sets: task.sets.map((set) => set.targetDuration?.unit === "minutes" ? { ...set, targetDuration: { ...set.targetDuration, value: set.targetDuration.value + extraMinutes } } : set) },
+        ),
+      };
+    });
+    return { ...week, sessions, weeklyDirectSets: volumeLedgerFromSessions(sessions) };
+  });
 }
 
 function assertPlannerRequest(request: PlannerRequest): void {
@@ -2164,11 +2585,6 @@ function buildPlannerTrace(
  * 局部限制不应升级为"整份计划不可行"——那等于因为不能硬拉就不让练。
  */
 
-/**
- * 有氧需求判定（产品规则）：减脂目标、conditioning/health 修饰、或显式有氧 floor。
- * 数值方向来自 WHO 2020（每周 150-300 分钟中等强度）——作为渐进目标而非硬门槛。
- */
-
 /** 从 EquipmentRequirement 树里取出 item id 列表（用于展示与排序）。 */
 function equipmentItemIds(requirement: import("../coach/domain").EquipmentRequirement): string[] {
   if (requirement.kind === "item") return [requirement.id];
@@ -2178,23 +2594,28 @@ function equipmentItemIds(requirement: import("../coach/domain").EquipmentRequir
   return [];
 }
 
-function aerobicRequirement(
-  facts: PlannerFacts,
-): { sessionsPerWeek: number; minutesPerSession: number; reason: string } | undefined {
-  const goal = facts.goalContract.value;
-  const modifiers = goal.modifiers ?? [];
-  const floorText = (goal.maintenanceFloors ?? []).join(" ");
-  const floorAsksAerobic = /有氧|aerobic|cardio|心肺/i.test(floorText);
-  if (floorAsksAerobic) {
-    return { sessionsPerWeek: 1, minutesPerSession: 30, reason: "explicit_user_aerobic_floor" };
-  }
-  if (modifiers.includes("conditioning")) {
-    return { sessionsPerWeek: 2, minutesPerSession: 30, reason: "conditioning_modifier" };
-  }
-  if (goal.primaryGoal === "fat_loss_preserve_lean_mass" || modifiers.includes("health")) {
-    return { sessionsPerWeek: 1, minutesPerSession: 30, reason: "fat_loss_or_health_goal" };
-  }
-  return undefined;
+function isLowerBodyResistanceSession(session: PlannedSessionData): boolean {
+  const lowerBodyPatterns: readonly MovementPattern[] = ["squat", "hip_hinge", "lunge", "knee_extension", "knee_flexion"];
+  return (session.kind === "weighted_reps" || session.kind === "bodyweight_reps")
+    && (session.stimulusSlots ?? []).some((slot) => lowerBodyPatterns.includes(slot.intent.movementPattern));
+}
+
+/**
+ * 仅对“昨天已完成的、时长足够的、高冲击且 hard/RPE≥7”的有氧做自动保守保持。
+ * 这是可审计的产品恢复规则，不等于宣称跑步后一定不能练腿；用户下次 check-in
+ * 或重新排程后仍可根据真实恢复状态恢复轮转。
+ */
+function hasRecentHardImpactCardio(facts: PlannerFacts, date: string): boolean {
+  const previousDate = addDays(date, -1);
+  return facts.timeline.some((event) => {
+    if (event.fact.kind !== "activity" || event.occurredAt.slice(0, 10) !== previousDate) return false;
+    const minutes = event.fact.duration?.unit === "minutes" ? event.fact.duration.value : 0;
+    const hard = event.fact.perceivedExertion !== undefined
+      ? event.fact.perceivedExertion >= 7
+      : event.fact.intensity === "hard";
+    const highImpact = /run|jog|跑步|跳绳|rope|球类|basketball|football|tennis/i.test(event.fact.activityType);
+    return minutes >= 20 && hard && highImpact;
+  });
 }
 
 function pruneUnresolvedSlots(revision: PlanRevisionData): PlanRevisionData {
@@ -2225,6 +2646,8 @@ function emphasisIsolationPatternFor(muscle: string): MovementPattern | undefine
   const map: Record<string, MovementPattern> = {
     glutes: "hip_hinge",           // 髋主导（臀桥/臀推是 hip_hinge 变式）
     deltoids: "shoulder_abduction", // 侧平举
+    lateral_deltoid: "shoulder_abduction",
+    rear_deltoid: "shoulder_horizontal_abduction",
     chest: "horizontal_push",
     back: "horizontal_pull",
     quadriceps: "knee_extension",
@@ -2233,6 +2656,19 @@ function emphasisIsolationPatternFor(muscle: string): MovementPattern | undefine
     triceps: "elbow_extension",
   };
   return map[muscle];
+}
+
+/** 侧重部位的额外低疲劳直接组，只能放在相容的主训练日，不跨大区“撒胡椒面”。 */
+function supportsEmphasisSupplement(muscle: string, templates: readonly SlotTemplate[]): boolean {
+  const patterns = new Set(templates.map((template) => template.movementPattern));
+  const hasPush = patterns.has("horizontal_push") || patterns.has("vertical_push");
+  const hasPull = patterns.has("horizontal_pull") || patterns.has("vertical_pull");
+  const hasLower = patterns.has("squat") || patterns.has("hip_hinge") || patterns.has("lunge");
+  if (muscle === "lateral_deltoid" || muscle === "deltoids") return hasPush;
+  if (muscle === "rear_deltoid" || muscle === "back" || muscle === "biceps") return hasPull;
+  if (muscle === "chest" || muscle === "triceps") return hasPush;
+  if (muscle === "quadriceps" || muscle === "hamstrings" || muscle === "glutes") return hasLower;
+  return false;
 }
 
 function defaultDietStrategyId(
@@ -2375,6 +2811,7 @@ function dailyEnergyBudgetsFor(
   context: PlanningContext,
   days: readonly import("../coach/domain").PlannedSessionData[],
   guidance: import("../coach/domain").NutritionGuidanceData,
+  rollingAdjustment?: import("./rollingEnergyAdjustment").RollingEnergyAdjustment,
 ): Readonly<Record<string, NonNullable<import("../coach/domain").PlanRevisionData["dailyEnergyBudgets"]>[string]>> | undefined {
   const profile = context.facts.profile.value;
   if (!profile.demographics?.currentWeight || !profile.demographics.height) return undefined;
@@ -2387,19 +2824,32 @@ function dailyEnergyBudgetsFor(
 
   const result: Record<string, NonNullable<import("../coach/domain").PlanRevisionData["dailyEnergyBudgets"]>[string]> = {};
   for (const day of days) {
+    const rollingAction = rollingAdjustment?.actions.find((action) => action.date === day.scheduledFor);
     const isCardio = day.kind === "cardio";
     const hasWork = day.tasks.length > 0;
     // 大重量日（主项休息 ≥150s）走 heavy MET，其余中等
     const heavy = (day.stimulusSlots ?? []).some(
       (slot) => slot.intent.priority === "primary" && (slot.prescription.rest?.value ?? 0) >= 150,
     );
+    const aerobicMinutes = day.aerobicBlock?.minutes ?? (isCardio ? day.estimatedDuration?.value ?? 0 : 0);
+    const strengthMinutes = !isCardio && hasWork
+      ? Math.max(0, (day.estimatedDuration?.value ?? profile.schedule?.sessionDurationMinutes ?? 60) - aerobicMinutes)
+      : 0;
+    const activitySessions: Parameters<typeof dailyEnergyBudget>[0]["day"]["sessions"] = [
+      ...(strengthMinutes > 0 ? [{ kind: heavy ? "resistance_heavy" as const : "resistance_moderate" as const, minutes: strengthMinutes }] : []),
+      ...(aerobicMinutes > 0 ? [{
+        kind: day.aerobicBlock?.intensity === "vigorous" ? "cardio_vigorous" as const : "cardio_moderate" as const,
+        minutes: aerobicMinutes,
+      }] : []),
+    ];
     const budget = dailyEnergyBudget({
       profile,
-      day: dayActivityFromPlan({
-        kind: !hasWork ? "rest" : isCardio ? "cardio" : "strength",
-        ...(hasWork ? { minutes: day.estimatedDuration?.value ?? profile.schedule?.sessionDurationMinutes ?? 60 } : {}),
-        ...(heavy ? { intensity: "heavy" as const } : {}),
-      }),
+      day: activitySessions.length || rollingAction?.extraSteps
+        ? {
+            ...(activitySessions.length ? { sessions: activitySessions } : {}),
+            ...(rollingAction?.extraSteps ? { plannedExtraSteps: rollingAction.extraSteps } : {}),
+          }
+        : {},
       ...(dailyDeficit !== undefined ? { dailyDeficitKcal: dailyDeficit } : {}),
     });
     if (budget) {
@@ -2410,6 +2860,7 @@ function dailyEnergyBudgetsFor(
         tefKcal: budget.tefKcal,
         tdeeKcal: budget.tdeeKcal,
         ...(budget.intakeTargetKcal !== undefined ? { intakeTargetKcal: budget.intakeTargetKcal } : {}),
+        ...(budget.plannedExtraActivityKcal ? { plannedExtraActivityKcal: budget.plannedExtraActivityKcal } : {}),
         uncertaintyKcal: budget.uncertaintyKcal,
       };
     }
@@ -2470,6 +2921,44 @@ function remainderDayOrdinal(
   return best?.index ?? fallback;
 }
 
+
+/**
+ * 从训练历史推断肌群：精确动作优先用目录关联，自由文本也保留为可解释的补充。
+ * 与 rotationHistory 的自由文本映射保持一致。
+ */
+function musclesFromTrainingFact(
+  fact: {
+    reportedSession?: { summary?: string; exercises?: readonly { name: string }[] };
+    historicalSet?: { exerciseVariantId?: string };
+  },
+  exactVariantMuscles: (variantId: string) => readonly string[] | undefined,
+): readonly string[] {
+  const muscles = new Set<string>();
+  const variantId = fact.historicalSet?.exerciseVariantId;
+  if (variantId) {
+    for (const muscle of exactVariantMuscles(variantId) ?? []) muscles.add(muscle);
+  }
+  const text = [fact.reportedSession?.summary, ...(fact.reportedSession?.exercises ?? []).map((item) => item.name)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  if (!text) return [...muscles];
+  const KEYWORDS: readonly [RegExp, readonly string[]][] = [
+    [/腿|squat|深蹲|leg|lunge|弓步|硬拉|deadlift/, ["quadriceps", "hamstrings", "glutes"]],
+    [/胸|bench|卧推|chest|飞鸟|fly|俯卧撑|push.?up/, ["chest", "triceps"]],
+    [/背|row|划船|下拉|pulldown|引体|pull.?up|back/, ["back", "biceps"]],
+    [/肩|shoulder|推举|press|平举|raise|delt/, ["deltoids"]],
+    [/二头|biceps|弯举|curl/, ["biceps"]],
+    [/三头|triceps|臂屈伸|extension/, ["triceps"]],
+    [/臀|glute|臀推|hip.?thrust/, ["glutes"]],
+    [/核心|core|腹|plank|平板/, ["core"]],
+  ];
+  for (const [pattern, list] of KEYWORDS) {
+    if (pattern.test(text)) for (const muscle of list) muscles.add(muscle);
+  }
+  return [...muscles];
+}
+
 function nutritionGuidanceFor(
   facts: PlannerFacts,
   energyApproach: import("./adaptiveStrategy").PlanningNutritionStrategy["energyApproach"],
@@ -2504,7 +2993,9 @@ function nutritionGuidanceFor(
     calorieDirection,
     ...absoluteNutritionTargets(facts, calorieDirection, tiering),
     ...(tiering?.weeklyRateTarget ? { weeklyRateTarget: tiering.weeklyRateTarget } : {}),
-    ...(tiering?.bodyMassState === "high" || tiering?.bodyMassState === "very_high"
+    ...(facts.goalContract.value.dailyStepTarget !== undefined
+      ? { dailyStepTarget: facts.goalContract.value.dailyStepTarget }
+      : tiering?.bodyMassState === "high" || tiering?.bodyMassState === "very_high"
       ? { dailyStepTarget: 8000 }
       : tiering && calorieDirection === "deficit"
         ? { dailyStepTarget: 7000 }

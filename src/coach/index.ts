@@ -22,6 +22,7 @@ export type {
   CoachLedger,
 } from "./ledger";
 export { ArtifactCardRegistry } from "./cards";
+export { CoachExecutionHarness } from "./executionHarness";
 export { PolicyGate } from "./policy";
 export { CoachToolRegistry, ToolSchemaError } from "./toolRegistry";
 export type * from "./model";

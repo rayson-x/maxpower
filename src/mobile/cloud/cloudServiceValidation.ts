@@ -1,5 +1,8 @@
 /** Shared validation for first-party cloud adapters. */
-export function maxPowerApiOrigin(value: string): string {
+export function maxPowerApiOrigin(
+  value: string,
+  options: { allowInsecureHttp?: boolean } = {},
+): string {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -7,7 +10,8 @@ export function maxPowerApiOrigin(value: string): string {
     throw new Error("cloud_api_url_invalid");
   }
   if (
-    parsed.protocol !== "https:"
+    (parsed.protocol !== "https:"
+      && !(options.allowInsecureHttp === true && parsed.protocol === "http:"))
     || !parsed.hostname
     || parsed.username
     || parsed.password

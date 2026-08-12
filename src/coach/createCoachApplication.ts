@@ -71,7 +71,7 @@ import {
   type PrivacySettingsOverview,
 } from "../privacy";
 import { clone, stableHash } from "./stable";
-import { CoachToolRegistry, type UserStatedRecordInput } from "./toolRegistry";
+import { CoachToolRegistry, type AdaptivePlanReportInput, type UserStatedRecordInput } from "./toolRegistry";
 import {
   createInstalledKnowledgePack,
   createKnowledgePackRegistry,
@@ -358,6 +358,8 @@ export class CoachApplication {
         explainKnowledgeRule: (input, execution) => this.explainKnowledgeRule(input, execution),
         searchKnowledgeBase: (input, execution) => this.searchKnowledgeBase(input, execution),
         recordNutritionObservation: (input, execution) => this.recordNutritionObservationForTool(input, execution),
+        proposeEnergyRebalance: (input, execution) => this.proposeEnergyRebalanceForTool(input, execution),
+        adaptPlanFromUserReport: (input, execution) => this.adaptPlanFromUserReportForTool(input, execution),
         recordUserStatedReport: (input, execution) => this.recordUserStatedReportForTool(input, execution),
         substituteExercise: (input, execution) => this.substituteExerciseForTool(input, execution),
         reportWorkoutSet: (input, execution) => this.reportWorkoutSetForTool(input, execution),
@@ -427,7 +429,10 @@ export class CoachApplication {
         mandate: projection.mandate,
         safetyConstraints: projection.safetyConstraints,
         equipmentProfiles: projection.equipmentProfiles,
-        recoveryConstraints: projection.recoveryConstraints,
+        recoveryConstraints: [
+          ...projection.recoveryConstraints,
+          ...(input.transientRecoveryConstraint ? [{ revision: 0, value: input.transientRecoveryConstraint }] : []),
+        ],
         nutritionStrategies: projection.nutritionStrategies,
         timeline: projection.timeline.current,
         ...(priorGoalCycle ? { priorGoalCycle } : {}),
@@ -456,6 +461,9 @@ export class CoachApplication {
         currentDate: input.currentDate,
         trigger: input.trigger,
         ...(input.requestedScope ? { requestedScope: input.requestedScope } : {}),
+        ...(input.missedSessionDates?.length ? { missedSessionDates: [...input.missedSessionDates] } : {}),
+        ...(input.transientRecoveryConstraint ? { transientRecoveryConstraint: input.transientRecoveryConstraint } : {}),
+        ...(input.transientNextSessionFocus ? { transientNextSessionFocus: input.transientNextSessionFocus } : {}),
       },
       ...(input.recomputeOf ? { recomputeOf: input.recomputeOf } : {}),
       decision,
@@ -518,6 +526,9 @@ export class CoachApplication {
                 currentDate: input.currentDate,
                 trigger: input.trigger,
                 ...(input.requestedScope ? { requestedScope: input.requestedScope } : {}),
+                ...(input.missedSessionDates?.length ? { missedSessionDates: [...input.missedSessionDates] } : {}),
+                ...(input.transientRecoveryConstraint ? { transientRecoveryConstraint: input.transientRecoveryConstraint } : {}),
+                ...(input.transientNextSessionFocus ? { transientNextSessionFocus: input.transientNextSessionFocus } : {}),
               },
               ...(input.recomputeOf ? { sourcePreviewId: input.recomputeOf } : {}),
             },
@@ -580,6 +591,9 @@ export class CoachApplication {
       currentDate: preview.planningPreview.request.currentDate,
       trigger: preview.planningPreview.request.trigger,
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
+      ...(preview.planningPreview.request.missedSessionDates?.length ? { missedSessionDates: preview.planningPreview.request.missedSessionDates } : {}),
+      ...(preview.planningPreview.request.transientRecoveryConstraint ? { transientRecoveryConstraint: preview.planningPreview.request.transientRecoveryConstraint } : {}),
+      ...(preview.planningPreview.request.transientNextSessionFocus ? { transientNextSessionFocus: preview.planningPreview.request.transientNextSessionFocus } : {}),
       idempotencyKey: input.idempotencyKey,
       recomputeOf: preview.id,
     });
@@ -643,6 +657,9 @@ export class CoachApplication {
       currentDate: preview.planningPreview.request.currentDate,
       trigger: preview.planningPreview.request.trigger,
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
+      ...(preview.planningPreview.request.missedSessionDates?.length ? { missedSessionDates: preview.planningPreview.request.missedSessionDates } : {}),
+      ...(preview.planningPreview.request.transientRecoveryConstraint ? { transientRecoveryConstraint: preview.planningPreview.request.transientRecoveryConstraint } : {}),
+      ...(preview.planningPreview.request.transientNextSessionFocus ? { transientNextSessionFocus: preview.planningPreview.request.transientNextSessionFocus } : {}),
     });
     if (stableHash(current) !== stableHash(preview.planningPreview.proposal)) {
       const stale: EvidenceBriefArtifact = {
@@ -699,6 +716,9 @@ export class CoachApplication {
       currentDate: preview.planningPreview.request.currentDate,
       trigger: preview.planningPreview.request.trigger,
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
+      ...(preview.planningPreview.request.missedSessionDates?.length ? { missedSessionDates: preview.planningPreview.request.missedSessionDates } : {}),
+      ...(preview.planningPreview.request.transientRecoveryConstraint ? { transientRecoveryConstraint: preview.planningPreview.request.transientRecoveryConstraint } : {}),
+      ...(preview.planningPreview.request.transientNextSessionFocus ? { transientNextSessionFocus: preview.planningPreview.request.transientNextSessionFocus } : {}),
       idempotencyKey: input.idempotencyKey,
       confirmedPreview: preview,
       ...(input.deviceId ? { deviceId: input.deviceId } : {}),
@@ -1682,6 +1702,166 @@ export class CoachApplication {
       execution,
       artifact,
       scope: "nutrition:observation_draft",
+    });
+  }
+
+  /**
+   * 首页 Coach 的执行期能量回调：先将用户明确陈述记为 Timeline Record，
+   * 再用已确认计划生成「仅未来」的 Planner Preview。它永远不静默改 PlanRevision。
+   */
+  async proposeEnergyRebalanceForTool(
+    input: { sessionId: string; description: string; excessKcal?: number },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    if (!domain.plan) throw new Error("energy_rebalance_requires_confirmed_plan");
+    const now = this.runtime.now();
+    if (!canCoachCommitUserStatedRecord(domain.mandate?.value, now, "nutrition")) {
+      throw new Error("energy_rebalance_requires_record_confirmation");
+    }
+    const timezoneOffsetMinutes = new Date(now).getTimezoneOffset() * -1;
+    const identity = execution?.toolCallId ?? stableHash(input);
+    await this.recordTimelineFact({
+      userId: session.userId,
+      idempotencyKey: `tool:${identity}:energy-rebalance:record`,
+      actor: { kind: "agent", id: "coach" },
+      delegatedByUser: true,
+      fact: {
+        kind: "nutrition",
+        observationId: `energy-rebalance:${identity}`,
+        mealDescription: input.description,
+        ...(input.excessKcal !== undefined ? { reportedEnergyDeviationKcal: input.excessKcal } : {}),
+        simplified: { proteinCompletion: "partial", hunger: "moderate", deviation: "large" },
+        confidence: "confirmed",
+      },
+      envelope: {
+        time: { startedAt: now, timezoneOffsetMinutes },
+        provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" },
+        privacyClass: "sensitive",
+        causalRefs: [`coach_session:${session.id}`, `tool_call:${identity}`],
+        evidenceRefs: [],
+        layer: "raw_observation",
+      },
+    });
+    const preview = await this.createPlanningPreview({
+      userId: session.userId,
+      currentDate: now.slice(0, 10),
+      trigger: "user_requested",
+      requestedScope: "future_plan",
+      idempotencyKey: `tool:${identity}:energy-rebalance:preview`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "plan.propose_energy_rebalance",
+      execution,
+      artifact: preview,
+      // A report may be recorded even when the current plan has no safe,
+      // available low-impact capacity to alter.  Never label that receipt as
+      // something awaiting user confirmation when Planner made no proposal.
+      presentationStatus: preview.planningPreview ? "awaiting_user" : "ready",
+      scope: "plan:future_energy_rebalance",
+    });
+  }
+
+  /**
+   * 首页 Coach 的通用执行期闭环。先把当前对话的事实写入 Timeline；只有
+   * 那些会改变恢复/排程/后续训练负荷的事实，才重新计算尚未发生的计划。
+   * 预览始终等待用户确认，绝不静默覆盖已确认 PlanRevision。
+   */
+  async adaptPlanFromUserReportForTool(
+    input: { sessionId: string; report: AdaptivePlanReportInput },
+    execution?: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
+    if (!session) throw new Error("coach_session_not_found");
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    if (!domain.plan) throw new Error("adaptive_update_requires_confirmed_plan");
+    const now = this.runtime.now();
+    if (!canCoachCommitUserStatedRecord(domain.mandate?.value, now, input.report.kind === "schedule" || input.report.kind === "missed_training" ? "training" : input.report.kind)) {
+      throw new Error("adaptive_update_requires_record_confirmation");
+    }
+    const identity = execution?.toolCallId ?? stableHash(input);
+    const timezoneOffsetMinutes = new Date(now).getTimezoneOffset() * -1;
+    let trigger: PlannerRequest["trigger"];
+    let missedSessionDates: readonly string[] | undefined;
+    let transientRecoveryConstraint: import("./domain").RecoveryConstraintData | undefined;
+    let transientNextSessionFocus: PlannerRequest["transientNextSessionFocus"] | undefined;
+    if (input.report.kind === "recovery") {
+      const validUntil = new Date(Date.parse(now) + 36 * 60 * 60 * 1_000).toISOString();
+      if (input.report.qualitativeAssessment === "poor_sleep_localized_lower_soreness") {
+        // 用户给的是定性部位反馈，不是数值评分。它只生成短时、可确认的预览
+        // 约束；不把系统推断写成用户报告的 perceivedRecovery/fatigue 事实。
+        transientRecoveryConstraint = qualitativeSleepAndLocalizedSorenessConstraint({
+          id: `transient-recovery:${stableHash({ userId: session.userId, identity, now })}`,
+          now,
+          validUntil,
+        });
+        transientNextSessionFocus = input.report.requestedTrainingFocus;
+      } else {
+        await this.submitRecoveryCheckIn({
+          userId: session.userId,
+          idempotencyKey: `tool:${identity}:adaptive-recovery`,
+          occurredAt: now,
+          validUntil,
+          checkIn: {
+            ...(input.report.perceivedRecovery === undefined ? {} : { perceivedRecovery: input.report.perceivedRecovery }),
+            ...(input.report.fatigue === undefined ? {} : { fatigue: input.report.fatigue }),
+            ...(input.report.sorenessSeverity === undefined ? { } : { soreness: { severity: input.report.sorenessSeverity, ...(input.report.sorenessArea ? { area: input.report.sorenessArea } : {}) } }),
+          },
+        });
+      }
+      trigger = "recovery_downgraded";
+    } else {
+      const fact = input.report.kind === "schedule"
+        ? { kind: "schedule" as const, effect: "availability_changed" as const, note: input.report.summary, confidence: "confirmed" as const }
+        : input.report.kind === "missed_training"
+          ? { kind: "rest" as const, note: input.report.summary, confidence: "confirmed" as const }
+          : {
+              kind: "activity" as const,
+              activityType: input.report.activityType,
+              ...(input.report.durationMinutes === undefined ? {} : { duration: { value: input.report.durationMinutes, unit: "minutes" as const } }),
+              ...(input.report.intensity === undefined ? {} : { intensity: input.report.intensity }),
+              confidence: "confirmed" as const,
+            };
+      await this.recordTimelineFact({
+        userId: session.userId,
+        idempotencyKey: `tool:${identity}:adaptive:${input.report.kind}:record`,
+        actor: { kind: "agent", id: "coach" },
+        delegatedByUser: true,
+        fact,
+        envelope: {
+          time: { startedAt: now, timezoneOffsetMinutes },
+          provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" },
+          privacyClass: "sensitive",
+          causalRefs: [`coach_session:${session.id}`, `tool_call:${identity}`, `adaptive_report:${input.report.kind}`],
+          evidenceRefs: [],
+          layer: "raw_observation",
+        },
+      });
+      trigger = input.report.kind === "schedule" ? "schedule_changed" : input.report.kind === "missed_training" ? "repeated_missed_sessions" : "session_completed";
+      missedSessionDates = input.report.kind === "schedule" ? input.report.unavailableDates : input.report.kind === "missed_training" ? input.report.missedDates : undefined;
+    }
+    const preview = await this.createPlanningPreview({
+      userId: session.userId,
+      currentDate: now.slice(0, 10),
+      trigger,
+      requestedScope: "future_plan",
+      ...(missedSessionDates?.length ? { missedSessionDates } : {}),
+      ...(transientRecoveryConstraint ? { transientRecoveryConstraint } : {}),
+      ...(transientNextSessionFocus ? { transientNextSessionFocus } : {}),
+      idempotencyKey: `tool:${identity}:adaptive:${input.report.kind}:preview`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "plan.adapt_from_user_report",
+      execution,
+      artifact: preview,
+      presentationStatus: "awaiting_user",
+      scope: `plan:future_adaptive:${input.report.kind}`,
     });
   }
 
@@ -9446,6 +9626,10 @@ function timelineFactFromUserReport(report: UserStatedRecordInput): import("./do
           : { metric: "body_fat_percentage", quantity: { value: report.value, unit: "percent" } },
         confidence: "confirmed",
       };
+    case "schedule":
+      return { kind: "schedule", effect: "availability_changed", note: report.summary, confidence: "confirmed" };
+    case "rest":
+      return { kind: "rest", note: report.summary, confidence: "confirmed" };
   }
 }
 
@@ -9456,7 +9640,43 @@ function userReportSummary(report: UserStatedRecordInput): string {
     case "sleep": return `睡眠${report.durationMinutes === undefined ? "" : ` · ${report.durationMinutes} min`}`;
     case "recovery": return `恢复 · ${report.perceivedRecovery}/5`;
     case "body": return report.metric === "body_weight" ? `体重 · ${report.value} kg` : `体脂 · ${report.value}%`;
+    case "schedule": return `日程变化 · ${report.summary}`;
+    case "rest": return `休息/缺训 · ${report.summary}`;
   }
+}
+
+/**
+ * 定性恢复组合的短时预览约束。它有意不调用 `submitRecoveryCheckIn`：用户没有
+ * 给出数值评分，系统不能把“睡不好”冒充为 2/5 或把“腿酸”冒充为严重疼痛。
+ */
+function qualitativeSleepAndLocalizedSorenessConstraint(input: {
+  id: string;
+  now: string;
+  validUntil: string;
+}): import("./domain").RecoveryConstraintData {
+  return {
+    id: input.id,
+    level: "slight_reduction",
+    validUntil: input.validUntil,
+    scope: "next_session",
+    intentions: [
+      { kind: "increase_rir", magnitude: 1 },
+      { kind: "remove_optional_sets" },
+      { kind: "extend_rest" },
+      { kind: "warmup_check" },
+    ],
+    evaluation: {
+      rulePackId: "maxpower.qualitative-recovery-preview",
+      ruleVersion: "1.0.0",
+      evaluatedAt: input.now,
+      triggeringFactRefs: [],
+      corroboratingFactRefs: [],
+      contradictingFactRefs: [],
+      missingOrStale: ["numeric_recovery_rating_not_reported"],
+      reasonCodes: ["poor_sleep_user_report", "localized_lower_soreness_user_report", "upper_body_readiness_user_report", "transient_preview_only"],
+      confirmationRequired: true,
+    },
+  };
 }
 
 function timelineRangeDates(

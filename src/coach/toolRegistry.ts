@@ -51,7 +51,38 @@ export type UserStatedRecordInput =
     }
   | { kind: "sleep"; durationMinutes?: number; quality?: number }
   | { kind: "recovery"; perceivedRecovery?: number }
-  | { kind: "body"; metric: "body_weight" | "body_fat_percentage"; value: number };
+  | { kind: "body"; metric: "body_weight" | "body_fat_percentage"; value: number }
+  | { kind: "schedule"; summary: string }
+  | { kind: "rest"; summary: string };
+
+/**
+ * A conversational execution-time change.  It deliberately contains only
+ * what the person said, rather than a model-generated diagnosis or a target
+ * training prescription.  The local rules decide whether the fact warrants
+ * a future-plan preview.
+ */
+export type AdaptivePlanReportInput =
+  | {
+      kind: "recovery";
+      summary: string;
+      perceivedRecovery?: number;
+      fatigue?: number;
+      sorenessArea?: string;
+      sorenessSeverity?: number;
+      /** 只允许规则引擎从明确的定性组合中生成；不把它伪装成用户评分。 */
+      qualitativeAssessment?: "poor_sleep_localized_lower_soreness";
+      /** 用户明确提出的下一节换课目标；当前仅支持可恢复性最高的肩部课。 */
+      requestedTrainingFocus?: "shoulders";
+    }
+  | { kind: "schedule"; summary: string; unavailableDates: readonly string[] }
+  | { kind: "missed_training"; summary: string; missedDates: readonly string[] }
+  | {
+      kind: "activity";
+      summary: string;
+      activityType: string;
+      durationMinutes?: number;
+      intensity?: "easy" | "moderate" | "hard" | "unknown";
+    };
 
 const EXACT_EMPTY_OBJECT = Object.freeze({ type: "object", additionalProperties: false });
 const AGENT_ADJUST_TASK_CHANGE_SCHEMA = Object.freeze({
@@ -173,12 +204,22 @@ const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   {
     name: "timeline.record_user_report", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
     permissionScopes: ["coaching_mandate"], riskCeiling: "review", evidenceRequirements: ["current_user_statement"], output: "artifact_ref", outputLimit: 1,
-    inputSchema: { type: "object", additionalProperties: false, required: ["kind"], properties: { kind: { enum: ["training", "activity", "sleep", "recovery", "body"] }, summary: { type: "string", maxLength: 240 }, note: { type: "string", maxLength: 480 }, exercises: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 120 }, sets: { type: "array", maxItems: 99, items: { type: "object", additionalProperties: false, properties: { reps: { type: "integer", minimum: 0, maximum: 200 }, loadKg: { type: "number", minimum: 0, maximum: 1000 }, rir: { type: "number", minimum: 0, maximum: 10 } } } } } } }, activityType: { type: "string", maxLength: 120 }, durationMinutes: { type: "number", minimum: 0, maximum: 1440 }, intensity: { enum: ["easy", "moderate", "hard", "unknown"] }, energyKcal: { type: "number", minimum: 0, maximum: 10000 }, energyEstimateKcal: { type: "number", minimum: 0, maximum: 10000 }, quality: { type: "integer", minimum: 1, maximum: 5 }, perceivedRecovery: { type: "integer", minimum: 1, maximum: 5 }, metric: { enum: ["body_weight", "body_fat_percentage"] }, value: { type: "number", minimum: 0, maximum: 1000 } } },
+    inputSchema: { type: "object", additionalProperties: false, required: ["kind"], properties: { kind: { enum: ["training", "activity", "sleep", "recovery", "body", "schedule", "rest"] }, summary: { type: "string", maxLength: 240 }, note: { type: "string", maxLength: 480 }, exercises: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 120 }, sets: { type: "array", maxItems: 99, items: { type: "object", additionalProperties: false, properties: { reps: { type: "integer", minimum: 0, maximum: 200 }, loadKg: { type: "number", minimum: 0, maximum: 1000 }, rir: { type: "number", minimum: 0, maximum: 10 } } } } } } }, activityType: { type: "string", maxLength: 120 }, durationMinutes: { type: "number", minimum: 0, maximum: 1440 }, intensity: { enum: ["easy", "moderate", "hard", "unknown"] }, energyKcal: { type: "number", minimum: 0, maximum: 10000 }, energyEstimateKcal: { type: "number", minimum: 0, maximum: 10000 }, quality: { type: "integer", minimum: 1, maximum: 5 }, perceivedRecovery: { type: "integer", minimum: 1, maximum: 5 }, metric: { enum: ["body_weight", "body_fat_percentage"] }, value: { type: "number", minimum: 0, maximum: 1000 } } },
+  },
+  {
+    name: "plan.adapt_from_user_report", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["current_materialized_plan", "current_user_statement"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["kind", "summary"], properties: { kind: { enum: ["recovery", "schedule", "missed_training", "activity"] }, summary: { type: "string", minLength: 2, maxLength: 480 }, perceivedRecovery: { type: "integer", minimum: 1, maximum: 5 }, fatigue: { type: "integer", minimum: 1, maximum: 10 }, sorenessArea: { type: "string", maxLength: 120 }, sorenessSeverity: { type: "integer", minimum: 1, maximum: 10 }, qualitativeAssessment: { enum: ["poor_sleep_localized_lower_soreness"] }, requestedTrainingFocus: { enum: ["shoulders"] }, unavailableDates: { type: "array", minItems: 1, maxItems: 14, items: { type: "string", format: "date" } }, missedDates: { type: "array", minItems: 1, maxItems: 14, items: { type: "string", format: "date" } }, activityType: { type: "string", minLength: 1, maxLength: 120 }, durationMinutes: { type: "number", minimum: 0, maximum: 1440 }, intensity: { enum: ["easy", "moderate", "hard", "unknown"] } } },
   },
   {
     name: "nutrition.record_observation", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
     permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["user_stated_items"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["items"], properties: { items: { type: "array", minItems: 1, maxItems: 20 }, mealSlot: { type: "string" }, note: { type: "string", maxLength: 240 } } },
+  },
+  {
+    name: "plan.propose_energy_rebalance", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["current_materialized_plan", "current_user_statement"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["description"], properties: { description: { type: "string", minLength: 2, maxLength: 240 }, excessKcal: { type: "number", minimum: 1, maximum: 10000 } } },
   },
   {
     name: "plan.substitute_exercise", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
@@ -269,6 +310,14 @@ export class CoachToolRegistry {
       ): Promise<ShowArtifactResult>;
       recordNutritionObservation(
         input: { sessionId: string; items: readonly string[]; mealSlot?: string; note?: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      proposeEnergyRebalance(
+        input: { sessionId: string; description: string; excessKcal?: number },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      adaptPlanFromUserReport(
+        input: { sessionId: string; report: AdaptivePlanReportInput },
         execution: ToolExecutionIdentity,
       ): Promise<ShowArtifactResult>;
       recordUserStatedReport(
@@ -365,6 +414,26 @@ export class CoachToolRegistry {
           ...(typeof parsed.mealSlot === "string" ? { mealSlot: parsed.mealSlot } : {}),
           ...(typeof parsed.note === "string" ? { note: parsed.note } : {}),
         },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "plan.propose_energy_rebalance") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const parsed = parseExactObject(input.call.input, ["description", "excessKcal"]);
+      const description = optionalString(parsed.description, 240);
+      const excessKcal = optionalBoundedNumber(parsed.excessKcal, 1, 10_000);
+      if (!description || (parsed.excessKcal !== undefined && excessKcal === undefined)) throw new ToolSchemaError("invalid_tool_input");
+      const result = await this.handlers.proposeEnergyRebalance(
+        { sessionId: input.sessionId, description, ...(excessKcal === undefined ? {} : { excessKcal }) },
+        { runId: input.runId, toolCallId: input.call.toolCallId },
+      );
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "plan.adapt_from_user_report") {
+      if (!this.options.actionToolsEnabled) throw new ToolSchemaError("unknown_tool");
+      const result = await this.handlers.adaptPlanFromUserReport(
+        { sessionId: input.sessionId, report: parseAdaptivePlanReport(input.call.input) },
         { runId: input.runId, toolCallId: input.call.toolCallId },
       );
       return this.validateResultIdentity(input, result.events);
@@ -619,6 +688,46 @@ function parseUserStatedRecord(input: unknown): UserStatedRecordInput {
     const value = optionalBoundedNumber(parsed.value, 0, 1000);
     if ((metric !== "body_weight" && metric !== "body_fat_percentage") || value === undefined || (metric === "body_fat_percentage" && value > 100)) throw new ToolSchemaError("invalid_tool_input");
     return { kind: "body", metric, value };
+  }
+  if (parsed.kind === "schedule" || parsed.kind === "rest") {
+    const summary = optionalString(parsed.summary, 240) ?? note;
+    if (!summary) throw new ToolSchemaError("invalid_tool_input");
+    return { kind: parsed.kind, summary };
+  }
+  throw new ToolSchemaError("invalid_tool_input");
+}
+
+function parseAdaptivePlanReport(input: unknown): AdaptivePlanReportInput {
+  const parsed = parseExactObject(input, ["kind", "summary", "perceivedRecovery", "fatigue", "sorenessArea", "sorenessSeverity", "qualitativeAssessment", "requestedTrainingFocus", "unavailableDates", "missedDates", "activityType", "durationMinutes", "intensity"]);
+  const kind = parsed.kind;
+  const summary = optionalString(parsed.summary, 480);
+  if (!summary) throw new ToolSchemaError("invalid_tool_input");
+  const dates = (value: unknown): string[] | undefined => {
+    if (!Array.isArray(value) || !value.length || value.length > 14 || value.some((item) => typeof item !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(item))) return undefined;
+    return [...new Set(value)].sort();
+  };
+  if (kind === "recovery") {
+    const perceivedRecovery = optionalBoundedInteger(parsed.perceivedRecovery, 1, 5);
+    const fatigue = optionalBoundedInteger(parsed.fatigue, 1, 10);
+    const sorenessArea = optionalString(parsed.sorenessArea, 120);
+    const sorenessSeverity = optionalBoundedInteger(parsed.sorenessSeverity, 1, 10);
+    const qualitativeAssessment = parsed.qualitativeAssessment === "poor_sleep_localized_lower_soreness" ? parsed.qualitativeAssessment : undefined;
+    const requestedTrainingFocus = parsed.requestedTrainingFocus === "shoulders" ? parsed.requestedTrainingFocus : undefined;
+    if ((parsed.perceivedRecovery !== undefined && perceivedRecovery === undefined) || (parsed.fatigue !== undefined && fatigue === undefined) || (parsed.sorenessArea !== undefined && sorenessArea === undefined) || (parsed.sorenessSeverity !== undefined && sorenessSeverity === undefined) || (sorenessArea === undefined && sorenessSeverity !== undefined) || (parsed.qualitativeAssessment !== undefined && qualitativeAssessment === undefined) || (parsed.requestedTrainingFocus !== undefined && requestedTrainingFocus === undefined) || (perceivedRecovery === undefined && fatigue === undefined && sorenessSeverity === undefined && qualitativeAssessment === undefined)) throw new ToolSchemaError("invalid_tool_input");
+    return { kind, summary, ...(perceivedRecovery === undefined ? {} : { perceivedRecovery }), ...(fatigue === undefined ? {} : { fatigue }), ...(sorenessArea === undefined ? {} : { sorenessArea }), ...(sorenessSeverity === undefined ? {} : { sorenessSeverity }), ...(qualitativeAssessment === undefined ? {} : { qualitativeAssessment }), ...(requestedTrainingFocus === undefined ? {} : { requestedTrainingFocus }) };
+  }
+  if (kind === "schedule" || kind === "missed_training") {
+    const key = kind === "schedule" ? "unavailableDates" : "missedDates";
+    const value = dates(parsed[key]);
+    if (!value) throw new ToolSchemaError("invalid_tool_input");
+    return kind === "schedule" ? { kind, summary, unavailableDates: value } : { kind, summary, missedDates: value };
+  }
+  if (kind === "activity") {
+    const activityType = optionalString(parsed.activityType, 120);
+    const durationMinutes = optionalBoundedNumber(parsed.durationMinutes, 0, 1440);
+    const intensity = parsed.intensity;
+    if (!activityType || (parsed.durationMinutes !== undefined && durationMinutes === undefined) || (intensity !== undefined && intensity !== "easy" && intensity !== "moderate" && intensity !== "hard" && intensity !== "unknown")) throw new ToolSchemaError("invalid_tool_input");
+    return { kind, summary, activityType, ...(durationMinutes === undefined ? {} : { durationMinutes }), ...(intensity === undefined ? {} : { intensity }) };
   }
   throw new ToolSchemaError("invalid_tool_input");
 }

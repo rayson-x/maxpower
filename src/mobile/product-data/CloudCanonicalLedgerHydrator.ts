@@ -5,13 +5,13 @@ import {
   type DomainAggregateRef,
   type DomainEvent,
   type DomainProjection,
-  type ExerciseSetPrescription,
-  type ExerciseTaskPrescription,
+  type PlannedExerciseSet,
+  type PlannedExerciseTask,
   type GoalContractData,
   type GoalCycleData,
   type PlanRevisionData,
   type Revisioned,
-  type SessionPrescriptionData,
+  type PlannedSessionData,
   type SetOutcomeData,
   type WorkoutExecutionMode,
 } from "../../coach/domain";
@@ -507,8 +507,8 @@ function createWorkoutEvents(input: {
 
 function setOutcome(
   result: CloudResult,
-  task: ExerciseTaskPrescription,
-  set: ExerciseSetPrescription,
+  task: PlannedExerciseTask,
+  set: PlannedExerciseSet,
 ): SetOutcomeData | undefined {
   const asPlanned = result.payload.confirmAsPlanned === true;
   const actualReps = asPlanned ? set.targetReps?.max : finiteInteger(result.payload.actualReps);
@@ -635,9 +635,9 @@ function activeWorkoutState(mode: WorkoutExecutionMode, startedAt: string) {
 }
 
 function prescribedSet(
-  session: SessionPrescriptionData,
+  session: PlannedSessionData,
   setId: string | undefined,
-): { task: ExerciseTaskPrescription; set: ExerciseSetPrescription } | undefined {
+): { task: PlannedExerciseTask; set: PlannedExerciseSet } | undefined {
   if (!setId) return undefined;
   for (const task of session.tasks) {
     const set = task.sets.find((candidate) => candidate.id === setId);
@@ -650,14 +650,14 @@ function workoutMode(value: unknown): WorkoutExecutionMode {
   return value === "coach_monitor" ? "coach_monitor" : "record_only";
 }
 
-function duration(value: unknown): ExerciseSetPrescription["targetDuration"] {
+function duration(value: unknown): PlannedExerciseSet["targetDuration"] {
   const row = optionalObject(value);
   if (!row || typeof row.value !== "number") return undefined;
   if (row.unit !== "seconds" && row.unit !== "minutes" && row.unit !== "hours") return undefined;
   return { value: row.value, unit: row.unit };
 }
 
-function distance(value: unknown): ExerciseSetPrescription["targetDistance"] {
+function distance(value: unknown): PlannedExerciseSet["targetDistance"] {
   const row = optionalObject(value);
   if (!row || typeof row.value !== "number") return undefined;
   if (row.unit !== "m" && row.unit !== "km") return undefined;

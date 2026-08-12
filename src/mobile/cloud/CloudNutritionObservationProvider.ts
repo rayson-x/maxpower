@@ -22,12 +22,12 @@ import { linkAbortSignals } from "./linkAbortSignals";
 export const MAXPOWER_NUTRITION_ALIAS = "maxpower/nutrition-vision-v1";
 
 export interface CloudNutritionPermissions {
-  remoteLlm: "granted" | "denied";
   mediaUpload: "granted" | "denied";
 }
 
 export interface CloudNutritionObservationProviderResolverOptions {
   apiBaseUrl: string;
+  allowInsecureHttp?: boolean;
   accountId: string;
   accessTokens: CloudServiceAccessTokenSource;
   media: ConstructorParameters<typeof RemoteNutritionObservationProvider>[0]["media"];
@@ -45,13 +45,18 @@ export class CloudNutritionObservationProviderResolver implements NutritionObser
   private readonly cancellations: CloudInvocationCancellationClient;
 
   constructor(private readonly options: CloudNutritionObservationProviderResolverOptions) {
-    const origin = maxPowerApiOrigin(options.apiBaseUrl);
+    const origin = maxPowerApiOrigin(options.apiBaseUrl, {
+      allowInsecureHttp: options.allowInsecureHttp,
+    });
     this.endpoint = new URL("/v1/chat/completions", origin).toString();
     const fetchImpl = options.fetch
       ?? (globalThis.fetch?.bind(globalThis) as unknown as OpenAICompatibleNutritionFetch);
     if (!fetchImpl) throw new Error("cloud_nutrition_fetch_unavailable");
     this.cancellations = new CloudInvocationCancellationClient({
       apiBaseUrl: origin,
+      ...(options.allowInsecureHttp === undefined
+        ? {}
+        : { allowInsecureHttp: options.allowInsecureHttp }),
       accountId: options.accountId,
       accessTokens: options.accessTokens,
       fetch: (url, init) => fetchImpl(url, init),
@@ -70,9 +75,6 @@ export class CloudNutritionObservationProviderResolver implements NutritionObser
   }): Promise<NutritionObservationPort> {
     if (input.userId !== this.options.accountId) throw new Error("cloud_nutrition_account_mismatch");
     const permission = await this.options.permission(input.userId);
-    if (permission.remoteLlm !== "granted") {
-      throw new NutritionObservationError("remote_llm_consent_required");
-    }
     if (input.request.localMediaRefs?.length && permission.mediaUpload !== "granted") {
       throw new NutritionObservationError("media_consent_required");
     }

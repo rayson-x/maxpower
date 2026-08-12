@@ -27,6 +27,8 @@ export type CloudProductDataFetch = (url: string, init?: RequestInit) => Promise
 
 export interface CloudProductDataClientOptions {
   baseUrl: string;
+  /** Debug-only escape hatch supplied by the mobile composition root. */
+  allowInsecureHttp?: boolean;
   /** Reads the current five-minute service JWT; the value is never captured. */
   accessToken(): string;
   fetch?: CloudProductDataFetch;
@@ -69,7 +71,9 @@ export class CloudProductDataClient {
     } catch {
       throw new CloudProductDataError("configuration_error", "MaxPower API URL is invalid.");
     }
-    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+    const protocolAllowed = url.protocol === "https:"
+      || (options.allowInsecureHttp === true && url.protocol === "http:");
+    if (!protocolAllowed || url.username || url.password || url.search || url.hash) {
       throw new CloudProductDataError("configuration_error", "MaxPower product data requires an HTTPS API origin.");
     }
     this.origin = new URL(url.origin);

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CoachStreamProjection } from "../../src/coach/ui/coachStreamProjection";
-import type { TodayPlanArtifact } from "../../src/coach/model";
+import type { ActionReceiptArtifact, EvidenceBriefArtifact, ExerciseSubstitutionArtifact, MesocycleReviewArtifact, TodayPlanArtifact } from "../../src/coach/model";
+import { ArtifactCardRegistry } from "../../src/coach/cards";
 
 const plan: TodayPlanArtifact = {
   id: "artifact-today",
@@ -20,6 +21,53 @@ const plan: TodayPlanArtifact = {
   planRevision: 4,
   tasks: [{ id: "bench", name: "杠铃卧推", sets: 4, reps: "8", targetRir: 2 }],
 };
+
+const receipt: ActionReceiptArtifact = {
+  id: "artifact-receipt",
+  kind: "action_receipt",
+  schemaVersion: 1,
+  renderVersion: 1,
+  createdAt: "2026-08-08T08:02:00.000Z",
+  contextRefs: [{ kind: "plan", ref: "plan:4" }],
+  evidenceRefs: [],
+  missingness: [],
+  capabilityBoundary: ["撤销会创建补偿版本，不删除历史"],
+  hash: "receipt-hash",
+  action: "apply",
+  targetArtifactId: "proposal-1",
+  result: "applied",
+  beforeRevision: 4,
+  afterRevision: 5,
+};
+
+const artifactBase = {
+  schemaVersion: 1 as const,
+  renderVersion: 1 as const,
+  createdAt: "2026-08-08T08:00:00.000Z",
+  contextRefs: [{ kind: "plan" as const, ref: "plan:4" }],
+  evidenceRefs: [{ aggregate: "plan" as const, id: "plan", revision: 4 }],
+  missingness: [],
+  capabilityBoundary: [],
+};
+
+test("闭合 Registry 覆盖平替、周期回顾和依据 Artifact，不接受模型自定义 renderer", () => {
+  const registry = new ArtifactCardRegistry();
+  const artifacts: readonly (ExerciseSubstitutionArtifact | MesocycleReviewArtifact | EvidenceBriefArtifact)[] = [
+    {
+      ...artifactBase, id: "substitution", hash: "substitution-hash", kind: "exercise_substitution", userId: "u1", sourceExerciseVariantId: "bench",
+      candidates: [{ exerciseVariantId: "dumbbell-press", label: "哑铃卧推", stimulusFit: "matches", equipmentFit: "available", comparableLoadHistory: "cold_start" }],
+    },
+    {
+      ...artifactBase, id: "review", hash: "review-hash", kind: "mesocycle_review", userId: "u1", period: { start: "2026-08-01", end: "2026-08-28" }, status: "adjust", summary: ["完成率下降"],
+    },
+    {
+      ...artifactBase, id: "brief", hash: "brief-hash", kind: "evidence_brief", userId: "u1", title: "调整依据", summary: ["来自已确认训练记录"],
+    },
+  ];
+  assert.deepEqual(artifacts.map((artifact) => registry.render(artifact, "ready").renderer), [
+    "exercise-substitution/v1", "mesocycle-review/v1", "evidence-brief/v1",
+  ]);
+});
 
 test("TodayPlan stream 在同一 presentation 原位从 loading 更新为 ready", () => {
   const stream = new CoachStreamProjection([plan]);
@@ -76,6 +124,94 @@ test("TodayPlan stream 在同一 presentation 原位从 loading 更新为 ready"
   assert.equal(ready.parts[1]?.type, "data-artifact-card");
   if (ready.parts[1]?.type === "data-artifact-card") {
     assert.equal(ready.parts[1].data.card?.title, "今日上肢推");
+  }
+});
+
+test("AI SDK 风格 tool state 与 HITL 在同一 part 原位暂停和恢复", () => {
+  const stream = new CoachStreamProjection();
+  stream.accept({
+    type: "tool-state",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "choice-1",
+    toolName: "ui.request_choice",
+    state: "input-available",
+    occurredAt: "2026-08-08T08:00:00.000Z",
+  });
+  stream.accept({
+    type: "hitl-suspended",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "choice-1",
+    pendingActionId: "pending-1",
+    presentationId: "presentation-1",
+    occurredAt: "2026-08-08T08:00:01.000Z",
+  });
+  assert.equal(stream.snapshot().status, "streaming");
+  assert.equal(
+    stream.snapshot().parts.find((part) => part.id === "human-action:pending-1")?.state,
+    "awaiting_user",
+  );
+  stream.accept({
+    type: "hitl-resumed",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "choice-1",
+    pendingActionId: "pending-1",
+    presentationId: "presentation-1",
+    occurredAt: "2026-08-08T08:00:02.000Z",
+  });
+  stream.accept({
+    type: "tool-state",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "choice-1",
+    toolName: "ui.request_choice",
+    state: "output-available",
+    occurredAt: "2026-08-08T08:00:02.000Z",
+  });
+  assert.equal(stream.snapshot().status, "ready");
+  assert.equal(
+    stream.snapshot().parts.find((part) => part.id === "human-action:pending-1")?.state,
+    "resolved",
+  );
+});
+
+test("恢复会话时使用当前 presentation 状态，并将 ActionReceipt 渲染为独立稳定卡片", () => {
+  const stream = new CoachStreamProjection(
+    [plan, receipt],
+    undefined,
+    [
+      { id: "presentation-plan", artifactId: plan.id, renderer: "today-plan/v1", status: "applied" },
+      { id: "presentation-receipt", artifactId: receipt.id, renderer: "action-receipt/v1", status: "ready" },
+    ],
+  );
+  stream.accept({
+    type: "artifact-ready",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "tool-plan",
+    artifactRef: { id: plan.id, kind: plan.kind, schemaVersion: plan.schemaVersion, hash: plan.hash },
+    presentation: { id: "presentation-plan", artifactId: plan.id, renderer: "today-plan/v1", status: "awaiting_user" },
+    occurredAt: "2026-08-08T08:00:00.000Z",
+  });
+  stream.accept({
+    type: "action-receipt",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "tool-plan",
+    artifactRef: { id: receipt.id, kind: receipt.kind, schemaVersion: receipt.schemaVersion, hash: receipt.hash },
+    occurredAt: "2026-08-08T08:02:00.000Z",
+  });
+
+  const cards = stream.snapshot().parts.filter((part) => part.type === "data-artifact-card");
+  assert.equal(cards.length, 2);
+  assert.equal(cards[0]?.type, "data-artifact-card");
+  assert.equal(cards[1]?.type, "data-artifact-card");
+  if (cards[0]?.type === "data-artifact-card" && cards[1]?.type === "data-artifact-card") {
+    assert.equal(cards[0].state, "applied");
+    assert.equal(cards[1].data.card?.title, "计划已更新");
+    assert.equal(cards[1].data.card?.actions[0]?.id, "undo");
   }
 });
 

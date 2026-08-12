@@ -307,15 +307,47 @@ function planTraceCard(artifact: Artifact, status: PresentationStatus): Artifact
 
 function evidenceBriefCard(artifact: Artifact, status: PresentationStatus): ArtifactCardModel {
   const brief = artifact as EvidenceBriefArtifact;
+  const energyAdjustment = brief.planningPreview?.proposal.planRevision.rollingEnergyAdjustment;
+  const recoveryAdjustment = brief.planningPreview?.request.trigger === "recovery_downgraded";
+  const previewPlan = brief.planningPreview?.proposal.planRevision;
+  const recoverySession = recoveryAdjustment
+    ? previewPlan?.sessions.find((session) => session.tasks.length > 0)
+    : undefined;
+  const recoverySets = recoverySession?.tasks.reduce((sum, task) => sum + task.sets.length, 0);
+  const recoveryFirstSet = recoverySession?.tasks.flatMap((task) => task.sets)[0];
+  const recoveryRir = recoveryFirstSet?.targetRirRange;
   return {
     renderer: "evidence-brief/v1",
-    eyebrow: "依据",
+    eyebrow: energyAdjustment?.status === "gentle_rebalance" || recoveryAdjustment ? "未来计划调整" : "依据",
     artifactId: brief.id,
-    title: brief.title,
-    subtitle: brief.summary[0],
-    metrics: [{ label: "依据", value: String(brief.evidenceRefs.length) }],
+    title: energyAdjustment?.status === "gentle_rebalance"
+      ? "聚餐后的温和回调待确认"
+      : recoveryAdjustment
+        ? "保守肩日调整待确认"
+        : brief.title,
+    subtitle: energyAdjustment?.status === "gentle_rebalance"
+      ? `未来 ${energyAdjustment.horizonDays ?? 0} 个可用时段将增加低冲击活动；确认前当前计划不变。`
+      : recoveryAdjustment
+        ? "下一节已换为肩部课，并降低工作量、提高余力、取消练后有氧；确认前当前计划不变。"
+      : brief.summary[0],
+    metrics: energyAdjustment?.status === "gentle_rebalance"
+      ? [
+          { label: "需分摊", value: `${energyAdjustment.unrecoveredSurplusKcal} kcal` },
+          { label: "先安排", value: `${energyAdjustment.plannedAdditionalExpenditureKcal ?? 0} kcal` },
+        ]
+      : recoveryAdjustment
+        ? [
+            { label: "本次工作组", value: String(recoverySets ?? 0) },
+            { label: "目标余力", value: recoveryRir ? `RIR ${recoveryRir.min}–${recoveryRir.max}` : "保守执行" },
+            { label: "有氧", value: "本次取消" },
+          ]
+      : [{ label: "依据", value: String(brief.evidenceRefs.length) }],
     taskList: [],
-    actions: [],
+    actions: energyAdjustment?.status === "gentle_rebalance"
+      ? [{ id: "open_future_plan_preview", label: "查看并确认调整", enabled: status === "awaiting_user" }]
+      : recoveryAdjustment
+        ? [{ id: "open_future_plan_preview", label: "查看肩日调整", enabled: status === "awaiting_user" }]
+      : [],
     status,
     evidenceLabels: brief.evidenceRefs.map((ref) => `${ref.aggregate} r${ref.revision}`),
     capabilityBoundary: brief.capabilityBoundary,

@@ -29,13 +29,48 @@ export interface SplitSelection {
   /** 每肌群每周实际暴露次数（按用户可用天数 × 轮转结构换算）。 */
   exposuresPerWeek: number;
   reasonCode: string;
+  /**
+   * 可审计的选择依据。它是产品的结构质量判断，绝不是声称某种分化对所有人
+   * 在生理上更优；当用户的完成度、表现或恢复事实改变时必须重新评估。
+   */
+  rationale: readonly string[];
 }
 
-/** 按可用天数与偏好选分化轮转（策略集 §1：等训练量下分化无优劣，按可执行性分配）。 */
+export interface SplitSelectionContext {
+  trainingExperience?: "beginner" | "intermediate" | "advanced";
+  sessionDurationMinutes?: number;
+  primaryGoal?: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass";
+  emphasisMuscles?: readonly string[];
+}
+
+/**
+ * 分化结构的产品判断规则（D 级、版本化行为规则）：
+ *
+ * 研究并不支持「某个 split 名称天然更好」；等周量下，全身/上下肢/分化的平均
+ * 肌肥大和力量结果没有稳定优劣。因此这里不把经验年限变成单一公式，而是先
+ * 判断本周是否有足够的天数与时长，将高疲劳的大肌群分开，以保护后续主动作
+ * 的训练质量；数据不足时才退回较简单、重复练习更多的结构。
+ */
+export const SPLIT_SELECTION_POLICY = {
+  id: "maxpower.split-quality-fit",
+  version: "2.0.0",
+  evidenceTier: "D_product_policy" as const,
+  focusedSessionThreshold: {
+    minimumWeeklyDays: 4,
+    minimumSessionMinutes: 60,
+    maxMajorRegionsPerSession: 2,
+  },
+};
+
+/**
+ * 选分化不是按暴露频率排序。先满足已锁定的用户选择；否则按训练能力、单课
+ * 时长、目标和一次训练内的大肌群聚集度，选择更能保护主动作质量的轮转。
+ */
 export function selectSplitRotation(
   strategies: ProgramStrategies,
   weeklyDays: number,
   preferredRotationId?: string,
+  context: SplitSelectionContext = {},
 ): SplitSelection {
   const rotations = strategies.splitRotations;
   if (preferredRotationId) {
@@ -45,19 +80,96 @@ export function selectSplitRotation(
         rotation: preferred,
         exposuresPerWeek: exposuresFor(preferred, weeklyDays),
         reasonCode: "split_user_preference_honored",
+        rationale: ["user_confirmed_split"],
       };
     }
   }
   const suitable = rotations
     .filter((rotation) => weeklyDays >= rotation.suitableWeeklyDays[0] && weeklyDays <= rotation.suitableWeeklyDays[1])
-    .sort((left, right) => right.exposuresPerCycle / right.sessions.length - left.exposuresPerCycle / left.sessions.length);
+    .map((rotation) => ({ rotation, assessment: assessSplitQuality(rotation, weeklyDays, context) }))
+    .sort((left, right) => right.assessment.score - left.assessment.score);
   // 天数低于所有模板下限时，全身训练永远可执行（每天一次全身，频率随天数）
-  const rotation = suitable[0] ?? rotations.find((candidate) => candidate.id === "full_body") ?? rotations[0]!;
+  const selected = suitable[0];
+  const rotation = selected?.rotation ?? rotations.find((candidate) => candidate.id === "full_body") ?? rotations[0]!;
+  const assessment = selected?.assessment ?? assessSplitQuality(rotation, weeklyDays, context);
   return {
     rotation,
     exposuresPerWeek: exposuresFor(rotation, weeklyDays),
-    reasonCode: suitable.length ? "split_by_executability_max_frequency" : "split_fallback_full_body",
+    reasonCode: suitable.length ? assessment.reasonCode : "split_fallback_full_body",
+    rationale: assessment.rationale,
   };
+}
+
+function assessSplitQuality(
+  rotation: SplitRotationTemplate,
+  weeklyDays: number,
+  context: SplitSelectionContext,
+): { score: number; reasonCode: string; rationale: readonly string[] } {
+  const experienced = context.trainingExperience === "intermediate" || context.trainingExperience === "advanced";
+  const hasFocusedCapacity = experienced
+    && weeklyDays >= SPLIT_SELECTION_POLICY.focusedSessionThreshold.minimumWeeklyDays
+    && (context.sessionDurationMinutes ?? 0) >= SPLIT_SELECTION_POLICY.focusedSessionThreshold.minimumSessionMinutes;
+  const mostMajorRegions = Math.max(...rotation.sessions.map(majorRegionsInSession));
+  const keepsMajorRegionsFocused = mostMajorRegions <= SPLIT_SELECTION_POLICY.focusedSessionThreshold.maxMajorRegionsPerSession;
+  const rationale: string[] = [
+    `experience:${context.trainingExperience ?? "unknown"}`,
+    `session_minutes:${context.sessionDurationMinutes ?? "unknown"}`,
+    `max_major_regions_per_session:${mostMajorRegions}`,
+  ];
+  let score = 0;
+
+  if (context.trainingExperience === "beginner") {
+    // 初学者优先获得更频繁、可比较的基本动作练习；这不是说两分化只能给新手。
+    score += rotation.sessions.length <= 2 ? 120 : 20;
+    rationale.push("beginner_repeatable_skill_practice");
+  } else if (hasFocusedCapacity) {
+    // 中高级、每周至少四天且每课至少一小时：不要为了名义频率把胸/背/肩等
+    // 多个大区主项塞进一节。优先让单课集中，给协同肌和主项表现留出质量预算。
+    score += keepsMajorRegionsFocused ? 140 : -140;
+    score += Math.min(rotation.sessions.length, 4) * 10;
+    rationale.push(
+      keepsMajorRegionsFocused
+        ? "experienced_capacity_allows_focused_major_regions"
+        : "rejected_dense_major_region_session",
+    );
+    if (context.primaryGoal === "fat_loss_preserve_lean_mass") {
+      score += keepsMajorRegionsFocused ? 20 : -20;
+      rationale.push("energy_restriction_preserves_main_lift_quality");
+    }
+    if (context.emphasisMuscles?.length && rotation.sessions.length >= 4) {
+      score += 15;
+      rationale.push("specialization_needs_dedicated_session_capacity");
+    }
+  } else {
+    // 经验不明、可用天数/时长不足时，选更容易稳定完成的结构；不把“更多拆分”
+    // 误当成自动更好。
+    score += rotation.exposuresPerCycle / rotation.sessions.length * 100;
+    rationale.push("insufficient_capacity_for_focused_split_use_repeatable_structure");
+  }
+
+  return {
+    score,
+    reasonCode: hasFocusedCapacity
+      ? keepsMajorRegionsFocused
+        ? "split_quality_focused_experienced_capacity"
+        : "split_quality_dense_session_deprioritized"
+      : context.trainingExperience === "beginner"
+        ? "split_quality_beginner_repeatability"
+        : "split_quality_limited_capacity",
+    rationale,
+  };
+}
+
+/** 只计算会竞争主动作质量的粗粒度大区，不把二头/三头/核心误算成大肌群。 */
+function majorRegionsInSession(session: SplitRotationTemplate["sessions"][number]): number {
+  const regions = new Set<"chest" | "back" | "shoulders" | "lower">();
+  for (const slot of session.slots) {
+    if (slot.movementPattern === "horizontal_push") regions.add("chest");
+    if (slot.movementPattern === "horizontal_pull" || slot.movementPattern === "vertical_pull") regions.add("back");
+    if (slot.movementPattern === "vertical_push" || slot.movementPattern === "shoulder_abduction" || slot.movementPattern === "shoulder_horizontal_abduction") regions.add("shoulders");
+    if (["squat", "hip_hinge", "lunge", "knee_extension", "knee_flexion"].includes(slot.movementPattern)) regions.add("lower");
+  }
+  return regions.size;
 }
 
 function exposuresFor(rotation: SplitRotationTemplate, weeklyDays: number): number {

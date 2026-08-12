@@ -61,9 +61,13 @@ export interface StructuredHealthFlags {
 
 /** 从档案提取结构化健康标记。 */
 export function healthFlagsOf(profile: UserProfileData): StructuredHealthFlags {
+  const safety = profile.metabolicExerciseSafety;
+  // 保留旧字段兼容历史档案；新筛查不再把健康风险伪装成“营养偏好”。
+  const flags = new Set(profile.nutritionPreferences ?? []);
+  if (safety?.hypoglycemiaHistory || safety?.recentHypoglycemia) flags.add("hypoglycemia_history");
+  if (safety?.usesInsulinOrSecretagogue) flags.add("insulin_or_secretagogue_use");
   return {
-    // 目前由 nutritionPreferences 承载结构化标记；结构化筛查落地后改读其专用字段
-    flags: profile.nutritionPreferences ?? [],
+    flags: [...flags],
     professionalClearanceRequired: (profile.professionalConstraints ?? []).some(
       (constraint) => constraint.requiresClearance === true,
     ),

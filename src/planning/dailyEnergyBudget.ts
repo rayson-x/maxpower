@@ -58,6 +58,8 @@ export interface DayActivity {
   sessions?: readonly { kind: ActivityKind; minutes: number }[];
   /** 当日实际步数（有则用它替代档案基准估 NEAT）。 */
   actualSteps?: number;
+  /** 计划中的额外步数，只用于未来计划预算；不能冒充已完成的健康数据。 */
+  plannedExtraSteps?: number;
   /** 设备/用户填报的当日活动总消耗（最高优先，直接替代 NEAT+EAT 的估算）。 */
   reportedActivityKcal?: number;
 }
@@ -79,6 +81,8 @@ export interface DailyEnergyBudget {
   uncertaintyKcal: number;
   /** NEAT 的来源：实际步数 / 档案档位。 */
   neatSource: "actual_steps" | "profile_level" | "reported";
+  /** 计划额外步数带来的预估消耗，与用户实际记录分开。 */
+  plannedExtraActivityKcal?: number;
   /** EAT 明细（可解释）。 */
   eatBreakdown: readonly { kind: ActivityKind; minutes: number; kcal: number }[];
 }
@@ -122,6 +126,7 @@ export function dailyEnergyBudget(input: {
   // ── 日常代谢 NEAT ──
   let neatKcal: number;
   let neatSource: DailyEnergyBudget["neatSource"];
+  let plannedExtraActivityKcal = 0;
   if (input.day.actualSteps !== undefined) {
     // 有实际步数：基准 NEAT + 超出基准部分的净消耗
     const baseNeat = bmr * (NEAT_MULTIPLIER[level] - 1);
@@ -131,6 +136,10 @@ export function dailyEnergyBudget(input: {
   } else {
     neatKcal = Math.round(bmr * (NEAT_MULTIPLIER[level] - 1));
     neatSource = "profile_level";
+    if (input.day.plannedExtraSteps !== undefined) {
+      plannedExtraActivityKcal = Math.round(Math.max(0, input.day.plannedExtraSteps) * weightKg * NET_KCAL_PER_KG_PER_STEP);
+      neatKcal += plannedExtraActivityKcal;
+    }
   }
 
   // ── 运动代谢 EAT ──
@@ -166,6 +175,7 @@ export function dailyEnergyBudget(input: {
     // 有设备数据时不确定度更低
     uncertaintyKcal: Math.round(tdeeKcal * (neatSource === "reported" ? 0.07 : neatSource === "actual_steps" ? 0.08 : 0.1)),
     neatSource,
+    ...(plannedExtraActivityKcal ? { plannedExtraActivityKcal } : {}),
     eatBreakdown,
   };
 }

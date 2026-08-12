@@ -109,6 +109,80 @@ test("偏好三分化轮转时采用 胸+三头/背+二头/肩+腿 结构", () =
   assert.ok(!patterns[0]?.includes("squat"));
 });
 
+test("中级、每周四练且每课 60 分钟以上：不能为名义频率把胸背肩主项塞进同一节", () => {
+  const decision = planner.plan(request(
+    {
+      schedule: [
+        { weekday: 1, availableMinutes: 75, locationId: "gym-main" },
+        { weekday: 2, availableMinutes: 75, locationId: "gym-main" },
+        { weekday: 4, availableMinutes: 75, locationId: "gym-main" },
+        { weekday: 6, availableMinutes: 75, locationId: "gym-main" },
+      ],
+    },
+    {
+      profile: {
+        revision: 2,
+        value: {
+          ...facts().profile.value,
+          trainingExperience: "intermediate",
+          schedule: { weeklyFrequency: 4, sessionDurationMinutes: 75 },
+        },
+      },
+      goalContract: {
+        revision: 2,
+        value: {
+          ...facts().goalContract.value,
+          primaryGoal: "fat_loss_preserve_lean_mass",
+          emphasisMuscles: ["lateral_deltoid", "rear_deltoid"],
+        },
+      },
+    },
+    "intermediate",
+  ));
+  assert.equal(decision.kind, "plan_proposal");
+  if (decision.kind !== "plan_proposal") return;
+  const split = decision.trace.splitSelection;
+  assert.equal(split?.rotationId, "chest_back_shoulders_legs");
+  assert.equal(split?.reasonCode, "split_quality_focused_experienced_capacity");
+  assert.ok(split?.rationale?.includes("experienced_capacity_allows_focused_major_regions"));
+  const sessions = decision.planRevision.materializedWeeks?.[0]?.sessions.filter((session) => session.tasks.length > 0) ?? [];
+  for (const session of sessions) {
+    const patterns = (session.stimulusSlots ?? []).map((slot) => slot.intent.movementPattern);
+    const majorRegions = new Set([
+      ...(patterns.includes("horizontal_push") ? ["chest"] : []),
+      ...(patterns.some((pattern) => pattern === "horizontal_pull" || pattern === "vertical_pull") ? ["back"] : []),
+      ...(patterns.some((pattern) => pattern === "vertical_push" || pattern === "shoulder_abduction" || pattern === "shoulder_horizontal_abduction") ? ["shoulders"] : []),
+      ...(patterns.some((pattern) => ["squat", "hip_hinge", "lunge", "knee_extension", "knee_flexion"].includes(pattern)) ? ["lower"] : []),
+    ]);
+    assert.ok(majorRegions.size <= 2, `${session.scheduledFor} 不应混入超过两个大区：${[...majorRegions].join(",")}`);
+    const exerciseIds = session.tasks.map((task) => task.exerciseVariantId);
+    assert.equal(new Set(exerciseIds).size, exerciseIds.length, `${session.scheduledFor} 有可替代动作时不应重复同一变式`);
+  }
+  const lowerSession = sessions.find((session) => (session.stimulusSlots ?? []).some((slot) => slot.intent.movementPattern === "squat"));
+  assert.ok(lowerSession, "四分化中必须有腿日");
+  const lowerPatterns = (lowerSession?.stimulusSlots ?? []).map((slot) => slot.intent.movementPattern);
+  assert.ok(!lowerPatterns.includes("shoulder_abduction"), "肩部侧重的补充组不能被撒到腿日");
+  assert.ok(!lowerPatterns.includes("shoulder_horizontal_abduction"), "后束补充组不能被撒到腿日");
+});
+
+test("新手、每周四练：简单上下肢轮转优先于更细的四分化", () => {
+  const decision = planner.plan(request({
+    schedule: [
+      { weekday: 1, availableMinutes: 60, locationId: "gym-main" }, { weekday: 2, availableMinutes: 60, locationId: "gym-main" },
+      { weekday: 4, availableMinutes: 60, locationId: "gym-main" }, { weekday: 6, availableMinutes: 60, locationId: "gym-main" },
+    ],
+  }, {
+    profile: {
+      revision: 2,
+      value: { ...facts().profile.value, schedule: { weeklyFrequency: 4, sessionDurationMinutes: 60 } },
+    },
+  }));
+  assert.equal(decision.kind, "plan_proposal");
+  if (decision.kind !== "plan_proposal") return;
+  assert.equal(decision.trace.splitSelection?.rotationId, "upper_lower");
+  assert.equal(decision.trace.splitSelection?.reasonCode, "split_quality_beginner_repeatability");
+});
+
 test("居家徒手自动剔除无变式的 slot 且不崩（水平拉无徒手变式）", () => {
   const homeFacts = facts({
     profile: {

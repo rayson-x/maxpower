@@ -6,6 +6,7 @@ import { COACH_PLAYBOOK } from "../playbook";
 import type { CoachToolManifest } from "../toolRegistry";
 import { openAiCompatibleToolName } from "./openAiToolName";
 import { remoteCoachContext } from "./remoteCoachContext";
+import { CoachExecutionHarness } from "../executionHarness";
 
 export type ProviderEvent =
   | { type: "text-delta"; delta: string }
@@ -557,6 +558,13 @@ function cloneProviderRequest<T extends LLMProviderRequest>(request: T): T {
   return structuredClone(persistable) as T;
 }
 
+const executionHarness = new CoachExecutionHarness();
+
+/** Compatibility function for existing language adapters. */
+export function deterministicExecutionRoute(request: LLMProviderRequest): readonly ProviderEvent[] | undefined {
+  return executionHarness.route(request);
+}
+
 /**
  * Offline baseline for a fresh install. It is deliberately narrow: it can
  * explain which local facts are available and request a typed Today-plan card,
@@ -570,6 +578,13 @@ export class LocalCoachProvider implements LLMProvider {
   async *stream(request: LLMProviderRequest): AsyncIterable<ProviderEvent> {
     const text = request.userText.trim();
     const lower = text.toLowerCase();
+    const motionEvidence = request.context.canonicalEvidence.filter(isTrainingExecutionEvidence);
+    const asksAboutMotion = /动作|执行|技术|轨迹|计次|阶段|离心|向心|复盘|form|motion|rep|phase|tempo/.test(lower);
+    if (motionEvidence.length > 0 && asksAboutMotion) {
+      yield { type: "text-delta", delta: summarizeTrainingExecutionEvidence(motionEvidence) };
+      yield { type: "completed" };
+      return;
+    }
     const date = extractIsoDate(text) ?? planDate(request.context.plan);
     const asksForTodayPlan = /今天|今日|计划|训练安排|workout|plan/.test(lower);
     const asksAboutSafety = /安全|疼痛|眩晕|胸部|呼吸困难|safety|dizzy|chest/.test(lower);
@@ -579,6 +594,11 @@ export class LocalCoachProvider implements LLMProvider {
     const asksForForecast = /目标路径|完成路径|预测|预期|forecast|roadmap/.test(lower);
     const asksAboutNutrition = /饮食|营养|碳水|蛋白|热量|nutrition|calorie|protein/.test(lower);
     const asksForPlanOverview = /完整计划|本周计划|训练计划|摄入计划|饮食计划|训练和饮食|训练与饮食|training plan|meal plan|intake plan/.test(lower);
+    const executionRoute = deterministicExecutionRoute(request);
+    if (executionRoute) {
+      yield* executionRoute;
+      return;
+    }
 
     if (asksAboutSafety) {
       yield {
@@ -702,6 +722,173 @@ export class LocalCoachProvider implements LLMProvider {
     yield { type: "text-delta", delta: response };
     yield { type: "completed" };
   }
+}
+
+interface TrainingExecutionEvidenceRecord extends Record<string, unknown> {
+  kind: "training_execution_assessment";
+  captureId: string;
+  rustOutcomes: {
+    confirmed: number;
+    needsReview: number;
+    rejected: number;
+    reasonCounts?: Record<string, number>;
+  };
+  assessment: {
+    preset: {
+      exerciseId: string;
+      capturePosition: string;
+    };
+    dimensions: {
+      task: { status: string; confirmedRepCount: number };
+      phaseControl: {
+        status: string;
+        semantics?: { startToPeak: string; peakToEnd: string };
+        reps?: Array<{ repIndex: number; firstPhaseMs: number; secondPhaseMs: number; totalMs: number }>;
+      };
+      supportStability?: {
+        judgementStatus?: string;
+        reps?: Array<{
+          judgementStatus?: string;
+          torsoCenterMaximumExcursionTorsoNorm?: number | null;
+          torsoTiltRangeDeg?: number | null;
+        }>;
+      };
+      bilateralCoordination?: {
+        judgementStatus?: string;
+        reps?: Array<{
+          judgementStatus?: string;
+          jointAngleDeltas?: Record<string, {
+            p90AbsoluteAngleDeltaDeg?: number | null;
+          }>;
+        }>;
+      };
+      trajectoryControl?: {
+        judgementStatus?: string;
+        reps?: Array<{
+          judgementStatus?: string;
+          p90FrameStepTorsoNorm?: number | null;
+          predictedOrRepairedPointRate?: number | null;
+        }>;
+        equipmentPath?: { judgementStatus?: string; reason?: string };
+      };
+      observationConfidence: {
+        effectiveObservationFps: number;
+        processedFrames?: number;
+        emptyCandidateFrames: number;
+        emptyCandidateFrameRate?: number | null;
+        maximumInferenceMs: number;
+      };
+      [key: string]: unknown;
+    };
+    fiveLayers?: {
+      effortAndDoseContext?: { cannotJudge?: readonly string[] };
+    };
+    reps?: Array<{
+      repIndex: number;
+      disposition: "confirmed" | "needs_review" | "rejected";
+      startMs: number;
+      turnaroundMs: number;
+      endMs: number;
+      observation?: {
+        validFrameRate?: number | null;
+        medianCanonicalQuality?: number | null;
+      };
+    }>;
+  };
+}
+
+function isTrainingExecutionEvidence(value: Record<string, unknown>): value is TrainingExecutionEvidenceRecord {
+  return value.kind === "training_execution_assessment"
+    && typeof value.captureId === "string"
+    && Boolean(value.assessment && typeof value.assessment === "object")
+    && Boolean(value.rustOutcomes && typeof value.rustOutcomes === "object");
+}
+
+function summarizeTrainingExecutionEvidence(evidence: readonly TrainingExecutionEvidenceRecord[]): string {
+  const lines = ["这次只根据客户端骨架进入 Rust SDK 后封口的证据复盘，不把视频置信度当作动作正确性。"];
+  for (const item of evidence) {
+    const assessment = item.assessment;
+    const outcomes = item.rustOutcomes;
+    const observation = assessment.dimensions.observationConfidence;
+    const phaseReps = assessment.dimensions.phaseControl.reps ?? [];
+    const emptyRate = observation.emptyCandidateFrameRate;
+    const trajectoryReps = assessment.dimensions.trajectoryControl?.reps?.filter(
+      (rep) => rep.judgementStatus === "observed",
+    ) ?? [];
+    const maximumPathStep = maximumFinite(trajectoryReps.map((rep) => rep.p90FrameStepTorsoNorm));
+    const maximumPredictedRate = maximumFinite(trajectoryReps.map((rep) => rep.predictedOrRepairedPointRate));
+    const unstable = outcomes.rejected > outcomes.confirmed
+      || (typeof emptyRate === "number" && emptyRate > 0.05)
+      || (maximumPredictedRate !== null && maximumPredictedRate > 0.15)
+      || (maximumPathStep !== null && maximumPathStep > 0.50);
+    lines.push(
+      `${assessment.preset.exerciseId}（${assessment.preset.capturePosition}）：确认 ${outcomes.confirmed} 次，待复核 ${outcomes.needsReview} 次，拒绝 ${outcomes.rejected} 次；客户端观测 ${observation.effectiveObservationFps.toFixed(1)} FPS${typeof emptyRate === "number" ? `，空候选帧 ${(emptyRate * 100).toFixed(1)}%` : ""}。`,
+    );
+    const perRep = (assessment.reps ?? []).slice(0, 12).map((rep) => {
+      const firstPhaseMs = Math.max(0, rep.turnaroundMs - rep.startMs);
+      const secondPhaseMs = Math.max(0, rep.endMs - rep.turnaroundMs);
+      const quality = rep.observation;
+      const confidence = typeof quality?.validFrameRate === "number"
+        ? `，有效帧 ${(quality.validFrameRate * 100).toFixed(0)}%`
+        : "";
+      return `R${rep.repIndex} ${rep.disposition} ${rep.startMs}-${rep.turnaroundMs}-${rep.endMs}ms（两阶段 ${firstPhaseMs}/${secondPhaseMs}ms${confidence}）`;
+    });
+    if (perRep.length) {
+      lines.push(`逐 rep 客户端封口结果：${perRep.join("；")}。这里的完成质量只表示周期证据与观测可信度，不表示技术标准度。`);
+    }
+    if (unstable) {
+      const reasons = Object.entries(outcomes.reasonCounts ?? {})
+        .filter(([reason, count]) => reason !== "none" && count > 0)
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, 3)
+        .map(([reason, count]) => `${reason}×${count}`)
+        .join("、");
+      lines.push(`这组时间轴证据不稳定${reasons ? `（${reasons}）` : ""}，当前不应据此给出动作技术纠正。`);
+    }
+    if (phaseReps.length >= 2) {
+      const first = phaseReps[0];
+      const last = phaseReps.at(-1)!;
+      const change = first.totalMs > 0 ? (last.totalMs - first.totalMs) / first.totalMs : 0;
+      const semantics = assessment.dimensions.phaseControl.semantics;
+      lines.push(
+        `可观察到每次周期和${semantics ? `${semantics.startToPeak}/${semantics.peakToEnd}` : "两个阶段"}时长；末次相对首次总时长${change >= 0 ? "增加" : "减少"} ${Math.abs(change * 100).toFixed(0)}%。这只是可见速度变化，不等于 RPE、RIR、肌肉发力或借力结论。`,
+      );
+    }
+    const supportReps = assessment.dimensions.supportStability?.reps?.filter(
+      (rep) => rep.judgementStatus === "observed",
+    ) ?? [];
+    const maximumTorsoExcursion = maximumFinite(
+      supportReps.map((rep) => rep.torsoCenterMaximumExcursionTorsoNorm),
+    );
+    const maximumTorsoTiltRange = maximumFinite(
+      supportReps.map((rep) => rep.torsoTiltRangeDeg),
+    );
+    if (maximumTorsoExcursion !== null || maximumTorsoTiltRange !== null) {
+      lines.push(
+        `Rust 可见策略量：rep 内躯干中心最大位移${maximumTorsoExcursion === null ? "不可用" : `约 ${maximumTorsoExcursion.toFixed(2)} 个躯干长度`}，躯干倾角最大变化${maximumTorsoTiltRange === null ? "不可用" : `约 ${maximumTorsoTiltRange.toFixed(1)}°`}。这些是相机平面观测，尚未按该动作标准走廊评级。`,
+      );
+    }
+    const bilateralDeltas = (assessment.dimensions.bilateralCoordination?.reps ?? []).flatMap(
+      (rep) => Object.entries(rep.jointAngleDeltas ?? {}).flatMap(([joint, values]) =>
+        typeof values.p90AbsoluteAngleDeltaDeg === "number"
+          ? [{ joint, value: values.p90AbsoluteAngleDeltaDeg }]
+          : []),
+    );
+    const largestBilateral = bilateralDeltas.sort((left, right) => right.value - left.value)[0];
+    if (largestBilateral) {
+      lines.push(`左右协调可观测量中，${largestBilateral.joint}角度差的较高分位最大约 ${largestBilateral.value.toFixed(1)}°；缺少该机位和变式的审核阈值，因此不能直接称为左右发力不一致。`);
+    }
+    if (maximumPathStep !== null) {
+      lines.push(`骨架轨迹连续性已记录：相邻观测步长 P90 最大约 ${maximumPathStep.toFixed(3)} 个躯干长度${maximumPredictedRate === null ? "" : `，预测/修复点占比最高 ${(maximumPredictedRate * 100).toFixed(0)}%`}。这能提示观测是否抖动，但没有标准走廊时不等于动作不稳。`);
+    }
+  }
+  lines.push("目前已能输出动作周期、阶段时长、识别 profile 相对行程、躯干可见位移、左右关节差、骨架路径连续性和观测可信度；这些观测量不会自动升级为技术正确、借力或刺激转移结论。器械轨迹需在对应动作预设中启用器械检测，技术与刺激判断仍需审核过的标准动作走廊；负重和 RPE/RIR 仍需用户或训练计划提供。产品不会输出一个掩盖原因的总分。");
+  return lines.join("\n");
+}
+
+function maximumFinite(values: readonly (number | null | undefined)[]): number | null {
+  const finite = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  return finite.length ? Math.max(...finite) : null;
 }
 
 /** Thin adapter for the existing provider call. SDK-specific types stay behind the injected function. */

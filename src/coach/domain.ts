@@ -148,6 +148,18 @@ export interface UserProfileData {
    * very_active 体力劳动
    */
   dailyActivityLevel?: "sedentary" | "lightly_active" | "active" | "very_active";
+  /**
+   * 有氧相关的代谢/低血糖风险筛查。它只记录用户已知事实，
+   * 用于阻止不安全的自动空腹或高强度处方；不是诊断、也不提供用药建议。
+   */
+  metabolicExerciseSafety?: {
+    diabetesType?: "type_1" | "type_2" | "other" | "unknown";
+    usesInsulinOrSecretagogue?: boolean;
+    hypoglycemiaHistory?: boolean;
+    recentHypoglycemia?: boolean;
+    hasGlucoseMonitoringPlan?: boolean;
+    clinicianExercisePlan?: boolean;
+  };
   locations?: readonly {
     id: string;
     kind: "home" | "gym" | "hotel" | "outdoor" | "other";
@@ -174,8 +186,12 @@ export interface UserProfileData {
   };
   strengthBaseline?: {
     squat?: MassQuantity;
+    /** 用户报告的该重量完成次数；缺失时保留为未知，绝不把重量冒充为 1RM。 */
+    squatReps?: number;
     benchPress?: MassQuantity;
+    benchPressReps?: number;
     deadlift?: MassQuantity;
+    deadliftReps?: number;
     measuredAt?: string;
     source?: "user_confirmed" | "estimated";
   };
@@ -264,6 +280,12 @@ export interface GoalContractData {
   targetWeeks?: number;
   /** 速度档位（由 targetWeeks 推导或用户直接选）：激进 / 标准 / 稳健。 */
   pace?: "aggressive" | "standard" | "gentle";
+  /** 有氧只在用户明确的角色/时机偏好内加码；缺失时走保守起步而非猜测。 */
+  aerobicPreference?: {
+    role: "health_baseline" | "fat_loss_acceleration" | "endurance_priority";
+    timingPreference?: "after_strength" | "separate_session" | "either";
+    intensityPreference?: "easy_moderate" | "intervals";
+  };
   commitmentPreferences?: {
     training?: "minimal" | "standard" | "high";
     nutrition?: "flexible" | "standard" | "strict";
@@ -550,6 +572,18 @@ export interface PlannedSessionData {
       claim: string;
     }[];
   };
+  /** 独立呈现附加有氧，避免客户端把“力量后有氧”误显示为另一堂力量课。 */
+  aerobicBlock?: {
+    placement: "after_strength" | "separate_session";
+    role: "health_baseline" | "fat_loss_acceleration" | "endurance_priority";
+    intensity: "easy" | "moderate" | "vigorous";
+    targetRpe: { min: number; max: number };
+    talkTest: string;
+    minutes: number;
+    fastedEligible: boolean;
+    reasonCodes: readonly string[];
+    safetyNote?: string;
+  };
   status?: "planned" | "frozen_for_workout";
   tasks: readonly PlannedExerciseTask[];
 }
@@ -642,6 +676,33 @@ export interface PlanRevisionData {
    */
   upcomingSevenDays?: readonly PlannedSessionData[];
   /**
+   * 肌群恢复间隔冲突（含用户自己完成的训练）。
+   * 只暴露不自动重排——重排牵连轮转续接/器械过滤/内容回填，需统一设计。
+   */
+  recoveryIntervalConflicts?: readonly {
+    muscle: string;
+    previousDate: string;
+    conflictDate: string;
+    actualGapDays: number;
+    requiredGapDays: number;
+    previousFromHistory: boolean;
+  }[];
+  /**
+   * 动作主/次级肌群参与形成的相对恢复负荷预测。
+   * 与 weeklyDirectSets 分离：前者用于恢复和排序，后者只用于训练量统计。
+   */
+  muscleFatigueForecast?: import("../planning/muscleFatigue").MuscleFatigueForecast;
+  /**
+   * 有氧的系统/下肢相对负荷预测。它与力量动作的肌群 RU 分开，
+   * 让“今天跑了什么”能够影响明天候选腿课的准备度，而不伪装成力量训练组数。
+   */
+  cardioLoadForecast?: import("../planning/cardioLoad").CardioLoadForecast;
+  /**
+   * 连续训练队列：近端为已物化动作，远端只表示「满足恢复条件后最早可排」的动作意图。
+   * 未来不锁死具体变式/重量，训练完成或恢复变化后必须重算。
+   */
+  continuousTrainingQueue?: import("../planning/continuousTrainingQueue").ContinuousTrainingQueue;
+  /**
    * 每日能量预算（按日型严格分解，key = YYYY-MM-DD）。
    * 训练日消耗比休息日高 200-350 kcal，给周平均会让训练日吃不够、休息日吃过量。
    */
@@ -652,8 +713,12 @@ export interface PlanRevisionData {
     tefKcal: number;
     tdeeKcal: number;
     intakeTargetKcal?: number;
+    /** 已计划但尚未完成的、用于滚动能量回调的额外低冲击活动估算。 */
+    plannedExtraActivityKcal?: number;
     uncertaintyKcal: number;
   }>>;
+  /** 已记录聚餐/超额后的滚动能量调整；量化日志优先，明确「吃多」陈述仅给低置信度范围。 */
+  rollingEnergyAdjustment?: import("../planning/rollingEnergyAdjustment").RollingEnergyAdjustment;
   futureIntentRefs?: readonly string[];
   reasonCodes?: readonly string[];
   strategySelection?: import("../planning").StrategySelection;
@@ -941,6 +1006,10 @@ export type TimelineFact =
       duration?: DurationQuantity;
       distance?: { value: number; unit: "m" | "km" };
       intensity?: "easy" | "moderate" | "hard" | "unknown";
+      /** 用户主观用力感 0–10；缺失时仅使用粗强度档位，绝不推测。 */
+      perceivedExertion?: number;
+      /** 仅记录用户报告的停止/异常信号，不由 Planner 诊断。 */
+      symptoms?: readonly StopSignal[];
       /** The person's reported or explicitly confirmed exercise expenditure. */
       energyExpenditure?: EnergyQuantity;
       /** Keeps a reported number distinct from a conservative local/Coach estimate. */
@@ -955,6 +1024,8 @@ export type TimelineFact =
       /** The foods the meal was built from, kept so a total can be traced back. */
       foods?: readonly import("../nutrition").FoodEntryData[];
       energy?: EnergyQuantity;
+      /** 用户明确报告的「相对当天计划多出多少」，与整日摄入总热量区分保存。 */
+      reportedEnergyDeviationKcal?: number;
       proteinGrams?: number;
       fatGrams?: number;
       carbohydrateGrams?: number;

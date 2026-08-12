@@ -3,3 +3,8 @@ export { STRATEGY_CATALOG, selectAdaptiveStrategy } from "./adaptiveStrategy";
 export type * from "./model";
 export type * from "./adaptiveStrategy";
 export * from "./goalTimeline";
+export * from "./muscleFatigue";
+export * from "./continuousTrainingQueue";
+export * from "./aerobicPlan";
+export * from "./cardioLoad";
+export * from "./rollingEnergyAdjustment";
