@@ -436,6 +436,8 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
     };
     /** The durable Timeline risk evaluation that warranted this future-only preview. */
     sourceRiskEvaluationId?: string;
+    /** Source Timeline events already represented by a user-requested future adjustment. */
+    sourceTimelineEventIds?: readonly string[];
     sourcePreviewId?: string;
   };
   phaseTransition?: import("../replanning").PhaseTransitionProposal;

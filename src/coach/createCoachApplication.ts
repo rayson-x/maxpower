@@ -499,6 +499,8 @@ export class CoachApplication {
       recomputeOf?: string;
       /** A durable at-risk assessment can proactively open a future-only preview. */
       sourceRiskEvaluationId?: string;
+      /** A user-requested adjustment may already cover these Timeline events. */
+      sourceTimelineEventIds?: readonly string[];
       phaseTransition?: import("../replanning").PhaseTransitionProposal;
     },
   ): Promise<EvidenceBriefArtifact> {
@@ -517,6 +519,7 @@ export class CoachApplication {
       },
       ...(input.recomputeOf ? { recomputeOf: input.recomputeOf } : {}),
       ...(input.sourceRiskEvaluationId ? { sourceRiskEvaluationId: input.sourceRiskEvaluationId } : {}),
+      ...(input.sourceTimelineEventIds?.length ? { sourceTimelineEventIds: [...input.sourceTimelineEventIds].sort() } : {}),
       decision,
       ...(phaseTransition ? { phaseTransition } : {}),
     })}`;
@@ -590,6 +593,7 @@ export class CoachApplication {
                 ...(input.transientNextSessionFocus ? { transientNextSessionFocus: input.transientNextSessionFocus } : {}),
               },
               ...(input.sourceRiskEvaluationId ? { sourceRiskEvaluationId: input.sourceRiskEvaluationId } : {}),
+              ...(input.sourceTimelineEventIds?.length ? { sourceTimelineEventIds: [...input.sourceTimelineEventIds].sort() } : {}),
               ...(input.recomputeOf ? { sourcePreviewId: input.recomputeOf } : {}),
             },
           }
@@ -731,6 +735,7 @@ export class CoachApplication {
       ...(preview.planningPreview.request.transientRecoveryConstraint ? { transientRecoveryConstraint: preview.planningPreview.request.transientRecoveryConstraint } : {}),
       ...(preview.planningPreview.request.transientNextSessionFocus ? { transientNextSessionFocus: preview.planningPreview.request.transientNextSessionFocus } : {}),
       ...(preview.planningPreview.sourceRiskEvaluationId ? { sourceRiskEvaluationId: preview.planningPreview.sourceRiskEvaluationId } : {}),
+      ...(preview.planningPreview.sourceTimelineEventIds?.length ? { sourceTimelineEventIds: preview.planningPreview.sourceTimelineEventIds } : {}),
       idempotencyKey: input.idempotencyKey,
       recomputeOf: preview.id,
     });
@@ -1861,7 +1866,7 @@ export class CoachApplication {
     }
     const timezoneOffsetMinutes = new Date(now).getTimezoneOffset() * -1;
     const identity = execution?.toolCallId ?? stableHash(input);
-    await this.recordTimelineFact({
+    const record = await this.recordTimelineFact({
       userId: session.userId,
       idempotencyKey: `tool:${identity}:energy-rebalance:record`,
       actor: { kind: "agent", id: "coach" },
@@ -1888,6 +1893,7 @@ export class CoachApplication {
       currentDate: now.slice(0, 10),
       trigger: "user_requested",
       requestedScope: "future_plan",
+      sourceTimelineEventIds: record.eventIds,
       idempotencyKey: `tool:${identity}:energy-rebalance:preview`,
     });
     return this.presentArtifactForTool({
@@ -1925,6 +1931,7 @@ export class CoachApplication {
     const timezoneOffsetMinutes = new Date(now).getTimezoneOffset() * -1;
     let trigger: PlannerRequest["trigger"];
     let missedSessionDates: readonly string[] | undefined;
+    let sourceTimelineEventIds: readonly string[] | undefined;
     let transientRecoveryConstraint: import("./domain").RecoveryConstraintData | undefined;
     let transientNextSessionFocus: PlannerRequest["transientNextSessionFocus"] | undefined;
     if (input.report.kind === "recovery") {
@@ -1964,7 +1971,7 @@ export class CoachApplication {
               ...(input.report.intensity === undefined ? {} : { intensity: input.report.intensity }),
               confidence: "confirmed" as const,
             };
-      await this.recordTimelineFact({
+      const record = await this.recordTimelineFact({
         userId: session.userId,
         idempotencyKey: `tool:${identity}:adaptive:${input.report.kind}:record`,
         actor: { kind: "agent", id: "coach" },
@@ -1979,6 +1986,7 @@ export class CoachApplication {
           layer: "raw_observation",
         },
       });
+      sourceTimelineEventIds = record.eventIds;
       trigger = input.report.kind === "schedule" ? "schedule_changed" : input.report.kind === "missed_training" ? "repeated_missed_sessions" : "session_completed";
       missedSessionDates = input.report.kind === "schedule" ? input.report.unavailableDates : input.report.kind === "missed_training" ? input.report.missedDates : undefined;
     }
@@ -1990,6 +1998,7 @@ export class CoachApplication {
       ...(missedSessionDates?.length ? { missedSessionDates } : {}),
       ...(transientRecoveryConstraint ? { transientRecoveryConstraint } : {}),
       ...(transientNextSessionFocus ? { transientNextSessionFocus } : {}),
+      ...(sourceTimelineEventIds?.length ? { sourceTimelineEventIds } : {}),
       idempotencyKey: `tool:${identity}:adaptive:${input.report.kind}:preview`,
     });
     return this.presentArtifactForTool({
@@ -8008,6 +8017,11 @@ export class CoachApplication {
     // This is a dynamic adjustment, not first-plan creation.  The onboarding
     // path retains ownership of an absent plan.
     if (!projection.plan || !projection.goalContract) return;
+    // A user may already have opened a future-only preview from the same
+    // Timeline frontier (for example, after explicitly reporting a dinner
+    // deviation).  The risk check must enrich that decision path, not create
+    // a second competing confirmation card.
+    if (await this.hasPendingFuturePreviewForTimelineRisk(assessment)) return;
     await this.createPlanningPreview({
       userId: assessment.userId,
       currentDate: assessment.createdAt.slice(0, 10),
@@ -8016,6 +8030,22 @@ export class CoachApplication {
       sourceRiskEvaluationId: assessment.id,
       idempotencyKey: `timeline-risk:${assessment.id}:future-plan-preview`,
     });
+  }
+
+  private async hasPendingFuturePreviewForTimelineRisk(
+    assessment: import("./model").TimelineRiskEvaluationArtifact,
+  ): Promise<boolean> {
+    const snapshot = await this.ledger.read();
+    const sourceEventIds = new Set(assessment.sourceFactRefs.map((ref) => ref.id));
+    if (sourceEventIds.size === 0) return false;
+    const hasPending = snapshot.artifacts.some(
+      (artifact) => artifact.kind === "evidence_brief" &&
+        artifact.userId === assessment.userId &&
+        artifact.planningPreview?.status === "awaiting_confirmation" &&
+        artifact.planningPreview.request.requestedScope === "future_plan" &&
+        artifact.planningPreview.sourceTimelineEventIds?.some((eventId) => sourceEventIds.has(eventId)) === true,
+    );
+    return hasPending;
   }
 
   private async recordTimelineRiskDecision(
