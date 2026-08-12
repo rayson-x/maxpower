@@ -462,7 +462,7 @@ RiskEvaluationCoordinator coalesces idempotently by user + fact frontier
 | Home Coach Agent in conversation | `fact.reported`, `fact.corrected`, `availability.changed` | Every field must trace to the current statement or an existing confirmed fact; language alone does not create a hidden inference. |
 | Manual record UI | `nutrition.logged`, `body_measurement.logged`, `recovery.logged`, `workout.logged` | The user chooses/edits the values and measurement method; command carries source and timestamp. |
 | Training Timeline UI | `workout.completed`, `workout.missed`, `workout.rescheduled`, `workout.corrected` | Only a semantic state/dose change emits an event; visual reorder and drafts do not. |
-| Real-time recognition | `workout_execution.observed`, later `workout_execution.finalized` or `workout_execution.corrected` | Requires confidence, temporal completion, provenance and any required user correction; raw frames are not Timeline facts. |
+| Real-time recognition | `workout_execution.finalized` or `workout_execution.corrected` | First works in ephemeral `Observation` and `LiveSessionState`; only finalized, provenance-carrying actual dose/outcomes enter Timeline. |
 | Import/sync | `external_observation.imported` | Deduplicate and preserve source/confidence; do not overwrite a more trustworthy explicit correction. |
 | Plan lifecycle | `goal_contract.changed`, `plan_revision.committed`, `plan_revision.superseded` | Bind to revision and confirmation identity so stale assessment baselines cannot survive. |
 
@@ -490,6 +490,46 @@ correction satisfy the execution contract. It may prompt an in-session action
 but a future-plan re-evaluation waits for a finalized or materially corrected
 set/session. This prevents a transient recognition error from reshuffling a
 week of training.
+
+### Real-time execution coaching is a separate, low-latency loop
+
+The Timeline must not be the only destination for real-time understanding.
+During a workout, `RealtimeExecutionCoach` consumes the provisional observation
+stream and keeps an ephemeral `LiveSessionState`. It may issue a visible,
+time-bounded cue or adjust the **current** exercise/set recommendation without
+claiming that the long-term plan has changed:
+
+```text
+pose / equipment / repetition observations
+→ confidence + temporal-stability gate
+→ exercise-specific execution assessment
+→ LiveSessionState
+→ cue | rest/technique change | next-set load/rep adjustment | stop/seek help
+```
+
+Examples include: "brace before the next rep", "your depth has become
+inconsistent; reduce the next-set load", or "stop this movement today because
+the observed safety signal requires it". A cue is an intervention for the
+current action, not a Timeline fact, and it does not trigger `RiskEvaluator`.
+The live loop is rate-limited, has a confidence display/fallback and never
+pretends a pose estimate is a medical or injury diagnosis.
+
+There are three deliberately distinct persistence levels:
+
+| Level | Examples | Lifetime / downstream effect |
+| --- | --- | --- |
+| `Observation` | landmarks, tentative reps, momentary depth/form estimate | transient; may be discarded; never changes the plan or risk forecast |
+| `LiveSessionState` | the current set is stopped early, next-set load reduced, cue acknowledged, session temporarily paused | lasts for the active workout; supports immediate coaching and the workout UI, but does not by itself revise the long-term plan |
+| Timeline fact | finalized exercise/set dose, user-confirmed correction, completed/missed session, sustained technical limitation that changed actual dose | append-only history; updates fatigue/recovery/execution inputs and can trigger risk/planning assessment |
+
+At set/session finalization, an `ExecutionFinalizer` converts eligible live
+state into a compact, provenance-carrying Timeline command. It records actual
+dose and only those execution-quality outcomes that have a defined downstream
+meaning. A discarded cue, one low-confidence form warning, or a visual UI
+adjustment never becomes history. If a current-session adjustment materially
+changes the planned dose, the final Timeline fact causes the normal risk loop
+to assess its recovery and target-path consequence; any **future** plan change
+still requires a Planner proposal and user confirmation.
 
 ### Cadence, priority and action policy
 
