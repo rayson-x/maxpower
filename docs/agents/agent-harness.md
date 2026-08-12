@@ -418,6 +418,95 @@ single-variable, time-bounded hypothesis test with predeclared signal: for
 example, hold training and measurement conditions steady while changing only
 one agreed activity or intake lever, then reassess the multi-measure trend.
 
+## Risk evaluation: one evaluator, three ways to wake it
+
+Risk is not a conversational intuition and must not differ between the chat
+and a background job. `RiskEvaluator.evaluate(snapshot, trigger)` is a deep,
+deterministic Module that reads one versioned factual snapshot and returns a
+typed `RiskAssessment`. It owns target-achievability, execution-continuity,
+stagnation, recovery/safety and evidence-quality assessment. The Home Coach
+Agent and background workers only supply a trigger; neither reimplements the
+decision.
+
+```text
+conversation / user record / Timeline / real-time execution / scheduler / plan change
+→ append confirmed Fact or semantic domain event (or a clock wake-up)
+→ RiskEvaluationCoordinator coalesces idempotently by user + fact frontier
+→ load one ActivePlan + GoalContract + factual snapshot
+→ RiskEvaluator.evaluate(snapshot, trigger)
+→ persist RiskAssessment + trace
+→ no action | request evidence | PlannerHarness proposal | safety hold
+```
+
+### Trigger sources
+
+| Source | When it runs | What it must do | What it must not do |
+| --- | --- | --- | --- |
+| Conversation | After the Agent has recorded a material user fact, at the turn boundary | Evaluate the fresh fact and, if needed, give the Agent a typed result to explain or turn into a proposal | Infer a fact from sentiment or plan from a keyword before the record exists |
+| Direct user record | On committed nutrition, workout, recovery, body-measurement, availability or correction event | Re-evaluate without requiring the user to open chat; surface a pending review on the next open | Treat an absent record as a confirmed failure |
+| Timeline | On a semantically meaningful change: a session is completed, missed, moved, deleted, corrected, or its actual dose materially differs from plan | Update execution continuity, remaining critical slots and recovery/interaction inputs | Run a full assessment for cosmetic reordering or an unconfirmed draft |
+| Real-time recognition | On stable, provenance-carrying workout observations and on a finalized/corrected set or session | Feed actual exercise, sets, load/reps, RIR proxy, stopped-early/technical or pain flags into the current-session and future-recovery facts | Use individual pose frames, low-confidence recognition or an in-progress set as evidence of a failed long-term plan |
+| Goal / plan lifecycle | On Goal Contract edits, plan confirmation, plan expiry, confirmation rejection, or a plan becoming stale | Recompute against the new contract and reset/retain only the appropriate execution baseline | Preserve an assessment calculated for a superseded goal or plan revision |
+| Sync / import | On a deduplicated, provenance-marked import from Health or a connected source | Reconcile eligible steps, body mass, workouts and nutrition observations with local facts | Override a more trustworthy explicit correction without conflict handling |
+| Scheduled worker | Daily reconciliation, weekly trend review, and deadline/critical-session look-ahead; cadence is goal-mode and notification-preference aware | Detect accumulating deviation, joint stagnation and quiet loss of evidence while the user is not chatting | Modify a plan or send repeated punitive notifications |
+
+The user-facing Agent may explicitly call `risk.evaluate` when the user asks
+what a fact means. All normal fact-write tools and Timeline mutations emit
+durable events through an outbox. This makes direct records, chat records and
+execution changes identical downstream without any regex-based route. A
+scheduled wake-up emits `RiskEvaluationDue`, which contains no invented fact;
+it only asks the same evaluator to inspect the latest snapshot.
+
+The real-time pipeline has an explicit seam between **observation** and
+**planning fact**. Frame-level pose/rep estimates remain provisional. A
+`WorkoutExecutionObserved` event is eligible only after the recognition
+confidence, temporal completion, source provenance and any required user
+correction satisfy the execution contract. It may prompt an in-session action
+(for example, stop/modify the current exercise on an immediate safety signal),
+but a future-plan re-evaluation waits for a finalized or materially corrected
+set/session. This prevents a transient recognition error from reshuffling a
+week of training.
+
+### Cadence, priority and action policy
+
+Immediate evaluation is reserved for a confirmed material delta: a known large
+energy deviation relative to remaining buffer, a missed or changed critical
+session, a recovery/safety signal, a new comparable measurement, loss of
+availability, or a correction to an earlier fact. Multiple writes in one user
+turn are debounced into one evaluation after the fact frontier settles.
+
+The scheduler performs a light daily reconciliation for active goals, a fuller
+weekly trend/stagnation assessment, and deadline-sensitive look-ahead for the
+next few critical actions. Exact timing belongs to the goal-mode policy; it is
+not a universal daily "you failed" check. Low logging coverage creates an
+evidence request or silent `insufficient_evidence`, subject to notification
+preferences, rather than a failure alert.
+
+`RiskAssessment` has two independent outputs:
+
+```ts
+type RiskAssessment = {
+  snapshotVersion: string;
+  trigger: "conversation" | "fact_recorded" | "scheduled" | "explicit_request";
+  urgency: "none" | "review" | "soon" | "safety";
+  achievability: "on_path" | "at_risk" | "infeasible_under_guardrails" | "insufficient_evidence";
+  drivers: readonly RiskDriver[];
+  nextAction: "none" | "request_evidence" | "propose_plan_change" | "safety_hold";
+};
+```
+
+Urgency governs presentation and notification; `nextAction` governs workflow.
+For `at_risk`, the worker can start a bounded, non-writing PlannerHarness job
+to prepare a proposal. The result is a review card, never an automatic plan
+change. `safety_hold` is immediate and blocks automated intensification;
+`infeasible_under_guardrails` presents the explicit contract trade-off.
+
+Every assessment and proposal is bound to `snapshotVersion`. If a new fact
+arrives while planning, the in-flight proposal is marked stale and must be
+re-evaluated before presentation or confirmation. The trace records trigger,
+input frontier, state transition, notification decision and proposal outcome,
+which makes scheduled and conversational judgments auditable and replayable.
+
 ### Goal-specific success predicates
 
 Different goals do not merely receive different coefficients. They have
