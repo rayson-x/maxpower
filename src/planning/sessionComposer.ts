@@ -190,6 +190,29 @@ export function weeklyVolumeLedger(
  */
 export const WEEKLY_DIRECT_SETS_HARD_CAP = 14;
 
+/**
+ * 记账上合并计入上限的肌群族（2026-08-12 真实缺陷）。
+ *
+ * 肩被拆成 deltoids / lateral_deltoid / rear_deltoid 三个记账单位，各自 ≤14 时
+ * 合计可达 42 组——上限被完全绕过，会给出危险的过量计划。
+ * 同族肌群的周量必须合并后再受上限约束（生理上它们共享恢复预算）。
+ */
+export const MUSCLE_FAMILIES: Readonly<Record<string, string>> = {
+  deltoids: "shoulder",
+  lateral_deltoid: "shoulder",
+  rear_deltoid: "shoulder",
+  front_deltoid: "shoulder",
+};
+
+/** 族上限：肩整体不应超过这个量（比单一肌群上限略高，因为分三束）。 */
+export const FAMILY_HARD_CAP: Readonly<Record<string, number>> = {
+  shoulder: 20,
+};
+
+function familyOf(muscle: string): string | undefined {
+  return MUSCLE_FAMILIES[muscle];
+}
+
 export function capWeeklyVolume<
   T extends {
     stimulusSlots?: readonly {
@@ -208,7 +231,33 @@ export function capWeeklyVolume<
       }
     }
   }
-  const over = [...totals.entries()].filter(([, total]) => total > cap).map(([muscle]) => muscle);
+  // 每个肌群的目标量：默认单肌群上限；族超限时按比例下调
+  const targets = new Map<string, number>();
+  for (const [muscle, total] of totals) targets.set(muscle, Math.min(total, cap));
+  // 族超限（肩三束合并）：把该族里量最大的肌群也纳入裁剪
+  const familyTotals = new Map<string, number>();
+  for (const [muscle, total] of totals) {
+    const family = familyOf(muscle);
+    if (family) familyTotals.set(family, (familyTotals.get(family) ?? 0) + total);
+  }
+  for (const [family, familyTotal] of familyTotals) {
+    const familyCap = FAMILY_HARD_CAP[family];
+    if (familyCap === undefined) continue;
+    // 用当前目标量求族总量（可能已被单肌群上限压过）
+    const members = [...totals.keys()].filter((muscle) => familyOf(muscle) === family);
+    const currentFamilyTotal = members.reduce((sum, muscle) => sum + (targets.get(muscle) ?? 0), 0);
+    if (currentFamilyTotal <= familyCap) continue;
+    // 按当前占比等比下调，保证族总量达标且各束不为 0
+    const scale = familyCap / currentFamilyTotal;
+    for (const muscle of members) {
+      const current = targets.get(muscle) ?? 0;
+      targets.set(muscle, Math.max(1, Math.floor(current * scale)));
+    }
+    void familyTotal;
+  }
+  const over = [...totals.entries()]
+    .filter(([muscle, total]) => total > (targets.get(muscle) ?? total))
+    .map(([muscle]) => muscle);
   if (!over.length) return { sessions: [...sessions], cappedMuscles: [] };
 
   const result = sessions.map((session) => ({
@@ -217,7 +266,7 @@ export function capWeeklyVolume<
     tasks: (session.tasks ?? []).map((task) => ({ ...task, sets: [...task.sets] })),
   })) as T[];
   for (const muscle of over) {
-    let excess = (totals.get(muscle) ?? 0) - cap;
+    let excess = (totals.get(muscle) ?? 0) - (targets.get(muscle) ?? cap);
     const slotsFlat: { session: T; slotIndex: number; slot: NonNullable<T["stimulusSlots"]>[number] }[] = [];
     for (const session of result) {
       (session.stimulusSlots ?? []).forEach((slot, slotIndex) => {

@@ -58,7 +58,9 @@ function firstTrainingKind(decision: ReturnType<GoalCyclePlanner["plan"]>): stri
   return "push";
 }
 
-test("周一练了腿 → 下一次训练接着排推，不重头开始", () => {
+// 语义修正（2026-08-12）：断言"续排"这个不变量本身，不硬编码某个分化的课序
+// ——分化方案会增减（新加了四分化），课序不该被测试钉死。
+test("练过某部位后 → 下一次不重复同一部位（续排而非重头开始）", () => {
   const decision = planner.plan({
     trigger: "initial_plan", currentDate: "2026-08-12",
     facts: factsWith([trainingEvent("2026-08-10", "腿日：深蹲 硬拉 弓步")]),
@@ -69,15 +71,18 @@ test("周一练了腿 → 下一次训练接着排推，不重头开始", () => 
     decision.reasonCodes.some((code) => code.startsWith("rotation_resumed_from_history:2026-08-10")),
     `应识别到 08-10 的训练：${decision.reasonCodes.filter((c) => c.includes("rotation")).join(", ")}`,
   );
-  assert.equal(firstTrainingKind(decision), "push", "腿之后应接推");
+  assert.notEqual(firstTrainingKind(decision), "legs", "刚练过腿，下一次不该又是腿");
 });
 
-test("上次练的是推 → 下一次接拉", () => {
+test("练过推之后 → 下一次不重复推", () => {
   const decision = planner.plan({
     trigger: "initial_plan", currentDate: "2026-08-12",
     facts: factsWith([trainingEvent("2026-08-11", "卧推 肩推 三头")]),
   });
-  assert.equal(firstTrainingKind(decision), "pull", "推之后应接拉");
+  assert.equal(decision.kind, "plan_proposal");
+  if (decision.kind !== "plan_proposal") return;
+  assert.ok(decision.reasonCodes.some((code) => code.startsWith("rotation_resumed_from_history")));
+  assert.notEqual(firstTrainingKind(decision), "push", "刚练过推，下一次不该又是推");
 });
 
 test("无训练历史 → 从轮转第一课开始（保守回落，不报错）", () => {

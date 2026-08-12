@@ -2400,6 +2400,59 @@ function dailyEnergyBudgetsFor(
   return Object.keys(result).length ? result : undefined;
 }
 
+
+/**
+ * 余数天该练哪一课（频率不被课数整除时）。
+ *
+ * 优先级：
+ *   1. emphasis 肌群所在的课（用户明确想强化的部位）
+ *   2. 直接暴露次数最少的课（补最弱环节）
+ * 都不适用时回落原序号。
+ *
+ * 为什么需要：此前余数天按 ordinal % 课数 回到第一课，导致
+ * 「四分化 5 练」比「四分化 4 练」腿量更少、选独立肩日反而肩量更低。
+ */
+function remainderDayOrdinal(
+  rotation: import("../knowledge/model").SplitRotationTemplate,
+  context: PlanningContext,
+  fallback: number,
+): number {
+  const emphasis = new Set(context.facts.goalContract.value.emphasisMuscles ?? []);
+  if (emphasis.size) {
+    // 找 emphasis 肌群占比最高的课
+    let best: { index: number; ratio: number } | undefined;
+    rotation.sessions.forEach((session, index) => {
+      const direct = new Set<string>();
+      for (const slot of session.slots) {
+        for (const muscle of slot.directMuscles ?? slot.muscleGroups) direct.add(muscle);
+      }
+      if (!direct.size) return;
+      const hits = [...direct].filter((muscle) => emphasis.has(muscle)).length;
+      const ratio = hits / direct.size;
+      if (ratio > 0 && (!best || ratio > best.ratio)) best = { index, ratio };
+    });
+    if (best) return best.index;
+  }
+  // 无 emphasis：补**本轮暴露不足**的课，而不是 slot 最多的课。
+  // 反例：肩日 slot 最多（前中后束+核心），无脑补它会让不想练肩的人每周多一次肩，
+  // 而真正需要频率的大肌群（腿/背）反而不被补。
+  // 判据：该课的主项（primary）覆盖的大肌群数量——大肌群更受益于提高频率。
+  const LARGE_MUSCLES = new Set(["quadriceps", "hamstrings", "glutes", "back", "chest"]);
+  let best: { index: number; score: number } | undefined;
+  rotation.sessions.forEach((session, index) => {
+    const primaryLarge = new Set<string>();
+    for (const slot of session.slots) {
+      if (slot.priority !== "primary") continue;
+      for (const muscle of slot.directMuscles ?? slot.muscleGroups) {
+        if (LARGE_MUSCLES.has(muscle)) primaryLarge.add(muscle);
+      }
+    }
+    const score = primaryLarge.size;
+    if (score > 0 && (!best || score > best.score)) best = { index, score };
+  });
+  return best?.index ?? fallback;
+}
+
 function nutritionGuidanceFor(
   facts: PlannerFacts,
   energyApproach: import("./adaptiveStrategy").PlanningNutritionStrategy["energyApproach"],
