@@ -300,6 +300,90 @@ unlogged intake, activity compensation, body-composition measurement error and
 water/glycogen variation widen the distribution; they must not be hidden by a
 single predicted kilogram value.
 
+### Execution evidence is a forecast input, not a moral score
+
+The Planner must measure execution separately from outcome. A plan can be
+executed faithfully yet need revision because the personal response differs
+from its initial model; conversely a target can remain `on_path` after a missed
+workout because the remaining buffer is sufficient. The actual rolling energy
+path is therefore compared with the planned path:
+
+```text
+energyPathRatio = observed cumulative net deficit / planned cumulative net deficit
+```
+
+Both terms are ranges, not asserted single calories. The ratio is evidence for
+the body-mass / fat-loss state transition; it is never a command to "repay" an
+uncertain meal with a precise amount of cardio.
+
+The future-execution part of the forecast keeps three distinct, recency- and
+confidence-weighted quantities:
+
+```text
+q_diet  = E[future days within the agreed intake tolerance]
+q_train = E[future required training dose completed to the required quality]
+coverage = E[how much of the required observation was actually recorded]
+```
+
+For a rolling window, each confirmed day or planned session receives a
+`0..1` adherence contribution (`z`) and a weight (`w`) for recency,
+data-confidence and plan criticality. The provisional estimator is:
+
+```text
+q = (alpha + Σ(w × z)) / (alpha + beta + Σw)
+```
+
+`alpha` and `beta` are deliberately broad priors until personal evidence
+accumulates. For nutrition, `z` reflects the reported intake range against the
+plan tolerance; for training it reflects completion of the **required** session
+and its minimum effective dose, not merely opening a check-in. A confirmed
+missed key session contributes `0`; an unrecorded session does not silently
+contribute `0`—it reduces `coverage` and widens uncertainty. Extra optional
+activity cannot erase a missed strength exposure when that exposure is a hard
+guardrail for the target mode.
+
+The deviation assessment consumes `energyPathRatio`, `q_diet`, `q_train` and
+`coverage` together with measured trend and recovery. It asks: under this
+user's demonstrated execution pattern, does the remaining plan still satisfy
+the original Goal Contract? Repeated excess intake, missed key sessions or a
+falling completion rate can move the path to `at_risk` before the scale trend
+has fully shown it. Low coverage instead produces `insufficient_evidence` or a
+small measurement request; it must not be treated as non-compliance.
+
+### Continuity and high failure rate are separate planning signals
+
+The same number of failures can have different meaning depending on their
+sequence. A missed key session after six consistently completed weeks is not
+equivalent to two consecutive missed key sessions at the start of a short
+deadline. In addition to the rolling estimates above, the forecast retains:
+
+```text
+recentFailureRun      = consecutive confirmed failures of a critical action
+weightedFailureRate   = recency- and criticality-weighted failures in the window
+executionSlope        = whether diet / training completion is deteriorating
+remainingSlots        = remaining critical days or sessions before deadline
+```
+
+The model uses the pattern to update the future-execution distribution. An
+implementation may express its continuity pressure as:
+
+```text
+failurePressure = weightedFailureRate
+                  + modeWeight × recentFailureRun × criticality
+                  + deteriorationWeight × max(0, -executionSlope)
+```
+
+This is an input to the goal-mode forecast, not a universal pass/fail rule.
+Its threshold is determined by remaining slack, deadline and the target's
+guardrails: an extreme-lean or strength-retention cut has little recovery room;
+a longer higher-body-mass fat-loss goal may absorb the same pattern. The system
+must trigger `planner.assess_deviation` when either a continuous failure run or
+a high/deteriorating weighted failure rate materially changes the forecast,
+even before a body measurement has moved. A full proposal occurs only if a
+safe, future-only correction improves the original-path state; otherwise the
+Agent explains that the observed execution pattern cannot support the original
+deadline without a user-approved trade-off.
+
 ### Goal-specific success predicates
 
 Different goals do not merely receive different coefficients. They have
