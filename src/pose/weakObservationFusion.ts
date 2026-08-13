@@ -11,6 +11,7 @@ const BASELINE_WINDOW = 15;
 const MIN_BASELINE_SAMPLES = 5;
 const MAX_RAW_BONE_RESIDUAL = 0.45;
 const MAX_PREDICTION_MS = 150;
+const MAX_WEAK_COORDINATE_INNOVATION_RATIO = 0.08;
 
 interface ArmChain {
   shoulder: number;
@@ -57,6 +58,10 @@ const ARM_CHAINS: Record<PoseSchema, readonly ArmChain[]> = {
     { shoulder: 5, elbow: 7, wrist: 9 },
     { shoulder: 6, elbow: 8, wrist: 10 },
   ],
+  halpe26: [
+    { shoulder: 5, elbow: 7, wrist: 9 },
+    { shoulder: 6, elbow: 8, wrist: 10 },
+  ],
 };
 
 const SKELETON_BONES: Record<PoseSchema, readonly BoneEdge[]> = {
@@ -87,6 +92,26 @@ const SKELETON_BONES: Record<PoseSchema, readonly BoneEdge[]> = {
     { from: 13, to: 15 },
     { from: 12, to: 14 },
     { from: 14, to: 16 },
+  ],
+  halpe26: [
+    { from: 5, to: 6 },
+    { from: 5, to: 7 },
+    { from: 7, to: 9 },
+    { from: 6, to: 8 },
+    { from: 8, to: 10 },
+    { from: 5, to: 11 },
+    { from: 6, to: 12 },
+    { from: 11, to: 12 },
+    { from: 11, to: 13 },
+    { from: 13, to: 15 },
+    { from: 12, to: 14 },
+    { from: 14, to: 16 },
+    { from: 15, to: 20 },
+    { from: 15, to: 22 },
+    { from: 15, to: 24 },
+    { from: 16, to: 21 },
+    { from: 16, to: 23 },
+    { from: 16, to: 25 },
   ],
 };
 
@@ -202,6 +227,46 @@ export class WeakObservationFusion {
       });
     }
 
+    // Visibility is an occlusion likelihood, not a proof that MediaPipe's
+    // coordinate is geometrically useless. Supine presses can retain coherent
+    // elbow/wrist coordinates for seconds with near-zero visibility. Walk the
+    // arm outward from a reliable shoulder and keep those weak observations
+    // only when they satisfy both the learned bone length and motion prior.
+    for (const chain of ARM_CHAINS[this.schema]) {
+      const elbow = landmarks[chain.elbow];
+      if (
+        !repaired.has(chain.elbow) &&
+        elbow &&
+        elbow.visibility < MEASURED_MIN_SCORE
+      ) {
+        const fusedElbow = this.fuseWeakChild(
+          chain.shoulder,
+          chain.elbow,
+          landmarks,
+          rejected,
+          repaired,
+          timestampMs,
+        );
+        if (fusedElbow) repaired.set(chain.elbow, fusedElbow);
+      }
+      const wrist = landmarks[chain.wrist];
+      if (
+        !repaired.has(chain.wrist) &&
+        wrist &&
+        wrist.visibility < MEASURED_MIN_SCORE
+      ) {
+        const fusedWrist = this.fuseWeakChild(
+          chain.elbow,
+          chain.wrist,
+          landmarks,
+          rejected,
+          repaired,
+          timestampMs,
+        );
+        if (fusedWrist) repaired.set(chain.wrist, fusedWrist);
+      }
+    }
+
     landmarks.forEach((landmark, index) => {
       const existingRepair = repaired.get(index);
       if (existingRepair?.source === "fused") {
@@ -295,6 +360,90 @@ export class WeakObservationFusion {
         previous && elapsedMs > 0 ? (point.y - previous.point.y) / elapsedMs : 0,
       acceptedTimestampMs: timestampMs,
     });
+  }
+
+  private fuseWeakChild(
+    parentIndex: number,
+    childIndex: number,
+    landmarks: readonly PoseLandmark[],
+    rejected: ReadonlySet<number>,
+    repaired: ReadonlyMap<number, ContinuityJointEvidence>,
+    timestampMs: number,
+  ): ContinuityJointEvidence | null {
+    if (rejected.has(childIndex)) return null;
+    const child = landmarks[childIndex];
+    if (!isFiniteLandmark(child) || child.visibility <= 0) return null;
+    const repairedParent = repaired.get(parentIndex);
+    let parentPoint: PointPx;
+    let parentConfidence: number;
+    if (repairedParent && repairedParent.source === "fused") {
+      parentPoint = {
+        x: repairedParent.x * this.image.widthPx,
+        y: repairedParent.y * this.image.heightPx,
+      };
+      parentConfidence = repairedParent.canonicalConfidence;
+    } else {
+      const parent = landmarks[parentIndex];
+      if (
+        rejected.has(parentIndex) ||
+        !isFiniteLandmark(parent) ||
+        parent.visibility < MEASURED_MIN_SCORE
+      ) {
+        return null;
+      }
+      parentPoint = this.toPixels(parent);
+      parentConfidence = parent.visibility;
+    }
+    const samples = this.boneLengths.get(boneKey(parentIndex, childIndex));
+    if (!samples || samples.length < MIN_BASELINE_SAMPLES) return null;
+    const motion = this.motion.get(childIndex);
+    if (!motion) return null;
+    const elapsedMs = timestampMs - motion.acceptedTimestampMs;
+    if (elapsedMs <= 0 || elapsedMs > MAX_PREDICTION_MS) return null;
+    const baseline = median(samples);
+    const rawPoint = this.toPixels(child);
+    const boneResidual = Math.abs(distance(parentPoint, rawPoint) - baseline) / baseline;
+    if (!Number.isFinite(boneResidual) || boneResidual > MAX_RAW_BONE_RESIDUAL) return null;
+    const predicted = {
+      x: motion.point.x + motion.vxPxPerMs * elapsedMs,
+      y: motion.point.y + motion.vyPxPerMs * elapsedMs,
+    };
+    const diagonal = Math.hypot(this.image.widthPx, this.image.heightPx);
+    const innovation = distance(rawPoint, predicted);
+    if (
+      !Number.isFinite(innovation) ||
+      innovation > diagonal * MAX_WEAK_COORDINATE_INNOVATION_RATIO
+    ) {
+      return null;
+    }
+    // Visibility acts as the measurement gain: a near-zero observation may
+    // steer a validated chain, but cannot dominate the motion prior.
+    const rawWeight = clamp(0.08 + child.visibility * 0.84, 0.08, 0.5);
+    const blended = {
+      x: rawPoint.x * rawWeight + predicted.x * (1 - rawWeight),
+      y: rawPoint.y * rawWeight + predicted.y * (1 - rawWeight),
+    };
+    const direction = {
+      x: blended.x - parentPoint.x,
+      y: blended.y - parentPoint.y,
+    };
+    const directionLength = Math.hypot(direction.x, direction.y);
+    if (!Number.isFinite(directionLength) || directionLength <= 1e-6) return null;
+    const result = {
+      x: parentPoint.x + (direction.x / directionLength) * baseline,
+      y: parentPoint.y + (direction.y / directionLength) * baseline,
+    };
+    return {
+      x: result.x / this.image.widthPx,
+      y: result.y / this.image.heightPx,
+      source: "fused",
+      canonicalConfidence: clamp(parentConfidence * 0.7, MEASURED_MIN_SCORE, 0.75),
+      uncertainty:
+        innovation / diagonal +
+        boneResidual * 0.03 +
+        Math.max(0, MEASURED_MIN_SCORE - child.visibility) * 0.025,
+      reason: "weak-observation-bone-fusion",
+    };
   }
 
   private findOutliers(
