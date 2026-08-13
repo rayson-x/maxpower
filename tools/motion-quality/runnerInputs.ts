@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { gunzip } from "node:zlib";
 
@@ -23,23 +24,95 @@ export type GovernanceInputRole =
   | "sourceIndependentBenchProfile"
   | "fullDataRun";
 
+type GovernanceAssetRole =
+  | "raw_evidence"
+  | "human_supervision"
+  | "official_weak_supervision"
+  | "model_observation"
+  | "annotation_proposal"
+  | "evaluation_artifact"
+  | "historical_baseline"
+  | "protected_runtime";
+
+interface GovernanceAssetLocation {
+  readonly root: "maxpower_source" | "power_workspace";
+  readonly path: string;
+  readonly kind: "file" | "directory";
+  readonly sha256?: string;
+  readonly selector?: string;
+}
+
 interface GovernanceAssetBinding {
   readonly assetId: string;
+  readonly role: GovernanceAssetRole;
   readonly admission: string;
   readonly authority: string;
   readonly groupKey: string;
+  readonly location: GovernanceAssetLocation;
+  readonly definitionSha256: string;
+  readonly catalogSha256: string | null;
+  readonly resolvedLocationPath: string;
 }
 
 export interface MotionQualityInputCatalog {
-  readonly schemaVersion: "maxpower-motion-quality-input-catalog/v1";
+  readonly schemaVersion: "maxpower-motion-quality-input-catalog/v2";
   readonly catalogId: string;
+  readonly authorityCatalog: Readonly<{
+    catalogId: string;
+    path: string;
+    sha256: string;
+    selfAssetId: string;
+  }>;
   readonly assets: Readonly<Record<GovernanceInputRole, GovernanceAssetBinding>>;
 }
 
-export interface InputAssetPin extends GovernanceAssetBinding {
+export interface InputAssetPin {
+  readonly authorityCatalogId: string;
+  readonly authorityCatalogSha256: string;
+  readonly assetId: string;
+  readonly role: GovernanceAssetRole;
+  readonly admission: string;
+  readonly authority: string;
+  readonly groupKey: string;
+  readonly location: GovernanceAssetLocation;
+  readonly definitionSha256: string;
+  readonly catalogSha256: string | null;
   readonly path: string;
   readonly sha256: string;
   readonly sourceCaptureId?: string;
+}
+
+interface SerializedMotionQualityInputCatalog {
+  readonly schemaVersion: "maxpower-motion-quality-input-catalog/v2";
+  readonly catalogId: string;
+  readonly authorityCatalog: Readonly<{
+    path: string;
+    catalogId: string;
+    selfAssetId: string;
+  }>;
+  readonly assets: Readonly<Record<GovernanceInputRole, Readonly<{
+    assetId: string;
+    definitionSha256: string;
+  }>>>;
+}
+
+interface AuthorityAsset {
+  readonly id: string;
+  readonly role: GovernanceAssetRole;
+  readonly admission: string;
+  readonly authority: string;
+  readonly location: GovernanceAssetLocation;
+  readonly allowedTasks: readonly string[];
+  readonly allowedSupervision: readonly string[];
+  readonly forbiddenUses: readonly string[];
+  readonly groupKey: string;
+}
+
+interface AuthorityAssetCatalog {
+  readonly schemaVersion: "maxpower-data-asset-catalog/v1";
+  readonly catalogId: string;
+  readonly defaultRoots: Readonly<Record<GovernanceAssetLocation["root"], string>>;
+  readonly assets: readonly AuthorityAsset[];
 }
 
 export interface RawObservationLandmark {
@@ -125,29 +198,152 @@ interface SerializedSourceIndependentBenchProfiles {
   }>[];
 }
 
+const GOVERNANCE_INPUT_ROLES: readonly GovernanceInputRole[] = Object.freeze([
+  "humanRanges", "rawHalpe26", "benchBarbellAxis", "profileArtifact",
+  "blindPlan", "rustWasm", "sourceIndependentBenchProfile", "fullDataRun",
+]);
+
+const ROLE_POLICIES: Readonly<Record<GovernanceInputRole, Readonly<{
+  assetId: string;
+  role: GovernanceAssetRole;
+  admission: string;
+  groupKey: string;
+}>>> = Object.freeze({
+  humanRanges: Object.freeze({
+    assetId: "personal-human-rep-ranges-v2",
+    role: "human_supervision",
+    admission: "label_allowed",
+    groupKey: "sourceCaptureId",
+  }),
+  rawHalpe26: Object.freeze({
+    assetId: "personal-native-rtmpose-halpe26-observations",
+    role: "model_observation",
+    admission: "feature_only",
+    groupKey: "sourceCaptureId",
+  }),
+  benchBarbellAxis: Object.freeze({
+    assetId: "barbell-geometry-alignment-prototype",
+    role: "annotation_proposal",
+    admission: "proposal_only",
+    groupKey: "sourceCaptureId",
+  }),
+  profileArtifact: Object.freeze({
+    assetId: "client-cycle-aligned-profile-artifact",
+    role: "evaluation_artifact",
+    admission: "evaluation_only",
+    groupKey: "sourceCaptureId",
+  }),
+  blindPlan: Object.freeze({
+    assetId: "motion-quality-review-evaluation-artifacts",
+    role: "evaluation_artifact",
+    admission: "evaluation_only",
+    groupKey: "sourceCaptureId",
+  }),
+  rustWasm: Object.freeze({
+    assetId: "maxpower-motion-sdk-wasm",
+    role: "protected_runtime",
+    admission: "protected",
+    groupKey: "not_applicable",
+  }),
+  sourceIndependentBenchProfile: Object.freeze({
+    assetId: "source-independent-bench-profile-config",
+    role: "evaluation_artifact",
+    admission: "evaluation_only",
+    groupKey: "not_applicable",
+  }),
+  fullDataRun: Object.freeze({
+    assetId: "motion-quality-review-evaluation-artifacts",
+    role: "evaluation_artifact",
+    admission: "evaluation_only",
+    groupKey: "sourceCaptureId",
+  }),
+});
+
 export async function loadInputCatalog(path: string): Promise<LoadedPinned<MotionQualityInputCatalog>> {
   const absolute = resolve(path);
   const bytes = await readFile(absolute);
-  const value = JSON.parse(bytes.toString("utf8")) as MotionQualityInputCatalog;
-  if (value.schemaVersion !== "maxpower-motion-quality-input-catalog/v1") {
+  const serialized = JSON.parse(bytes.toString("utf8")) as SerializedMotionQualityInputCatalog;
+  if (serialized.schemaVersion !== "maxpower-motion-quality-input-catalog/v2") {
     throw new Error("motion-quality input catalog schema is unsupported");
   }
-  const roles: readonly GovernanceInputRole[] = [
-    "humanRanges", "rawHalpe26", "benchBarbellAxis", "profileArtifact",
-    "blindPlan", "rustWasm", "sourceIndependentBenchProfile", "fullDataRun",
-  ];
-  for (const role of roles) requireBinding(value.assets[role], role);
+  if (!serialized.catalogId || !serialized.authorityCatalog?.path
+      || !serialized.authorityCatalog.catalogId || !serialized.authorityCatalog.selfAssetId) {
+    throw new Error("motion-quality input catalog authority declaration is incomplete");
+  }
+  const declaredRoles = Object.keys(serialized.assets ?? {}).sort();
+  if (declaredRoles.join(",") !== [...GOVERNANCE_INPUT_ROLES].sort().join(",")) {
+    throw new Error("motion-quality input catalog roles drifted from the runtime contract");
+  }
+
+  const authorityAbsolute = resolve(dirname(absolute), serialized.authorityCatalog.path);
+  const canonicalAuthorityAbsolute = resolve(
+    dirname(absolute),
+    "../../../maxpower-training-data-governance/catalog/assets.json",
+  );
+  if (authorityAbsolute !== canonicalAuthorityAbsolute) {
+    throw new Error("motion-quality input catalog does not reference the canonical governance catalog");
+  }
+  const authorityBytes = await readFile(authorityAbsolute);
+  const authority = JSON.parse(authorityBytes.toString("utf8")) as AuthorityAssetCatalog;
+  validateAuthorityCatalog(authority, serialized.authorityCatalog.catalogId);
+  const authorityAssets = new Map(authority.assets.map((asset) => [asset.id, asset]));
+  const selfAsset = authorityAssets.get(serialized.authorityCatalog.selfAssetId);
+  if (!selfAsset) {
+    throw new Error(`${serialized.authorityCatalog.selfAssetId}: local catalog is not registered by the authoritative catalog`);
+  }
+  const selfBinding = resolveAuthorityBinding(selfAsset, authority, authorityAbsolute);
+  if (selfBinding.role !== "protected_runtime" || selfBinding.admission !== "protected"
+      || selfBinding.groupKey !== "not_applicable") {
+    throw new Error(`${selfBinding.assetId}: local catalog authority fields drifted`);
+  }
+  if (resolve(selfBinding.resolvedLocationPath) !== absolute) {
+    throw new Error(`${selfBinding.assetId}: authoritative location does not identify the loaded local catalog`);
+  }
+
+  const resolvedAssets = {} as Record<GovernanceInputRole, GovernanceAssetBinding>;
+  for (const role of GOVERNANCE_INPUT_ROLES) {
+    const declared = serialized.assets[role];
+    const policy = ROLE_POLICIES[role];
+    if (!declared || Object.keys(declared).sort().join(",") !== "assetId,definitionSha256"
+        || declared.assetId !== policy.assetId
+        || !/^[a-f0-9]{64}$/u.test(declared.definitionSha256)) {
+      throw new Error(`${role}: asset ID drifted from the runtime contract`);
+    }
+    const authorityAsset = authorityAssets.get(declared.assetId);
+    if (!authorityAsset) throw new Error(`${role}: authoritative asset ${declared.assetId} is missing`);
+    const authorityDefinitionSha256 = sha256(stableStringify(authorityAsset));
+    if (authorityDefinitionSha256 !== declared.definitionSha256) {
+      throw new Error(`${role}: authoritative asset definition drifted for ${declared.assetId}`);
+    }
+    const binding = resolveAuthorityBinding(
+      authorityAsset,
+      authority,
+      authorityAbsolute,
+      authorityDefinitionSha256,
+    );
+    if (binding.role !== policy.role || binding.admission !== policy.admission
+        || binding.groupKey !== policy.groupKey) {
+      throw new Error(`${role}: authoritative admission fields drifted for ${binding.assetId}`);
+    }
+    resolvedAssets[role] = binding;
+  }
+
+  const authorityCatalog = Object.freeze({
+    catalogId: authority.catalogId,
+    path: projectRelativePath(authorityAbsolute),
+    sha256: sha256(authorityBytes),
+    selfAssetId: selfBinding.assetId,
+  });
+  const value: MotionQualityInputCatalog = Object.freeze({
+    schemaVersion: serialized.schemaVersion,
+    catalogId: serialized.catalogId,
+    authorityCatalog,
+    assets: Object.freeze(resolvedAssets),
+  });
   return Object.freeze({
     value,
     bytes,
-    pin: Object.freeze({
-      assetId: "motion-quality-runner-input-catalog",
-      admission: "protected",
-      authority: "application_runtime",
-      groupKey: "not_applicable",
-      path: projectRelativePath(absolute),
-      sha256: sha256(bytes),
-    }),
+    pin: pinResolvedBytes(value, selfBinding, absolute, bytes),
   });
 }
 
@@ -158,13 +354,9 @@ export function pinInputBytes(
   bytes: Buffer,
   sourceCaptureId?: string,
 ): InputAssetPin {
-  const binding = requireBinding(catalog.assets[role], role);
-  return Object.freeze({
-    ...binding,
-    path: projectRelativePath(resolve(path)),
-    sha256: sha256(bytes),
-    ...(sourceCaptureId ? { sourceCaptureId } : {}),
-  });
+  const binding = catalog.assets[role];
+  if (!binding) throw new Error(`${role}: resolved governance asset binding is missing`);
+  return pinResolvedBytes(catalog, binding, resolve(path), bytes, sourceCaptureId);
 }
 
 export async function loadRawObservationSidecar(
@@ -390,14 +582,160 @@ function projectRelativePath(absolute: string): string {
   return relative(resolve(process.cwd()), absolute).split(sep).join("/") || ".";
 }
 
-function requireBinding(
-  value: GovernanceAssetBinding | undefined,
-  role: string,
-): GovernanceAssetBinding {
-  if (!value || !value.assetId || !value.admission || !value.authority || !value.groupKey) {
-    throw new Error(`${role}: incomplete governance asset binding`);
+function validateAuthorityCatalog(catalog: AuthorityAssetCatalog, expectedCatalogId: string): void {
+  if (catalog.schemaVersion !== "maxpower-data-asset-catalog/v1"
+      || catalog.catalogId !== expectedCatalogId
+      || !catalog.defaultRoots?.maxpower_source
+      || !catalog.defaultRoots.power_workspace
+      || !Array.isArray(catalog.assets)) {
+    throw new Error("authoritative data catalog identity or schema is invalid");
   }
-  return value;
+  const ids = new Set<string>();
+  for (const asset of catalog.assets) {
+    if (!asset.id || ids.has(asset.id)) throw new Error(`${asset.id || "unknown"}: duplicate or empty authoritative asset ID`);
+    ids.add(asset.id);
+    if (!asset.role || !asset.admission || !asset.authority || !asset.groupKey
+        || !asset.location?.root || !asset.location.path || !asset.location.kind
+        || !Array.isArray(asset.allowedTasks) || !Array.isArray(asset.allowedSupervision)
+        || !Array.isArray(asset.forbiddenUses)) {
+      throw new Error(`${asset.id}: authoritative asset fields are incomplete`);
+    }
+  }
+}
+
+function resolveAuthorityBinding(
+  asset: AuthorityAsset,
+  catalog: AuthorityAssetCatalog,
+  authorityCatalogPath: string,
+  definitionSha256 = sha256(stableStringify(asset)),
+): GovernanceAssetBinding {
+  const rootRelative = catalog.defaultRoots[asset.location.root];
+  if (!rootRelative) throw new Error(`${asset.id}: authoritative root is unknown`);
+  if (isAbsolute(asset.location.path) || asset.location.path.split(/[\\/]/u).includes("..")) {
+    throw new Error(`${asset.id}: authoritative location escapes its declared root`);
+  }
+  const governanceRepoRoot = resolve(dirname(authorityCatalogPath), "..");
+  const rootOverride = asset.location.root === "maxpower_source"
+    ? process.env.MAXPOWER_SOURCE_ROOT
+    : process.env.POWER_WORKSPACE_ROOT;
+  const declaredRoot = resolve(rootOverride ?? resolve(governanceRepoRoot, rootRelative));
+  const resolvedLocationPath = resolve(declaredRoot, asset.location.path);
+  const escaped = relative(declaredRoot, resolvedLocationPath);
+  if (escaped === ".." || escaped.startsWith(`..${sep}`) || isAbsolute(escaped)) {
+    throw new Error(`${asset.id}: authoritative location escapes its declared root`);
+  }
+  let stat;
+  try {
+    stat = statSync(resolvedLocationPath);
+  } catch (error) {
+    throw new Error(`${asset.id}: authoritative location is missing (${String(error)})`);
+  }
+  if ((asset.location.kind === "file" && !stat.isFile())
+      || (asset.location.kind === "directory" && !stat.isDirectory())) {
+    throw new Error(`${asset.id}: authoritative location kind drifted`);
+  }
+  const realRoot = realpathSync(declaredRoot);
+  const realLocation = realpathSync(resolvedLocationPath);
+  const realEscaped = relative(realRoot, realLocation);
+  if (realEscaped === ".." || realEscaped.startsWith(`..${sep}`) || isAbsolute(realEscaped)) {
+    throw new Error(`${asset.id}: authoritative location escapes its declared root`);
+  }
+  if (asset.location.sha256) {
+    if (asset.location.kind !== "file" || !/^[a-f0-9]{64}$/u.test(asset.location.sha256)) {
+      throw new Error(`${asset.id}: authoritative SHA-256 declaration is invalid`);
+    }
+    const actual = sha256(readFileSync(resolvedLocationPath));
+    if (actual !== asset.location.sha256) {
+      throw new Error(`${asset.id}: authoritative SHA-256 mismatch (${actual})`);
+    }
+  }
+  return Object.freeze({
+    assetId: asset.id,
+    role: asset.role,
+    admission: asset.admission,
+    authority: asset.authority,
+    groupKey: asset.groupKey,
+    location: Object.freeze({ ...asset.location }),
+    definitionSha256,
+    catalogSha256: asset.location.sha256 ?? null,
+    resolvedLocationPath,
+  });
+}
+
+function pinResolvedBytes(
+  catalog: MotionQualityInputCatalog,
+  binding: GovernanceAssetBinding,
+  path: string,
+  bytes: Buffer,
+  sourceCaptureId?: string,
+): InputAssetPin {
+  const absolute = resolve(path);
+  let authoritativeRealPath: string;
+  let inputRealPath: string;
+  try {
+    authoritativeRealPath = realpathSync(binding.resolvedLocationPath);
+    inputRealPath = realpathSync(absolute);
+  } catch (error) {
+    throw new Error(`${binding.assetId}: pinned input is missing or unreadable (${String(error)})`);
+  }
+  if (binding.location.kind === "file") {
+    if (inputRealPath !== authoritativeRealPath) {
+      throw new Error(`${binding.assetId}: input is outside authoritative asset location`);
+    }
+  } else {
+    const child = relative(authoritativeRealPath, inputRealPath);
+    if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child)) {
+      throw new Error(`${binding.assetId}: input is outside authoritative asset location`);
+    }
+    if (binding.location.selector && !matchesCatalogSelector(basename(inputRealPath), binding.location.selector)) {
+      throw new Error(`${binding.assetId}: input does not match authoritative selector`);
+    }
+  }
+  const inputSha256 = sha256(bytes);
+  if (binding.catalogSha256 && inputSha256 !== binding.catalogSha256) {
+    throw new Error(`${binding.assetId}: authoritative SHA-256 mismatch (${inputSha256})`);
+  }
+  let diskBytes: Buffer;
+  try {
+    const stat = statSync(absolute);
+    if (!stat.isFile()) throw new Error("input is not a file");
+    diskBytes = readFileSync(absolute);
+  } catch (error) {
+    throw new Error(`${binding.assetId}: pinned input is missing or unreadable (${String(error)})`);
+  }
+  const diskSha256 = sha256(diskBytes);
+  if (diskSha256 !== inputSha256) {
+    throw new Error(`${binding.assetId}: supplied bytes drifted from the pinned input file`);
+  }
+  return Object.freeze({
+    authorityCatalogId: catalog.authorityCatalog.catalogId,
+    authorityCatalogSha256: catalog.authorityCatalog.sha256,
+    assetId: binding.assetId,
+    role: binding.role,
+    admission: binding.admission,
+    authority: binding.authority,
+    groupKey: binding.groupKey,
+    location: binding.location,
+    definitionSha256: binding.definitionSha256,
+    catalogSha256: binding.catalogSha256,
+    path: projectRelativePath(absolute),
+    sha256: inputSha256,
+    ...(sourceCaptureId ? { sourceCaptureId } : {}),
+  });
+}
+
+function matchesCatalogSelector(fileName: string, selector: string): boolean {
+  if (/^\*\.[A-Za-z0-9._-]+$/u.test(selector)) return fileName.endsWith(selector.slice(1));
+  throw new Error(`unsupported authoritative selector: ${selector}`);
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function finiteOrZero(value: number | null | undefined): number {

@@ -1,54 +1,43 @@
 {
-  "schemaVersion": "maxpower-motion-quality-input-catalog/v1",
-  "catalogId": "motion-quality-runner-inputs-v1",
+  "schemaVersion": "maxpower-motion-quality-input-catalog/v2",
+  "catalogId": "motion-quality-runner-inputs-v2",
+  "authorityCatalog": {
+    "path": "../../../maxpower-training-data-governance/catalog/assets.json",
+    "catalogId": "maxpower-motion-training-data-v1",
+    "selfAssetId": "motion-quality-runner-input-catalog"
+  },
   "assets": {
     "humanRanges": {
       "assetId": "personal-human-rep-ranges-v2",
-      "admission": "label_allowed",
-      "authority": "user_reviewed",
-      "groupKey": "sourceCaptureId"
+      "definitionSha256": "0c2ce14d44688944150d5e4467e7e3cf68c0b9232974d05f2d47e065c7ee541d"
     },
     "rawHalpe26": {
       "assetId": "personal-native-rtmpose-halpe26-observations",
-      "admission": "feature_only",
-      "authority": "model_generated",
-      "groupKey": "sourceCaptureId"
+      "definitionSha256": "26dff806b7fb6505061ae7b5449f9c07d257e4c4cd0a88f88398c51e5c118bca"
     },
     "benchBarbellAxis": {
       "assetId": "barbell-geometry-alignment-prototype",
-      "admission": "proposal_only",
-      "authority": "model_generated",
-      "groupKey": "sourceCaptureId"
+      "definitionSha256": "5f727ab6973225de144fc3502f374e8db0b7ceb1a28746672132c6807577068c"
     },
     "profileArtifact": {
-      "assetId": "client-single-pass-predictions-and-agent-output",
-      "admission": "evaluation_only",
-      "authority": "frozen_prediction_or_report",
-      "groupKey": "sourceCaptureId"
+      "assetId": "client-cycle-aligned-profile-artifact",
+      "definitionSha256": "010ca32745e1a9ccd865d5d7180b264e151805024651b015cc905f2c7035596f"
     },
     "blindPlan": {
-      "assetId": "client-single-pass-predictions-and-agent-output",
-      "admission": "evaluation_only",
-      "authority": "frozen_prediction_or_report",
-      "groupKey": "sourceCaptureId"
+      "assetId": "motion-quality-review-evaluation-artifacts",
+      "definitionSha256": "4bbf4f780d9afa257225edde19cf8065ff7405d0a4372c32ad647ebfade18916"
     },
     "rustWasm": {
       "assetId": "maxpower-motion-sdk-wasm",
-      "admission": "protected",
-      "authority": "application_runtime",
-      "groupKey": "not_applicable"
+      "definitionSha256": "9fad0bc0f5bc2aec412f9f1bc490e36bb8b0ca1fa4227e3cdf18d304e5b12d13"
     },
     "sourceIndependentBenchProfile": {
       "assetId": "source-independent-bench-profile-config",
-      "admission": "reference_only",
-      "authority": "source_independent_rule_config",
-      "groupKey": "not_applicable"
+      "definitionSha256": "92109da6898c8b43c022bdd2efa2398a5da762729ecfea199e210f7efe2087a1"
     },
     "fullDataRun": {
-      "assetId": "client-single-pass-predictions-and-agent-output",
-      "admission": "evaluation_only",
-      "authority": "frozen_prediction_or_report",
-      "groupKey": "sourceCaptureId"
+      "assetId": "motion-quality-review-evaluation-artifacts",
+      "definitionSha256": "4bbf4f780d9afa257225edde19cf8065ff7405d0a4372c32ad647ebfade18916"
     }
   }
 }
