@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { createAnnotationInboxServer } from "./server";
 
 const projectRoot = process.cwd();
-const inboxRoot = resolve(process.env.FORM_COACH_ANNOTATION_INBOX_DIR ?? "../new-video");
-const archiveRoot = resolve(process.env.FORM_COACH_CONFIRMED_ARCHIVE_DIR ?? "public/archives/confirmed-captures");
+const inboxRoot = resolve(process.env.MAXPOWER_ANNOTATION_INBOX_DIR ?? "../new-video");
+const archiveRoot = resolve(process.env.MAXPOWER_CONFIRMED_ARCHIVE_DIR ?? "public/archives/confirmed-captures");
 const port = 4317;
 const server = createAnnotationInboxServer({ inboxRoot, archiveRoot });
 

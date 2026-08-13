@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import test from "node:test";
 import { createAnnotationInboxServer } from "./server";
 
 test("local annotation server exposes the inbox and seekable video bytes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "form-coach-inbox-server-"));
+  const root = await mkdtemp(join(tmpdir(), "maxpower-inbox-server-"));
   const inboxRoot = join(root, "new-video");
   const archiveRoot = join(root, "archive");
   await mkdir(inboxRoot);
@@ -29,7 +29,7 @@ test("local annotation server exposes the inbox and seekable video bytes", async
     assert.equal(listResponse.status, 200);
     assert.equal(listResponse.headers.get("access-control-allow-origin"), "http://localhost:8081");
     assert.deepEqual(await listResponse.json(), {
-      version: "form-coach-annotation-inbox/v1",
+      version: "maxpower-annotation-inbox/v1",
       items: [{ id: "bench", filename: "bench.mp4", sizeBytes: 10, videoUrl: "/videos/bench.mp4" }],
     });
 
@@ -63,6 +63,28 @@ test("local annotation server exposes the inbox and seekable video bytes", async
         labels: "chest/bench.labels.json",
         metadata: "chest/bench.metadata.json",
       },
+    });
+
+    const poseFixture = {
+      video: "bench.mp4",
+      durationSec: 1,
+      stepMs: 50,
+      model: "pose_landmarker_heavy",
+      poses: [{ timestampMs: 50, landmarks: [], worldLandmarks: [] }],
+    };
+    const poseResponse = await fetch(`http://127.0.0.1:${port}/api/annotation-inbox/archive-pose-fixture`, {
+      method: "POST",
+      headers: { Origin: "http://localhost:8081", "Content-Type": "application/json" },
+      body: JSON.stringify({ captureId: "bench", fixture: poseFixture }),
+    });
+    assert.equal(poseResponse.status, 200);
+    assert.deepEqual(await poseResponse.json(), { captureId: "bench", frameCount: 1 });
+    assert.deepEqual(JSON.parse(await readFile(join(archiveRoot, "chest", "bench.json"), "utf8")), [poseFixture]);
+    assert.deepEqual(JSON.parse(await readFile(join(archiveRoot, "chest", "bench.metadata.json"), "utf8")), {
+      annotationStatus: "human_approved",
+      model: "pose_landmarker_heavy",
+      canonicalPoseFrameCount: 1,
+      poseFixtureDurationSec: 1,
     });
 
     const foreignOrigin = await fetch(`http://127.0.0.1:${port}/api/annotation-inbox`, {

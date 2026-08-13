@@ -12,7 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, extname, join, parse } from "node:path";
+import { basename, dirname, extname, join, parse, resolve, sep } from "node:path";
 
 import {
   ANNOTATION_INBOX_VIDEO_EXTENSIONS,
@@ -40,21 +40,38 @@ export interface CompleteAnnotationInboxInput {
   readonly metadata: unknown;
 }
 
+export interface SaveArchivePoseFixtureInput {
+  readonly archiveRoot: string;
+  readonly captureId: string;
+  readonly fixture: {
+    readonly video: string;
+    readonly durationSec: number;
+    readonly stepMs: number;
+    readonly model: string;
+    readonly poses: readonly unknown[];
+  };
+}
+
 export async function listAnnotationInbox(root: string): Promise<AnnotationInboxItem[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const videos = await Promise.all(entries
     .filter((entry) => entry.isFile() && isSafeAnnotationVideoFilename(entry.name))
-    .sort((left, right) => left.name.localeCompare(right.name))
     .map(async (entry) => {
       const fileStat = await stat(join(root, entry.name));
       return {
-        id: parse(entry.name).name,
-        filename: entry.name,
-        sizeBytes: fileStat.size,
-        videoUrl: `/videos/${encodeURIComponent(entry.name)}`,
-      } satisfies AnnotationInboxItem;
+        item: {
+          id: parse(entry.name).name,
+          filename: entry.name,
+          sizeBytes: fileStat.size,
+          videoUrl: `/videos/${encodeURIComponent(entry.name)}`,
+        } satisfies AnnotationInboxItem,
+        modifiedAtMs: fileStat.mtimeMs,
+      };
     }));
-  return videos;
+  return videos
+    .sort((left, right) => left.modifiedAtMs - right.modifiedAtMs
+      || left.item.filename.localeCompare(right.item.filename))
+    .map(({ item }) => item);
 }
 
 export async function completeAnnotationInboxItem(
@@ -70,6 +87,81 @@ export async function completeAnnotationInboxItem(
   } finally {
     activeCompletions.delete(completionKey);
   }
+}
+
+export async function saveArchivePoseFixture(
+  input: SaveArchivePoseFixtureInput,
+): Promise<{ captureId: string; frameCount: number }> {
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(input.captureId)) throw new Error("captureId must be safe");
+  if (
+    !input.fixture
+    || basename(input.fixture.video) !== input.fixture.video
+    || !isSafeAnnotationVideoFilename(input.fixture.video)
+    || !Number.isFinite(input.fixture.durationSec)
+    || input.fixture.durationSec <= 0
+    || !Number.isFinite(input.fixture.stepMs)
+    || input.fixture.stepMs <= 0
+    || typeof input.fixture.model !== "string"
+    || !input.fixture.model
+    || !Array.isArray(input.fixture.poses)
+  ) {
+    throw new Error("archive pose fixture is invalid");
+  }
+  const manifest = parseManifest(await readFile(join(input.archiveRoot, "manifest.json"), "utf8"));
+  const entry = manifest.captures.find((capture) => capture.id === input.captureId) as {
+    id?: unknown;
+    video?: unknown;
+    keypoints?: unknown;
+    metadata?: unknown;
+  } | undefined;
+  if (!entry) throw new Error(`archive capture not found: ${input.captureId}`);
+  if (
+    typeof entry.video !== "string"
+    || basename(entry.video) !== input.fixture.video
+    || typeof entry.keypoints !== "string"
+    || typeof entry.metadata !== "string"
+    || !entry.metadata
+  ) {
+    throw new Error("archive capture does not have a compatible video/keypoints/metadata triplet");
+  }
+  const keypointsPath = safeArchivePath(input.archiveRoot, entry.keypoints);
+  const metadataPath = safeArchivePath(input.archiveRoot, entry.metadata);
+  const [previousKeypoints, previousMetadata] = await Promise.all([
+    readFile(keypointsPath),
+    readFile(metadataPath),
+  ]);
+  const metadata = JSON.parse(previousMetadata.toString("utf8")) as Record<string, unknown>;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("archive capture metadata is invalid");
+  }
+  const nonce = `.pose-fixture-${process.pid}-${Date.now()}`;
+  const stagedKeypoints = join(dirname(keypointsPath), `${basename(keypointsPath)}${nonce}`);
+  const stagedMetadata = join(dirname(metadataPath), `${basename(metadataPath)}${nonce}`);
+  try {
+    await Promise.all([
+      writeJson(stagedKeypoints, [input.fixture]),
+      writeJson(stagedMetadata, {
+        ...metadata,
+        model: input.fixture.model,
+        canonicalPoseFrameCount: input.fixture.poses.length,
+        poseFixtureDurationSec: input.fixture.durationSec,
+      }),
+    ]);
+    await rename(stagedKeypoints, keypointsPath);
+    await rename(stagedMetadata, metadataPath);
+  } catch (error) {
+    await Promise.all([
+      writeFile(keypointsPath, previousKeypoints),
+      writeFile(metadataPath, previousMetadata),
+    ]);
+    throw error;
+  } finally {
+    await Promise.all([
+      rm(stagedKeypoints, { force: true }),
+      rm(stagedMetadata, { force: true }),
+    ]);
+  }
+  return { captureId: input.captureId, frameCount: input.fixture.poses.length };
 }
 
 async function completeUnlocked(input: CompleteAnnotationInboxInput): Promise<ConfirmedCaptureEntry> {
@@ -158,6 +250,13 @@ function assertSafeFilename(filename: string): void {
   if (basename(filename) !== filename || !isSafeAnnotationVideoFilename(filename)) {
     throw new Error("filename must be a safe inbox basename");
   }
+}
+
+function safeArchivePath(root: string, relativePath: string): string {
+  const resolvedRoot = resolve(root);
+  const resolvedPath = resolve(resolvedRoot, relativePath);
+  if (!resolvedPath.startsWith(`${resolvedRoot}${sep}`)) throw new Error("archive path is not safe");
+  return resolvedPath;
 }
 
 async function exists(path: string): Promise<boolean> {

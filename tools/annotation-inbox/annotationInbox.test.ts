@@ -1,30 +1,32 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { completeAnnotationInboxItem, listAnnotationInbox } from "./annotationInbox";
 
-test("annotation inbox lists only top-level workout videos in stable order", async () => {
-  const root = await mkdtemp(join(tmpdir(), "form-coach-inbox-"));
+test("annotation inbox lists only top-level workout videos in chronological order", async () => {
+  const root = await mkdtemp(join(tmpdir(), "maxpower-inbox-"));
   try {
     await writeFile(join(root, "bench-b.mp4"), "bbbb");
     await writeFile(join(root, "bench-a.MOV"), "aa");
     await writeFile(join(root, "notes.txt"), "ignore me");
+    await utimes(join(root, "bench-b.mp4"), new Date(1_000), new Date(1_000));
+    await utimes(join(root, "bench-a.MOV"), new Date(2_000), new Date(2_000));
 
     assert.deepEqual(await listAnnotationInbox(root), [
-      {
-        id: "bench-a",
-        filename: "bench-a.MOV",
-        sizeBytes: 2,
-        videoUrl: "/videos/bench-a.MOV",
-      },
       {
         id: "bench-b",
         filename: "bench-b.mp4",
         sizeBytes: 4,
         videoUrl: "/videos/bench-b.mp4",
+      },
+      {
+        id: "bench-a",
+        filename: "bench-a.MOV",
+        sizeBytes: 2,
+        videoUrl: "/videos/bench-a.MOV",
       },
     ]);
   } finally {
@@ -33,7 +35,7 @@ test("annotation inbox lists only top-level workout videos in stable order", asy
 });
 
 test("completing an annotation archives the video and sidecars before removing it from the inbox", async () => {
-  const root = await mkdtemp(join(tmpdir(), "form-coach-inbox-"));
+  const root = await mkdtemp(join(tmpdir(), "maxpower-inbox-"));
   const inboxRoot = join(root, "new-video");
   const archiveRoot = join(root, "confirmed-captures");
   await mkdir(inboxRoot);
@@ -52,7 +54,7 @@ test("completing an annotation archives the video and sidecars before removing i
       archiveGroup: "chest",
       keypoints: [{ video: "bench.mp4", durationSec: 3, stepMs: 33, model: "pose_landmarker_lite", poses: [] }],
       labels: { exerciseId: "barbell_bench_press", labels: [{ repIndex: 1, startMs: 100, extremeMs: 500, endMs: 900 }] },
-      metadata: { schemaVersion: "form-coach-inbox-review/v1", exerciseId: "barbell_bench_press" },
+      metadata: { schemaVersion: "maxpower-inbox-review/v1", exerciseId: "barbell_bench_press" },
     });
 
     assert.deepEqual(completed, {
@@ -74,7 +76,7 @@ test("completing an annotation archives the video and sidecars before removing i
 });
 
 test("an archive collision leaves the inbox source untouched", async () => {
-  const root = await mkdtemp(join(tmpdir(), "form-coach-inbox-"));
+  const root = await mkdtemp(join(tmpdir(), "maxpower-inbox-"));
   const inboxRoot = join(root, "new-video");
   const archiveRoot = join(root, "confirmed-captures");
   await mkdir(inboxRoot);
@@ -101,7 +103,7 @@ test("an archive collision leaves the inbox source untouched", async () => {
 });
 
 test("duplicate completion requests cannot race the same inbox video", async () => {
-  const root = await mkdtemp(join(tmpdir(), "form-coach-inbox-"));
+  const root = await mkdtemp(join(tmpdir(), "maxpower-inbox-"));
   const inboxRoot = join(root, "new-video");
   const archiveRoot = join(root, "confirmed-captures");
   await mkdir(inboxRoot);

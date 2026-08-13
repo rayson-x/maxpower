@@ -6,6 +6,7 @@ import { basename, join } from "node:path";
 import {
   completeAnnotationInboxItem,
   listAnnotationInbox,
+  saveArchivePoseFixture,
   type CompleteAnnotationInboxInput,
 } from "./annotationInbox";
 import {
@@ -67,6 +68,19 @@ async function route(
       archiveRoot: options.archiveRoot,
     });
     sendJson(response, 200, { completed });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/annotation-inbox/archive-pose-fixture") {
+    const body = await readJsonBody(request) as {
+      captureId: string;
+      fixture: Parameters<typeof saveArchivePoseFixture>[0]["fixture"];
+    };
+    const saved = await saveArchivePoseFixture({
+      archiveRoot: options.archiveRoot,
+      captureId: body.captureId,
+      fixture: body.fixture,
+    });
+    sendJson(response, 200, saved);
     return;
   }
   if (request.method === "GET" && url.pathname.startsWith("/videos/")) {
