@@ -100,6 +100,10 @@ test("Provider 只能调用闭合周报工具，客户端保存 artifact 后以�
   const manifest = provider.requests[0]?.toolManifest;
   assert.ok(manifest?.some((tool) => tool.name === "coach.show_weekly_report" && tool.output === "artifact_ref"));
   assert.ok(manifest?.some((tool) => tool.name === "ui.request_choice" && tool.executionMode === "human_in_loop"));
+  const choiceSchema = manifest?.find((tool) => tool.name === "ui.request_choice")?.inputSchema;
+  const optionsSchema = (choiceSchema?.properties as Record<string, Record<string, unknown>> | undefined)?.options;
+  assert.deepEqual((optionsSchema?.items as Record<string, unknown> | undefined)?.required, ["id", "label"]);
+  assert.equal((optionsSchema?.items as Record<string, unknown> | undefined)?.additionalProperties, false);
   assert.equal(manifest?.every((tool) => tool.schemaVersion === 1 && tool.outputLimit === 1), true);
 });
 
