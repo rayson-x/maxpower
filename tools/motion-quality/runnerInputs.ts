@@ -20,6 +20,7 @@ export type GovernanceInputRole =
   | "benchBarbellAxis"
   | "profileArtifact"
   | "blindPlan"
+  | "frozenPredictions"
   | "rustWasm"
   | "sourceIndependentBenchProfile"
   | "fullDataRun";
@@ -200,7 +201,7 @@ interface SerializedSourceIndependentBenchProfiles {
 
 const GOVERNANCE_INPUT_ROLES: readonly GovernanceInputRole[] = Object.freeze([
   "humanRanges", "rawHalpe26", "benchBarbellAxis", "profileArtifact",
-  "blindPlan", "rustWasm", "sourceIndependentBenchProfile", "fullDataRun",
+  "blindPlan", "frozenPredictions", "rustWasm", "sourceIndependentBenchProfile", "fullDataRun",
 ]);
 
 const ROLE_POLICIES: Readonly<Record<GovernanceInputRole, Readonly<{
@@ -234,6 +235,12 @@ const ROLE_POLICIES: Readonly<Record<GovernanceInputRole, Readonly<{
     groupKey: "sourceCaptureId",
   }),
   blindPlan: Object.freeze({
+    assetId: "motion-quality-review-evaluation-artifacts",
+    role: "evaluation_artifact",
+    admission: "evaluation_only",
+    groupKey: "sourceCaptureId",
+  }),
+  frozenPredictions: Object.freeze({
     assetId: "motion-quality-review-evaluation-artifacts",
     role: "evaluation_artifact",
     admission: "evaluation_only",
