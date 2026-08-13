@@ -10,6 +10,7 @@ import {
   buildReviewProposal,
   loadFrozenBenchAblationPolicyReport,
   materializeAssessmentProfile,
+  releaseQualityProposalsForPolicy,
   reviewCapabilityForContext,
   resolveAppliedBenchPolicy,
   routeSourceFramesOnce,
@@ -105,36 +106,31 @@ test("review capabilities stay inside the public four-state contract", () => {
     capturePosition: string;
     anatomicalSide: "left" | "right" | null;
     profileIdentity: string;
-    status: string;
-  }>) => reviewCapabilityForContext({ ...input, appliedPolicy: { status: input.status } });
+  }>) => reviewCapabilityForContext(input);
 
   assert.equal(capability({
     actionId: "barbell_bench_press",
     capturePosition: "frontLeft45",
     anatomicalSide: null,
     profileIdentity: "barbell_bench_press/frontLeft45/bilateral/barbell/fixture-v1",
-    status: "selected",
-  }), "quality_supported");
+  }), "phase_supported");
   assert.equal(capability({
     actionId: "barbell_bench_press",
     capturePosition: "front",
     anatomicalSide: null,
     profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
-    status: "no_winner",
   }), "phase_supported");
   assert.equal(capability({
     actionId: "pull_up",
     capturePosition: "rearLeft45",
     anatomicalSide: null,
     profileIdentity: "pull_up/rearLeft45/bilateral/fixed_pull_up_bar/fixture-v1",
-    status: "not_applicable",
   }), "observation_only");
   assert.equal(capability({
     actionId: "unknown_action",
     capturePosition: "front",
     anatomicalSide: null,
     profileIdentity: "unknown_action/front/bilateral/bodyweight/fixture-v1",
-    status: "not_applicable",
   }), "unsupported");
 });
 
@@ -195,6 +191,40 @@ test("review proposal preserves immutable Rust endpoints and eight conclusions",
   ]);
   assert.equal(proposal.reps[0].conclusions.length, 8);
   assert.equal(Object.isFrozen(proposal), true);
+});
+
+test("applied review policy never mutates decoded Rust quality proposals", () => {
+  const rustProposal = {
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposalId: "rust-proposal-immutable",
+    repId: 1,
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    equipmentRole: "barbell_axis_phase_and_path",
+    capability: "phase_supported" as const,
+    ruleBundleVersion: "personal-motion-quality-rules/v1",
+    profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
+    profileHash: "0000000000000001",
+    canonicalSliceHash: "0000000000000002",
+    endpoints: [],
+    conclusions: [],
+    contentHash: "0123456789abcdef",
+  };
+  const before = JSON.stringify(rustProposal);
+  const released = releaseQualityProposalsForPolicy(
+    [rustProposal],
+    {
+      status: "no_winner",
+      candidate: "diagnostic_unselected_fused",
+      claimEligibility: "diagnostic_only_not_frozen_policy_claim",
+      reportDigest: "a".repeat(64),
+    },
+  );
+
+  assert.equal(released[0], rustProposal);
+  assert.equal(JSON.stringify(released[0]), before);
+  assert.deepEqual(Object.keys(released[0]), Object.keys(rustProposal));
 });
 
 test("actual profile lineage excludes same-source bundles from blind inference", () => {

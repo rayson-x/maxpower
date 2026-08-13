@@ -24,10 +24,17 @@ interface ReviewEvidenceFrame {
   readonly equipment?: readonly Readonly<Record<string, unknown>>[];
 }
 
+type ReviewCapability =
+  | "quality_supported"
+  | "phase_supported"
+  | "observation_only"
+  | "unsupported";
+
 interface FullContext {
   readonly captureId: string;
   readonly actionId: string;
   readonly capturePosition: string;
+  readonly capability: ReviewCapability;
   readonly qualityProposals: readonly Readonly<Record<string, unknown>>[];
   readonly reviewProposal: Readonly<{
     schemaVersion: string;
@@ -91,6 +98,8 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
   ]));
   const records = new Map(input.records.map((record) => [record.captureId, record]));
   const items = input.fullDataRun.sources.flatMap((source) => source.contexts.map((context) => {
+    const capability = requireReviewCapability(context.capability, context.captureId);
+    assertContextRustProposalIntegrity(context);
     const record = records.get(context.captureId);
     if (!record) throw new Error(`${context.captureId}: review truth/context record missing`);
     const sourceCaptureId = record.sourceCaptureId ?? record.captureId;
@@ -99,9 +108,9 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
     }
     const from = record.evaluationWindow?.startMs ?? 0;
     const until = record.evaluationWindow?.endMs ?? record.source?.durationMs ?? Number.MAX_SAFE_INTEGER;
-    const { evidenceHash, ...evidenceSemantic } = context.currentRustEvidence;
+    const { evidenceHash: sourceEvidenceHash, ...evidenceSemantic } = context.currentRustEvidence;
     if (context.currentRustEvidence.producer !== "current_rust_single_pass"
-        || sha256(stableStringify(evidenceSemantic)) !== evidenceHash) {
+        || sha256(stableStringify(evidenceSemantic)) !== sourceEvidenceHash) {
       throw new Error(`${context.captureId}: current Rust evidence hash mismatch`);
     }
     const frames = context.currentRustEvidence.frames
@@ -121,11 +130,20 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
         ? [{ timestampMs: frame.timestampMs, x: centerX, y: centerY }]
         : [];
     }));
+    const reviewEvidenceSemantic = {
+      maximumOverlayAgeMs: 150,
+      source: "current_rust_single_pass" as const,
+      lineage: { sourceEvidenceHash },
+      frames,
+      equipmentTrajectories: equipmentPoints.length
+        ? [{ kind: "external_load_center", points: equipmentPoints }]
+        : [],
+    };
     return deepFreeze({
       itemId: context.captureId,
       captureId: context.captureId,
       title: `${context.actionId} · ${context.capturePosition}`,
-      capability: String(context.qualityProposals[0]?.capability ?? "unsupported"),
+      capability,
       context: {
         action: context.actionId,
         view: context.capturePosition,
@@ -138,13 +156,8 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
       })),
       expectedCount: record.expectedCount ?? null,
       evidence: {
-        maximumOverlayAgeMs: 150,
-        source: "current_rust_single_pass",
-        evidenceHash,
-        frames,
-        equipmentTrajectories: equipmentPoints.length
-          ? [{ kind: "external_load_center", points: equipmentPoints }]
-          : [],
+        ...reviewEvidenceSemantic,
+        evidenceHash: sha256(stableStringify(reviewEvidenceSemantic)),
       },
       evidenceLinks: {
         calibrationContextId: context.captureId,
@@ -204,6 +217,96 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
     ...semantic,
     releaseHash: `sha256:${sha256(stableStringify(semantic))}`,
   });
+}
+
+function requireReviewCapability(value: unknown, captureId: string): ReviewCapability {
+  if (value !== "quality_supported"
+      && value !== "phase_supported"
+      && value !== "observation_only"
+      && value !== "unsupported") {
+    throw new Error(`${captureId}: invalid review capability`);
+  }
+  return value;
+}
+
+const RUST_PROPOSAL_KEYS = Object.freeze([
+  "schemaVersion",
+  "proposalId",
+  "repId",
+  "actionId",
+  "capturePosition",
+  "anatomicalSide",
+  "equipmentRole",
+  "capability",
+  "ruleBundleVersion",
+  "profileIdentity",
+  "profileHash",
+  "canonicalSliceHash",
+  "endpoints",
+  "conclusions",
+  "contentHash",
+].sort());
+
+function assertContextRustProposalIntegrity(context: FullContext): void {
+  const { proposalHash, ...reviewSemantic } = context.reviewProposal;
+  if (!/^[a-f0-9]{64}$/u.test(proposalHash)
+      || sha256(stableStringify(reviewSemantic)) !== proposalHash) {
+    throw new Error(`${context.captureId}: review proposal hash mismatch`);
+  }
+  const reviewReps = new Map<string, Readonly<Record<string, unknown>>>();
+  for (const raw of context.reviewProposal.reps) {
+    const rep = requireRecord(raw, `${context.captureId}: review rep`);
+    const proposalId = requireString(
+      rep.rustProposalId,
+      `${context.captureId}: review Rust proposal id`,
+    );
+    if (reviewReps.has(proposalId)) {
+      throw new Error(`${context.captureId}: duplicate review Rust proposal id`);
+    }
+    reviewReps.set(proposalId, rep);
+  }
+  if (reviewReps.size !== context.qualityProposals.length) {
+    throw new Error(`${context.captureId}: Rust proposal count mismatch`);
+  }
+  for (const raw of context.qualityProposals) {
+    const proposal = requireRecord(raw, `${context.captureId}: Rust proposal`);
+    const keys = Object.keys(proposal).sort();
+    if (keys.length !== RUST_PROPOSAL_KEYS.length
+        || keys.some((key, index) => key !== RUST_PROPOSAL_KEYS[index])) {
+      throw new Error(`${context.captureId}: Rust proposal contains non-canonical fields`);
+    }
+    const proposalId = requireString(
+      proposal.proposalId,
+      `${context.captureId}: Rust proposal id`,
+    );
+    const contentHash = requireString(
+      proposal.contentHash,
+      `${context.captureId}: Rust proposal content hash`,
+    );
+    if (!/^[a-f0-9]{16}$/u.test(contentHash)) {
+      throw new Error(`${context.captureId}: invalid Rust proposal content hash`);
+    }
+    const rustCapability = requireReviewCapability(proposal.capability, context.captureId);
+    const reviewRep = reviewReps.get(proposalId);
+    if (!reviewRep
+        || reviewRep.rustContentHash !== contentHash
+        || reviewRep.rustCapability !== rustCapability
+        || reviewRep.rustProposalDigest !== sha256(stableStringify(proposal))) {
+      throw new Error(`${context.captureId}: Rust proposal content mismatch`);
+    }
+  }
+}
+
+function requireRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string") throw new Error(`${label} must be a string`);
+  return value;
 }
 
 export async function buildQualityReviewRelease(input: Readonly<{

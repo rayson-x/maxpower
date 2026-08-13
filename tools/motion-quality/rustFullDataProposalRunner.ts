@@ -112,6 +112,8 @@ export interface FrozenReviewProposal {
     repId: string;
     rustProposalId: string;
     rustContentHash: string;
+    rustCapability: MotionAssessmentCapability;
+    rustProposalDigest: string;
     endpoints: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
     conclusions: readonly Readonly<Record<string, unknown>>[];
   }>[];
@@ -141,6 +143,11 @@ export function buildReviewProposal(input: ReviewProposalInput): Readonly<Frozen
       repId: `${input.captureId}:${String(proposal.repId)}`,
       rustProposalId: requireString(proposal.proposalId, "Rust proposal id"),
       rustContentHash: requireString(proposal.contentHash, "Rust content hash"),
+      rustCapability: requireMotionAssessmentCapability(
+        proposal.capability,
+        "Rust proposal capability",
+      ),
+      rustProposalDigest: sha256(stableStringify(proposal)),
       endpoints: orderedEndpoints,
       conclusions,
     };
@@ -174,6 +181,19 @@ export function buildReviewProposal(input: ReviewProposalInput): Readonly<Frozen
     proposalHash: sha256(stableStringify(semantic)),
     ...semantic,
   });
+}
+
+function requireMotionAssessmentCapability(
+  value: unknown,
+  label: string,
+): MotionAssessmentCapability {
+  if (value !== "quality_supported"
+      && value !== "phase_supported"
+      && value !== "observation_only"
+      && value !== "unsupported") {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
 }
 
 interface GoldenRecord {
@@ -559,12 +579,10 @@ export async function runFullDataProposal(
         capturePosition: record.capturePosition,
         anatomicalSide: side,
         profileIdentity: installed.identity,
-        appliedPolicy,
       });
       const releaseQualityProposals = releaseQualityProposalsForPolicy(
         [...rustProposals.values()],
         appliedPolicy,
-        contextCapability,
       );
       const reviewProposal = buildReviewProposal({
         captureId: record.captureId,
@@ -952,7 +970,7 @@ function requireSha256(value: unknown, label: string): string {
   return digest;
 }
 
-function releaseQualityProposalsForPolicy(
+export function releaseQualityProposalsForPolicy(
   proposals: readonly Readonly<DecodedRustQualityProposal>[],
   appliedPolicy: Readonly<{
     status: string;
@@ -960,7 +978,6 @@ function releaseQualityProposalsForPolicy(
     claimEligibility: string;
     reportDigest: string;
   }>,
-  capability: MotionAssessmentCapability,
 ): readonly Readonly<Record<string, unknown>>[] {
   if (appliedPolicy.status === "no_winner" && (
     appliedPolicy.candidate !== "diagnostic_unselected_fused"
@@ -968,16 +985,7 @@ function releaseQualityProposalsForPolicy(
   )) {
     throw new Error("no_winner may only emit an unselected fused diagnostic");
   }
-  return deepFreeze(proposals.map((proposal) => ({
-    ...proposal,
-    rustCapability: proposal.capability,
-    capability,
-    ...(appliedPolicy.status === "no_winner" ? {
-      diagnosticCandidate: "diagnostic_unselected_fused",
-      frozenPolicyClaim: false,
-      diagnosticPolicyReportDigest: appliedPolicy.reportDigest,
-    } : {}),
-  })));
+  return Object.freeze([...proposals]) as readonly Readonly<Record<string, unknown>>[];
 }
 
 export function reviewCapabilityForContext(input: Readonly<{
@@ -985,7 +993,6 @@ export function reviewCapabilityForContext(input: Readonly<{
   capturePosition: string;
   anatomicalSide: "left" | "right" | null;
   profileIdentity: string;
-  appliedPolicy: Readonly<{ status: string }>;
 }>): MotionAssessmentCapability {
   const identityParts = input.profileIdentity.split("/");
   const equipment = identityParts[3] ?? "";
@@ -996,7 +1003,6 @@ export function reviewCapabilityForContext(input: Readonly<{
     trainingSide: input.anatomicalSide ?? "bilateral",
   });
   if (!contract) return "unsupported";
-  if (input.appliedPolicy.status === "selected") return "quality_supported";
   return contract.capability.phase;
 }
 

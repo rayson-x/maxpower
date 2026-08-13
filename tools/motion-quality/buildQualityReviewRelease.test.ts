@@ -3,8 +3,22 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import { assembleQualityReviewRelease } from "./buildQualityReviewRelease.js";
+import { buildReviewProposal } from "./rustFullDataProposalRunner.js";
 
 test("review release keeps human start/end separate from immutable Rust proposal", () => {
+  const rustProposal = rustQualityProposalFixture("phase_supported");
+  const reviewProposal = buildReviewProposal({
+    captureId: "context-a",
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    sourceCaptureId: "source-a",
+    videoRef: "chest/source-a.mp4",
+    profileIdentity: rustProposal.profileIdentity,
+    profileHash: rustProposal.profileHash,
+    capability: "phase_supported",
+    rustProposals: [rustProposal],
+  });
   const evidence = {
     schemaVersion: "maxpower-current-rust-context-evidence/v1" as const,
     packetSchema: "MOTN/1.8+QLT1",
@@ -29,13 +43,9 @@ test("review release keeps human start/end separate from immutable Rust proposal
           captureId: "context-a",
           actionId: "barbell_bench_press",
           capturePosition: "front",
-          qualityProposals: [{ capability: "quality_supported" }],
-          reviewProposal: {
-            schemaVersion: "maxpower.motion-quality-proposal/v1",
-            proposalHash: "b".repeat(64),
-            lineage: { runKind: "full_data_proposal" },
-            reps: [],
-          },
+          capability: "phase_supported",
+          qualityProposals: [rustProposal],
+          reviewProposal,
           currentRustEvidence: {
             ...evidence,
             evidenceHash: sha256(stableStringify(evidence)),
@@ -59,9 +69,24 @@ test("review release keeps human start/end separate from immutable Rust proposal
   assert.match(release.releaseHash, /^sha256:[a-f0-9]{64}$/u);
   assert.deepEqual(release.items[0].humanSegments, [{ startMs: 500, endMs: 1_500 }]);
   assert.equal("peakMs" in release.items[0].humanSegments[0], false);
-  assert.equal(release.items[0].proposal.proposalHash, "b".repeat(64));
+  assert.equal(release.items[0].proposal.proposalHash, reviewProposal.proposalHash);
   assert.equal(release.items[0].evidence.source, "current_rust_single_pass");
   assert.equal(release.items[0].evidence.equipmentTrajectories[0].points[0].y, 0.4);
+  const reviewEvidence = release.items[0].evidence as typeof release.items[0]["evidence"] & {
+    lineage?: Readonly<{ sourceEvidenceHash: string }>;
+  };
+  assert.equal(
+    reviewEvidence.lineage?.sourceEvidenceHash,
+    sha256(stableStringify(evidence)),
+  );
+  const { evidenceHash: reviewEvidenceHash, ...reviewEvidenceSemantic } = reviewEvidence;
+  assert.notEqual(reviewEvidenceHash, reviewEvidence.lineage?.sourceEvidenceHash);
+  assert.equal(reviewEvidenceHash, sha256(stableStringify(reviewEvidenceSemantic)));
+  const tamperedEvidence = JSON.parse(JSON.stringify(reviewEvidenceSemantic)) as {
+    frames: Array<{ timestampMs: number }>;
+  };
+  tamperedEvidence.frames[0].timestampMs += 1;
+  assert.notEqual(reviewEvidenceHash, sha256(stableStringify(tamperedEvidence)));
   assert.deepEqual(
     release.evidenceRuns.benchmark.frozenPredictions,
     frozenEvaluationRun(),
@@ -72,6 +97,161 @@ test("review release keeps human start/end separate from immutable Rust proposal
   assert.equal(release.items[0].evidenceLinks.benchmarkContextId, "context-a");
   assert.equal(Object.isFrozen(release), true);
 });
+
+test("review release rejects a context capability outside the public contract", () => {
+  const evidence = {
+    schemaVersion: "maxpower-current-rust-context-evidence/v1" as const,
+    packetSchema: "MOTN/1.8+QLT1",
+    producer: "current_rust_single_pass" as const,
+    frames: [],
+  };
+  const input = {
+    releaseId: "release-invalid-capability",
+    frozenAt: "2026-08-13T10:30:00.000Z",
+    fullDataRun: {
+      runId: "full-invalid-capability",
+      runKind: "full_data_proposal",
+      frozenDigest: "a".repeat(64),
+      sources: [{
+        sourceCaptureId: "source-invalid-capability",
+        videoRef: null,
+        contexts: [{
+          captureId: "context-invalid-capability",
+          actionId: "barbell_bench_press",
+          capturePosition: "front",
+          capability: "profile_defined",
+          qualityProposals: [],
+          reviewProposal: {
+            schemaVersion: "maxpower.motion-quality-proposal/v1",
+            proposalHash: "b".repeat(64),
+            lineage: { runKind: "full_data_proposal" },
+            reps: [],
+          },
+          currentRustEvidence: {
+            ...evidence,
+            evidenceHash: sha256(stableStringify(evidence)),
+          },
+        }],
+      }],
+    },
+    frozenEvaluationRun: frozenEvaluationRun(),
+    records: [{
+      captureId: "context-invalid-capability",
+      sourceCaptureId: "source-invalid-capability",
+      exerciseId: "barbell_bench_press",
+      capturePosition: "front",
+      source: { durationMs: 2_000 },
+    }],
+  } as unknown as Parameters<typeof assembleQualityReviewRelease>[0];
+
+  assert.throws(
+    () => assembleQualityReviewRelease(input),
+    /context-invalid-capability: invalid review capability/u,
+  );
+});
+
+test("review release rejects a Rust proposal changed after its review projection was sealed", () => {
+  const originalProposal = rustQualityProposalFixture("phase_supported");
+  const reviewProposal = buildReviewProposal({
+    captureId: "context-proposal-integrity",
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    sourceCaptureId: "source-proposal-integrity",
+    videoRef: null,
+    profileIdentity: originalProposal.profileIdentity,
+    profileHash: originalProposal.profileHash,
+    capability: "phase_supported",
+    rustProposals: [originalProposal],
+  });
+  const changedProposal = {
+    ...originalProposal,
+    capability: "quality_supported" as const,
+  };
+  const evidence = {
+    schemaVersion: "maxpower-current-rust-context-evidence/v1" as const,
+    packetSchema: "MOTN/1.8+QLT1",
+    producer: "current_rust_single_pass" as const,
+    frames: [],
+  };
+
+  assert.throws(() => assembleQualityReviewRelease({
+    releaseId: "release-proposal-integrity",
+    frozenAt: "2026-08-13T10:30:00.000Z",
+    fullDataRun: {
+      runId: "full-proposal-integrity",
+      runKind: "full_data_proposal",
+      frozenDigest: "a".repeat(64),
+      sources: [{
+        sourceCaptureId: "source-proposal-integrity",
+        videoRef: null,
+        contexts: [{
+          captureId: "context-proposal-integrity",
+          actionId: "barbell_bench_press",
+          capturePosition: "front",
+          capability: "phase_supported",
+          qualityProposals: [changedProposal],
+          reviewProposal,
+          currentRustEvidence: {
+            ...evidence,
+            evidenceHash: sha256(stableStringify(evidence)),
+          },
+        }],
+      }],
+    },
+    frozenEvaluationRun: frozenEvaluationRun(),
+    records: [{
+      captureId: "context-proposal-integrity",
+      sourceCaptureId: "source-proposal-integrity",
+      exerciseId: "barbell_bench_press",
+      capturePosition: "front",
+      source: { durationMs: 2_000 },
+    }],
+  }), /context-proposal-integrity: Rust proposal content mismatch/u);
+});
+
+function rustQualityProposalFixture(
+  capability: "quality_supported" | "phase_supported" | "observation_only" | "unsupported",
+) {
+  return {
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposalId: "rust-proposal-fixture",
+    repId: 1,
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    equipmentRole: "barbell_axis_phase_and_path",
+    capability,
+    ruleBundleVersion: "personal-motion-quality-rules/v1",
+    profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
+    profileHash: "0000000000000001",
+    canonicalSliceHash: "0000000000000002",
+    endpoints: ["start_anchor", "primary_turnaround", "end_return"].map((kind, index) => ({
+      kind,
+      occurredFrameId: index + 1,
+      occurredTimestampMs: 100 + index * 100,
+      causalConfirmedTimestampMs: 300,
+      phaseBefore: "ready",
+      phaseAfter: "eccentric",
+      confidence: 0.8,
+      evidenceChannels: ["pose_measured"],
+    })),
+    conclusions: [
+      "task_completion", "range_of_motion", "phase_control", "support_stability",
+      "bilateral_coordination", "trajectory_control", "standard_variant_compatibility",
+      "observation_confidence",
+    ].map((dimension) => ({
+      conclusionId: `rep:1:${dimension}`,
+      dimension,
+      state: "observed_fact",
+      summary: "fact",
+      evidence: [],
+      reason: null,
+      confidence: 0.8,
+    })),
+    contentHash: "0123456789abcdef",
+  };
+}
 
 function frozenEvaluationRun() {
   const semantic = {
