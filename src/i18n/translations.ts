@@ -119,6 +119,46 @@ export const MOTION_COPY: TranslationTable = {
     en: "This rep finished faster than expected — control the lowering phase",
     zh: "单次的完成节奏快于预期，离心阶段注意控制",
   },
+  "finding.equipmentPrimaryBoundary.title": {
+    en: "Equipment path set the phase boundary",
+    zh: "本次阶段边界来自器械轨迹",
+  },
+  "finding.equipmentPrimaryBoundary.detail": {
+    en: "Rust used the observed equipment turnaround to seal this rep; pose remains separate evidence",
+    zh: "Rust 使用观测到的器械换向封装本次动作，骨架仍作为独立证据保留",
+  },
+  "finding.poseEquipmentTurnaroundAligned.title": {
+    en: "Pose and equipment turnaround agree",
+    zh: "骨架与器械换向一致",
+  },
+  "finding.poseEquipmentTurnaroundAligned.detail": {
+    en: "The pose and equipment channels observed the turnaround within the configured tolerance",
+    zh: "骨架与器械通道在设定容差内观测到同一次换向",
+  },
+  "finding.poseUnavailableAtTurnaround.title": {
+    en: "Pose was unavailable at turnaround",
+    zh: "换向点缺少可靠骨架",
+  },
+  "finding.poseUnavailableAtTurnaround.detail": {
+    en: "The equipment path was observed, but the required pose evidence was unavailable at the turnaround",
+    zh: "器械轨迹可观测，但换向时缺少所需的可靠骨架证据",
+  },
+  "finding.poseEquipmentTurnaroundConflict.title": {
+    en: "Pose and equipment turnaround conflict",
+    zh: "骨架与器械换向存在冲突",
+  },
+  "finding.poseEquipmentTurnaroundConflict.detail": {
+    en: "The two observation channels did not agree within tolerance; review this rep instead of choosing one as truth",
+    zh: "两个观测通道未在容差内一致；应复核本次动作，不能直接选择一方作为真值",
+  },
+  "finding.equipmentPathCoverageLow.title": {
+    en: "Equipment path coverage is low",
+    zh: "器械轨迹覆盖不足",
+  },
+  "finding.equipmentPathCoverageLow.detail": {
+    en: "Too little of the equipment path was observed to treat the full trajectory as reliable",
+    zh: "可观测的器械轨迹过少，不能把完整路径视为可靠证据",
+  },
 
   // 实时便签一行文案
   "live.steady": { en: "Tempo and path are steady — keep going", zh: "节奏与轨迹稳定 — 保持" },
