@@ -26,6 +26,7 @@ export interface KinematicsProfile {
   version: string;
   movementPattern:
     | "horizontal_pull"
+    | "horizontal_push"
     | "vertical_pull"
     | "vertical_push"
     | "shoulder_abduction"
@@ -130,6 +131,48 @@ const PROFILE_LIST: readonly KinematicsProfile[] = [
     // instead of borrowing generic standing evidence and misclassifying a squat
     // as an upper-body movement.
     recognitionTags: [],
+  }),
+  // Horizontal presses are explicitly selected in the first field version.
+  // Their provisional profiles segment elbow extension/flexion, but do not
+  // claim exercise classification or form-quality assessment.
+  profile({
+    exerciseId: "barbell_bench_press",
+    version: "barbell-bench-press-kinematics/v1",
+    movementPattern: "horizontal_push",
+    signal: "elbow_angle",
+    effortExtreme: "max",
+    preferredView: "oblique45",
+    supportedViews: FRONT_OBLIQUE_VIEWS,
+    metricViews: FRONT_OBLIQUE_VIEWS,
+    amplitudeJoints: ["shoulder", "elbow", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
+  }),
+  profile({
+    exerciseId: "machine_chest_press",
+    version: "machine-chest-press-kinematics/v1",
+    movementPattern: "horizontal_push",
+    signal: "elbow_angle",
+    effortExtreme: "max",
+    preferredView: "oblique45",
+    supportedViews: FRONT_OBLIQUE_VIEWS,
+    metricViews: FRONT_OBLIQUE_VIEWS,
+    amplitudeJoints: ["shoulder", "elbow", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
+  }),
+  profile({
+    exerciseId: "push_up",
+    version: "push-up-kinematics/v1",
+    movementPattern: "horizontal_push",
+    signal: "elbow_angle",
+    effortExtreme: "max",
+    preferredView: "oblique45",
+    supportedViews: FRONT_OBLIQUE_VIEWS,
+    metricViews: FRONT_OBLIQUE_VIEWS,
+    amplitudeJoints: ["shoulder", "elbow", "wrist"],
+    recognitionTags: [],
+    autoRecognizable: false,
   }),
   // Shoulder profiles are intentionally user-selected during the first field
   // collection. A single 2D wrist path cannot safely distinguish a seated

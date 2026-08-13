@@ -42,6 +42,48 @@ test("catalog covers every training muscle group and carries the group in each r
   assert.equal(EXERCISE_REGISTRY.require("triceps_pushdown").muscleGroup, "arms");
 });
 
+test("catalog includes the first reviewed batch of common gym identities", () => {
+  const commonExerciseIds = [
+    "decline_barbell_bench_press",
+    "chest_dip",
+    "pec_deck_fly",
+    "chin_up",
+    "t_bar_row",
+    "back_extension",
+    "front_squat",
+    "goblet_squat",
+    "seated_leg_curl",
+    "lying_leg_curl",
+    "glute_bridge",
+    "arnold_press",
+    "dumbbell_shoulder_press",
+    "upright_row",
+    "preacher_curl",
+    "incline_dumbbell_curl",
+    "close_grip_bench_press",
+  ];
+
+  assert.deepEqual(
+    commonExerciseIds.filter((exerciseId) => !EXERCISE_REGISTRY.get(exerciseId)),
+    [],
+  );
+  assert.equal(EXERCISE_REGISTRY.exercises.length, 70);
+  assert.ok(
+    commonExerciseIds.every(
+      (exerciseId) => EXERCISE_REGISTRY.require(exerciseId).maturity === "catalog_only",
+    ),
+  );
+});
+
+test("external research actions keep exact identities and remain catalog-only", () => {
+  const expected = ["jumping_jack", "sit_up", "alternating_lunge", "standing_dumbbell_row", "alternating_dumbbell_biceps_curl"];
+  assert.deepEqual(expected.filter((id) => !EXERCISE_REGISTRY.get(id)), []);
+  assert.ok(expected.every((id) => EXERCISE_REGISTRY.require(id).maturity === "catalog_only"));
+  assert.notEqual(EXERCISE_REGISTRY.require("jumping_jack").id, "step_jack");
+  assert.notEqual(EXERCISE_REGISTRY.require("alternating_lunge").id, "walking_lunge");
+  assert.equal(EXERCISE_REGISTRY.require("sit_up").muscleGroup, "core");
+});
+
 test("registry rejects duplicate ids, broken variants, and illegal maturity", () => {
   const base = EXERCISE_REGISTRY.require("barbell_row");
   assert.throws(
@@ -53,7 +95,7 @@ test("registry rejects duplicate ids, broken variants, and illegal maturity", ()
     /references missing variation parent/,
   );
   assert.throws(
-    () => loadExerciseRegistry([{ ...base, muscleGroup: "core" }]),
+    () => loadExerciseRegistry([{ ...base, muscleGroup: "neck" }]),
     /invalid muscleGroup/,
   );
   assert.throws(

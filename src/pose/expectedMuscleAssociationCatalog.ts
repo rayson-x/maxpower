@@ -14,11 +14,13 @@ export type MuscleId =
   | "latissimus_dorsi"
   | "elbow_flexors"
   | "scapular_retractors"
+  | "upper_trapezius"
   | "lower_trapezius"
   | "rotator_cuff"
   | "spinal_erectors"
   | "serratus_anterior"
-  | "trunk_stabilizers";
+  | "trunk_stabilizers"
+  | "abdominals";
 
 export type MuscleRole = "primary" | "secondary" | "stabilizer";
 
@@ -98,7 +100,7 @@ export interface ExpectedMusclePresentation {
 }
 
 export const EXPECTED_MUSCLE_ASSOCIATION_SCHEMA =
-  "form-coach-expected-muscle-associations/v1" as const;
+  "maxpower-expected-muscle-associations/v1" as const;
 
 export const MUSCLE_CATALOG: readonly MuscleDefinition[] = [
   { id: "quadriceps", labelZh: "股四头肌群", labelEn: "Quadriceps" },
@@ -116,11 +118,13 @@ export const MUSCLE_CATALOG: readonly MuscleDefinition[] = [
   { id: "latissimus_dorsi", labelZh: "背阔肌", labelEn: "Latissimus dorsi" },
   { id: "elbow_flexors", labelZh: "屈肘肌群", labelEn: "Elbow flexors" },
   { id: "scapular_retractors", labelZh: "肩胛后缩肌群", labelEn: "Scapular retractors" },
+  { id: "upper_trapezius", labelZh: "上斜方肌", labelEn: "Upper trapezius" },
   { id: "lower_trapezius", labelZh: "下斜方肌", labelEn: "Lower trapezius" },
   { id: "rotator_cuff", labelZh: "肩袖肌群", labelEn: "Rotator cuff" },
   { id: "spinal_erectors", labelZh: "竖脊肌群", labelEn: "Spinal erectors" },
   { id: "serratus_anterior", labelZh: "前锯肌", labelEn: "Serratus anterior" },
   { id: "trunk_stabilizers", labelZh: "躯干稳定肌群", labelEn: "Trunk stabilizers" },
+  { id: "abdominals", labelZh: "腹肌群", labelEn: "Abdominals" },
 ] as const;
 
 const exactExerciseSource = (
@@ -155,6 +159,20 @@ export const MUSCLE_ASSOCIATION_SOURCES: readonly AssociationSource[] = [
     id: "ace-exercise-library",
     title: "ACE Exercise Library",
     url: "https://www.acefitness.org/resources/everyone/exercise-library/",
+    evidenceKind: "exercise_reference",
+    exactExerciseId: null,
+  },
+  {
+    id: "exercise-api-v1-1",
+    title: "ExerciseAPI dataset v1.1.0",
+    url: "https://exercise-api.com/docs",
+    evidenceKind: "exercise_reference",
+    exactExerciseId: null,
+  },
+  {
+    id: "free-exercise-db",
+    title: "free-exercise-db open exercise metadata",
+    url: "https://github.com/yuhonas/free-exercise-db",
     evidenceKind: "exercise_reference",
     exactExerciseId: null,
   },
@@ -508,6 +526,52 @@ const TRICEPS_EXTENSION_PHASES = [
   phase("returning", "屈肘回程", [motion("elbow", "flexion", "前臂回到起始方向。")], ["triceps"], "回程为预计机械控制关系。"),
 ] as const;
 
+const CHEST_DIP_PHASES = [
+  phase(
+    "lowering",
+    "下放",
+    [
+      motion("elbow", "flexion", "肘部投影趋向屈曲。"),
+      motion("shoulder", "extension", "上臂相对躯干向后移动。"),
+    ],
+    ["pectorals", "triceps", "anterior_deltoids"],
+    "前倾程度和肩部路径属于动作身份；轨迹不能显示胸肌与肱三头肌的实际分担。",
+  ),
+  phase(
+    "pressing",
+    "撑起",
+    [
+      motion("elbow", "extension", "肘部投影趋向伸展。"),
+      motion("shoulder", "flexion", "上臂回到躯干侧方。"),
+    ],
+    ["pectorals", "triceps", "anterior_deltoids"],
+    "撑起只支持双杠推类动作语义，不支持肌肉激活比例。",
+  ),
+] as const;
+
+const UPRIGHT_ROW_PHASES = [
+  phase(
+    "raising",
+    "向上提拉",
+    [
+      motion("shoulder", "abduction", "上臂相对躯干向侧上方抬高。"),
+      motion("elbow", "flexion", "肘部投影趋向屈曲。"),
+    ],
+    ["medial_deltoids", "upper_trapezius", "elbow_flexors"],
+    "肩胛上提和旋转只能弱观察，不能据此声称上斜方肌实际激活。",
+  ),
+  phase(
+    "lowering",
+    "下放",
+    [
+      motion("shoulder", "adduction", "上臂回到躯干侧方。"),
+      motion("elbow", "extension", "肘部投影趋向伸展。"),
+    ],
+    ["medial_deltoids", "upper_trapezius", "elbow_flexors"],
+    "下放阶段为预计机械关联。",
+  ),
+] as const;
+
 const gymAssociation = (
   exerciseId: string,
   muscles: readonly ExpectedMuscleRole[],
@@ -520,6 +584,19 @@ const gymAssociation = (
     phases,
     exactSourceId ? [exactSourceId] : ["ace-exercise-library", "acsm-free-weights"],
     exactSourceId ? "exact_exercise_reference" : "curated_general_reference",
+  );
+
+const importedCandidateAssociation = (
+  exerciseId: string,
+  muscles: readonly ExpectedMuscleRole[],
+  phases: readonly TrajectoryMusclePhase[],
+): ExpectedMuscleAssociation =>
+  association(
+    exerciseId,
+    muscles,
+    phases,
+    ["exercise-api-v1-1", "free-exercise-db"],
+    "curated_general_reference",
   );
 
 export const SEED_ASSOCIATIONS: readonly ExpectedMuscleAssociation[] = [
@@ -575,6 +652,31 @@ export const SEED_ASSOCIATIONS: readonly ExpectedMuscleAssociation[] = [
       phase("close", "并步落臂", [motion("hip", "adduction", "侧点腿回到中线。"), motion("shoulder", "adduction", "双臂回到躯干两侧。")], ["hip_adductors", "medial_deltoids"], "回收阶段不能用来断言肌肉是否充分发力。"),
     ],
     ["nike-calisthenics-2026"],
+  ),
+  association(
+    "jumping_jack",
+    [
+      role("hip_abductors", "primary"), role("medial_deltoids", "primary"),
+      role("gluteals", "secondary"), role("calves", "secondary"),
+      role("hip_adductors", "secondary"), role("trunk_stabilizers", "stabilizer"),
+    ],
+    [
+      phase("jump_open", "跳开举臂", [motion("hip", "abduction", "双脚跳开时双腿相对骨盆外展。"), motion("shoulder", "abduction", "双臂同步向侧上方展开。"), motion("ankle", "plantarflexion", "起跳阶段可伴随踝跖屈。")], ["hip_abductors", "medial_deltoids", "calves"], "骨架只观察同步开合轨迹，不能测量肌肉激活或冲击负荷。"),
+      phase("jump_close", "跳回并拢", [motion("hip", "adduction", "双腿回到身体中线。"), motion("shoulder", "adduction", "双臂回到躯干两侧。")], ["hip_adductors", "medial_deltoids"], "回收阶段的预计参与关系不构成动作质量结论。"),
+    ],
+    ["nike-calisthenics-2026"],
+  ),
+  association(
+    "sit_up",
+    [
+      role("abdominals", "primary"), role("hip_flexors", "secondary"),
+      role("trunk_stabilizers", "stabilizer"),
+    ],
+    [
+      phase("rising", "屈躯起身", [motion("trunk", "flexion", "侧面投影中肩部向骨盆方向起身。"), motion("hip", "flexion", "髋部投影可随起身趋向屈曲。")], ["abdominals", "hip_flexors"], "二维骨架可区分起身相位，不能分配腹肌与髋屈肌的实际贡献。"),
+      phase("lowering", "回到仰卧", [motion("trunk", "extension", "躯干受控回到地面构型。"), motion("hip", "extension", "髋部投影回到起点。")], ["abdominals", "hip_flexors"], "回落轨迹不能用于判断腰椎负荷或受伤风险。"),
+    ],
+    ["ace-exercise-library"],
   ),
   association(
     "bodyweight_squat",
@@ -707,6 +809,11 @@ export const SEED_ASSOCIATIONS: readonly ExpectedMuscleAssociation[] = [
     ROW_PHASES,
   ),
   gymAssociation(
+    "standing_dumbbell_row",
+    [role("latissimus_dorsi", "primary"), role("scapular_retractors", "primary"), role("posterior_deltoids", "secondary"), role("elbow_flexors", "secondary"), role("spinal_erectors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    ROW_PHASES,
+  ),
+  gymAssociation(
     "chest_supported_row",
     [role("latissimus_dorsi", "primary"), role("scapular_retractors", "primary"), role("posterior_deltoids", "secondary"), role("elbow_flexors", "secondary"), role("rotator_cuff", "stabilizer")],
     ROW_PHASES,
@@ -753,6 +860,11 @@ export const SEED_ASSOCIATIONS: readonly ExpectedMuscleAssociation[] = [
     [role("quadriceps", "primary"), role("gluteals", "primary"), role("hamstrings", "secondary"), role("hip_abductors", "stabilizer"), role("hip_adductors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
     SQUAT_PHASES,
     "ace-bulgarian-split-squat",
+  ),
+  gymAssociation(
+    "alternating_lunge",
+    [role("quadriceps", "primary"), role("gluteals", "primary"), role("hamstrings", "secondary"), role("hip_abductors", "stabilizer"), role("hip_adductors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    SQUAT_PHASES,
   ),
   gymAssociation(
     "leg_extension",
@@ -833,6 +945,11 @@ export const SEED_ASSOCIATIONS: readonly ExpectedMuscleAssociation[] = [
     CURL_PHASES,
   ),
   gymAssociation(
+    "alternating_dumbbell_biceps_curl",
+    [role("elbow_flexors", "primary"), role("anterior_deltoids", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    CURL_PHASES,
+  ),
+  gymAssociation(
     "hammer_curl",
     [role("elbow_flexors", "primary"), role("anterior_deltoids", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
     CURL_PHASES,
@@ -859,5 +976,93 @@ export const SEED_ASSOCIATIONS: readonly ExpectedMuscleAssociation[] = [
     "skull_crusher",
     [role("triceps", "primary"), role("anterior_deltoids", "stabilizer"), role("rotator_cuff", "stabilizer")],
     TRICEPS_EXTENSION_PHASES,
+  ),
+
+  // Reviewed common-exercise expansion. Directory labels are discovery
+  // evidence only, so every record remains curated_general_reference.
+  importedCandidateAssociation(
+    "decline_barbell_bench_press",
+    [role("pectorals", "primary"), role("triceps", "secondary"), role("anterior_deltoids", "secondary"), role("rotator_cuff", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    HORIZONTAL_PRESS_PHASES,
+  ),
+  importedCandidateAssociation(
+    "chest_dip",
+    [role("pectorals", "primary"), role("triceps", "primary"), role("anterior_deltoids", "secondary"), role("serratus_anterior", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    CHEST_DIP_PHASES,
+  ),
+  importedCandidateAssociation(
+    "pec_deck_fly",
+    [role("pectorals", "primary"), role("anterior_deltoids", "secondary"), role("rotator_cuff", "stabilizer")],
+    CHEST_FLY_PHASES,
+  ),
+  importedCandidateAssociation(
+    "chin_up",
+    [role("latissimus_dorsi", "primary"), role("elbow_flexors", "secondary"), role("scapular_retractors", "secondary"), role("trunk_stabilizers", "stabilizer")],
+    VERTICAL_PULL_PHASES,
+  ),
+  importedCandidateAssociation(
+    "t_bar_row",
+    [role("scapular_retractors", "primary"), role("latissimus_dorsi", "primary"), role("posterior_deltoids", "secondary"), role("elbow_flexors", "secondary"), role("spinal_erectors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    ROW_PHASES,
+  ),
+  importedCandidateAssociation(
+    "back_extension",
+    [role("spinal_erectors", "primary"), role("gluteals", "secondary"), role("hamstrings", "secondary"), role("trunk_stabilizers", "stabilizer")],
+    HIP_HINGE_PHASES,
+  ),
+  importedCandidateAssociation(
+    "front_squat",
+    [role("quadriceps", "primary"), role("gluteals", "primary"), role("hamstrings", "secondary"), role("spinal_erectors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    SQUAT_PHASES,
+  ),
+  importedCandidateAssociation(
+    "goblet_squat",
+    [role("quadriceps", "primary"), role("gluteals", "primary"), role("hamstrings", "secondary"), role("hip_adductors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    SQUAT_PHASES,
+  ),
+  importedCandidateAssociation(
+    "seated_leg_curl",
+    [role("hamstrings", "primary"), role("calves", "secondary"), role("trunk_stabilizers", "stabilizer")],
+    KNEE_FLEXION_PHASES,
+  ),
+  importedCandidateAssociation(
+    "lying_leg_curl",
+    [role("hamstrings", "primary"), role("calves", "secondary"), role("gluteals", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    KNEE_FLEXION_PHASES,
+  ),
+  importedCandidateAssociation(
+    "glute_bridge",
+    [role("gluteals", "primary"), role("hamstrings", "secondary"), role("spinal_erectors", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    HIP_HINGE_PHASES,
+  ),
+  importedCandidateAssociation(
+    "dumbbell_shoulder_press",
+    [role("anterior_deltoids", "primary"), role("medial_deltoids", "primary"), role("triceps", "secondary"), role("rotator_cuff", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    VERTICAL_PRESS_PHASES,
+  ),
+  importedCandidateAssociation(
+    "arnold_press",
+    [role("anterior_deltoids", "primary"), role("medial_deltoids", "secondary"), role("triceps", "secondary"), role("rotator_cuff", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    VERTICAL_PRESS_PHASES,
+  ),
+  importedCandidateAssociation(
+    "upright_row",
+    [role("medial_deltoids", "primary"), role("upper_trapezius", "primary"), role("elbow_flexors", "secondary"), role("rotator_cuff", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    UPRIGHT_ROW_PHASES,
+  ),
+  importedCandidateAssociation(
+    "preacher_curl",
+    [role("elbow_flexors", "primary"), role("anterior_deltoids", "stabilizer")],
+    CURL_PHASES,
+  ),
+  importedCandidateAssociation(
+    "incline_dumbbell_curl",
+    [role("elbow_flexors", "primary"), role("anterior_deltoids", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    CURL_PHASES,
+  ),
+  importedCandidateAssociation(
+    "close_grip_bench_press",
+    [role("triceps", "primary"), role("pectorals", "secondary"), role("anterior_deltoids", "secondary"), role("rotator_cuff", "stabilizer"), role("trunk_stabilizers", "stabilizer")],
+    HORIZONTAL_PRESS_PHASES,
   ),
 ];

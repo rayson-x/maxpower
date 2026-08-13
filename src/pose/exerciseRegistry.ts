@@ -20,9 +20,10 @@ export type MovementPattern =
   | "knee_flexion"
   | "knee_extension"
   | "ankle_plantarflexion"
+  | "core_flexion"
   | "locomotion";
 
-export type MuscleGroup = "chest" | "back" | "legs" | "shoulders" | "arms";
+export type MuscleGroup = "chest" | "back" | "legs" | "shoulders" | "arms" | "core";
 
 export const MUSCLE_GROUPS: ReadonlyArray<{ id: MuscleGroup; labelZh: string }> = [
   { id: "chest", labelZh: "胸" },
@@ -30,6 +31,7 @@ export const MUSCLE_GROUPS: ReadonlyArray<{ id: MuscleGroup; labelZh: string }> 
   { id: "legs", labelZh: "腿" },
   { id: "shoulders", labelZh: "肩" },
   { id: "arms", labelZh: "手臂" },
+  { id: "core", labelZh: "核心" },
 ];
 
 export interface ExerciseSource {
@@ -74,14 +76,27 @@ const MOVEMENT_PATTERNS = new Set<MovementPattern>([
   "knee_flexion",
   "knee_extension",
   "ankle_plantarflexion",
+  "core_flexion",
   "locomotion",
 ]);
 const MUSCLE_GROUP_IDS = new Set<MuscleGroup>(MUSCLE_GROUPS.map((group) => group.id));
 
 const PROJECT_SOURCE: ExerciseSource = {
-  name: "Form Coach project-authored seed catalog",
+  name: "MaxPower project-authored seed catalog",
   url: null,
   license: "project-authored metadata",
+};
+
+const EXERCISE_API_SOURCE: ExerciseSource = {
+  name: "ExerciseAPI dataset v1.1.0",
+  url: "https://exercise-api.com/docs",
+  license: "CC BY 4.0",
+};
+
+const FREE_EXERCISE_DB_SOURCE: ExerciseSource = {
+  name: "free-exercise-db metadata",
+  url: "https://github.com/yuhonas/free-exercise-db",
+  license: "Unlicense (metadata only; media excluded)",
 };
 
 const SEED_EXERCISES: readonly ExerciseConcept[] = [
@@ -131,6 +146,30 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     equipment: ["bodyweight"],
     variationOf: null,
     maturity: "experimental",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "jumping_jack",
+    nameZh: "开合跳",
+    nameEn: "Jumping jack",
+    aliases: ["标准开合跳"],
+    muscleGroup: "legs",
+    movementPattern: "locomotion",
+    equipment: ["bodyweight"],
+    variationOf: null,
+    maturity: "catalog_only",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "sit_up",
+    nameZh: "仰卧起坐",
+    nameEn: "Sit-up",
+    aliases: ["仰卧卷腹起身"],
+    muscleGroup: "core",
+    movementPattern: "core_flexion",
+    equipment: ["bodyweight", "exercise mat"],
+    variationOf: null,
+    maturity: "catalog_only",
     source: PROJECT_SOURCE,
   },
   {
@@ -270,7 +309,7 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
   // Catalog-only entries are deliberately recordable. They have canonical
   // labels and muscle ownership, but no unvalidated scoring profile yet.
   {
-    id: "barbell_bench_press", nameZh: "杠铃卧推", nameEn: "Barbell bench press", aliases: ["平板卧推"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["barbell", "bench"], variationOf: null, maturity: "catalog_only", source: PROJECT_SOURCE,
+    id: "barbell_bench_press", nameZh: "杠铃卧推", nameEn: "Barbell bench press", aliases: ["平板卧推"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["barbell", "bench"], variationOf: null, maturity: "experimental", source: PROJECT_SOURCE,
   },
   {
     id: "dumbbell_bench_press", nameZh: "哑铃卧推", nameEn: "Dumbbell bench press", aliases: ["平板哑铃卧推"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["dumbbell", "bench"], variationOf: "barbell_bench_press", maturity: "catalog_only", source: PROJECT_SOURCE,
@@ -279,16 +318,19 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     id: "incline_dumbbell_press", nameZh: "上斜哑铃卧推", nameEn: "Incline dumbbell press", aliases: ["上斜卧推"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["dumbbell", "incline bench"], variationOf: "dumbbell_bench_press", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
-    id: "machine_chest_press", nameZh: "器械推胸", nameEn: "Machine chest press", aliases: ["坐姿推胸"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["chest press machine"], variationOf: "barbell_bench_press", maturity: "catalog_only", source: PROJECT_SOURCE,
+    id: "machine_chest_press", nameZh: "器械推胸", nameEn: "Machine chest press", aliases: ["坐姿推胸"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["chest press machine"], variationOf: "barbell_bench_press", maturity: "experimental", source: PROJECT_SOURCE,
   },
   {
     id: "cable_chest_fly", nameZh: "绳索夹胸", nameEn: "Cable chest fly", aliases: ["绳索飞鸟", "夹胸"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["cable machine"], variationOf: null, maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
-    id: "push_up", nameZh: "俯卧撑", nameEn: "Push-up", aliases: ["标准俯卧撑"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["bodyweight"], variationOf: null, maturity: "catalog_only", source: PROJECT_SOURCE,
+    id: "push_up", nameZh: "俯卧撑", nameEn: "Push-up", aliases: ["标准俯卧撑"], muscleGroup: "chest", movementPattern: "horizontal_push", equipment: ["bodyweight"], variationOf: null, maturity: "experimental", source: PROJECT_SOURCE,
   },
   {
     id: "one_arm_dumbbell_row", nameZh: "单臂哑铃划船", nameEn: "One-arm dumbbell row", aliases: ["单手哑铃划船"], muscleGroup: "back", movementPattern: "horizontal_pull", equipment: ["dumbbell", "bench"], variationOf: "barbell_row", maturity: "catalog_only", source: PROJECT_SOURCE,
+  },
+  {
+    id: "standing_dumbbell_row", nameZh: "站姿双哑铃划船", nameEn: "Standing dumbbell row", aliases: ["俯身双哑铃划船"], muscleGroup: "back", movementPattern: "horizontal_pull", equipment: ["dumbbell"], variationOf: "barbell_row", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
     id: "chest_supported_row", nameZh: "胸托划船", nameEn: "Chest-supported row", aliases: ["器械胸托划船"], muscleGroup: "back", movementPattern: "horizontal_pull", equipment: ["row machine or incline bench"], variationOf: "barbell_row", maturity: "catalog_only", source: PROJECT_SOURCE,
@@ -313,6 +355,9 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
   },
   {
     id: "walking_lunge", nameZh: "行走箭步蹲", nameEn: "Walking lunge", aliases: ["弓步走"], muscleGroup: "legs", movementPattern: "squat", equipment: ["dumbbell or bodyweight"], variationOf: "bodyweight_squat", maturity: "catalog_only", source: PROJECT_SOURCE,
+  },
+  {
+    id: "alternating_lunge", nameZh: "原地交替弓步蹲", nameEn: "Alternating lunge", aliases: ["交替弓步", "原地弓步蹲"], muscleGroup: "legs", movementPattern: "squat", equipment: ["bodyweight"], variationOf: "bodyweight_squat", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
     id: "bulgarian_split_squat", nameZh: "保加利亚分腿蹲", nameEn: "Bulgarian split squat", aliases: ["分腿蹲"], muscleGroup: "legs", movementPattern: "squat", equipment: ["dumbbell", "bench"], variationOf: "bodyweight_squat", maturity: "catalog_only", source: PROJECT_SOURCE,
@@ -354,6 +399,9 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
     id: "dumbbell_biceps_curl", nameZh: "哑铃弯举", nameEn: "Dumbbell biceps curl", aliases: ["哑铃二头弯举"], muscleGroup: "arms", movementPattern: "elbow_flexion", equipment: ["dumbbell"], variationOf: "barbell_biceps_curl", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
+    id: "alternating_dumbbell_biceps_curl", nameZh: "交替哑铃弯举", nameEn: "Alternating dumbbell biceps curl", aliases: ["交替二头弯举"], muscleGroup: "arms", movementPattern: "elbow_flexion", equipment: ["dumbbell"], variationOf: "dumbbell_biceps_curl", maturity: "catalog_only", source: PROJECT_SOURCE,
+  },
+  {
     id: "hammer_curl", nameZh: "锤式弯举", nameEn: "Hammer curl", aliases: ["锤式二头弯举"], muscleGroup: "arms", movementPattern: "elbow_flexion", equipment: ["dumbbell"], variationOf: "dumbbell_biceps_curl", maturity: "catalog_only", source: PROJECT_SOURCE,
   },
   {
@@ -367,6 +415,213 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
   },
   {
     id: "skull_crusher", nameZh: "仰卧臂屈伸", nameEn: "Lying triceps extension", aliases: ["碎颅者"], muscleGroup: "arms", movementPattern: "elbow_extension", equipment: ["barbell or dumbbell", "bench"], variationOf: "triceps_pushdown", maturity: "catalog_only", source: PROJECT_SOURCE,
+  },
+  // Reviewed common-exercise expansion. These identities are catalog-only:
+  // external directory metadata helps name and split them, but does not install
+  // a recognition profile or establish user-specific muscle activation.
+  {
+    id: "decline_barbell_bench_press",
+    nameZh: "下斜杠铃卧推",
+    nameEn: "Decline barbell bench press",
+    aliases: ["下斜卧推"],
+    muscleGroup: "chest",
+    movementPattern: "horizontal_push",
+    equipment: ["barbell", "decline bench", "rack"],
+    variationOf: "barbell_bench_press",
+    maturity: "catalog_only",
+    source: FREE_EXERCISE_DB_SOURCE,
+  },
+  {
+    id: "chest_dip",
+    nameZh: "双杠臂屈伸（胸部版）",
+    nameEn: "Chest dip",
+    aliases: ["胸部双杠臂屈伸", "前倾双杠臂屈伸"],
+    muscleGroup: "chest",
+    movementPattern: "vertical_push",
+    equipment: ["dip station"],
+    variationOf: null,
+    maturity: "catalog_only",
+    source: FREE_EXERCISE_DB_SOURCE,
+  },
+  {
+    id: "pec_deck_fly",
+    nameZh: "蝴蝶机夹胸",
+    nameEn: "Pec deck fly",
+    aliases: ["蝴蝶机飞鸟", "器械夹胸"],
+    muscleGroup: "chest",
+    movementPattern: "horizontal_push",
+    equipment: ["pec deck machine"],
+    variationOf: "cable_chest_fly",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "chin_up",
+    nameZh: "反手引体向上",
+    nameEn: "Chin-up",
+    aliases: ["反握引体"],
+    muscleGroup: "back",
+    movementPattern: "vertical_pull",
+    equipment: ["pull-up bar"],
+    variationOf: "pull_up",
+    maturity: "catalog_only",
+    source: FREE_EXERCISE_DB_SOURCE,
+  },
+  {
+    id: "t_bar_row",
+    nameZh: "T 杠划船",
+    nameEn: "T-bar row",
+    aliases: ["T杆划船"],
+    muscleGroup: "back",
+    movementPattern: "horizontal_pull",
+    equipment: ["T-bar row machine or landmine handle"],
+    variationOf: "barbell_row",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "back_extension",
+    nameZh: "罗马椅背伸",
+    nameEn: "45-degree back extension",
+    aliases: ["背伸", "山羊挺身"],
+    muscleGroup: "back",
+    movementPattern: "hip_hinge",
+    equipment: ["45-degree back extension bench"],
+    variationOf: null,
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "front_squat",
+    nameZh: "杠铃前蹲",
+    nameEn: "Barbell front squat",
+    aliases: ["前蹲"],
+    muscleGroup: "legs",
+    movementPattern: "squat",
+    equipment: ["barbell", "rack"],
+    variationOf: "barbell_back_squat",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "goblet_squat",
+    nameZh: "高脚杯深蹲",
+    nameEn: "Goblet squat",
+    aliases: ["哑铃高脚杯深蹲"],
+    muscleGroup: "legs",
+    movementPattern: "squat",
+    equipment: ["dumbbell or kettlebell"],
+    variationOf: "bodyweight_squat",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "seated_leg_curl",
+    nameZh: "坐姿腿弯举",
+    nameEn: "Seated leg curl",
+    aliases: ["坐姿腘绳肌弯举"],
+    muscleGroup: "legs",
+    movementPattern: "knee_flexion",
+    equipment: ["seated leg curl machine"],
+    variationOf: "leg_curl",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "lying_leg_curl",
+    nameZh: "俯卧腿弯举",
+    nameEn: "Lying leg curl",
+    aliases: ["俯卧腘绳肌弯举"],
+    muscleGroup: "legs",
+    movementPattern: "knee_flexion",
+    equipment: ["lying leg curl machine"],
+    variationOf: "leg_curl",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "glute_bridge",
+    nameZh: "臀桥",
+    nameEn: "Glute bridge",
+    aliases: ["徒手臀桥", "地面臀桥"],
+    muscleGroup: "legs",
+    movementPattern: "hip_hinge",
+    equipment: ["bodyweight", "floor mat"],
+    variationOf: "hip_thrust",
+    maturity: "catalog_only",
+    source: PROJECT_SOURCE,
+  },
+  {
+    id: "dumbbell_shoulder_press",
+    nameZh: "坐姿哑铃推肩",
+    nameEn: "Seated dumbbell shoulder press",
+    aliases: ["哑铃推举", "哑铃肩推"],
+    muscleGroup: "shoulders",
+    movementPattern: "vertical_push",
+    equipment: ["dumbbells", "upright bench"],
+    variationOf: "seated_shoulder_press",
+    maturity: "catalog_only",
+    source: FREE_EXERCISE_DB_SOURCE,
+  },
+  {
+    id: "arnold_press",
+    nameZh: "阿诺德推举",
+    nameEn: "Arnold press",
+    aliases: ["阿诺德肩推"],
+    muscleGroup: "shoulders",
+    movementPattern: "vertical_push",
+    equipment: ["dumbbells", "upright bench"],
+    variationOf: "dumbbell_shoulder_press",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "upright_row",
+    nameZh: "直立划船",
+    nameEn: "Upright row",
+    aliases: ["直立提拉"],
+    muscleGroup: "shoulders",
+    movementPattern: "shoulder_abduction",
+    equipment: ["barbell or cable"],
+    variationOf: null,
+    maturity: "catalog_only",
+    source: FREE_EXERCISE_DB_SOURCE,
+  },
+  {
+    id: "preacher_curl",
+    nameZh: "牧师凳弯举",
+    nameEn: "Preacher curl",
+    aliases: ["牧师椅弯举"],
+    muscleGroup: "arms",
+    movementPattern: "elbow_flexion",
+    equipment: ["EZ curl bar", "preacher bench"],
+    variationOf: "barbell_biceps_curl",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "incline_dumbbell_curl",
+    nameZh: "上斜哑铃弯举",
+    nameEn: "Incline dumbbell curl",
+    aliases: ["上斜凳弯举"],
+    muscleGroup: "arms",
+    movementPattern: "elbow_flexion",
+    equipment: ["dumbbells", "incline bench"],
+    variationOf: "dumbbell_biceps_curl",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
+  },
+  {
+    id: "close_grip_bench_press",
+    nameZh: "窄握杠铃卧推",
+    nameEn: "Close-grip bench press",
+    aliases: ["窄握卧推"],
+    muscleGroup: "arms",
+    movementPattern: "horizontal_push",
+    equipment: ["barbell", "flat bench", "rack"],
+    variationOf: "barbell_bench_press",
+    maturity: "catalog_only",
+    source: EXERCISE_API_SOURCE,
   },
 ];
 

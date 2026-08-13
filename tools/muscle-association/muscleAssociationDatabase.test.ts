@@ -18,7 +18,7 @@ function knownAssociation(exerciseId: string): ExpectedMuscleAssociation {
 test("known exercise exposes expected muscles and phase evidence without claiming activation", () => {
   assert.equal(
     EXPECTED_MUSCLE_ASSOCIATIONS.schemaVersion,
-    "form-coach-expected-muscle-associations/v1",
+    "maxpower-expected-muscle-associations/v1",
   );
   const squat = knownAssociation("bodyweight_squat");
 
@@ -75,14 +75,36 @@ test("every registered five-split exercise has an exact-identity muscle associat
     legs: [],
     shoulders: [],
     arms: [],
+    core: [],
   });
-  assert.equal(EXPECTED_MUSCLE_ASSOCIATIONS.records.length, 48);
+  assert.equal(EXPECTED_MUSCLE_ASSOCIATIONS.records.length, 70);
   assert.equal(
     EXPECTED_MUSCLE_ASSOCIATIONS.records.filter(
       (association) => association.evidenceStatus === "exact_exercise_reference",
     ).length,
     22,
   );
+});
+
+test("new common gym identities have explicit curated associations instead of pattern fallback", () => {
+  const expectedPrimaryMuscles: Readonly<Record<string, readonly string[]>> = {
+    chest_dip: ["pectorals", "triceps"],
+    chin_up: ["latissimus_dorsi"],
+    front_squat: ["quadriceps", "gluteals"],
+    arnold_press: ["anterior_deltoids"],
+    preacher_curl: ["elbow_flexors"],
+  };
+
+  for (const [exerciseId, expected] of Object.entries(expectedPrimaryMuscles)) {
+    const record = knownAssociation(exerciseId);
+    assert.deepEqual(
+      record.muscles
+        .filter((muscle) => muscle.role === "primary")
+        .map((muscle) => muscle.muscleId),
+      expected,
+    );
+    assert.equal(record.evidenceStatus, "curated_general_reference");
+  }
 });
 
 test("front raise keeps shoulder flexion distinct from lateral-raise abduction", () => {

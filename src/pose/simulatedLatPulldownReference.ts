@@ -31,7 +31,7 @@ export function buildSimulatedLatPulldownReference(
     }),
   );
   return {
-    schemaVersion: "form-coach-provisional-reference-profile/v1",
+    schemaVersion: "maxpower-provisional-reference-profile/v1",
     profileStatus: "simulated_nominal",
     identity,
     intendedUse: "compare_observed_reps_to_personal_provisional_corridor",
