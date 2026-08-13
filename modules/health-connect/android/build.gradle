@@ -1,0 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.maxpowerhealthconnect'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.maxpowerhealthconnect"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+}
+
+dependencies {
+  // Stable Health Connect client. The Android SDK never escapes this module.
+  implementation "androidx.health.connect:connect-client:1.1.0"
+}

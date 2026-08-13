@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["MaxPowerHealthKitModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.maxpowerhealthconnect.MaxPowerHealthConnectModule"]
+  }
+}
