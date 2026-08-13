@@ -63,6 +63,19 @@ test("production config accepts a complete HTTPS/TLS-only deployment", () => {
   assert.deepEqual(config.auth.nativeSchemes, ["maxpower://"]);
   assert.equal(config.llm.routes["maxpower/coach-v1"].model, "coach-model");
   assert.equal(
+    config.llm.routes["maxpower/coach-v1"].endpoint,
+    "https://coach-provider.example/v1/chat/completions",
+  );
+  assert.equal(
+    config.llm.routes["maxpower/nutrition-vision-v1"].endpoint,
+    "https://vision-provider.example/v1/chat/completions",
+  );
+  assert.equal(config.llm.usageRoutes["maxpower/coach-v1"].providerId, "coach-provider");
+  assert.equal(
+    config.llm.usageRoutes["maxpower/nutrition-vision-v1"].providerId,
+    "vision-provider",
+  );
+  assert.equal(
     config.llm.routes["maxpower/coach-v1"].inputCostMicrosPerMillionTokens,
     1500,
   );
@@ -78,10 +91,72 @@ test("production config accepts a complete HTTPS/TLS-only deployment", () => {
     maxInputBytes: 65_536,
     maxInputTokens: 131_072,
     maxOutputTokens: 4_096,
-    maxImages: 4,
+    maxImages: 0,
     maxImageBytes: 65_536,
     reservationCredits: 140,
   });
+});
+
+test("production config permits explicit loopback HTTP CORS origins for local web development", () => {
+  const config = parseProductionConfig(validEnvironment({
+    HTTP_ALLOWED_ORIGINS: "https://app.maxpower.example,http://localhost:8081,http://127.0.0.1:8081,http://[::1]:8081",
+  }));
+  assert.deepEqual(config.http.allowedOrigins, [
+    "https://app.maxpower.example",
+    "http://localhost:8081",
+    "http://127.0.0.1:8081",
+    "http://[::1]:8081",
+  ]);
+  assert.deepEqual(config.auth.trustedOrigins, ["https://app.maxpower.example"]);
+  assert.throws(
+    () => parseProductionConfig(validEnvironment({ HTTP_ALLOWED_ORIGINS: "http://app.maxpower.example" })),
+    /loopback HTTP origins/,
+  );
+});
+
+test("production and worker configs use the AWS credential chain when static S3 keys are absent", () => {
+  const environment = validEnvironment({
+    S3_ACCESS_KEY_ID: undefined,
+    S3_SECRET_ACCESS_KEY: undefined,
+  });
+
+  const production = parseProductionConfig(environment);
+  assert.equal(production.objectStorage.credentials, undefined);
+
+  const worker = parseProductionWorkerConfig({
+    NODE_ENV: environment.NODE_ENV,
+    MAXPOWER_RUNTIME: environment.MAXPOWER_RUNTIME,
+    DATABASE_URL: environment.DATABASE_URL,
+    S3_ENDPOINT: environment.S3_ENDPOINT,
+    S3_REGION: environment.S3_REGION,
+    S3_BUCKET: environment.S3_BUCKET,
+    S3_FORCE_PATH_STYLE: environment.S3_FORCE_PATH_STYLE,
+    MEDIA_TRANSFER_EXPIRY_SECONDS: environment.MEDIA_TRANSFER_EXPIRY_SECONDS,
+    DELETION_WORKER_POLL_MS: environment.DELETION_WORKER_POLL_MS,
+  });
+  assert.equal(worker.objectStorage.credentials, undefined);
+});
+
+test("S3 static credentials fail closed when only one half is configured", () => {
+  assert.throws(
+    () => parseProductionConfig(validEnvironment({ S3_SECRET_ACCESS_KEY: undefined })),
+    /S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be provided together/,
+  );
+  assert.throws(
+    () => parseProductionWorkerConfig({
+      NODE_ENV: "production",
+      MAXPOWER_RUNTIME: "production",
+      DATABASE_URL: "postgresql://maxpower:secret@db.example/maxpower?sslmode=require",
+      S3_ENDPOINT: "https://s3.ap-southeast-1.amazonaws.com",
+      S3_REGION: "ap-southeast-1",
+      S3_BUCKET: "maxpower-private-media",
+      S3_ACCESS_KEY_ID: "only-access-key",
+      S3_FORCE_PATH_STYLE: "false",
+      MEDIA_TRANSFER_EXPIRY_SECONDS: "900",
+      DELETION_WORKER_POLL_MS: "1000",
+    }),
+    /S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be provided together/,
+  );
 });
 
 test("production config fails closed on insecure external URLs and weak secrets", () => {
@@ -100,8 +175,10 @@ test("production config fails closed on insecure external URLs and weak secrets"
     );
   }
   assert.throws(
-    () => parseProductionConfig(validEnvironment({ LLM_PROVIDER_ENDPOINT: "http://llm.example/v1/chat/completions" })),
-    /LLM_PROVIDER_ENDPOINT.*HTTPS/i,
+    () => parseProductionConfig(validEnvironment({
+      LLM_NUTRITION_PROVIDER_ENDPOINT: "http://llm.example/v1/chat/completions",
+    })),
+    /LLM_NUTRITION_PROVIDER_ENDPOINT.*HTTPS/i,
   );
   assert.throws(
     () => parseProductionConfig(validEnvironment({ AUTH_SECRET: "short" })),
@@ -150,7 +227,8 @@ test("production config reports every missing variable in one startup error", ()
       assert.ok(error instanceof ProductionConfigurationError);
       assert.match(error.message, /DATABASE_URL/);
       assert.match(error.message, /AUTH_SECRET/);
-      assert.match(error.message, /LLM_PROVIDER_API_KEY/);
+      assert.match(error.message, /LLM_COACH_PROVIDER_API_KEY/);
+      assert.match(error.message, /LLM_NUTRITION_PROVIDER_API_KEY/);
       return true;
     },
   );
@@ -191,9 +269,9 @@ function validEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
     S3_SECRET_ACCESS_KEY: "s3-secret-key",
     S3_FORCE_PATH_STYLE: "false",
     MEDIA_TRANSFER_EXPIRY_SECONDS: "900",
-    LLM_PROVIDER_ENDPOINT: "https://llm-provider.example/v1/chat/completions",
-    LLM_PROVIDER_API_KEY: "provider-secret",
-    LLM_PROVIDER_ID: "primary-openai-compatible",
+    LLM_COACH_PROVIDER_ENDPOINT: "https://coach-provider.example/v1/chat/completions",
+    LLM_COACH_PROVIDER_API_KEY: "coach-provider-secret",
+    LLM_COACH_PROVIDER_ID: "coach-provider",
     LLM_COACH_MODEL: "coach-model",
     LLM_COACH_INPUT_CREDITS_PER_MILLION: "1000",
     LLM_COACH_OUTPUT_CREDITS_PER_MILLION: "2000",
@@ -201,10 +279,13 @@ function validEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
     LLM_COACH_MAX_INPUT_BYTES: "65536",
     LLM_COACH_MAX_INPUT_TOKENS: "131072",
     LLM_COACH_MAX_OUTPUT_TOKENS: "4096",
-    LLM_COACH_MAX_IMAGES: "4",
+    LLM_COACH_MAX_IMAGES: "0",
     LLM_COACH_MAX_IMAGE_BYTES: "65536",
     LLM_COACH_PROVIDER_INPUT_COST_MICROS_PER_MILLION: "1500",
     LLM_COACH_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION: "6000",
+    LLM_NUTRITION_PROVIDER_ENDPOINT: "https://vision-provider.example/v1/chat/completions",
+    LLM_NUTRITION_PROVIDER_API_KEY: "vision-provider-secret",
+    LLM_NUTRITION_PROVIDER_ID: "vision-provider",
     LLM_NUTRITION_MODEL: "nutrition-model",
     LLM_NUTRITION_INPUT_CREDITS_PER_MILLION: "3000",
     LLM_NUTRITION_OUTPUT_CREDITS_PER_MILLION: "4000",

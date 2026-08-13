@@ -9,7 +9,7 @@ The versioned HTTP API is the stable interface. Production composes only durable
 - Better Auth + PostgreSQL for email/phone/password, Google/Apple, explicit identity linking, sessions, and short-lived EdDSA service JWTs.
 - PostgreSQL for profiles, immutable plan versions, workout sessions, structured results, idempotency, LLM entitlements, usage, and deletion jobs.
 - A private S3-compatible bucket for optional video, canonical packets, keypoints, and nutrition photos.
-- An OpenAI-compatible provider behind the two product aliases `maxpower/coach-v1` and `maxpower/nutrition-vision-v1`.
+- Independently configured OpenAI-compatible providers behind the stable product aliases `maxpower/coach-v1` (text) and `maxpower/nutrition-vision-v1` (multimodal); physical endpoints, models, and credentials stay server-side.
 - A dedicated non-persistent Redis for five-minute SSE replay and a separate shared Redis for rate limiting.
 
 Prompts, responses, images, tool arguments, and conversations are not persisted by the gateway. Usage rows retain token totals, the internal provider route/pricing version, credits, and provider cost in micros.
@@ -155,3 +155,9 @@ The command prints only whether the idempotent grant was created and a short acc
 - Operations: `/healthz`, `/readyz`, `/openapi.json`
 
 Authenticated ownership always comes from the verified, live session-backed service JWT. Request bodies cannot select an account. Mutable commands use `Idempotency-Key` and/or revision preconditions as documented in OpenAPI.
+
+`/v1/chat/completions` accepts the reviewed Pi/OpenAI Completions subset, including
+`store: false`, `stream_options.include_usage: true`, and `tool_choice`. Provider
+retention is always disabled and token usage remains server-internal. The mobile
+`MaxPowerPiLlmProvider` supplies the short-lived JWT, per-invocation idempotency
+headers, Pi event stream, durable cancellation, and `Last-Event-ID` recovery.

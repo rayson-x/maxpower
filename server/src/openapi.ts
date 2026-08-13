@@ -1265,7 +1265,37 @@ export const openApiDocument = {
           max_tokens: { type: "integer", minimum: 1 },
           max_completion_tokens: { type: "integer", minimum: 1 },
           parallel_tool_calls: { const: false },
+          store: {
+            const: false,
+            description: "Accepted for Pi/OpenAI compatibility. Provider retention stays disabled.",
+          },
+          stream_options: {
+            type: "object",
+            required: ["include_usage"],
+            additionalProperties: false,
+            properties: { include_usage: { const: true } },
+            description: "Accepted for Pi compatibility; usage remains server-internal.",
+          },
           temperature: { type: "number", minimum: 0, maximum: 2 },
+          tool_choice: {
+            oneOf: [
+              { type: "string", enum: ["auto", "none", "required"] },
+              {
+                type: "object",
+                required: ["type", "function"],
+                additionalProperties: false,
+                properties: {
+                  type: { const: "function" },
+                  function: {
+                    type: "object",
+                    required: ["name"],
+                    additionalProperties: false,
+                    properties: { name: { type: "string", minLength: 1, maxLength: 128 } },
+                  },
+                },
+              },
+            ],
+          },
           response_format: {
             type: "object",
             required: ["type"],

@@ -72,6 +72,8 @@ test("Gateway routes a product alias upstream, normalizes usage and hides provid
       model: "maxpower/coach-v1",
       messages: [{ role: "user", content: "hello" }],
       stream: false,
+      tools: [{ type: "function", function: { name: "read_plan", parameters: {} } }],
+      tool_choice: { type: "function", function: { name: "read_plan" } },
     },
   });
 
@@ -82,6 +84,10 @@ test("Gateway routes a product alias upstream, normalizes usage and hides provid
   assert.equal(observedBody.model, "vendor-coach-model");
   assert.equal(observedBody.stream, false);
   assert.equal(observedBody.store, false);
+  assert.deepEqual(observedBody.tool_choice, {
+    type: "function",
+    function: { name: "read_plan" },
+  });
   assert.equal(result.response.model, "maxpower-cloud");
   assert.equal(result.response.id, `chatcmpl_${result.invocationId}`);
   assert.equal("system_fingerprint" in result.response, false);

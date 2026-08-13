@@ -34,10 +34,9 @@ export async function createProductionWorkerRuntime(
     endpoint: config.objectStorage.endpoint,
     region: config.objectStorage.region,
     forcePathStyle: config.objectStorage.forcePathStyle,
-    credentials: {
-      accessKeyId: config.objectStorage.accessKeyId,
-      secretAccessKey: config.objectStorage.secretAccessKey,
-    },
+    ...(config.objectStorage.credentials
+      ? { credentials: config.objectStorage.credentials }
+      : {}),
   });
   let closed = false;
   const close = async (): Promise<void> => {

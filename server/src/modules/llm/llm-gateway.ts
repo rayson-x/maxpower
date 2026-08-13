@@ -913,6 +913,24 @@ function acceptRequest(
   if (request.parallel_tool_calls !== undefined && request.parallel_tool_calls !== false) {
     throw new ApiError(400, "invalid_request", "parallel_tool_calls must be false.");
   }
+  if (request.store !== undefined && request.store !== false) {
+    throw new ApiError(400, "invalid_request", "store must be false.");
+  }
+  if (
+    request.stream_options !== undefined
+    && (!isPlainObject(request.stream_options)
+      || Object.keys(request.stream_options).length !== 1
+      || request.stream_options.include_usage !== true)
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_request",
+      "stream_options only supports include_usage=true.",
+    );
+  }
+  if (request.tool_choice !== undefined && !isSupportedToolChoice(request.tool_choice)) {
+    throw new ApiError(400, "invalid_request", "tool_choice is invalid.");
+  }
   if (
     request.temperature !== undefined &&
     (typeof request.temperature !== "number" ||
@@ -948,6 +966,7 @@ function acceptRequest(
       ? {}
       : { parallel_tool_calls: request.parallel_tool_calls }),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+    ...(request.tool_choice === undefined ? {} : { tool_choice: request.tool_choice }),
     ...(request.response_format === undefined
       ? {}
       : { response_format: request.response_format }),
@@ -977,7 +996,10 @@ const ALLOWED_REQUEST_FIELDS = new Set([
   "max_tokens",
   "max_completion_tokens",
   "parallel_tool_calls",
+  "store",
+  "stream_options",
   "temperature",
+  "tool_choice",
   "response_format",
 ]);
 
@@ -990,6 +1012,18 @@ function assertAllowedRequestFields(request: OpenAiChatCompletionRequest): void 
       `Unsupported LLM request field: ${unsupported.sort()[0]}.`,
     );
   }
+}
+
+function isSupportedToolChoice(value: unknown): boolean {
+  if (value === "auto" || value === "none" || value === "required") return true;
+  return isPlainObject(value)
+    && Object.keys(value).length === 2
+    && value.type === "function"
+    && isPlainObject(value.function)
+    && Object.keys(value.function).length === 1
+    && typeof value.function.name === "string"
+    && value.function.name.trim().length >= 1
+    && value.function.name.length <= 128;
 }
 
 function outputTokenLimit(

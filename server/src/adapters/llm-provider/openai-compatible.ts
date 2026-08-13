@@ -98,6 +98,9 @@ export class OpenAiCompatibleLlmProviderAdapter implements LlmProviderAdapter {
       ...(input.request.temperature === undefined
         ? {}
         : { temperature: input.request.temperature }),
+      ...(input.request.tool_choice === undefined
+        ? {}
+        : { tool_choice: input.request.tool_choice }),
       ...(input.request.response_format === undefined
         ? {}
         : { response_format: input.request.response_format }),

@@ -12,6 +12,7 @@ import {
   LlmGateway,
   immediateProviderDispatch,
   type LlmGatewayDependencies,
+  type OpenAiChatCompletionRequest,
   type OpenAiObject,
 } from "../src/modules/llm/index.js";
 
@@ -500,8 +501,19 @@ test("rejects provider-specific request fields instead of forwarding policy over
     usage: new InMemoryLlmUsageAdapter(),
   });
 
+  await assert.rejects(
+    gateway.invoke(alice, {
+      idempotencyKey: "no-provider-store",
+      request: {
+        model: "maxpower/coach-v1",
+        messages: [],
+        store: true,
+      } as unknown as OpenAiChatCompletionRequest,
+    }),
+    apiError(400, "invalid_request"),
+  );
+
   for (const [idempotencyKey, field] of [
-    ["no-provider-store", { store: true }],
     ["no-provider-metadata", { metadata: { user: "private" } }],
     ["no-provider-audio", { modalities: ["audio"] }],
     ["no-provider-tier", { service_tier: "priority" }],

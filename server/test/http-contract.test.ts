@@ -111,8 +111,11 @@ test("HTTP contract carries an authenticated user from registration to cloud dat
     "model",
     "parallel_tool_calls",
     "response_format",
+    "store",
     "stream",
+    "stream_options",
     "temperature",
+    "tool_choice",
     "tools",
   ]);
   const cancelRequestSchema = openApiBody.components?.schemas?.CancelLlmInvocationRequest as {
@@ -269,6 +272,9 @@ test("HTTP contract carries an authenticated user from registration to cloud dat
       model: "maxpower/coach-v1",
       messages: [{ role: "user", content: "hello" }],
       stream: false,
+      store: false,
+      stream_options: { include_usage: true },
+      tool_choice: "auto",
     }),
   });
   assert.equal(completion.status, 200);

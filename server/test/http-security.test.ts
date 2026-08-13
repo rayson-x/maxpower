@@ -31,6 +31,40 @@ test("HTTP boundary applies security headers and an exact CORS allowlist", async
   assert.equal((await rejected.json() as { error: { code: string } }).error.code, "origin_forbidden");
 });
 
+test("HTTP boundary permits an explicit loopback CORS origin for local web development", async () => {
+  const runtime = createMemoryRuntime({
+    production: false,
+    security: {
+      allowedOrigins: ["http://localhost:8081"],
+      maxRequestBytes: 1_024,
+    },
+  });
+
+  const allowed = await runtime.app.request("/healthz", {
+    headers: { origin: "http://localhost:8081" },
+  });
+  assert.equal(allowed.status, 200);
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "http://localhost:8081");
+
+  const preflight = await runtime.app.request("/v1/auth/config", {
+    method: "OPTIONS",
+    headers: {
+      origin: "http://localhost:8081",
+      "access-control-request-method": "GET",
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "http://localhost:8081");
+
+  assert.throws(
+    () => createMemoryRuntime({
+      production: false,
+      security: { allowedOrigins: ["http://app.maxpower.example"], maxRequestBytes: 1_024 },
+    }),
+    /loopback HTTP origins/,
+  );
+});
+
 test("HTTP boundary admits only Apple's exact form_post callback without granting CORS", async () => {
   const runtime = createMemoryRuntime({
     production: false,
