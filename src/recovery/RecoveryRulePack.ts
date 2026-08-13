@@ -124,6 +124,11 @@ export function evaluateRecovery(input: {
   }
   const subjectiveLow = (check.perceivedRecovery ?? 10) <= 3 || (check.fatigue ?? 0) >= 8;
   const localSorenessHigh = (check.soreness?.severity ?? 0) >= 7 || (check.pain?.severity ?? 0) >= 5;
+  // 局部高不适不等于全身不能训练；把部位显式交给 Planner，供其移除
+  // 涉及该肌群的动作或改排，而不是把所有课程一律停掉。
+  const avoidAffectedArea = localSorenessHigh && (check.soreness?.area ?? check.pain?.area)
+    ? [{ kind: "avoid_area" as const, area: check.soreness?.area ?? check.pain?.area }]
+    : [];
   const repeatedDecline = (check.comparablePerformanceDeclines ?? 0) >= rules.baseline.minimumComparablePerformanceEvents;
   const wearableSupport = Boolean(
     (check.hrv?.baselineMature && check.hrv.direction === "lower" && check.hrv.permission === "granted" && check.hrv.freshness !== "stale") ||
@@ -137,6 +142,7 @@ export function evaluateRecovery(input: {
         { kind: "increase_rir", magnitude: 2 },
         { kind: "remove_optional_sets" },
         { kind: "extend_rest" },
+        ...avoidAffectedArea,
       ],
       reasons: ["subjective_recovery_low", ...(repeatedDecline ? ["repeated_comparable_performance_decline"] : []), ...(wearableSupport ? ["wearable_context_supports"] : [])],
       triggering: refs,
@@ -149,7 +155,7 @@ export function evaluateRecovery(input: {
     return decision(input, rules, {
       level: "slight_reduction",
       scope: "remaining_session",
-      intentions: [{ kind: "increase_rir", magnitude: 1 }, { kind: "extend_rest" }],
+      intentions: [{ kind: "increase_rir", magnitude: 1 }, { kind: "extend_rest" }, ...avoidAffectedArea],
       reasons: [
         ...(subjectiveLow ? ["subjective_recovery_low"] : []),
         ...(localSorenessHigh ? ["local_feedback_high"] : []),
@@ -217,6 +223,7 @@ function decision(
       level: value.level,
       validUntil: input.validUntil,
       scope: value.scope,
+      ...(input.checkIn.schedule ? { availability: input.checkIn.schedule } : {}),
       intentions: value.intentions,
       evaluation: {
         rulePackId: rules.id,
