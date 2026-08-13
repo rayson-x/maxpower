@@ -10,6 +10,7 @@ import {
   buildReviewProposal,
   loadFrozenBenchAblationPolicyReport,
   materializeAssessmentProfile,
+  reviewCapabilityForContext,
   resolveAppliedBenchPolicy,
   routeSourceFramesOnce,
 } from "./rustFullDataProposalRunner.js";
@@ -98,6 +99,45 @@ test("the admitted split unilateral windows preserve anatomical side", () => {
   assert.equal(anatomicalSideForContext("barbell_bench_press", "front"), null);
 });
 
+test("review capabilities stay inside the public four-state contract", () => {
+  const capability = (input: Readonly<{
+    actionId: string;
+    capturePosition: string;
+    anatomicalSide: "left" | "right" | null;
+    profileIdentity: string;
+    status: string;
+  }>) => reviewCapabilityForContext({ ...input, appliedPolicy: { status: input.status } });
+
+  assert.equal(capability({
+    actionId: "barbell_bench_press",
+    capturePosition: "frontLeft45",
+    anatomicalSide: null,
+    profileIdentity: "barbell_bench_press/frontLeft45/bilateral/barbell/fixture-v1",
+    status: "selected",
+  }), "quality_supported");
+  assert.equal(capability({
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
+    status: "no_winner",
+  }), "phase_supported");
+  assert.equal(capability({
+    actionId: "pull_up",
+    capturePosition: "rearLeft45",
+    anatomicalSide: null,
+    profileIdentity: "pull_up/rearLeft45/bilateral/fixed_pull_up_bar/fixture-v1",
+    status: "not_applicable",
+  }), "observation_only");
+  assert.equal(capability({
+    actionId: "unknown_action",
+    capturePosition: "front",
+    anatomicalSide: null,
+    profileIdentity: "unknown_action/front/bilateral/bodyweight/fixture-v1",
+    status: "not_applicable",
+  }), "unsupported");
+});
+
 test("review proposal preserves immutable Rust endpoints and eight conclusions", () => {
   const proposal = buildReviewProposal({
     captureId: "capture-a",
@@ -108,6 +148,7 @@ test("review proposal preserves immutable Rust endpoints and eight conclusions",
     videoRef: "chest/source-a.mp4",
     profileIdentity: "barbell_bench_press/front/bilateral/fixture/v1",
     profileHash: "0000000000000001",
+    capability: "quality_supported",
     rustProposals: [{
       schemaVersion: "maxpower.motion-quality-proposal/v1",
       proposalId: "rust-proposal-1",
@@ -313,10 +354,11 @@ test("front no-winner runs only an explicitly unselected fused diagnostic", asyn
     videoRef: null,
     profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
     profileHash: "0000000000000001",
+    capability: "phase_supported",
     appliedPolicy: applied,
     rustProposals: [],
   });
-  assert.equal(proposal.lineage.capability, "no_winner");
+  assert.equal(proposal.lineage.capability, "phase_supported");
   assert.deepEqual(proposal.lineage.appliedPolicy, applied);
 });
 

@@ -11,6 +11,7 @@ import {
 import type {
   DecodedMotionPacket,
   DecodedRustQualityProposal,
+  MotionAssessmentCapability,
 } from "../../src/motion/motionPacket";
 import type { PoseCandidateEstimate } from "../../src/pose/PoseEngine";
 import {
@@ -27,7 +28,10 @@ import {
   type MotionQualityInputCatalog,
   type RawObservationFrame,
 } from "./runnerInputs";
-import { ACTION_CONTRACT_CATALOG } from "./actionContractCatalog";
+import {
+  ACTION_CONTRACT_CATALOG,
+  getExactActionContextContract,
+} from "./actionContractCatalog";
 
 export interface TimestampedFrame {
   readonly timestampMs: number;
@@ -94,6 +98,7 @@ interface ReviewProposalInput {
   readonly videoRef: string | null;
   readonly profileIdentity: string;
   readonly profileHash: string;
+  readonly capability: MotionAssessmentCapability;
   readonly appliedPolicy?: Readonly<Record<string, unknown>>;
   readonly rustProposals: readonly Readonly<Record<string, unknown>>[];
 }
@@ -149,11 +154,7 @@ export function buildReviewProposal(input: ReviewProposalInput): Readonly<Frozen
       visualInput: "client_deployable_yolox_rtmpose_halpe26_canonical_observations",
       profileIdentity: input.profileIdentity,
       profileHash: input.profileHash,
-      capability: input.appliedPolicy?.status === "no_winner"
-        ? "no_winner"
-        : input.appliedPolicy?.status === "selected"
-          ? "quality_supported"
-          : "profile_defined",
+      capability: input.capability,
       appliedPolicy: input.appliedPolicy ?? null,
       prohibitedClaims: ["force", "strength", "muscle_activation", "joint_torque", "medical_diagnosis"],
       automaticTraining: false,
@@ -553,9 +554,17 @@ export async function runFullDataProposal(
         },
       });
       const profileHash = installed.contentHash.toString(16).padStart(16, "0");
+      const contextCapability = reviewCapabilityForContext({
+        actionId: record.exerciseId,
+        capturePosition: record.capturePosition,
+        anatomicalSide: side,
+        profileIdentity: installed.identity,
+        appliedPolicy,
+      });
       const releaseQualityProposals = releaseQualityProposalsForPolicy(
         [...rustProposals.values()],
         appliedPolicy,
+        contextCapability,
       );
       const reviewProposal = buildReviewProposal({
         captureId: record.captureId,
@@ -566,6 +575,7 @@ export async function runFullDataProposal(
         videoRef: record.source?.video ?? null,
         profileIdentity: installed.identity,
         profileHash,
+        capability: contextCapability,
         appliedPolicy,
         rustProposals: releaseQualityProposals,
       });
@@ -585,11 +595,7 @@ export async function runFullDataProposal(
         actionId: record.exerciseId,
         capturePosition: record.capturePosition,
         anatomicalSide: side,
-        capability: appliedPolicy.status === "no_winner"
-          ? "no_winner"
-          : appliedPolicy.status === "selected"
-            ? "quality_supported"
-            : "profile_defined",
+        capability: contextCapability,
         processing: {
           chronologicalMonotonic: true,
           singlePass: true,
@@ -954,22 +960,44 @@ function releaseQualityProposalsForPolicy(
     claimEligibility: string;
     reportDigest: string;
   }>,
+  capability: MotionAssessmentCapability,
 ): readonly Readonly<Record<string, unknown>>[] {
-  if (appliedPolicy.status !== "no_winner") {
-    return proposals as unknown as readonly Readonly<Record<string, unknown>>[];
-  }
-  if (appliedPolicy.candidate !== "diagnostic_unselected_fused"
-      || appliedPolicy.claimEligibility !== "diagnostic_only_not_frozen_policy_claim") {
+  if (appliedPolicy.status === "no_winner" && (
+    appliedPolicy.candidate !== "diagnostic_unselected_fused"
+      || appliedPolicy.claimEligibility !== "diagnostic_only_not_frozen_policy_claim"
+  )) {
     throw new Error("no_winner may only emit an unselected fused diagnostic");
   }
   return deepFreeze(proposals.map((proposal) => ({
     ...proposal,
     rustCapability: proposal.capability,
-    capability: "no_winner",
-    diagnosticCandidate: "diagnostic_unselected_fused",
-    frozenPolicyClaim: false,
-    diagnosticPolicyReportDigest: appliedPolicy.reportDigest,
+    capability,
+    ...(appliedPolicy.status === "no_winner" ? {
+      diagnosticCandidate: "diagnostic_unselected_fused",
+      frozenPolicyClaim: false,
+      diagnosticPolicyReportDigest: appliedPolicy.reportDigest,
+    } : {}),
   })));
+}
+
+export function reviewCapabilityForContext(input: Readonly<{
+  actionId: string;
+  capturePosition: string;
+  anatomicalSide: "left" | "right" | null;
+  profileIdentity: string;
+  appliedPolicy: Readonly<{ status: string }>;
+}>): MotionAssessmentCapability {
+  const identityParts = input.profileIdentity.split("/");
+  const equipment = identityParts[3] ?? "";
+  const contract = getExactActionContextContract({
+    exerciseId: input.actionId,
+    capturePosition: input.capturePosition,
+    equipment,
+    trainingSide: input.anatomicalSide ?? "bilateral",
+  });
+  if (!contract) return "unsupported";
+  if (input.appliedPolicy.status === "selected") return "quality_supported";
+  return contract.capability.phase;
 }
 
 function serializeCurrentRustFrame(
