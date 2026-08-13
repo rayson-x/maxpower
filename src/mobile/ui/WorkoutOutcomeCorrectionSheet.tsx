@@ -11,6 +11,7 @@ import {
 
 import type { SetOutcomeData, WorkoutProjection } from "../../coach/domain";
 import type { CoachApplication } from "../../coach/createCoachApplication";
+import { ProfessionalTermText } from "../ui-kit";
 import { colors, radius } from "./theme";
 
 /**
@@ -166,7 +167,7 @@ function selectOutcome(
 }
 
 function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <View style={styles.metricField}><Text style={styles.metricLabel}>{label}</Text><TextInput accessibilityLabel={label} value={value} keyboardType="decimal-pad" onChangeText={onChange} placeholder="—" placeholderTextColor={colors.ink3} style={styles.metricInput} /></View>;
+  return <View style={styles.metricField}><ProfessionalTermText text={label} style={styles.metricLabel} /><TextInput accessibilityLabel={label} value={value} keyboardType="decimal-pad" onChangeText={onChange} placeholder="—" placeholderTextColor={colors.ink3} style={styles.metricInput} /></View>;
 }
 
 function setPatch(outcome: SetOutcomeData, values: { load: string; reps: string; rir: string; duration: string; distance: string }) {

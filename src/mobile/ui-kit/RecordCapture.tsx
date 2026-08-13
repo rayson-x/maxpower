@@ -2,6 +2,7 @@ import React, { type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 
 import { uiColors, uiRadius, uiSpace, uiType } from "./tokens";
+import { ProfessionalTermText } from "./ProfessionalTermText";
 
 /** A capture is deliberately not a persisted Timeline record. */
 export type RecordIntent = "training" | "nutrition" | "activity" | "check_in";
@@ -92,7 +93,7 @@ export function RecordField({ label, unit, style, ...props }: {
   style?: TextInputProps["style"];
 } & Omit<TextInputProps, "style" | "accessibilityLabel" | "placeholderTextColor">) {
   return <View style={styles.field}>
-    <Text style={styles.fieldLabel}>{label}</Text>
+    <ProfessionalTermText text={label} style={styles.fieldLabel} />
     <View style={styles.fieldValue}>
       <TextInput
         accessibilityLabel={label}

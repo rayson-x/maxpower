@@ -96,6 +96,7 @@ import {
   type ConfirmedProductBridge,
   type ProductShellCloudProjection,
 } from "../product-data";
+import { ProfessionalTermText } from "../ui-kit";
 import {
   applyInboundNavigationIntent,
   initialProductShellState,
@@ -1114,7 +1115,7 @@ function TodayCard({ today, onFlip, onStartOnboarding, onBeginWorkout, onRecordA
             {today.session.actions.map((task, index) => (
               <View style={styles.taskRow} key={task.id}>
                 <Text numberOfLines={1} style={styles.taskName}>{humanizeExerciseLabel(task.label)}</Text>
-                <Text numberOfLines={1} style={styles.taskSummary}>{task.summary}{task.targetRir !== undefined ? ` · RIR ${task.targetRir}` : ""}</Text>
+                <ProfessionalTermText numberOfLines={1} text={`${task.summary}${task.targetRir !== undefined ? ` · RIR ${task.targetRir}` : ""}`} style={styles.taskSummary} />
                 {index < today.session!.actions.length - 1 ? <View style={styles.rowDivider} /> : null}
               </View>
             ))}
@@ -2676,7 +2677,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
         onSubmit={(values) => void submitDynamicCard(values)}
       /> : <View style={styles.quickChoiceCard}>
         <Text style={styles.quickChoiceTitle}>{dynamicLoading ? "我在整理下一步。" : "接下来继续这一段对话。"}</Text>
-        {messages.slice(-3).map((message) => <Text key={message.id} style={styles.quickChoiceHint}>{message.role === "assistant" ? "我：" : "你："}{message.content}</Text>)}
+        {messages.slice(-3).map((message) => <ProfessionalTermText key={message.id} text={message.content} prefix={message.role === "assistant" ? "我：" : "你："} style={styles.quickChoiceHint} />)}
         <TextInput accessibilityLabel="补充你的训练情况" value={conversationText} onChangeText={setConversationText} editable={!conversationSending} multiline placeholder="比如：我练了两年，一周四练，最近胸背腿肩，健身房训练。" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
         <Pressable accessibilityRole="button" accessibilityLabel="发送建档对话" disabled={conversationSending || !conversationText.trim()} onPress={() => void sendOnboardingConversation()} style={[styles.onboardingButton, (conversationSending || !conversationText.trim()) && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{conversationSending ? "正在整理…" : "继续"}</Text><Text style={styles.onboardingButtonArrow}>→</Text></Pressable>
       </View>}
@@ -2785,7 +2786,7 @@ function PlanningPreviewScreen({ preview, nutritionStrategy, busy, error, locale
 
     {recoveryAdjustment ? <View style={styles.reportCalibration}>
       <Text style={styles.reportCalibrationTitle}>这次实际会怎么调整</Text>
-      <Text style={styles.reportCalibrationCopy}>下一节改为 {recoverySession ? readablePlanSessionTitle(recoverySession.title) : "肩部训练"}；本次以 {recoveryFirstSet?.targetRirRange ? `RIR ${recoveryFirstSet.targetRirRange.min}–${recoveryFirstSet.targetRirRange.max}` : "更保守的余力"} 完成，组间休息 {recoveryFirstSet?.rest?.unit === "seconds" ? `${recoveryFirstSet.rest.value} 秒` : "按动作提示"}，不安排练后有氧。确认前，当前版本不变。</Text>
+      <ProfessionalTermText text={`下一节改为 ${recoverySession ? readablePlanSessionTitle(recoverySession.title) : "肩部训练"}；本次以 ${recoveryFirstSet?.targetRirRange ? `RIR ${recoveryFirstSet.targetRirRange.min}–${recoveryFirstSet.targetRirRange.max}` : "更保守的余力"} 完成，组间休息 ${recoveryFirstSet?.rest?.unit === "seconds" ? `${recoveryFirstSet.rest.value} 秒` : "按动作提示"}，不安排练后有氧。确认前，当前版本不变。`} style={styles.reportCalibrationCopy} />
     </View> : null}
 
     <ReportSectionHeading index="01" title={recoveryAdjustment ? "调整后的训练安排" : "首周训练计划"} subtitle={report.weekRange ? `${report.weekRange} · ${report.totalWorkSets} 个力量训练工作组` : "当前周安排"} />
@@ -2793,7 +2794,7 @@ function PlanningPreviewScreen({ preview, nutritionStrategy, busy, error, locale
     {trainingSessions.map((session, index) => <View key={session.id} style={styles.reportSessionCard}>
       <View style={styles.reportSessionTop}><View><Text style={styles.reportSessionDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.reportSessionTitle}>{readablePlanSessionTitle(session.title)}</Text></View><Text style={styles.reportSessionOrdinal}>{String(index + 1).padStart(2, "0")}</Text></View>
       <View style={styles.reportTaskList}>{session.tasks.map((task) => <View key={task.id} style={styles.reportTaskRow}><View style={styles.reportTaskBullet} /><Text numberOfLines={1} style={styles.reportTaskName}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.reportTaskDose}>{planTaskDose(task)}</Text></View>)}</View>
-      {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? "力量完成后有氧" : "独立有氧"} · {session.aerobicBlock.minutes} 分钟</Text><Text style={styles.reportAerobicCopy}>RPE {session.aerobicBlock.targetRpe.min}–{session.aerobicBlock.targetRpe.max} · {session.aerobicBlock.talkTest} {session.aerobicBlock.fastedEligible ? "空腹仅可按偏好选择，不增加减脂承诺。" : "本计划不安排空腹有氧。"}</Text>{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
+      {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? "力量完成后有氧" : "独立有氧"} · {session.aerobicBlock.minutes} 分钟</Text><ProfessionalTermText text={`RPE ${session.aerobicBlock.targetRpe.min}–${session.aerobicBlock.targetRpe.max} · ${session.aerobicBlock.talkTest} ${session.aerobicBlock.fastedEligible ? "空腹仅可按偏好选择，不增加减脂承诺。" : "本计划不安排空腹有氧。"}`} style={styles.reportAerobicCopy} />{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
       <Text style={styles.reportSessionFoot}>{session.estimatedDuration?.unit === "minutes" ? `预计 ${session.estimatedDuration.value} 分钟${session.durationBudget?.unit === "minutes" ? ` · 可用最多 ${session.durationBudget.value} 分钟` : ""}` : session.durationBudget?.unit === "minutes" ? `可用最多 ${session.durationBudget.value} 分钟` : "按完成质量调整时长"} · {session.kind === "cardio" ? "以能稳定完成的强度为准" : strengthBaselineNeedsSetContext ? "已读取力量参考；首场确认最近工作组的次数与余力" : "工作重量从可控热身逐步确认"}</Text>
     </View>)}
     <View style={styles.reportRuleCard}><Text style={styles.reportRuleEyebrow}>如何进阶</Text>{(proposal.trainingStrategy?.progression ?? []).map((rule) => <ReportBullet key={rule} text={planningPhrase(rule, locale)} />)}{(proposal.trainingStrategy?.recoveryRules ?? []).map((rule) => <ReportBullet key={rule} text={planningPhrase(rule, locale)} tone="guard" />)}</View>
@@ -3321,14 +3322,14 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.workoutTop}><View><Text style={styles.screenTitle}>{readablePlanSessionTitle(workout.frozenPrescription.title)}</Text><Text style={styles.screenSub}>统一训练执行</Text></View><View style={styles.workoutTopActions}>{skipped.size ? <Text style={{ color: colors.terra, fontSize: 11, fontWeight: "800" }}>已跳过 {skipped.size} 组</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel="打开训练中的 Coach" onPress={onOpenCoach} style={styles.workoutCoachButton}><Text style={styles.workoutCoachButtonText}>Coach</Text></Pressable></View></View>
-      {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>组间休息</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <Text style={styles.workoutTaskBoundary}>下一组：{exerciseDisplayName(pending.task.exerciseVariantId)} · {setDose(pending.set)}</Text> : <Text style={styles.workoutTaskBoundary}>已没有待完成组</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel="减少三十秒休息" onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>−30 秒</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="增加三十秒休息" onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>+30 秒</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>结束</Text></Pressable></View></View> : null}
+      {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>组间休息</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <ProfessionalTermText text={`下一组：${exerciseDisplayName(pending.task.exerciseVariantId)} · ${setDose(pending.set)}`} style={styles.workoutTaskBoundary} /> : <Text style={styles.workoutTaskBoundary}>已没有待完成组</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel="减少三十秒休息" onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>−30 秒</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="增加三十秒休息" onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>+30 秒</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>结束</Text></Pressable></View></View> : null}
       {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
       {pending ? (
         <View style={styles.currentSetCard}>
           <View style={styles.currentSetHeader}><Text style={styles.cardEyebrow}>当前组 · 第 {pendingSetIndex} 组</Text>{currentExerciseOutcomes.length ? <Pressable accessibilityRole="button" accessibilityLabel={`${historyExpanded ? "收起" : "查看"}${currentExerciseOutcomes.length}组完成历史`} accessibilityState={{ expanded: historyExpanded }} onPress={() => setHistoryExpanded((value) => !value)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>已完成 {currentExerciseOutcomes.length} 组 ↻</Text></Pressable> : <Text style={styles.notRecordedText}>尚未记录</Text>}</View>
           <Text style={styles.currentSetTitle}>{exerciseDisplayName(pending.task.exerciseVariantId)}</Text>
-          <Text style={styles.currentSetDose}>{setDose(pending.set)}</Text>
-          <Text style={styles.currentSetBoundary}>重量、RIR 与疼痛只来自你的确认；相机不会替你推断。</Text>
+          <ProfessionalTermText text={setDose(pending.set)} style={styles.currentSetDose} />
+          <ProfessionalTermText text="重量、RIR 与疼痛只来自你的确认；相机不会替你推断。" style={styles.currentSetBoundary} />
           {historyExpanded ? <View accessibilityLabel="已确认组历史" style={styles.completedHistory}>{currentExerciseOutcomes.map((outcome, index) => {
             const previous = currentExerciseOutcomes[index - 1];
             const loadChange = outcome.actualLoad && previous?.actualLoad && outcome.actualLoad.unit === previous.actualLoad.unit ? outcome.actualLoad.value - previous.actualLoad.value : undefined;
@@ -3338,7 +3339,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
           {editingActual ? (
             <View style={styles.actualForm}>
               <Text style={styles.setReviewTitle}>Set Review</Text>
-              <Text style={styles.setReviewSnapshot}>计划快照：{setDose(pending.set)}</Text>
+              <ProfessionalTermText text={setDose(pending.set)} prefix="计划快照：" style={styles.setReviewSnapshot} />
               {persistedObservation ? <View style={styles.observationSummary}><Text style={styles.observationSummaryTitle}>Canonical observation · 本机留存</Text><Text style={styles.observationSummaryText}>已确认 {persistedObservation.counts.confirmed} · 待复核 {persistedObservation.counts.needsReview} · 已拒绝 {persistedObservation.counts.rejected}</Text><Text style={styles.observationSummaryBoundary}>{persistedObservation.judgement === "cannot_judge" ? "当前相机证据无法判断；请手动确认。" : "只有已确认次数用于预填；原观察不会被你的修正覆盖。"} 此观察尚不是云端 confirmed Result。</Text></View> : <Text style={styles.setReviewSnapshot}>观察：手动记录（无相机证据）</Text>}
               <ActualInput label="次数" value={actualReps} onChange={setActualReps} />
               <ActualInput label="重量" value={actualLoad} onChange={setActualLoad} />
@@ -3357,7 +3358,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
           ) : (
             <>
               <Pressable accessibilityRole="button" onPress={openActual} style={styles.primaryButton}><Text style={styles.primaryButtonText}>完成本组并检查</Text></Pressable>
-              {realtimeAvailable ? <View style={styles.monitorEntry}><View><Text style={styles.monitorEntryTitle}>Realtime 自动计次</Text><Text style={styles.monitorEntrySub}>当前动作与机位具备 exact capability；相机不会确认重量或 RIR</Text></View><Pressable accessibilityRole="button" accessibilityLabel="为当前组开启 Realtime 自动计次" onPress={() => void enableMonitor()} style={styles.monitorEntryButton}><Text style={styles.monitorEntryButtonText}>开启</Text></Pressable></View> : null}
+              {realtimeAvailable ? <View style={styles.monitorEntry}><View><Text style={styles.monitorEntryTitle}>Realtime 自动计次</Text><ProfessionalTermText text="当前动作与机位具备 exact capability；相机不会确认重量或 RIR" style={styles.monitorEntrySub} /></View><Pressable accessibilityRole="button" accessibilityLabel="为当前组开启 Realtime 自动计次" onPress={() => void enableMonitor()} style={styles.monitorEntryButton}><Text style={styles.monitorEntryButtonText}>开启</Text></Pressable></View> : null}
               <View style={styles.setActions}>
                 <Pressable accessibilityRole="button" onPress={openTarget} style={styles.actualButton}><Text style={styles.actualButtonText}>调整本组目标</Text></Pressable>
                 <Pressable accessibilityRole="button" onPress={() => setShowSkipSet(true)} style={styles.actualButton}><Text style={styles.skipSetText}>跳过本组</Text></Pressable>
@@ -3680,7 +3681,7 @@ function PausedWorkoutScreen({ application, cloudConfirmed, userId, workoutId, r
 }
 
 function ActualInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <View style={styles.actualField}><Text style={styles.actualLabel}>{label}</Text><TextInput accessibilityLabel={`实际${label}`} keyboardType="decimal-pad" value={value} onChangeText={onChange} style={styles.actualInput} placeholder="—" placeholderTextColor="#777971" /></View>;
+  return <View style={styles.actualField}><ProfessionalTermText text={label} style={styles.actualLabel} /><TextInput accessibilityLabel={`实际${label}`} keyboardType="decimal-pad" value={value} onChangeText={onChange} style={styles.actualInput} placeholder="—" placeholderTextColor="#777971" /></View>;
 }
 
 function LightNumberInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -3697,7 +3698,7 @@ function DetailedPlanSession({ session, subdued = false }: { session: ProductSes
   return <View style={[styles.reportSessionCard, subdued && styles.planSessionSubdued]}>
     <View style={styles.reportSessionTop}><View><Text style={styles.reportSessionDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.reportSessionTitle}>{readablePlanSessionTitle(session.title)}</Text></View><Text style={styles.committedSessionSets}>{session.totalSetCount} 组</Text></View>
     <View style={styles.reportTaskList}>{session.actions.map((task) => <View key={task.id} style={styles.reportTaskRow}><View style={styles.reportTaskBullet} /><Text numberOfLines={1} style={styles.reportTaskName}>{humanizeExerciseLabel(task.label)}</Text><Text style={styles.reportTaskDose}>{humanizeDoseSummary(task.summary)}{task.targetRir !== undefined ? ` · 余力 ${task.targetRir}` : ""}</Text></View>)}</View>
-    {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? "力量完成后有氧" : "独立有氧"} · {session.aerobicBlock.minutes} 分钟</Text><Text style={styles.reportAerobicCopy}>RPE {session.aerobicBlock.targetRpe.min}–{session.aerobicBlock.targetRpe.max} · {session.aerobicBlock.talkTest} {session.aerobicBlock.fastedEligible ? "空腹仅是偏好选项。" : "本计划不安排空腹有氧。"}</Text>{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
+    {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? "力量完成后有氧" : "独立有氧"} · {session.aerobicBlock.minutes} 分钟</Text><ProfessionalTermText text={`RPE ${session.aerobicBlock.targetRpe.min}–${session.aerobicBlock.targetRpe.max} · ${session.aerobicBlock.talkTest} ${session.aerobicBlock.fastedEligible ? "空腹仅是偏好选项。" : "本计划不安排空腹有氧。"}`} style={styles.reportAerobicCopy} />{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
     <Text style={styles.reportSessionFoot}>{session.estimatedMinutes ? `预计 ${session.estimatedMinutes} 分钟` : "按完成质量调整时长"} · 先保证动作质量，再考虑加量</Text>
   </View>;
 }
@@ -4025,15 +4026,6 @@ function strategyLabel(strategy: string): string { return ({ fat_loss_recomposit
 function forecastScenarioLabel(scenario: "strict_aggressive" | "balanced" | "flexible"): string { return scenario === "strict_aggressive" ? "严格进取" : scenario === "balanced" ? "平衡" : "灵活"; }
 function actorLabel(actor: "user" | "agent" | "rule_engine" | "sensor" | "sync"): string { return actor === "agent" ? "Coach" : actor === "rule_engine" ? "本地规则" : actor === "sensor" ? "设备" : actor === "sync" ? "同步" : "你"; }
 function optionalFiniteNumber(value: string): number | undefined { const parsed = Number(value.trim()); return value.trim() && Number.isFinite(parsed) ? parsed : undefined; }
-
-function onboardingGoalKind(draft: NonNullable<OnboardingEntryState["draft"]>): "fat_loss" | "hypertrophy" | "strength" | "visual_physique" | "general" {
-  if (draft.patch.goalCapture?.goalTargets.some((target) => target.kind === "target_body_fat")) return "fat_loss";
-  if (draft.patch.goalCapture?.visualIntents.length) return "visual_physique";
-  const text = draft.patch.baseline?.goalNarrative?.text ?? "";
-  if (/力量|卧推|深蹲|硬拉/u.test(text)) return "strength";
-  if (/增肌|肌肉/u.test(text)) return "hypertrophy";
-  return "general";
-}
 
 /** Convert only UI typing drafts into the catalog's typed command values. */
 function dynamicFormValueToDomain(value: DynamicOnboardingFormValue): unknown {

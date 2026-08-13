@@ -9,3 +9,5 @@ export * from "./tokens";
 export * from "./TrendChart";
 export * from "./RecordCapture";
 export * from "./DailyRecordLibrary";
+export * from "./ProfessionalTermText";
+export * from "./professionalTerms";

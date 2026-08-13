@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { CoachContextKind, CoachMessage, CoachSessionStatus, ContextRef } from "../model";
 import { APP_DOCK_BODY_HEIGHT, type CoachComposerAnchor } from "../../mobile/ui-kit/AppDock";
 import { FocusSurface } from "../../mobile/ui-kit/FocusSurface";
+import { ProfessionalTermText } from "../../mobile/ui-kit/ProfessionalTermText";
 import type {
   CoachArtifactPart,
   CoachStreamSnapshot,
@@ -272,7 +273,7 @@ function ConversationMessage({ message }: { message: CoachMessage }) {
   return <View style={[styles.conversationRow, user && styles.conversationRowUser]}>
     {!user ? <View style={styles.assistantMark}><Text style={styles.assistantMarkText}>↗</Text></View> : null}
     <View style={[styles.conversationBubble, user ? styles.userBubble : styles.assistantBubble]}>
-      <Text style={[styles.conversationText, user && styles.userText]}>{message.content}</Text>
+      <ProfessionalTermText text={message.content} style={[styles.conversationText, user && styles.userText]} />
       <Text style={[styles.conversationTime, user && styles.userTime]}>{message.createdAt.slice(11, 16)}</Text>
     </View>
   </View>;
@@ -385,14 +386,14 @@ function ArtifactState({
       <Text style={styles.cardEyebrow}>
         {card.eyebrow}
       </Text>
-      <Text style={styles.cardTitle}>{card.title}</Text>
-      {card.subtitle ? <Text style={styles.cardSubtitle}>{card.subtitle}</Text> : null}
+      <ProfessionalTermText text={card.title} style={styles.cardTitle} />
+      {card.subtitle ? <ProfessionalTermText text={card.subtitle} style={styles.cardSubtitle} /> : null}
       {card.metrics.length > 0 ? (
         <View style={styles.metrics}>
           {card.metrics.map((metric) => (
             <View key={`${metric.label}:${metric.value}`} style={styles.metric}>
-              <Text style={styles.metricValue}>{metric.value}</Text>
-              <Text style={styles.metricLabel}>{metric.label}</Text>
+              <ProfessionalTermText text={metric.value} style={styles.metricValue} />
+              <ProfessionalTermText text={metric.label} style={styles.metricLabel} />
             </View>
           ))}
         </View>
@@ -401,25 +402,19 @@ function ArtifactState({
         <View style={styles.taskList}>
           {card.taskList.map((task) => (
             <View key={task.id} style={styles.taskRow}>
-              <Text numberOfLines={1} style={styles.taskName}>
-                {task.name}
-              </Text>
-              <Text style={styles.taskDose}>
-                {task.sets} × {task.reps}
-              </Text>
+              <ProfessionalTermText numberOfLines={1} text={task.name} style={styles.taskName} />
+              <ProfessionalTermText text={`${task.sets} × ${task.reps}`} style={styles.taskDose} />
             </View>
           ))}
         </View>
       ) : null}
       {card.capabilityBoundary.map((boundary) => (
-        <Text key={boundary} style={styles.boundary}>
-          {boundary}
-        </Text>
+        <ProfessionalTermText key={boundary} text={boundary} style={styles.boundary} />
       ))}
       {card.evidenceLabels.length > 0 ? (
         <View style={styles.evidence}>
           <Text style={styles.evidenceTitle}>依据</Text>
-          <Text style={styles.evidenceText}>{card.evidenceLabels.join(" · ")}</Text>
+          <ProfessionalTermText text={card.evidenceLabels.join(" · ")} style={styles.evidenceText} />
         </View>
       ) : null}
       {card.actions.length > 0 ? (
@@ -455,6 +450,7 @@ function EmptyState({ context, message, onSelect }: { context?: CoachContextKind
 }
 
 const contextCopy: Record<CoachContextKind, { label: string }> = {
+  onboarding: { label: "建档" },
   today: { label: "今天" },
   calendar: { label: "日历" },
   plan: { label: "计划" },
@@ -464,6 +460,7 @@ const contextCopy: Record<CoachContextKind, { label: string }> = {
 };
 
 const quickPrompts: Record<CoachContextKind, readonly string[]> = {
+  onboarding: ["继续建立档案", "解释当前卡片", "查看建档进度"],
   today: ["解释今天的训练", "我今天还能吃多少？", "状态不好，怎么调整？"],
   calendar: ["总结本周安排", "帮我移动一次训练", "哪天适合恢复？"],
   plan: ["解释训练与摄入计划", "为什么今天可以多吃？", "调整本周计划"],
