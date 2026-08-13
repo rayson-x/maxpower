@@ -11,9 +11,16 @@ def generatedPoseAssetsDir = file("$buildDir/generated/poseAssets")
 android {
   namespace "expo.modules.posecamera"
   ndkVersion "27.1.12297006"
+  packaging {
+    jniLibs {
+      pickFirsts += ["**/libc++_shared.so"]
+    }
+  }
   defaultConfig {
     versionCode 1
     versionName "0.1.0"
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    consumerProguardFiles "consumer-rules.pro"
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17"
@@ -28,8 +35,14 @@ android {
   }
   sourceSets {
     main {
-      jniLibs.srcDirs += rustJniDir
+      // The Rust task is the single Android native-library source. Using +=
+      // also retains Gradle's implicit src/main/jniLibs directory, which can
+      // package a stale checked-in .so beside the freshly built one.
+      jniLibs.srcDirs = [rustJniDir]
       assets.srcDirs += generatedPoseAssetsDir
+    }
+    androidTest {
+      assets.srcDirs += file("${rootProject.projectDir.parentFile}/tools/motion-sdk/fixtures")
     }
   }
   lintOptions {
@@ -52,7 +65,8 @@ tasks.register("buildRustAndroid", Exec) {
 
 tasks.register("preparePoseModels", Sync) {
   from("${rootProject.projectDir.parentFile}/public/models") {
-    include "pose_landmarker_*.task"
+    include "yolox-nano-humanart-416x416.onnx"
+    include "rtmpose-m-halpe26-256x192.onnx"
     into "models"
   }
   into generatedPoseAssetsDir
@@ -68,5 +82,8 @@ dependencies {
   implementation "androidx.camera:camera-camera2:$camerax_version"
   implementation "androidx.camera:camera-lifecycle:$camerax_version"
   implementation "androidx.camera:camera-view:$camerax_version"
-  implementation 'com.google.mediapipe:tasks-vision:0.10.21'
+  implementation "androidx.camera:camera-video:$camerax_version"
+  implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.24.2'
+  androidTestImplementation 'androidx.test:runner:1.6.2'
+  androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 }
