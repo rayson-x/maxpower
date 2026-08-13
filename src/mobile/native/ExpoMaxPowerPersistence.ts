@@ -4,7 +4,6 @@ import { File } from "expo-file-system";
 import { createSQLiteCoachLedger } from "../../coach/sqlite";
 import { accountDatabaseName, legacyAccountDatabaseName } from "./accountDatabaseName";
 import { assertAccountDatabaseOwner } from "./accountDatabaseOwner";
-import { SQLiteCloudProductDataCache } from "./SQLiteCloudProductDataCache";
 import { SQLiteProductShellStateStore } from "./SQLiteProductShellStateStore";
 
 /**
@@ -33,25 +32,15 @@ export async function openExpoMaxPowerPersistence(accountId: string) {
     await ledgerDatabase.closeAsync();
     throw cause;
   }
-  let cloudProductDatabase: SQLite.SQLiteDatabase;
-  try {
-    cloudProductDatabase = await SQLite.openDatabaseAsync(databaseName);
-  } catch (cause) {
-    await productShellDatabase.closeAsync();
-    await ledgerDatabase.closeAsync();
-    throw cause;
-  }
   let disposed = false;
   return {
     accountId,
     databaseName,
     ledger: createSQLiteCoachLedger(ledgerDatabase),
     productShellStateStore: new SQLiteProductShellStateStore(productShellDatabase),
-    cloudProductDataCache: new SQLiteCloudProductDataCache(cloudProductDatabase),
     async dispose() {
       if (disposed) return;
       disposed = true;
-      await cloudProductDatabase.closeAsync();
       await productShellDatabase.closeAsync();
       await ledgerDatabase.closeAsync();
     },
