@@ -1,17 +1,44 @@
 {
-  "schemaVersion": "maxpower-source-independent-bench-profiles/v1",
+  "schemaVersion": "maxpower-touched-benchmark-bench-profiles/v1",
   "evidence": {
-    "source": "builtin_source_independent_provisional",
-    "fittedSourceIds": [],
-    "fittedDerivativeSourceIds": [],
-    "purpose": "Causal barbell-cycle segmentation only; no standard-form or quality truth"
+    "status": "touched_benchmark",
+    "source": "thresholds_touched_current_six_bench_captures",
+    "fittedSourceIds": [
+      "839e233f09acd809593551b125645bf7",
+      "a44741cba03352f1e689fd51276dfec5",
+      "a51c8a692c2a5a5b40cda482065cc6d5",
+      "b8af1ab860d6bbb43cd3f2cadc71506c",
+      "bc29e11c23f97a4b1ccaf321ba1e9db7",
+      "e963bc2e0819f5ef528561cc1260b7ef"
+    ],
+    "fittedDerivativeSourceIds": [
+      "personal-native-rtmpose-halpe26-observations/839e233f09acd809593551b125645bf7",
+      "personal-native-rtmpose-halpe26-observations/a44741cba03352f1e689fd51276dfec5",
+      "personal-native-rtmpose-halpe26-observations/a51c8a692c2a5a5b40cda482065cc6d5",
+      "personal-native-rtmpose-halpe26-observations/b8af1ab860d6bbb43cd3f2cadc71506c",
+      "personal-native-rtmpose-halpe26-observations/bc29e11c23f97a4b1ccaf321ba1e9db7",
+      "personal-native-rtmpose-halpe26-observations/e963bc2e0819f5ef528561cc1260b7ef"
+    ],
+    "purpose": "Known-capture causal barbell-cycle benchmark only; no unseen-source, standard-form, quality, or production claim",
+    "claimBoundary": {
+      "benchmarkClass": "touched_benchmark",
+      "acceptanceEligible": false,
+      "acceptedClaims": ["known_capture_rep_count", "known_capture_start_end_alignment"],
+      "prohibitedClaims": [
+        "unseen_source_performance",
+        "cross_user_performance",
+        "production_acceptance",
+        "turnaround_accuracy",
+        "action_quality_accuracy"
+      ]
+    }
   },
   "profiles": [
     {
       "exerciseId": "barbell_bench_press",
       "capturePosition": "front",
       "profile": {
-        "identity": "barbell_bench_press/front/bilateral/barbell/builtin-source-independent-provisional-v1",
+        "identity": "barbell_bench_press/front/bilateral/barbell/touched-benchmark-provisional-v1",
         "maturity": "provisional",
         "schema": "halpe26",
         "coordinateUnit": "image-angle-deg",
@@ -34,7 +61,7 @@
       "exerciseId": "barbell_bench_press",
       "capturePosition": "frontLeft45",
       "profile": {
-        "identity": "barbell_bench_press/frontLeft45/bilateral/barbell/builtin-source-independent-provisional-v1",
+        "identity": "barbell_bench_press/frontLeft45/bilateral/barbell/touched-benchmark-provisional-v1",
         "maturity": "provisional",
         "schema": "halpe26",
         "coordinateUnit": "image-angle-deg",
@@ -57,7 +84,7 @@
       "exerciseId": "barbell_bench_press",
       "capturePosition": "frontRight45",
       "profile": {
-        "identity": "barbell_bench_press/frontRight45/bilateral/barbell/builtin-source-independent-provisional-v1",
+        "identity": "barbell_bench_press/frontRight45/bilateral/barbell/touched-benchmark-provisional-v1",
         "maturity": "provisional",
         "schema": "halpe26",
         "coordinateUnit": "image-angle-deg",

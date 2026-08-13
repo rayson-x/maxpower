@@ -17,6 +17,7 @@
   "include": [
     "runPoseEquipmentAblation.ts",
     "runPoseEquipmentAblation.test.ts",
+    "rustBlindProposalRunner.test.ts",
     "runnerInputs.ts",
     "fusionAblation.ts",
     "blindEvaluation.ts",

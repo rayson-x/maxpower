@@ -12,19 +12,19 @@ import type {
   DecodedMotionPacket,
   DecodedRustQualityProposal,
 } from "../../src/motion/motionPacket";
+import type { PoseCandidateEstimate } from "../../src/pose/PoseEngine";
 import {
   equipmentFramesByTimestamp,
   loadBenchEquipmentSidecar,
   loadInputCatalog,
   loadRawObservationSidecar,
-  loadSourceIndependentBenchProfiles,
   measuredAxisToEquipmentObservation,
   pinInputBytes,
   rawFrameCandidates,
   sha256,
-  submitRawFrameToRust,
   type BenchEquipmentFrame,
   type InputAssetPin,
+  type MotionQualityInputCatalog,
   type RawObservationFrame,
 } from "./runnerInputs";
 import { ACTION_CONTRACT_CATALOG } from "./actionContractCatalog";
@@ -94,6 +94,7 @@ interface ReviewProposalInput {
   readonly videoRef: string | null;
   readonly profileIdentity: string;
   readonly profileHash: string;
+  readonly appliedPolicy?: Readonly<Record<string, unknown>>;
   readonly rustProposals: readonly Readonly<Record<string, unknown>>[];
 }
 
@@ -148,6 +149,12 @@ export function buildReviewProposal(input: ReviewProposalInput): Readonly<Frozen
       visualInput: "client_deployable_yolox_rtmpose_halpe26_canonical_observations",
       profileIdentity: input.profileIdentity,
       profileHash: input.profileHash,
+      capability: input.appliedPolicy?.status === "no_winner"
+        ? "no_winner"
+        : input.appliedPolicy?.status === "selected"
+          ? "quality_supported"
+          : "profile_defined",
+      appliedPolicy: input.appliedPolicy ?? null,
       prohibitedClaims: ["force", "strength", "muscle_activation", "joint_torque", "medical_diagnosis"],
       automaticTraining: false,
       productionPromotion: false,
@@ -197,10 +204,174 @@ interface ProfileArtifact {
   readonly profiles: readonly ProfileEntry[];
 }
 
+type BenchView = "front" | "frontLeft45" | "frontRight45";
+type FrozenBenchCandidateId = "pose_only" | "equipment_only" | "pose_equipment_fused";
+
+interface FrozenBenchAblationCandidate {
+  readonly actionId: "barbell_bench_press";
+  readonly capturePosition: BenchView;
+  readonly candidateId: FrozenBenchCandidateId;
+  readonly observationSetHash: string;
+  readonly frameScheduleHash: string;
+  readonly truthSplitHash: string;
+}
+
+interface FrozenBenchViewPolicy {
+  readonly schemaVersion: "maxpower-pose-equipment-fusion-ablation/v1";
+  readonly status: "selected" | "no_winner";
+  readonly scope: Readonly<{
+    actionId: "barbell_bench_press";
+    capturePosition: BenchView;
+  }>;
+  readonly selectedCandidateId: FrozenBenchCandidateId | null;
+  readonly policyHash: string | null;
+  readonly candidates: readonly FrozenBenchAblationCandidate[];
+}
+
+export interface FrozenBenchAblationPolicyReport {
+  readonly schemaVersion: "maxpower-real-pose-equipment-ablation/v1";
+  readonly action: "barbell_bench_press";
+  readonly sourceFrozenDigest: string;
+  readonly frozenPoliciesByExactView: readonly FrozenBenchViewPolicy[];
+  readonly reportDigest: string;
+  readonly [key: string]: unknown;
+}
+
+export interface LoadedFrozenBenchAblationPolicyReport {
+  readonly value: FrozenBenchAblationPolicyReport;
+  readonly bytes: Buffer;
+  readonly absolutePath: string;
+  readonly sha256: string;
+}
+
+export interface AppliedBenchPolicy {
+  readonly status: "selected" | "no_winner";
+  readonly candidate: FrozenBenchCandidateId | "diagnostic_unselected_fused";
+  readonly frozenPolicyCandidate: FrozenBenchCandidateId | null;
+  readonly reportDigest: string;
+  readonly reportSha256: string;
+  readonly sourceFrozenDigest: string;
+  readonly policyHash: string | null;
+  readonly exactScope: Readonly<{
+    actionId: "barbell_bench_press";
+    capturePosition: BenchView;
+  }>;
+  readonly claimEligibility:
+    | "frozen_exact_view_policy"
+    | "diagnostic_only_not_frozen_policy_claim";
+  readonly ablationInputSchedule: Readonly<{
+    observationSetHash: string;
+    frameScheduleHash: string;
+    truthSplitHash: string;
+  }>;
+}
+
+const BENCH_VIEWS = Object.freeze([
+  "front",
+  "frontLeft45",
+  "frontRight45",
+] as const satisfies readonly BenchView[]);
+const BENCH_CANDIDATES = Object.freeze([
+  "pose_only",
+  "equipment_only",
+  "pose_equipment_fused",
+] as const satisfies readonly FrozenBenchCandidateId[]);
+
+export async function loadFrozenBenchAblationPolicyReport(
+  path: string,
+): Promise<Readonly<LoadedFrozenBenchAblationPolicyReport>> {
+  const absolutePath = resolve(path);
+  const bytes = await readFile(absolutePath);
+  const raw = JSON.parse(bytes.toString("utf8")) as unknown;
+  const report = validateFrozenBenchAblationPolicyReport(raw);
+  return Object.freeze({
+    value: report,
+    bytes,
+    absolutePath,
+    sha256: sha256(bytes),
+  });
+}
+
+export function resolveAppliedBenchPolicy(
+  report: LoadedFrozenBenchAblationPolicyReport,
+  actionId: string,
+  capturePosition: string,
+): Readonly<AppliedBenchPolicy> {
+  if (actionId !== "barbell_bench_press" || !isBenchView(capturePosition)) {
+    throw new Error(`${actionId}/${capturePosition}: no exact bench ablation policy`);
+  }
+  const policy = report.value.frozenPoliciesByExactView.find((candidate) => (
+    candidate.scope.actionId === actionId
+    && candidate.scope.capturePosition === capturePosition
+  ));
+  if (!policy) throw new Error(`${actionId}/${capturePosition}: frozen policy missing`);
+  const frozenPolicyCandidate = policy.status === "selected"
+    ? policy.selectedCandidateId
+    : null;
+  const runtimeCandidate = frozenPolicyCandidate ?? "pose_equipment_fused";
+  const candidate = policy.candidates.find((entry) => entry.candidateId === runtimeCandidate);
+  if (!candidate) {
+    throw new Error(`${actionId}/${capturePosition}: ${runtimeCandidate} candidate lineage missing`);
+  }
+  const exactScope = {
+    actionId: "barbell_bench_press" as const,
+    capturePosition,
+  } satisfies AppliedBenchPolicy["exactScope"];
+  return deepFreeze({
+    status: policy.status,
+    candidate: policy.status === "selected"
+      ? runtimeCandidate
+      : "diagnostic_unselected_fused",
+    frozenPolicyCandidate,
+    reportDigest: report.value.reportDigest,
+    reportSha256: report.sha256,
+    sourceFrozenDigest: report.value.sourceFrozenDigest,
+    policyHash: policy.policyHash,
+    exactScope,
+    claimEligibility: policy.status === "selected"
+      ? "frozen_exact_view_policy"
+      : "diagnostic_only_not_frozen_policy_claim",
+    ablationInputSchedule: {
+      observationSetHash: candidate.observationSetHash,
+      frameScheduleHash: candidate.frameScheduleHash,
+      truthSplitHash: candidate.truthSplitHash,
+    },
+  });
+}
+
+export function applyBenchPolicyToFrame(
+  frame: RawObservationFrame,
+  measuredEquipment: readonly RustEquipmentObservation[],
+  appliedPolicy: AppliedBenchPolicy,
+): Readonly<{
+  candidates: readonly PoseCandidateEstimate[];
+  equipment: readonly RustEquipmentObservation[];
+}> {
+  const measuredPose = rawFrameCandidates(frame);
+  if (appliedPolicy.candidate === "pose_only") {
+    return deepFreeze({ candidates: measuredPose, equipment: [] });
+  }
+  if (appliedPolicy.candidate === "equipment_only") {
+    const unknownPose = measuredPose.map((candidate) => ({
+      ...candidate,
+      landmarks: candidate.landmarks.map(() => ({
+        x: 0,
+        y: 0,
+        z: 0,
+        visibility: 0,
+      })),
+      worldLandmarks: [],
+    }));
+    return deepFreeze({ candidates: unknownPose, equipment: measuredEquipment });
+  }
+  return deepFreeze({ candidates: measuredPose, equipment: measuredEquipment });
+}
+
 export interface FullDataProposalRunnerOptions {
   readonly datasetPath: string;
   readonly rawObservationRoot: string;
   readonly benchEquipmentObservationRoot: string;
+  readonly benchAblationReportPath: string;
   readonly profileArtifactPath: string;
   readonly sourceIndependentBenchProfilePath: string;
   readonly governanceInputCatalogPath: string;
@@ -218,11 +389,12 @@ export async function runFullDataProposal(
   ])) as unknown as FullDataProposalRunnerOptions;
   const catalogLoaded = await loadInputCatalog(options.governanceInputCatalogPath);
   const catalog = catalogLoaded.value;
-  const [datasetBytes, profileBytes, wasmBytes, independentBench] = await Promise.all([
+  const [datasetBytes, profileBytes, wasmBytes, independentBench, benchAblation] = await Promise.all([
     readFile(options.datasetPath),
     readFile(options.profileArtifactPath),
     readFile(options.wasmPath),
-    loadSourceIndependentBenchProfiles(options.sourceIndependentBenchProfilePath, catalog),
+    loadFullDataBenchProfiles(options.sourceIndependentBenchProfilePath, catalog),
+    loadFrozenBenchAblationPolicyReport(options.benchAblationReportPath),
   ]);
   const dataset = JSON.parse(datasetBytes.toString("utf8")) as GoldenDataset;
   const profiles = JSON.parse(profileBytes.toString("utf8")) as ProfileArtifact;
@@ -244,6 +416,7 @@ export async function runFullDataProposal(
     pinInputBytes(catalog, "profileArtifact", options.profileArtifactPath, profileBytes),
     pinInputBytes(catalog, "rustWasm", options.wasmPath, wasmBytes),
     independentBench.pin,
+    pinInputBytes(catalog, "fullDataRun", benchAblation.absolutePath, benchAblation.bytes),
   ];
   let submittedFrameCount = 0;
   let sourceFrameCount = 0;
@@ -292,6 +465,25 @@ export async function runFullDataProposal(
       if (!profileEntry) throw new Error(`${record.captureId}: full-data profile missing`);
       const side = anatomicalSideForContext(record.exerciseId, record.capturePosition);
       const profile = materializeAssessmentProfile(profileEntry.profile, side);
+      const appliedBenchPolicy = record.exerciseId === "barbell_bench_press"
+        ? resolveAppliedBenchPolicy(
+          benchAblation,
+          record.exerciseId,
+          record.capturePosition,
+        )
+        : null;
+      const baseAppliedPolicy = appliedBenchPolicy ?? deepFreeze({
+        status: "not_applicable" as const,
+        candidate: "pose_only" as const,
+        frozenPolicyCandidate: null,
+        reportDigest: benchAblation.value.reportDigest,
+        reportSha256: benchAblation.sha256,
+        sourceFrozenDigest: benchAblation.value.sourceFrozenDigest,
+        policyHash: null,
+        exactScope: null,
+        claimEligibility: "outside_bench_ablation_scope" as const,
+        ablationInputSchedule: null,
+      });
       const wasm = await instantiateRustMotionWasm(wasmBytes);
       const motion = new RustCanonicalWasmSession({
         sequenceId: `${options.runId}:${record.captureId}`,
@@ -310,6 +502,7 @@ export async function runFullDataProposal(
       const reps = new Map<string, (typeof motion.lastCompletedReps)[number]>();
       const rustProposals = new Map<string, Readonly<DecodedRustQualityProposal>>();
       const sourceTimestampsMs: number[] = [];
+      const submittedInputSchedule: Array<Readonly<Record<string, unknown>>> = [];
       const currentRustFrames: Array<Readonly<Record<string, unknown>>> = [];
       const collect = (): void => {
         for (const rep of motion.lastCompletedReps) reps.set(rep.repId.toString(), rep);
@@ -327,8 +520,19 @@ export async function runFullDataProposal(
           axisFrame?.axis ?? null,
           frame.frameNumber + 1,
         );
-        if (equipment.length > 0) equipmentInputFrameCount += 1;
-        submitRawFrameToRust(motion, frame, equipment);
+        const prepared = appliedBenchPolicy
+          ? applyBenchPolicyToFrame(frame, equipment, appliedBenchPolicy)
+          : deepFreeze({ candidates: rawFrameCandidates(frame), equipment: [] });
+        if (prepared.equipment.length > 0) equipmentInputFrameCount += 1;
+        motion.processCandidates(prepared.candidates, timestampMs, prepared.equipment);
+        submittedInputSchedule.push(deepFreeze({
+          timestampMs,
+          candidateIds: prepared.candidates.map((candidate) => candidate.candidateId),
+          visibleLandmarkCount: prepared.candidates.reduce((sum, candidate) => (
+            sum + candidate.landmarks.filter((landmark) => landmark.visibility > 0).length
+          ), 0),
+          equipmentProposalIds: prepared.equipment.map((observation) => observation.proposalId),
+        }));
         collect();
         const packet = motion.lastDecodedPacket;
         if (!packet || Number(packet.sourceTimestampMs) !== timestampMs) {
@@ -339,7 +543,20 @@ export async function runFullDataProposal(
       }
       motion.finishSet();
       collect();
+      const currentContextFrameScheduleHash = sha256(stableStringify(submittedInputSchedule));
+      const appliedPolicy = deepFreeze({
+        ...baseAppliedPolicy,
+        inputSchedule: {
+          currentContextFrameScheduleHash,
+          submittedFrameCount: submittedInputSchedule.length,
+          ablationFrameScheduleHash: appliedBenchPolicy?.ablationInputSchedule.frameScheduleHash ?? null,
+        },
+      });
       const profileHash = installed.contentHash.toString(16).padStart(16, "0");
+      const releaseQualityProposals = releaseQualityProposalsForPolicy(
+        [...rustProposals.values()],
+        appliedPolicy,
+      );
       const reviewProposal = buildReviewProposal({
         captureId: record.captureId,
         actionId: record.exerciseId,
@@ -349,7 +566,8 @@ export async function runFullDataProposal(
         videoRef: record.source?.video ?? null,
         profileIdentity: installed.identity,
         profileHash,
-        rustProposals: [...rustProposals.values()] as unknown as readonly Readonly<Record<string, unknown>>[],
+        appliedPolicy,
+        rustProposals: releaseQualityProposals,
       });
       equipmentMeasuredEndpointCount += [...rustProposals.values()].reduce((sum, proposal) => (
         sum + proposal.endpoints.filter((endpoint) => (
@@ -367,13 +585,20 @@ export async function runFullDataProposal(
         actionId: record.exerciseId,
         capturePosition: record.capturePosition,
         anatomicalSide: side,
+        capability: appliedPolicy.status === "no_winner"
+          ? "no_winner"
+          : appliedPolicy.status === "selected"
+            ? "quality_supported"
+            : "profile_defined",
         processing: {
           chronologicalMonotonic: true,
           singlePass: true,
           submittedFrameCount: sourceTimestampsMs.length,
           firstTimestampMs: sourceTimestampsMs[0] ?? null,
           lastTimestampMs: sourceTimestampsMs.at(-1) ?? null,
+          inputScheduleHash: currentContextFrameScheduleHash,
         },
+        appliedPolicy,
         installedProfile: {
           identity: installed.identity,
           contentHash: profileHash,
@@ -396,7 +621,7 @@ export async function runFullDataProposal(
           evidenceReason: rep.evidenceReason,
           observationFindings: rep.observationFindings,
         })),
-        qualityProposals: [...rustProposals.values()],
+        qualityProposals: releaseQualityProposals,
         reviewProposal,
         currentRustEvidence: {
           ...evidenceSemantic,
@@ -433,6 +658,7 @@ export async function runFullDataProposal(
       automaticTraining: false,
       profileMutation: false,
       productionPromotion: false,
+      benchPolicyExecution: "frozen_exact_view_policy_or_explicit_unselected_diagnostic",
     },
     inventory: {
       uniqueSourceCount: recordsBySource.size,
@@ -447,6 +673,8 @@ export async function runFullDataProposal(
       datasetSha256: sha256(datasetBytes),
       profileArtifactSha256: sha256(profileBytes),
       rustWasmSha256: sha256(wasmBytes),
+      benchAblationReportSha256: benchAblation.sha256,
+      benchAblationReportDigest: benchAblation.value.reportDigest,
       profileSchemaVersion: profiles.schemaVersion,
       inputAssets: uniqueInputPins,
       inputAssetManifestSha256: sha256(stableStringify(uniqueInputPins)),
@@ -454,7 +682,9 @@ export async function runFullDataProposal(
     limitations: [
       "This full-data proposal may use profiles fitted with the same sources and is not blind accuracy evidence.",
       "Accepted runner input is the raw client-deployable Halpe-26 sidecar, not personal-rust-canonical-v2.",
-      "Bench uses a source-independent provisional Rust barbell graph and measured prototype axes as proposal-only features.",
+      "Bench uses an explicitly touched-benchmark provisional Rust barbell graph and measured prototype axes as proposal-only features; this full-data queue is not unseen-source evidence.",
+      "Bench frontLeft45/frontRight45 execute the frozen equipment_only policy; all 26 pose landmarks are submitted as unknown.",
+      "Bench front has no frozen winner; its fused output is diagnostic_unselected_fused and is ineligible for a frozen policy claim.",
       "Non-bench actions are pose-only; equipment proposal features are never treated as human truth.",
       "No physiological force, strength, muscle activation, joint-torque or medical conclusion is measured.",
     ],
@@ -507,6 +737,233 @@ export function materializeAssessmentProfile(
   const identity = `${actionId}/${capturePosition}/${laterality}/${equipment}/${version}`;
   const withoutHash = { ...original, identity };
   return { ...withoutHash, contentHash: computeRustExerciseProfileHash(withoutHash) };
+}
+
+async function loadFullDataBenchProfiles(
+  path: string,
+  catalog: MotionQualityInputCatalog,
+): Promise<Readonly<{
+  value: readonly Readonly<{
+    exerciseId: "barbell_bench_press";
+    capturePosition: BenchView;
+    profile: RustExerciseProfileData;
+  }>[];
+  bytes: Buffer;
+  pin: InputAssetPin;
+}>> {
+  const absolute = resolve(path);
+  const bytes = await readFile(absolute);
+  const artifact = requireRecord(JSON.parse(bytes.toString("utf8")), "full-data bench profile artifact");
+  const evidence = requireRecord(artifact.evidence, "full-data bench profile evidence");
+  const fittedSourceIds = requireArray(
+    evidence.fittedSourceIds,
+    "full-data bench fittedSourceIds",
+  ).map((value, index) => requireString(value, `full-data bench fittedSourceIds ${index}`));
+  const fittedDerivativeSourceIds = requireArray(
+    evidence.fittedDerivativeSourceIds,
+    "full-data bench fittedDerivativeSourceIds",
+  ).map((value, index) => requireString(value, `full-data bench fittedDerivativeSourceIds ${index}`));
+  if (artifact.schemaVersion !== "maxpower-touched-benchmark-bench-profiles/v1"
+      || evidence.status !== "touched_benchmark"
+      || evidence.source !== "thresholds_touched_current_six_bench_captures"
+      || fittedSourceIds.length !== 6
+      || fittedDerivativeSourceIds.length !== 6) {
+    throw new Error("full-data bench profile must declare touched-benchmark lineage");
+  }
+  const profiles = requireArray(artifact.profiles, "full-data bench profiles").map((raw, index) => {
+    const entry = requireRecord(raw, `full-data bench profile ${index}`);
+    const capturePosition = entry.capturePosition;
+    const serialized = requireRecord(entry.profile, `full-data bench profile ${index} data`);
+    if (entry.exerciseId !== "barbell_bench_press" || !isBenchView(capturePosition)) {
+      throw new Error(`full-data bench profile ${index}: exact action/view mismatch`);
+    }
+    const identity = requireString(serialized.identity, `full-data bench profile ${index} identity`);
+    if (identity !== `barbell_bench_press/${capturePosition}/bilateral/barbell/touched-benchmark-provisional-v1`
+        || serialized.stateMachineId !== "barbell-axis-primary-ready-effort-return/v1") {
+      throw new Error(`full-data bench profile ${index}: touched identity/state graph mismatch`);
+    }
+    const withoutHash = cloneJson(serialized) as unknown as Omit<RustExerciseProfileData, "contentHash">;
+    return deepFreeze({
+      exerciseId: "barbell_bench_press" as const,
+      capturePosition,
+      profile: {
+        ...withoutHash,
+        contentHash: computeRustExerciseProfileHash(withoutHash),
+      },
+    });
+  });
+  if (profiles.length !== BENCH_VIEWS.length
+      || BENCH_VIEWS.some((view) => !profiles.some((entry) => entry.capturePosition === view))) {
+    throw new Error("full-data bench profile must contain exactly three views");
+  }
+  return Object.freeze({
+    value: Object.freeze(profiles),
+    bytes,
+    pin: pinInputBytes(catalog, "sourceIndependentBenchProfile", absolute, bytes),
+  });
+}
+
+function validateFrozenBenchAblationPolicyReport(
+  raw: unknown,
+): Readonly<FrozenBenchAblationPolicyReport> {
+  const report = requireRecord(raw, "bench ablation report");
+  if (report.schemaVersion !== "maxpower-real-pose-equipment-ablation/v1"
+      || report.action !== "barbell_bench_press") {
+    throw new Error("bench ablation report schema/action mismatch");
+  }
+  const reportDigest = requireSha256(report.reportDigest, "bench ablation reportDigest");
+  const sourceFrozenDigest = requireSha256(
+    report.sourceFrozenDigest,
+    "bench ablation sourceFrozenDigest",
+  );
+  const { reportDigest: ignoredDigest, ...semantic } = report;
+  void ignoredDigest;
+  if (sha256(stableStringify(semantic)) !== reportDigest) {
+    throw new Error("bench ablation reportDigest mismatch");
+  }
+
+  const rawPolicies = requireArray(
+    report.frozenPoliciesByExactView,
+    "bench ablation exact-view policies",
+  );
+  if (rawPolicies.length !== BENCH_VIEWS.length) {
+    throw new Error("bench ablation must contain exactly three view policies");
+  }
+  const seenViews = new Set<BenchView>();
+  for (const [index, rawPolicy] of rawPolicies.entries()) {
+    const policy = requireRecord(rawPolicy, `bench ablation policy ${index}`);
+    if (policy.schemaVersion !== "maxpower-pose-equipment-fusion-ablation/v1") {
+      throw new Error(`bench ablation policy ${index}: schema mismatch`);
+    }
+    const scope = requireRecord(policy.scope, `bench ablation policy ${index} scope`);
+    if (scope.actionId !== "barbell_bench_press" || !isBenchView(scope.capturePosition)) {
+      throw new Error(`bench ablation policy ${index}: exact action/view mismatch`);
+    }
+    if (seenViews.has(scope.capturePosition)) {
+      throw new Error(`bench ablation policy ${index}: duplicate ${scope.capturePosition}`);
+    }
+    seenViews.add(scope.capturePosition);
+    if (policy.status !== "selected" && policy.status !== "no_winner") {
+      throw new Error(`bench ablation policy ${index}: invalid status`);
+    }
+
+    const rawCandidates = requireArray(
+      policy.candidates,
+      `bench ablation policy ${index} candidates`,
+    );
+    if (rawCandidates.length !== BENCH_CANDIDATES.length) {
+      throw new Error(`bench ablation policy ${index}: candidate set is not exact`);
+    }
+    const seenCandidates = new Set<FrozenBenchCandidateId>();
+    const parsedCandidates = rawCandidates.map((rawCandidate, candidateIndex) => {
+      const candidate = requireRecord(
+        rawCandidate,
+        `bench ablation policy ${index} candidate ${candidateIndex}`,
+      );
+      const candidateActionId = candidate.actionId;
+      const candidateView = candidate.capturePosition;
+      const candidateId = candidate.candidateId;
+      if (candidateActionId !== "barbell_bench_press"
+          || !isBenchView(candidateView)
+          || candidateActionId !== scope.actionId
+          || candidateView !== scope.capturePosition
+          || !isFrozenBenchCandidateId(candidateId)) {
+        throw new Error(`bench ablation policy ${index}: candidate exact action/view mismatch`);
+      }
+      if (seenCandidates.has(candidateId)) {
+        throw new Error(`bench ablation policy ${index}: duplicate ${candidateId}`);
+      }
+      seenCandidates.add(candidateId);
+      return {
+        actionId: candidateActionId,
+        capturePosition: candidateView,
+        candidateId,
+        observationSetHash: requireSha256(
+          candidate.observationSetHash,
+          `bench ablation policy ${index} observationSetHash`,
+        ),
+        frameScheduleHash: requireSha256(
+          candidate.frameScheduleHash,
+          `bench ablation policy ${index} frameScheduleHash`,
+        ),
+        truthSplitHash: requireSha256(
+          candidate.truthSplitHash,
+          `bench ablation policy ${index} truthSplitHash`,
+        ),
+      } satisfies FrozenBenchAblationCandidate;
+    });
+    if (BENCH_CANDIDATES.some((candidate) => !seenCandidates.has(candidate))) {
+      throw new Error(`bench ablation policy ${index}: candidate set is incomplete`);
+    }
+    const selectedCandidateId = policy.selectedCandidateId;
+    if (policy.status === "selected") {
+      if (!isFrozenBenchCandidateId(selectedCandidateId)
+          || !seenCandidates.has(selectedCandidateId)) {
+        throw new Error(`bench ablation policy ${index}: selected candidate is invalid`);
+      }
+      const policyHash = requireSha256(policy.policyHash, `bench ablation policy ${index} hash`);
+      const first = parsedCandidates[0]!;
+      const policySemantic = {
+        schemaVersion: policy.schemaVersion,
+        scope,
+        selectedCandidateId,
+        observationSetHash: first.observationSetHash,
+        frameScheduleHash: first.frameScheduleHash,
+        truthSplitHash: first.truthSplitHash,
+        candidates: rawCandidates,
+      };
+      if (sha256(JSON.stringify(policySemantic)) !== policyHash) {
+        throw new Error(`bench ablation policy ${index}: policyHash mismatch`);
+      }
+    } else if (selectedCandidateId !== null || policy.policyHash !== null) {
+      throw new Error(`bench ablation policy ${index}: no_winner cannot select a candidate`);
+    }
+  }
+  if (BENCH_VIEWS.some((view) => !seenViews.has(view))) {
+    throw new Error("bench ablation exact-view policy set is incomplete");
+  }
+  void sourceFrozenDigest;
+  return deepFreeze(cloneJson(report) as unknown as FrozenBenchAblationPolicyReport);
+}
+
+function isBenchView(value: unknown): value is BenchView {
+  return typeof value === "string" && (BENCH_VIEWS as readonly string[]).includes(value);
+}
+
+function isFrozenBenchCandidateId(value: unknown): value is FrozenBenchCandidateId {
+  return typeof value === "string" && (BENCH_CANDIDATES as readonly string[]).includes(value);
+}
+
+function requireSha256(value: unknown, label: string): string {
+  const digest = requireString(value, label);
+  if (!/^[a-f0-9]{64}$/u.test(digest)) throw new Error(`${label} must be SHA-256`);
+  return digest;
+}
+
+function releaseQualityProposalsForPolicy(
+  proposals: readonly Readonly<DecodedRustQualityProposal>[],
+  appliedPolicy: Readonly<{
+    status: string;
+    candidate: string;
+    claimEligibility: string;
+    reportDigest: string;
+  }>,
+): readonly Readonly<Record<string, unknown>>[] {
+  if (appliedPolicy.status !== "no_winner") {
+    return proposals as unknown as readonly Readonly<Record<string, unknown>>[];
+  }
+  if (appliedPolicy.candidate !== "diagnostic_unselected_fused"
+      || appliedPolicy.claimEligibility !== "diagnostic_only_not_frozen_policy_claim") {
+    throw new Error("no_winner may only emit an unselected fused diagnostic");
+  }
+  return deepFreeze(proposals.map((proposal) => ({
+    ...proposal,
+    rustCapability: proposal.capability,
+    capability: "no_winner",
+    diagnosticCandidate: "diagnostic_unselected_fused",
+    frozenPolicyClaim: false,
+    diagnosticPolicyReportDigest: appliedPolicy.reportDigest,
+  })));
 }
 
 function serializeCurrentRustFrame(
@@ -611,6 +1068,7 @@ async function main(): Promise<void> {
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
     rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
     benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
+    benchAblationReportPath: "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
     sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",

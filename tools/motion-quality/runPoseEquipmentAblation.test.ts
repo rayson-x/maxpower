@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   ablationFrameCandidates,
+  assertTouchedBenchmarkClaimBoundary,
   buildRowNoWinnerScope,
   freezeStartEndTruthSplit,
 } from "./runPoseEquipmentAblation";
@@ -62,4 +63,28 @@ test("row remains a separate no-winner scope when frozen equipment evidence is a
   assert.equal(row.selectedCandidateId, null);
   assert.deepEqual(row.candidates, []);
   assert.match(row.missingEvidence, /row_equipment_sidecar/);
+});
+
+test("ablation artifacts fail closed on overstated benchmark claims", () => {
+  const honest = {
+    runKind: "touched_benchmark",
+    claimBoundary: {
+      evidenceClass: "touched_benchmark",
+      allowedClaims: ["rep_count", "start_end_alignment"],
+      excludedClaims: ["unseen_capture", "unseen_user", "production_promotion"],
+    },
+  };
+  assert.doesNotThrow(() => assertTouchedBenchmarkClaimBoundary(honest));
+  assert.doesNotMatch(JSON.stringify(honest), /blind|generalization/iu);
+  assert.throws(
+    () => assertTouchedBenchmarkClaimBoundary({ ...honest, runKind: "blind_evaluation" }),
+    /touched_benchmark/u,
+  );
+  assert.throws(
+    () => assertTouchedBenchmarkClaimBoundary({
+      ...honest,
+      limitations: ["cross-user generalization"],
+    }),
+    /overstated benchmark claim/u,
+  );
 });

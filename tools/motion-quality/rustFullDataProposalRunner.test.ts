@@ -1,24 +1,76 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
   anatomicalSideForContext,
+  applyBenchPolicyToFrame,
   buildReviewProposal,
+  loadFrozenBenchAblationPolicyReport,
   materializeAssessmentProfile,
+  resolveAppliedBenchPolicy,
   routeSourceFramesOnce,
 } from "./rustFullDataProposalRunner.js";
-import { actualProfileBundles, runFrozenBlindPlan } from "./rustBlindProposalRunner.js";
+import {
+  actualProfileBundles,
+  loadTouchedBenchmarkBenchProfiles,
+  runFrozenTouchedBenchmarkPlan,
+  sealTouchedBenchmarkPlan,
+  TOUCHED_BENCHMARK_CLAIM_BOUNDARY,
+  writeTouchedBenchmarkPlan,
+} from "./rustBlindProposalRunner.js";
 import { validateSourceAwareLeakage } from "./blindEvaluation.js";
 import {
   loadInputCatalog,
-  loadSourceIndependentBenchProfiles,
   measuredAxisToEquipmentObservation,
+  pinInputBytes,
   rawObservationDerivativeId,
   submitRawFrameToRust,
 } from "./runnerInputs.js";
+
+test("motion-quality roles resolve through the authoritative governance catalog", async () => {
+  const loaded = await loadInputCatalog("tools/motion-quality/data-governance-inputs.json");
+  assert.equal(loaded.value.schemaVersion, "maxpower-motion-quality-input-catalog/v2");
+  assert.equal(loaded.value.authorityCatalog.catalogId, "maxpower-motion-training-data-v1");
+  assert.equal(loaded.pin.assetId, "motion-quality-runner-input-catalog");
+  assert.equal(loaded.pin.admission, "protected");
+  assert.match(loaded.pin.sha256, /^[a-f0-9]{64}$/u);
+  assert.equal(loaded.pin.catalogSha256, loaded.pin.sha256);
+
+  const expectedAdmissions = {
+    humanRanges: "label_allowed",
+    rawHalpe26: "feature_only",
+    benchBarbellAxis: "proposal_only",
+    profileArtifact: "evaluation_only",
+    blindPlan: "evaluation_only",
+    rustWasm: "protected",
+    sourceIndependentBenchProfile: "evaluation_only",
+    fullDataRun: "evaluation_only",
+  } as const;
+  for (const [role, admission] of Object.entries(expectedAdmissions)) {
+    const binding = loaded.value.assets[role as keyof typeof expectedAdmissions];
+    assert.equal(binding.admission, admission);
+    assert.ok(binding.authority.length > 0);
+    assert.ok(binding.groupKey.length > 0);
+    assert.ok(binding.location.path.length > 0);
+  }
+
+  const datasetPath = resolve("data/training/personal-golden-segmentation-v2.json");
+  const datasetBytes = await readFile(datasetPath);
+  const pin = pinInputBytes(loaded.value, "humanRanges", datasetPath, datasetBytes);
+  assert.equal(pin.catalogSha256, pin.sha256);
+  assert.equal(pin.location.path, "data/training/personal-golden-segmentation-v2.json");
+  assert.throws(
+    () => pinInputBytes(loaded.value, "humanRanges", datasetPath, Buffer.concat([datasetBytes, Buffer.from("drift")])),
+    /authoritative SHA-256 mismatch/u,
+  );
+  assert.throws(
+    () => pinInputBytes(loaded.value, "rustWasm", datasetPath, datasetBytes),
+    /outside authoritative asset location/u,
+  );
+});
 
 test("one source frame is routed to at most one exact context window", () => {
   const routed = routeSourceFramesOnce(
@@ -171,9 +223,114 @@ test("measured axis becomes a geometry barbell observation submitted with raw ca
   assert.equal(calls[0][2], equipment);
 });
 
-test("source-independent bench identity keeps barbell in the equipment segment", async () => {
+test("selected equipment-only policy preserves subject identity while withholding all 26 joints", async () => {
+  const report = await loadFrozenBenchAblationPolicyReport(
+    "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
+  );
+  const applied = resolveAppliedBenchPolicy(
+    report,
+    "barbell_bench_press",
+    "frontLeft45",
+  );
+  assert.equal(applied.status, "selected");
+  assert.equal(applied.candidate, "equipment_only");
+  assert.equal(applied.claimEligibility, "frozen_exact_view_policy");
+  assert.equal(applied.reportDigest, report.value.reportDigest);
+  assert.match(report.sha256, /^[a-f0-9]{64}$/u);
+
+  const frame = {
+    frameNumber: 7,
+    timestampMs: 100,
+    selectedBbox: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
+    landmarks: Array.from({ length: 26 }, (_, index) => ({
+      x: 0.2 + index / 100,
+      y: 0.3,
+      z: null,
+      visibility: 0.9,
+    })),
+  };
+  const equipment = measuredAxisToEquipmentObservation({
+    source: "measured",
+    confidence: 0.96,
+    x1: 0.2,
+    y1: 0.4,
+    x2: 0.8,
+    y2: 0.4,
+    centerY: 0.4,
+  }, 8);
+  const prepared = applyBenchPolicyToFrame(frame, equipment, applied);
+  assert.equal(prepared.candidates.length, 1);
+  assert.equal(prepared.candidates[0].candidateId, 1);
+  assert.deepEqual(prepared.candidates[0].bbox, frame.selectedBbox);
+  assert.equal(prepared.candidates[0].landmarks.length, 26);
+  assert.ok(prepared.candidates[0].landmarks.every((point) => (
+    point.x === 0 && point.y === 0 && point.z === 0 && point.visibility === 0
+  )));
+  assert.equal(prepared.equipment, equipment);
+});
+
+test("front no-winner runs only an explicitly unselected fused diagnostic", async () => {
+  const report = await loadFrozenBenchAblationPolicyReport(
+    "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
+  );
+  const applied = resolveAppliedBenchPolicy(report, "barbell_bench_press", "front");
+  assert.equal(applied.status, "no_winner");
+  assert.equal(applied.candidate, "diagnostic_unselected_fused");
+  assert.equal(applied.frozenPolicyCandidate, null);
+  assert.equal(applied.policyHash, null);
+  assert.equal(applied.claimEligibility, "diagnostic_only_not_frozen_policy_claim");
+
+  const frame = {
+    frameNumber: 1,
+    timestampMs: 100,
+    selectedBbox: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
+    landmarks: Array.from({ length: 26 }, () => ({
+      x: 0.4,
+      y: 0.5,
+      z: null,
+      visibility: 0.8,
+    })),
+  };
+  const equipment = measuredAxisToEquipmentObservation({
+    source: "measured",
+    confidence: 0.96,
+    x1: 0.2,
+    y1: 0.4,
+    x2: 0.8,
+    y2: 0.4,
+    centerY: 0.4,
+  }, 2);
+  const prepared = applyBenchPolicyToFrame(frame, equipment, applied);
+  assert.equal(prepared.candidates[0].landmarks[0].visibility, 0.8);
+  assert.equal(prepared.equipment, equipment);
+
+  const proposal = buildReviewProposal({
+    captureId: "front-diagnostic",
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    sourceCaptureId: "front-source",
+    videoRef: null,
+    profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
+    profileHash: "0000000000000001",
+    appliedPolicy: applied,
+    rustProposals: [],
+  });
+  assert.equal(proposal.lineage.capability, "no_winner");
+  assert.deepEqual(proposal.lineage.appliedPolicy, applied);
+});
+
+test("touched bench threshold lineage excludes all six target captures", async () => {
+  const expectedTouchedSources = [
+    "839e233f09acd809593551b125645bf7",
+    "a44741cba03352f1e689fd51276dfec5",
+    "a51c8a692c2a5a5b40cda482065cc6d5",
+    "b8af1ab860d6bbb43cd3f2cadc71506c",
+    "bc29e11c23f97a4b1ccaf321ba1e9db7",
+    "e963bc2e0819f5ef528561cc1260b7ef",
+  ];
   const catalog = await loadInputCatalog("tools/motion-quality/data-governance-inputs.json");
-  const loaded = await loadSourceIndependentBenchProfiles(
+  const loaded = await loadTouchedBenchmarkBenchProfiles(
     "tools/motion-quality/source-independent-bench-profiles.json",
     catalog.value,
   );
@@ -184,12 +341,41 @@ test("source-independent bench identity keeps barbell in the equipment segment",
       entry.capturePosition,
       "bilateral",
       "barbell",
-      "builtin-source-independent-provisional-v1",
+      "touched-benchmark-provisional-v1",
     ]);
+    assert.deepEqual(entry.fittedSourceIds, expectedTouchedSources);
+    assert.deepEqual(
+      entry.fittedDerivativeSourceIds,
+      expectedTouchedSources.map(rawObservationDerivativeId),
+    );
   }
   const bundles = actualProfileBundles({ schemaVersion: "profiles/v1", profiles: [] }, loaded.value);
   assert.equal(bundles.length, 3);
-  assert.ok(bundles.every((bundle) => bundle.fittedSourceIds.length === 0));
+  assert.ok(bundles.every((bundle) => (
+    expectedTouchedSources.every((sourceCaptureId) => bundle.fittedSourceIds.includes(sourceCaptureId))
+  )));
+
+  const directory = await mkdtemp(join(tmpdir(), "maxpower-touched-benchmark-plan-"));
+  const plan = await writeTouchedBenchmarkPlan({
+    datasetPath: "data/training/personal-golden-segmentation-v2.json",
+    profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
+    touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
+    outputPath: join(directory, "plan.json"),
+    seed: "touched-benchmark-source-exclusion-test",
+    runId: "touched-benchmark-source-exclusion-test",
+  });
+  const benchContexts = plan.sources.flatMap((source) => source.contexts.filter((context) => (
+    context.actionId === "barbell_bench_press"
+  )));
+  assert.equal(plan.runKind, "touched_benchmark");
+  assert.equal(benchContexts.length, 6);
+  assert.ok(benchContexts.every((context) => (
+    context.capability === "unsupported"
+    && context.bundle === null
+    && context.selection === "no_legal_bundle"
+  )));
+  assert.doesNotMatch(JSON.stringify(plan), /blind|generalization/iu);
 
   const bench = loaded.value[0].profile;
   const adaptedMachine = materializeAssessmentProfile({
@@ -212,17 +398,20 @@ test("source-independent bench identity keeps barbell in the equipment segment",
   );
 });
 
-test("unsupported context still runs current Rust WASM over every raw frame without a profile", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "maxpower-motion-quality-"));
+test("unsupported touched-benchmark context still runs current Rust WASM over every raw frame", async (t) => {
+  const directory = await mkdtemp(resolve(
+    "data/workflows/motion-quality-review/.tmp-touched-benchmark-test-",
+  ));
+  t.after(() => rm(directory, { recursive: true, force: true }));
   const planPath = join(directory, "plan.json");
   const outputPath = join(directory, "prediction.json");
   const sourceCaptureId = "1ffdb9483b96090c6caf40a2ca3e6c46";
-  await writeFile(planPath, JSON.stringify({
-    schemaVersion: "maxpower-motion-quality-truth-free-plan/v1",
+  await writeFile(planPath, JSON.stringify(sealTouchedBenchmarkPlan({
+    schemaVersion: "maxpower-motion-quality-touched-benchmark-plan/v1",
     runId: "unsupported-real-wasm-test",
-    runKind: "blind_evaluation",
+    runKind: "touched_benchmark",
     seed: "test",
-    planDigest: "a".repeat(64),
+    claimBoundary: TOUCHED_BENCHMARK_CLAIM_BOUNDARY,
     sources: [{
       sourceCaptureId,
       videoRef: null,
@@ -236,18 +425,19 @@ test("unsupported context still runs current Rust WASM over every raw frame with
         inputWindow: { fromTimestampMs: 0, untilTimestampMs: 500 },
       }],
     }],
-  }));
-  const frozen = await runFrozenBlindPlan({
+  })));
+  const frozen = await runFrozenTouchedBenchmarkPlan({
     planPath,
     rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
     benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-    sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
     outputPath,
   });
   const context = frozen.contexts[0];
+  assert.equal(frozen.runKind, "touched_benchmark");
   assert.equal(context.capability, "unsupported");
   assert.equal(context.versions.profileBundle, "none");
   assert.doesNotMatch(context.versions.rustEngine, /not_run/u);

@@ -11,15 +11,8 @@ import {
 import type { DecodedRustQualityProposal } from "../../src/motion/motionPacket";
 import type { PoseCandidateEstimate } from "../../src/pose/PoseEngine";
 import {
-  freezePredictions,
-  scoreFrozenBlindRun,
-  type AlignmentMetrics,
-  type BlindEvaluationReport,
-  type FrozenPredictionRun,
-  type InjectedContextPrediction,
   type PersonalGoldenDataset,
   type PersonalGoldenRecord,
-  type TruthFreePlan,
 } from "./blindEvaluation";
 import {
   freezeFusionPolicy,
@@ -28,11 +21,23 @@ import {
 } from "./fusionAblation";
 import { routeSourceFramesOnce } from "./rustFullDataProposalRunner";
 import {
+  TOUCHED_BENCHMARK_CLAIM_BOUNDARY,
+  TOUCHED_BENCHMARK_RUN_KIND,
+  freezeTouchedBenchmarkPredictions,
+  loadTouchedBenchmarkBenchProfiles,
+  scoreFrozenTouchedBenchmarkRun,
+  sealTouchedBenchmarkPlan,
+  type TouchedBenchmarkBenchProfileEntry,
+  type TouchedBenchmarkEvaluationReport,
+  type TouchedBenchmarkFrozenPredictionRun,
+  type TouchedBenchmarkInjectedContextPrediction,
+  type TouchedBenchmarkPlan,
+} from "./rustBlindProposalRunner";
+import {
   equipmentFramesByTimestamp,
   loadBenchEquipmentSidecar,
   loadInputCatalog,
   loadRawObservationSidecar,
-  loadSourceIndependentBenchProfiles,
   measuredAxisToEquipmentObservation,
   pinInputBytes,
   rawFrameCandidates,
@@ -40,7 +45,6 @@ import {
   type BenchEquipmentFrame,
   type InputAssetPin,
   type RawObservationFrame,
-  type SourceIndependentBenchProfileEntry,
 } from "./runnerInputs";
 
 export type AblationMode = FusionCandidateId;
@@ -51,8 +55,13 @@ const MODES = [
   "pose_equipment_fused",
 ] as const satisfies readonly AblationMode[];
 
-const PROFILE_FAMILY_ID = "barbell_bench_press/source-independent-ablation-family/v1";
+const PROFILE_FAMILY_ID = "barbell_bench_press/touched-benchmark-ablation-family/v1";
 const PACKET_SCHEMA = "MOTN/1.8+QLT1";
+
+export const POSE_EQUIPMENT_ABLATION_CONTRACT = Object.freeze({
+  runKind: TOUCHED_BENCHMARK_RUN_KIND,
+  claimBoundary: TOUCHED_BENCHMARK_CLAIM_BOUNDARY,
+});
 
 interface FrozenTruthSplitRecord extends Omit<PersonalGoldenRecord, "segments"> {
   readonly segments: readonly Readonly<{ startMs: number; endMs: number }>[];
@@ -118,12 +127,14 @@ interface FrozenModeRun {
   readonly candidateId: AblationMode;
   readonly channelLineage: Readonly<Record<string, unknown>>;
   readonly contexts: readonly FrozenModeContext[];
-  readonly frozenRun: FrozenPredictionRun;
+  readonly frozenRun: TouchedBenchmarkFrozenPredictionRun;
 }
 
 interface FrozenAblationInference {
-  readonly schemaVersion: "maxpower-bench-pose-equipment-ablation-predictions/v1";
+  readonly schemaVersion: "maxpower-bench-pose-equipment-touched-benchmark-predictions/v1";
   readonly state: "frozen_before_truth";
+  readonly runKind: typeof TOUCHED_BENCHMARK_RUN_KIND;
+  readonly claimBoundary: typeof TOUCHED_BENCHMARK_CLAIM_BOUNDARY;
   readonly runId: string;
   readonly sourcePlanDigest: string;
   readonly profileFamilyId: typeof PROFILE_FAMILY_ID;
@@ -236,7 +247,7 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
   planPath: string;
   rawObservationRoot: string;
   benchEquipmentObservationRoot: string;
-  sourceIndependentBenchProfilePath: string;
+  touchedBenchProfilePath: string;
   governanceInputCatalogPath: string;
   wasmPath: string;
   outputPath: string;
@@ -244,11 +255,11 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
 }>): Promise<Readonly<FrozenAblationInference>> {
   const catalogLoaded = await loadInputCatalog(input.governanceInputCatalogPath);
   const planBytes = await readFile(resolve(input.planPath));
-  const plan = JSON.parse(planBytes.toString("utf8")) as TruthFreePlan;
-  assertTruthFreePlan(plan);
+  const plan = JSON.parse(planBytes.toString("utf8")) as TouchedBenchmarkPlan;
+  assertTouchedBenchmarkPlanInput(plan);
   const wasmBytes = await readFile(resolve(input.wasmPath));
-  const independentProfiles = await loadSourceIndependentBenchProfiles(
-    input.sourceIndependentBenchProfilePath,
+  const touchedProfiles = await loadTouchedBenchmarkBenchProfiles(
+    input.touchedBenchProfilePath,
     catalogLoaded.value,
   );
   const benchSources = plan.sources.map((source) => ({
@@ -263,12 +274,12 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
     catalogLoaded.pin,
     pinInputBytes(catalogLoaded.value, "blindPlan", input.planPath, planBytes),
     pinInputBytes(catalogLoaded.value, "rustWasm", input.wasmPath, wasmBytes),
-    independentProfiles.pin,
+    touchedProfiles.pin,
   ];
   const modeContexts = new Map<AblationMode, FrozenModeContext[]>(
     MODES.map((mode) => [mode, []]),
   );
-  const modePredictions = new Map<AblationMode, InjectedContextPrediction[]>(
+  const modePredictions = new Map<AblationMode, TouchedBenchmarkInjectedContextPrediction[]>(
     MODES.map((mode) => [mode, []]),
   );
 
@@ -308,7 +319,7 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
       inputWindow: context.inputWindow,
       frameScheduleHash,
     }));
-    const baseProfile = independentProfiles.value.find((entry) => (
+    const baseProfile = touchedProfiles.value.find((entry) => (
       entry.capturePosition === context.capturePosition
     ));
 
@@ -317,7 +328,7 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
       if (!baseProfile || ((mode === "equipment_only" || mode === "pose_equipment_fused")
           && !equipmentLoaded)) {
         const reason = !baseProfile
-          ? `no_source_independent_profile_for_${context.capturePosition}`
+          ? `no_touched_benchmark_profile_for_${context.capturePosition}`
           : "no_frozen_bench_equipment_sidecar";
         const unsupported = unsupportedModeContext({
           sourceCaptureId: source.sourceCaptureId,
@@ -473,23 +484,27 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
         };
       }),
     }));
-    const miniPlan: TruthFreePlan = {
-      ...plan,
+    const { planDigest: _sourcePlanDigest, ...miniPlanBody } = plan;
+    const miniPlanSemantic = {
+      ...miniPlanBody,
       runId: `${input.runId}:${mode}`,
       sources: modeSources,
     };
+    const miniPlan = sealTouchedBenchmarkPlan(miniPlanSemantic);
     return deepFreeze({
       candidateId: mode,
       channelLineage: channelLineage(mode),
       contexts: Object.freeze(modeContexts.get(mode)!),
-      frozenRun: freezePredictions(miniPlan, modePredictions.get(mode)!),
+      frozenRun: freezeTouchedBenchmarkPredictions(miniPlan, modePredictions.get(mode)!),
     });
   });
   assertLikeForLikeSchedules(modes);
   const inputAssets = uniquePins(pins);
   const semantic: Omit<FrozenAblationInference, "frozenDigest"> = {
-    schemaVersion: "maxpower-bench-pose-equipment-ablation-predictions/v1" as const,
+    schemaVersion: "maxpower-bench-pose-equipment-touched-benchmark-predictions/v1" as const,
     state: "frozen_before_truth" as const,
+    runKind: TOUCHED_BENCHMARK_RUN_KIND,
+    claimBoundary: TOUCHED_BENCHMARK_CLAIM_BOUNDARY,
     runId: input.runId,
     sourcePlanDigest: plan.planDigest,
     profileFamilyId: PROFILE_FAMILY_ID,
@@ -510,6 +525,7 @@ export async function runPoseEquipmentAblationInference(input: Readonly<{
     ...semantic,
     frozenDigest: sha256(stableStringify(semantic)),
   });
+  assertTouchedBenchmarkClaimBoundary(output);
   await writeFile(resolve(input.outputPath), `${JSON.stringify(output, null, 2)}\n`, "utf8");
   return output;
 }
@@ -537,9 +553,9 @@ export async function scorePoseEquipmentAblation(input: Readonly<{
     schemaVersion: dataset.schemaVersion,
     records: truthSplit.contexts,
   };
-  const reports = new Map<AblationMode, Readonly<BlindEvaluationReport>>();
+  const reports = new Map<AblationMode, Readonly<TouchedBenchmarkEvaluationReport>>();
   for (const mode of frozen.modes) {
-    reports.set(mode.candidateId, scoreFrozenBlindRun(mode.frozenRun, sanitizedTruth));
+    reports.set(mode.candidateId, scoreFrozenTouchedBenchmarkRun(mode.frozenRun, sanitizedTruth));
   }
   const views = [...new Set(benchRecords.map((record) => record.capturePosition))].sort();
   const truthHashByView = new Map(views.map((view) => [
@@ -573,7 +589,7 @@ export async function scorePoseEquipmentAblation(input: Readonly<{
   ]);
   const semantic = {
     schemaVersion: "maxpower-real-pose-equipment-ablation/v1" as const,
-    runKind: "blind_single_pass_causal_ablation" as const,
+    runKind: TOUCHED_BENCHMARK_RUN_KIND,
     acceptanceEligible: false,
     productionPromotion: false,
     sourceFrozenDigest: frozen.frozenDigest,
@@ -592,7 +608,7 @@ export async function scorePoseEquipmentAblation(input: Readonly<{
       chronologicalSinglePass: true,
       repeatedInterpretation: false,
       sameRawFrameScheduleAcrossCandidates: true,
-      sameSourceIndependentProfileFamilyAcrossCandidates: PROFILE_FAMILY_ID,
+      sameTouchedBenchmarkProfileFamilyAcrossCandidates: PROFILE_FAMILY_ID,
       matching: "monotonic_start_end_dynamic_programming",
       maximumBoundaryErrorMs: 1500,
       minimumIntervalIoU: 0.1,
@@ -613,24 +629,23 @@ export async function scorePoseEquipmentAblation(input: Readonly<{
       frozenInferenceInputAssetManifestSha256: frozen.reproducibility.inputAssetManifestSha256,
     },
     claimBoundary: {
+      ...TOUCHED_BENCHMARK_CLAIM_BOUNDARY,
       acceptedClaims: [
-        "rep_count",
-        "start_end_alignment",
-        "endpoint_proposal_coverage",
-        "evidence_conflict",
-        "abstention",
-        "causal_confirmation_latency",
+        ...TOUCHED_BENCHMARK_CLAIM_BOUNDARY.acceptedClaims,
+        "known_capture_endpoint_proposal_coverage",
+        "known_capture_evidence_conflict",
+        "known_capture_abstention",
+        "known_capture_causal_confirmation_latency",
       ],
       prohibitedClaims: [
+        ...TOUCHED_BENCHMARK_CLAIM_BOUNDARY.prohibitedClaims,
         "historical_peak_accuracy",
-        "unreviewed_turnaround_accuracy",
-        "unreviewed_action_quality_accuracy",
         "barbell_detector_accuracy",
         "strength_or_force",
       ],
     },
     limitations: [
-      "All six captures are from one known participant; this is not cross-user generalization evidence.",
+      "All thresholds and all six evaluated captures belong to the same known participant benchmark; no claim is made for any unseen source or user.",
       "frontLeft45 contains one frozen capture and frontRight45 contains two; a selected candidate is exact-scope experimental evidence, not a production promotion.",
       "The barbell-axis input is proposal_only model evidence without accepted shaft truth, so this report evaluates Rep/start/end utility rather than detector accuracy.",
       "No historical peak or reviewed turnaround truth exists; turnaround accuracy and action-quality accuracy remain unclaimed.",
@@ -640,13 +655,14 @@ export async function scorePoseEquipmentAblation(input: Readonly<{
     ...semantic,
     reportDigest: sha256(stableStringify(semantic)),
   });
+  assertTouchedBenchmarkClaimBoundary(output);
   await writeFile(resolve(input.outputPath), `${JSON.stringify(output, null, 2)}\n`, "utf8");
   return output;
 }
 
 function summarizeCandidate(
   mode: FrozenModeRun,
-  report: Readonly<BlindEvaluationReport>,
+  report: Readonly<TouchedBenchmarkEvaluationReport>,
   view: string | null,
   truthSplitHash: string,
 ): Readonly<CandidateMetrics> {
@@ -730,12 +746,15 @@ function toSelectionCandidate(candidate: CandidateMetrics): FusionAblationCandid
 }
 
 function materializeModeProfile(
-  entry: SourceIndependentBenchProfileEntry,
+  entry: TouchedBenchmarkBenchProfileEntry,
   mode: AblationMode,
 ): RustExerciseProfileData {
   const base = entry.profile;
   const identityParts = base.identity.split("/");
-  const identity = [...identityParts.slice(0, 4), `ablation-${mode.replaceAll("_", "-")}-v1`].join("/");
+  const identity = [
+    ...identityParts.slice(0, 4),
+    `touched-benchmark-ablation-${mode.replaceAll("_", "-")}-v1`,
+  ].join("/");
   const profileWithoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
     ...base,
     identity,
@@ -754,19 +773,19 @@ function channelLineage(mode: AblationMode): Readonly<Record<string, unknown>> {
     pose: "independent_raw_rtmpose_halpe26_measured",
     equipment: "withheld_by_ablation",
     subjectIdentity: "selected_raw_yolox_bbox_plus_pose",
-    stateGraph: "source_independent_pose_ready_effort_peak_return",
+    stateGraph: "touched_benchmark_pose_ready_effort_peak_return",
   });
   if (mode === "equipment_only") return deepFreeze({
     pose: "withheld_joint_signal_all_26_landmarks_visibility_zero",
     equipment: "subject_associated_measured_barbell_axis_proposal",
     subjectIdentity: "selected_raw_yolox_bbox_only",
-    stateGraph: "source_independent_barbell_axis_ready_effort_return",
+    stateGraph: "touched_benchmark_barbell_axis_ready_effort_return",
   });
   return deepFreeze({
     pose: "independent_raw_rtmpose_halpe26_measured",
     equipment: "subject_associated_measured_barbell_axis_proposal",
     subjectIdentity: "selected_raw_yolox_bbox_plus_pose",
-    stateGraph: "source_independent_barbell_axis_ready_effort_return_with_pose_corroboration",
+    stateGraph: "touched_benchmark_barbell_axis_ready_effort_return_with_pose_corroboration",
     doubleCountingGuard: "equipment_constrained_pose_remains_predicted_and_is_not_independent_evidence",
   });
 }
@@ -776,9 +795,9 @@ function toInjectedPrediction(
   timestamps: readonly number[],
   visualModel: string,
   proposals: readonly Readonly<DecodedRustQualityProposal>[],
-): InjectedContextPrediction {
+): TouchedBenchmarkInjectedContextPrediction {
   return {
-    runKind: "blind_evaluation",
+    runKind: TOUCHED_BENCHMARK_RUN_KIND,
     sourceCaptureId: context.sourceCaptureId,
     contextId: context.contextId,
     processing: {
@@ -823,7 +842,10 @@ function unsupportedModeContext(input: Readonly<{
   rawSha256: string;
   equipmentSha256: string | null;
   lineage: Readonly<Record<string, unknown>>;
-}>): Readonly<{ context: FrozenModeContext; prediction: InjectedContextPrediction }> {
+}>): Readonly<{
+  context: FrozenModeContext;
+  prediction: TouchedBenchmarkInjectedContextPrediction;
+}> {
   const packetHash = sha256(stableStringify({ contextId: input.contextId, reason: input.reason }));
   const proposalHash = sha256("[]");
   const context: FrozenModeContext = deepFreeze({
@@ -858,10 +880,12 @@ function unsupportedModeContext(input: Readonly<{
   };
 }
 
-function assertTruthFreePlan(plan: TruthFreePlan): void {
-  if (plan.schemaVersion !== "maxpower-motion-quality-truth-free-plan/v1"
-      || plan.runKind !== "blind_evaluation" || !Array.isArray(plan.sources)) {
-    throw new Error("ablation requires a frozen truth-free blind plan");
+function assertTouchedBenchmarkPlanInput(plan: TouchedBenchmarkPlan): void {
+  if (plan.schemaVersion !== "maxpower-motion-quality-touched-benchmark-plan/v1"
+      || plan.runKind !== TOUCHED_BENCHMARK_RUN_KIND
+      || stableStringify(plan.claimBoundary) !== stableStringify(TOUCHED_BENCHMARK_CLAIM_BOUNDARY)
+      || !Array.isArray(plan.sources)) {
+    throw new Error("ablation requires a frozen truth-free touched benchmark plan");
   }
   const forbidden = new Set(["segments", "reps", "startMs", "endMs", "peakMs", "reviewDecision"]);
   const visit = (value: unknown): void => {
@@ -875,11 +899,45 @@ function assertTruthFreePlan(plan: TruthFreePlan): void {
     }
   };
   visit(plan);
+  assertTouchedBenchmarkClaimBoundary(plan);
+}
+
+export function assertTouchedBenchmarkClaimBoundary(value: unknown): void {
+  if (!value || typeof value !== "object") {
+    throw new Error("artifact must declare touched_benchmark");
+  }
+  const root = value as Record<string, unknown>;
+  const claimBoundary = root.claimBoundary as Record<string, unknown> | undefined;
+  const benchmarkClass = claimBoundary?.benchmarkClass ?? claimBoundary?.evidenceClass;
+  if (root.runKind !== TOUCHED_BENCHMARK_RUN_KIND
+      || benchmarkClass !== TOUCHED_BENCHMARK_RUN_KIND) {
+    throw new Error("artifact must declare touched_benchmark runKind and claim boundary");
+  }
+  if (/blind|generalization/iu.test(JSON.stringify(value))) {
+    throw new Error("artifact contains an overstated benchmark claim");
+  }
+  const visit = (child: unknown): void => {
+    if (Array.isArray(child)) {
+      child.forEach(visit);
+      return;
+    }
+    if (!child || typeof child !== "object") return;
+    for (const [key, nested] of Object.entries(child)) {
+      if (key === "runKind" && nested !== TOUCHED_BENCHMARK_RUN_KIND) {
+        throw new Error("every persisted runKind must be touched_benchmark");
+      }
+      visit(nested);
+    }
+  };
+  visit(value);
 }
 
 function assertFrozenAblation(value: FrozenAblationInference): void {
-  if (value.schemaVersion !== "maxpower-bench-pose-equipment-ablation-predictions/v1"
-      || value.state !== "frozen_before_truth" || value.modes.length !== MODES.length) {
+  if (value.schemaVersion !== "maxpower-bench-pose-equipment-touched-benchmark-predictions/v1"
+      || value.state !== "frozen_before_truth"
+      || value.runKind !== TOUCHED_BENCHMARK_RUN_KIND
+      || stableStringify(value.claimBoundary) !== stableStringify(TOUCHED_BENCHMARK_CLAIM_BOUNDARY)
+      || value.modes.length !== MODES.length) {
     throw new Error("frozen ablation artifact schema/state is invalid");
   }
   const { frozenDigest, ...semantic } = value;
@@ -889,6 +947,7 @@ function assertFrozenAblation(value: FrozenAblationInference): void {
   if (MODES.some((mode) => !value.modes.some((candidate) => candidate.candidateId === mode))) {
     throw new Error("frozen ablation candidate inventory is incomplete");
   }
+  assertTouchedBenchmarkClaimBoundary(value);
   assertLikeForLikeSchedules(value.modes);
 }
 
@@ -962,16 +1021,16 @@ function deepFreeze<T>(value: T): T {
 }
 
 const DEFAULTS = Object.freeze({
-  planPath: "data/workflows/motion-quality-review/blind-inference-pack-v1.json",
+  planPath: "data/workflows/motion-quality-review/touched-benchmark-inference-pack-v1.json",
   rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
   benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
-  sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+  touchedBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
   governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
   wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
-  frozenPredictionPath: "data/workflows/motion-quality-review/bench-pose-equipment-ablation-predictions-before-truth-v1.json",
+  frozenPredictionPath: "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-predictions-before-truth-v1.json",
   datasetPath: "data/training/personal-golden-segmentation-v2.json",
-  outputPath: "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
-  runId: "bench-pose-equipment-ablation-v1",
+  outputPath: "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-v1.json",
+  runId: "bench-pose-equipment-touched-benchmark-v1",
 });
 
 async function main(): Promise<void> {
@@ -981,7 +1040,7 @@ async function main(): Promise<void> {
       planPath: DEFAULTS.planPath,
       rawObservationRoot: DEFAULTS.rawObservationRoot,
       benchEquipmentObservationRoot: DEFAULTS.benchEquipmentObservationRoot,
-      sourceIndependentBenchProfilePath: DEFAULTS.sourceIndependentBenchProfilePath,
+      touchedBenchProfilePath: DEFAULTS.touchedBenchProfilePath,
       governanceInputCatalogPath: DEFAULTS.governanceInputCatalogPath,
       wasmPath: DEFAULTS.wasmPath,
       outputPath: DEFAULTS.frozenPredictionPath,
