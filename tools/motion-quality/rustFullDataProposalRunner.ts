@@ -27,6 +27,7 @@ import {
   type InputAssetPin,
   type RawObservationFrame,
 } from "./runnerInputs";
+import { ACTION_CONTRACT_CATALOG } from "./actionContractCatalog";
 
 export interface TimestampedFrame {
   readonly timestampMs: number;
@@ -467,21 +468,6 @@ export async function runFullDataProposal(
   return output;
 }
 
-const EQUIPMENT_BY_ACTION: Readonly<Record<string, string>> = Object.freeze({
-  barbell_bench_press: "barbell",
-  barbell_row: "barbell",
-  machine_chest_press: "machine",
-  seated_shoulder_press: "dumbbell",
-  push_up: "bodyweight",
-  lat_pulldown: "cable",
-  pull_up: "bodyweight",
-  seated_row: "cable",
-  straight_arm_pulldown: "cable",
-  lateral_raise: "dumbbell",
-  rear_delt_fly: "dumbbell",
-  single_arm_cable_lateral_raise: "cable",
-});
-
 /**
  * Adapts legacy tuned profile identities to the five-part Rust assessment
  * identity without changing any learned signal, gate, or state graph.
@@ -502,7 +488,15 @@ export function materializeAssessmentProfile(
   const capturePosition = parts[1] ?? "";
   const sourceLaterality = parts[2] ?? "";
   const laterality = side ?? sourceLaterality;
-  const equipment = EQUIPMENT_BY_ACTION[actionId];
+  const matchingContexts = ACTION_CONTRACT_CATALOG
+    .find((contract) => contract.exerciseId === actionId)
+    ?.contexts.filter((context) => (
+      context.key.capturePosition === capturePosition
+      && context.key.trainingSide === laterality
+    )) ?? [];
+  const equipment = matchingContexts.length === 1
+    ? matchingContexts[0]!.key.equipment
+    : undefined;
   if (!actionId || !capturePosition || !laterality || !equipment) {
     throw new Error(`${original.identity}: cannot adapt assessment profile identity`);
   }

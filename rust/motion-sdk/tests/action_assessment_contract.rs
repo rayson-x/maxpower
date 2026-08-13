@@ -447,6 +447,46 @@ fn built_in_lat_pulldown_identity_normalizes_kebab_case_view() {
 }
 
 #[test]
+fn exact_action_catalog_equipment_tokens_are_accepted_by_rust() {
+    for (identity, expected) in [
+        (
+            "machine_chest_press/front/bilateral/chest_press_machine/v1",
+            AssessmentCapability::PhaseSupported,
+        ),
+        (
+            "seated_shoulder_press/front/bilateral/barbell/v1",
+            AssessmentCapability::PhaseSupported,
+        ),
+        (
+            "lat_pulldown/rear/bilateral/cable_bar/v1",
+            AssessmentCapability::PhaseSupported,
+        ),
+        (
+            "pull_up/rearLeft45/bilateral/fixed_pull_up_bar/v1",
+            AssessmentCapability::ObservationOnly,
+        ),
+        (
+            "seated_row/right/bilateral/cable_handle/v1",
+            AssessmentCapability::PhaseSupported,
+        ),
+        (
+            "straight_arm_pulldown/frontLeft45/bilateral/cable_bar/v1",
+            AssessmentCapability::PhaseSupported,
+        ),
+        (
+            "single_arm_cable_lateral_raise/frontLeft45/left/cable_handle/v1",
+            AssessmentCapability::PhaseSupported,
+        ),
+    ] {
+        assert_eq!(
+            proposal_for_identity(identity, Vec::new()).capability,
+            expected,
+            "Rust must accept the exact equipment token frozen by the action contract: {identity}",
+        );
+    }
+}
+
+#[test]
 fn built_in_profile_with_mismatched_equipment_is_unsupported() {
     let proposal = proposal_for_identity(
         "barbell-bench-press/front/bilateral/dumbbell/v1",

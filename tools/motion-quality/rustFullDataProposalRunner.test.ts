@@ -197,7 +197,7 @@ test("source-independent bench identity keeps barbell in the equipment segment",
     identity: "machine_chest_press/front/bilateral/observed-tuned/v2-halpe26/cycle-aligned-client-candidate-v1",
   }, null);
   assert.deepEqual(adaptedMachine.identity.split("/").slice(0, 4), [
-    "machine_chest_press", "front", "bilateral", "machine",
+    "machine_chest_press", "front", "bilateral", "chest_press_machine",
   ]);
   assert.match(adaptedMachine.identity, /legacy-profile-adapter-v1-[a-f0-9]{16}$/u);
   assert.notEqual(adaptedMachine.contentHash, bench.contentHash);
@@ -208,7 +208,7 @@ test("source-independent bench identity keeps barbell in the equipment segment",
   }, "left");
   assert.equal(
     adaptedUnilateral.identity.split("/").slice(0, 4).join("/"),
-    "single_arm_cable_lateral_raise/frontLeft45/left/cable",
+    "single_arm_cable_lateral_raise/frontLeft45/left/cable_handle",
   );
 });
 
