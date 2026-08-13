@@ -645,14 +645,7 @@ export class LocalCoachProvider implements LLMProvider {
   async *stream(request: LLMProviderRequest): AsyncIterable<ProviderEvent> {
     const onboarding = localOnboardingFrontier(request.context.onboardingDraft);
     if (onboarding) {
-      if (onboarding.kind === "natural_training_background") {
-        const background = extractLocalTrainingBackground(request.userText);
-        if (background) {
-          yield { type: "tool-call", toolCallId: `local-onboarding-background-${request.runId}`, toolName: "onboarding.capture_training_background", input: background };
-        } else {
-          yield { type: "text-delta", delta: "先说说你最近怎么练：大概练了多久、近几周一周几次、在哪练、每次多久。" };
-        }
-      } else if (onboarding.kind === "assess_training_context") {
+      if (onboarding.kind === "assess_training_context") {
         yield { type: "tool-call", toolCallId: `local-onboarding-assessment-${request.runId}`, toolName: "onboarding.assess_training_context", input: {} };
       } else if (onboarding.kind === "catalog_fields") {
         yield { type: "text-delta", delta: "我把下一步会影响这版目标安排的信息整理成一张小表。" };
@@ -825,7 +818,6 @@ export class LocalCoachProvider implements LLMProvider {
 }
 
 type LocalOnboardingFrontier =
-  | { kind: "natural_training_background" }
   | { kind: "assess_training_context" }
   | { kind: "catalog_fields"; topic: string; reasonCode: string; requiredFor: string; fieldIds: readonly string[] }
   | { kind: "review_dossier" };
@@ -835,7 +827,7 @@ function localOnboardingFrontier(value: Record<string, unknown> | undefined): Lo
   const raw = value?.questionFrontier;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const frontier = raw as Record<string, unknown>;
-  if (frontier.kind === "natural_training_background" || frontier.kind === "assess_training_context" || frontier.kind === "review_dossier") return { kind: frontier.kind };
+  if (frontier.kind === "assess_training_context" || frontier.kind === "review_dossier") return { kind: frontier.kind };
   if (
     frontier.kind === "catalog_fields"
     && typeof frontier.topic === "string"
@@ -843,7 +835,6 @@ function localOnboardingFrontier(value: Record<string, unknown> | undefined): Lo
     && typeof frontier.requiredFor === "string"
     && Array.isArray(frontier.fieldIds)
     && frontier.fieldIds.length > 0
-    && frontier.fieldIds.length <= 3
     && frontier.fieldIds.every((fieldId) => typeof fieldId === "string")
   ) {
     return { kind: "catalog_fields", topic: frontier.topic, reasonCode: frontier.reasonCode, requiredFor: frontier.requiredFor, fieldIds: frontier.fieldIds };

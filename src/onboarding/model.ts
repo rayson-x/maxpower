@@ -203,6 +203,7 @@ export type OnboardingQuestionReasonCode =
 
 /** A concrete capability that may be limited by an unknown onboarding field. */
 export type OnboardingActionGate =
+  | "initial_plan"
   | "reliable_energy_target"
   | "dated_session_schedule"
   | "fasted_cardio"

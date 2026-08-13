@@ -275,9 +275,9 @@ const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
 const ONBOARDING_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   {
     name: "onboarding.capture_fields", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
-    description: "onboarding.capture_fields: Normalize at most 3 values stated in the current onboarding user message into the same dossier draft. These remain review-needed conversation extractions until the user confirms the dossier. Use instead of requesting a card when the user already gave the answer.",
+    description: "onboarding.capture_fields: Normalize values already stated in the current onboarding user message into the same dossier draft. These remain review-needed conversation extractions until the user confirms the dossier. Use instead of requesting a card when the user already gave the answer; do not use it to ask questions.",
     permissionScopes: [], riskCeiling: "review", evidenceRequirements: ["current_user_statement", "active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
-    inputSchema: { type: "object", additionalProperties: false, required: ["captures"], properties: { captures: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", additionalProperties: false, required: ["fieldId", "value"], properties: { fieldId: { type: "string", minLength: 1, maxLength: 120 }, value: {} } } } } },
+    inputSchema: { type: "object", additionalProperties: false, required: ["captures"], properties: { captures: { type: "array", minItems: 1, items: { type: "object", additionalProperties: false, required: ["fieldId", "value"], properties: { fieldId: { type: "string", minLength: 1, maxLength: 120 }, value: {} } } } } },
   },
   {
     name: "onboarding.capture_goal_narrative", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
@@ -287,9 +287,9 @@ const ONBOARDING_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   },
   {
     name: "onboarding.request_form", schemaVersion: 1, accessClass: "human_input", executionMode: "human_in_loop", offlineAvailable: true,
-    description: "onboarding.request_form: Ask for 1–4 product catalog fields only when they can change the next onboarding decision. Use after reading the user's stated goal and existing draft; never request a fixed questionnaire or repeat a captured/explicitly-unknown field.",
+    description: "onboarding.request_form: Ask product-catalog questions as one dynamic form card. Include every currently material independent field selected by the goal frontier; there is no arbitrary field-count limit. Never ask onboarding questions in ordinary text, request a fixed questionnaire, or repeat a captured/explicitly-unknown field.",
     permissionScopes: [], riskCeiling: "confirmation_required", evidenceRequirements: ["active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
-    inputSchema: { type: "object", additionalProperties: false, required: ["topic", "fieldIds", "reasonCode", "requiredFor"], properties: { topic: { type: "string", minLength: 1, maxLength: 80 }, fieldIds: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", minLength: 1, maxLength: 120 } }, reasonCode: { enum: ["goal_disambiguation", "planning_gate", "safety_gate", "measurement_quality", "schedule_feasibility", "conflict_resolution"] }, requiredFor: { type: "string", minLength: 1, maxLength: 80 } } },
+    inputSchema: { type: "object", additionalProperties: false, required: ["topic", "fieldIds", "reasonCode", "requiredFor"], properties: { topic: { type: "string", minLength: 1, maxLength: 80 }, fieldIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1, maxLength: 120 } }, reasonCode: { enum: ["goal_disambiguation", "planning_gate", "safety_gate", "measurement_quality", "schedule_feasibility", "conflict_resolution"] }, requiredFor: { type: "string", minLength: 1, maxLength: 80 } } },
   },
   {
     name: "onboarding.capture_training_background", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
@@ -442,7 +442,7 @@ export class CoachToolRegistry {
   }): Promise<readonly CoachRunEvent[]> {
     if (input.call.toolName === "onboarding.capture_fields") {
       const parsed = parseExactObject(input.call.input, ["captures"]);
-      if (!Array.isArray(parsed.captures) || !parsed.captures.length || parsed.captures.length > 3) throw new ToolSchemaError("invalid_tool_input");
+      if (!Array.isArray(parsed.captures) || !parsed.captures.length) throw new ToolSchemaError("invalid_tool_input");
       const captures = parsed.captures.map((raw) => {
         const item = parseExactObject(raw, ["fieldId", "value"]);
         if (typeof item.fieldId !== "string" || !item.fieldId.trim() || item.value === undefined) throw new ToolSchemaError("invalid_tool_input");

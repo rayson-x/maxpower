@@ -213,7 +213,8 @@ export class OnboardingService {
     assertCurrentDynamicRevision(current, input.expectedDraftRevision);
     const captures = input.captures.map((capture) => validateDynamicFieldInput(capture, input.inputMode));
     assertDistinctCatalogFields(captures);
-    return this.saveDynamicCaptures({ current, inputMode: input.inputMode, captures, idempotencyKey: input.idempotencyKey });
+    const saved = await this.saveDynamicCaptures({ current, inputMode: input.inputMode, captures, idempotencyKey: input.idempotencyKey });
+    return this.assessAfterTrainingCapture(saved, captures, `${input.idempotencyKey}:assessment`);
   }
 
   /** A rendered card is single-use and may only submit against its own draft frontier. */
@@ -241,13 +242,14 @@ export class OnboardingService {
       observedAt,
       source: { kind: "form_submission", submissionId },
     }, "form"));
-    return this.saveDynamicCaptures({
+    const saved = await this.saveDynamicCaptures({
       current,
       inputMode: "form",
       captures,
       dynamicForm: { catalogVersion: card.catalogVersion, cardId: card.cardId, submissionId, fieldIds: card.fieldIds },
       idempotencyKey: input.idempotencyKey,
     });
+    return this.assessAfterTrainingCapture(saved, captures, `${input.idempotencyKey}:assessment`);
   }
 
   /** The UI renders the last still-open Agent-requested card from durable draft events. */
@@ -413,6 +415,7 @@ export class OnboardingService {
     idempotencyKey: string;
   }): Promise<OnboardingProgress> {
     const recordedAt = this.runtime.now();
+    const trainingBackground = trainingBackgroundFromCaptures(input.current.patch.trainingBackground, input.captures, input.inputMode);
     const event: OnboardingDraftEvent = {
       id: this.runtime.nextId("onboarding-event"),
       schemaVersion: ONBOARDING_DRAFT_SCHEMA_VERSION,
@@ -422,7 +425,10 @@ export class OnboardingService {
       recordedAt,
       payload: {
         inputMode: input.inputMode,
-        patch: { dynamicFields: Object.fromEntries(input.captures.map((capture) => [capture.fieldId, capture])) },
+        patch: {
+          dynamicFields: Object.fromEntries(input.captures.map((capture) => [capture.fieldId, capture])),
+          ...(trainingBackground ? { trainingBackground } : {}),
+        },
         confirmedSections: [],
         ...(input.dynamicForm ? { dynamicForm: input.dynamicForm } : {}),
       },
@@ -435,6 +441,22 @@ export class OnboardingService {
       recordedAt,
     });
     return this.read(input.current.id);
+  }
+
+  private async assessAfterTrainingCapture(
+    progress: OnboardingProgress,
+    captures: readonly OnboardingDynamicFieldCapture[],
+    idempotencyKey: string,
+  ): Promise<OnboardingProgress> {
+    if (!captures.some((capture) => capture.state !== "explicit_unknown" && capture.fieldId.startsWith("training.")) || !progress.patch.trainingBackground) {
+      return progress;
+    }
+    await this.assessCoachingLevel({
+      draftId: progress.id,
+      expectedDraftRevision: progress.revision,
+      idempotencyKey,
+    });
+    return this.read(progress.id);
   }
 
   private async commitDraftEvent(input: {
@@ -1747,6 +1769,64 @@ function completionUnknownFields(professional: OnboardingPatch["professional"]):
     ...(!professional?.nutritionObservations?.length ? ["nutrition_intake"] : []),
     ...(!professional?.setHistory?.length ? ["training_load_history"] : []),
   ];
+}
+
+function trainingBackgroundFromCaptures(
+  current: TrainingBackgroundDraft | undefined,
+  captures: readonly OnboardingDynamicFieldCapture[],
+  inputMode: "form" | "conversation",
+): TrainingBackgroundDraft | undefined {
+  const training = captures.filter((capture) => capture.state !== "explicit_unknown" && capture.fieldId.startsWith("training."));
+  const schedule = captures.find((capture) => capture.state !== "explicit_unknown" && capture.fieldId === "profile.training_schedule");
+  if (training.length === 0 && !schedule) return current;
+  const sourceCapture = training[0] ?? schedule;
+  if (!sourceCapture) return current;
+  const next: TrainingBackgroundDraft = {
+    ...(current ?? {}),
+    capturedAt: sourceCapture.observedAt,
+    source: sourceCapture.source,
+    captureStatus: inputMode === "form" ? "captured_explicit" : "normalized_needs_review",
+  };
+  for (const capture of [...training, ...(schedule ? [schedule] : [])]) {
+    const value = capture.value;
+    if (capture.fieldId === "training.cumulative_months" && isUnknownRecord(value) && typeof value.value === "number" && value.unit === "month") {
+      next.cumulativeTrainingMonths = { minimum: value.value, maximum: value.value };
+    } else if (capture.fieldId === "training.recent_continuity" && isUnknownRecord(value)) {
+      next.recentContinuity = {
+        ...(typeof value.consecutive_weeks === "number" ? { consecutiveWeeks: value.consecutive_weeks } : {}),
+        ...(typeof value.usual_sessions_per_week === "number" ? { usualSessionsPerWeek: value.usual_sessions_per_week } : {}),
+        ...(typeof value.time_away_weeks === "number" ? { timeAwayWeeks: value.time_away_weeks } : {}),
+      };
+    } else if (capture.fieldId === "training.recent_split" && typeof value === "string") {
+      next.recentSplit = value.split(/[,，、/\n]+/u).map((part) => part.trim()).filter(Boolean);
+    } else if (capture.fieldId === "training.environment" && isStringArray(value)) {
+      next.environments = value;
+    } else if (capture.fieldId === "training.equipment" && isStringArray(value)) {
+      next.availableEquipment = value;
+    } else if (capture.fieldId === "training.execution_stability" && (value === "reported_consistent" || value === "reported_variable" || value === "unknown")) {
+      next.executionStability = value;
+    } else if (capture.fieldId === "profile.training_schedule" && isUnknownRecord(value) && typeof value.days_per_week === "number" && typeof value.minutes_per_session === "number") {
+      next.schedule = { weeklyFrequency: value.days_per_week, sessionDurationMinutes: value.minutes_per_session };
+    } else if (capture.fieldId === "training.comparable_set" && isUnknownRecord(value) && isUnknownRecord(value.load) && typeof value.exercise_variant === "string" && typeof value.load.value === "number" && value.load.unit === "kg" && typeof value.reps === "number" && typeof value.performed_on === "string") {
+      next.comparableSets = [{
+        exerciseVariantId: value.exercise_variant,
+        load: { value: value.load.value, unit: "kg" },
+        reps: value.reps,
+        ...(typeof value.rir_or_rpe === "number" ? { rpe: value.rir_or_rpe } : {}),
+        performedOn: value.performed_on,
+        ...(typeof value.conditions === "string" ? { conditions: value.conditions } : {}),
+      }];
+    }
+  }
+  return next;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function completionKnownFields(): readonly string[] {

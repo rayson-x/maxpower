@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
+import { goalDrivenOnboardingFrontier } from "../../src/onboarding/FieldCatalog";
 
 function fixture() {
   const ledger = new InMemoryCoachLedger();
@@ -162,7 +163,7 @@ test("旧卡片不能覆盖较新的草稿；明确不知道会留下受限行�
   });
 
   assert.equal(afterUnknown.patch.dynamicFields?.["profile.training_schedule"]?.state, "explicit_unknown");
-  assert.deepEqual(afterUnknown.limitedActions, ["dated_session_schedule"]);
+  assert.deepEqual(afterUnknown.limitedActions, ["dated_session_schedule", "initial_plan"]);
   await assert.rejects(
     app.requestOnboardingDynamicForm({
       draftId: draft.id,
@@ -190,8 +191,12 @@ test("不同目标的推荐表单选择不同字段，训练记录保持产品�
     draft,
     goalKind: "strength",
   });
-  assert.deepEqual(fatLoss.fieldIds, ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake"]);
-  assert.deepEqual(strength.fieldIds, ["training.comparable_set"]);
+  assert.ok(fatLoss.fieldIds.length > 3);
+  assert.ok(fatLoss.fieldIds.includes("training.cumulative_months"));
+  assert.ok(fatLoss.fieldIds.includes("profile.training_schedule"));
+  assert.ok(fatLoss.fieldIds.includes("profile.sex"));
+  assert.ok(fatLoss.fieldIds.includes("timeline.daily_activity"));
+  assert.ok(strength.fieldIds.includes("training.comparable_set"));
 
   const card = await app.requestOnboardingDynamicForm({
     draftId: draft.id,
@@ -199,8 +204,9 @@ test("不同目标的推荐表单选择不同字段，训练记录保持产品�
     idempotencyKey: "strength-card",
     proposal: strength,
   });
-  assert.equal(card.fields[0]?.control.kind, "field_group");
-  assert.deepEqual(card.fields[0]?.control.fields, ["exercise_variant", "load", "reps", "rir_or_rpe", "performed_on", "conditions"]);
+  const comparableSet = card.fields.find((field) => field.id === "training.comparable_set");
+  assert.equal(comparableSet?.control.kind, "field_group");
+  assert.deepEqual(comparableSet?.control.kind === "field_group" ? comparableSet.control.fields : [], ["exercise_variant", "load", "reps", "rir_or_rpe", "performed_on", "conditions"]);
 
   await assert.rejects(
     app.captureOnboardingDynamicFields({
@@ -225,4 +231,43 @@ test("不同目标的推荐表单选择不同字段，训练记录保持产品�
     }),
     { message: /dynamic_form_rejected/ },
   );
+});
+
+test("目标前沿直接返回不限三项的动态表单，提交后形成训练背景与多维评估", async () => {
+  const { app } = fixture();
+  const draft = await baseline(app, "goal-frontier-user");
+  const frontier = goalDrivenOnboardingFrontier(draft);
+  assert.equal(frontier.kind, "catalog_fields");
+  if (frontier.kind !== "catalog_fields") return;
+  assert.ok(frontier.fieldIds.length > 3);
+  assert.equal(frontier.fieldIds.includes("training.cumulative_months"), true);
+  assert.equal(frontier.fieldIds.includes("training.recent_continuity"), true);
+  assert.equal(frontier.fieldIds.includes("training.environment"), true);
+
+  const card = await app.requestOnboardingDynamicForm({
+    draftId: draft.id,
+    expectedDraftRevision: draft.revision,
+    proposal: frontier,
+    idempotencyKey: "goal-frontier-card",
+  });
+  const answer = (fieldId: string, value: unknown) => ({ fieldId, state: "captured_explicit" as const, value });
+  const progress = await app.submitOnboardingDynamicForm({
+    draftId: draft.id,
+    cardId: card.cardId,
+    expectedDraftRevision: card.draftRevision,
+    idempotencyKey: "goal-frontier-submit",
+    answers: card.fieldIds.map((fieldId) => {
+      if (fieldId === "training.cumulative_months") return answer(fieldId, { value: 24, unit: "month" });
+      if (fieldId === "training.recent_continuity") return answer(fieldId, { consecutive_weeks: 16, usual_sessions_per_week: 4, time_away_weeks: 0 });
+      if (fieldId === "training.recent_split") return answer(fieldId, "胸、背、腿、肩");
+      if (fieldId === "training.environment") return answer(fieldId, ["gym"]);
+      if (fieldId === "training.equipment") return answer(fieldId, ["full_gym"]);
+      if (fieldId === "training.execution_stability") return answer(fieldId, "reported_consistent");
+      if (fieldId === "profile.training_schedule") return answer(fieldId, { days_per_week: 4, minutes_per_session: 75 });
+      return { fieldId, state: "explicit_unknown" as const };
+    }),
+  });
+  assert.equal(progress.patch.trainingBackground?.cumulativeTrainingMonths?.minimum, 24);
+  assert.deepEqual(progress.patch.trainingBackground?.recentSplit, ["胸", "背", "腿", "肩"]);
+  assert.equal(progress.coachingLevelAssessments?.at(-1)?.priority, "multi_dimensional_assessment");
 });

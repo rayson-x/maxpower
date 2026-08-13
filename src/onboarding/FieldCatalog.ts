@@ -57,11 +57,11 @@ export interface OnboardingFieldDefinition {
 
 /**
  * The local, inspectable intake frontier. It suggests the next decision that
- * is unblocked by the draft; the Agent still chooses wording and whether a
- * natural question or an allowed card is the clearest interaction.
+ * is unblocked by the draft. Every question is rendered through the product
+ * form-card tool; conversation capture is reserved for facts the user already
+ * volunteered.
  */
 export type GoalDrivenOnboardingFrontier =
-  | { kind: "natural_training_background"; reason: "initial_training_context" }
   | { kind: "assess_training_context"; reason: "training_background_captured" }
   | {
       kind: "catalog_fields";
@@ -88,8 +88,8 @@ const catalog = [
         { id: "prefer_not_to_say", label: "不想说明" },
       ],
     },
-    requiredFor: ["reliable_energy_target"],
-    themes: ["energy_planning"],
+    requiredFor: ["reliable_energy_target", "initial_plan"],
+    themes: ["energy_planning", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_profile_sex",
@@ -108,8 +108,8 @@ const catalog = [
         { id: "active_job", label: "工作中活动较多" },
       ],
     },
-    requiredFor: ["reliable_energy_target"],
-    themes: ["energy_planning"],
+    requiredFor: ["reliable_energy_target", "initial_plan"],
+    themes: ["energy_planning", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_timeline_daily_activity",
@@ -121,8 +121,8 @@ const catalog = [
     sensitivity: "nutrition",
     label: "平时每日摄入",
     control: { kind: "numeric_with_unit", units: ["kcal"], min: 0, max: 10000 },
-    requiredFor: ["reliable_energy_target"],
-    themes: ["energy_planning"],
+    requiredFor: ["reliable_energy_target", "initial_plan"],
+    themes: ["energy_planning", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_usual_energy_intake",
@@ -134,8 +134,8 @@ const catalog = [
     sensitivity: "standard",
     label: "可训练的频率和时长",
     control: { kind: "field_group", fields: ["days_per_week", "minutes_per_session"] },
-    requiredFor: ["dated_session_schedule"],
-    themes: ["schedule_feasibility"],
+    requiredFor: ["dated_session_schedule", "initial_plan"],
+    themes: ["schedule_feasibility", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_training_schedule",
@@ -153,8 +153,8 @@ const catalog = [
         { id: "suggest_then_confirm", label: "给出建议后由我确认" },
       ],
     },
-    requiredFor: ["managed_plan_changes"],
-    themes: ["coaching_collaboration"],
+    requiredFor: ["managed_plan_changes", "initial_plan"],
+    themes: ["coaching_collaboration", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_plan_adjustment_authority",
@@ -179,6 +179,84 @@ const catalog = [
     writeCommand: "onboarding.capture_remote_llm_permission",
   },
   {
+    id: "training.cumulative_months",
+    owner: "working_memory",
+    valueType: "quantity",
+    sensitivity: "standard",
+    label: "累计规律训练时间",
+    control: { kind: "numeric_with_unit", units: ["month"], min: 0, max: 1200 },
+    requiredFor: ["initial_plan"],
+    themes: ["goal_based_intake"],
+    allowedSources: ["conversation_message", "form_submission"],
+    acceptsExplicitUnknown: true,
+    writeCommand: "onboarding.capture_training_months",
+  },
+  {
+    id: "training.recent_continuity",
+    owner: "working_memory",
+    valueType: "compound",
+    sensitivity: "standard",
+    label: "最近训练连续性",
+    control: { kind: "field_group", fields: ["consecutive_weeks", "usual_sessions_per_week", "time_away_weeks"] },
+    requiredFor: ["initial_plan"],
+    themes: ["goal_based_intake"],
+    allowedSources: ["conversation_message", "form_submission"],
+    acceptsExplicitUnknown: true,
+    writeCommand: "onboarding.capture_training_continuity",
+  },
+  {
+    id: "training.recent_split",
+    owner: "working_memory",
+    valueType: "text",
+    sensitivity: "standard",
+    label: "最近怎么分配训练部位",
+    control: { kind: "multiline_text" },
+    requiredFor: ["initial_plan"],
+    themes: ["goal_based_intake"],
+    allowedSources: ["conversation_message", "form_submission"],
+    acceptsExplicitUnknown: true,
+    writeCommand: "onboarding.capture_recent_split",
+  },
+  {
+    id: "training.environment",
+    owner: "working_memory",
+    valueType: "multi_enum",
+    sensitivity: "standard",
+    label: "通常在哪里训练",
+    control: { kind: "multi_select", options: [{ id: "gym", label: "健身房" }, { id: "home", label: "家里" }, { id: "outdoor", label: "户外" }] },
+    requiredFor: ["initial_plan"],
+    themes: ["goal_based_intake"],
+    allowedSources: ["conversation_message", "form_submission"],
+    acceptsExplicitUnknown: true,
+    writeCommand: "onboarding.capture_training_environment",
+  },
+  {
+    id: "training.equipment",
+    owner: "working_memory",
+    valueType: "multi_enum",
+    sensitivity: "standard",
+    label: "可用训练器械",
+    control: { kind: "multi_select", options: [{ id: "full_gym", label: "完整健身房" }, { id: "barbell", label: "杠铃" }, { id: "dumbbells", label: "哑铃" }, { id: "rack", label: "深蹲架" }, { id: "machines", label: "固定器械" }, { id: "cables", label: "绳索器械" }, { id: "bodyweight", label: "徒手" }] },
+    requiredFor: ["initial_plan"],
+    themes: ["goal_based_intake"],
+    allowedSources: ["conversation_message", "form_submission"],
+    acceptsExplicitUnknown: true,
+    writeCommand: "onboarding.capture_training_equipment",
+  },
+  {
+    id: "training.execution_stability",
+    owner: "working_memory",
+    valueType: "enum",
+    sensitivity: "standard",
+    label: "训练动作与强度执行是否稳定",
+    control: { kind: "single_select", options: [{ id: "reported_consistent", label: "大多数时候稳定" }, { id: "reported_variable", label: "经常波动" }, { id: "unknown", label: "不确定" }] },
+    requiredFor: ["initial_plan"],
+    themes: ["goal_based_intake"],
+    allowedSources: ["conversation_message", "form_submission"],
+    acceptsExplicitUnknown: true,
+    writeCommand: "onboarding.capture_execution_stability",
+  },
+  {
     id: "training.comparable_set",
     owner: "timeline_baseline",
     valueType: "compound",
@@ -188,8 +266,8 @@ const catalog = [
       kind: "field_group",
       fields: ["exercise_variant", "load", "reps", "rir_or_rpe", "performed_on", "conditions"],
     },
-    requiredFor: ["comparable_strength_progression"],
-    themes: ["strength_baseline"],
+    requiredFor: ["comparable_strength_progression", "initial_plan"],
+    themes: ["strength_baseline", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_comparable_training_set",
@@ -208,8 +286,8 @@ const catalog = [
         { id: "medical_restriction", label: "专业人士要求限制活动" },
       ],
     },
-    requiredFor: ["high_intensity_cardio", "exercise_selection"],
-    themes: ["safety_check"],
+    requiredFor: ["high_intensity_cardio", "exercise_selection", "initial_plan"],
+    themes: ["safety_check", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_activity_restrictions",
@@ -221,8 +299,8 @@ const catalog = [
     sensitivity: "standard",
     label: "希望达成目标的时间",
     control: { kind: "date_range" },
-    requiredFor: ["dated_session_schedule", "body_composition_trend"],
-    themes: ["goal_timing"],
+    requiredFor: ["dated_session_schedule", "body_composition_trend", "initial_plan"],
+    themes: ["goal_timing", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_goal_horizon",
@@ -242,8 +320,8 @@ const catalog = [
         { id: "unknown_method", label: "不确定" },
       ],
     },
-    requiredFor: ["body_composition_trend"],
-    themes: ["measurement_quality"],
+    requiredFor: ["body_composition_trend", "initial_plan"],
+    themes: ["measurement_quality", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_measurement_method",
@@ -301,7 +379,7 @@ export function validateDynamicFormProposal(
   progress: OnboardingProgress,
   proposal: OnboardingDynamicFormProposal,
 ): readonly OnboardingFieldDefinition[] {
-  if (!reasonCodes.has(proposal.reasonCode) || !proposal.topic || proposal.fieldIds.length === 0 || proposal.fieldIds.length > 4) {
+  if (!reasonCodes.has(proposal.reasonCode) || !proposal.topic || proposal.fieldIds.length === 0) {
     throw new Error("dynamic_form_rejected");
   }
   const fields = proposal.fieldIds.map(fieldById);
@@ -361,33 +439,34 @@ export function limitedActionsFor(progress: Pick<OnboardingProgress, "patch">): 
 }
 
 export function recommendFieldsForGoal(goalKind: "fat_loss" | "hypertrophy" | "strength" | "visual_physique" | "general"): OnboardingDynamicFormProposal {
-  switch (goalKind) {
-    case "fat_loss":
-      return { topic: "energy_planning", fieldIds: ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake"], reasonCode: "planning_gate", requiredFor: "reliable_energy_target" };
-    case "strength":
-      return { topic: "strength_baseline", fieldIds: ["training.comparable_set"], reasonCode: "planning_gate", requiredFor: "comparable_strength_progression" };
-    case "visual_physique":
-      return { topic: "measurement_quality", fieldIds: ["profile.body_measurement_method"], reasonCode: "measurement_quality", requiredFor: "body_composition_trend" };
-    case "hypertrophy":
-      return { topic: "schedule_feasibility", fieldIds: ["profile.training_schedule"], reasonCode: "schedule_feasibility", requiredFor: "dated_session_schedule" };
-    default:
-      return { topic: "safety_check", fieldIds: ["safety.activity_restrictions"], reasonCode: "safety_gate", requiredFor: "exercise_selection" };
-  }
+  const common = [
+    "training.cumulative_months", "training.recent_continuity", "training.recent_split",
+    "training.environment", "training.equipment", "training.execution_stability",
+    "profile.training_schedule", "safety.activity_restrictions", "mandate.plan_adjustment_authority",
+  ];
+  const goalSpecific = goalKind === "fat_loss"
+    ? ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake", "goal.target_horizon", "profile.body_measurement_method"]
+    : goalKind === "strength"
+      ? ["training.comparable_set", "goal.target_horizon"]
+      : goalKind === "visual_physique"
+        ? ["profile.body_measurement_method", "goal.target_horizon"]
+        : goalKind === "hypertrophy"
+          ? ["goal.target_horizon"]
+          : [];
+  return {
+    topic: "goal_based_intake",
+    fieldIds: [...common, ...goalSpecific],
+    reasonCode: "planning_gate",
+    requiredFor: "initial_plan",
+  };
 }
 
 /**
- * A small goal-led decision tree, not a second questionnaire. It exposes
- * only the currently unblocked frontier and intentionally caps a card at
- * three independent fields. Facts already captured from conversation count
- * as answered; they are confirmed later in the dossier summary.
+ * A goal-led decision frontier, not a fixed questionnaire. One card contains
+ * every independent fact that is material now; its size is determined by the
+ * goal and the remaining draft gaps, never by an arbitrary question limit.
  */
 export function goalDrivenOnboardingFrontier(progress: OnboardingProgress): GoalDrivenOnboardingFrontier {
-  if (!progress.patch.trainingBackground) {
-    return { kind: "natural_training_background", reason: "initial_training_context" };
-  }
-  if (!progress.coachingLevelAssessments?.length) {
-    return { kind: "assess_training_context", reason: "training_background_captured" };
-  }
   const narrative = progress.patch.baseline?.goalNarrative?.text ?? "";
   const goalKind = /(减脂|减重|体脂|腹肌|瘦)/u.test(narrative)
     ? "fat_loss"
@@ -402,7 +481,10 @@ export function goalDrivenOnboardingFrontier(progress: OnboardingProgress): Goal
   const fieldIds = proposal.fieldIds.filter((id) => {
     const field = fieldById(id);
     return field ? fieldIsAskable(progress, field) : false;
-  }).slice(0, 3);
+  });
+  if (progress.patch.trainingBackground && !progress.coachingLevelAssessments?.length && fieldIds.length === 0) {
+    return { kind: "assess_training_context", reason: "training_background_captured" };
+  }
   return fieldIds.length
     ? { kind: "catalog_fields", reason: "goal_specific_planning_gate", topic: proposal.topic, reasonCode: proposal.reasonCode, requiredFor: proposal.requiredFor, fieldIds }
     : { kind: "review_dossier", reason: "no_unblocked_goal_specific_fields" };
@@ -410,7 +492,20 @@ export function goalDrivenOnboardingFrontier(progress: OnboardingProgress): Goal
 
 function fieldIsAskable(progress: OnboardingProgress, field: OnboardingFieldDefinition): boolean {
   const existing = progress.patch.dynamicFields?.[field.id];
-  return !existing || existing.state === "conflicted";
+  if (existing && existing.state !== "conflicted") return false;
+  const background = progress.patch.trainingBackground;
+  if (!background) return true;
+  const alreadyCaptured = new Set([
+    ...(background.cumulativeTrainingMonths ? ["training.cumulative_months"] : []),
+    ...(background.recentContinuity ? ["training.recent_continuity"] : []),
+    ...(background.recentSplit?.length ? ["training.recent_split"] : []),
+    ...(background.environments?.length ? ["training.environment"] : []),
+    ...(background.availableEquipment?.length ? ["training.equipment"] : []),
+    ...(background.executionStability ? ["training.execution_stability"] : []),
+    ...(background.schedule ? ["profile.training_schedule"] : []),
+    ...(background.comparableSets?.length ? ["training.comparable_set"] : []),
+  ]);
+  return !alreadyCaptured.has(field.id);
 }
 
 function matchesInputMode(source: OnboardingInputSource, inputMode: "form" | "conversation"): boolean {
@@ -445,6 +540,9 @@ function validateValue(field: OnboardingFieldDefinition, value: unknown): void {
     const record = value as Record<string, unknown>;
     if (field.id === "profile.training_schedule") {
       if (!isWholeNumberInRange(record.days_per_week, 1, 7) || !isWholeNumberInRange(record.minutes_per_session, 10, 300)) throw new Error("dynamic_form_rejected");
+    }
+    if (field.id === "training.recent_continuity") {
+      if (!isWholeNumberInRange(record.consecutive_weeks, 0, 520) || !isWholeNumberInRange(record.usual_sessions_per_week, 0, 14) || !isWholeNumberInRange(record.time_away_weeks, 0, 520)) throw new Error("dynamic_form_rejected");
     }
     if (field.id === "training.comparable_set") {
       const load = record.load as { value?: unknown; unit?: unknown } | undefined;

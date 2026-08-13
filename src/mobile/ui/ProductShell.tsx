@@ -2529,6 +2529,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
   };
   const submitDynamicCard = async (values: DynamicOnboardingFormValues) => {
     if (!dynamicCard) return;
+    const draftId = entry?.draft?.id ?? onboardingDraftId.current ?? "";
     setDynamicSaving(true);
     setError(undefined);
     try {
@@ -2536,7 +2537,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
         ? { fieldId, state: "explicit_unknown" }
         : { fieldId, state: "captured_explicit", value: dynamicFormValueToDomain(values[fieldId]) });
       await application.submitOnboardingDynamicForm({
-        draftId: entry?.draft?.id ?? onboardingDraftId.current ?? "",
+        draftId,
         cardId: dynamicCard.cardId,
         expectedDraftRevision: dynamicCard.draftRevision,
         answers,
@@ -2545,6 +2546,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
       setDynamicCard(undefined);
       setDynamicValues(undefined);
       setDynamicUnknownFields(new Set());
+      await onStartConversation(draftId);
       onProgressSaved();
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "这组信息还需要再确认一下。";
@@ -4003,6 +4005,7 @@ function dynamicFormValueToDomain(value: DynamicOnboardingFormValue): unknown {
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
     key,
     key === "reps" || key === "rir_or_rpe" || key === "days_per_week" || key === "minutes_per_session"
+      || key === "consecutive_weeks" || key === "usual_sessions_per_week" || key === "time_away_weeks"
       ? Number(nested)
       : dynamicFormValueToDomain(nested),
   ]));

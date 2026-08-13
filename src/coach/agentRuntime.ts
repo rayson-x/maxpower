@@ -37,6 +37,7 @@ import { stableHash } from "./stable";
 import { redactDirectIdentifiers } from "./remoteRedaction";
 import type { CoachToolCall, CoachToolRegistry } from "./toolRegistry";
 import { projectOnboardingProgress } from "../onboarding/OnboardingService";
+import { goalDrivenOnboardingFrontier } from "../onboarding/FieldCatalog";
 import { projectDomainEvents } from "./domain";
 
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 45_000;
@@ -492,6 +493,17 @@ export class AgentRuntime {
       });
     }
     if (input.abortController.signal.aborted) return events;
+    if (input.session.context.kind === "onboarding") {
+      const snapshot = await this.ledger.read();
+      const progress = projectOnboardingProgress(snapshot.onboardingDraftEvents, input.session.context.ref);
+      const frontier = goalDrivenOnboardingFrontier(progress);
+      const requestedForm = events.some((event) => event.type === "tool-started" && event.toolName === "onboarding.request_form");
+      const askedInText = events.some((event) => event.type === "text-delta" && onboardingTextAsksQuestion(event.delta));
+      if (askedInText) throw new Error("onboarding_question_must_use_form_tool");
+      if (frontier.kind === "catalog_fields" && !requestedForm) {
+        throw new Error("onboarding_form_tool_required");
+      }
+    }
     const locallyPersistedTypes = new Set(["tool-started", "artifact-ready", "hitl-suspended"]);
     await this.finishRun({
       sessionId: input.session.id,
@@ -1075,6 +1087,11 @@ export class AgentRuntime {
     });
     return events;
   }
+}
+
+function onboardingTextAsksQuestion(text: string): boolean {
+  return /[?？]/u.test(text)
+    || /(?:请问|能否|愿不愿意|告诉我|说说你|(?:^|[。！])\s*是否|你.*(?:多少|多久|几次|哪里|什么|哪些|怎么|有没有))/u.test(text);
 }
 
 function providerIdleTimeout(value: number | undefined): number {

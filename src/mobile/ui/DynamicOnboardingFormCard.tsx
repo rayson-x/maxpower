@@ -115,7 +115,8 @@ function SegmentedScale({ field, value, onChange, disabled }: { field: Onboardin
 }
 
 function FieldGroup({ fields, value, onChange, disabled }: { fields: readonly string[]; value: FieldGroupDraft; onChange(value: FieldGroupDraft): void; disabled: boolean }) {
-  return <View style={styles.group}>{fields.map((name) => name === "load" ? <View key={name}><Text style={styles.groupLabel}>{groupFieldLabel(name)}</Text><NumericWithUnit label={groupFieldLabel(name)} units={["kg"]} value={numericValue(value[name], "kg")} onChange={(next) => onChange({ ...value, [name]: next })} disabled={disabled} /></View> : name === "performed_on" ? <View key={name}><Text style={styles.groupLabel}>{groupFieldLabel(name)}</Text><DateInput label={groupFieldLabel(name)} value={typeof value[name] === "string" ? value[name] : ""} onChange={(next) => onChange({ ...value, [name]: next })} disabled={disabled} /></View> : <View key={name}><Text style={styles.groupLabel}>{groupFieldLabel(name)}</Text><TextInput accessibilityLabel={groupFieldLabel(name)} editable={!disabled} keyboardType={name === "reps" || name === "rir_or_rpe" || name === "days_per_week" || name === "minutes_per_session" ? "decimal-pad" : "default"} multiline={name === "conditions"} onChangeText={(next) => onChange({ ...value, [name]: next })} placeholderTextColor={colors.ink3} style={[styles.input, name === "conditions" && styles.multiline]} value={typeof value[name] === "string" ? value[name] : ""} /></View>)}</View>;
+  const numericFields = new Set(["reps", "rir_or_rpe", "days_per_week", "minutes_per_session", "consecutive_weeks", "usual_sessions_per_week", "time_away_weeks"]);
+  return <View style={styles.group}>{fields.map((name) => name === "load" ? <View key={name}><Text style={styles.groupLabel}>{groupFieldLabel(name)}</Text><NumericWithUnit label={groupFieldLabel(name)} units={["kg"]} value={numericValue(value[name], "kg")} onChange={(next) => onChange({ ...value, [name]: next })} disabled={disabled} /></View> : name === "performed_on" ? <View key={name}><Text style={styles.groupLabel}>{groupFieldLabel(name)}</Text><DateInput label={groupFieldLabel(name)} value={typeof value[name] === "string" ? value[name] : ""} onChange={(next) => onChange({ ...value, [name]: next })} disabled={disabled} /></View> : <View key={name}><Text style={styles.groupLabel}>{groupFieldLabel(name)}</Text><TextInput accessibilityLabel={groupFieldLabel(name)} editable={!disabled} keyboardType={numericFields.has(name) ? "decimal-pad" : "default"} multiline={name === "conditions"} onChangeText={(next) => onChange({ ...value, [name]: next })} placeholderTextColor={colors.ink3} style={[styles.input, name === "conditions" && styles.multiline]} value={typeof value[name] === "string" ? value[name] : ""} /></View>)}</View>;
 }
 
 function numericValue(value: DynamicOnboardingFormValue, unit: string): NumericWithUnitDraft {
@@ -137,15 +138,15 @@ function range(minimum: number, maximum: number, step: number): readonly number[
 }
 
 function groupFieldLabel(name: string): string {
-  return ({ exercise_variant: "动作变式", load: "重量", reps: "次数", rir_or_rpe: "RIR / RPE", performed_on: "训练日期", conditions: "当时情况", days_per_week: "每周可训练天数", minutes_per_session: "每次可训练分钟" } as Record<string, string>)[name] ?? name;
+  return ({ exercise_variant: "动作变式", load: "重量", reps: "次数", rir_or_rpe: "RIR / RPE", performed_on: "训练日期", conditions: "当时情况", days_per_week: "每周可训练天数", minutes_per_session: "每次可训练分钟", consecutive_weeks: "最近连续训练周数", usual_sessions_per_week: "这段时间每周通常训练次数", time_away_weeks: "此前中断周数" } as Record<string, string>)[name] ?? name;
 }
 
 function reasonLabel(requiredFor: string): string {
-  return ({ reliable_energy_target: "这会影响能量目标的可靠性。", dated_session_schedule: "这会影响训练日安排。", high_intensity_cardio: "这会影响高强度有氧是否适合安排。", exercise_selection: "这会影响动作选择。", comparable_strength_progression: "这会影响力量进阶的起点。", body_composition_trend: "这会影响体型变化的追踪。", managed_plan_changes: "这会影响计划调整的确认方式。", remote_coach_conversation: "这会影响对话能力是否可用。" } as Record<string, string>)[requiredFor] ?? "这会影响下一步的安排。";
+  return ({ initial_plan: "这些信息会直接影响首次计划的结构与起点。", reliable_energy_target: "这会影响能量目标的可靠性。", dated_session_schedule: "这会影响训练日安排。", high_intensity_cardio: "这会影响高强度有氧是否适合安排。", exercise_selection: "这会影响动作选择。", comparable_strength_progression: "这会影响力量进阶的起点。", body_composition_trend: "这会影响体型变化的追踪。", managed_plan_changes: "这会影响计划调整的确认方式。", remote_coach_conversation: "这会影响对话能力是否可用。" } as Record<string, string>)[requiredFor] ?? "这会影响下一步的安排。";
 }
 
 function topicLabel(topic: string): string {
-  return ({ energy_planning: "日常活动与饮食", strength_baseline: "近期训练表现", measurement_quality: "体型记录方式", schedule_feasibility: "训练时间安排", safety_check: "训练安全情况", goal_timing: "目标时间" } as Record<string, string>)[topic] ?? topic;
+  return ({ goal_based_intake: "按你的目标补充信息", energy_planning: "日常活动与饮食", strength_baseline: "近期训练表现", measurement_quality: "体型记录方式", schedule_feasibility: "训练时间安排", safety_check: "训练安全情况", goal_timing: "目标时间" } as Record<string, string>)[topic] ?? topic;
 }
 
 const styles = StyleSheet.create({

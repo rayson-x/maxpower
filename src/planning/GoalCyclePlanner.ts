@@ -79,6 +79,13 @@ import {
 const DAY_MS = 86_400_000;
 const DEFAULT_MESOCYCLE_WEEKS = 6;
 
+function legacyTrainingExperience(
+  value: UserProfileData["trainingExperience"],
+): Exclude<UserProfileData["trainingExperience"], "unknown"> {
+  if (value === "unknown") throw new Error("coaching_level_assessment_required");
+  return value;
+}
+
 /** 周期长度由 horizon 推导（4–12 周），无 endDate 时用默认值（TP-MESO-001：不固定 4–8 周）。 */
 function mesocycleLengthFor(goal: GoalContractData): number {
   if (!goal.horizon.endDate) return DEFAULT_MESOCYCLE_WEEKS;
@@ -183,7 +190,6 @@ export class GoalCyclePlanner {
         knowledgePins: pins,
       };
     }
-    const assessedLegacyExperience = request.facts.profile.value.trainingExperience;
     const hardFailure = this.evaluateGlobalHardConstraints(request, pins);
     if (hardFailure) return hardFailure;
     const trainingRule = this.trainingRules.current(request.facts.goalContract.value.primaryGoal);
@@ -1288,7 +1294,7 @@ export class GoalCyclePlanner {
       }
       const targetBand = weeklyDirectSetTarget(
         strategies,
-        assessedLegacyExperience,
+        legacyTrainingExperience(context.facts.profile.value.trainingExperience),
         context.facts.goalContract.value.primaryGoal,
       );
       const baseTarget = trainingCommitmentTarget(targetBand, context.facts.goalContract.value.commitmentPreferences?.training);
