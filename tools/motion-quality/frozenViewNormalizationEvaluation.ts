@@ -1,4 +1,9 @@
 import { createHash } from "node:crypto";
+import type {
+  DecodedLocalMotionCoordinate,
+  DecodedMotionPacket,
+  DecodedRepEndpointSnapshot,
+} from "../../src/motion/motionPacket.js";
 
 export type FrozenEvaluationRunKind =
   | "touched_benchmark"
@@ -14,7 +19,10 @@ export type EvaluationCondition =
   | "mirror"
   | "bar_occlusion"
   | "wrist_forearm_occlusion"
-  | "competing_reflection_person";
+  | "competing_reflection_person"
+  | "camera_roll"
+  | "crop_change"
+  | "orientation_change";
 
 export type EvaluationBucketKey =
   | `view:${FrozenEvaluationView}`
@@ -133,6 +141,32 @@ export interface GeometryInvarianceReport {
   }>[];
 }
 
+export interface GeometryRawPoint2d {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface GeometryRawObservationInput {
+  readonly frames: readonly Readonly<{
+    readonly frameId: number;
+    readonly sourceTimestampMs: number;
+    readonly points: Readonly<Record<string, Readonly<GeometryRawPoint2d> | null>>;
+  }>[];
+}
+
+export interface GeometryInvarianceRawInput {
+  readonly sourceId: string;
+  readonly original: Readonly<GeometryRawObservationInput>;
+  readonly transforms: readonly Readonly<{
+    transformId: string;
+    transform: GeometryInvarianceInput["transforms"][number]["transform"];
+  }>[];
+  /** Runs the same causal projection for the original and every transformed input. */
+  readonly run: (
+    input: Readonly<GeometryRawObservationInput>,
+  ) => Readonly<GeometryInvarianceTrace>;
+}
+
 /** Compares independently produced transformed outputs; it does not normalize traces itself. */
 export function evaluateSyntheticGeometryInvariance(
   input: GeometryInvarianceInput,
@@ -185,6 +219,27 @@ export function evaluateSyntheticGeometryInvariance(
 }
 
 /**
+ * Applies each preregistered transform to raw 2D observations, then invokes
+ * the same runner again. This prevents a geometry case from supplying its own
+ * expected normalized output and accidentally passing by construction.
+ */
+export function evaluateSyntheticGeometryInvarianceFromRawInput(
+  input: GeometryInvarianceRawInput,
+): Readonly<GeometryInvarianceReport> {
+  assertRawGeometryInput(input.original, "original");
+  const original = input.run(deepFreeze(cloneJson(input.original)));
+  return evaluateSyntheticGeometryInvariance({
+    sourceId: input.sourceId,
+    original,
+    transforms: input.transforms.map((entry) => ({
+      transformId: entry.transformId,
+      transform: cloneJson(entry.transform),
+      output: input.run(transformRawGeometryInput(input.original, entry.transform)),
+    })),
+  });
+}
+
+/**
  * Reads Ticket 04's additive decoded facts without fabricating a fallback from
  * screen-y when an older packet does not contain them.
  */
@@ -197,6 +252,39 @@ export function adaptOptionalDecodedNormalizedFacts(value: unknown): DecodedNorm
   }
   if (!value || typeof value !== "object") return invalidNormalizedFacts();
   const candidate = value as Record<string, unknown>;
+  // Canonical decoded MotionPacket shape. Prefer measured equipment, but keep
+  // a valid pose-only channel observable; neither is rebuilt from screen-y.
+  if (candidate.schemaVersion === "maxpower-local-motion-coordinate/v1") {
+    const frameState = candidate.state;
+    const channelCandidate = candidate.equipment ?? candidate.pose;
+    if ((frameState !== "uninitialized" && frameState !== "provisional"
+        && frameState !== "learning" && frameState !== "frozen" && frameState !== "degraded")
+        || candidate.endpointOrderMapping !== "screen_ordered_anatomy_unknown"
+        || !finiteNumber(candidate.confidence)
+        || candidate.confidence < 0 || candidate.confidence > 1) {
+      return invalidNormalizedFacts();
+    }
+    if (!channelCandidate || typeof channelCandidate !== "object") {
+      return Object.freeze({ status: "unavailable", reason: "normalized_fields_not_present" });
+    }
+    const channel = channelCandidate as Record<string, unknown>;
+    if (!finiteNumber(channel.alongAxisProgress)
+        || !finiteNumber(channel.crossAxisDisplacement)
+        || !unitInterval(channel.confidence)
+        || !unitInterval(channel.coverage)
+        || !unitInterval(channel.uncertainty)) {
+      return invalidNormalizedFacts();
+    }
+    return Object.freeze({
+      status: "available",
+      coordinateVersion: candidate.schemaVersion,
+      frameState: frameState === "uninitialized" ? "provisional" : frameState,
+      alongAxisProgress: channel.alongAxisProgress,
+      crossAxisDisplacement: channel.crossAxisDisplacement,
+      endpointResidual: null,
+      confidence: candidate.confidence,
+    });
+  }
   const frameState = candidate.frameState;
   if (typeof candidate.coordinateVersion !== "string" || !candidate.coordinateVersion
       || (frameState !== "provisional" && frameState !== "learning"
@@ -216,6 +304,51 @@ export function adaptOptionalDecodedNormalizedFacts(value: unknown): DecodedNorm
     crossAxisDisplacement: candidate.crossAxisDisplacement ?? null,
     endpointResidual: candidate.endpointResidual ?? null,
     confidence: candidate.confidence,
+  });
+}
+
+type DecodedRustCanonicalPacketProjectionSource = Pick<DecodedMotionPacket,
+  "frameId" | "sourceTimestampMs" | "repState" | "completedReps"
+  | "localMotionCoordinate" | "qualityProposals">;
+
+/**
+ * Projects the real `decodeMotionPacket` result into the frozen evaluator's
+ * stable compatibility shape. Rep endpoint facts come only from Rust quality
+ * proposal snapshots; absent snapshots remain absent.
+ */
+export function adaptDecodedRustCanonicalPacket(
+  packet: Readonly<DecodedRustCanonicalPacketProjectionSource>,
+  packetHash: string,
+): Readonly<ClientRustOutputProjection> {
+  if (!/^[a-f0-9]{64}$/u.test(packetHash)) {
+    throw new Error("decoded Rust canonical packet hash must be sha256");
+  }
+  const proposals = new Map(packet.qualityProposals.map((proposal) => [
+    String(proposal.repId),
+    proposal,
+  ]));
+  const sealedReps = packet.completedReps.map((rep): ClientSealedRepPrediction => {
+    const proposal = proposals.get(rep.repId.toString());
+    const endpoints = proposal?.endpoints ?? [];
+    const normalizedFacts = normalizedFactsFromEndpointSnapshots(endpoints);
+    const rawScreenYRom = rawScreenYRomFromEndpointSnapshots(endpoints);
+    return {
+      repId: rep.repId.toString(),
+      startMs: safeBigIntTimestamp(rep.startTimestampMs, "rep start timestamp"),
+      turnaroundMs: safeBigIntTimestamp(rep.peakTimestampMs, "rep turnaround timestamp"),
+      endMs: safeBigIntTimestamp(rep.endTimestampMs, "rep end timestamp"),
+      disposition: rep.disposition,
+      ...(rawScreenYRom === null ? {} : { rawScreenYRom }),
+      ...(normalizedFacts === null ? {} : { normalizedFacts }),
+    };
+  });
+  return deepFreeze({
+    packetHash,
+    phase: packet.repState.phase,
+    sealedReps,
+    ...(packet.localMotionCoordinate === null
+      ? {}
+      : { normalizedFacts: packet.localMotionCoordinate }),
   });
 }
 
@@ -1092,6 +1225,126 @@ function assertTrace(trace: GeometryInvarianceTrace, label: string): void {
   }
 }
 
+function assertRawGeometryInput(input: GeometryRawObservationInput, label: string): void {
+  if (!Array.isArray(input.frames) || input.frames.length === 0) {
+    throw new Error(`${label}: raw geometry input has no frames`);
+  }
+  let previousFrameId = -1;
+  let previousTimestampMs = -1;
+  for (const frame of input.frames) {
+    if (!Number.isSafeInteger(frame.frameId) || frame.frameId <= previousFrameId
+        || !Number.isFinite(frame.sourceTimestampMs)
+        || frame.sourceTimestampMs <= previousTimestampMs) {
+      throw new Error(`${label}: raw geometry frames must be chronological`);
+    }
+    const entries = Object.entries(frame.points) as Array<[
+      string,
+      Readonly<GeometryRawPoint2d> | null,
+    ]>;
+    if (entries.length === 0) throw new Error(`${label}: raw geometry frame has no points`);
+    for (const [pointId, point] of entries) {
+      if (point !== null && (!finiteNumber(point.x) || !finiteNumber(point.y))) {
+        throw new Error(`${label}: raw geometry point ${pointId} is invalid`);
+      }
+    }
+    previousFrameId = frame.frameId;
+    previousTimestampMs = frame.sourceTimestampMs;
+  }
+}
+
+function transformRawGeometryInput(
+  input: GeometryRawObservationInput,
+  transform: GeometryInvarianceInput["transforms"][number]["transform"],
+): Readonly<GeometryRawObservationInput> {
+  if (!finiteNumber(transform.rotationDegrees)
+      || !finiteNumber(transform.translateX)
+      || !finiteNumber(transform.translateY)
+      || !finiteNumber(transform.uniformScale)
+      || transform.uniformScale <= 0) {
+    throw new Error("invalid synthetic transform");
+  }
+  const radians = transform.rotationDegrees * Math.PI / 180;
+  const cosine = Math.cos(radians);
+  const sine = Math.sin(radians);
+  const transformed: GeometryRawObservationInput = {
+    frames: input.frames.map((frame) => ({
+      frameId: frame.frameId,
+      sourceTimestampMs: frame.sourceTimestampMs,
+      points: Object.fromEntries(Object.entries(frame.points).map(([pointId, point]) => [
+        pointId,
+        point === null ? null : {
+          x: transform.uniformScale * (point.x * cosine - point.y * sine)
+            + transform.translateX,
+          y: transform.uniformScale * (point.x * sine + point.y * cosine)
+            + transform.translateY,
+        },
+      ])),
+    })),
+  };
+  assertRawGeometryInput(transformed, "transformed");
+  return deepFreeze(transformed);
+}
+
+function normalizedFactsFromEndpointSnapshots(
+  endpoints: readonly Readonly<DecodedRepEndpointSnapshot>[],
+): null | Readonly<{
+  coordinateVersion: string;
+  normalizedRom: number;
+  crossPath: number;
+  endpointResidual: number;
+  confidence: number;
+}> {
+  const start = endpointCoordinate(endpoints, "start_anchor");
+  const turnaround = endpointCoordinate(endpoints, "primary_turnaround");
+  const end = endpointCoordinate(endpoints, "end_return");
+  if (!start || !turnaround || !end) return null;
+  const coordinates = [start, turnaround, end];
+  const channels = coordinates.map((coordinate) => coordinate.equipment ?? coordinate.pose);
+  if (channels.some((channel) => channel === null)) return null;
+  const along = channels.map((channel) => channel!.alongAxisProgress);
+  const cross = channels.map((channel) => channel!.crossAxisDisplacement);
+  return deepFreeze({
+    coordinateVersion: start.schemaVersion,
+    normalizedRom: Math.max(...along) - Math.min(...along),
+    crossPath: Math.max(...cross) - Math.min(...cross),
+    endpointResidual: Math.hypot(channels[2]!.alongAxisProgress
+      - channels[0]!.alongAxisProgress, channels[2]!.crossAxisDisplacement
+      - channels[0]!.crossAxisDisplacement),
+    confidence: Math.min(...coordinates.map((coordinate) => coordinate.confidence)),
+  });
+}
+
+function endpointCoordinate(
+  endpoints: readonly Readonly<DecodedRepEndpointSnapshot>[],
+  kind: DecodedRepEndpointSnapshot["kind"],
+): Readonly<DecodedLocalMotionCoordinate> | null {
+  const coordinate = endpoints.find((endpoint) => endpoint.kind === kind)?.normalizedFeatures;
+  const channel = coordinate?.equipment ?? coordinate?.pose;
+  if (!coordinate || coordinate.endpointOrderMapping !== "screen_ordered_anatomy_unknown"
+      || !channel || !unitInterval(channel.coverage)
+      || !unitInterval(channel.uncertainty)) {
+    return null;
+  }
+  return coordinate;
+}
+
+function rawScreenYRomFromEndpointSnapshots(
+  endpoints: readonly Readonly<DecodedRepEndpointSnapshot>[],
+): number | null {
+  const start = endpointCoordinate(endpoints, "start_anchor")?.rawBarAxis;
+  const turnaround = endpointCoordinate(endpoints, "primary_turnaround")?.rawBarAxis;
+  if (!start || !turnaround) return null;
+  return Math.abs((turnaround[1] + turnaround[3]) / 2 - (start[1] + start[3]) / 2);
+}
+
+function safeBigIntTimestamp(value: bigint, label: string): number {
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result < 0) {
+    throw new Error(`decoded Rust ${label} is outside the evaluation range`);
+  }
+  return result;
+}
+
 function maximumAbsoluteError(left: readonly number[], right: readonly number[]): number {
   if (left.length !== right.length) throw new Error("geometry traces have different lengths");
   return left.reduce((maximum, value, index) => (
@@ -1101,6 +1354,10 @@ function maximumAbsoluteError(left: readonly number[], right: readonly number[])
 
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function unitInterval(value: unknown): value is number {
+  return finiteNumber(value) && value >= 0 && value <= 1;
 }
 
 function nullableFiniteNumber(value: unknown): value is number | null | undefined {

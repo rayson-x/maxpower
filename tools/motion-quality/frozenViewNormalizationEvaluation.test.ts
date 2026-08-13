@@ -3,16 +3,60 @@ import test from "node:test";
 
 import {
   FrozenViewNormalizationEvaluationSession,
+  adaptDecodedRustCanonicalPacket,
   adaptOptionalDecodedNormalizedFacts,
   createPostRevealTouchedRerun,
   evaluateSyntheticGeometryInvariance,
+  evaluateSyntheticGeometryInvarianceFromRawInput,
   revealFrozenEvaluationTruth,
   validateFrozenEvaluationPrediction,
   type FrozenEvaluationInferencePack,
 } from "./frozenViewNormalizationEvaluation.js";
+import type {
+  DecodedLocalMotionCoordinate,
+  DecodedMotionPacket,
+} from "../../src/motion/motionPacket.js";
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
+
+function localCoordinate(
+  alongAxisProgress: number,
+  crossAxisDisplacement: number,
+  rawBarAxis: readonly [number, number, number, number],
+  confidence: number,
+): DecodedLocalMotionCoordinate {
+  return {
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    coordinateFrameId: 7,
+    sourceTimestampMs: 500,
+    state: "frozen",
+    reason: null,
+    primaryAxis: [0, -1],
+    crossAxis: [1, 0],
+    origin: [0.5, 0.75],
+    scale: 1,
+    scaleSource: "projected_bar_length",
+    equipmentTrackId: 11,
+    rawBarAxis,
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    equipment: {
+      alongAxisProgress,
+      crossAxisDisplacement,
+      confidence,
+      coverage: 1,
+      uncertainty: 1 - confidence,
+      provenance: "equipment_measured",
+    },
+    pose: null,
+    channelAgreement: "equipment_only",
+    endpointOneProgress: alongAxisProgress,
+    endpointTwoProgress: alongAxisProgress,
+    rawBarAngleRadians: 0,
+    baselineCorrectedBarAngleRadians: 0,
+    confidence,
+  };
+}
 
 function inferencePack(
   runKind: FrozenEvaluationInferencePack["runKind"] = "touched_benchmark",
@@ -192,6 +236,172 @@ test("optional normalized facts adapter preserves missing Ticket 04 evidence as 
   });
 });
 
+test("normalized facts adapter consumes the canonical MotionPacket v1.10 coordinate shape", () => {
+  assert.deepEqual(adaptOptionalDecodedNormalizedFacts({
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    state: "frozen",
+    confidence: 0.91,
+    equipment: {
+      alongAxisProgress: 0.42,
+      crossAxisDisplacement: -0.03,
+      confidence: 0.92,
+      coverage: 0.84,
+      uncertainty: 0.08,
+      provenance: "equipment_measured",
+    },
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+  }), {
+    status: "available",
+    coordinateVersion: "maxpower-local-motion-coordinate/v1",
+    frameState: "frozen",
+    alongAxisProgress: 0.42,
+    crossAxisDisplacement: -0.03,
+    endpointResidual: null,
+    confidence: 0.91,
+  });
+});
+
+test("normalized facts adapter preserves a decoded pose-only channel", () => {
+  assert.deepEqual(adaptOptionalDecodedNormalizedFacts({
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    state: "degraded",
+    confidence: 0.71,
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    equipment: null,
+    pose: {
+      alongAxisProgress: 0.39,
+      crossAxisDisplacement: 0.06,
+      confidence: 0.76,
+      coverage: 0.63,
+      uncertainty: 0.24,
+      provenance: "pose_measured",
+    },
+  }), {
+    status: "available",
+    coordinateVersion: "maxpower-local-motion-coordinate/v1",
+    frameState: "degraded",
+    alongAxisProgress: 0.39,
+    crossAxisDisplacement: 0.06,
+    endpointResidual: null,
+    confidence: 0.71,
+  });
+});
+
+test("canonical packet adapter projects decoded Rust phase, reps, and endpoint snapshots", () => {
+  const start = localCoordinate(0.05, 0.01, [0.2, 0.75, 0.8, 0.75], 0.92);
+  const turnaround = localCoordinate(0.85, 0.04, [0.2, 0.25, 0.8, 0.25], 0.88);
+  const returned = localCoordinate(0.08, 0.01, [0.2, 0.7, 0.8, 0.7], 0.9);
+  const packet = {
+    frameId: 30n,
+    sourceTimestampMs: 1_200n,
+    repState: {
+      phase: "return",
+      partialAttempts: 0n,
+      activeRepId: null,
+      recoveredAcrossGap: false,
+    },
+    completedReps: [{
+      repId: 4n,
+      startFrameId: 10n,
+      startTimestampMs: 200n,
+      peakFrameId: 20n,
+      peakTimestampMs: 700n,
+      endFrameId: 30n,
+      endTimestampMs: 1_100n,
+      canonicalSliceHash: 1n,
+      profileHash: 2n,
+      revision: 1,
+      profileMaturity: "provisional",
+      profileIdentity: "barbell-bench/local/v1",
+      qualityVerdict: null,
+      recoveredAcrossGap: false,
+      disposition: "confirmed",
+      evidenceReason: null,
+      observationFindings: [],
+    }],
+    localMotionCoordinate: returned,
+    qualityProposals: [{
+      schemaVersion: "maxpower-rust-quality-proposal/v1",
+      proposalId: "proposal-4",
+      repId: 4,
+      actionId: "barbell_bench_press",
+      capturePosition: "frontLeft45",
+      anatomicalSide: null,
+      equipmentRole: "barbell_axis_phase_and_path",
+      capability: "quality_supported",
+      ruleBundleVersion: "rule/v1",
+      profileIdentity: "barbell-bench/local/v1",
+      profileHash: "2",
+      canonicalSliceHash: "1",
+      endpoints: [
+        {
+          kind: "start_anchor",
+          occurredFrameId: 10,
+          occurredTimestampMs: 200,
+          causalConfirmedTimestampMs: 200,
+          phaseBefore: "ready",
+          phaseAfter: "effort",
+          confidence: 0.92,
+          evidenceChannels: ["equipment_measured"],
+          normalizedFeatures: start,
+        },
+        {
+          kind: "primary_turnaround",
+          occurredFrameId: 20,
+          occurredTimestampMs: 700,
+          causalConfirmedTimestampMs: 700,
+          phaseBefore: "effort",
+          phaseAfter: "return",
+          confidence: 0.88,
+          evidenceChannels: ["equipment_measured"],
+          normalizedFeatures: turnaround,
+        },
+        {
+          kind: "end_return",
+          occurredFrameId: 30,
+          occurredTimestampMs: 1_100,
+          causalConfirmedTimestampMs: 1_100,
+          phaseBefore: "return",
+          phaseAfter: "ready",
+          confidence: 0.9,
+          evidenceChannels: ["equipment_measured"],
+          normalizedFeatures: returned,
+        },
+      ],
+      conclusions: [],
+      contentHash: "proposal-hash",
+    }],
+  } satisfies Pick<DecodedMotionPacket,
+    "frameId" | "sourceTimestampMs" | "repState" | "completedReps"
+    | "localMotionCoordinate" | "qualityProposals">;
+
+  const projection = adaptDecodedRustCanonicalPacket(packet, HASH_A);
+  const normalized = projection.sealedReps[0]?.normalizedFacts as {
+    normalizedRom: number;
+  };
+  assert.ok(Math.abs(normalized.normalizedRom - 0.8) < 1e-12);
+  assert.deepEqual(projection, {
+    packetHash: HASH_A,
+    phase: "return",
+    normalizedFacts: returned,
+    sealedReps: [{
+      repId: "4",
+      startMs: 200,
+      turnaroundMs: 700,
+      endMs: 1_100,
+      disposition: "confirmed",
+      rawScreenYRom: 0.5,
+      normalizedFacts: {
+        coordinateVersion: "maxpower-local-motion-coordinate/v1",
+        normalizedRom: normalized.normalizedRom,
+        crossPath: 0.03,
+        endpointResidual: 0.03,
+        confidence: 0.88,
+      },
+    }],
+  });
+});
+
 test("synthetic geometry suite reports normalized invariance separately from raw screen-y", () => {
   const report = evaluateSyntheticGeometryInvariance({
     sourceId: "synthetic-bench",
@@ -236,6 +446,67 @@ test("synthetic geometry suite reports normalized invariance separately from raw
   });
   assert.equal(unavailable.normalizedFactsStatus, "unavailable");
   assert.equal(unavailable.transforms[0]?.normalizedAlongAxisMaximumAbsoluteError, null);
+});
+
+test("geometry invariance transforms raw observations and reruns one projection", () => {
+  const runnerInputs: number[] = [];
+  const report = evaluateSyntheticGeometryInvarianceFromRawInput({
+    sourceId: "raw-observation-bench",
+    original: {
+      frames: [
+        { frameId: 1, sourceTimestampMs: 0, points: {
+          shaftOne: { x: 0.2, y: 0.7 }, shaftTwo: { x: 0.8, y: 0.7 }, center: { x: 0.5, y: 0.7 },
+        } },
+        { frameId: 2, sourceTimestampMs: 100, points: {
+          shaftOne: { x: 0.2, y: 0.5 }, shaftTwo: { x: 0.8, y: 0.5 }, center: { x: 0.5, y: 0.5 },
+        } },
+        { frameId: 3, sourceTimestampMs: 200, points: {
+          shaftOne: { x: 0.2, y: 0.3 }, shaftTwo: { x: 0.8, y: 0.3 }, center: { x: 0.5, y: 0.3 },
+        } },
+        { frameId: 4, sourceTimestampMs: 300, points: {
+          shaftOne: { x: 0.2, y: 0.7 }, shaftTwo: { x: 0.8, y: 0.7 }, center: { x: 0.5, y: 0.7 },
+        } },
+      ],
+    },
+    transforms: [{
+      transformId: "rotate-30-translate-scale",
+      transform: { rotationDegrees: 30, translateX: 0.2, translateY: -0.1, uniformScale: 1.5 },
+    }],
+    run: (raw) => {
+      runnerInputs.push(raw.frames[0]!.points.center!.y);
+      const first = raw.frames[0]!;
+      const shaftOne = first.points.shaftOne!;
+      const shaftTwo = first.points.shaftTwo!;
+      const origin = first.points.center!;
+      const scale = Math.hypot(shaftTwo.x - shaftOne.x, shaftTwo.y - shaftOne.y);
+      const crossX = (shaftTwo.x - shaftOne.x) / scale;
+      const crossY = (shaftTwo.y - shaftOne.y) / scale;
+      const primaryX = crossY;
+      const primaryY = -crossX;
+      const normalizedAlongAxis = raw.frames.map(({ points }) => {
+        const center = points.center!;
+        return ((center.x - origin.x) * primaryX + (center.y - origin.y) * primaryY) / scale;
+      });
+      const normalizedCrossAxis = raw.frames.map(({ points }) => {
+        const center = points.center!;
+        return ((center.x - origin.x) * crossX + (center.y - origin.y) * crossY) / scale;
+      });
+      return {
+        phaseSequence: ["ready", "effort", "peak", "return"],
+        repEndpointsMs: [{ startMs: 0, turnaroundMs: 200, endMs: 300 }],
+        rawScreenY: raw.frames.map(({ points }) => points.center!.y),
+        normalizedAlongAxis,
+        normalizedCrossAxis,
+      };
+    },
+  });
+
+  assert.equal(runnerInputs.length, 2);
+  assert.notEqual(runnerInputs[0], runnerInputs[1]);
+  assert.equal(report.transforms[0]?.discreteRepPhaseInvariant, true);
+  assert.ok((report.transforms[0]?.rawScreenYMaximumAbsoluteError ?? 0) > 0.1);
+  assert.ok((report.transforms[0]?.normalizedAlongAxisMaximumAbsoluteError ?? 1) < 1e-12);
+  assert.ok((report.transforms[0]?.normalizedCrossAxisMaximumAbsoluteError ?? 1) < 1e-12);
 });
 
 test("client observations freeze once before truth reveal", () => {
