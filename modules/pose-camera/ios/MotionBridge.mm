@@ -119,6 +119,14 @@ NSData *CopyPacket() {
   return active ? motion_sdk_begin_set() : motion_sdk_finish_set();
 }
 
+- (int32_t)pauseSet {
+  return motion_sdk_pause_set();
+}
+
+- (int32_t)resumeSet {
+  return motion_sdk_resume_set();
+}
+
 - (nullable NSData *)processObservations:(NSArray<NSDictionary<NSString *, id> *> *)candidates
                    equipmentObservations:(NSArray<NSDictionary<NSString *, id> *> *)equipmentObservations
                               visualLuma:(nullable NSData *)visualLuma

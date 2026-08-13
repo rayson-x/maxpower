@@ -16,6 +16,8 @@ internal object MotionNative {
   external fun nativeSetProfile(profileCode: Int): Int
   external fun nativeInstallProfile(identity: String, abiArguments: DoubleArray): Int
   external fun nativeSetActive(active: Boolean): Int
+  external fun nativePauseSet(): Int
+  external fun nativeResumeSet(): Int
   external fun nativeContractMajor(): Int
   external fun nativeProcessFrame(timestampMs: Long, flatLandmarks: DoubleArray): ByteArray?
   /**

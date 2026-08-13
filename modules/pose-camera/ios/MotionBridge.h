@@ -14,6 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (int32_t)setProfileJSON:(nullable NSString *)profileJSON;
 - (int32_t)setActive:(BOOL)active;
+- (int32_t)pauseSet;
+- (int32_t)resumeSet;
 - (nullable NSData *)processObservations:(NSArray<NSDictionary<NSString *, id> *> *)candidates
                    equipmentObservations:(NSArray<NSDictionary<NSString *, id> *> *)equipmentObservations
                               visualLuma:(nullable NSData *)visualLuma

@@ -130,6 +130,16 @@ Java_expo_modules_posecamera_MotionNative_nativeSetActive(
   return active == JNI_TRUE ? motion_sdk_begin_set() : motion_sdk_finish_set();
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_expo_modules_posecamera_MotionNative_nativePauseSet(JNIEnv *, jobject) {
+  return motion_sdk_pause_set();
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_expo_modules_posecamera_MotionNative_nativeResumeSet(JNIEnv *, jobject) {
+  return motion_sdk_resume_set();
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_expo_modules_posecamera_MotionNative_nativeProcessFrame(
     JNIEnv *env, jobject, jlong timestamp_ms, jdoubleArray flat_landmarks) {
