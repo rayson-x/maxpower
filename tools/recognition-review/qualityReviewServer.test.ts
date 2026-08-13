@@ -126,6 +126,7 @@ test("quality review exposes only frozen GET evidence and range-addressable vide
 
   const pagePath = join(publicRoot, "quality-review.html");
   const documentPath = join(publicRoot, "qualityReviewDocument.js");
+  const i18nPath = join(publicRoot, "qualityReviewI18n.js");
   const appPath = join(publicRoot, "qualityReviewApp.js");
   const playerMathPath = join(publicRoot, "playerMath.js");
   const releasePath = join(root, "frozen-release.json");
@@ -134,6 +135,7 @@ test("quality review exposes only frozen GET evidence and range-addressable vide
   await Promise.all([
     writeFile(pagePath, "<!doctype html><title>Quality review</title>"),
     writeFile(documentPath, "window.QualityReviewDocument = {};"),
+    writeFile(i18nPath, "window.QualityReviewI18n = {};"),
     writeFile(appPath, "window.QualityReviewApp = {};"),
     writeFile(playerMathPath, "window.ReviewPlayerMath = {};"),
     writeFile(releasePath, `${JSON.stringify(release)}\n`),
@@ -155,7 +157,7 @@ test("quality review exposes only frozen GET evidence and range-addressable vide
     assert.equal(pageResponse.status, 200);
     assert.match(await pageResponse.text(), /Quality review/);
 
-    for (const asset of ["qualityReviewDocument.js", "qualityReviewApp.js", "playerMath.js"]) {
+    for (const asset of ["qualityReviewDocument.js", "qualityReviewI18n.js", "qualityReviewApp.js", "playerMath.js"]) {
       const response = await fetch(`${baseUrl}/${asset}`);
       assert.equal(response.status, 200);
       assert.match(response.headers.get("content-type") ?? "", /javascript/);

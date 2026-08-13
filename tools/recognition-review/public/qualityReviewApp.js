@@ -5,7 +5,10 @@
   const playerMath = typeof module === "object" && module.exports
     ? require("./playerMath.js")
     : root.ReviewPlayerMath;
-  const api = factory(qualityReviewDocument, playerMath);
+  const qualityReviewI18n = typeof module === "object" && module.exports
+    ? require("./qualityReviewI18n.js")
+    : root.QualityReviewI18n;
+  const api = factory(qualityReviewDocument, playerMath, qualityReviewI18n);
   if (typeof module === "object" && module.exports) module.exports = api;
   root.QualityReviewApp = api;
   if (typeof document === "object") {
@@ -15,6 +18,7 @@
 })(typeof globalThis === "object" ? globalThis : this, function createQualityReviewAppModule(
   QualityReviewDocument,
   ReviewPlayerMath,
+  QualityReviewI18n,
 ) {
   "use strict";
 
@@ -476,9 +480,13 @@
       const decision = state.activeReview.getDecision(target);
       const stateValue = conclusion.state ?? conclusion.value ?? "cannot_judge";
       const evidence = Array.isArray(conclusion.evidence) ? conclusion.evidence : [];
+      const copy = QualityReviewI18n.localizeConclusionText(conclusion.text || conclusion.summary || stateValue);
+      const stateCopy = QualityReviewI18n.localizeConclusionState(stateValue);
+      const reason = QualityReviewI18n.localizeConclusionReason(conclusion.reason);
       return `<article class="review-card conclusion-card" data-kind="conclusion" data-rep-id="${escapeHtml(rep.repId)}" data-conclusion-id="${escapeHtml(conclusion.conclusionId)}">
-        <div class="conclusion-head"><div><span class="dimension">${escapeHtml(dimensionLabel(conclusion.dimension))}</span><h3>${escapeHtml(conclusion.text || conclusion.summary || stateValue)}</h3></div><span class="confidence">${formatConfidence(conclusion.confidence)}</span></div>
-        <p class="conclusion-state ${escapeHtml(stateValue)}">${escapeHtml(stateValue.replaceAll("_", " "))}${conclusion.reason ? ` · ${escapeHtml(conclusion.reason)}` : ""}</p>
+        <div class="conclusion-head"><div><span class="dimension">${escapeHtml(dimensionLabel(conclusion.dimension))}</span><h3 class="conclusion-copy ${copy.translated ? "" : "translation-missing"}"><span class="conclusion-copy-zh" lang="zh-CN">${escapeHtml(copy.zh)}</span><span class="conclusion-copy-en" lang="en">${escapeHtml(copy.en)}</span></h3></div><span class="confidence">${formatConfidence(conclusion.confidence)}</span></div>
+        <p class="conclusion-state ${escapeHtml(stateValue)} ${stateCopy.translated ? "" : "translation-missing"}"><span lang="zh-CN">${escapeHtml(stateCopy.zh)}</span><span class="conclusion-state-en" lang="en">${escapeHtml(stateCopy.en)}</span></p>
+        ${reason.en ? `<p class="conclusion-reason ${reason.translated ? "" : "translation-missing"}"><span lang="zh-CN">${escapeHtml(reason.zh)}</span><span lang="en">${escapeHtml(reason.en)}</span></p>` : ""}
         ${evidence.length ? `<div class="evidence-list">${evidence.map((entry) => `<code>${escapeHtml(typeof entry === "string" ? entry : JSON.stringify(entry))}</code>`).join("")}</div>` : "<p class=muted>没有额外证据引用</p>"}
         ${decisionControls(decision, "可选修正值（JSON 或文本）", correctionText(decision?.correctedValue), "text")}
       </article>`;

@@ -4,6 +4,8 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const test = require("node:test");
 
+const QualityReviewI18n = require("./qualityReviewI18n.js");
+
 const {
   benchmarkEvidenceForItem,
   createWorkspace,
@@ -39,6 +41,52 @@ test("narrow review windows stack the audit rails instead of clipping the video"
   assert.match(html, /body\s*\{[^}]*min-width:\s*0/iu);
   assert.match(html, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu);
   assert.match(html, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.queue-list\s*\{[^}]*overflow-x:\s*auto/iu);
+});
+
+test("quality conclusions render stable Chinese translations beside the Rust English source", () => {
+  assert.deepEqual(QualityReviewI18n.localizeConclusionText(
+    "The visible excursion reached the recognizer's cycle gate.",
+  ), {
+    zh: "可见动作幅度已达到当前识别器的计次阈值。",
+    en: "The visible excursion reached the recognizer's cycle gate.",
+    translated: true,
+  });
+  assert.deepEqual(QualityReviewI18n.localizeConclusionText(
+    "Observed eccentric for 1291ms, then concentric for 103ms.",
+  ), {
+    zh: "观察到离心阶段持续 1291 ms，随后向心阶段持续 103 ms。",
+    en: "Observed eccentric for 1291ms, then concentric for 103ms.",
+    translated: true,
+  });
+  assert.equal(
+    QualityReviewI18n.localizeConclusionReason(
+      "This is profile-relative visible motion, not a universal standard-ROM verdict.",
+    ).zh,
+    "这只表示相对于当前识别 Profile 的可见运动幅度，不是通用的标准动作行程结论。",
+  );
+  assert.deepEqual(QualityReviewI18n.localizeConclusionState("observed_acceptable"), {
+    zh: "观测范围内可接受",
+    en: "Observed acceptable",
+    translated: true,
+  });
+});
+
+test("unknown Rust conclusion copy remains visible without inventing a translation", () => {
+  assert.deepEqual(QualityReviewI18n.localizeConclusionText("A future Rust conclusion."), {
+    zh: "中文翻译待补充",
+    en: "A future Rust conclusion.",
+    translated: false,
+  });
+});
+
+test("review page wires bilingual conclusion copy before mounting the app", () => {
+  const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
+  const i18nIndex = html.indexOf('<script src="/qualityReviewI18n.js"></script>');
+  const appIndex = html.indexOf('<script src="/qualityReviewApp.js"></script>');
+
+  assert.ok(i18nIndex >= 0 && i18nIndex < appIndex);
+  assert.match(html, /\.conclusion-copy-zh\s*\{/u);
+  assert.match(html, /\.conclusion-copy-en\s*\{/u);
 });
 
 test("review release exposes touched frozen benchmark evidence beside calibration proposals", () => {

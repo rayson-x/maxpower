@@ -259,10 +259,18 @@
     .conclusion-head { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; }
     .dimension { display: block; margin-bottom: 6px; color: var(--cyan); font: 800 8px/1 var(--mono); letter-spacing: .08em; }
     .confidence { align-self: start; color: var(--acid); font: 900 16px/1 var(--mono); }
-    .conclusion-state { display: inline-block; padding: 4px 6px; border: 1px solid var(--line); }
+    .conclusion-copy { display: grid; gap: 5px; }
+    .conclusion-copy-zh { color: var(--paper); font-size: 14px; line-height: 1.45; }
+    .conclusion-copy-en { color: var(--muted); font: 600 9px/1.5 var(--mono); letter-spacing: .01em; }
+    .conclusion-state { display: inline-flex; flex-wrap: wrap; gap: 5px; padding: 5px 7px; border: 1px solid var(--line); }
+    .conclusion-state-en::before { content: "/"; margin-right: 5px; color: var(--muted); }
     .conclusion-state.observed_deviation { color: var(--coral); border-color: var(--coral); }
     .conclusion-state.observed_acceptable { color: var(--green); border-color: var(--green); }
     .conclusion-state.cannot_judge { color: var(--amber); border-color: var(--amber); }
+    .conclusion-reason { display: grid; gap: 3px; margin-top: 8px !important; padding-left: 9px; border-left: 2px solid var(--line-strong); }
+    .conclusion-reason span:first-child { color: var(--paper); font-family: var(--sans); font-size: 10px; }
+    .conclusion-reason span:last-child { color: var(--muted); font-size: 8px; }
+    .translation-missing .conclusion-copy-zh, .conclusion-reason.translation-missing span:first-child { color: var(--amber); }
     .evidence-list { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
     .evidence-list code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--muted); background: #080b09; padding: 5px 6px; font: 600 8px/1 var(--mono); }
     .empty { padding: 20px; border: 1px dashed var(--line); text-align: center; }
@@ -456,6 +464,7 @@
 
   <script src="/playerMath.js"></script>
   <script src="/qualityReviewDocument.js"></script>
+  <script src="/qualityReviewI18n.js"></script>
   <script src="/qualityReviewApp.js"></script>
 </body>
 </html>

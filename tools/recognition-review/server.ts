@@ -131,6 +131,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   }
   if (request.method === "GET" && (
     url.pathname === "/qualityReviewDocument.js"
+    || url.pathname === "/qualityReviewI18n.js"
     || url.pathname === "/qualityReviewApp.js"
   )) {
     const filename = url.pathname.slice(1);
