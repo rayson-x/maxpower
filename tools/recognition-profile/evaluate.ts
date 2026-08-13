@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   instantiateRustMotionWasm,
   RustCanonicalWasmSession,
+  type RustSealedRep,
   type MotionWasmExports,
   type RustExerciseProfile,
   type RustExerciseProfileData,
@@ -40,28 +41,32 @@ interface ObservedProfileArtifact {
 
 const ROOT = process.cwd();
 const ARCHIVE_ROOT = path.join(ROOT, "public", "archives", "confirmed-captures");
-const TARGET_EXERCISES = new Set(["lat_pulldown", "barbell_row", "seated_shoulder_press", "lateral_raise"]);
+const TARGET_EXERCISES = new Set(["barbell_bench_press", "machine_chest_press", "push_up"]);
 
 async function main(): Promise<void> {
+  const profileArtifactPath = path.resolve(ROOT, process.argv[2] ?? path.join(ARCHIVE_ROOT, "recognition-profiles.json"));
+  const reportStem = process.argv[3] ?? "observed-profile-replay-2026-08-08";
   const dataset = readJson<{ records: DatasetRecord[] }>(path.join(ROOT, "data", "training", "approved-segmentation-v1.json"));
-  const observed = readJson<ObservedProfileArtifact>(path.join(ARCHIVE_ROOT, "recognition-profiles.json"));
+  const observed = readJson<ObservedProfileArtifact>(profileArtifactPath);
   const wasm = await instantiateRustMotionWasm(
-    fs.readFileSync(path.join(ROOT, "public", "motion-sdk", "form_coach_motion_sdk.wasm")),
+    fs.readFileSync(path.join(ROOT, "public", "motion-sdk", "maxpower_motion_sdk.wasm")),
   );
   const rows = dataset.records
     .filter((record) => TARGET_EXERCISES.has(record.exerciseId))
     .map((record) => replay(record, observed, wasm));
   const report = {
-    schemaVersion: "form-coach-observed-profile-replay/v1",
+    schemaVersion: "maxpower-observed-profile-replay/v1",
     generatedAt: new Date().toISOString(),
-    purpose: "In-sample compatibility replay of archived canonical sidecars. Not MediaPipe inference accuracy and not an independent validation claim.",
+    purpose: "Full-video in-sample replay through the explicit product set lifecycle. Not MediaPipe inference accuracy and not an independent validation claim.",
+    profileArtifactPath,
+    replayPolicy: { setLifecycleMode: "preview", beginSetAtMs: 0, fullVideoNegativeContext: true },
     selection: [...TARGET_EXERCISES],
     summary: summarize(rows),
     byExerciseAndPosition: group(rows),
     rows,
   };
-  const jsonPath = path.join(ROOT, "docs", "reports", "observed-profile-replay-2026-08-04.json");
-  const markdownPath = path.join(ROOT, "docs", "reports", "observed-profile-replay-2026-08-04.md");
+  const jsonPath = path.join(ROOT, "docs", "reports", `${reportStem}.json`);
+  const markdownPath = path.join(ROOT, "docs", "reports", `${reportStem}.md`);
   fs.writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
   fs.writeFileSync(markdownPath, markdown(report));
   process.stdout.write(`${JSON.stringify({ jsonPath, markdownPath, summary: report.summary, byExerciseAndPosition: report.byExerciseAndPosition }, null, 2)}\n`);
@@ -70,7 +75,7 @@ async function main(): Promise<void> {
 function replay(record: DatasetRecord, observed: ObservedProfileArtifact, wasm: MotionWasmExports) {
   const profile = profileFor(record, observed);
   if (!profile) {
-    return { captureId: record.captureId, exerciseId: record.exerciseId, capturePosition: record.capturePosition, truthCount: record.expectedCount, truthSegmentCount: record.segments.length, source: "unavailable", profileIdentity: null, predictedCount: null, matchedReps: null, missedReps: null, falsePositiveReps: null, exactCount: null, reason: "No exact observed, built-in, or simulated recognition profile for this context." };
+    return { captureId: record.captureId, exerciseId: record.exerciseId, capturePosition: record.capturePosition, truthCount: record.expectedCount, truthSegmentCount: record.segments.length, source: "unavailable", profileIdentity: null, predictedCount: null, needsReviewCount: null, rejectedCount: null, matchedReps: null, missedReps: null, falsePositiveReps: null, exactCount: null, reason: "No exact observed, built-in, or simulated recognition profile for this context." };
   }
   const fixture = readJson<Fixture[]>(path.join(ARCHIVE_ROOT, record.source.keypoints))[0];
   if (!fixture?.poses.length) throw new Error(`Missing poses for ${record.captureId}`);
@@ -80,22 +85,28 @@ function replay(record: DatasetRecord, observed: ObservedProfileArtifact, wasm: 
     schema: "blazepose33",
     image: { widthPx: first.image?.widthPx ?? 1280, heightPx: first.image?.heightPx ?? 720, rotationDegrees: 0, mirrored: first.image?.mirrored ?? false },
     stabilization: "fusion",
+    setLifecycleMode: "preview",
   }, wasm);
   if (profile.kind === "data") session.installExerciseProfileData(profile.profile);
   else session.setExerciseProfile(profile.profile);
-  const predicted: Segment[] = [];
+  session.beginSet();
+  const outcomes: RustSealedRep[] = [];
   for (const pose of fixture.poses) {
     session.process({
       timestampMs: pose.timestampMs,
       landmarks: pose.landmarks.map((landmark) => ({ x: finiteOrZero(landmark.x), y: finiteOrZero(landmark.y), z: finiteOrZero(landmark.z), visibility: landmark.visibility })),
       worldLandmarks: pose.worldLandmarks ?? [],
     });
-    predicted.push(...session.lastCompletedReps.map((rep) => ({
-      startMs: Number(rep.startTimestampMs), peakMs: Number(rep.peakTimestampMs), endMs: Number(rep.endTimestampMs),
-    })));
+    outcomes.push(...session.lastCompletedReps);
   }
+  const predicted = outcomes
+    .filter((rep) => rep.disposition === "confirmed")
+    .map((rep) => ({
+      startMs: Number(rep.startTimestampMs), peakMs: Number(rep.peakTimestampMs), endMs: Number(rep.endTimestampMs),
+    }));
   const match = matchByPeak(record.segments, predicted);
   const identity = session.lastDecodedPacket?.lineage.activeProfileIdentity ?? null;
+  session.finishSet();
   session.close();
   return {
     captureId: record.captureId,
@@ -106,13 +117,20 @@ function replay(record: DatasetRecord, observed: ObservedProfileArtifact, wasm: 
     source: profile.source,
     profileIdentity: identity,
     predictedCount: predicted.length,
+    needsReviewCount: outcomes.filter((rep) => rep.disposition === "needs_review").length,
+    rejectedCount: outcomes.filter((rep) => rep.disposition === "rejected").length,
     matchedReps: match.matched,
     missedReps: record.segments.length - match.matched,
     falsePositiveReps: predicted.length - match.matched,
-    exactCount: predicted.length === record.expectedCount,
+    exactCount: predicted.length === record.expectedCount && match.matched === record.segments.length,
     replayDetail: {
       truthSegments: record.segments,
       predictedSegments: predicted,
+      outcomeBreakdown: Object.entries(outcomes.reduce<Record<string, number>>((counts, rep) => {
+        const key = `${rep.disposition}:${rep.evidenceReason ?? "none"}`;
+        counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {})).map(([key, count]) => ({ key, count })),
       peakMatches: match.pairs,
       unmatchedTruthIndexes: match.unmatchedTruthIndexes,
       unmatchedPredictedIndexes: match.unmatchedPredictedIndexes,
@@ -158,14 +176,22 @@ function matchByPeak(truth: readonly Segment[], predicted: readonly Segment[]) {
 
 function summarize(rows: ReturnType<typeof replay>[]) {
   const evaluated = rows.filter((row) => row.predictedCount !== null);
+  const evaluatedTruthRepCount = evaluated.reduce((sum, row) => sum + row.truthSegmentCount, 0);
+  const predictedRepCount = evaluated.reduce((sum, row) => sum + (row.predictedCount ?? 0), 0);
+  const matchedRepCount = evaluated.reduce((sum, row) => sum + (row.matchedReps ?? 0), 0);
   return {
     captureCount: rows.length,
     evaluatedCaptureCount: evaluated.length,
     unavailableCaptureCount: rows.length - evaluated.length,
     truthRepCount: rows.reduce((sum, row) => sum + row.truthSegmentCount, 0),
-    predictedRepCount: evaluated.reduce((sum, row) => sum + (row.predictedCount ?? 0), 0),
-    matchedRepCount: evaluated.reduce((sum, row) => sum + (row.matchedReps ?? 0), 0),
+    evaluatedTruthRepCount,
+    predictedRepCount,
+    matchedRepCount,
+    matchedRecall: evaluatedTruthRepCount ? matchedRepCount / evaluatedTruthRepCount : null,
+    matchedPrecision: predictedRepCount ? matchedRepCount / predictedRepCount : null,
     exactCountCaptureCount: evaluated.filter((row) => row.exactCount).length,
+    needsReviewOutcomeCount: evaluated.reduce((sum, row) => sum + (row.needsReviewCount ?? 0), 0),
+    rejectedOutcomeCount: evaluated.reduce((sum, row) => sum + (row.rejectedCount ?? 0), 0),
   };
 }
 
@@ -183,9 +209,15 @@ function markdown(report: { summary: ReturnType<typeof summarize>; byExerciseAnd
     "# 已归档视频：观察型 profile 回放", "",
     "这是人工标注关键点 sidecar 的 in-sample 回放，不是重新运行 MediaPipe，也不是独立准确率或动作质量结论。", "",
     `- 覆盖录像：${report.summary.captureCount}；可回放：${report.summary.evaluatedCaptureCount}；无精确 profile：${report.summary.unavailableCaptureCount}`,
-    `- 标注 rep：${report.summary.truthRepCount}；Rust 封装 rep：${report.summary.predictedRepCount}；峰值匹配：${report.summary.matchedRepCount}`, "",
+    `- 全部标注 rep：${report.summary.truthRepCount}；已有 profile 的机位标注 rep：${report.summary.evaluatedTruthRepCount}`,
+    `- Rust 确认 rep：${report.summary.predictedRepCount}；峰值匹配：${report.summary.matchedRepCount}；匹配召回 ${(report.summary.matchedRecall ?? 0).toLocaleString("en", { style: "percent", maximumFractionDigits: 1 })}；匹配精度 ${(report.summary.matchedPrecision ?? 0).toLocaleString("en", { style: "percent", maximumFractionDigits: 1 })}`,
+    `- 另有待复核 outcome：${report.summary.needsReviewOutcomeCount}；拒绝 outcome：${report.summary.rejectedOutcomeCount}`, "",
     "| 动作 × 机位 | 录像 | 标注 rep | 封装 rep | 峰值匹配 | 精确计数录像 | profile 来源 |", "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
-    ...report.byExerciseAndPosition.map((row) => `| ${row.key} | ${row.captureCount} | ${row.truthRepCount} | ${row.predictedRepCount} | ${row.matchedRepCount} | ${row.exactCountCaptureCount} | ${row.sources.join(", ")} |`),
+    ...report.byExerciseAndPosition.map((row) => `| ${row.key.replace("|", " / ")} | ${row.captureCount} | ${row.truthRepCount} | ${row.predictedRepCount} | ${row.matchedRepCount} | ${row.exactCountCaptureCount} | ${row.sources.join(", ")} |`),
+    "", "## 结论", "",
+    "- 这些 profile 仍为 provisional；本报告是同批数据回放，只能证明链路可运行，不能当成独立准确率或生产发布结论。",
+    "- 三条正面杠铃卧推没有安装 profile：肩—肘—腕完整可见率仅约 14%–24%，低于当前骨架模型的可靠计数条件。录像与人工标签仍保留。",
+    "- 已安装的 45° 卧推和俯卧撑 profile 在遮挡机位使用近侧肘角；它们只支持动作确认/计数，不支持姿势质量或左右对称性判断。",
     "", "## 逐段", "",
     ...report.rows.map((row) => `- ${row.captureId}: ${row.exerciseId}/${row.capturePosition} · ${row.source} · 标注 ${row.truthSegmentCount} / 预测 ${row.predictedCount ?? "—"} / 匹配 ${row.matchedReps ?? "—"}${row.reason ? ` · ${row.reason}` : ""}`), "",
   ].join("\n");

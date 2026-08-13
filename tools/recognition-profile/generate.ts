@@ -41,13 +41,50 @@ interface ObservedRecognitionProfile {
   };
 }
 type SerializedRustProfile = Omit<RustExerciseProfileData, "contentHash"> & { contentHash: string };
+type SignalContract = {
+  coordinateUnit: RustExerciseProfileData["coordinateUnit"];
+  direction: RustExerciseProfileData["direction"];
+  primary: RustExerciseProfileData["primarySignal"];
+  secondary: RustExerciseProfileData["secondarySignal"];
+};
 
 const projectRoot = process.cwd();
-const datasetPath = path.join(projectRoot, "data", "training", "approved-segmentation-v1.json");
 const capturesRoot = path.join(projectRoot, "public", "archives", "confirmed-captures");
-const outputPath = path.join(capturesRoot, "recognition-profiles.json");
+
+function option(argv: readonly string[], name: string): string | null {
+  const index = argv.indexOf(name);
+  return index >= 0 ? argv[index + 1] ?? null : null;
+}
+
+export function resolveGenerationArtifactPaths(argv: readonly string[], rootDir = process.cwd()) {
+  const datasetArgument = option(argv, "--dataset");
+  const outputArgument = option(argv, "--output");
+  if (!datasetArgument || !outputArgument) {
+    throw new Error("Usage: --dataset data/training/<dataset>.json --output data/workflows/motion-profile/<workflow>/<run>/candidates/<file>.json");
+  }
+  const datasetPath = path.resolve(rootDir, datasetArgument);
+  const relativeDataset = path.relative(rootDir, datasetPath);
+  if (path.isAbsolute(relativeDataset) || relativeDataset.startsWith("..") || !relativeDataset.startsWith(`data${path.sep}training${path.sep}`)) {
+    throw new Error("--dataset must be inside data/training/");
+  }
+  const outputPath = path.resolve(rootDir, outputArgument);
+  const relativeOutput = path.relative(rootDir, outputPath);
+  const parts = relativeOutput.split(path.sep);
+  const isWorkflowCandidate = !path.isAbsolute(relativeOutput)
+    && !relativeOutput.startsWith("..")
+    && parts.length >= 7
+    && parts[0] === "data"
+    && parts[1] === "workflows"
+    && parts[2] === "motion-profile"
+    && parts[5] === "candidates";
+  if (!isWorkflowCandidate) {
+    throw new Error("--output must be inside data/workflows/motion-profile/<workflow>/<run>/candidates/");
+  }
+  return { datasetPath, outputPath };
+}
 
 function main(): void {
+  const { datasetPath, outputPath } = resolveGenerationArtifactPaths(process.argv.slice(2), projectRoot);
   const dataset = readJson<Dataset>(datasetPath);
   const buckets = new Map<string, DatasetRecord[]>();
   for (const record of dataset.records) {
@@ -56,7 +93,7 @@ function main(): void {
     buckets.set(key, [...(buckets.get(key) ?? []), record]);
   }
   const candidates = [...buckets.values()]
-    .map((records) => buildObservedProfile(records, dataset))
+    .map((records) => buildObservedProfile(records, dataset, datasetPath))
     .sort((left, right) => (left?.identity ?? "").localeCompare(right?.identity ?? ""));
   const profiles = candidates.filter((profile): profile is ObservedRecognitionProfile => profile !== null);
   const skippedBuckets = [...buckets.values()]
@@ -68,17 +105,18 @@ function main(): void {
       capturePosition: records[0].capturePosition,
       captureCount: records.length,
       labeledRepCount: records.reduce((sum, record) => sum + record.segments.length, 0),
-      reason: "少于 4 个双侧信号完整的标注 rep；已保留在原始训练集，等待更多可见性或机位匹配数据。",
+      reason: "没有达到发布门槛：至少 4 个可用标注 rep，且双侧或近侧关节信号需覆盖足够帧；原始录像与标签继续保留。",
     }))
     .sort((left, right) => `${left.exerciseId}|${left.capturePosition}`.localeCompare(`${right.exerciseId}|${right.capturePosition}`));
   const artifact = {
-    schemaVersion: "form-coach-observed-recognition-profiles/v1",
+    schemaVersion: "maxpower-observed-recognition-profiles/v1",
     generatedAt: new Date().toISOString(),
     intendedUse: ["rep_segmentation", "rep_counting", "anti_interference"],
     excludedUse: ["standard_form_reference", "quality_scoring", "medical_assessment"],
     profiles,
     skippedBuckets,
   };
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(artifact, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ output: outputPath, profileCount: profiles.length, skippedBucketCount: skippedBuckets.length, profiles: profiles.map((profile) => ({
     exerciseId: profile.exerciseId,
@@ -90,11 +128,16 @@ function main(): void {
 function buildObservedProfile(
   records: readonly DatasetRecord[],
   dataset: Dataset,
+  datasetPath: string,
 ): ObservedRecognitionProfile | null {
   const [first] = records;
   const kinematics = getKinematicsProfile(first.exerciseId);
-  const contract = first.exerciseId === "seated_shoulder_press"
+  const contract = isHorizontalPress(first.exerciseId)
+    ? chooseHorizontalPressContract(records)
+    : first.exerciseId === "seated_shoulder_press"
     ? seatedShoulderPressContract()
+    : first.exerciseId === "single_arm_cable_lateral_raise"
+    ? chooseSingleArmLateralRaiseContract(records)
     : kinematics
       ? signalContract(kinematics.phaseSignal.kind, kinematics.phaseSignal.effortExtreme)
       : null;
@@ -120,14 +163,26 @@ function buildObservedProfile(
       secondaryAmplitudes.push(secondary);
     }
   }
-  if (primaryAmplitudes.length < 4 || secondaryAmplitudes.length < 4) return null;
-  const primaryFloor = percentile(primaryAmplitudes, 0.2);
-  const secondaryFloor = percentile(secondaryAmplitudes, 0.2);
+  const fallback = conservativeSignalThresholds(contract.coordinateUnit);
+  const primaryFloor = primaryAmplitudes.length >= 4
+    ? percentile(primaryAmplitudes, 0.2)
+    : fallback.minimum / 0.60;
+  const secondaryFloor = secondaryAmplitudes.length >= 4
+    ? percentile(secondaryAmplitudes, 0.2)
+    : fallback.minimum / 0.60;
   const minPrimaryAmplitude = primaryFloor * 0.60;
   const minSecondaryAmplitude = secondaryFloor * 0.60;
-  const startAmplitude = Math.min(minPrimaryAmplitude * 0.40, minSecondaryAmplitude * 0.40);
+  const noiseGuard = activationNoiseGuard(first.exerciseId, first.capturePosition);
+  const startAmplitude = Math.min(
+    fallback.start,
+    Math.min(minPrimaryAmplitude * 0.55, minSecondaryAmplitude * 0.55) * noiseGuard,
+  );
   const durations = records.flatMap((record) => record.segments.map((segment) => segment.endMs - segment.startMs));
-  const minRepDurationMs = Math.max(450, Math.round(percentile(durations, 0.20) * 0.55));
+  // Rust boundaries intentionally sit inside the human setup/return marks.
+  // Use annotation duration as an upper-context signal, not as a direct lower
+  // bound; otherwise genuine cycles are downgraded merely because the engine
+  // seals before the annotator's wider end marker.
+  const minRepDurationMs = Math.max(450, Math.round(percentile(durations, 0.20) * 0.35));
   const maxRepDurationMs = Math.min(8_000, Math.round(percentile(durations, 0.80) * 1.60));
   const identity = `${first.exerciseId}/${first.capturePosition}/bilateral/observed/v1`;
   const profileWithoutHash: Omit<RustExerciseProfileData, "contentHash"> = {
@@ -143,8 +198,11 @@ function buildObservedProfile(
     startAmplitude,
     minPrimaryAmplitude,
     minSecondaryAmplitude,
-    returnHysteresis: Math.max(startAmplitude * 0.75, minPrimaryAmplitude * 0.12),
-    readyTolerance: startAmplitude * 0.75,
+    returnHysteresis: Math.min(minPrimaryAmplitude * 0.90, Math.max(
+      startAmplitude * 1.35,
+      minPrimaryAmplitude * 0.35 * noiseGuard,
+    )),
+    readyTolerance: startAmplitude * 0.55,
     maxGapMs: 700,
     minRepDurationMs,
     maxRepDurationMs,
@@ -173,9 +231,23 @@ function buildObservedProfile(
         "由人工标注的起点、极点、终点拟合，仅用于识别与计数。",
         "不把录制者动作当作标准动作轨迹，也不产生动作质量评分。",
         "variation 未在历史标注中结构化记录；运行时只会在空变式上下文匹配，禁止替代明确器械/握法。",
+        ...(primaryAmplitudes.length < 4 || secondaryAmplitudes.length < 4
+          ? ["人工边界附近的可靠幅度样本不足；该 profile 仅作为全视频候选搜索 seed，不具备发布资格。"]
+          : []),
+        ...(sameSignal(contract.primary, contract.secondary)
+          ? ["该机位双侧遮挡明显，profile 使用可见侧肘角完成计数，不声明左右对称性。"]
+          : []),
       ],
     },
   };
+}
+
+function conservativeSignalThresholds(
+  coordinateUnit: RustExerciseProfileData["coordinateUnit"],
+): { start: number; minimum: number } {
+  if (coordinateUnit === "image-angle-deg") return { start: 5, minimum: 20 };
+  if (coordinateUnit === "image-normalized-y") return { start: 0.02, minimum: 0.08 };
+  return { start: 0.04, minimum: 0.15 };
 }
 
 function signalContract(kind: string, effortExtreme: "min" | "max"): {
@@ -239,6 +311,94 @@ function seatedShoulderPressContract(): {
   };
 }
 
+function chooseSingleArmLateralRaiseContract(records: readonly DatasetRecord[]): SignalContract | null {
+  const left = { kind: "joint-angle" as const, landmarks: [23, 11, 15] as [number, number, number] };
+  const right = { kind: "joint-angle" as const, landmarks: [24, 12, 16] as [number, number, number] };
+  const leftCoverage = signalCoverage(records, left);
+  const rightCoverage = signalCoverage(records, right);
+  const selected = leftCoverage >= rightCoverage ? left : right;
+  if (Math.max(leftCoverage, rightCoverage) < 0.05) return null;
+  return {
+    coordinateUnit: "image-angle-deg",
+    direction: "auto",
+    primary: selected,
+    secondary: selected,
+  };
+}
+
+function isHorizontalPress(exerciseId: string): boolean {
+  return exerciseId === "barbell_bench_press"
+    || exerciseId === "machine_chest_press"
+    || exerciseId === "push_up";
+}
+
+function activationNoiseGuard(exerciseId: string, capturePosition: string): number {
+  if (exerciseId === "barbell_bench_press" && capturePosition === "frontRight45") return 1.40;
+  if (exerciseId === "machine_chest_press" && capturePosition === "frontRight45") return 1.20;
+  if (exerciseId === "push_up" && capturePosition === "rearRight45") return 1.20;
+  return 1;
+}
+
+/**
+ * Bench press, chest press and push-up share the same directly observable
+ * image-space cycle: bilateral elbow flexion/extension. `auto` is deliberate:
+ * capture can start at either lockout or the bottom and annotators mark the
+ * physical extreme, not a globally fixed angle direction.
+ */
+function chooseHorizontalPressContract(records: readonly DatasetRecord[]): SignalContract | null {
+  const left = { kind: "joint-angle" as const, landmarks: [11, 13, 15] as [number, number, number] };
+  const right = { kind: "joint-angle" as const, landmarks: [12, 14, 16] as [number, number, number] };
+  const candidates: SignalContract[] = [
+    horizontalPressContract(left, right),
+    horizontalPressContract(left, left),
+    horizontalPressContract(right, right),
+  ];
+  const coverage = [signalCoverage(records, left), signalCoverage(records, right)];
+  // Bilateral evidence is preferred only when both arms remain observable.
+  // Oblique horizontal presses often hide the far elbow; in that case a
+  // versioned near-side counter is safer than repeatedly freezing the cycle.
+  if (Math.min(...coverage) >= 0.70) return candidates[0];
+  const bestSide = coverage[0] >= coverage[1] ? 1 : 2;
+  if (coverage[bestSide - 1] < 0.05) return null;
+  return candidates[bestSide];
+}
+
+function horizontalPressContract(
+  primary: RustExerciseProfileData["primarySignal"],
+  secondary: RustExerciseProfileData["secondarySignal"],
+): SignalContract {
+  return {
+    coordinateUnit: "image-angle-deg",
+    direction: "auto",
+    primary,
+    secondary,
+  };
+}
+
+function signalCoverage(
+  records: readonly DatasetRecord[],
+  signal: RustExerciseProfileData["primarySignal"],
+): number {
+  let visible = 0;
+  let total = 0;
+  for (const record of records) {
+    const fixture = readJson<Fixture[]>(path.join(capturesRoot, record.source.keypoints))[0];
+    if (!fixture) continue;
+    for (const pose of fixture.poses) {
+      total += 1;
+      if (measureSignal(pose.landmarks, signal) !== null) visible += 1;
+    }
+  }
+  return total ? visible / total : 0;
+}
+
+function sameSignal(
+  left: RustExerciseProfileData["primarySignal"],
+  right: RustExerciseProfileData["secondarySignal"],
+): boolean {
+  return left.kind === right.kind && left.landmarks.join(",") === right.landmarks.join(",");
+}
+
 function segmentAmplitude(
   poses: readonly PoseEstimate[],
   segment: Segment,
@@ -262,11 +422,17 @@ function closestSignal(
   timeMs: number,
   signal: RustExerciseProfileData["primarySignal"],
 ): number | null {
-  let selected: PoseEstimate | null = null;
+  let selectedValue: number | null = null;
+  let selectedDistance = Number.POSITIVE_INFINITY;
   for (const pose of poses) {
-    if (!selected || Math.abs(pose.timestampMs - timeMs) < Math.abs(selected.timestampMs - timeMs)) selected = pose;
+    const distance = Math.abs(pose.timestampMs - timeMs);
+    if (distance > 350 || distance >= selectedDistance) continue;
+    const value = measureSignal(pose.landmarks, signal);
+    if (value === null) continue;
+    selectedValue = value;
+    selectedDistance = distance;
   }
-  return selected ? measureSignal(selected.landmarks, signal) : null;
+  return selectedValue;
 }
 
 function measureSignal(
@@ -313,4 +479,4 @@ function readJson<T>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf8")) as T;
 }
 
-main();
+if (require.main === module) main();
