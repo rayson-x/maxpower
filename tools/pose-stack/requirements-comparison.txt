@@ -1,0 +1,6 @@
+numpy==2.2.6
+onnxruntime==1.28.0
+opencv-contrib-python==5.0.0.93
+rtmlib==0.0.16
+scipy==1.18.0
+tensorflow==2.20.0
