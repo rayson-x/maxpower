@@ -1,3 +1,22 @@
+repo_root = File.expand_path('../../..', __dir__)
+run_preflight = lambda do |arguments, remediation|
+  next if system('node', *arguments, chdir: repo_root)
+
+  raise Pod::Informative, <<~MESSAGE
+    PoseCamera native preparation failed.
+    Run from the repository root: #{remediation}
+  MESSAGE
+end
+
+run_preflight.call(
+  ['tools/client-realtime-agent/fetch-web-vision-models.mjs', '--verify'],
+  'node tools/client-realtime-agent/fetch-web-vision-models.mjs --execute'
+)
+run_preflight.call(
+  ['tools/motion-sdk/preflight-native.mjs', 'apple', '--artifacts', 'modules/pose-camera/ios/Frameworks'],
+  'sh tools/motion-sdk/build-native.sh apple modules/pose-camera/ios/Frameworks'
+)
+
 Pod::Spec.new do |s|
   s.name           = 'PoseCamera'
   s.version        = '1.0.0'

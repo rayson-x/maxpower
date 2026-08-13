@@ -7,6 +7,7 @@ group = 'expo.modules.posecamera'
 version = '0.1.0'
 def rustJniDir = file("$buildDir/rustJni")
 def generatedPoseAssetsDir = file("$buildDir/generated/poseAssets")
+def projectRootDir = rootProject.projectDir.parentFile
 
 android {
   namespace "expo.modules.posecamera"
@@ -51,7 +52,7 @@ android {
 }
 
 tasks.register("buildRustAndroid", Exec) {
-  workingDir rootProject.projectDir.parentFile
+  workingDir projectRootDir
   commandLine "sh", "tools/motion-sdk/build-native.sh", "android", rustJniDir.absolutePath
   inputs.files(
     fileTree("${rootProject.projectDir.parentFile}/rust/motion-sdk/src"),
@@ -63,8 +64,20 @@ tasks.register("buildRustAndroid", Exec) {
   outputs.dir rustJniDir
 }
 
+tasks.register("verifyPinnedPoseModels", Exec) {
+  workingDir projectRootDir
+  commandLine "node", "tools/client-realtime-agent/fetch-web-vision-models.mjs", "--verify"
+  inputs.files(
+    file("${projectRootDir}/tools/client-realtime-agent/web-vision-models.json"),
+    file("${projectRootDir}/tools/client-realtime-agent/fetch-web-vision-models.mjs"),
+    file("${projectRootDir}/public/models/yolox-nano-humanart-416x416.onnx"),
+    file("${projectRootDir}/public/models/rtmpose-m-halpe26-256x192.onnx")
+  )
+}
+
 tasks.register("preparePoseModels", Sync) {
-  from("${rootProject.projectDir.parentFile}/public/models") {
+  dependsOn("verifyPinnedPoseModels")
+  from("${projectRootDir}/public/models") {
     include "yolox-nano-humanart-416x416.onnx"
     include "rtmpose-m-halpe26-256x192.onnx"
     into "models"
@@ -72,8 +85,24 @@ tasks.register("preparePoseModels", Sync) {
   into generatedPoseAssetsDir
 }
 
+tasks.register("verifyRustAndroidOutputs", Exec) {
+  dependsOn("buildRustAndroid")
+  workingDir projectRootDir
+  commandLine "node", "tools/motion-sdk/preflight-native.mjs", "android", "--artifacts", rustJniDir.absolutePath
+  inputs.file(file("${projectRootDir}/tools/motion-sdk/preflight-native.mjs"))
+  inputs.dir rustJniDir
+}
+
+tasks.register("preparePoseCameraNative") {
+  dependsOn("verifyPinnedPoseModels", "preparePoseModels", "verifyRustAndroidOutputs")
+}
+
+tasks.named("buildRustAndroid") {
+  mustRunAfter("verifyPinnedPoseModels")
+}
+
 tasks.configureEach { task ->
-  if (task.name == "preBuild") task.dependsOn("buildRustAndroid", "preparePoseModels")
+  if (task.name == "preBuild") task.dependsOn("preparePoseCameraNative")
 }
 
 dependencies {

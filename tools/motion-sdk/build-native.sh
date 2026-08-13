@@ -31,6 +31,7 @@ if [ "$platform" = "android" ]; then
       -t x86_64 \
       -o "$output_dir" \
       build --manifest-path "$repo_root/Cargo.toml" -p maxpower-motion-sdk --release
+  node "$repo_root/tools/motion-sdk/preflight-native.mjs" android --artifacts "$output_dir"
   exit 0
 fi
 
@@ -56,6 +57,7 @@ if [ "$platform" = "apple" ]; then
     -library "$simulator_dir/libmaxpower_motion_sdk.a" \
     -headers "$repo_root/modules/pose-camera/common" \
     -output "$output_dir/MotionSdk.xcframework"
+  node "$repo_root/tools/motion-sdk/preflight-native.mjs" apple --artifacts "$output_dir"
   exit 0
 fi
 

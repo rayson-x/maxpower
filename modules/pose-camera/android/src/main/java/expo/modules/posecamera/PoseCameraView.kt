@@ -46,6 +46,7 @@ class PoseCameraView(context: Context, appContext: AppContext) :
 
   private val textureView = TextureView(context)
   private val analysisExecutor = Executors.newSingleThreadExecutor()
+  private val cameraFrameTimestampMapper = CameraFrameTimestampMapper()
 
   private var cameraProvider: ProcessCameraProvider? = null
   private var posePipeline: RtmposePipeline? = null
@@ -284,6 +285,12 @@ class PoseCameraView(context: Context, appContext: AppContext) :
     analysis.setAnalyzer(analysisExecutor) { imageProxy ->
       try {
         if (posePipeline != null) {
+          // CameraX timestamps represent frame capture time. Map that source
+          // clock once, before preprocessing, so inference latency cannot move
+          // Rust endpoints or inflate/deflate the processed FPS measurement.
+          val frameTimestampMs = cameraFrameTimestampMapper.toMonotonicMilliseconds(
+            imageProxy.imageInfo.timestamp
+          )
           val preprocessStartedAt = SystemClock.elapsedRealtimeNanos()
           var bitmap = imageProxy.toBitmap()
           val rotation = imageProxy.imageInfo.rotationDegrees
@@ -292,7 +299,7 @@ class PoseCameraView(context: Context, appContext: AppContext) :
             bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
           }
           val preprocessMs = elapsedMs(preprocessStartedAt)
-          processUprightFrame(bitmap, SystemClock.uptimeMillis(), null, preprocessMs)
+          processUprightFrame(bitmap, frameTimestampMs, null, preprocessMs)
         }
       } catch (error: Exception) {
         emitError("inference", error)
@@ -752,6 +759,49 @@ class PoseCameraView(context: Context, appContext: AppContext) :
 
   private fun elapsedMs(startedAtNanos: Long): Double =
     (SystemClock.elapsedRealtimeNanos() - startedAtNanos) / 1_000_000.0
+}
+
+/**
+ * Maps CameraX's per-camera nanosecond clock onto one strictly increasing
+ * monotonic millisecond timeline. Camera providers may restart their source
+ * clock after a rebind, so a backwards source timestamp opens a new anchor
+ * without allowing the Rust timeline to move backwards or repeat a value.
+ */
+private class CameraFrameTimestampMapper(
+  private val monotonicClockMs: () -> Long = { SystemClock.elapsedRealtime() },
+) {
+  private var sourceAnchorNanos: Long? = null
+  private var previousSourceTimestampNanos: Long? = null
+  private var mappedAnchorMs = 0L
+  private var lastMappedTimestampMs = -1L
+
+  fun toMonotonicMilliseconds(sourceTimestampNanos: Long): Long {
+    require(sourceTimestampNanos >= 0L) { "CameraX frame timestamp must be non-negative" }
+
+    val sourceRestarted = previousSourceTimestampNanos?.let {
+      sourceTimestampNanos < it
+    } ?: false
+    if (sourceAnchorNanos == null || sourceRestarted) {
+      sourceAnchorNanos = sourceTimestampNanos
+      mappedAnchorMs = maxOf(monotonicClockMs(), lastMappedTimestampMs + 1L)
+    }
+    previousSourceTimestampNanos = sourceTimestampNanos
+
+    val elapsedSourceMs = (sourceTimestampNanos - sourceAnchorNanos!!)
+      .coerceAtLeast(0L) / NANOS_PER_MILLISECOND
+    val derivedTimestampMs = mappedAnchorMs + elapsedSourceMs
+    val mappedTimestampMs = if (lastMappedTimestampMs < 0L) {
+      derivedTimestampMs
+    } else {
+      maxOf(lastMappedTimestampMs + 1L, derivedTimestampMs)
+    }
+    lastMappedTimestampMs = mappedTimestampMs
+    return mappedTimestampMs
+  }
+
+  private companion object {
+    const val NANOS_PER_MILLISECOND = 1_000_000L
+  }
 }
 
 private sealed class NativeRecognitionProfile(
