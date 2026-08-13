@@ -290,7 +290,7 @@ export async function runFullDataProposal(
         ));
       if (!profileEntry) throw new Error(`${record.captureId}: full-data profile missing`);
       const side = anatomicalSideForContext(record.exerciseId, record.capturePosition);
-      const profile = materializeProfile(profileEntry.profile, side);
+      const profile = materializeAssessmentProfile(profileEntry.profile, side);
       const wasm = await instantiateRustMotionWasm(wasmBytes);
       const motion = new RustCanonicalWasmSession({
         sequenceId: `${options.runId}:${record.captureId}`,
@@ -373,7 +373,14 @@ export async function runFullDataProposal(
           firstTimestampMs: sourceTimestampsMs[0] ?? null,
           lastTimestampMs: sourceTimestampsMs.at(-1) ?? null,
         },
-        installedProfile: { identity: installed.identity, contentHash: profileHash },
+        installedProfile: {
+          identity: installed.identity,
+          contentHash: profileHash,
+          sourceIdentity: profileEntry.profile.identity,
+          identityAdapter: installed.identity === profileEntry.profile.identity
+            ? null
+            : "action-equipment-profile-identity/v1",
+        },
         packetSchema: "MOTN/1.8+QLT1",
         canonicalPacketHash: motion.lastCanonicalHash.toString(16).padStart(16, "0"),
         reps: [...reps.values()].map((rep) => ({
@@ -460,7 +467,27 @@ export async function runFullDataProposal(
   return output;
 }
 
-function materializeProfile(
+const EQUIPMENT_BY_ACTION: Readonly<Record<string, string>> = Object.freeze({
+  barbell_bench_press: "barbell",
+  barbell_row: "barbell",
+  machine_chest_press: "machine",
+  seated_shoulder_press: "dumbbell",
+  push_up: "bodyweight",
+  lat_pulldown: "cable",
+  pull_up: "bodyweight",
+  seated_row: "cable",
+  straight_arm_pulldown: "cable",
+  lateral_raise: "dumbbell",
+  rear_delt_fly: "dumbbell",
+  single_arm_cable_lateral_raise: "cable",
+});
+
+/**
+ * Adapts legacy tuned profile identities to the five-part Rust assessment
+ * identity without changing any learned signal, gate, or state graph.
+ * The source identity remains frozen beside the installed identity.
+ */
+export function materializeAssessmentProfile(
   serialized: SerializedProfile | RustExerciseProfileData,
   side: "left" | "right" | null,
 ): RustExerciseProfileData {
@@ -470,8 +497,20 @@ function materializeProfile(
       ? serialized.contentHash
       : BigInt(serialized.contentHash),
   } as RustExerciseProfileData;
-  if (!side) return original;
-  const identity = original.identity.replace("/bilateral/", `/${side}/`);
+  const parts = original.identity.split("/");
+  const actionId = parts[0] ?? "";
+  const capturePosition = parts[1] ?? "";
+  const sourceLaterality = parts[2] ?? "";
+  const laterality = side ?? sourceLaterality;
+  const equipment = EQUIPMENT_BY_ACTION[actionId];
+  if (!actionId || !capturePosition || !laterality || !equipment) {
+    throw new Error(`${original.identity}: cannot adapt assessment profile identity`);
+  }
+  const alreadyCurrent = parts.length === 5 && parts[3] === equipment;
+  const version = alreadyCurrent
+    ? parts[4]
+    : `legacy-profile-adapter-v1-${sha256(original.identity).slice(0, 16)}`;
+  const identity = `${actionId}/${capturePosition}/${laterality}/${equipment}/${version}`;
   const withoutHash = { ...original, identity };
   return { ...withoutHash, contentHash: computeRustExerciseProfileHash(withoutHash) };
 }

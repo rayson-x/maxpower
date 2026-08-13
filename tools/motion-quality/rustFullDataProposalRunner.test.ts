@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   anatomicalSideForContext,
   buildReviewProposal,
+  materializeAssessmentProfile,
   routeSourceFramesOnce,
 } from "./rustFullDataProposalRunner.js";
 import { actualProfileBundles, runFrozenBlindPlan } from "./rustBlindProposalRunner.js";
@@ -189,6 +190,26 @@ test("source-independent bench identity keeps barbell in the equipment segment",
   const bundles = actualProfileBundles({ schemaVersion: "profiles/v1", profiles: [] }, loaded.value);
   assert.equal(bundles.length, 3);
   assert.ok(bundles.every((bundle) => bundle.fittedSourceIds.length === 0));
+
+  const bench = loaded.value[0].profile;
+  const adaptedMachine = materializeAssessmentProfile({
+    ...bench,
+    identity: "machine_chest_press/front/bilateral/observed-tuned/v2-halpe26/cycle-aligned-client-candidate-v1",
+  }, null);
+  assert.deepEqual(adaptedMachine.identity.split("/").slice(0, 4), [
+    "machine_chest_press", "front", "bilateral", "machine",
+  ]);
+  assert.match(adaptedMachine.identity, /legacy-profile-adapter-v1-[a-f0-9]{16}$/u);
+  assert.notEqual(adaptedMachine.contentHash, bench.contentHash);
+
+  const adaptedUnilateral = materializeAssessmentProfile({
+    ...bench,
+    identity: "single_arm_cable_lateral_raise/frontLeft45/bilateral/observed-tuned/v2",
+  }, "left");
+  assert.equal(
+    adaptedUnilateral.identity.split("/").slice(0, 4).join("/"),
+    "single_arm_cable_lateral_raise/frontLeft45/left/cable",
+  );
 });
 
 test("unsupported context still runs current Rust WASM over every raw frame without a profile", async () => {
