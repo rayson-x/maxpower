@@ -4,11 +4,20 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  benchmarkEvidenceForItem,
   createWorkspace,
   dimensionLabel,
   frameAt,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
+
+test("review release exposes untouched frozen benchmark evidence beside calibration proposals", () => {
+  const release = fixtureRelease();
+  const evidence = benchmarkEvidenceForItem(release, release.items[0]);
+  assert.equal(evidence.contextId, "capture-a");
+  assert.equal(evidence.reps[0].turnaroundTimestampMs, 2_050);
+  assert.equal(release.evidenceRuns.benchmark.frozenPredictions.contexts[0].proposalHash, "sha256:benchmark-a");
+});
 
 test("current Rust eight-dimension keys render with Chinese review labels", () => {
   assert.deepEqual(Object.fromEntries([
@@ -113,6 +122,41 @@ function fixtureRelease() {
     releaseHash: "sha256:release-a",
     frozenAt: "2026-08-13T23:30:00.000Z",
     runKind: "full_data_proposal",
+    evidenceRuns: {
+      benchmark: {
+        runKind: "touched_benchmark",
+        acceptanceEligible: false,
+        truthStatus: "withheld_from_inference",
+        frozenPredictions: {
+          schemaVersion: "maxpower-motion-quality-frozen-predictions/v1",
+          state: "frozen_before_truth",
+          runId: "benchmark-run-a",
+          runKind: "touched_benchmark",
+          planDigest: "sha256:plan-a",
+          frozenDigest: "sha256:frozen-a",
+          contexts: [{
+            sourceCaptureId: "capture-a",
+            contextId: "capture-a",
+            proposalHash: "sha256:benchmark-a",
+            capability: "quality_supported",
+            reps: [{
+              repId: "rep-1",
+              startTimestampMs: 1_050,
+              turnaroundTimestampMs: 2_050,
+              endTimestampMs: 3_050,
+              disposition: "confirmed",
+            }],
+            qualityConclusions: [],
+          }],
+        },
+      },
+      calibration: {
+        runKind: "full_data_proposal",
+        acceptanceEligible: false,
+        sourceRunId: "run-a",
+        sourceFrozenDigest: "sha256:calibration-a",
+      },
+    },
     items: [{
       itemId: "item-a",
       captureId: "capture-a",
@@ -120,6 +164,7 @@ function fixtureRelease() {
       durationMs: 4_000,
       humanSegments: [{ startMs: 900, endMs: 3_100 }],
       evidence: { frames: [], equipmentTrajectories: [] },
+      evidenceLinks: { calibrationContextId: "capture-a", benchmarkContextId: "capture-a" },
       proposal: {
         schemaVersion: "maxpower-motion-quality-proposal/v1",
         proposalHash: "sha256:proposal-a",

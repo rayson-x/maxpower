@@ -147,6 +147,20 @@ test("quality review rejects a tampered proposal even when the outer release has
   }
 });
 
+test("quality review rejects tampered frozen benchmark evidence even when outer release hash is recomputed", async () => {
+  const release = frozenRelease("capture-a.mp4");
+  release.evidenceRuns.benchmark.frozenPredictions.contexts[0]!.proposalHash = "tampered";
+  release.releaseHash = stableHash(release, "releaseHash", true);
+  const harness = await qualityReleaseHarness(release);
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/review/quality-release`);
+    assert.equal(response.status, 409);
+    assert.match((await response.json() as { error: string }).error, /benchmark frozen prediction hash mismatch/);
+  } finally {
+    await harness.close();
+  }
+});
+
 function serverOptions(quality: Pick<RecognitionReviewServerOptions,
   "qualityReviewPagePath" | "qualityReviewReleasePath" | "qualityReviewVideoRoot"
 >): RecognitionReviewServerOptions {
@@ -177,6 +191,34 @@ function frozenRelease(videoPath: string) {
     releaseHash: "",
     frozenAt: "2026-08-13T23:30:00.000Z",
     runKind: "full_data_proposal",
+    evidenceRuns: {
+      benchmark: {
+        runKind: "touched_benchmark",
+        acceptanceEligible: false,
+        truthStatus: "withheld_from_inference",
+        frozenPredictions: {
+          schemaVersion: "maxpower-motion-quality-frozen-predictions/v1",
+          state: "frozen_before_truth",
+          runId: "benchmark-a",
+          runKind: "touched_benchmark",
+          planDigest: "plan-a",
+          contexts: [{
+            sourceCaptureId: "capture-a",
+            contextId: "capture-a",
+            proposalHash: "benchmark-proposal-a",
+            reps: [],
+            qualityConclusions: [],
+          }],
+          frozenDigest: "",
+        },
+      },
+      calibration: {
+        runKind: "full_data_proposal",
+        acceptanceEligible: false,
+        sourceRunId: "run-a",
+        sourceFrozenDigest: "full-a",
+      },
+    },
     items: [{
       itemId: "item-a",
       captureId: "capture-a",
@@ -221,6 +263,10 @@ function frozenRelease(videoPath: string) {
     }],
   };
   release.items[0]!.proposal.proposalHash = stableHash(release.items[0]!.proposal, "proposalHash");
+  release.evidenceRuns.benchmark.frozenPredictions.frozenDigest = stableHash(
+    release.evidenceRuns.benchmark.frozenPredictions,
+    "frozenDigest",
+  );
   release.releaseHash = stableHash(release, "releaseHash", true);
   return release;
 }

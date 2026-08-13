@@ -43,6 +43,7 @@ test("review release keeps human start/end separate from immutable Rust proposal
         }],
       }],
     },
+    frozenEvaluationRun: frozenEvaluationRun(),
     records: [{
       captureId: "context-a",
       sourceCaptureId: "source-a",
@@ -61,8 +62,61 @@ test("review release keeps human start/end separate from immutable Rust proposal
   assert.equal(release.items[0].proposal.proposalHash, "b".repeat(64));
   assert.equal(release.items[0].evidence.source, "current_rust_single_pass");
   assert.equal(release.items[0].evidence.equipmentTrajectories[0].points[0].y, 0.4);
+  assert.deepEqual(
+    release.evidenceRuns.benchmark.frozenPredictions,
+    frozenEvaluationRun(),
+  );
+  assert.equal(release.evidenceRuns.benchmark.acceptanceEligible, false);
+  assert.equal(release.evidenceRuns.benchmark.truthStatus, "withheld_from_inference");
+  assert.equal(release.evidenceRuns.calibration.runKind, "full_data_proposal");
+  assert.equal(release.items[0].evidenceLinks.benchmarkContextId, "context-a");
   assert.equal(Object.isFrozen(release), true);
 });
+
+function frozenEvaluationRun() {
+  const semantic = {
+    schemaVersion: "maxpower-motion-quality-frozen-predictions/v1" as const,
+    state: "frozen_before_truth" as const,
+    runId: "benchmark-a",
+    runKind: "touched_benchmark",
+    planDigest: "c".repeat(64),
+    contexts: [{
+      runKind: "touched_benchmark",
+      sourceCaptureId: "source-a",
+      contextId: "context-a",
+      processing: {
+        chronologicalMonotonic: true as const,
+        singlePass: true as const,
+        sourceTimestampsMs: [0, 1_000, 2_000],
+      },
+      packetHash: "d".repeat(64),
+      proposalHash: "e".repeat(64),
+      versions: {
+        visualModel: "rtmpose-halpe26",
+        rustEngine: "motion-sdk",
+        packetSchema: "MOTN/1.8+QLT1",
+        profileBundle: "bench-v1",
+        rulePack: "quality-v1",
+      },
+      reps: [{
+        repId: "rep-1",
+        startTimestampMs: 500,
+        turnaroundTimestampMs: 1_000,
+        endTimestampMs: 1_500,
+        disposition: "confirmed",
+      }],
+      qualityConclusions: [],
+      actionId: "barbell_bench_press",
+      capturePosition: "front",
+      capability: "quality_supported",
+      bundleHash: "f".repeat(64),
+    }],
+  };
+  return {
+    ...semantic,
+    frozenDigest: sha256(stableStringify(semantic)),
+  };
+}
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;

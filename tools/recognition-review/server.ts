@@ -427,6 +427,27 @@ async function readQualityReviewRelease(
   const runKind = requireJsonString(release.runKind, "quality review run kind");
   if (!Array.isArray(release.items)) throw new Error("quality review release items are invalid");
   requireStableHash(release, "releaseHash", releaseHash, "quality review release", true);
+  if (release.evidenceRuns != null) {
+    const evidenceRuns = requireJsonRecord(release.evidenceRuns, "quality review evidence runs");
+    const benchmark = requireJsonRecord(evidenceRuns.benchmark, "quality review benchmark evidence");
+    const frozen = requireJsonRecord(benchmark.frozenPredictions, "quality review benchmark frozen predictions");
+    if (frozen.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
+        || frozen.state !== "frozen_before_truth") {
+      throw new Error("quality review benchmark frozen predictions are invalid");
+    }
+    const frozenDigest = requireJsonString(frozen.frozenDigest, "quality review benchmark frozen prediction hash");
+    requireStableHash(
+      frozen,
+      "frozenDigest",
+      frozenDigest,
+      "quality review benchmark frozen prediction",
+    );
+    if (!Array.isArray(frozen.contexts)) throw new Error("quality review benchmark contexts are invalid");
+    const calibration = requireJsonRecord(evidenceRuns.calibration, "quality review calibration evidence");
+    if (calibration.runKind !== "full_data_proposal") {
+      throw new Error("quality review calibration evidence is invalid");
+    }
+  }
 
   const itemIds = new Set<string>();
   const items = release.items.map((rawItem, index): QualityReviewReleaseItem => {

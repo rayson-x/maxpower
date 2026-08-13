@@ -83,6 +83,15 @@
           releaseId: release.releaseId,
           releaseHash: release.releaseHash,
           runKind: release.runKind,
+          evidenceLineage: {
+            benchmark: release.evidenceRuns?.benchmark ? {
+              runKind: release.evidenceRuns.benchmark.runKind,
+              acceptanceEligible: release.evidenceRuns.benchmark.acceptanceEligible,
+              runId: release.evidenceRuns.benchmark.frozenPredictions?.runId,
+              frozenDigest: release.evidenceRuns.benchmark.frozenPredictions?.frozenDigest,
+            } : null,
+            calibration: release.evidenceRuns?.calibration ?? null,
+          },
           reviewer: cloneJson(reviewer),
           exportMetadata: metadata,
           proposalReviews,
@@ -130,6 +139,20 @@
     requireString(release.releaseHash, "releaseHash");
     requireString(release.runKind, "runKind");
     requireString(release.frozenAt, "frozenAt");
+    if (release.evidenceRuns != null) {
+      const evidenceRuns = requireRecord(release.evidenceRuns, "evidence runs");
+      const benchmark = requireRecord(evidenceRuns.benchmark, "benchmark evidence run");
+      const frozen = requireRecord(benchmark.frozenPredictions, "frozen benchmark predictions");
+      if (frozen.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
+          || frozen.state !== "frozen_before_truth"
+          || !Array.isArray(frozen.contexts)) {
+        throw new Error("frozen benchmark predictions are invalid");
+      }
+      requireString(frozen.runId, "frozen benchmark run id");
+      requireString(frozen.frozenDigest, "frozen benchmark digest");
+      const calibration = requireRecord(evidenceRuns.calibration, "calibration evidence run");
+      if (calibration.runKind !== "full_data_proposal") throw new Error("calibration evidence run is invalid");
+    }
     if (!Array.isArray(release.items) || !release.items.length) throw new Error("quality review release has no items");
     const ids = new Set();
     release.items.forEach((rawItem) => {
@@ -162,6 +185,14 @@
   function trajectoryUntil(points, timestampMs) {
     if (!Array.isArray(points)) return [];
     return points.filter((point) => Number.isFinite(point.timestampMs) && point.timestampMs <= timestampMs);
+  }
+
+  function benchmarkEvidenceForItem(release, item) {
+    const contexts = release?.evidenceRuns?.benchmark?.frozenPredictions?.contexts;
+    if (!Array.isArray(contexts)) return null;
+    const contextId = item?.evidenceLinks?.benchmarkContextId ?? item?.captureId;
+    if (!contextId) return null;
+    return contexts.find((context) => context.contextId === contextId) || null;
   }
 
   function targetCount(proposal) {
@@ -225,6 +256,7 @@
       activeRepId: null,
       activeItem: null,
       activeReview: null,
+      evidenceMode: "calibration",
       layers: { skeleton: true, equipment: true, trails: true },
     };
     const video = byId("qualityVideo");
@@ -258,10 +290,28 @@
     function renderReleaseHeader() {
       const release = state.workspace.release;
       byId("releaseId").textContent = release.releaseId;
-      byId("runKind").textContent = release.runKind === "blind_evaluation" ? "盲测冻结结果" : "全数据审核提案";
+      byId("runKind").textContent = release.evidenceRuns
+        ? "冻结基准 + 全量校准"
+        : (release.runKind === "blind_evaluation" ? "盲测冻结结果" : "全数据审核提案");
       byId("releaseHash").textContent = release.releaseHash;
       byId("frozenAt").textContent = formatDate(release.frozenAt);
       renderProgress();
+      document.querySelectorAll("[data-evidence-mode]").forEach((button) => {
+        button.hidden = !release.evidenceRuns;
+        button.classList.toggle("active", button.dataset.evidenceMode === state.evidenceMode);
+      });
+    }
+
+    function selectEvidenceMode(mode) {
+      if (!state.workspace?.release.evidenceRuns || !["benchmark", "calibration"].includes(mode)) return;
+      state.evidenceMode = mode;
+      document.querySelectorAll("[data-evidence-mode]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.evidenceMode === mode);
+      });
+      byId("evidenceModeReadout").textContent = mode === "benchmark"
+        ? "已调参冻结基准 · 原样只读 · 不可作为泛化验收"
+        : "全量校准提案 · 可逐项审核 · 不可作为泛化验收";
+      selectItem(state.activeItemId || state.workspace.release.items[0].itemId);
     }
 
     function selectItem(itemId) {
@@ -271,7 +321,7 @@
       state.activeItemId = itemId;
       state.activeItem = item;
       state.activeReview = state.workspace.review(itemId);
-      state.activeRepId = state.activeReview.proposal.reps[0]?.repId || null;
+      state.activeRepId = activeModeReps()[0]?.repId || null;
       video.src = item.videoUrl;
       video.load();
       renderQueue();
@@ -279,8 +329,8 @@
       renderRepTabs();
       renderReviewPanel();
       renderTimeline();
-      if (state.activeReview.proposal.reps[0]) {
-        video.currentTime = endpointTime(state.activeReview.proposal.reps[0].endpoints.start_anchor) / 1000;
+      if (activeModeReps()[0]) {
+        video.currentTime = repEndpointTime(activeModeReps()[0], "start_anchor") / 1000;
       }
       updatePlayback();
     }
@@ -288,12 +338,13 @@
     function renderQueue() {
       byId("qualityQueue").innerHTML = state.workspace.release.items.map((item, index) => {
         const progress = state.workspace.progress(item.itemId);
+        const benchmark = benchmarkEvidenceForItem(state.workspace.release, item);
         const context = item.context || item.exercise || {};
         const title = item.title || [context.action, context.view].filter(Boolean).join(" · ") || item.captureId;
         return `<button type="button" class="queue-item ${item.itemId === state.activeItemId ? "active" : ""}" data-item-id="${escapeHtml(item.itemId)}">
           <span class="queue-index">${String(index + 1).padStart(2, "0")}</span>
           <span class="queue-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(item.captureId)}</small></span>
-          <span class="queue-progress">${progress.decided}/${progress.total}</span>
+          <span class="queue-progress">${state.evidenceMode === "calibration" ? `${progress.decided}/${progress.total}` : `${benchmark?.reps?.length ?? 0} REP`}</span>
         </button>`;
       }).join("");
       byId("qualityQueue").querySelectorAll("[data-item-id]").forEach((button) => {
@@ -308,19 +359,30 @@
       byId("itemContext").textContent = [context.variant, context.equipment, context.view, context.anatomicalSide]
         .filter(Boolean).join(" · ") || item.captureId;
       byId("capabilityBadge").textContent = String(item.capability || "observation_only").replaceAll("_", " ");
-      byId("proposalHash").textContent = state.activeReview.proposal.proposalHash;
-      const lineage = state.activeReview.proposal.lineage;
-      byId("lineageReadout").textContent = [lineage.profileVersion, lineage.ruleVersion, lineage.motionPacketHash]
-        .filter(Boolean).join(" · ") || lineage.runId || "lineage pinned";
+      const benchmark = benchmarkEvidenceForItem(state.workspace.release, item);
+      if (state.evidenceMode === "benchmark") {
+        byId("proposalHash").textContent = benchmark?.proposalHash || "NO FROZEN PROPOSAL";
+        byId("lineageReadout").textContent = benchmark
+          ? [benchmark.versions?.visualModel, benchmark.versions?.rustEngine, benchmark.packetHash].filter(Boolean).join(" · ")
+          : "当前上下文没有冻结基准提案";
+        byId("capabilityBadge").textContent = String(benchmark?.capability || "unsupported").replaceAll("_", " ");
+      } else {
+        byId("proposalHash").textContent = state.activeReview.proposal.proposalHash;
+        const lineage = state.activeReview.proposal.lineage;
+        byId("lineageReadout").textContent = [lineage.profileVersion, lineage.ruleVersion, lineage.motionPacketHash]
+          .filter(Boolean).join(" · ") || lineage.runId || "lineage pinned";
+      }
     }
 
     function renderRepTabs() {
-      const reps = state.activeReview.proposal.reps;
+      const reps = activeModeReps();
       byId("repTabs").innerHTML = reps.map((rep, index) => {
-        const decisions = state.activeReview.listDecisions().filter((decision) => decision.target.repId === rep.repId).length;
-        const total = ENDPOINTS.length + rep.conclusions.length;
+        const decisions = state.evidenceMode === "calibration"
+          ? state.activeReview.listDecisions().filter((decision) => decision.target.repId === rep.repId).length
+          : 0;
+        const total = state.evidenceMode === "calibration" ? ENDPOINTS.length + rep.conclusions.length : 0;
         return `<button type="button" class="rep-tab ${rep.repId === state.activeRepId ? "active" : ""}" data-rep-id="${escapeHtml(rep.repId)}">
-          <span>REP ${String(index + 1).padStart(2, "0")}</span><small>${decisions}/${total}</small>
+          <span>REP ${String(index + 1).padStart(2, "0")}</span><small>${state.evidenceMode === "calibration" ? `${decisions}/${total}` : escapeHtml(rep.disposition || "frozen")}</small>
         </button>`;
       }).join("");
       byId("repTabs").querySelectorAll("[data-rep-id]").forEach((button) => button.addEventListener("click", () => {
@@ -328,18 +390,35 @@
         renderRepTabs();
         renderReviewPanel();
         const rep = activeRep();
-        if (rep) video.currentTime = endpointTime(rep.endpoints.start_anchor) / 1000;
+        if (rep) video.currentTime = repEndpointTime(rep, "start_anchor") / 1000;
       }));
     }
 
     function renderReviewPanel() {
       const rep = activeRep();
       if (!rep) {
-        byId("endpointReviews").innerHTML = "<p class=empty>此提案没有 Rep。</p>";
-        byId("conclusionReviews").innerHTML = "";
+        const benchmark = benchmarkEvidenceForItem(state.workspace.release, state.activeItem);
+        byId("endpointReviews").innerHTML = `<p class=empty>${state.evidenceMode === "benchmark" ? `冻结基准没有 Rep。${escapeHtml(benchmark?.unsupportedReason || "不可据此验收")}` : "此校准提案没有 Rep。"}</p>`;
+        byId("conclusionReviews").innerHTML = state.evidenceMode === "benchmark"
+          ? "<p class=empty>此处只展示冻结推理原文，不生成或修改审核标签。</p>"
+          : "";
         return;
       }
       byId("activeRepTitle").textContent = rep.repId;
+      if (state.evidenceMode === "benchmark") {
+        const benchmark = benchmarkEvidenceForItem(state.workspace.release, state.activeItem);
+        byId("endpointReviews").innerHTML = ENDPOINTS.map((endpoint) => `<article class="review-card endpoint-card">
+          <div class="card-lead"><span class="card-number">${ENDPOINTS.indexOf(endpoint) + 1}</span><div><h3>${ENDPOINT_LABELS[endpoint]}</h3><p>${formatMs(repEndpointTime(rep, endpoint))} · 冻结单次因果输出</p></div><button class="seek-chip" type="button" data-seek-ms="${repEndpointTime(rep, endpoint)}">定位</button></div>
+        </article>`).join("");
+        const conclusions = Array.isArray(benchmark?.qualityConclusions) ? benchmark.qualityConclusions : [];
+        byId("conclusionReviews").innerHTML = conclusions.length
+          ? conclusions.map((conclusion) => `<article class="review-card conclusion-card"><code>${escapeHtml(JSON.stringify(conclusion))}</code></article>`).join("")
+          : "<p class=empty>冻结基准没有质量结论；这不是全量校准提案。</p>";
+        document.querySelectorAll("#endpointReviews [data-seek-ms]").forEach((button) => button.addEventListener("click", () => {
+          video.pause(); video.currentTime = Number(button.dataset.seekMs) / 1000; updatePlayback();
+        }));
+        return;
+      }
       byId("endpointReviews").innerHTML = ENDPOINTS.map((endpoint) => endpointCard(rep, endpoint)).join("");
       byId("conclusionReviews").innerHTML = rep.conclusions.length
         ? rep.conclusions.map((conclusion) => conclusionCard(rep, conclusion)).join("")
@@ -433,10 +512,10 @@
       const item = state.activeItem;
       const duration = durationMs();
       const humanSegments = item.humanSegments || [];
-      const reps = state.activeReview.proposal.reps;
+      const reps = activeModeReps();
       const marks = [];
       reps.forEach((rep, repIndex) => ENDPOINTS.forEach((endpoint) => {
-        const time = endpointTime(rep.endpoints[endpoint]);
+        const time = repEndpointTime(rep, endpoint);
         marks.push(`<button type="button" class="endpoint-mark ${endpoint}" style="left:${pct(time, duration)}" data-seek-ms="${time}" aria-label="REP ${repIndex + 1} ${ENDPOINT_LABELS[endpoint]}"><span>${repIndex + 1}</span></button>`);
       }));
       byId("truthTrack").innerHTML = humanSegments.map((segment, index) => `<button type="button" class="truth-range" style="left:${pct(segment.startMs, duration)};width:${pct(segment.endMs - segment.startMs, duration)}" data-seek-ms="${segment.startMs}"><span>H${index + 1}</span></button>`).join("");
@@ -449,7 +528,14 @@
     }
 
     function activeRep() {
-      return state.activeReview?.proposal.reps.find((rep) => rep.repId === state.activeRepId) || null;
+      return activeModeReps().find((rep) => rep.repId === state.activeRepId) || null;
+    }
+
+    function activeModeReps() {
+      if (state.evidenceMode === "benchmark") {
+        return benchmarkEvidenceForItem(state.workspace?.release, state.activeItem)?.reps || [];
+      }
+      return state.activeReview?.proposal.reps || [];
     }
 
     function durationMs() {
@@ -632,6 +718,9 @@
     byId("qualityNextFrame").addEventListener("click", () => stepFrame(1));
     byId("qualityExport").addEventListener("click", exportReviews);
     byId("qualityImport").addEventListener("change", (event) => importReviews(event.target.files?.[0]));
+    document.querySelectorAll("[data-evidence-mode]").forEach((button) => button.addEventListener("click", () => {
+      selectEvidenceMode(button.dataset.evidenceMode);
+    }));
     document.querySelectorAll("[data-quality-layer]").forEach((button) => button.addEventListener("click", () => {
       const layer = button.dataset.qualityLayer;
       state.layers[layer] = !state.layers[layer];
@@ -673,6 +762,13 @@
         ?? endpoint?.occurred_at_ms
         ?? 0,
     );
+  }
+
+  function repEndpointTime(rep, endpoint) {
+    if (rep?.endpoints) return endpointTime(rep.endpoints[endpoint]);
+    if (endpoint === "start_anchor") return Number(rep?.startTimestampMs ?? rep?.startMs ?? 0);
+    if (endpoint === "primary_turnaround") return Number(rep?.turnaroundTimestampMs ?? rep?.peakTimestampMs ?? rep?.turnaroundMs ?? 0);
+    return Number(rep?.endTimestampMs ?? rep?.endMs ?? 0);
   }
 
   function pct(value, duration) {
@@ -720,6 +816,7 @@
   }
 
   return {
+    benchmarkEvidenceForItem,
     EXPORT_SCHEMA,
     RELEASE_SCHEMA,
     createWorkspace,

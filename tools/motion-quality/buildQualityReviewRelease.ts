@@ -55,10 +55,25 @@ interface FullDataRun {
   }>[];
 }
 
+interface FrozenEvaluationContext extends Readonly<Record<string, unknown>> {
+  readonly sourceCaptureId: string;
+  readonly contextId: string;
+}
+
+interface FrozenEvaluationRun extends Readonly<Record<string, unknown>> {
+  readonly schemaVersion: "maxpower-motion-quality-frozen-predictions/v1";
+  readonly state: "frozen_before_truth";
+  readonly runId: string;
+  readonly runKind: string;
+  readonly contexts: readonly FrozenEvaluationContext[];
+  readonly frozenDigest: string;
+}
+
 export interface QualityReviewReleaseInput {
   readonly releaseId: string;
   readonly frozenAt: string;
   readonly fullDataRun: FullDataRun;
+  readonly frozenEvaluationRun: FrozenEvaluationRun;
   readonly records: readonly GoldenRecord[];
   readonly inputAssets?: readonly InputAssetPin[];
 }
@@ -67,6 +82,11 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
   if (input.fullDataRun.runKind !== "full_data_proposal") {
     throw new Error("quality review queue must use a full_data_proposal run");
   }
+  assertFrozenEvaluationRun(input.frozenEvaluationRun);
+  const benchmarkContexts = new Map(input.frozenEvaluationRun.contexts.map((context) => [
+    `${context.sourceCaptureId}\u0000${context.contextId}`,
+    context,
+  ]));
   const records = new Map(input.records.map((record) => [record.captureId, record]));
   const items = input.fullDataRun.sources.flatMap((source) => source.contexts.map((context) => {
     const record = records.get(context.captureId);
@@ -124,6 +144,12 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
           ? [{ kind: "external_load_center", points: equipmentPoints }]
           : [],
       },
+      evidenceLinks: {
+        calibrationContextId: context.captureId,
+        benchmarkContextId: benchmarkContexts.has(`${source.sourceCaptureId}\u0000${context.captureId}`)
+          ? context.captureId
+          : null,
+      },
       proposal: context.reviewProposal,
     });
   }));
@@ -149,6 +175,23 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
       productionPromotion: false,
       aggregateStandardnessScore: "forbidden",
     },
+    evidenceRuns: {
+      benchmark: {
+        runKind: input.frozenEvaluationRun.runKind,
+        acceptanceEligible: false,
+        truthStatus: "withheld_from_inference",
+        disclosure: input.frozenEvaluationRun.runKind === "blind_evaluation"
+          ? "frozen_before_truth_but_not_claimed_as_pristine_until_governance_confirms"
+          : "parameters_or_data_were_previously_inspected; calibration_only",
+        frozenPredictions: cloneJson(input.frozenEvaluationRun),
+      },
+      calibration: {
+        runKind: "full_data_proposal",
+        acceptanceEligible: false,
+        sourceRunId: input.fullDataRun.runId,
+        sourceFrozenDigest: input.fullDataRun.frozenDigest,
+      },
+    },
     reproducibility: {
       inputAssets: input.inputAssets ?? [],
       sourceRunReproducibility: (input.fullDataRun as unknown as Record<string, unknown>).reproducibility ?? null,
@@ -163,26 +206,31 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
 
 export async function buildQualityReviewRelease(input: Readonly<{
   fullDataRunPath: string;
+  frozenEvaluationRunPath: string;
   datasetPath: string;
   governanceInputCatalogPath: string;
   outputPath: string;
   frozenAt: string;
 }>): Promise<void> {
   const catalogLoaded = await loadInputCatalog(input.governanceInputCatalogPath);
-  const [runBytes, datasetBytes] = await Promise.all([
+  const [runBytes, frozenEvaluationBytes, datasetBytes] = await Promise.all([
     readFile(resolve(input.fullDataRunPath)),
+    readFile(resolve(input.frozenEvaluationRunPath)),
     readFile(resolve(input.datasetPath)),
   ]);
   const run = JSON.parse(runBytes.toString("utf8")) as FullDataRun;
+  const frozenEvaluationRun = JSON.parse(frozenEvaluationBytes.toString("utf8")) as FrozenEvaluationRun;
   const dataset = JSON.parse(datasetBytes.toString("utf8")) as { records: GoldenRecord[] };
   const release = assembleQualityReviewRelease({
     releaseId: "personal-motion-quality-review-v1",
     frozenAt: input.frozenAt,
     fullDataRun: run,
+    frozenEvaluationRun,
     records: dataset.records,
     inputAssets: [
       catalogLoaded.pin,
       pinInputBytes(catalogLoaded.value, "fullDataRun", input.fullDataRunPath, runBytes),
+      pinInputBytes(catalogLoaded.value, "frozenPredictions", input.frozenEvaluationRunPath, frozenEvaluationBytes),
       pinInputBytes(catalogLoaded.value, "humanRanges", input.datasetPath, datasetBytes),
     ],
   });
@@ -204,6 +252,22 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function assertFrozenEvaluationRun(run: FrozenEvaluationRun): void {
+  if (run.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
+      || run.state !== "frozen_before_truth"
+      || !Array.isArray(run.contexts)) {
+    throw new Error("benchmark evidence is not a frozen prediction run");
+  }
+  const { frozenDigest, ...semantic } = run;
+  if (sha256(stableStringify(semantic)) !== frozenDigest) {
+    throw new Error("benchmark frozen prediction digest mismatch");
+  }
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     Object.values(value as Record<string, unknown>).forEach(deepFreeze);
@@ -215,6 +279,7 @@ function deepFreeze<T>(value: T): T {
 async function main(): Promise<void> {
   await buildQualityReviewRelease({
     fullDataRunPath: "data/workflows/motion-quality-review/full-data-proposals-v1.json",
+    frozenEvaluationRunPath: "data/workflows/motion-quality-review/blind-predictions-before-truth-v1.json",
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     outputPath: "data/workflows/motion-quality/full-personal-corpus-v1/frozen-quality-review-release.json",
