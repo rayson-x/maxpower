@@ -1,7 +1,7 @@
 import type {
   DomainActor,
   SessionOutcomeData,
-  SessionPrescriptionData,
+  PlannedSessionData,
   WorkoutExecutionMode,
   WorkoutExecutionState,
   WorkoutProjection,
@@ -140,9 +140,9 @@ export function deriveSessionOutcome(workout: WorkoutProjection, completedAt: st
 }
 
 /** Current set and already committed outcomes are immutable execution history. */
-export function assertOnlyUpcomingPrescriptionChanged(input: {
-  before: SessionPrescriptionData;
-  after: SessionPrescriptionData;
+export function assertOnlyUpcomingPlannedSessionChanged(input: {
+  before: PlannedSessionData;
+  after: PlannedSessionData;
   completedPrescriptionSetIds: readonly string[];
   currentSetId?: string;
 }): void {
@@ -162,8 +162,8 @@ export function assertOnlyUpcomingPrescriptionChanged(input: {
 }
 
 function lockedSetSignature(input: {
-  task: SessionPrescriptionData["tasks"][number];
-  set: SessionPrescriptionData["tasks"][number]["sets"][number];
+  task: PlannedSessionData["tasks"][number];
+  set: PlannedSessionData["tasks"][number]["sets"][number];
 }) {
   return {
     taskId: input.task.id,

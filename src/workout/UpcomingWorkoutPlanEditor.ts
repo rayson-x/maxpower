@@ -1,23 +1,23 @@
 import type {
-  ExerciseSetPrescription,
-  ExerciseTaskPrescription,
-  SessionPrescriptionData,
-  UpcomingWorkoutPrescriptionChange,
+  PlannedExerciseSet,
+  PlannedExerciseTask,
+  PlannedSessionData,
+  UpcomingWorkoutPlanChange,
 } from "../coach/domain";
-import { assertOnlyUpcomingPrescriptionChanged } from "./WorkoutExecutionPolicy";
+import { assertOnlyUpcomingPlannedSessionChanged } from "./WorkoutExecutionPolicy";
 
 export type UpcomingWorkoutEditScope = "next_set" | "future_sets" | "future_tasks";
 
-export interface ApplyUpcomingWorkoutPrescriptionChangeInput {
-  before: SessionPrescriptionData;
-  change: UpcomingWorkoutPrescriptionChange;
+export interface ApplyUpcomingWorkoutPlanChangeInput {
+  before: PlannedSessionData;
+  change: UpcomingWorkoutPlanChange;
   completedPrescriptionSetIds: readonly string[];
   /** A saved draft means that set has started and is frozen. */
   draftedPrescriptionSetId?: string;
 }
 
-export interface AppliedUpcomingWorkoutPrescriptionChange {
-  frozenPrescription: SessionPrescriptionData;
+export interface AppliedUpcomingWorkoutPlanChange {
+  frozenPrescription: PlannedSessionData;
   scope: UpcomingWorkoutEditScope;
 }
 
@@ -26,9 +26,9 @@ export interface AppliedUpcomingWorkoutPrescriptionChange {
  * knows nothing about persistence, Agent policy or UI; its job is to make the
  * safe editing boundary executable and repeatable on every client.
  */
-export function applyUpcomingWorkoutPrescriptionChange(
-  input: ApplyUpcomingWorkoutPrescriptionChangeInput,
-): AppliedUpcomingWorkoutPrescriptionChange {
+export function applyUpcomingWorkoutPlanChange(
+  input: ApplyUpcomingWorkoutPlanChangeInput,
+): AppliedUpcomingWorkoutPlanChange {
   assertPrescriptionShape(input.before);
   const lockedSetIds = new Set([
     ...input.completedPrescriptionSetIds,
@@ -50,7 +50,7 @@ export function applyUpcomingWorkoutPrescriptionChange(
     }
   };
 
-  let tasks: readonly ExerciseTaskPrescription[];
+  let tasks: readonly PlannedExerciseTask[];
   let scope: UpcomingWorkoutEditScope;
   switch (change.kind) {
     case "adjust_set": {
@@ -124,6 +124,32 @@ export function applyUpcomingWorkoutPrescriptionChange(
       scope = "future_tasks";
       break;
     }
+    case "replace_remaining_task": {
+      const index = taskIndex(change.taskId);
+      const task = input.before.tasks[index]!;
+      if (!change.replacementExerciseVariantId.trim()) throw new Error("replacement_exercise_required");
+      if (!change.replacementTaskId.trim() || input.before.tasks.some((candidate) => candidate.id === change.replacementTaskId)) {
+        throw new Error("duplicate_workout_task_id");
+      }
+      const lockedSets = task.sets.filter((set) => lockedSetIds.has(set.id));
+      const remainingSets = task.sets.filter((set) => !lockedSetIds.has(set.id)).map(clearTargetLoad);
+      if (!lockedSets.length) throw new Error("replace_remaining_requires_started_task");
+      if (!remainingSets.length) throw new Error("workout_task_has_no_unresolved_set");
+      const replacement: PlannedExerciseTask = {
+        ...task,
+        id: change.replacementTaskId,
+        exerciseVariantId: change.replacementExerciseVariantId,
+        sets: remainingSets,
+      };
+      tasks = [
+        ...input.before.tasks.slice(0, index),
+        { ...task, sets: lockedSets },
+        replacement,
+        ...input.before.tasks.slice(index + 1),
+      ];
+      scope = "future_tasks";
+      break;
+    }
     case "reorder_task": {
       const index = taskIndex(change.taskId);
       assertTaskIsEditable(index);
@@ -142,9 +168,9 @@ export function applyUpcomingWorkoutPrescriptionChange(
     }
   }
 
-  const frozenPrescription = { ...input.before, tasks } satisfies SessionPrescriptionData;
+  const frozenPrescription = { ...input.before, tasks } satisfies PlannedSessionData;
   assertPrescriptionShape(frozenPrescription);
-  assertOnlyUpcomingPrescriptionChanged({
+  assertOnlyUpcomingPlannedSessionChanged({
     before: input.before,
     after: frozenPrescription,
     completedPrescriptionSetIds: input.completedPrescriptionSetIds,
@@ -154,10 +180,10 @@ export function applyUpcomingWorkoutPrescriptionChange(
 }
 
 function applySetPatch(
-  set: ExerciseSetPrescription,
-  patch: Extract<UpcomingWorkoutPrescriptionChange, { kind: "adjust_set" }> ["patch"],
-): ExerciseSetPrescription {
-  const next: ExerciseSetPrescription = { ...set };
+  set: PlannedExerciseSet,
+  patch: Extract<UpcomingWorkoutPlanChange, { kind: "adjust_set" }> ["patch"],
+): PlannedExerciseSet {
+  const next: PlannedExerciseSet = { ...set };
   for (const [field, value] of Object.entries(patch) as [
     keyof typeof patch,
     (typeof patch)[keyof typeof patch],
@@ -170,12 +196,12 @@ function applySetPatch(
   return next;
 }
 
-function clearTargetLoad(set: ExerciseSetPrescription): ExerciseSetPrescription {
+function clearTargetLoad(set: PlannedExerciseSet): PlannedExerciseSet {
   const { targetLoad: _targetLoad, targetLoadStatus: _targetLoadStatus, targetLoadBasis: _targetLoadBasis, ...rest } = set;
   return rest;
 }
 
-function assertPrescriptionShape(prescription: SessionPrescriptionData): void {
+function assertPrescriptionShape(prescription: PlannedSessionData): void {
   const taskIds = new Set<string>();
   const setIds = new Set<string>();
   for (const task of prescription.tasks) {
@@ -189,13 +215,13 @@ function assertPrescriptionShape(prescription: SessionPrescriptionData): void {
   }
 }
 
-function assertTaskShape(task: ExerciseTaskPrescription): void {
+function assertTaskShape(task: PlannedExerciseTask): void {
   if (!task.id.trim() || !task.exerciseVariantId.trim()) throw new Error("invalid_workout_task");
   if (!task.sets.length) throw new Error("workout_task_requires_set");
   task.sets.forEach(assertSetShape);
 }
 
-function assertSetShape(set: ExerciseSetPrescription): void {
+function assertSetShape(set: PlannedExerciseSet): void {
   if (!set.id.trim()) throw new Error("invalid_workout_set");
   if (set.targetReps && (
     !Number.isInteger(set.targetReps.min) ||

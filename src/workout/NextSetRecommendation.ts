@@ -1,7 +1,7 @@
 import type {
-  ExerciseSetPrescription,
-  ExerciseTaskPrescription,
-  UpcomingWorkoutPrescriptionChange,
+  PlannedExerciseSet,
+  PlannedExerciseTask,
+  UpcomingWorkoutPlanChange,
 } from "../coach/domain";
 import type { RuleDecision } from "../training-rules";
 
@@ -15,7 +15,7 @@ export interface WorkoutNextSetRecommendation {
   nextSetId?: string;
   status: "proposal" | "no_change" | "blocked" | "unavailable";
   decision: RuleDecision;
-  change?: Extract<UpcomingWorkoutPrescriptionChange, { kind: "adjust_set" }>;
+  change?: Extract<UpcomingWorkoutPlanChange, { kind: "adjust_set" }>;
   reason: string;
 }
 
@@ -31,7 +31,7 @@ export function toNextSetRecommendation(input: {
   baseWorkoutRevision: number;
   sourceOutcomeId: string;
   sourceExerciseVariantId: string;
-  next?: { task: ExerciseTaskPrescription; set: ExerciseSetPrescription };
+  next?: { task: PlannedExerciseTask; set: PlannedExerciseSet };
   decision: RuleDecision;
 }): WorkoutNextSetRecommendation {
   const base = {
@@ -74,12 +74,12 @@ export function toNextSetRecommendation(input: {
 
 function patchFromDecision(
   decision: RuleDecision,
-  next: ExerciseSetPrescription,
-): Extract<UpcomingWorkoutPrescriptionChange, { kind: "adjust_set" }> ["patch"] | undefined {
+  next: PlannedExerciseSet,
+): Extract<UpcomingWorkoutPlanChange, { kind: "adjust_set" }> ["patch"] | undefined {
   if (decision.decision === "reduce_load" || decision.decision === "increase_load") {
     const load = massQuantity(decision.after.load);
     if (!load || equalMass(load, next.targetLoad)) return undefined;
-    const patch: Extract<UpcomingWorkoutPrescriptionChange, { kind: "adjust_set" }> ["patch"] = {
+    const patch: Extract<UpcomingWorkoutPlanChange, { kind: "adjust_set" }> ["patch"] = {
       targetLoad: load,
     };
     const reps = integer(decision.after.reps);

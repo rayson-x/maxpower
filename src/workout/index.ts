@@ -1,3 +1,3 @@
 export * from "./WorkoutExecutionPolicy";
-export * from "./UpcomingWorkoutPrescriptionEditor";
+export * from "./UpcomingWorkoutPlanEditor";
 export * from "./NextSetRecommendation";

@@ -119,7 +119,10 @@ export type ImmutableEvidenceRef =
 
 export interface UserProfileData {
   id: string;
-  trainingExperience: "beginner" | "intermediate" | "advanced";
+  /** `unknown` is an explicit calibration state for the new dossier path. It
+   * is never a synonym for beginner and planners must not use it as a split
+   * or volume fallback. */
+  trainingExperience: "beginner" | "intermediate" | "advanced" | "unknown";
   locale: string;
   /** Optional intake facts stay absent when the user did not provide them. */
   demographics?: {
@@ -849,6 +852,44 @@ export interface SetDraftData {
   updatedAt: string;
 }
 
+/**
+ * Immutable local WorkoutSession resource derived only from Rust canonical
+ * packets. It is observed evidence, never a performed set or a cloud-confirmed
+ * Result. Load, RIR and subjective state are intentionally absent.
+ */
+export interface SetObservationData {
+  id: string;
+  prescriptionSetId: string;
+  exerciseVariantId: string;
+  source: "rust_canonical_packet";
+  observedAt: string;
+  capabilityIdentity?: string;
+  judgement: "observed" | "cannot_judge";
+  cannotJudgeReason?:
+    | "no_valid_frames"
+    | "target_not_locked"
+    | "canonical_producer_unknown";
+  counts: { confirmed: number; needsReview: number; rejected: number };
+  reps: readonly {
+    id: string;
+    revision: number;
+    disposition: "confirmed" | "needs_review" | "rejected";
+    findings: readonly string[];
+    canonicalSliceHash: string;
+    profileIdentity: string;
+    profileHash: string;
+  }[];
+  lineage: {
+    sequenceIds: readonly string[];
+    contractVersions: readonly string[];
+    algorithmVersions: readonly string[];
+    configVersions: readonly string[];
+    inferenceVersions: readonly string[];
+    sourceFrameIds: readonly string[];
+    canonicalSliceHashes: readonly string[];
+  };
+}
+
 export interface SessionOutcomeData {
   status: "completed" | "partial" | "abandoned";
   completedAt: string;
@@ -887,6 +928,13 @@ export interface SetOutcomeData {
     id: string;
     version: number;
     hash: string;
+  };
+  /** Link/provenance only; observed dispositions remain immutable elsewhere. */
+  observationRef?: { id: string };
+  performedRepsProvenance?: {
+    source: "user_confirmed";
+    observedConfirmedReps: number;
+    userAdjusted: boolean;
   };
 }
 
@@ -981,6 +1029,13 @@ export type UpcomingWorkoutPlanChange =
        * absolute target load from the prior exercise.
        */
       replacementSets?: readonly PlannedExerciseSet[];
+    }
+  | {
+      /** Keep locked sets on the original task and insert a replacement for the unresolved remainder. */
+      kind: "replace_remaining_task";
+      taskId: string;
+      replacementTaskId: string;
+      replacementExerciseVariantId: string;
     }
   | {
       kind: "reorder_task";
@@ -1183,6 +1238,8 @@ export interface RecoveryConstraintData {
   level: "normal" | "slight_reduction" | "recovery_priority" | "pause_and_confirm";
   validUntil: string;
   scope?: "next_set" | "remaining_session" | "next_session" | "future_plan";
+  /** Short-lived execution availability, never a stable User Profile schedule. */
+  availability?: { availableMinutes?: number; location?: string };
   intentions?: readonly {
     kind: "increase_rir" | "remove_optional_sets" | "shorten_session" | "extend_rest" | "avoid_area" | "reschedule" | "pause" | "warmup_check";
     magnitude?: number;
@@ -1283,6 +1340,7 @@ export type DomainEventName =
   | "workout.started"
   | "workout.state_changed"
   | "workout.draft_set_saved"
+  | "workout.set_observation_saved"
   | "workout.draft_set_retracted"
   | "workout.prescription_revised"
   | "workout.set_recorded"
@@ -1340,6 +1398,7 @@ export type DomainEvent =
     >
   | DomainEventEnvelope<"workout.state_changed", "workout_session", { state: WorkoutExecutionState }>
   | DomainEventEnvelope<"workout.draft_set_saved", "workout_session", { draft: SetDraftData }>
+  | DomainEventEnvelope<"workout.set_observation_saved", "workout_session", { observation: SetObservationData }>
   | DomainEventEnvelope<"workout.draft_set_retracted", "workout_session", { draftId: string; reason: string }>
   | DomainEventEnvelope<
       "workout.prescription_revised",
@@ -1571,6 +1630,11 @@ export type DomainCommand =
       expectedRevision: number;
       draft: SetDraftData;
     })
+  | (CommandBase<"workout.save_set_observation"> & {
+      workoutId: string;
+      expectedRevision: number;
+      observation: SetObservationData;
+    })
   | (CommandBase<"workout.retract_draft_set"> & {
       workoutId: string;
       expectedRevision: number;
@@ -1691,6 +1755,7 @@ export interface WorkoutProjection {
   /** Effective corrections; original event facts remain in the Ledger. */
   setOutcomeCorrections?: readonly SetOutcomeCorrectionData[];
   drafts: readonly SetDraftData[];
+  setObservations?: readonly SetObservationData[];
   state: WorkoutExecutionState;
   outcome?: SessionOutcomeData;
   sessionOutcomeCorrections?: readonly SessionOutcomeCorrectionData[];
@@ -1892,6 +1957,7 @@ export function projectDomainEvents(
         skippedSets: [],
         setOutcomeCorrections: [],
         drafts: [],
+        setObservations: [],
         state,
         status: state.status,
         sessionOutcomeCorrections: [],
@@ -1916,6 +1982,15 @@ export function projectDomainEvents(
             ...current.drafts.filter((draft) => draft.id !== event.payload.draft.id),
             event.payload.draft,
           ],
+        });
+      }
+    } else if (event.name === "workout.set_observation_saved") {
+      const current = workouts.get(event.aggregate.id);
+      if (current && !(current.setObservations ?? []).some((item) => item.id === event.payload.observation.id)) {
+        workouts.set(event.aggregate.id, {
+          ...current,
+          revision: event.aggregate.revision,
+          setObservations: [...(current.setObservations ?? []), event.payload.observation],
         });
       }
     } else if (event.name === "workout.draft_set_retracted") {

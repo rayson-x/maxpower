@@ -327,8 +327,9 @@ export class LedgerConflictError extends Error {
       | "duplicate_event"
       | "invalid_unit"
       | "stale_snapshot",
+    readonly detail?: string,
   ) {
-    super(code);
+    super(detail ? `${code}:${detail}` : code);
     this.name = "LedgerConflictError";
   }
 }
@@ -376,7 +377,10 @@ export function applyDomainAtomicCommitTransition(
       throw new LedgerConflictError("cross_user_reference");
     }
     if ((current?.revision ?? 0) !== expected.revision) {
-      throw new LedgerConflictError("stale_aggregate");
+      throw new LedgerConflictError(
+        "stale_aggregate",
+        `expected:${expected.kind}:${expected.id}:r${expected.revision}:current${current?.revision ?? 0}`,
+      );
     }
   }
 
@@ -392,11 +396,14 @@ export function applyDomainAtomicCommitTransition(
       throw new LedgerConflictError("cross_user_reference");
     }
     if (!expectedByAggregate.has(key)) {
-      throw new LedgerConflictError("stale_aggregate");
+      throw new LedgerConflictError("stale_aggregate", `unexpected_event:${key}`);
     }
     const currentRevision = current?.revision ?? 0;
     if (event.aggregate.revision !== currentRevision + 1) {
-      throw new LedgerConflictError("stale_aggregate");
+      throw new LedgerConflictError(
+        "stale_aggregate",
+        `event_revision:${key}:r${event.aggregate.revision}:current${currentRevision}`,
+      );
     }
     validateDomainEventState(event, current, nextAggregateStates, input.userId);
     validateDomainEventReferences(event, availableEvents, nextAggregateStates, input.userId);
@@ -563,7 +570,9 @@ export function applyDomainAtomicCommitTransition(
   const activeByUser = resultingSessions.filter(
     (session) => session.userId === input.userId && session.status === "active",
   );
-  if (activeByUser.length > 1) throw new LedgerConflictError("stale_aggregate");
+  if (activeByUser.length > 1) {
+    throw new LedgerConflictError("stale_aggregate", "multiple_active_sessions");
+  }
 
   const updatedRefs = input.domainEvents.map((event) => event.aggregate);
   const committedEventIds = [
@@ -890,6 +899,19 @@ function validateDomainEventReferences(
     }
     if (state.userId !== userId) throw new LedgerConflictError("cross_user_reference");
   };
+  const effectiveWorkoutPrescription = (workoutId: string) => {
+    const events = availableEvents.filter(
+      (candidate) => candidate.userId === userId && candidate.aggregate.kind === "workout_session" && candidate.aggregate.id === workoutId,
+    );
+    const revised = events.filter(
+      (candidate): candidate is Extract<DomainEvent, { name: "workout.prescription_revised" }> => candidate.name === "workout.prescription_revised",
+    ).at(-1);
+    if (revised) return revised.payload.frozenPrescription;
+    const start = events.find(
+      (candidate): candidate is Extract<DomainEvent, { name: "workout.started" | "workout.prepared" }> => candidate.name === "workout.started" || candidate.name === "workout.prepared",
+    );
+    return start?.payload.frozenPrescription;
+  };
   if (event.name === "goal_cycle.created" || event.name === "goal_cycle.revised") {
     assertRef(event.payload.goalContractRef);
   } else if (event.name === "plan.revised") {
@@ -929,17 +951,19 @@ function validateDomainEventReferences(
         candidate.aggregate.id === event.aggregate.id,
     );
     if (!started) throw new LedgerConflictError("invalid_reference");
-  } else if (event.name === "workout.set_recorded") {
-    const start = availableEvents.find(
-      (candidate) =>
-        (candidate.name === "workout.started" || candidate.name === "workout.prepared") &&
-        candidate.userId === userId &&
-        candidate.aggregate.id === event.aggregate.id,
-    );
-    if (!start || (start.name !== "workout.started" && start.name !== "workout.prepared")) {
+  } else if (event.name === "workout.set_observation_saved") {
+    const prescription = effectiveWorkoutPrescription(event.aggregate.id);
+    if (!prescription) throw new LedgerConflictError("invalid_reference");
+    const set = prescription.tasks
+      .flatMap((task) => task.sets.map((item) => ({ task, item })))
+      .find(({ item }) => item.id === event.payload.observation.prescriptionSetId);
+    if (!set || set.task.exerciseVariantId !== event.payload.observation.exerciseVariantId) {
       throw new LedgerConflictError("invalid_reference");
     }
-    const set = start.payload.frozenPrescription.tasks
+  } else if (event.name === "workout.set_recorded") {
+    const prescription = effectiveWorkoutPrescription(event.aggregate.id);
+    if (!prescription) throw new LedgerConflictError("invalid_reference");
+    const set = prescription.tasks
       .flatMap((task) => task.sets.map((item) => ({ task, item })))
       .find(({ item }) => item.id === event.payload.outcome.prescriptionSetId);
     if (!set || set.task.exerciseVariantId !== event.payload.outcome.exerciseVariantId) {

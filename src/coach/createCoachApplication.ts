@@ -138,6 +138,13 @@ import {
   type RuleEvaluationContext,
 } from "../training-rules";
 import {
+  assertCanonicalSetObservation,
+  buildCanonicalSetObservation,
+  type CanonicalCaptureTelemetry,
+  type CanonicalSetObservationContext,
+} from "../workout/CanonicalSetObservation";
+import type { DecodedMotionPacket } from "../motion/motionPacket";
+import {
   deriveBodyTrends,
   factHasNoCompletedClaim,
   selectPrimarySourceFacts,
@@ -6097,21 +6104,40 @@ export class CoachApplication {
   async saveCurrentSetObservation(input: {
     userId: string;
     workoutId: string;
-    observation: import("./domain").SetObservationData;
+    context: CanonicalSetObservationContext;
+    packets: readonly DecodedMotionPacket[];
+    telemetry: CanonicalCaptureTelemetry;
+    observedAt: string;
     idempotencyKey: string;
   }): Promise<import("./domain").SetObservationData> {
+    if (Object.prototype.hasOwnProperty.call(input, "observation")) {
+      throw new Error("prebuilt_canonical_observation_not_accepted");
+    }
     const workout = await this.requireWorkoutProjection(input.userId, input.workoutId);
     if (workout.status !== "active") throw new Error("workout_not_active");
     const target = currentSet(workout);
     if (!target) throw new Error("no_current_set");
+    const observation = buildCanonicalSetObservation({
+      context: input.context,
+      packets: input.packets,
+      telemetry: input.telemetry,
+      observedAt: input.observedAt,
+    });
+    assertCanonicalSetObservation(observation, {
+      context: input.context,
+      packets: input.packets,
+      telemetry: input.telemetry,
+      observedAt: input.observedAt,
+    });
     if (
-      input.observation.prescriptionSetId !== target.set.id
-      || input.observation.exerciseVariantId !== target.task.exerciseVariantId
-      || input.observation.source !== "rust_canonical_packet"
+      input.context.workoutId !== workout.id
+      || observation.prescriptionSetId !== target.set.id
+      || observation.exerciseVariantId !== target.task.exerciseVariantId
+      || observation.source !== "rust_canonical_packet"
     ) throw new Error("observation_does_not_match_current_set");
-    const existing = (workout.setObservations ?? []).find((item) => item.id === input.observation.id);
+    const existing = (workout.setObservations ?? []).find((item) => item.id === observation.id);
     if (existing) {
-      if (JSON.stringify(existing) !== JSON.stringify(input.observation)) throw new Error("immutable_observation_conflict");
+      if (JSON.stringify(existing) !== JSON.stringify(observation)) throw new Error("immutable_observation_conflict");
       return existing;
     }
     await this.executeDomainCommand({
@@ -6119,9 +6145,9 @@ export class CoachApplication {
       meta: settingsCommandMeta(input.userId, input.idempotencyKey, this.runtime.now()),
       workoutId: input.workoutId,
       expectedRevision: workout.revision,
-      observation: input.observation,
+      observation,
     });
-    return input.observation;
+    return observation;
   }
 
   async confirmCurrentSet(input: {
