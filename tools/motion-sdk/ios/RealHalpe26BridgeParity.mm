@@ -38,8 +38,10 @@ static bool HasRustQualityEnvelope(NSData *packet) {
         | (static_cast<uint32_t>(bytes[offset + 5]) << 8)
         | (static_cast<uint32_t>(bytes[offset + 6]) << 16)
         | (static_cast<uint32_t>(bytes[offset + 7]) << 24);
-    if (payloadLength <= packet.length - offset - 8
-        && offset + 8 + payloadLength == packet.length) return true;
+    // QLT1 is an additive evidence section, not a terminal trailer. Newer
+    // packet minors append AXI1/LMC1 after it, so parity must accept a valid
+    // bounded quality payload without assuming it is the final section.
+    if (payloadLength <= packet.length - offset - 8) return true;
   }
   return false;
 }

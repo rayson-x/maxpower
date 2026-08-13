@@ -64,6 +64,7 @@ test("Apple bridge parity rebuilds client Rust artifacts and excludes generated 
   assert.match(script, /ios-simulator-universal\/libmaxpower_motion_sdk\.a/);
   assert.match(harness, /visualLuma:nil/);
   assert.match(harness, /HasRustQualityEnvelope/);
+  assert.doesNotMatch(harness, /offset \+ 8 \+ payloadLength == packet\.length/);
   assert.match(podspec, /s\.vendored_frameworks = 'Frameworks\/MotionSdk\.xcframework'/);
   assert.match(podspec, /s\.exclude_files = 'Frameworks\/\*\*\/\*'/);
 });

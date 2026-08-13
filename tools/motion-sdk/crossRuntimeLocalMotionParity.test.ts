@@ -254,21 +254,48 @@ test("begin, pause, resume, finish and fresh-session reset use the public Rust s
   ]);
 });
 
-test("endpoint occurrence and causal confirmation remain gated until Ticket 04 publishes both", async () => {
+test("active local profile preserves endpoint occurrence before causal confirmation", async () => {
   assert.ok(fs.existsSync(wasmPath));
   const wasm = await instantiateRustMotionWasm(fs.readFileSync(wasmPath));
-  const fixture = loadFrontBenchFixture();
-  const packets = replayFixtureThroughWasm(wasm, fixture).packets;
-  const endpoints = packets.flatMap((packet) => packet.qualityProposals)
-    .flatMap((proposal) => proposal.endpoints);
-  if (endpoints.length === 0) {
-    emitContractReport("endpoint-causal-timestamps", [{
-      state: "data-gated",
-      capability: "endpoint-occurred-at-vs-confirmed-at",
-      reason: "the blocked Ticket 04 profile emitted no endpoint snapshots for this fixture",
-    }]);
-    return;
+  const source = loadFrontBenchFixture();
+  const progress = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
+    0, 0, 0, 0, 0, 0];
+  const fixture = {
+    ...source,
+    bridgeConfig: { ...source.bridgeConfig, profileCode: 110, active: true },
+    frames: progress.map((value, index) => {
+      const basis = source.frames[Math.min(index, source.frames.length - 1)];
+      const y = 0.40 + value;
+      return {
+        ...basis,
+        sourceFrameNumber: index + 1,
+        timestampMs: index * 100,
+        equipmentObservations: [{
+          ...basis.equipmentObservations[0],
+          proposalId: 1_500 + index,
+          bbox: [0.2, y, 0.6, 0.005] as const,
+          axis: { x1: 0.2, y1: y, x2: 0.8, y2: y },
+          score: 0.96,
+        }],
+      };
+    }),
+  } satisfies import("./localMotionRuntimeContractSupport").Halpe26EquipmentFixture;
+  const session = new RustCanonicalWasmSession(sessionConfig(fixture, "ticket06:endpoints"), wasm);
+  const endpoints = [] as import("../../src/motion/motionPacket").DecodedRepEndpointSnapshot[];
+  try {
+    session.setExerciseProfile("barbell_bench_press_local_front_left");
+    session.beginSet();
+    for (const frame of fixture.frames) {
+      submitFrame(session, frame);
+      endpoints.push(...session.lastQualityProposals.flatMap((proposal) => proposal.endpoints));
+    }
+    session.finishSet();
+    endpoints.push(...session.lastQualityProposals.flatMap((proposal) => proposal.endpoints));
+  } finally {
+    session.close();
   }
+  assert.ok(endpoints.length >= 3, "local profile must publish a complete endpoint snapshot set");
 
   for (const endpoint of endpoints) {
     assert.ok(

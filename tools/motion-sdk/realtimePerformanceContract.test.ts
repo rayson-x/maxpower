@@ -107,14 +107,9 @@ test("realtime scheduling and physical-device metrics never pass without runtime
       reason: "no declared iOS device run artifact is available",
     },
     {
-      state: "data-gated",
-      capability: "coordinate-freeze-latency-and-per-frame-cost",
-      reason: "the coordinate is implemented, but this bbox-only fixture cannot produce a measured shaft freeze event or isolate its per-frame cost",
-    },
-    {
-      state: "data-gated",
-      capability: "rep-occurred-vs-confirmed-latency",
-      reason: "the current Ticket 06 fixture/profile does not publish Ticket 04 endpoint occurred/confirmed timestamps",
+      state: "platform-gated",
+      capability: "physical-device-coordinate-freeze-and-rep-confirmation-latency",
+      reason: "synthetic and host/WASM contracts exercise these timestamps, but no Android/iOS realtime artifact reports them yet",
     },
   ];
   assert.ok(gates.every(({ state }) => state !== "passed"));

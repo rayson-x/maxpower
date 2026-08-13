@@ -208,7 +208,8 @@ export interface RustExerciseSignal {
     | "local-dynamic-bar-angle"
     | "local-channel-agreement"
     | "local-observability";
-  landmarks: readonly number[];
+  /** Local-coordinate signals use an empty list; legacy tuples may contain omitted slots. */
+  landmarks: readonly (number | undefined)[];
 }
 
 /** Scalar form shared by WASM and native adapters when installing a data profile. */
@@ -1283,7 +1284,7 @@ export function computeRustExerciseProfileHash(
     profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2,
   ]);
   for (const signal of [profile.primarySignal, profile.secondarySignal]) {
-    const landmarks = signal.landmarks.filter((value): value is number => value !== undefined);
+    const landmarks: number[] = signal.landmarks.filter((value): value is number => value !== undefined);
     update([rustExerciseSignalKind(signal.kind), landmarks.length, ...landmarks]);
   }
   for (const value of [
@@ -1330,11 +1331,11 @@ export function encodeRustExerciseProfileInstallation(
       | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1),
     profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2,
     rustExerciseSignalKind(profile.primarySignal.kind),
-    profile.primarySignal.landmarks[0],
+    profile.primarySignal.landmarks[0] ?? 0xffff_ffff,
     profile.primarySignal.landmarks[1] ?? 0xffff_ffff,
     profile.primarySignal.landmarks[2] ?? 0xffff_ffff,
     rustExerciseSignalKind(profile.secondarySignal.kind),
-    profile.secondarySignal.landmarks[0],
+    profile.secondarySignal.landmarks[0] ?? 0xffff_ffff,
     profile.secondarySignal.landmarks[1] ?? 0xffff_ffff,
     profile.secondarySignal.landmarks[2] ?? 0xffff_ffff,
     profile.startAmplitude,
@@ -1374,7 +1375,7 @@ export function adaptRustExerciseProfileToPoseSchema(
         throw new Error(`BlazePose joint ${index} has no Halpe-26 equivalent`);
       }
       return mapped;
-    }) as unknown as RustExerciseSignal["landmarks"],
+    }),
   });
   const withoutHash: RustExerciseProfileData = {
     ...profile,
