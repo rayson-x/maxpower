@@ -48,6 +48,14 @@
     standard_variant_compatibility: "标准变式兼容性",
     observation_confidence: "观测可信度",
   };
+  const EVIDENCE_LAYER_DEFINITIONS = Object.freeze([
+    Object.freeze({ key: "rawSkeleton", label: "原始骨架" }),
+    Object.freeze({ key: "rawEquipment", label: "原始器械" }),
+    Object.freeze({ key: "normalizedPose", label: "归一化骨架" }),
+    Object.freeze({ key: "normalizedEquipment", label: "归一化器械" }),
+    Object.freeze({ key: "fusionStatus", label: "融合状态" }),
+  ]);
+  const LOCAL_TRAJECTORY_DISPLAY_SCALE = 0.2;
 
   function dimensionLabel(key) {
     return DIMENSION_LABELS[key] || key;
@@ -261,15 +269,148 @@
     return points.filter((point) => Number.isFinite(point.timestampMs) && point.timestampMs <= timestampMs);
   }
 
+  function equipmentAxisGeometry(observation) {
+    const axis = observation?.axis || observation;
+    if (![axis?.x1, axis?.y1, axis?.x2, axis?.y2].every(Number.isFinite)) return null;
+    return Object.freeze({ x1: axis.x1, y1: axis.y1, x2: axis.x2, y2: axis.y2 });
+  }
+
+  function canonicalEquipmentTracks(value) {
+    if (Array.isArray(value.equipmentTracks)) return value.equipmentTracks;
+    if (Array.isArray(value.equipment)) return value.equipment;
+    if (Array.isArray(value.equipment?.tracks)) return value.equipment.tracks;
+    return value.axis ? [value.axis] : [];
+  }
+
+  function localCoordinateOf(value) {
+    return value.localMotionCoordinate
+      ?? value.local_motion_coordinate
+      ?? value.localCoordinate
+      ?? null;
+  }
+
+  function normalizedReviewPoint(channel) {
+    const alongAxisProgress = channel?.alongAxisProgress ?? channel?.along_axis_progress;
+    const crossAxisDisplacement = channel?.crossAxisDisplacement ?? channel?.cross_axis_displacement;
+    if (!channel
+        || !Number.isFinite(alongAxisProgress)
+        || !Number.isFinite(crossAxisDisplacement)) return null;
+    return Object.freeze({
+      x: 0.5 + crossAxisDisplacement * LOCAL_TRAJECTORY_DISPLAY_SCALE,
+      y: 0.5 + alongAxisProgress * LOCAL_TRAJECTORY_DISPLAY_SCALE,
+    });
+  }
+
+  function normalizedChannelEvidence(channel, timestampMs) {
+    const point = normalizedReviewPoint(channel);
+    if (!point) return null;
+    return Object.freeze({
+      timestampMs: Number.isFinite(timestampMs) ? timestampMs : null,
+      point,
+      alongAxisProgress: channel.alongAxisProgress ?? channel.along_axis_progress,
+      crossAxisDisplacement: channel.crossAxisDisplacement ?? channel.cross_axis_displacement,
+      confidence: Number.isFinite(channel.confidence) ? channel.confidence : null,
+      provenance: channel.provenance ?? "unknown",
+      predicted: isPredictedEvidence(channel),
+    });
+  }
+
+  function fusionEvidence(coordinate) {
+    return Object.freeze({
+      status: coordinate?.channelAgreement ?? coordinate?.channel_agreement ?? "cannot_judge",
+      confidence: Number.isFinite(coordinate?.confidence) ? coordinate.confidence : null,
+      reason: coordinate?.reason ?? null,
+    });
+  }
+
+  function coordinateStatusSummary(coordinate) {
+    const value = coordinate || {};
+    return Object.freeze({
+      coordinateFrameId: value.coordinateFrameId ?? value.coordinate_frame_id ?? null,
+      state: value.state ?? "uninitialized",
+      scale: Number.isFinite(value.scale) ? value.scale : null,
+      scaleSource: value.scaleSource ?? value.scale_source ?? null,
+      confidence: Number.isFinite(value.confidence) ? value.confidence : null,
+      reason: value.reason ?? null,
+      fusionStatus: value.channelAgreement ?? value.channel_agreement ?? "cannot_judge",
+    });
+  }
+
+  function coordinateStatusText(coordinate, includeFusion = true) {
+    if (!coordinate) return "COORD UNAVAILABLE · REASON no_coordinate_evidence";
+    const status = coordinate.coordinateFrameId === undefined
+      ? coordinateStatusSummary(coordinate)
+      : coordinate;
+    const frame = status.coordinateFrameId == null ? "" : ` #${status.coordinateFrameId}`;
+    const scale = status.scaleSource || Number.isFinite(status.scale)
+      ? ` · SCALE ${status.scaleSource ?? "unknown"} ${Number.isFinite(status.scale) ? status.scale.toFixed(3) : "—"}`
+      : " · SCALE —";
+    const confidence = ` · CONF ${Number.isFinite(status.confidence) ? `${Math.round(status.confidence * 100)}%` : "—"}`;
+    const reason = ` · REASON ${status.reason ?? "none"}`;
+    const fusion = includeFusion ? ` · FUSION ${status.fusionStatus ?? "cannot_judge"}` : "";
+    return `COORD${frame} · ${String(status.state ?? "uninitialized").toUpperCase()}${scale}${confidence}${reason}${fusion}`;
+  }
+
+  function evidenceLayerControlsHtml() {
+    return EVIDENCE_LAYER_DEFINITIONS.map(({ key, label }) => (
+      `<button type="button" class="layer-switch active" data-quality-layer="${key}" aria-pressed="true">${label}</button>`
+    )).join("");
+  }
+
+  function normalizedTrajectoryUntil(frames, timestampMs, channelName) {
+    if (!Array.isArray(frames) || !["pose", "equipment"].includes(channelName)) return [];
+    return frames
+      .filter((frame) => Number.isFinite(frame?.timestampMs) && frame.timestampMs <= timestampMs)
+      .map((frame) => normalizedChannelEvidence(localCoordinateOf(frame)?.[channelName], frame.timestampMs))
+      .filter(Boolean);
+  }
+
+  function legacyEquipmentTrajectoryUntil(trajectories, timestampMs) {
+    if (!Array.isArray(trajectories)) return [];
+    return trajectories.map((trajectory) => trajectoryUntil(
+      trajectory?.points || trajectory?.samples || [],
+      timestampMs,
+    ).map((point) => {
+      const x = point.x ?? point.centerX
+        ?? (Number.isFinite(point.x1) && Number.isFinite(point.x2) ? (point.x1 + point.x2) / 2 : null);
+      const y = point.y ?? point.centerY
+        ?? (Number.isFinite(point.y1) && Number.isFinite(point.y2) ? (point.y1 + point.y2) / 2 : null);
+      return Number.isFinite(x) && Number.isFinite(y)
+        ? { timestampMs: point.timestampMs, x, y }
+        : null;
+    }).filter(Boolean)).filter((points) => points.length);
+  }
+
+  function isPredictedEvidence(value) {
+    if (!value) return false;
+    const provenance = String(value.provenance ?? value.source ?? "").toLowerCase();
+    return value.predicted === true || provenance.includes("predicted");
+  }
+
   function frameEvidenceLayers(frame) {
     const value = frame || {};
     const inputAxes = Array.isArray(value.inputEquipmentAxes) ? value.inputEquipmentAxes : [];
+    const canonicalTracks = canonicalEquipmentTracks(value);
+    const hasCanonicalAxis = canonicalTracks.some((track) => equipmentAxisGeometry(track));
+    const rawEquipment = hasCanonicalAxis
+      ? canonicalTracks
+      : (inputAxes.length ? inputAxes : canonicalTracks);
+    const canonicalPose = value.landmarks || value.skeleton || [];
+    const inputPose = value.inputPose?.landmarks || [];
+    const coordinate = localCoordinateOf(value);
+    const normalizedPose = normalizedChannelEvidence(coordinate?.pose, value.timestampMs);
+    const normalizedEquipment = normalizedChannelEvidence(coordinate?.equipment, value.timestampMs);
+    const fusionStatus = fusionEvidence(coordinate);
     return Object.freeze({
-      canonicalPose: value.landmarks || value.skeleton || [],
-      inputPose: value.inputPose?.landmarks || [],
-      equipment: inputAxes.length
-        ? inputAxes
-        : (value.equipment || (value.axis ? [value.axis] : [])),
+      rawSkeleton: Object.freeze({ canonical: canonicalPose, input: inputPose }),
+      rawEquipment,
+      normalizedPose,
+      normalizedEquipment,
+      fusionStatus,
+      coordinate,
+      canonicalPose,
+      inputPose,
+      equipment: rawEquipment,
     });
   }
 
@@ -349,6 +490,8 @@
     if (!shell || shell.dataset.mounted === "true") return;
     shell.dataset.mounted = "true";
     const byId = (id) => document.getElementById(id);
+    const layerSwitches = document.querySelector(".layer-switches");
+    if (layerSwitches) layerSwitches.innerHTML = evidenceLayerControlsHtml();
     const state = {
       workspace: null,
       activeItemId: null,
@@ -356,11 +499,13 @@
       activeItem: null,
       activeReview: null,
       evidenceMode: "calibration",
-      layers: { skeleton: true, equipment: true, trails: true },
+      layers: Object.fromEntries(EVIDENCE_LAYER_DEFINITIONS.map(({ key }) => [key, true])),
     };
     const video = byId("qualityVideo");
     const canvas = byId("qualityOverlay");
     const context = canvas.getContext("2d");
+    byId("observationReadout").style.whiteSpace = "pre-line";
+    byId("observationReadout").style.maxWidth = "min(92%, 780px)";
 
     async function init() {
       try {
@@ -729,17 +874,30 @@
         offsetY: (height - video.videoHeight * scale) / 2,
       };
       const layers = frameEvidenceLayers(frame);
-      if (state.layers.trails) drawTrajectories(evidence.equipmentTrajectories || [], currentMs, transform);
-      if (frame && state.layers.skeleton) {
+      if (frame && state.layers.rawSkeleton) {
         drawSkeleton(layers.inputPose, transform, "input");
         drawSkeleton(layers.canonicalPose, transform, "canonical");
       }
-      if (frame && state.layers.equipment) drawEquipment(layers.equipment, transform);
+      if (state.layers.rawEquipment) {
+        drawLegacyEquipmentTrajectories(evidence.equipmentTrajectories || [], currentMs, transform);
+        if (frame) drawEquipment(layers.rawEquipment, transform);
+      }
+      if (state.layers.normalizedPose || state.layers.normalizedEquipment) {
+        drawNormalizedEvidence({
+          frames: evidence.frames || [],
+          currentMs,
+          width,
+          height,
+          showPose: state.layers.normalizedPose,
+          showEquipment: state.layers.normalizedEquipment,
+        });
+      }
       const canonicalVisible = layers.canonicalPose.filter(isVisiblePoint).length;
       const inputVisible = layers.inputPose.filter(isVisiblePoint).length;
-      const equipmentCount = layers.equipment.length;
+      const equipmentCount = layers.rawEquipment.length;
+      const coordinateReadout = `\n${coordinateStatusText(layers.coordinate, state.layers.fusionStatus)}`;
       byId("observationReadout").textContent = frame
-        ? `OBS ${formatMs(frame.timestampMs)} · POSE INPUT ${inputVisible} / RUST ${canonicalVisible} · EQUIPMENT ${equipmentCount}`
+        ? `OBS ${formatMs(frame.timestampMs)} · POSE INPUT ${inputVisible} / RUST ${canonicalVisible} · EQUIPMENT ${equipmentCount}${coordinateReadout}`
         : "OBSERVATION UNKNOWN · no frame within 150 ms";
     }
 
@@ -756,21 +914,27 @@
         if (!isVisiblePoint(a) || !isVisiblePoint(b)) continue;
         const pa = mapPoint(a, transform);
         const pb = mapPoint(b, transform);
-        const predicted = a.predicted || b.predicted || a.source === "predicted" || b.source === "predicted";
+        const predicted = isPredictedEvidence(a) || isPredictedEvidence(b);
         context.setLineDash(input ? [5, 4] : (predicted ? [6, 5] : []));
-        context.strokeStyle = input
-          ? "rgba(85,220,231,.72)"
-          : (predicted ? "rgba(255,104,72,.92)" : "rgba(202,255,57,.92)");
+        context.strokeStyle = predicted
+          ? "rgba(255,104,72,.92)"
+          : (input ? "rgba(85,220,231,.72)" : "rgba(202,255,57,.92)");
         context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
       }
       context.setLineDash([]);
       points.forEach((point) => {
         if (!isVisiblePoint(point)) return;
         const position = mapPoint(point, transform);
-        context.fillStyle = input
-          ? "rgba(85,220,231,.82)"
-          : (point.predicted || point.source === "predicted" ? "#ff6848" : "#f7f7ed");
+        const predicted = isPredictedEvidence(point);
+        context.fillStyle = predicted
+          ? "#ff6848"
+          : (input ? "rgba(85,220,231,.82)" : "#f7f7ed");
         context.beginPath(); context.arc(position.x, position.y, input ? 2.2 : 3.2, 0, Math.PI * 2); context.fill();
+        if (predicted) {
+          context.fillStyle = "#ff6848";
+          context.font = "800 8px ui-monospace, monospace";
+          context.fillText("P", position.x + 5, position.y - 5);
+        }
       });
       context.restore();
     }
@@ -779,14 +943,21 @@
       context.save();
       context.lineCap = "round";
       observations.forEach((observation) => {
-        const axis = observation.axis || observation;
-        if ([axis.x1, axis.y1, axis.x2, axis.y2].every(Number.isFinite)) {
+        const axis = equipmentAxisGeometry(observation);
+        const predicted = isPredictedEvidence(observation) || isPredictedEvidence(observation?.axis);
+        context.setLineDash(predicted ? [7, 5] : []);
+        if (axis) {
           const a = mapPoint({ x: axis.x1, y: axis.y1 }, transform);
           const b = mapPoint({ x: axis.x2, y: axis.y2 }, transform);
           context.strokeStyle = "rgba(0,0,0,.72)"; context.lineWidth = 8;
           context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(b.x, b.y); context.stroke();
-          context.strokeStyle = "#ffd84a"; context.lineWidth = 3;
+          context.strokeStyle = predicted ? "#ff6848" : "#ffd84a"; context.lineWidth = 3;
           context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(b.x, b.y); context.stroke();
+          if (predicted) {
+            context.fillStyle = "#ff6848";
+            context.font = "800 9px ui-monospace, monospace";
+            context.fillText("PREDICTED", (a.x + b.x) / 2 + 8, (a.y + b.y) / 2 - 8);
+          }
         } else if ([observation.x, observation.y, observation.width, observation.height].every(Number.isFinite)) {
           const topLeft = mapPoint(observation, transform);
           context.strokeStyle = "#ffd84a"; context.lineWidth = 2;
@@ -798,14 +969,66 @@
       context.restore();
     }
 
-    function drawTrajectories(trajectories, currentMs, transform) {
+    function drawLegacyEquipmentTrajectories(trajectories, currentMs, transform) {
       context.save();
-      trajectories.forEach((trajectory, index) => {
-        const points = trajectoryUntil(trajectory.points || trajectory.samples || [], currentMs)
-          .map(normalizeTrajectoryPoint).filter(Boolean).slice(-180);
+      legacyEquipmentTrajectoryUntil(trajectories, currentMs).forEach((points, index) => {
         drawPath(points, transform, index % 2 ? "rgba(85,220,231,.8)" : "rgba(255,216,74,.85)", 2);
       });
       context.restore();
+    }
+
+    function drawNormalizedEvidence({ frames, currentMs, width, height, showPose, showEquipment }) {
+      const pose = showPose ? normalizedTrajectoryUntil(frames, currentMs, "pose") : [];
+      const equipment = showEquipment ? normalizedTrajectoryUntil(frames, currentMs, "equipment") : [];
+      if (!pose.length && !equipment.length) return;
+      const size = Math.max(112, Math.min(176, width * 0.22, height * 0.28));
+      const left = 18;
+      const top = Math.max(58, height - size - 18);
+      const panel = {
+        renderedWidth: size,
+        renderedHeight: size,
+        offsetX: left,
+        offsetY: top,
+      };
+      context.save();
+      context.fillStyle = "rgba(5,7,6,.82)";
+      context.strokeStyle = "rgba(202,255,57,.42)";
+      context.lineWidth = 1;
+      context.fillRect(left, top, size, size);
+      context.strokeRect(left, top, size, size);
+      context.setLineDash([3, 4]);
+      context.strokeStyle = "rgba(247,247,237,.22)";
+      context.beginPath();
+      context.moveTo(left + size / 2, top); context.lineTo(left + size / 2, top + size);
+      context.moveTo(left, top + size / 2); context.lineTo(left + size, top + size / 2);
+      context.stroke();
+      context.setLineDash([]);
+      if (pose.length) drawPath(pose.slice(-180).map((sample) => sample.point), panel, "rgba(85,220,231,.95)", 2.5);
+      if (equipment.length) drawPath(equipment.slice(-180).map((sample) => sample.point), panel, "rgba(255,216,74,.95)", 2.5);
+      drawPredictedNormalizedSamples(pose, panel);
+      drawPredictedNormalizedSamples(equipment, panel);
+      context.fillStyle = "#f7f7ed";
+      context.font = "800 8px ui-monospace, monospace";
+      context.fillText("VIEW-NORMALIZED 2D", left + 7, top + 13);
+      if (pose.length) {
+        context.fillStyle = "rgba(85,220,231,.95)";
+        context.fillText("POSE", left + 7, top + size - 8);
+      }
+      if (equipment.length) {
+        context.fillStyle = "rgba(255,216,74,.95)";
+        context.fillText("EQUIPMENT", left + size - 58, top + size - 8);
+      }
+      context.restore();
+    }
+
+    function drawPredictedNormalizedSamples(samples, transform) {
+      samples.filter((sample) => sample.predicted).slice(-24).forEach((sample) => {
+        const position = mapPoint(sample.point, transform);
+        context.fillStyle = "#ff6848";
+        context.beginPath(); context.arc(position.x, position.y, 3.2, 0, Math.PI * 2); context.fill();
+        context.font = "800 8px ui-monospace, monospace";
+        context.fillText("P", position.x + 5, position.y - 4);
+      });
     }
 
     function drawPath(points, transform, color, width) {
@@ -819,12 +1042,6 @@
         else context.lineTo(position.x, position.y);
       });
       context.stroke();
-    }
-
-    function normalizeTrajectoryPoint(point) {
-      const x = point.x ?? point.centerX ?? (Number.isFinite(point.x1) && Number.isFinite(point.x2) ? (point.x1 + point.x2) / 2 : null);
-      const y = point.y ?? point.centerY ?? (Number.isFinite(point.y1) && Number.isFinite(point.y2) ? (point.y1 + point.y2) / 2 : null);
-      return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
     }
 
     function mapPoint(point, transform) {
@@ -916,6 +1133,7 @@
       const layer = button.dataset.qualityLayer;
       state.layers[layer] = !state.layers[layer];
       button.classList.toggle("active", state.layers[layer]);
+      button.setAttribute("aria-pressed", String(state.layers[layer]));
       drawOverlay();
     }));
     video.addEventListener("timeupdate", updatePlayback);
@@ -1014,7 +1232,12 @@
   return {
     benchmarkEvidenceForItem,
     clearLocalDraft,
+    coordinateStatusSummary,
+    coordinateStatusText,
     EXPORT_SCHEMA,
+    EVIDENCE_LAYER_DEFINITIONS,
+    evidenceLayerControlsHtml,
+    equipmentAxisGeometry,
     LOCAL_DRAFT_PREFIX,
     RELEASE_SCHEMA,
     createWorkspace,
@@ -1022,8 +1245,11 @@
     draftStorageKey,
     frameAt,
     frameEvidenceLayers,
+    isPredictedEvidence,
+    legacyEquipmentTrajectoryUntil,
     lineageSummary,
     mount,
+    normalizedTrajectoryUntil,
     restoreLocalDraft,
     saveLocalDraft,
     syncExistingDecisionDraft,

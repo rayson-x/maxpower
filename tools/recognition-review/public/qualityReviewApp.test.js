@@ -9,12 +9,20 @@ const QualityReviewI18n = require("./qualityReviewI18n.js");
 const {
   benchmarkEvidenceForItem,
   clearLocalDraft,
+  coordinateStatusSummary,
+  coordinateStatusText,
   createWorkspace,
   dimensionLabel,
   draftStorageKey,
+  EVIDENCE_LAYER_DEFINITIONS,
+  evidenceLayerControlsHtml,
+  equipmentAxisGeometry,
   frameAt,
   frameEvidenceLayers,
+  isPredictedEvidence,
+  legacyEquipmentTrajectoryUntil,
   lineageSummary,
+  normalizedTrajectoryUntil,
   syncExistingDecisionDraft,
   restoreLocalDraft,
   saveLocalDraft,
@@ -328,6 +336,234 @@ test("review overlay keeps raw pose visible and preserves an oblique equipment a
   assert.equal(layers.inputPose, inputPose);
   assert.deepEqual(layers.equipment, [axis]);
 });
+
+test("review overlay prefers the canonical Rust shaft axis and safely falls back for legacy frames", () => {
+  const canonicalTrack = {
+    trackId: "rust-track-7",
+    source: "geometry",
+    confidence: 0.96,
+    axis: { x1: 0.12, y1: 0.31, x2: 0.88, y2: 0.47 },
+  };
+  const inputAxis = {
+    source: "geometry_input",
+    confidence: 0.91,
+    x1: 0.05,
+    y1: 0.4,
+    x2: 0.95,
+    y2: 0.4,
+  };
+
+  const canonical = frameEvidenceLayers({
+    equipment: [canonicalTrack, { trackId: "plate-8", x: 0.82, y: 0.3, width: 0.1, height: 0.18 }],
+    inputEquipmentAxes: [inputAxis],
+  });
+  assert.deepEqual(canonical.rawEquipment, [
+    canonicalTrack,
+    { trackId: "plate-8", x: 0.82, y: 0.3, width: 0.1, height: 0.18 },
+  ]);
+  assert.deepEqual(canonical.equipment, canonical.rawEquipment);
+  assert.deepEqual(equipmentAxisGeometry(canonical.rawEquipment[0]), {
+    x1: 0.12,
+    y1: 0.31,
+    x2: 0.88,
+    y2: 0.47,
+  });
+  assert.notEqual(
+    equipmentAxisGeometry(canonical.rawEquipment[0]).y1,
+    equipmentAxisGeometry(canonical.rawEquipment[0]).y2,
+  );
+
+  const legacy = frameEvidenceLayers({
+    equipment: [{ x: 0.05, y: 0.39, width: 0.9, height: 0.02 }],
+    inputEquipmentAxes: [inputAxis],
+  });
+  assert.deepEqual(legacy.rawEquipment, [inputAxis]);
+  assert.deepEqual(equipmentAxisGeometry(legacy.rawEquipment[0]), {
+    x1: 0.05,
+    y1: 0.4,
+    x2: 0.95,
+    y2: 0.4,
+  });
+});
+
+test("legacy review releases retain their raw equipment trails without local coordinates", () => {
+  const trajectories = [{
+    kind: "external_load_center",
+    points: [
+      { timestampMs: 100, x: 0.4, y: 0.2 },
+      { timestampMs: 200, x: 0.42, y: 0.3 },
+      { timestampMs: 300, x: 0.45, y: 0.4 },
+    ],
+  }];
+
+  assert.deepEqual(legacyEquipmentTrajectoryUntil(trajectories, 250), [[
+    { timestampMs: 100, x: 0.4, y: 0.2 },
+    { timestampMs: 200, x: 0.42, y: 0.3 },
+  ]]);
+});
+
+test("review projection keeps raw and normalized channels separate and exposes fusion state", () => {
+  const coordinate = {
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    coordinateFrameId: 12,
+    state: "frozen",
+    reason: null,
+    primaryAxis: [0, 1],
+    crossAxis: [1, 0],
+    origin: [0.5, 0.5],
+    scale: 0.2,
+    scaleSource: "projected_bar_length",
+    equipment: {
+      alongAxisProgress: 0.4,
+      crossAxisDisplacement: -0.1,
+      confidence: 0.92,
+      provenance: "equipment_measured",
+    },
+    pose: {
+      alongAxisProgress: 0.5,
+      crossAxisDisplacement: 0.25,
+      confidence: 0.78,
+      provenance: "pose_measured",
+    },
+    channelAgreement: "agreement",
+    confidence: 0.86,
+  };
+  const layers = frameEvidenceLayers({
+    timestampMs: 1_250,
+    landmarks: [{ x: 0.2, y: 0.3, source: "predicted", renderable: true }],
+    equipment: [{ axis: { x1: 0.1, y1: 0.3, x2: 0.9, y2: 0.4 } }],
+    localMotionCoordinate: coordinate,
+  });
+
+  assert.deepEqual(layers.normalizedPose.point, { x: 0.55, y: 0.6 });
+  assert.deepEqual(layers.normalizedEquipment.point, { x: 0.48, y: 0.5800000000000001 });
+  assert.equal(layers.fusionStatus.status, "agreement");
+  assert.deepEqual(coordinateStatusSummary(layers.coordinate), {
+    coordinateFrameId: 12,
+    state: "frozen",
+    scale: 0.2,
+    scaleSource: "projected_bar_length",
+    confidence: 0.86,
+    reason: null,
+    fusionStatus: "agreement",
+  });
+  assert.equal(isPredictedEvidence(layers.rawSkeleton.canonical[0]), true);
+  assert.equal(isPredictedEvidence(layers.normalizedPose), false);
+});
+
+test("normalized trails remain channel-specific and layer controls expose every review surface", () => {
+  const frames = [
+    localCoordinateFrame(100, 0.1, 0.2),
+    localCoordinateFrame(200, 0.2, 0.4),
+    localCoordinateFrame(300, 0.3, 0.6),
+  ];
+
+  assert.deepEqual(normalizedTrajectoryUntil(frames, 250, "pose").map((sample) => ({
+    timestampMs: sample.timestampMs,
+    point: sample.point,
+  })), [
+    { timestampMs: 100, point: { x: 0.5, y: 0.52 } },
+    { timestampMs: 200, point: { x: 0.5, y: 0.54 } },
+  ]);
+  assert.deepEqual(normalizedTrajectoryUntil(frames, 250, "equipment").map((sample) => ({
+    timestampMs: sample.timestampMs,
+    point: sample.point,
+  })), [
+    { timestampMs: 100, point: { x: 0.5, y: 0.54 } },
+    { timestampMs: 200, point: { x: 0.5, y: 0.5800000000000001 } },
+  ]);
+  assert.deepEqual(EVIDENCE_LAYER_DEFINITIONS.map(({ key }) => key), [
+    "rawSkeleton",
+    "rawEquipment",
+    "normalizedPose",
+    "normalizedEquipment",
+    "fusionStatus",
+  ]);
+  const controls = evidenceLayerControlsHtml();
+  EVIDENCE_LAYER_DEFINITIONS.forEach(({ key, label }) => {
+    assert.match(controls, new RegExp(`data-quality-layer="${key}"`, "u"));
+    assert.match(controls, new RegExp(label, "u"));
+  });
+  assert.equal((controls.match(/aria-pressed="true"/gu) || []).length, 5);
+});
+
+test("coordinate status readout keeps state scale confidence reason and fusion visible", () => {
+  assert.equal(coordinateStatusText({
+    coordinateFrameId: 12,
+    state: "degraded",
+    scale: 0.257,
+    scaleSource: "projected_bar_length",
+    confidence: 0.63,
+    reason: "observation_gap",
+    fusionStatus: "equipment_only",
+  }), "COORD #12 · DEGRADED · SCALE projected_bar_length 0.257 · CONF 63% · REASON observation_gap · FUSION equipment_only");
+  assert.equal(coordinateStatusText(null), "COORD UNAVAILABLE · REASON no_coordinate_evidence");
+  assert.equal(coordinateStatusText({
+    coordinateFrameId: 12,
+    state: "frozen",
+    scale: 0.2,
+    scaleSource: "projected_bar_length",
+    confidence: 0.86,
+    reason: null,
+    fusionStatus: "agreement",
+  }, false), "COORD #12 · FROZEN · SCALE projected_bar_length 0.200 · CONF 86% · REASON none");
+});
+
+test("review projection accepts Rust snake-case local coordinate fields", () => {
+  const layers = frameEvidenceLayers({
+    timestampMs: 500,
+    local_motion_coordinate: {
+      coordinate_frame_id: 8,
+      state: "learning",
+      scale: 0.4,
+      scale_source: "projected_bar_length",
+      channel_agreement: "pose_only",
+      confidence: 0.72,
+      equipment: null,
+      pose: {
+        along_axis_progress: 0.25,
+        cross_axis_displacement: -0.5,
+        confidence: 0.7,
+        provenance: "pose_measured",
+      },
+    },
+  });
+
+  assert.deepEqual(layers.normalizedPose.point, { x: 0.4, y: 0.55 });
+  assert.equal(layers.fusionStatus.status, "pose_only");
+  assert.equal(coordinateStatusSummary(layers.coordinate).coordinateFrameId, 8);
+});
+
+function localCoordinateFrame(timestampMs, poseProgress, equipmentProgress) {
+  return {
+    timestampMs,
+    localMotionCoordinate: {
+      schemaVersion: "maxpower-local-motion-coordinate/v1",
+      coordinateFrameId: 7,
+      state: "frozen",
+      reason: null,
+      primaryAxis: [0, 1],
+      crossAxis: [1, 0],
+      origin: [0.5, 0.5],
+      scale: 0.2,
+      scaleSource: "projected_bar_length",
+      pose: {
+        alongAxisProgress: poseProgress,
+        crossAxisDisplacement: 0,
+        confidence: 0.8,
+        provenance: "pose_measured",
+      },
+      equipment: {
+        alongAxisProgress: equipmentProgress,
+        crossAxisDisplacement: 0,
+        confidence: 0.9,
+        provenance: "equipment_measured",
+      },
+      channelAgreement: "agreement",
+      confidence: 0.85,
+    },
+  };
+}
 
 function fixtureRelease() {
   return {
