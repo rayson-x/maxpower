@@ -2,9 +2,9 @@
 
 **What to build:** Produce row-specific Rust endpoints, visible movement-strategy findings and view-bounded quality proposals without reusing bench semantics.
 
-**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable row evidence for Audit B.
+**Blocked by:** Nothing for Audit A; 02 and source-independent executable row evidence for Audit B.
 
-**Status:** needs-info
+**Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
 **Evidence state:** evidence-gated for blind-run/model acceptance.
 
@@ -17,6 +17,6 @@ Delivered implementation, not an accuracy claim:
 
 Evidence still required:
 
-- [ ] Regenerate full-data row proposals and expose each endpoint/conclusion for Audit A, preserving the known annotation mismatch without silent repair.
+- [x] Fresh full-data row proposals expose each endpoint/conclusion for Audit A, preserving the known annotation mismatch without silent repair.
 - [ ] Provide a source-independent executable row Profile/RulePack and untouched/new source set.
 - [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics by view before Audit B can start.

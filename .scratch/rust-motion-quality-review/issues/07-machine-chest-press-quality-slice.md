@@ -2,9 +2,9 @@
 
 **What to build:** Produce press-specific Rust phase, endpoint and direct quality proposals for the annotated machine chest press contexts while declaring unavailable equipment tracking.
 
-**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
+**Blocked by:** Nothing for Audit A; 02 and source-independent executable evidence for Audit B.
 
-**Status:** needs-info
+**Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
 **Evidence state:** evidence-gated for blind-run/model acceptance.
 
@@ -16,6 +16,6 @@ Delivered implementation, not an accuracy claim:
 
 Evidence still required:
 
-- [ ] Regenerate real full-data proposals and expose every target for Audit A.
+- [x] Fresh full-data proposals expose every target for Audit A.
 - [ ] Provide source-independent executable profiles plus untouched/new sources.
 - [ ] Publish fresh blind Rep/start/end and per-dimension proposal/abstention metrics by view before Audit B.

@@ -2,9 +2,9 @@
 
 **What to build:** Preserve useful body-motion facts and explicit abstentions for the annotated pull-up context without installing a mismatched generic profile.
 
-**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
+**Blocked by:** Nothing for Audit A; 02 and source-independent executable evidence for Audit B.
 
-**Status:** needs-info
+**Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
 **Evidence state:** evidence-gated for blind-run/model acceptance.
 
@@ -16,6 +16,6 @@ Delivered implementation, not an accuracy claim:
 
 Evidence still required:
 
-- [ ] Regenerate the full-data observation/proposal record for Audit A.
+- [x] Fresh full-data observation/proposal record is exposed for Audit A.
 - [ ] Provide source-independent executable phase support plus untouched/new sources before any capability promotion.
 - [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics before Audit B.

@@ -2,9 +2,9 @@
 
 **What to build:** Produce bodyweight-specific Rust endpoints and observable quality proposals for the annotated push-up context.
 
-**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
+**Blocked by:** Nothing for Audit A; 02 and source-independent executable evidence for Audit B.
 
-**Status:** needs-info
+**Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
 **Evidence state:** evidence-gated for blind-run/model acceptance.
 
@@ -16,6 +16,6 @@ Delivered implementation, not an accuracy claim:
 
 Evidence still required:
 
-- [ ] Regenerate full-data proposals and expose every target for Audit A.
+- [x] Fresh full-data proposals expose every target for Audit A.
 - [ ] Provide source-independent executable evidence plus untouched/new sources.
 - [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics before Audit B.

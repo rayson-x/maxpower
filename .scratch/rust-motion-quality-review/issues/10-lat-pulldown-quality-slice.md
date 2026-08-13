@@ -2,9 +2,9 @@
 
 **What to build:** Produce pulldown-specific Rust endpoints, visible pull strategy and reasoned quality proposals for rear and rear-left-45 contexts.
 
-**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
+**Blocked by:** Nothing for Audit A; 02 and source-independent executable evidence for Audit B.
 
-**Status:** needs-info
+**Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
 **Evidence state:** evidence-gated for blind-run/model acceptance.
 
@@ -16,6 +16,6 @@ Delivered implementation, not an accuracy claim:
 
 Evidence still required:
 
-- [ ] Regenerate rear and rear-oblique full-data proposals for Audit A.
+- [x] Fresh rear and rear-oblique full-data proposals are exposed for Audit A.
 - [ ] Provide source-independent executable profiles plus untouched/new sources.
 - [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics by view before Audit B.

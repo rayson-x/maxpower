@@ -1,4 +1,4 @@
-Status: calibration-audit-open / model-acceptance-data-gated
+Status: rust-calibration-audit-open / client-model-acceptance-data-gated
 
 # Rust 单次因果动作理解与人工质量审核 MVP
 
@@ -21,6 +21,8 @@ Status: calibration-audit-open / model-acceptance-data-gated
 1. **Untouched model-acceptance evaluation**：推理时只提供动作和机位上下文，不提供人工 Rep 时间线。Rust 完成一次因果识别并冻结输出后，才揭示人工 `start/end`。目标视频、同一 source/session 及其全部衍生数据都不得参与该运行所用 Profile/RulePack 的拟合或阈值选择。只有从未参与训练、调参、规则选择或人工结果检查的新来源集合才能开启这一验收。
 2. **Touched benchmark diagnostics**：已经参与阈值或策略选择的视频仍可用于回归、消融和错误定位，但产物必须标记 `touched_benchmark`、`acceptanceEligible=false`，不得使用 `blind`、`held-out` 或“泛化准确率”等表述。
 3. **Full-data calibration proposal**：允许使用全部现有已标注数据，对 50 个视频、54 个上下文生成 Rust 首轮端点与逐项质量提案，供用户校准。它是人工审核队列，不是模型准确率，也不能满足 model-acceptance gate。
+
+当前 fresh full-data calibration release 使用离线 Python ONNX 参考管线提取的 YOLOX + RTMPose Halpe-26 观测，并明确标记为 client visual acceptance 不合格。Python 不进入最终客户端验收链；Web/Android/iOS 视觉能力必须由各自 ONNX Runtime → Rust SDK 的单次因果产物另行冻结和验证。A 类审核校准 Rust 解释，不能被引用为三端视觉能力。
 
 Rust 对每个 Rep 输出统一的 `start_anchor / primary_turnaround / end_return`。动作契约负责把两段运动命名为向心或离心，因此卧推、侧平举、划船、深蹲等可以共享端点结构，而不会被强行套用同一种阶段顺序。单侧与交替动作按每一侧的完整周期分别计 Rep，保存解剖侧；用户不需要左右交替。
 
@@ -50,6 +52,7 @@ Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械
 - 页面加载的 proposal bytes、hash、lineage 与该 release 一致，视频/帧/骨架/器械/时间线同步；
 - review document、UI、只读媒体服务和导出 round-trip 测试对该 fresh release 通过；
 - 生成数量和测试结果从 fresh artifacts 写回交接文档，而不是沿用旧对话中的数字。
+- release 明确记录视觉观测来源；离线 Python 参考观测只能开启 Rust 规则校准，不能满足客户端视觉或端到端验收。
 
 这一审核只回答“Rust 首轮理解哪里对、哪里错、正确值是什么”，不回答模型是否泛化。
 

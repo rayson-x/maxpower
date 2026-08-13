@@ -2,9 +2,9 @@
 
 **What to build:** Preserve the four split contexts, count each side's complete cycle independently, and produce side-aware Rust endpoints and proposals under each exact view window.
 
-**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
+**Blocked by:** Nothing for Audit A; 02 and source-independent executable evidence for Audit B.
 
-**Status:** needs-info
+**Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
 **Evidence state:** evidence-gated for blind-run/model acceptance.
 
@@ -17,6 +17,6 @@ Delivered implementation, not an accuracy claim:
 
 Evidence still required:
 
-- [ ] Regenerate each split-context full-data proposal for Audit A.
+- [x] Fresh proposals for every split context are exposed for Audit A.
 - [ ] Provide source-independent executable profiles plus untouched/new sources.
 - [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics by exact context window before Audit B.

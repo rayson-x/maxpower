@@ -16,6 +16,8 @@ Status: calibration-audit-open / model-acceptance-data-gated
 
 目的：审核 full-data Rust proposals，逐 Rep 核对 `start_anchor`、`primary_turnaround`、`end_return` 以及每条质量结论。它用于形成校准数据，不用于证明泛化。
 
+当前 A 发布包的 Halpe-26 观测来自离线 Python ONNX 参考提取，且在产物中明确记录 `pythonVisionUsed=true`、`clientVisualAcceptanceEligible=false`。因此 A 只校准 Rust 对既定观测的端点与规则解释；它不验收 Web、Android 或 iOS 的视觉模型。客户端视觉链必须使用另行冻结的 ONNX Runtime Web/native → Rust 单次因果结果验收，二者不得混写。
+
 启动条件：
 
 - [x] 用当前代码重新生成冻结 full-data release，并记录 release ID、source digest、proposal count 与 capability count。
@@ -41,16 +43,20 @@ Status: `data-gated`
 
 | 字段 | Fresh value |
 | --- | --- |
-| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:69d5efa85a161a875671d0e4fa26cec10c7440cc97385dffe8a9e83c053ce464` |
-| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `fe1dcf8a423503353984ab9f0ba05b1e36fb329e91509b283222ea8d47bf91e3` |
+| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:3730a5a7974863b8e7bdd7074144707f7bd80b49c830448e26108ba557a76f2e` |
+| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `33a486af354203f7e670987e9fffc5fab15da92292f8ebfa442e2fc0188182da` |
 | touched benchmark run / digest | `personal-touched-benchmark-rust-qlt1-v1` / `151d1c1740c49eb7ae8467e4bc1c92aedb662246e47613b12efc1427ef3aba92` |
 | Rust proposal count | `501` Reps / `5511` independent endpoint-or-conclusion review targets |
-| capability counts | `quality_supported=3`, `phase_supported=50`, `observation_only=1`, `unsupported=0` exact contexts |
+| capability counts | `quality_supported=0`, `phase_supported=53`, `observation_only=1`, `unsupported=0` exact contexts |
+| conclusion states | `observed_acceptable=2030`, `observed_deviation=110`, `cannot_judge=1868`; these are proposals awaiting Audit A, not accepted truth |
+| calibration visual provenance | `offline_python_onnx_reference_only`; `pythonVisionUsed=true`; client visual acceptance ineligible |
 | equipment evidence | `2625` submitted equipment frames, `2357` Rust-observed frames, `135` equipment-measured endpoints |
 | review document/UI/server/export tests | public review document/UI `11/11`; review data/media/server `37/37`; fresh browser load/playback/toggle smoke passed |
-| runtime/contract tests | Rust `133/133`; QLT1 native projection `5/5`; real Halpe-26 Web parity `3/3`; full proposal/release `12/12`; quality contracts `16/16`; ablation `6/6`; governance `3/3`; full release contract `7/7` |
-| governed input catalog | `maxpower-motion-training-data-v1`; local runner catalog SHA-256 `02473226f22c973ee4526820911878e396e737514dc91b0b49eac20c23eb407f` |
+| runtime/contract tests | Rust `135/135`; Web ONNX→Rust causal chain `12/12`; QLT1 native projection `5/5`; native Halpe-26/equipment contract `7/7`; iOS Rust-byte parity `14/14` frames; Android Rust/CMake `4/4` ABI; full proposal/release `17/17`; quality contracts `16/16`; ablation `6/6`; governance `3/3`; full release contract `8/8` |
+| governed input catalog | `maxpower-motion-training-data-v1`; local runner catalog SHA-256 `7eefac253483bedc21bd3e2a85bffa7d9a8087a218c4fa0b911ff367f5b2eff1`; Rust WASM SHA-256 `176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6` |
 | model-acceptance metrics | data-gated |
+
+Native 验证边界：Android Rust/CMake 已覆盖 4 个 ABI，但本机剩余磁盘空间不足且没有连接真机，因此完整 Kotlin instrumentation/真机相机流不在本轮通过声明内。源码链与跨端契约已经交付；真机运行仍是客户端验收项，不得由编译通过替代。
 
 ## 已交付能力与仍待证据
 

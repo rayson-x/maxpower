@@ -64,6 +64,7 @@ tools/harness/out/
 /public/motion-sdk/
 /public/models/rtmpose-m-halpe26-256x192.onnx
 /public/models/yolox-nano-humanart-416x416.onnx
+/public/client-harness/runtime/
 
 # Derived skeletal trajectories remain local unless explicitly de-identified.
 /data/
@@ -75,3 +76,4 @@ tools/harness/out/
 /data/training/
 /modules/pose-camera/ios/Frameworks/
 /modules/pose-camera/android/build/rustJni/
+/modules/pose-camera/android/src/main/jniLibs/
