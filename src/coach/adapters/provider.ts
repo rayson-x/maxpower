@@ -2,9 +2,12 @@ import type { LedgerSnapshot } from "../model";
 import { projectDomainEvents } from "../domain";
 import { stableHash } from "../stable";
 import { redactDirectIdentifiers } from "../remoteRedaction";
+import { AGENT_SOUL } from "../agentSoul";
 import { COACH_PLAYBOOK } from "../playbook";
 import type { CoachToolManifest } from "../toolRegistry";
 import { openAiCompatibleToolName } from "./openAiToolName";
+import { projectOnboardingProgress } from "../../onboarding/OnboardingService";
+import { goalDrivenOnboardingFrontier } from "../../onboarding/FieldCatalog";
 
 export type ProviderEvent =
   | { type: "text-delta"; delta: string }
@@ -40,6 +43,8 @@ export interface ProviderContext {
   currentConversation: Array<Record<string, unknown>>;
   /** 窗口外对话按 run 分组的摘要；窗口内无内容时为空数组。 */
   conversationSummaries: Array<Record<string, unknown>>;
+  /** Only present for a draft-scoped onboarding Coach session. Still a draft, never Profile truth. */
+  onboardingDraft?: Record<string, unknown>;
 }
 
 export interface ContextManifest {
@@ -67,6 +72,8 @@ export interface ContextManifest {
   remoteLlmConsentRef?: string;
   /** 场景 playbook 版本（ticket 06）：对话准则钉入 manifest，可追溯到当次生效版本。 */
   playbookVersion?: string;
+  /** Stable interaction Soul assembled locally for this request. */
+  agentSoulVersion?: string;
   /** 上下文预算与降级记录（ticket 04）；未触发降级时 conversation 为 verbatim。 */
   contextBudget?: {
     maxTokens: number;
@@ -245,8 +252,14 @@ export class ContextAssembler {
     contextManifest: ContextManifest;
   } {
     const user = snapshot.users.find((candidate) => candidate.userId === userId);
+    const onboardingSession = sessionId
+      ? snapshot.sessions.find((candidate) => candidate.id === sessionId && candidate.userId === userId && candidate.context.kind === "onboarding")
+      : undefined;
+    const onboardingDraft = onboardingSession
+      ? projectOnboardingProgress(snapshot.onboardingDraftEvents, onboardingSession.context.ref)
+      : undefined;
     const domain = projectDomainEvents(snapshot.domainEvents, { userId });
-    if (!user && !domain.profile) throw new Error(`User facts not found: ${userId}`);
+    if (!user && !domain.profile && !onboardingDraft) throw new Error(`User facts not found: ${userId}`);
     const redactedPaths: string[] = [];
     const userPseudonym = `local-${stableHash({ userId })}`;
     const profile = sanitizeRecord(
@@ -421,6 +434,19 @@ export class ContextAssembler {
         };
       }),
       conversationSummaries: summarizedConversation,
+      ...(onboardingDraft ? {
+        onboardingDraft: sanitizeRecord({
+          id: onboardingDraft.id,
+          revision: onboardingDraft.revision,
+          baseline: onboardingDraft.patch.baseline,
+          goalCapture: onboardingDraft.patch.goalCapture,
+          dynamicFields: onboardingDraft.patch.dynamicFields,
+          trainingBackground: onboardingDraft.patch.trainingBackground,
+          assessment: onboardingDraft.coachingLevelAssessments?.at(-1),
+          baselineMissingFields: onboardingDraft.baselineMissingFields,
+          questionFrontier: goalDrivenOnboardingFrontier(onboardingDraft),
+        }, "onboarding_draft", redactedPaths, false),
+      } : {}),
     };
     const retainedTimeline = [...compressedTimeline, ...visibleTimeline];
     const earliestTimelineEvent = retainedTimeline[0];
@@ -477,6 +503,7 @@ export class ContextAssembler {
           "canonical_evidence",
           "working_memory",
           "current_conversation",
+          ...(onboardingDraft ? ["onboarding_draft"] : []),
         ],
         priority: ["authoritative_facts", "active_constraints", "working_memory", "conversation"],
         productionCompression: compressedTimeline.length ? "fact_ref_hierarchical" : "none",
@@ -486,6 +513,7 @@ export class ContextAssembler {
         mediaAttachments: [],
         redactionPolicyVersion: "direct-identifiers-v1",
         playbookVersion: COACH_PLAYBOOK.version,
+        agentSoulVersion: AGENT_SOUL.version,
         contextBudget: {
           maxTokens,
           estimatedTokens: estimateTokens(),
@@ -615,6 +643,36 @@ export class LocalCoachProvider implements LLMProvider {
   readonly usesNetwork = false;
 
   async *stream(request: LLMProviderRequest): AsyncIterable<ProviderEvent> {
+    const onboarding = localOnboardingFrontier(request.context.onboardingDraft);
+    if (onboarding) {
+      if (onboarding.kind === "natural_training_background") {
+        const background = extractLocalTrainingBackground(request.userText);
+        if (background) {
+          yield { type: "tool-call", toolCallId: `local-onboarding-background-${request.runId}`, toolName: "onboarding.capture_training_background", input: background };
+        } else {
+          yield { type: "text-delta", delta: "先说说你最近怎么练：大概练了多久、近几周一周几次、在哪练、每次多久。" };
+        }
+      } else if (onboarding.kind === "assess_training_context") {
+        yield { type: "tool-call", toolCallId: `local-onboarding-assessment-${request.runId}`, toolName: "onboarding.assess_training_context", input: {} };
+      } else if (onboarding.kind === "catalog_fields") {
+        yield { type: "text-delta", delta: "我把下一步会影响这版目标安排的信息整理成一张小表。" };
+        yield {
+          type: "tool-call",
+          toolCallId: `local-onboarding-form-${request.runId}`,
+          toolName: "onboarding.request_form",
+          input: {
+            topic: onboarding.topic,
+            fieldIds: onboarding.fieldIds,
+            reasonCode: onboarding.reasonCode,
+            requiredFor: onboarding.requiredFor,
+          },
+        };
+      } else {
+        yield { type: "text-delta", delta: "训练背景和目标相关信息已经够用，可以先看一遍档案摘要再确认。" };
+      }
+      yield { type: "completed" };
+      return;
+    }
     const text = request.userText.trim();
     const lower = text.toLowerCase();
     const motionEvidence = request.context.canonicalEvidence.filter(isTrainingExecutionEvidence);
@@ -755,6 +813,68 @@ export class LocalCoachProvider implements LLMProvider {
     yield { type: "text-delta", delta: response };
     yield { type: "completed" };
   }
+
+  async *resume(request: LLMProviderResumeRequest): AsyncIterable<ProviderEvent> {
+    if ("toolName" in request.continuation && request.continuation.toolName === "onboarding.request_form") {
+      yield { type: "text-delta", delta: "填完这张卡继续，我会接着把已知和未知分开整理。" };
+      yield { type: "completed" };
+      return;
+    }
+    yield* this.stream(request);
+  }
+}
+
+type LocalOnboardingFrontier =
+  | { kind: "natural_training_background" }
+  | { kind: "assess_training_context" }
+  | { kind: "catalog_fields"; topic: string; reasonCode: string; requiredFor: string; fieldIds: readonly string[] }
+  | { kind: "review_dossier" };
+
+/** Reads only the local harness-owned frontier shape; malformed context falls back safely. */
+function localOnboardingFrontier(value: Record<string, unknown> | undefined): LocalOnboardingFrontier | undefined {
+  const raw = value?.questionFrontier;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const frontier = raw as Record<string, unknown>;
+  if (frontier.kind === "natural_training_background" || frontier.kind === "assess_training_context" || frontier.kind === "review_dossier") return { kind: frontier.kind };
+  if (
+    frontier.kind === "catalog_fields"
+    && typeof frontier.topic === "string"
+    && typeof frontier.reasonCode === "string"
+    && typeof frontier.requiredFor === "string"
+    && Array.isArray(frontier.fieldIds)
+    && frontier.fieldIds.length > 0
+    && frontier.fieldIds.length <= 3
+    && frontier.fieldIds.every((fieldId) => typeof fieldId === "string")
+  ) {
+    return { kind: "catalog_fields", topic: frontier.topic, reasonCode: frontier.reasonCode, requiredFor: frontier.requiredFor, fieldIds: frontier.fieldIds };
+  }
+  return undefined;
+}
+
+/** Narrow offline extraction, limited to facts explicitly written in this turn. */
+function extractLocalTrainingBackground(text: string): Record<string, unknown> | undefined {
+  if (/^The baseline dossier is now available/u.test(text)) return undefined;
+  const input: Record<string, unknown> = {};
+  const years = text.match(/练(?:了)?\s*(\d+(?:\.\d+)?)\s*年/u);
+  const months = text.match(/练(?:了)?\s*(\d+)\s*个?月/u);
+  if (years) {
+    const value = Math.round(Number(years[1]) * 12);
+    if (Number.isFinite(value) && value >= 0 && value <= 1200) input.cumulativeTrainingMonths = { minimum: value, maximum: value };
+  } else if (months) {
+    const value = Number(months[1]);
+    if (Number.isFinite(value) && value >= 0 && value <= 1200) input.cumulativeTrainingMonths = { minimum: value, maximum: value };
+  }
+  const frequency = text.match(/(?:每周|一周)\s*(\d+)\s*(?:练|天)/u);
+  const minutes = text.match(/每次\s*(\d+)\s*(?:分|分钟)/u);
+  const hours = text.match(/每次\s*(\d+(?:\.\d+)?)\s*(?:小?时)/u);
+  const duration = minutes ? Number(minutes[1]) : hours ? Math.round(Number(hours[1]) * 60) : undefined;
+  if (frequency && duration && Number(frequency[1]) >= 1 && Number(frequency[1]) <= 14 && duration >= 10 && duration <= 360) {
+    input.schedule = { weeklyFrequency: Number(frequency[1]), sessionDurationMinutes: duration };
+  }
+  if (/健身房/u.test(text)) input.environments = ["gym"];
+  if (/胸.*背.*腿.*肩|胸背腿肩/u.test(text)) input.recentSplit = ["胸", "背", "腿", "肩"];
+  if (/稳定|规律|坚持/u.test(text)) input.executionStability = "reported_consistent";
+  return Object.keys(input).length ? input : undefined;
 }
 
 interface TrainingExecutionEvidenceRecord extends Record<string, unknown> {
@@ -850,14 +970,23 @@ function summarizeTrainingExecutionEvidence(evidence: readonly TrainingExecution
     ) ?? [];
     const maximumPathStep = maximumFinite(trajectoryReps.map((rep) => rep.p90FrameStepTorsoNorm));
     const maximumPredictedRate = maximumFinite(trajectoryReps.map((rep) => rep.predictedOrRepairedPointRate));
-    const unstable = outcomes.rejected > outcomes.confirmed
-      || (typeof emptyRate === "number" && emptyRate > 0.05)
-      || (maximumPredictedRate !== null && maximumPredictedRate > 0.15)
-      || (maximumPathStep !== null && maximumPathStep > 0.50);
+    const timelineEvidenceRisk = outcomes.rejected > outcomes.confirmed
+      || outcomes.needsReview > outcomes.confirmed;
+    const observationRiskReasons = [
+      typeof emptyRate === "number" && emptyRate > 0.05
+        ? `空候选帧 ${(emptyRate * 100).toFixed(1)}%`
+        : null,
+      maximumPredictedRate !== null && maximumPredictedRate > 0.15
+        ? `预测/修复点最高 ${(maximumPredictedRate * 100).toFixed(0)}%`
+        : null,
+      maximumPathStep !== null && maximumPathStep > 0.50
+        ? `骨架步长 P90 最高 ${maximumPathStep.toFixed(3)} 个躯干长度`
+        : null,
+    ].filter((reason): reason is string => reason !== null);
     lines.push(
       `${assessment.preset.exerciseId}（${assessment.preset.capturePosition}）：确认 ${outcomes.confirmed} 次，待复核 ${outcomes.needsReview} 次，拒绝 ${outcomes.rejected} 次；客户端观测 ${observation.effectiveObservationFps.toFixed(1)} FPS${typeof emptyRate === "number" ? `，空候选帧 ${(emptyRate * 100).toFixed(1)}%` : ""}。`,
     );
-    const perRep = (assessment.reps ?? []).slice(0, 12).map((rep) => {
+    const perRep = (assessment.reps ?? []).map((rep) => {
       const firstPhaseMs = Math.max(0, rep.turnaroundMs - rep.startMs);
       const secondPhaseMs = Math.max(0, rep.endMs - rep.turnaroundMs);
       const quality = rep.observation;
@@ -869,14 +998,20 @@ function summarizeTrainingExecutionEvidence(evidence: readonly TrainingExecution
     if (perRep.length) {
       lines.push(`逐 rep 客户端封口结果：${perRep.join("；")}。这里的完成质量只表示周期证据与观测可信度，不表示技术标准度。`);
     }
-    if (unstable) {
+    if (outcomes.needsReview > 0) {
+      lines.push(`其中 ${outcomes.needsReview} 次周期被 Rust 标记为 needs_review，不计入正式训练量，需按对应 rep 的观测证据复核。`);
+    }
+    if (timelineEvidenceRisk) {
       const reasons = Object.entries(outcomes.reasonCounts ?? {})
         .filter(([reason, count]) => reason !== "none" && count > 0)
         .sort((left, right) => right[1] - left[1])
         .slice(0, 3)
         .map(([reason, count]) => `${reason}×${count}`)
         .join("、");
-      lines.push(`这组时间轴证据不稳定${reasons ? `（${reasons}）` : ""}，当前不应据此给出动作技术纠正。`);
+      lines.push(`这组周期候选证据不稳定${reasons ? `（${reasons}）` : ""}，当前不应据此确认正式训练量。`);
+    }
+    if (observationRiskReasons.length > 0) {
+      lines.push(`骨架观测不稳定（${observationRiskReasons.join("、")}）；这会降低动作技术判断可信度，但不会改写已经由 Rust 封口的 rep 与阶段，当前不能据此给出动作技术纠正。`);
     }
     if (phaseReps.length >= 2) {
       const first = phaseReps[0];
@@ -1218,7 +1353,7 @@ function openAiCompatibleRequest(input: {
         type: "function",
         function: {
           name: wireName,
-          description: `MaxPower ${tool.accessClass} tool (${tool.name})`,
+          description: tool.description ?? `MaxPower ${tool.accessClass} tool (${tool.name})`,
           parameters: tool.inputSchema,
         },
       };

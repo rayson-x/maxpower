@@ -9,7 +9,7 @@ import type {
 } from "./domain";
 
 export type CoachSessionStatus = "active" | "suspended" | "completed" | "archived";
-export type CoachContextKind = "today" | "calendar" | "plan" | "progress" | "workout" | "profile";
+export type CoachContextKind = "today" | "calendar" | "plan" | "progress" | "workout" | "profile" | "onboarding";
 
 export interface ContextRef {
   kind: CoachContextKind;
@@ -21,7 +21,7 @@ export interface CoachSession {
   userId: string;
   status: CoachSessionStatus;
   context: ContextRef;
-  taskKind?: "today_plan" | "workout_execution" | "plan_adjustment" | "weekly_report" | "general";
+  taskKind?: "today_plan" | "workout_execution" | "plan_adjustment" | "weekly_report" | "onboarding" | "general";
   title?: string;
   revision?: number;
   contextRefs?: readonly ContextRef[];
@@ -88,7 +88,7 @@ export interface CoachToolCallRecord {
 
 export interface UserProfile {
   goal: "hypertrophy" | "fat_loss" | "strength" | "conditioning" | "health";
-  trainingExperience: "beginner" | "intermediate" | "advanced";
+  trainingExperience: "beginner" | "intermediate" | "advanced" | "unknown";
   name?: string;
   address?: string;
   email?: string;
@@ -440,6 +440,8 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
     sourceTimelineEventIds?: readonly string[];
     sourcePreviewId?: string;
   };
+  /** Initial Planner handoff uses the exclusive Agent Knowledge backend. */
+  firstPlannerHandoff?: import("../onboarding").FirstPlannerHandoffProposal;
   phaseTransition?: import("../replanning").PhaseTransitionProposal;
 }
 

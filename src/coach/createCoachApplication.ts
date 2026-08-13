@@ -34,6 +34,7 @@ import type {
   FactRef,
   HealthImportState,
   HealthMetric,
+  LedgerSnapshot,
   PlanRevision,
   RuntimeServices,
   TimelineEvent,
@@ -101,12 +102,31 @@ import {
   type MovementPattern,
   type SubstitutionInput,
 } from "../knowledge";
-import { OnboardingService } from "../onboarding/OnboardingService";
+import {
+  OnboardingService,
+  projectOnboardingEntryState,
+  projectOnboardingProgress,
+} from "../onboarding/OnboardingService";
+import {
+  OnboardingValidationError,
+} from "../onboarding/model";
 import type {
   OnboardingPatch,
   OnboardingSection,
 } from "../onboarding/model";
 import { evaluateOnboardingPolicy } from "../onboarding/policy";
+import { projectOnboardingReadinessSafety } from "../onboarding/ReadinessSafety";
+import { buildOnboardingDossierSummary } from "../onboarding/DossierSummary";
+import { goalDrivenOnboardingFrontier } from "../onboarding/FieldCatalog";
+import {
+  assessmentHasMeaningfulEvidence,
+  firstPlannerEvidence,
+  firstPlannerNeedsInput,
+} from "../onboarding/FirstPlannerHandoff";
+import {
+  createInstalledAgentKnowledgeHarness,
+  type AgentKnowledgeHarness,
+} from "../agent-knowledge";
 import {
   GoalCyclePlanner,
   type PlannerDecision,
@@ -177,6 +197,8 @@ import { LocalRecipeEngine } from "../scheduling";
 const DEFAULT_KNOWLEDGE_REGISTRY = new KnowledgePackRegistry(createInstalledKnowledgePack());
 
 export interface CoachApplicationDependencies extends CoachApplicationPorts {
+  /** Exclusive knowledge source for the first onboarding Planner handoff. */
+  agentKnowledgeHarness?: AgentKnowledgeHarness;
   knowledgeRegistry?: KnowledgePackRegistry;
   /** 本地安装的知识包来源（ticket 02）；配置后按 内置兜底 + 数据包覆盖 加载。 */
   knowledgePackSource?: KnowledgePackSourcePort;
@@ -289,6 +311,7 @@ export class CoachApplication {
   private readonly credentials?: SecureCredentialPort;
   private readonly monotonicClock: NonNullable<CoachApplicationPorts["monotonicClock"]>;
   private readonly knowledge: KnowledgePackRegistry;
+  private readonly agentKnowledge: AgentKnowledgeHarness;
   private knowledgePackLoad: KnowledgePackLoadResult | null;
   private readonly personalKnowledge?: import("../knowledge/personalLayer").PersonalKnowledgeLayer;
   private readonly onboarding: OnboardingService;
@@ -321,6 +344,7 @@ export class CoachApplication {
     this.credentials = dependencies.credentials;
     this.monotonicClock = dependencies.monotonicClock ?? { nowMs: () => Date.now() };
     this.personalKnowledge = dependencies.personalKnowledge;
+    this.agentKnowledge = dependencies.agentKnowledgeHarness ?? createInstalledAgentKnowledgeHarness();
     this.knowledgePackLoad = null;
     if (dependencies.knowledgeRegistry) {
       this.knowledge = dependencies.knowledgeRegistry;
@@ -406,6 +430,11 @@ export class CoachApplication {
         substituteExercise: (input, execution) => this.substituteExerciseForTool(input, execution),
         reportWorkoutSet: (input, execution) => this.reportWorkoutSetForTool(input, execution),
         triggerReplanWithContext: (input, execution) => this.triggerReplanWithContextForTool(input, execution),
+        requestOnboardingForm: (input, execution) => this.requestOnboardingFormForTool(input, execution),
+        captureOnboardingTrainingBackground: (input, execution) => this.captureOnboardingTrainingBackgroundForTool(input, execution),
+        assessOnboardingTrainingContext: (input, execution) => this.assessOnboardingTrainingContextForTool(input, execution),
+        captureOnboardingGoalNarrative: (input, execution) => this.captureOnboardingGoalNarrativeForTool(input, execution),
+        captureOnboardingFields: (input, execution) => this.captureOnboardingFieldsForTool(input, execution),
       },
       {
         knowledgeToolsEnabled: dependencies.knowledgeToolsEnabled ?? false,
@@ -726,9 +755,16 @@ export class CoachApplication {
         artifact.id === input.previewId && artifact.kind === "evidence_brief" && artifact.userId === input.userId,
     );
     if (!preview?.planningPreview) throw new Error("planning_preview_not_found");
+    const sourceTimelineIds = new Set(preview.planningPreview.sourceTimelineEventIds ?? []);
+    const latestSourceTimelineEvent = snapshot.domainEvents
+      .filter((event) => sourceTimelineIds.has(event.id))
+      .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))[0];
+    const currentDate = latestSourceTimelineEvent
+      ? localDateAtTimezoneOffset(latestSourceTimelineEvent.occurredAt, latestSourceTimelineEvent.timezoneOffsetMinutes)
+      : preview.planningPreview.request.currentDate;
     return this.createPlanningPreview({
       userId: input.userId,
-      currentDate: preview.planningPreview.request.currentDate,
+      currentDate,
       trigger: preview.planningPreview.request.trigger,
       ...(preview.planningPreview.request.requestedScope ? { requestedScope: preview.planningPreview.request.requestedScope } : {}),
       ...(preview.planningPreview.request.missedSessionDates?.length ? { missedSessionDates: preview.planningPreview.request.missedSessionDates } : {}),
@@ -1888,14 +1924,15 @@ export class CoachApplication {
         layer: "raw_observation",
       },
     });
-    const preview = await this.createPlanningPreview({
-      userId: session.userId,
-      currentDate: now.slice(0, 10),
-      trigger: "user_requested",
-      requestedScope: "future_plan",
-      sourceTimelineEventIds: record.eventIds,
-      idempotencyKey: `tool:${identity}:energy-rebalance:preview`,
-    });
+    const preview = await this.findPendingRiskPreviewForTimelineEvents(session.userId, record.eventIds)
+      ?? await this.createPlanningPreview({
+        userId: session.userId,
+        currentDate: localDateAtTimezoneOffset(now, timezoneOffsetMinutes),
+        trigger: "user_requested",
+        requestedScope: "future_plan",
+        sourceTimelineEventIds: record.eventIds,
+        idempotencyKey: `tool:${identity}:energy-rebalance:preview`,
+      });
     return this.presentArtifactForTool({
       sessionId: session.id,
       toolName: "plan.propose_energy_rebalance",
@@ -1990,17 +2027,20 @@ export class CoachApplication {
       trigger = input.report.kind === "schedule" ? "schedule_changed" : input.report.kind === "missed_training" ? "repeated_missed_sessions" : "session_completed";
       missedSessionDates = input.report.kind === "schedule" ? input.report.unavailableDates : input.report.kind === "missed_training" ? input.report.missedDates : undefined;
     }
-    const preview = await this.createPlanningPreview({
-      userId: session.userId,
-      currentDate: now.slice(0, 10),
-      trigger,
-      requestedScope: "future_plan",
-      ...(missedSessionDates?.length ? { missedSessionDates } : {}),
-      ...(transientRecoveryConstraint ? { transientRecoveryConstraint } : {}),
-      ...(transientNextSessionFocus ? { transientNextSessionFocus } : {}),
-      ...(sourceTimelineEventIds?.length ? { sourceTimelineEventIds } : {}),
-      idempotencyKey: `tool:${identity}:adaptive:${input.report.kind}:preview`,
-    });
+    const pendingRiskPreview = sourceTimelineEventIds?.length
+      ? await this.findPendingRiskPreviewForTimelineEvents(session.userId, sourceTimelineEventIds)
+      : undefined;
+    const preview = pendingRiskPreview ?? await this.createPlanningPreview({
+        userId: session.userId,
+        currentDate: localDateAtTimezoneOffset(now, timezoneOffsetMinutes),
+        trigger,
+        requestedScope: "future_plan",
+        ...(missedSessionDates?.length ? { missedSessionDates } : {}),
+        ...(transientRecoveryConstraint ? { transientRecoveryConstraint } : {}),
+        ...(transientNextSessionFocus ? { transientNextSessionFocus } : {}),
+        ...(sourceTimelineEventIds?.length ? { sourceTimelineEventIds } : {}),
+        idempotencyKey: `tool:${identity}:adaptive:${input.report.kind}:preview`,
+      });
     return this.presentArtifactForTool({
       sessionId: session.id,
       toolName: "plan.adapt_from_user_report",
@@ -3126,6 +3166,29 @@ export class CoachApplication {
       .sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`));
   }
 
+  private buildOnboardingDossierSummary(
+    snapshot: LedgerSnapshot,
+    draftId: string,
+  ): import("../onboarding").OnboardingDossierSummary {
+    const draft = projectOnboardingProgress(snapshot.onboardingDraftEvents, draftId);
+    const projection = projectDomainEvents(snapshot.domainEvents, { userId: draft.userId });
+    const readinessSafety = projectOnboardingReadinessSafety({
+      draft,
+      recoveryConstraints: projection.recoveryConstraints,
+      now: this.runtime.now(),
+    });
+    const factFrontier = snapshot.aggregateRevisions
+      .filter((item) => item.userId === draft.userId)
+      .map(({ kind, id, revision }) => ({ kind, id, revision }))
+      .sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`));
+    return buildOnboardingDossierSummary({
+      draft,
+      readinessSafety,
+      factFrontier,
+      workingMemory: snapshot.workingMemory.filter((item) => item.userId === draft.userId),
+    });
+  }
+
   evaluateTrainingRule(context: RuleEvaluationContext): RuleDecision {
     return this.trainingRules.evaluate(context);
   }
@@ -3333,6 +3396,54 @@ export class CoachApplication {
       envelope: baseEnvelope,
     });
     const timelineEventIds = [...recorded.eventIds];
+    if (input.checkIn.sleepDurationHours !== undefined) {
+      const sleepRecorded = await this.recordTimelineFact({
+        userId: input.userId,
+        idempotencyKey: `recovery-checkin:${input.idempotencyKey}:sleep`,
+        deviceId: input.deviceId,
+        fact: {
+          kind: "sleep",
+          duration: { value: input.checkIn.sleepDurationHours, unit: "hours" },
+          confidence: "confirmed",
+        },
+        envelope: {
+          ...baseEnvelope,
+          provenance: {
+            ...baseEnvelope.provenance,
+            sourceRecordId: `recovery-checkin:${input.idempotencyKey}:sleep`,
+          },
+          causalRefs: ["recovery_checkin", "subjective_sleep"],
+        },
+      });
+      timelineEventIds.push(...sleepRecorded.eventIds);
+    }
+    if (input.checkIn.schedule?.availableMinutes !== undefined || input.checkIn.schedule?.location) {
+      const scheduleRecorded = await this.recordTimelineFact({
+        userId: input.userId,
+        idempotencyKey: `recovery-checkin:${input.idempotencyKey}:availability`,
+        deviceId: input.deviceId,
+        fact: {
+          kind: "schedule",
+          effect: "availability_changed",
+          note: JSON.stringify({
+            ...(input.checkIn.schedule.availableMinutes === undefined
+              ? {}
+              : { availableMinutes: input.checkIn.schedule.availableMinutes }),
+            ...(input.checkIn.schedule.location ? { location: input.checkIn.schedule.location } : {}),
+          }),
+          confidence: "confirmed",
+        },
+        envelope: {
+          ...baseEnvelope,
+          provenance: {
+            ...baseEnvelope.provenance,
+            sourceRecordId: `recovery-checkin:${input.idempotencyKey}:availability`,
+          },
+          causalRefs: ["recovery_checkin", "temporary_availability"],
+        },
+      });
+      timelineEventIds.push(...scheduleRecorded.eventIds);
+    }
     const symptoms = [
       input.checkIn.pain
         ? { kind: "pain" as const, value: input.checkIn.pain }
@@ -4975,6 +5086,18 @@ export class CoachApplication {
           }),
         ];
         break;
+      case "workout.save_set_observation":
+        expectedRevisions = [
+          { kind: "workout_session", id: command.workoutId, revision: command.expectedRevision },
+        ];
+        events = [
+          event({
+            name: "workout.set_observation_saved",
+            aggregate: { kind: "workout_session", id: command.workoutId, revision: command.expectedRevision + 1 },
+            payload: { observation: command.observation },
+          }),
+        ];
+        break;
       case "workout.retract_draft_set":
         expectedRevisions = [
           { kind: "workout_session", id: command.workoutId, revision: command.expectedRevision },
@@ -5780,13 +5903,6 @@ export class CoachApplication {
   }): Promise<import("./domain").WorkoutProjection> {
     const workout = await this.requireWorkoutProjection(input.userId, input.workoutId);
     if (workout.status !== "active" && workout.status !== "paused") throw new Error("workout_not_monitorable");
-    if (
-      input.enabled &&
-      workout.state.currentSetId &&
-      workout.drafts.some((draft) => draft.prescriptionSetId === workout.state.currentSetId)
-    ) {
-      throw new Error("current_set_draft_requires_completion_or_retraction");
-    }
     const now = this.runtime.now();
     const state = transitionWorkoutState({
       current: workout.state,
@@ -5796,6 +5912,44 @@ export class CoachApplication {
       occurredAt: now,
       idempotencyKey: input.idempotencyKey,
       mode: input.enabled ? "coach_monitor" : "record_only",
+    });
+    await this.executeDomainCommand({
+      type: "workout.transition",
+      meta: settingsCommandMeta(input.userId, input.idempotencyKey, now),
+      workoutId: input.workoutId,
+      expectedRevision: workout.revision,
+      state,
+    });
+    return this.requireWorkoutProjection(input.userId, input.workoutId);
+  }
+
+  /**
+   * Selects an unresolved task in today's execution route without rewriting
+   * the planned order or any completed/drafted fact.
+   */
+  async focusWorkoutTask(input: {
+    userId: string;
+    workoutId: string;
+    taskId: string;
+    idempotencyKey: string;
+  }): Promise<import("./domain").WorkoutProjection> {
+    const workout = await this.requireWorkoutProjection(input.userId, input.workoutId);
+    if (workout.status !== "active" && workout.status !== "paused") throw new Error("workout_not_active");
+    const task = workout.frozenPrescription.tasks.find((candidate) => candidate.id === input.taskId);
+    if (!task) throw new Error("workout_task_not_found");
+    const resolved = new Set(resolvedWorkoutSetIds(workout));
+    const set = task.sets.find((candidate) => !resolved.has(candidate.id));
+    if (!set) throw new Error("workout_task_has_no_unresolved_set");
+    const now = this.runtime.now();
+    const state = transitionWorkoutState({
+      current: workout.state,
+      to: workout.status,
+      reason: "user_selected_execution_route_task",
+      actor: { kind: "user", id: input.userId },
+      occurredAt: now,
+      idempotencyKey: input.idempotencyKey,
+      currentTaskId: task.id,
+      currentSetId: set.id,
     });
     await this.executeDomainCommand({
       type: "workout.transition",
@@ -5939,6 +6093,37 @@ export class CoachApplication {
     });
   }
 
+  /** Persists immutable canonical observation locally; this is not a cloud-confirmed Result. */
+  async saveCurrentSetObservation(input: {
+    userId: string;
+    workoutId: string;
+    observation: import("./domain").SetObservationData;
+    idempotencyKey: string;
+  }): Promise<import("./domain").SetObservationData> {
+    const workout = await this.requireWorkoutProjection(input.userId, input.workoutId);
+    if (workout.status !== "active") throw new Error("workout_not_active");
+    const target = currentSet(workout);
+    if (!target) throw new Error("no_current_set");
+    if (
+      input.observation.prescriptionSetId !== target.set.id
+      || input.observation.exerciseVariantId !== target.task.exerciseVariantId
+      || input.observation.source !== "rust_canonical_packet"
+    ) throw new Error("observation_does_not_match_current_set");
+    const existing = (workout.setObservations ?? []).find((item) => item.id === input.observation.id);
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(input.observation)) throw new Error("immutable_observation_conflict");
+      return existing;
+    }
+    await this.executeDomainCommand({
+      type: "workout.save_set_observation",
+      meta: settingsCommandMeta(input.userId, input.idempotencyKey, this.runtime.now()),
+      workoutId: input.workoutId,
+      expectedRevision: workout.revision,
+      observation: input.observation,
+    });
+    return input.observation;
+  }
+
   async confirmCurrentSet(input: {
     userId: string;
     workoutId: string;
@@ -5947,6 +6132,7 @@ export class CoachApplication {
     /** Explicit tap only. It is never inferred from a plan or a camera packet. */
     confirmAsPlanned?: boolean;
     packetRef?: { id: string; version: number; hash: string };
+    observationId?: string;
   }): Promise<import("./domain").SetOutcomeData> {
     const workout = await this.requireWorkoutProjection(input.userId, input.workoutId);
     if (workout.status !== "active") throw new Error("workout_not_active");
@@ -5955,6 +6141,12 @@ export class CoachApplication {
     const draft = input.draftId
       ? workout.drafts.find((item) => item.id === input.draftId)
       : workout.drafts.find((item) => item.prescriptionSetId === target.set.id);
+    const observation = input.observationId
+      ? (workout.setObservations ?? []).find((item) => item.id === input.observationId)
+      : undefined;
+    if (input.observationId && (!observation || observation.prescriptionSetId !== target.set.id)) {
+      throw new Error("set_observation_not_found");
+    }
     const now = this.runtime.now();
     // 实测休息（ticket 05）：有休息计时器时按单调钟实测经过时间；无计时器则不测，不编造。
     const restTimer = workout.state.restTimer;
@@ -5984,6 +6176,7 @@ export class CoachApplication {
         draft,
         confirmAsPlanned: Boolean(input.confirmAsPlanned),
         ...(input.packetRef ? { packetRef: input.packetRef } : {}),
+        ...(observation ? { observation } : {}),
       }),
       recordedAt: now,
       ...(measuredRestSeconds !== undefined ? { measuredRestSeconds } : {}),
@@ -6150,7 +6343,7 @@ export class CoachApplication {
     });
     if (input.change.kind === "add_task") {
       await this.assertKnownWorkoutExerciseVariant(input.userId, input.change.task.exerciseVariantId);
-    } else if (input.change.kind === "replace_task_exercise") {
+    } else if (input.change.kind === "replace_task_exercise" || input.change.kind === "replace_remaining_task") {
       await this.assertKnownWorkoutExerciseVariant(input.userId, input.change.replacementExerciseVariantId);
     }
     return this.reviseUpcomingWorkoutPlan({
@@ -6846,6 +7039,703 @@ export class CoachApplication {
     return this.onboarding.start(input);
   }
 
+  /** Public client/harness seam for the four fixed intake inputs. */
+  startOrResumeBaselineIntake(input: { userId: string }) {
+    return this.onboarding.startOrResumeBaseline(input);
+  }
+
+  saveBaselineIntake(input: {
+    draftId: string;
+    inputMode: "form" | "conversation";
+    values: import("../onboarding").BaselineIntakeDraft;
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.saveBaseline(input);
+  }
+
+  /**
+   * Public Scenario Harness seam for a free-language goal statement. The
+   * result is a reviewable onboarding draft only; it cannot write a Goal
+   * Contract or Timeline record before dossier confirmation.
+   */
+  captureGoalNarrative(input: {
+    draftId: string;
+    inputMode: "form" | "conversation";
+    narrative: import("../onboarding").BaselineGoalNarrativeCapture;
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.captureGoalNarrative(input);
+  }
+
+  /** Public Scenario Harness seam for user-confirmed training-background facts. */
+  captureTrainingBackground(input: {
+    draftId: string;
+    expectedDraftRevision: number;
+    inputMode: "form" | "conversation";
+    background: import("../onboarding").TrainingBackgroundDraft;
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.captureTrainingBackground(input);
+  }
+
+  /**
+   * Produces a distinct multi-dimensional Coach assessment. It intentionally
+   * does not write `UserProfile.trainingExperience`.
+   */
+  assessCoachingLevel(input: {
+    draftId: string;
+    expectedDraftRevision: number;
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.assessCoachingLevel(input);
+  }
+
+  /** The Agent requests catalog IDs only; all visible semantics are product-owned. */
+  requestOnboardingDynamicForm(input: {
+    draftId: string;
+    expectedDraftRevision: number;
+    proposal: import("../onboarding").OnboardingDynamicFormProposal;
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.requestDynamicForm(input);
+  }
+
+  captureOnboardingDynamicFields(input: {
+    draftId: string;
+    expectedDraftRevision: number;
+    inputMode: "form" | "conversation";
+    captures: readonly import("../onboarding").DynamicFieldInput[];
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.captureDynamicFields(input);
+  }
+
+  /**
+   * This is a product-level consent action, not a profile question. It is
+   * recorded in the same draft before a network-backed onboarding turn can
+   * see any dossier facts.
+   */
+  async allowOnboardingRemoteConversation(input: { draftId: string }) {
+    const draft = await this.onboarding.read(input.draftId);
+    const submissionId = `onboarding-remote-llm:${draft.id}`;
+    return this.onboarding.captureDynamicFields({
+      draftId: draft.id,
+      expectedDraftRevision: draft.revision,
+      inputMode: "form",
+      captures: [{
+        fieldId: "permission.remote_llm",
+        value: "granted",
+        state: "captured_explicit",
+        observedAt: this.runtime.now(),
+        source: { kind: "form_submission", submissionId },
+      }],
+      idempotencyKey: submissionId,
+    });
+  }
+
+  submitOnboardingDynamicForm(input: {
+    draftId: string;
+    cardId: string;
+    expectedDraftRevision: number;
+    answers: readonly import("../onboarding").DynamicFormAnswer[];
+    idempotencyKey: string;
+  }) {
+    return this.onboarding.submitDynamicForm(input);
+  }
+
+  readActiveOnboardingDynamicForm(input: { draftId: string }) {
+    return this.onboarding.readActiveDynamicForm(input.draftId);
+  }
+
+  recommendOnboardingDynamicForm(input: {
+    draft: import("../onboarding").OnboardingProgress;
+    goalKind: "fat_loss" | "hypertrophy" | "strength" | "visual_physique" | "general";
+  }) {
+    return this.onboarding.recommendDynamicForm(input);
+  }
+
+  /**
+   * Agent-runtime adapter for the onboarding scenario. The draft id comes
+   * from the session context, never from model input, so a tool call cannot
+   * write another person's draft.
+   */
+  private async requestOnboardingFormForTool(
+    input: { sessionId: string; proposal: import("../onboarding").OnboardingDynamicFormProposal },
+    execution: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const { session, draftId } = await this.onboardingSession(input.sessionId);
+    const draft = await this.onboarding.read(draftId);
+    const currentFrontier = goalDrivenOnboardingFrontier(draft);
+    if (
+      currentFrontier.kind !== "catalog_fields"
+      || currentFrontier.topic !== input.proposal.topic
+      || currentFrontier.reasonCode !== input.proposal.reasonCode
+      || currentFrontier.requiredFor !== input.proposal.requiredFor
+      || currentFrontier.fieldIds.length !== input.proposal.fieldIds.length
+      || currentFrontier.fieldIds.some((fieldId, index) => fieldId !== input.proposal.fieldIds[index])
+    ) throw new Error("onboarding_question_frontier_not_reached");
+    const card = await this.onboarding.requestDynamicForm({
+      draftId,
+      expectedDraftRevision: draft.revision,
+      proposal: input.proposal,
+      idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:form`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "onboarding.request_form",
+      execution,
+      scope: `onboarding:${draftId}:form`,
+      presentationStatus: "awaiting_user",
+      artifact: onboardingToolArtifact({
+        userId: session.userId,
+        context: session.context,
+        now: this.runtime.now(),
+        id: `onboarding-form:${card.cardId}`,
+        title: "继续了解你的情况",
+        summary: ["我把下一步需要的信息整理成了一张小表，不需要的不会问。", ...card.fields.map((field) => field.label)],
+        evidenceRefs: [`onboarding_draft:${draftId}:${draft.revision}`],
+      }),
+    });
+  }
+
+  private async captureOnboardingGoalNarrativeForTool(
+    input: { sessionId: string; narrative: string },
+    execution: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const { session, draftId, source, userText } = await this.onboardingSession(input.sessionId, execution.runId);
+    if (!userText || !normalizedIncludes(userText, input.narrative)) throw new Error("onboarding_goal_not_supported_by_user_message");
+    const draft = await this.onboarding.captureGoalNarrative({
+      draftId,
+      inputMode: "conversation",
+      narrative: { text: input.narrative, observedAt: this.runtime.now(), source },
+      idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:goal`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "onboarding.capture_goal_narrative",
+      execution,
+      scope: `onboarding:${draftId}:goal`,
+      artifact: onboardingToolArtifact({
+        userId: session.userId,
+        context: session.context,
+        now: this.runtime.now(),
+        id: `onboarding-goal:${draftId}:${draft.revision}`,
+        title: "已记下你的目标补充",
+        summary: ["目标原话和我能确认的结构化信息会一起保留；有冲突时会回到你这里确认。"],
+        evidenceRefs: [`onboarding_draft:${draftId}:${draft.revision}`],
+      }),
+    });
+  }
+
+  private async captureOnboardingTrainingBackgroundForTool(
+    input: { sessionId: string; background: Omit<import("../onboarding").TrainingBackgroundDraft, "capturedAt" | "source"> },
+    execution: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const { session, draftId, source, userText } = await this.onboardingSession(input.sessionId, execution.runId);
+    if (!userText) throw new Error("onboarding_background_requires_user_message");
+    const draft = await this.onboarding.captureTrainingBackground({
+      draftId,
+      expectedDraftRevision: (await this.onboarding.read(draftId)).revision,
+      inputMode: "conversation",
+      background: { ...input.background, capturedAt: this.runtime.now(), source, captureStatus: "normalized_needs_review" },
+      idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:training-background`,
+    });
+    // The assessment is a deterministic view of the just-captured facts. It
+    // is created in the same intake turn so the next Agent turn sees the
+    // actual goal frontier instead of asking the user to prompt us again.
+    await this.onboarding.assessCoachingLevel({
+      draftId,
+      expectedDraftRevision: draft.revision,
+      idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:training-background-assessment`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "onboarding.capture_training_background",
+      execution,
+      scope: `onboarding:${draftId}:training_background`,
+      artifact: onboardingToolArtifact({
+        userId: session.userId,
+        context: session.context,
+        now: this.runtime.now(),
+        id: `onboarding-training-background:${draftId}:${draft.revision}`,
+        title: "已记下训练背景",
+        summary: ["这部分会用于判断起始训练质量和需要校准的地方，不会被压成一个自选等级。"],
+        evidenceRefs: [`onboarding_draft:${draftId}:${draft.revision}`],
+      }),
+    });
+  }
+
+  /**
+   * A conversational value is useful immediately, but it is not silently
+   * upgraded to a confirmed profile fact.  It stays reviewable on the same
+   * draft and is shown in the dossier summary before any formal record exists.
+   */
+  private async captureOnboardingFieldsForTool(
+    input: { sessionId: string; captures: readonly { fieldId: string; value: unknown }[] },
+    execution: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const { session, draftId, source, userText } = await this.onboardingSession(input.sessionId, execution.runId);
+    if (!userText) throw new Error("onboarding_fields_require_user_message");
+    const existing = await this.onboarding.read(draftId);
+    const draft = await this.onboarding.captureDynamicFields({
+      draftId,
+      expectedDraftRevision: existing.revision,
+      inputMode: "conversation",
+      captures: input.captures.map((capture) => ({
+        fieldId: capture.fieldId,
+        value: capture.value,
+        state: "normalized_needs_review" as const,
+        observedAt: this.runtime.now(),
+        source,
+      })),
+      idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:fields`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "onboarding.capture_fields",
+      execution,
+      scope: `onboarding:${draftId}:conversation_fields`,
+      artifact: onboardingToolArtifact({
+        userId: session.userId,
+        context: session.context,
+        now: this.runtime.now(),
+        id: `onboarding-fields:${draftId}:${draft.revision}`,
+        title: "已补进档案草稿",
+        summary: ["这几项来自你刚才的描述；建立正式档案前会和你一起确认。"],
+        evidenceRefs: [`onboarding_draft:${draftId}:${draft.revision}`],
+      }),
+    });
+  }
+
+  private async assessOnboardingTrainingContextForTool(
+    input: { sessionId: string },
+    execution: ToolExecutionIdentity,
+  ): Promise<ShowArtifactResult> {
+    const { session, draftId } = await this.onboardingSession(input.sessionId);
+    const assessment = await this.onboarding.assessCoachingLevel({
+      draftId,
+      expectedDraftRevision: (await this.onboarding.read(draftId)).revision,
+      idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:assessment`,
+    });
+    return this.presentArtifactForTool({
+      sessionId: session.id,
+      toolName: "onboarding.assess_training_context",
+      execution,
+      scope: `onboarding:${draftId}:coaching_assessment`,
+      artifact: onboardingToolArtifact({
+        userId: session.userId,
+        context: session.context,
+        now: this.runtime.now(),
+        id: `onboarding-coaching-assessment:${assessment.id}:${assessment.revision}`,
+        title: "训练情况已评估",
+        summary: ["我会把已知和未知分开处理；未知的部分会在前几次训练里校准。"],
+        evidenceRefs: [`coaching_level_assessment:${assessment.id}:${assessment.revision}`],
+      }),
+    });
+  }
+
+  private async onboardingSession(sessionId: string, runId?: string): Promise<{
+    session: CoachSession;
+    draftId: string;
+    source: import("../onboarding").OnboardingInputSource;
+    userText?: string;
+  }> {
+    const snapshot = await this.ledger.read();
+    const session = snapshot.sessions.find((candidate) => candidate.id === sessionId);
+    if (!session || session.context.kind !== "onboarding") throw new Error("onboarding_session_required");
+    const userMessage = runId
+      ? [...snapshot.messages].reverse().find((message) => message.sessionId === sessionId && message.runId === runId && message.role === "user")
+      : undefined;
+    return {
+      session,
+      draftId: session.context.ref,
+      source: { kind: "conversation_message", messageId: userMessage?.id ?? `session:${session.id}` },
+      ...(userMessage ? { userText: userMessage.content } : {}),
+    };
+  }
+
+  /**
+   * Readiness is a time-bounded projection of Timeline/recovery evidence.
+   * This records the local gate decision for audit but never changes a User
+   * Profile, coaching-level assessment, plan, or any safety fact.
+   */
+  async assessOnboardingReadinessAndSafety(input: {
+    draftId: string;
+    idempotencyKey: string;
+  }): Promise<import("../onboarding").OnboardingReadinessSafetyAssessment> {
+    const draft = await this.onboarding.read(input.draftId);
+    const projection = await this.readDomainProjection({ userId: draft.userId });
+    const now = this.runtime.now();
+    const assessment = projectOnboardingReadinessSafety({
+      draft,
+      recoveryConstraints: projection.recoveryConstraints,
+      now,
+    });
+    const capabilityStatus = Object.fromEntries(
+      assessment.capabilities.map((gate) => [gate.action, gate.status]),
+    );
+    const evidenceRefs = assessment.readiness.evidenceRefs.map((id) => ({
+      aggregate: "timeline" as const,
+      id,
+      revision: projection.timeline.revision,
+    }));
+    await this.ledger.commit({
+      kind: "domain",
+      userId: draft.userId,
+      actorId: "rule_engine",
+      intent: "onboarding.readiness_safety.assess",
+      expectedRevisions: [],
+      domainEvents: [],
+      actionEvents: [{
+        id: `action:${stableHash({ draftId: draft.id, idempotencyKey: input.idempotencyKey })}`,
+        userId: draft.userId,
+        occurredAt: now,
+        actor: "rule_engine",
+        action: "assessment.created",
+        targetType: "recovery",
+        targetId: draft.id,
+        scope: "onboarding_readiness_safety",
+        intent: "onboarding.readiness_safety.assess",
+        before: {},
+        after: {
+          readinessStatus: assessment.readiness.status,
+          safetyStatus: assessment.safety.status,
+          capabilityStatus,
+          reassessRequired: assessment.readiness.reassessRequired,
+        },
+        evidenceRefs,
+        beforeRefs: [],
+        afterRefs: evidenceRefs,
+        ruleVersions: {
+          onboarding: "schema-v1",
+          readiness: "onboarding-readiness-safety/v1",
+        },
+        mandateRevision: projection.mandate?.revision ?? 0,
+        result: assessment.capabilities.some((gate) => gate.status === "blocked") ? "rejected" : "allowed",
+        undoBoundary: "not_applicable",
+        policyDecision: assessment.capabilities.some((gate) => gate.status === "blocked") ? "deny" : "allow",
+        causationId: draft.id,
+        correlationId: input.idempotencyKey,
+        reversible: false,
+      }],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: now,
+    });
+    return assessment;
+  }
+
+  /**
+   * A review-only composite. It preserves each field's owner and confidence
+   * boundary instead of flattening draft, Timeline and Coach assessment into
+   * a second profile record.
+   */
+  async readOnboardingDossierSummary(input: {
+    draftId: string;
+  }): Promise<import("../onboarding").OnboardingDossierSummary> {
+    const snapshot = await this.ledger.read();
+    return this.buildOnboardingDossierSummary(snapshot, input.draftId);
+  }
+
+  /**
+   * Stages the exact dossier revision the user reviewed. The caller invokes
+   * `commitAcknowledged` only after ProductData has acknowledged the staged
+   * resources; until then no completion event reaches the real Ledger.
+   */
+  async stageOnboardingDossierConfirmation(input: {
+    userId: string;
+    draftId: string;
+    expectedDraftRevision: number;
+    expectedFactFrontier: readonly import("./domain").DomainAggregateRef[];
+    idempotencyKey: string;
+  }): Promise<{
+    summary: import("../onboarding").OnboardingDossierSummary;
+    completion?: import("../onboarding").OnboardingCompletion;
+    domain: DomainProjection;
+    commitAcknowledged(): Promise<void>;
+  }> {
+    const before = await this.ledger.read();
+    const draft = projectOnboardingProgress(before.onboardingDraftEvents, input.draftId);
+    if (draft.userId !== input.userId) throw new OnboardingValidationError("draft_user_mismatch");
+    const summary = this.buildOnboardingDossierSummary(before, input.draftId);
+    const priorAcknowledgement = before.domainIdempotency.some((record) =>
+      record.userId === input.userId &&
+      record.actorId === input.userId &&
+      record.intent === "onboarding.complete" &&
+      record.key === input.idempotencyKey,
+    );
+    if (priorAcknowledgement) {
+      return {
+        summary,
+        domain: projectDomainEvents(before.domainEvents, { userId: input.userId }),
+        commitAcknowledged: async () => {},
+      };
+    }
+    if (draft.status === "completed") {
+      throw new OnboardingValidationError("stale_dossier_confirmation", ["already_completed"]);
+    }
+    const draftChanged = input.expectedDraftRevision !== summary.draftRevision;
+    const frontierChanged = stableHash(input.expectedFactFrontier) !== stableHash(summary.confirmation.factFrontier);
+    if (draftChanged || frontierChanged) {
+      throw new OnboardingValidationError(
+        "stale_dossier_confirmation",
+        [
+          ...(draftChanged ? ["draft_revision"] : []),
+          ...(frontierChanged ? ["fact_frontier"] : []),
+        ],
+      );
+    }
+    const stagedLedger = new InMemoryCoachLedger(before);
+    const stagedApplication = new CoachApplication({ ...this.dependencies, ledger: stagedLedger });
+    const completion = await stagedApplication.completeOnboarding({
+      draftId: input.draftId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    const nextSnapshot = await stagedLedger.read();
+    const domain = projectDomainEvents(nextSnapshot.domainEvents, { userId: input.userId });
+    const expectedSnapshotHash = stableHash(before);
+    let committed = false;
+    return {
+      summary,
+      completion,
+      domain,
+      commitAcknowledged: async () => {
+        if (committed) return;
+        try {
+          await this.ledger.swapRestoredSnapshot({ expectedSnapshotHash, nextSnapshot });
+          committed = true;
+        } catch {
+          throw new OnboardingValidationError("stale_dossier_confirmation", ["fact_frontier"]);
+        }
+      },
+    };
+  }
+
+  /**
+   * Starts the short-lived first-planner task from durable onboarding output.
+   * It never re-extracts facts from chat and does not write an active plan.
+   */
+  async createFirstPlannerHandoff(input: {
+    userId: string;
+    draftId: string;
+    currentDate: string;
+    idempotencyKey: string;
+  }): Promise<import("../onboarding").FirstPlannerHandoffProposal> {
+    const snapshot = await this.ledger.read();
+    const draft = projectOnboardingProgress(snapshot.onboardingDraftEvents, input.draftId);
+    if (draft.userId !== input.userId) throw new OnboardingValidationError("draft_user_mismatch");
+    if (draft.status !== "completed") throw new Error("first_planner_dossier_not_completed");
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
+    const factFrontier = onboardingFactFrontier(snapshot, input.userId);
+    const readinessSafety = projectOnboardingReadinessSafety({
+      draft,
+      recoveryConstraints: domain.recoveryConstraints,
+      now: this.runtime.now(),
+    });
+    const assessment = draft.coachingLevelAssessments?.at(-1);
+    const evidence = firstPlannerEvidence({ draft, ...(assessment ? { assessment } : {}) });
+    const needsInput = firstPlannerNeedsInput({
+      ...(domain.profile ? { profile: domain.profile } : {}),
+      ...(domain.goalContract ? { goal: domain.goalContract } : {}),
+      mandatePresent: domain.mandate !== undefined,
+      ...(assessment ? { assessment } : {}),
+      readinessSafety,
+    });
+    const knowledge = this.agentKnowledge.selection();
+    if (knowledge.backend !== "agent_knowledge") throw new Error("first_planner_requires_agent_knowledge");
+    const rulePins = this.agentKnowledge.planningRulePins();
+    const id = `first-planner-handoff:${stableHash({
+      userId: input.userId,
+      draft: { id: draft.id, revision: draft.revision },
+      factFrontier,
+      currentDate: input.currentDate,
+      knowledge,
+      rulePins,
+    })}`;
+    const existing = snapshot.artifacts.find(
+      (artifact): artifact is EvidenceBriefArtifact =>
+        artifact.kind === "evidence_brief" && artifact.userId === input.userId && artifact.id === id,
+    )?.firstPlannerHandoff;
+    if (existing) return existing;
+    const proposal: import("../onboarding").FirstPlannerHandoffProposal = {
+      id,
+      userId: input.userId,
+      status: needsInput.length ? "needs_input" : "awaiting_confirmation",
+      draft: { id: draft.id, revision: draft.revision },
+      factFrontier,
+      ...(domain.profile ? { profileRef: { kind: "user_profile", id: domain.profile.value.id, revision: domain.profile.revision } } : {}),
+      ...(domain.goalContract ? { goalContractRef: { kind: "goal_contract", id: domain.goalContract.value.id, revision: domain.goalContract.revision } } : {}),
+      ...(domain.mandate ? { mandateRef: { kind: "coaching_mandate", id: domain.mandate.value.id, revision: domain.mandate.revision } } : {}),
+      ...(assessmentHasMeaningfulEvidence(assessment) ? { assessment } : {}),
+      readiness: readinessSafety.readiness,
+      safety: readinessSafety.safety,
+      knowledge,
+      rulePins,
+      evidenceRefs: [
+        `onboarding_draft:${draft.id}:${draft.revision}`,
+        ...(assessment ? [`coaching_level_assessment:${assessment.id}:${assessment.revision}`] : []),
+        ...factFrontier.map((ref) => `${ref.kind}:${ref.id}:${ref.revision}`),
+      ].sort(),
+      unknowns: [...new Set([
+        ...evidence.unknowns,
+        ...readinessSafety.capabilities.filter((gate) => gate.status !== "available").flatMap((gate) => gate.factsNeeded),
+      ])].sort(),
+      needsInput,
+      ...(!needsInput.length && domain.profile && domain.goalContract ? {
+        plan: this.agentKnowledge.createInitialPlan({
+          profile: domain.profile.value,
+          goalContract: domain.goalContract.value,
+          currentDate: input.currentDate,
+          evidence,
+        }),
+      } : {}),
+    };
+    const artifact: EvidenceBriefArtifact = {
+      id,
+      kind: "evidence_brief",
+      userId: input.userId,
+      schemaVersion: 1,
+      renderVersion: 1,
+      createdAt: this.runtime.now(),
+      contextRefs: [{ kind: "plan", ref: input.currentDate }],
+      evidenceRefs: [],
+      missingness: [...proposal.unknowns, ...proposal.needsInput],
+      capabilityBoundary: ["first_planner_handoff", "agent_knowledge_only", "proposal_requires_independent_confirmation"],
+      hash: stableHash(proposal),
+      title: "首次训练计划",
+      summary: proposal.status === "needs_input"
+        ? ["还缺少会改变首次计划的必要信息。"]
+        : ["首次计划已准备好；确认前不会成为活动计划。"],
+      firstPlannerHandoff: proposal,
+    };
+    await this.ledger.commit({
+      kind: "domain",
+      userId: input.userId,
+      actorId: "planner_harness",
+      intent: "onboarding.first_planner_handoff",
+      expectedRevisions: factFrontier,
+      domainEvents: [],
+      artifacts: [artifact],
+      actionEvents: [firstPlannerActionEvent({
+        id: this.runtime.nextId("action"),
+        userId: input.userId,
+        occurredAt: artifact.createdAt,
+        proposal,
+        intent: "onboarding.first_planner_handoff",
+        result: proposal.status === "needs_input" ? "rejected" : "allowed",
+      })],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: artifact.createdAt,
+    });
+    return proposal;
+  }
+
+  /** Revalidates the immutable handoff before changing its confirmation state. */
+  async confirmFirstPlannerHandoff(input: {
+    userId: string;
+    proposalId: string;
+    idempotencyKey: string;
+  }): Promise<import("../onboarding").FirstPlannerHandoffProposal> {
+    const snapshot = await this.ledger.read();
+    const priorConfirmed = snapshot.artifacts.find(
+      (artifact): artifact is EvidenceBriefArtifact =>
+        artifact.kind === "evidence_brief"
+        && artifact.userId === input.userId
+        && artifact.firstPlannerHandoff?.sourceProposalId === input.proposalId
+        && artifact.firstPlannerHandoff.status === "confirmed",
+    )?.firstPlannerHandoff;
+    if (priorConfirmed) return priorConfirmed;
+    const artifact = snapshot.artifacts.find(
+      (candidate): candidate is EvidenceBriefArtifact =>
+        candidate.kind === "evidence_brief" && candidate.userId === input.userId && candidate.id === input.proposalId,
+    );
+    const proposal = artifact?.firstPlannerHandoff;
+    if (!artifact || !proposal) throw new Error("first_planner_proposal_not_found");
+    if (proposal.status !== "awaiting_confirmation") throw new Error("first_planner_proposal_not_confirmable");
+    const draft = projectOnboardingProgress(snapshot.onboardingDraftEvents, proposal.draft.id);
+    const currentFrontier = onboardingFactFrontier(snapshot, input.userId);
+    const currentKnowledge = this.agentKnowledge.selection();
+    const currentRules = this.agentKnowledge.planningRulePins();
+    const stale = draft.userId !== input.userId
+      || draft.revision !== proposal.draft.revision
+      || stableHash(currentFrontier) !== stableHash(proposal.factFrontier)
+      || stableHash(currentKnowledge) !== stableHash(proposal.knowledge)
+      || stableHash(currentRules) !== stableHash(proposal.rulePins);
+    if (stale) {
+      const staleProposal = { ...proposal, status: "stale" as const };
+      await this.persistFirstPlannerState({
+        userId: input.userId,
+        sourceArtifact: artifact,
+        proposal: staleProposal,
+        intent: "onboarding.first_planner_stale",
+        idempotencyKey: `${input.idempotencyKey}:stale`,
+      });
+      throw new Error("first_planner_proposal_stale");
+    }
+    const confirmed = { ...proposal, id: `${proposal.id}:confirmed`, sourceProposalId: proposal.id, status: "confirmed" as const };
+    await this.persistFirstPlannerState({
+      userId: input.userId,
+      sourceArtifact: artifact,
+      proposal: confirmed,
+      intent: "onboarding.first_planner_confirm",
+      idempotencyKey: input.idempotencyKey,
+    });
+    return confirmed;
+  }
+
+  private async persistFirstPlannerState(input: {
+    userId: string;
+    sourceArtifact: EvidenceBriefArtifact;
+    proposal: import("../onboarding").FirstPlannerHandoffProposal;
+    intent: string;
+    idempotencyKey: string;
+  }): Promise<void> {
+    const now = this.runtime.now();
+    const snapshot = await this.ledger.read();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
+    const acceptedPlan = input.proposal.status === "confirmed" && input.proposal.plan
+      ? firstPlannerPlanRevision(input.proposal)
+      : undefined;
+    const planEvent: DomainEvent | undefined = acceptedPlan
+      ? {
+          id: this.runtime.nextId("domain-event"), schemaVersion: DOMAIN_EVENT_SCHEMA_VERSION,
+          name: "plan.revised", aggregate: { kind: "plan", id: acceptedPlan.id, revision: (domain.plan?.revision ?? 0) + 1 },
+          userId: input.userId, actor: { kind: "user", id: input.userId }, deviceId: "local-device",
+          occurredAt: now, recordedAt: now, timezoneOffsetMinutes: new Date(now).getTimezoneOffset() * -1,
+          provenance: { source: "rule_engine", confidence: "unknown" }, evidenceRefs: [], causationId: input.proposal.id,
+          correlationId: input.idempotencyKey, payload: acceptedPlan,
+        }
+      : undefined;
+    const artifact: EvidenceBriefArtifact = {
+      ...input.sourceArtifact,
+      id: input.proposal.id,
+      createdAt: now,
+      hash: stableHash(input.proposal),
+      summary: input.proposal.status === "confirmed"
+        ? ["首次计划已确认，可以开始按计划行动。"]
+        : ["上游事实已变化，需要重新生成首次计划。"],
+      firstPlannerHandoff: input.proposal,
+    };
+    await this.ledger.commit({
+      kind: "domain",
+      userId: input.userId,
+      actorId: input.proposal.status === "confirmed" ? input.userId : "planner_harness",
+      intent: input.intent,
+      expectedRevisions: acceptedPlan ? [{ kind: "plan", id: acceptedPlan.id, revision: domain.plan?.revision ?? 0 }] : [],
+      domainEvents: planEvent ? [planEvent] : [],
+      artifacts: [artifact],
+      actionEvents: [firstPlannerActionEvent({
+        id: this.runtime.nextId("action"),
+        userId: input.userId,
+        occurredAt: now,
+        proposal: input.proposal,
+        intent: input.intent,
+        result: input.proposal.status === "confirmed" ? "allowed" : "rejected",
+      })],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: now,
+    });
+  }
+
   saveOnboardingProgress(input: {
     draftId: string;
     inputMode: "form" | "conversation";
@@ -6858,6 +7748,21 @@ export class CoachApplication {
 
   readOnboardingProgress(draftId: string) {
     return this.onboarding.read(draftId);
+  }
+
+  /**
+   * Public account-entry seam for mobile and web shells. This reads one
+   * immutable Ledger snapshot, so the dossier-completion decision and the
+   * resumable draft cannot be assembled from different frontiers.
+   */
+  async readOnboardingEntryState(input: { userId: string }) {
+    const snapshot = await this.ledger.read();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
+    return projectOnboardingEntryState({
+      userId: input.userId,
+      dossierComplete: hasConfirmedUserDossier(snapshot, domain, input.userId),
+      events: snapshot.onboardingDraftEvents,
+    });
   }
 
   completeOnboarding(input: { draftId: string; idempotencyKey: string }) {
@@ -7919,6 +8824,35 @@ export class CoachApplication {
     });
   }
 
+  /**
+   * Lifecycle-safe scheduler entry point. Startup/background callers do not
+   * manufacture empty checks: they only finish a durable Timeline assessment
+   * that was queued before the app stopped or an earlier evaluation failed.
+   */
+  async runPendingTimelineRiskEvaluation(input: {
+    userId: string;
+    idempotencyKey: string;
+  }): Promise<import("./model").TimelineRiskEvaluationArtifact | undefined> {
+    const projection = await this.readDomainProjection({ userId: input.userId });
+    const evaluations = await this.readTimelineRiskEvaluations({ userId: input.userId });
+    // Admission artifacts are immutable, so a prior "material" artifact
+    // remains in the ledger after it has been checked. A scheduled-check at
+    // the same frontier is the durable completion marker.
+    if (evaluations.some((item) =>
+      item.timelineRevision === projection.timeline.revision &&
+      item.phase === "scheduled_check" &&
+      item.disposition !== "stale" &&
+      item.disposition !== "failed",
+    )) return undefined;
+    const queued = latestQueuedTimelineRiskEvaluation(evaluations);
+    if (!queued || queued.timelineRevision !== projection.timeline.revision) return undefined;
+    return this.runScheduledTimelineRiskEvaluation({
+      userId: input.userId,
+      expectedTimelineRevision: projection.timeline.revision,
+      idempotencyKey: input.idempotencyKey,
+    });
+  }
+
   /** Read model for Timeline risk admission and its future goal-aware evaluation. */
   async readTimelineRiskEvaluations(input: {
     userId: string;
@@ -8035,17 +8969,45 @@ export class CoachApplication {
   private async hasPendingFuturePreviewForTimelineRisk(
     assessment: import("./model").TimelineRiskEvaluationArtifact,
   ): Promise<boolean> {
-    const snapshot = await this.ledger.read();
     const sourceEventIds = new Set(assessment.sourceFactRefs.map((ref) => ref.id));
     if (sourceEventIds.size === 0) return false;
-    const hasPending = snapshot.artifacts.some(
+    const snapshot = await this.ledger.read();
+    return snapshot.artifacts.some(
       (artifact) => artifact.kind === "evidence_brief" &&
         artifact.userId === assessment.userId &&
         artifact.planningPreview?.status === "awaiting_confirmation" &&
         artifact.planningPreview.request.requestedScope === "future_plan" &&
         artifact.planningPreview.sourceTimelineEventIds?.some((eventId) => sourceEventIds.has(eventId)) === true,
     );
-    return hasPending;
+  }
+
+  private async findPendingRiskPreviewForTimelineEvents(
+    userId: string,
+    timelineEventIds: readonly string[],
+  ): Promise<EvidenceBriefArtifact | undefined> {
+    const snapshot = await this.ledger.read();
+    const sourceEventIds = new Set(timelineEventIds);
+    if (sourceEventIds.size === 0) return undefined;
+    const riskIds = new Set(
+      snapshot.artifacts
+        .filter((artifact): artifact is import("./model").TimelineRiskEvaluationArtifact =>
+          artifact.kind === "timeline_risk_evaluation" && artifact.userId === userId,
+        )
+        .filter((artifact) => artifact.sourceFactRefs.some((ref) => sourceEventIds.has(ref.id)))
+        .map((artifact) => artifact.id),
+    );
+    return snapshot.artifacts
+      .filter((artifact): artifact is EvidenceBriefArtifact => artifact.kind === "evidence_brief")
+      .filter((artifact) =>
+        artifact.userId === userId &&
+        artifact.planningPreview?.status === "awaiting_confirmation" &&
+        artifact.planningPreview.request.requestedScope === "future_plan" &&
+        (
+          artifact.planningPreview.sourceTimelineEventIds?.some((eventId) => sourceEventIds.has(eventId)) === true ||
+          (artifact.planningPreview.sourceRiskEvaluationId !== undefined && riskIds.has(artifact.planningPreview.sourceRiskEvaluationId))
+        ),
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0];
   }
 
   private async recordTimelineRiskDecision(
@@ -8691,6 +9653,20 @@ export class CoachApplication {
     text: string;
   }): Promise<readonly import("./model").CoachRunEvent[]> {
     return this.agentRuntime.sendTurn(input);
+  }
+
+  /** Opens the next coherent intake turn without fabricating a user message. */
+  async startOnboardingAgentTurn(input: { userId: string; draftId: string }): Promise<readonly import("./model").CoachRunEvent[]> {
+    const draft = await this.onboarding.read(input.draftId);
+    if (draft.userId !== input.userId || draft.status === "completed") throw new OnboardingValidationError("draft_not_found");
+    const session = (await this.listCoachSessions({ userId: input.userId, taskKind: "onboarding" }))
+      .find((candidate) => candidate.context.kind === "onboarding" && candidate.context.ref === input.draftId && candidate.status !== "archived")
+      ?? await this.startSession({ userId: input.userId, context: { kind: "onboarding", ref: input.draftId }, taskKind: "onboarding", title: "建立你的档案" });
+    return this.agentRuntime.sendTurn({
+      sessionId: session.id,
+      text: "The baseline dossier is now available in local context. Begin the next natural intake turn from those facts; do not treat this as a user statement.",
+      scenarioStart: true,
+    });
   }
 
   /** Stops the newest active provider run without replacing it with a fake continuation. */
@@ -10409,6 +11385,7 @@ function outcomeFromDraft(input: {
   draft?: import("./domain").SetDraftData;
   confirmAsPlanned: boolean;
   packetRef?: { id: string; version: number; hash: string };
+  observation?: import("./domain").SetObservationData;
 }): import("./domain").SetOutcomeData {
   const draft = input.draft;
   if (!draft && !input.confirmAsPlanned) throw new Error("user_must_confirm_actual_set");
@@ -10435,6 +11412,14 @@ function outcomeFromDraft(input: {
     completedAs: input.confirmAsPlanned && !draft ? "confirmed_as_planned" : "user_edited",
     source: "user_confirmed",
     ...(input.packetRef ? { packetRef: input.packetRef } : {}),
+    ...(input.observation ? {
+      observationRef: { id: input.observation.id },
+      performedRepsProvenance: {
+        source: "user_confirmed" as const,
+        observedConfirmedReps: input.observation.counts.confirmed,
+        userAdjusted: actualReps !== input.observation.counts.confirmed,
+      },
+    } : {}),
   };
 }
 
@@ -10716,11 +11701,43 @@ function profilePlanningAvailabilityChanged(
 function taskKindForContext(
   kind: ContextRef["kind"],
 ): NonNullable<CoachSession["taskKind"]> {
+  if (kind === "onboarding") return "onboarding";
   if (kind === "today") return "today_plan";
   if (kind === "workout") return "workout_execution";
   if (kind === "calendar" || kind === "plan") return "plan_adjustment";
   if (kind === "progress") return "weekly_report";
   return "general";
+}
+
+function onboardingToolArtifact(input: {
+  userId: string;
+  context: ContextRef;
+  now: string;
+  id: string;
+  title: string;
+  summary: readonly string[];
+  evidenceRefs: readonly string[];
+}): EvidenceBriefArtifact {
+  return {
+    id: input.id,
+    kind: "evidence_brief",
+    userId: input.userId,
+    title: input.title,
+    summary: input.summary,
+    schemaVersion: 1,
+    renderVersion: 1,
+    createdAt: input.now,
+    contextRefs: [input.context],
+    evidenceRefs: [],
+    missingness: [],
+    capabilityBoundary: ["只保存用户在当前对话明确说过的资料。", "档案和计划仍需用户确认。"],
+    hash: stableHash(input),
+  };
+}
+
+function normalizedIncludes(source: string, candidate: string): boolean {
+  const normalize = (value: string) => value.replace(/[\s，,。.!！?？]/gu, "").toLocaleLowerCase();
+  return normalize(source).includes(normalize(candidate));
 }
 
 function knowledgeRuleVersions(
@@ -10731,6 +11748,100 @@ function knowledgeRuleVersions(
     knowledgePack: pins.knowledgePack.contentHash,
     exerciseCatalog: pins.exerciseCatalog.contentHash,
     ...Object.fromEntries(pins.rulePacks.map((pin) => [`rulePack:${pin.id}`, pin.contentHash])),
+  };
+}
+
+function onboardingFactFrontier(
+  snapshot: LedgerSnapshot,
+  userId: string,
+): import("./domain").DomainAggregateRef[] {
+  return snapshot.aggregateRevisions
+    .filter((item) => item.userId === userId)
+    .map(({ kind, id, revision }) => ({ kind, id, revision }))
+    .sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`));
+}
+
+function firstPlannerActionEvent(input: {
+  id: string;
+  userId: string;
+  occurredAt: string;
+  proposal: import("../onboarding").FirstPlannerHandoffProposal;
+  intent: string;
+  result: "allowed" | "rejected";
+}): import("./model").ActionEvent {
+  return {
+    id: input.id,
+    userId: input.userId,
+    occurredAt: input.occurredAt,
+    actor: input.result === "allowed" && input.proposal.status === "confirmed" ? "user" : "rule_engine",
+    action: "assessment.created",
+    targetType: "plan",
+    targetId: input.proposal.id,
+    scope: "onboarding_first_planner",
+    intent: input.intent,
+    before: {},
+    after: { status: input.proposal.status, needsInput: input.proposal.needsInput },
+    evidenceRefs: [],
+    beforeRefs: [],
+    afterRefs: [],
+    ruleVersions: Object.fromEntries(input.proposal.rulePins.map((pin) => [`agentKnowledgeRule:${pin.id}`, pin.contentHash])),
+    mandateRevision: input.proposal.mandateRef?.revision ?? 0,
+    result: input.result,
+    undoBoundary: "not_reversible",
+    policyDecision: input.result === "allowed" ? "allow" : "deny",
+    causationId: input.proposal.id,
+    correlationId: input.proposal.id,
+    reversible: false,
+  };
+}
+
+/** Projects the exclusive Agent Knowledge candidate into the existing active-plan aggregate. */
+function firstPlannerPlanRevision(
+  proposal: import("../onboarding").FirstPlannerHandoffProposal,
+): import("./domain").PlanRevisionData {
+  const candidate = proposal.plan!;
+  const knowledgePins = {
+    knowledgePack: {
+      id: candidate.knowledgeReleasePin.id,
+      semanticVersion: candidate.knowledgeReleasePin.version,
+      schemaVersion: 1,
+      contentHash: candidate.knowledgeReleasePin.contentHash,
+    },
+    exerciseCatalog: {
+      id: "agent-domain-catalog",
+      semanticVersion: candidate.catalogPin.schemaVersion,
+      schemaVersion: 1,
+      contentHash: candidate.catalogPin.contentHash,
+    },
+    rulePacks: proposal.rulePins.map((pin) => ({ id: pin.id, semanticVersion: pin.version, schemaVersion: 1, contentHash: pin.contentHash })),
+  };
+  const sessions = candidate.week.sessions.map((session) => ({
+    id: `agent-session:${proposal.id}:${session.id}`,
+    title: session.focus,
+    scheduledFor: session.scheduledFor,
+    knowledgePins,
+    kind: "weighted_reps" as const,
+    durationBudget: { value: session.estimatedMinutes, unit: "minutes" as const },
+    tasks: session.exercises.map((exercise) => ({
+      id: `agent-task:${session.id}:${exercise.id}`,
+      exerciseVariantId: exercise.id,
+      mode: exercise.reps ? "weighted_reps" as const : "timed" as const,
+      sets: Array.from({ length: exercise.sets }, (_, index) => ({
+        id: `agent-set:${session.id}:${exercise.id}:${index + 1}`,
+        ...(exercise.reps ? { targetReps: { min: exercise.reps[0], max: exercise.reps[1] } } : {}),
+        ...(exercise.durationSeconds ? { targetDuration: { value: exercise.durationSeconds[1], unit: "seconds" as const } } : {}),
+        targetRirRange: { min: exercise.rir[0], max: exercise.rir[1] },
+      })),
+    })),
+  }));
+  return {
+    id: `agent-plan:${proposal.userId}`,
+    goalContractRef: proposal.goalContractRef!,
+    effectiveFrom: sessions[0]?.scheduledFor ?? proposal.draft.id,
+    knowledgePins,
+    sessions,
+    upcomingSevenDays: sessions,
+    reasonCodes: ["agent_knowledge_first_plan_confirmed"],
   };
 }
 
@@ -11309,4 +12420,52 @@ function parseRepRangeText(reps: string): { min: number; max: number } | undefin
   const match = reps.match(/^(\d+)(?:-(\d+))?$/);
   if (!match) return undefined;
   return { min: Number(match[1]), max: Number(match[2] ?? match[1]) };
+}
+
+function hasConfirmedUserDossier(
+  snapshot: LedgerSnapshot,
+  domain: DomainProjection,
+  userId: string,
+): boolean {
+  const completed = snapshot.onboardingDraftEvents
+    .filter((event): event is Extract<import("../onboarding").OnboardingDraftEvent, { type: "onboarding.completed" }> =>
+      event.type === "onboarding.completed" && event.userId === userId,
+    )
+    .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt) || right.id.localeCompare(left.id))[0];
+  if (!completed) return false;
+
+  const committedEvents = completed.payload.domainEventIds
+    .map((id) => snapshot.domainEvents.find((event) => event.id === id))
+    .filter((event): event is DomainEvent => event !== undefined);
+  const requiredKinds = [
+    "user_profile",
+    "goal_contract",
+    "coaching_mandate",
+    "permission_set",
+    "safety_constraint",
+  ] as const;
+  return requiredKinds.every((kind) => {
+    const completionEvent = committedEvents.find((event) => event.aggregate.kind === kind);
+    if (!completionEvent) return false;
+    const current = currentDossierAggregate(domain, kind, completionEvent.aggregate.id);
+    if (!current) return false;
+    if (current.value.id !== completionEvent.aggregate.id || current.revision < completionEvent.aggregate.revision) {
+      return false;
+    }
+    return !domain.archivedAggregates.some((archived) =>
+      archived.kind === kind && archived.id === completionEvent.aggregate.id,
+    );
+  });
+}
+
+function currentDossierAggregate(
+  domain: DomainProjection,
+  kind: "user_profile" | "goal_contract" | "coaching_mandate" | "permission_set" | "safety_constraint",
+  expectedId: string,
+): { value: { id: string }; revision: number } | undefined {
+  if (kind === "user_profile") return domain.profile;
+  if (kind === "goal_contract") return domain.goalContract;
+  if (kind === "coaching_mandate") return domain.mandate;
+  if (kind === "permission_set") return domain.permissions;
+  return domain.safetyConstraints.find((item) => item.value.id === expectedId);
 }

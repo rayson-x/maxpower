@@ -30,9 +30,11 @@ export interface ProfileDraft {
     height?: LengthQuantity;
     currentWeight?: MassQuantity;
   };
-  trainingExperience?: "beginner" | "intermediate" | "advanced";
+  trainingExperience?: "beginner" | "intermediate" | "advanced" | "unknown";
   returningStatus?: "new" | "returning" | "consistent";
   schedule?: { weeklyFrequency: number; sessionDurationMinutes: number };
+  /** Non-training daily movement, captured separately from workout frequency. */
+  dailyActivityLevel?: "sedentary" | "lightly_active" | "active" | "very_active";
   locations?: readonly {
     id: string;
     kind: "home" | "gym" | "hotel" | "outdoor" | "other";
@@ -161,7 +163,277 @@ export interface ProfessionalDraft {
   }[];
 }
 
+/**
+ * Identifies the user input that supplied an onboarding value.  This is kept
+ * on the draft value itself because conversation and form cards update the
+ * same draft and neither is intrinsically more authoritative.
+ */
+export type OnboardingInputSource =
+  | { kind: "conversation_message"; messageId: string }
+  | { kind: "form_submission"; submissionId: string };
+
+export interface BaselineAgeCapture {
+  ageYears: number;
+  /** When the user stated this age, rather than an inferred birth year. */
+  observedAt: string;
+  source: OnboardingInputSource;
+}
+
+export interface BaselineQuantityCapture<Q> {
+  value: Q;
+  observedAt: string;
+  source: OnboardingInputSource;
+}
+
+export interface BaselineGoalNarrativeCapture {
+  /** Unmodified user wording. Goal classification is a later, reviewable step. */
+  text: string;
+  observedAt: string;
+  source: OnboardingInputSource;
+}
+
+/** Closed reasons that let us audit question value without storing model reasoning. */
+export type OnboardingQuestionReasonCode =
+  | "goal_disambiguation"
+  | "planning_gate"
+  | "safety_gate"
+  | "measurement_quality"
+  | "schedule_feasibility"
+  | "conflict_resolution";
+
+/** A concrete capability that may be limited by an unknown onboarding field. */
+export type OnboardingActionGate =
+  | "reliable_energy_target"
+  | "dated_session_schedule"
+  | "fasted_cardio"
+  | "high_intensity_cardio"
+  | "training_execution"
+  | "exercise_selection"
+  | "comparable_strength_progression"
+  | "body_composition_trend"
+  | "managed_plan_changes"
+  | "remote_coach_conversation";
+
+export type OnboardingDraftFieldStatus =
+  | "empty"
+  | "captured_explicit"
+  | "normalized_needs_review"
+  | "estimated_needs_review"
+  | "confirmed"
+  | "invalid"
+  | "conflicted"
+  | "explicit_unknown";
+
+/**
+ * A product-owned dynamic field value. The raw event history remains the
+ * audit trail; this is only the current draft projection for a catalog ID.
+ */
+export interface OnboardingDynamicFieldCapture {
+  fieldId: string;
+  catalogVersion: string;
+  state: Exclude<OnboardingDraftFieldStatus, "empty">;
+  value?: unknown;
+  observedAt: string;
+  source: OnboardingInputSource;
+}
+
+export interface OnboardingDynamicFormRequest {
+  cardId: string;
+  catalogVersion: string;
+  draftRevision: number;
+  topic: string;
+  fieldIds: readonly string[];
+  reasonCode: OnboardingQuestionReasonCode;
+  requiredFor: OnboardingActionGate;
+}
+
+/**
+ * The only four fixed onboarding inputs. This deliberately does not project
+ * into the legacy ProfileDraft or GoalDraft: doing so would turn extraction or
+ * inference into a confirmed fact before the user reviews the dossier.
+ */
+export interface BaselineIntakeDraft {
+  age?: BaselineAgeCapture;
+  height?: BaselineQuantityCapture<LengthQuantity>;
+  currentWeight?: BaselineQuantityCapture<MassQuantity>;
+  goalNarrative?: BaselineGoalNarrativeCapture;
+}
+
+export type BaselineIntakeField = "age" | "height" | "current_weight" | "goal_narrative";
+
+/**
+ * Draft status is intentionally finer than a value's TypeScript shape. In
+ * particular, a normalized phrase or an estimate must never masquerade as a
+ * statement made by the user.
+ */
+export type OnboardingDraftValueStatus =
+  | "captured_explicit"
+  | "normalized_needs_review"
+  | "estimated_needs_review"
+  | "explicit_unknown"
+  | "conflicted";
+
+export interface GoalCaptureRef {
+  id: string;
+  observedAt: string;
+  source: OnboardingInputSource;
+}
+
+/** A target belongs to the future Goal Contract, not to Timeline. */
+export interface GoalTargetCapture extends GoalCaptureRef {
+  kind: "target_body_fat";
+  status: "captured_explicit" | "normalized_needs_review" | "conflicted";
+  value: PercentageQuantity;
+  normalizerVersion?: string;
+}
+
+/** A reported current measurement is a Timeline baseline candidate. */
+export interface TimelineBaselineMeasurementDraft extends GoalCaptureRef {
+  kind: "body_fat_percentage";
+  owner: "timeline_baseline";
+  status: "captured_explicit" | "normalized_needs_review" | "estimated_needs_review" | "conflicted";
+  value: PercentageQuantity;
+  /** Never infer a measurement method from a number in a goal sentence. */
+  measurementMethod: "unknown" | "user_reported";
+  normalizerVersion?: string;
+}
+
+export interface VisualGoalIntentCapture extends GoalCaptureRef {
+  kind: "wide_shoulders_narrow_waist";
+  status: "normalized_needs_review" | "conflicted";
+  normalizerVersion: string;
+}
+
+export interface GoalProtectionIntentCapture extends GoalCaptureRef {
+  kind: "bench_press_performance";
+  status: "normalized_needs_review" | "conflicted";
+  normalizerVersion: string;
+}
+
+export interface GoalTradeoffCapture extends GoalCaptureRef {
+  kind: "slower_progress_accepted";
+  status: "normalized_needs_review" | "conflicted";
+  normalizerVersion: string;
+}
+
+/**
+ * The presence of a conflict is a product fact. It is never represented by
+ * silently overwriting an older target or measurement in the draft reducer.
+ */
+export interface OnboardingGoalConflict {
+  id: string;
+  subject: "target_body_fat" | "current_body_fat";
+  state: "unresolved";
+  captureIds: readonly [string, string];
+}
+
+/**
+ * The structured interpretation of free-language goal statements. Raw
+ * narratives stay alongside the interpretation so the UI can show exactly
+ * what the person said and allow the interpretation to be corrected.
+ */
+export interface GoalNarrativeCaptureDraft {
+  narratives: readonly BaselineGoalNarrativeCapture[];
+  goalTargets: readonly GoalTargetCapture[];
+  timelineBaselineMeasurements: readonly TimelineBaselineMeasurementDraft[];
+  visualIntents: readonly VisualGoalIntentCapture[];
+  protectionIntents: readonly GoalProtectionIntentCapture[];
+  tradeoffs: readonly GoalTradeoffCapture[];
+  conflicts: readonly OnboardingGoalConflict[];
+}
+
+/**
+ * User-confirmed training history. This is deliberately separate from the
+ * legacy `trainingExperience` selector: duration, continuity and familiarity
+ * answer different planning questions and must remain independently reviewable.
+ */
+export interface TrainingBackgroundDraft {
+  capturedAt: string;
+  source: OnboardingInputSource;
+  /** Conversation extraction stays reviewable until the dossier is confirmed. */
+  captureStatus?: "captured_explicit" | "normalized_needs_review";
+  cumulativeTrainingMonths?: { minimum: number; maximum: number };
+  recentContinuity?: {
+    consecutiveWeeks?: number;
+    usualSessionsPerWeek?: number;
+    timeAwayWeeks?: number;
+  };
+  recentSplit?: readonly string[];
+  exactExerciseFamiliarity?: readonly string[];
+  comparableSets?: readonly {
+    exerciseVariantId: string;
+    load: MassQuantity;
+    reps: number;
+    rir?: number;
+    rpe?: number;
+    performedOn: string;
+    conditions?: string;
+  }[];
+  environments?: readonly string[];
+  availableEquipment?: readonly string[];
+  schedule?: { weeklyFrequency: number; sessionDurationMinutes: number };
+  executionStability?: "reported_consistent" | "reported_variable" | "unknown";
+  /** Weak, non-decisive evidence retained so it cannot silently raise a level. */
+  reportedTerminology?: readonly string[];
+}
+
+export type CoachingAssessmentStatus = "supported" | "provisional" | "unknown" | "contradicted";
+
+/**
+ * Structured reason codes are reviewable and auditable without storing model
+ * reasoning. Sources point back to a user statement, never to an LLM claim.
+ */
+export interface CoachingAssessmentEvidence {
+  code:
+    | "recent_continuity_reported"
+    | "recent_time_away_reported"
+    | "recent_split_reported"
+    | "exact_exercise_familiarity_reported"
+    | "comparable_set_reported"
+    | "execution_consistency_reported"
+    | "duration_and_vocabulary_not_sufficient";
+  source?: OnboardingInputSource;
+  capturedAt?: string;
+  exerciseVariantId?: string;
+}
+
+export interface CoachingAssessmentDimension {
+  status: CoachingAssessmentStatus;
+  supportingEvidence: readonly CoachingAssessmentEvidence[];
+  refutingEvidence: readonly CoachingAssessmentEvidence[];
+  unknowns: readonly string[];
+  /** Exact variants only. Familiarity never expands by muscle group or name. */
+  applicableExerciseVariantIds: readonly string[];
+  reassessWhen: readonly string[];
+}
+
+export interface CoachingLevelAssessment {
+  id: string;
+  userId: string;
+  /** Revision of this independent assessment artifact, not a Profile revision. */
+  revision: number;
+  assessedAt: string;
+  sourceDraft: { id: string; revision: number };
+  priority: "multi_dimensional_assessment";
+  /** Read-only migration context; never used to calculate the dimensions. */
+  legacyTrainingExperience?: ProfileDraft["trainingExperience"];
+  dimensions: {
+    trainingProgrammingUnderstanding: CoachingAssessmentDimension;
+    exactExerciseFamiliarity: CoachingAssessmentDimension;
+    currentComparablePerformance: CoachingAssessmentDimension;
+    trainingContinuity: CoachingAssessmentDimension;
+    selfRegulation: CoachingAssessmentDimension;
+    executionStability: CoachingAssessmentDimension;
+  };
+}
+
 export interface OnboardingPatch {
+  baseline?: BaselineIntakeDraft;
+  /** Dynamic Catalog fields not yet promoted to their owned dossier record. */
+  dynamicFields?: Readonly<Record<string, OnboardingDynamicFieldCapture>>;
+  /** Goal Contract and Timeline-baseline candidates remain distinct here. */
+  goalCapture?: GoalNarrativeCaptureDraft;
+  trainingBackground?: TrainingBackgroundDraft;
   profile?: ProfileDraft;
   goal?: GoalDraft;
   mandate?: MandateDraft;
@@ -191,7 +463,31 @@ export type OnboardingDraftEvent =
         inputMode: "form" | "conversation";
         patch: OnboardingPatch;
         confirmedSections: readonly OnboardingSection[];
+        dynamicForm?: {
+          catalogVersion: string;
+          cardId?: string;
+          submissionId: string;
+          fieldIds: readonly string[];
+        };
       };
+    }
+  | {
+      id: string;
+      schemaVersion: typeof ONBOARDING_DRAFT_SCHEMA_VERSION;
+      type: "onboarding.dynamic_form_requested";
+      userId: string;
+      draftId: string;
+      recordedAt: string;
+      payload: OnboardingDynamicFormRequest;
+    }
+  | {
+      id: string;
+      schemaVersion: typeof ONBOARDING_DRAFT_SCHEMA_VERSION;
+      type: "onboarding.coaching_level_assessed";
+      userId: string;
+      draftId: string;
+      recordedAt: string;
+      payload: CoachingLevelAssessment;
     }
   | {
       id: string;
@@ -209,11 +505,39 @@ export interface OnboardingProgress {
   depth: OnboardingDepth;
   status: "in_progress" | "completed";
   patch: OnboardingPatch;
+  /** Monotonically increases for every append-only event in this draft. */
+  revision: number;
+  /** Missing fixed baseline inputs. Later action gates are not listed here. */
+  baselineMissingFields: BaselineIntakeField[];
+  /** Append-only assessment revisions; these are Coach judgments, not Profile facts. */
+  coachingLevelAssessments?: readonly CoachingLevelAssessment[];
   confirmedSections: OnboardingSection[];
   nextRequiredSections: OnboardingSection[];
   lastInputMode?: "form" | "conversation";
   inputModeBySection: Partial<Record<OnboardingSection, "form" | "conversation">>;
+  /** Capabilities currently constrained by an explicit unknown, not a global block. */
+  limitedActions: OnboardingActionGate[];
   updatedAt: string;
+}
+
+/**
+ * The account-entry projection is deliberately smaller than the editable
+ * draft. It tells a product shell where to send an account without exposing
+ * Ledger events or making a second completion decision in the UI.
+ */
+export type OnboardingEntryStatus =
+  | "dossier_complete"
+  | "not_started"
+  | "in_progress"
+  | "ready_for_confirmation"
+  | "commit_pending"
+  | "safety_hold";
+
+export interface OnboardingEntryState {
+  status: OnboardingEntryStatus;
+  destination: "home" | "onboarding";
+  /** Present only when the account must resume a durable onboarding draft. */
+  draft?: OnboardingProgress;
 }
 
 export interface OnboardingCompletion {
@@ -238,6 +562,11 @@ export class OnboardingValidationError extends Error {
       | "adult_confirmation_required"
       | "primary_goal_conflict"
       | "invalid_professional_history"
+      | "invalid_baseline_intake"
+      | "dynamic_form_rejected"
+      | "stale_dynamic_form"
+      | "stale_dossier_confirmation"
+      | "draft_user_mismatch"
       | "local_user_presence_required",
     readonly fields: readonly string[] = [],
   ) {

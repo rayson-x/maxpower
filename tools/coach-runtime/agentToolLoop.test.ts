@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ScriptedLLMProvider } from "../../src/coach/adapters/provider";
+import { LocalCoachProvider, ScriptedLLMProvider } from "../../src/coach/adapters/provider";
 import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import { BehaviorDecisionTraceRecorder, TraceRecorder } from "../../src/observability";
@@ -82,10 +82,15 @@ test("本地能力合同会同时根据事实与 Coaching mandate 装配可见�
   const collaborativeSession = await collaborative.app.startSession({ userId: "collaborative-user", context: { kind: "plan", ref: "active" } });
   await seed(collaborative.app, "collaborative-user");
   await collaborative.app.sendCoachTurn({ sessionId: collaborativeSession.id, text: "帮我看看当前状态" });
-  const collaborativeTools = collaborativeProvider.requests[0]?.toolManifest.map((tool) => tool.name) ?? [];
+  const collaborativeManifest = collaborativeProvider.requests[0]?.toolManifest ?? [];
+  const collaborativeTools = collaborativeManifest.map((tool) => tool.name);
   assert.equal(collaborativeTools.includes("plan.show_today"), true);
   assert.equal(collaborativeTools.includes("plan.propose_change"), true);
   assert.equal(collaborativeTools.includes("nutrition.propose_change_from_timeline"), false);
+  assert.match(
+    collaborativeManifest.find((tool) => tool.name === "plan.adapt_from_user_report")?.description ?? "",
+    /unavailable-date\/schedule.*Prefer this over plan\.show_today\/current/,
+  );
 
   const manualProvider = new ScriptedLLMProvider([{ type: "completed" }]);
   const manual = fixture(manualProvider, true);
@@ -160,4 +165,184 @@ test("能力可见性、工具选择与校验写入结构化决策记录而非�
     "capability_visibility", "tool_selection", "tool_validation",
   ]);
   assert.equal(envelopes.every((item) => !JSON.stringify(item).includes("看看今天计划")), true);
+});
+
+test("建档场景把 Agent 选择的临时表单写入同一草稿；其它场景看不到建档工具", async () => {
+  const provider = new ScriptedLLMProvider(
+    [{
+      type: "tool-call",
+      toolCallId: "onboarding-form",
+      toolName: "onboarding.request_form",
+      input: {
+        topic: "schedule_feasibility",
+        fieldIds: ["profile.training_schedule"],
+        reasonCode: "schedule_feasibility",
+        requiredFor: "dated_session_schedule",
+      },
+    }, { type: "completed" }],
+    [],
+    [[{ type: "text-delta", delta: "先把你能稳定安排的训练频率和时长说清楚。" }, { type: "completed" }]],
+  );
+  const { app } = fixture(provider, true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "onboarding-agent-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id,
+    inputMode: "form",
+    idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "想减脂，保持力量", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+  const session = await app.startSession({ userId: draft.userId, context: { kind: "onboarding", ref: draft.id } });
+  await app.sendCoachTurn({ sessionId: session.id, text: "我每周大概练四次，每次一个小时。" });
+
+  const card = await app.readActiveOnboardingDynamicForm({ draftId: draft.id });
+  assert.deepEqual(card?.fieldIds, ["profile.training_schedule"]);
+  assert.equal(provider.requests[0]?.toolManifest?.some((tool) => tool.name === "onboarding.request_form"), true);
+  assert.match(provider.requests[0]?.modelInput.systemPrompt ?? "", /Onboarding scenario/);
+  assert.equal((provider.requests[0]?.context.onboardingDraft as { id?: string } | undefined)?.id, draft.id);
+
+  const nonOnboarding = new ScriptedLLMProvider([{ type: "completed" }]);
+  const other = fixture(nonOnboarding, true);
+  await seed(other.app, "other-user");
+  const otherSession = await other.app.startSession({ userId: "other-user", context: { kind: "profile", ref: "profile" } });
+  await other.app.sendCoachTurn({ sessionId: otherSession.id, text: "你好" });
+  assert.equal(nonOnboarding.requests[0]?.toolManifest.some((tool) => tool.name === "onboarding.request_form"), false);
+});
+
+test("建档 Agent 从自然语言回合保存训练背景，再创建多维评估而非训练等级", async () => {
+  const provider = new ScriptedLLMProvider(
+    [{
+      type: "tool-call",
+      toolCallId: "capture-background",
+      toolName: "onboarding.capture_training_background",
+      input: {
+        cumulativeTrainingMonths: { minimum: 18, maximum: 36 },
+        recentContinuity: { consecutiveWeeks: 12, usualSessionsPerWeek: 4 },
+        recentSplit: ["胸", "背", "腿", "肩"],
+        environments: ["gym"],
+        availableEquipment: ["full_gym"],
+        schedule: { weeklyFrequency: 4, sessionDurationMinutes: 75 },
+        executionStability: "reported_consistent",
+      },
+    }, { type: "completed" }],
+    [],
+    [[{ type: "tool-call", toolCallId: "assess-background", toolName: "onboarding.assess_training_context", input: {} }, { type: "completed" }], [{ type: "text-delta", delta: "训练背景已记下，接下来按已知情况继续校准。" }, { type: "completed" }]],
+  );
+  const { app } = fixture(provider, true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "onboarding-background-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id, inputMode: "form", idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "减脂保肌", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+  const session = await app.startSession({ userId: draft.userId, context: { kind: "onboarding", ref: draft.id } });
+  await app.sendCoachTurn({ sessionId: session.id, text: "我练两年了，一周四练，最近胸背腿肩，在健身房练，频率很稳定。" });
+
+  const progress = await app.readOnboardingProgress(draft.id);
+  assert.deepEqual(progress.patch.trainingBackground?.schedule, { weeklyFrequency: 4, sessionDurationMinutes: 75 });
+  assert.deepEqual(progress.patch.trainingBackground?.recentSplit, ["胸", "背", "腿", "肩"]);
+  assert.equal(progress.coachingLevelAssessments?.at(-1)?.priority, "multi_dimensional_assessment");
+  assert.equal(progress.patch.profile?.trainingExperience, undefined);
+});
+
+test("基线完成后由 Agent 主动开始同一份草稿的下一回合，不伪造用户消息", async () => {
+  const provider = new ScriptedLLMProvider([
+    {
+      type: "tool-call",
+      toolCallId: "opening-form",
+      toolName: "onboarding.request_form",
+      input: {
+        topic: "schedule_feasibility",
+        fieldIds: ["profile.training_schedule"],
+        reasonCode: "schedule_feasibility",
+        requiredFor: "dated_session_schedule",
+      },
+    },
+    { type: "completed" },
+  ], [], [[{ type: "text-delta", delta: "先说说你一周通常能练几次、每次多久。" }, { type: "completed" }]]);
+  const { app, ledger } = fixture(provider, true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "onboarding-opening-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id, inputMode: "form", idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "想减脂，保持力量", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+
+  await app.startOnboardingAgentTurn({ userId: draft.userId, draftId: draft.id });
+
+  const snapshot = await ledger.read();
+  assert.equal(snapshot.messages.some((message) => message.role === "user" && message.content.includes("开始建档")), false);
+  assert.equal(snapshot.messages.some((message) => message.role === "assistant" && message.content.includes("一周通常能练几次")), true);
+  assert.deepEqual((await app.readActiveOnboardingDynamicForm({ draftId: draft.id }))?.fieldIds, ["profile.training_schedule"]);
+  assert.match(provider.requests[0]?.modelInput?.systemPrompt ?? "", /Onboarding scenario/);
+  assert.match(provider.requests[0]?.modelInput?.systemPrompt ?? "", /decision tree/);
+});
+
+test("建档 Agent 把用户已经说出的动态字段写入同一草稿，标记为待确认而非伪装明确填写", async () => {
+  const provider = new ScriptedLLMProvider([
+    {
+      type: "tool-call",
+      toolCallId: "capture-activity",
+      toolName: "onboarding.capture_fields",
+      input: { captures: [{ fieldId: "timeline.daily_activity", value: "sedentary_remote_work" }] },
+    },
+    { type: "completed" },
+  ], [], [[{ type: "completed" }]]);
+  const { app } = fixture(provider, true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "onboarding-conversation-field-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id, inputMode: "form", idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "想减脂", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+  const session = await app.startSession({ userId: draft.userId, context: { kind: "onboarding", ref: draft.id } });
+  await app.sendCoachTurn({ sessionId: session.id, text: "我平时居家办公，白天基本坐着。" });
+
+  const capture = (await app.readOnboardingProgress(draft.id)).patch.dynamicFields?.["timeline.daily_activity"];
+  assert.equal(capture?.value, "sedentary_remote_work");
+  assert.equal(capture?.state, "normalized_needs_review");
+  assert.equal(capture?.source.kind, "conversation_message");
+});
+
+test("离线 Agent 也能从目标前沿完成训练背景→评估→下一张卡，而不会卡在联网同意", async () => {
+  const { app } = fixture(new LocalCoachProvider(), true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "offline-onboarding-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id, inputMode: "form", idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "想减脂", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+  await app.startOnboardingAgentTurn({ userId: draft.userId, draftId: draft.id });
+  const session = (await app.listCoachSessions({ userId: draft.userId, taskKind: "onboarding" }))[0]!;
+  await app.sendCoachTurn({ sessionId: session.id, text: "我练两年了，每周4练，每次75分钟，在健身房训练，最近胸背腿肩，频率很稳定。" });
+
+  const progress = await app.readOnboardingProgress(draft.id);
+  assert.deepEqual(progress.patch.trainingBackground?.schedule, { weeklyFrequency: 4, sessionDurationMinutes: 75 });
+  assert.ok(progress.coachingLevelAssessments?.length);
+  assert.deepEqual((await app.readActiveOnboardingDynamicForm({ draftId: draft.id }))?.fieldIds, ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake"]);
 });

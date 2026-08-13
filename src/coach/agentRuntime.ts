@@ -36,6 +36,8 @@ import {
 import { stableHash } from "./stable";
 import { redactDirectIdentifiers } from "./remoteRedaction";
 import type { CoachToolCall, CoachToolRegistry } from "./toolRegistry";
+import { projectOnboardingProgress } from "../onboarding/OnboardingService";
+import { projectDomainEvents } from "./domain";
 
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 45_000;
 const MAX_TOOL_RESULT_CONTINUATIONS = 8;
@@ -87,7 +89,7 @@ export class AgentRuntime {
     };
   }
 
-  async sendTurn(input: { sessionId: string; text: string }): Promise<readonly CoachRunEvent[]> {
+  async sendTurn(input: { sessionId: string; text: string; scenarioStart?: boolean }): Promise<readonly CoachRunEvent[]> {
     const snapshot = await this.ledger.read();
     const session = snapshot.sessions.find((candidate) => candidate.id === input.sessionId);
     if (!session) throw new Error(`CoachSession not found: ${input.sessionId}`);
@@ -95,6 +97,7 @@ export class AgentRuntime {
       throw new Error(`CoachSession is not writable: ${session.status}`);
     }
     const provider = await this.resolveProvider(session);
+    this.assertRemoteProviderAllowed(snapshot, session, provider);
     const now = this.runtime.now();
     const runId = this.runtime.nextId("coach-run");
     const assembled = this.contextAssembler.assemble(snapshot, session.userId, session.id, {
@@ -112,7 +115,7 @@ export class AgentRuntime {
           redactedPaths: [...new Set([...assembled.contextManifest.redactedPaths, ...providerText.redactedPaths])],
         }
       : assembled.contextManifest;
-    const message: CoachMessage = {
+    const message: CoachMessage | undefined = input.scenarioStart ? undefined : {
       id: this.runtime.nextId("message"),
       sessionId: session.id,
       userId: session.userId,
@@ -143,13 +146,14 @@ export class AgentRuntime {
       ...session,
       status: "active",
       revision: (session.revision ?? 1) + 1,
-      messageIds: [...new Set([...(session.messageIds ?? []), message.id])],
+      messageIds: [...new Set([...(session.messageIds ?? []), ...(message ? [message.id] : [])])],
       runIds: [...new Set([...(session.runIds ?? []), run.id])],
       updatedAt: now,
     };
     const toolManifest = resolveCoachCapabilities({
       snapshot,
       userId: session.userId,
+      contextKind: session.context.kind,
       tools: this.tools,
     });
     const requestAudit = auditRecord(this.runtime, {
@@ -175,7 +179,7 @@ export class AgentRuntime {
       expectedSessionRevisions: [{ id: session.id, revision: session.revision ?? 1 }],
       domainEvents: [],
       sessions: [updatedSession],
-      messages: [message],
+      messages: message ? [message] : [],
       runs: [run],
       toolAudit: [requestAudit],
       idempotencyKey: `run:start:${runId}`,
@@ -209,6 +213,7 @@ export class AgentRuntime {
         userText: providerText.text,
         context: assembled.context,
         contextManifest: providerContextManifest,
+        ...(session.context.kind === "onboarding" ? { scenario: "onboarding" as const } : {}),
       }),
       signal: controller.signal,
     };
@@ -274,6 +279,7 @@ export class AgentRuntime {
       await this.finishRun({ sessionId: session.id, runId: run.id, events: [failure], status: "failed" });
       return [failure];
     }
+    this.assertRemoteProviderAllowed(snapshot, session, provider);
     const assembled = this.contextAssembler.assemble(snapshot, session.userId, session.id, {
       providerKind: provider.kind,
       ...(provider.model ? { providerModel: provider.model } : {}),
@@ -313,12 +319,13 @@ export class AgentRuntime {
           runId: run.id,
           userText: "",
           ...assembled,
-          toolManifest: resolveCoachCapabilities({ snapshot, userId: session.userId, tools: this.tools }),
+          toolManifest: resolveCoachCapabilities({ snapshot, userId: session.userId, contextKind: session.context.kind, tools: this.tools }),
           modelInput: buildLocalAgentModelInput({
             userText: "",
             context: assembled.context,
             contextManifest: assembled.contextManifest,
             continuation: run.resume,
+            ...(session.context.kind === "onboarding" ? { scenario: "onboarding" as const } : {}),
           }),
           signal: controller.signal,
           continuation: run.resume,
@@ -508,6 +515,7 @@ export class AgentRuntime {
       throw new Error("provider_tool_result_continuation_unsupported");
     }
     const snapshot = await this.ledger.read();
+    this.assertRemoteProviderAllowed(snapshot, input.session, input.provider);
     const assembled = this.contextAssembler.assemble(snapshot, input.session.userId, input.session.id, {
       providerKind: input.provider.kind,
       ...(input.provider.model ? { providerModel: input.provider.model } : {}),
@@ -545,17 +553,35 @@ export class AgentRuntime {
       runId: input.runId,
       userText: "",
       ...assembled,
-      toolManifest: resolveCoachCapabilities({ snapshot, userId: input.session.userId, tools: this.tools }),
+      toolManifest: resolveCoachCapabilities({ snapshot, userId: input.session.userId, contextKind: input.session.context.kind, tools: this.tools }),
       modelInput: buildLocalAgentModelInput({
         userText: "",
         context: assembled.context,
         contextManifest: assembled.contextManifest,
         continuation: input.continuation,
+        ...(input.session.context.kind === "onboarding" ? { scenario: "onboarding" as const } : {}),
       }),
       signal: input.abortController.signal,
       continuation: input.continuation,
     };
     return input.provider.resume(request);
+  }
+
+  /** Re-check at every network boundary; consent can change while a run waits. */
+  private assertRemoteProviderAllowed(
+    snapshot: Awaited<ReturnType<CoachLedger["read"]>>,
+    session: CoachSession,
+    provider: LLMProvider | undefined,
+  ): void {
+    if (!provider?.usesNetwork) return;
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: session.userId });
+    const onboardingConsent = session.context.kind === "onboarding"
+      ? projectOnboardingProgress(snapshot.onboardingDraftEvents, session.context.ref)
+        .patch.dynamicFields?.["permission.remote_llm"]
+      : undefined;
+    const remoteLlmAllowed = domain.permissions?.value.remoteLlm === "granted"
+      || (onboardingConsent?.state === "captured_explicit" && onboardingConsent.value === "granted");
+    if (!remoteLlmAllowed) throw new Error("remote_llm_permission_required");
   }
 
   private async persistToolInputStreaming(
@@ -691,6 +717,7 @@ export class AgentRuntime {
     const currentlyVisible = resolveCoachCapabilities({
       snapshot,
       userId: session.userId,
+      contextKind: session.context.kind,
       tools: this.tools,
     }).some((tool) => tool.name === call.toolName);
     if (!currentlyVisible) {

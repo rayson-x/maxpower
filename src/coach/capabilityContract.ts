@@ -1,6 +1,7 @@
 import { projectDomainEvents } from "./domain";
 import type { LedgerSnapshot } from "./model";
 import type { CoachToolManifest, CoachToolRegistry } from "./toolRegistry";
+import type { CoachContextKind } from "./model";
 
 /**
  * Derives the model-visible capabilities from one local fact frontier.
@@ -12,6 +13,7 @@ import type { CoachToolManifest, CoachToolRegistry } from "./toolRegistry";
 export function resolveCoachCapabilities(input: {
   snapshot: LedgerSnapshot;
   userId: string;
+  contextKind?: CoachContextKind;
   tools?: CoachToolRegistry;
 }): readonly CoachToolManifest[] {
   if (!input.tools) return [];
@@ -77,7 +79,7 @@ export function resolveCoachCapabilities(input: {
     }
   };
 
-  return input.tools.manifest().filter((tool) => {
+  return input.tools.manifest({ contextKind: input.contextKind }).filter((tool) => {
     // Read and human-input tools stay discoverable even when their result
     // will truthfully be an unknown/empty local artifact. Hiding them would
     // make a missing record indistinguishable from an unsupported feature.

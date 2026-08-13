@@ -37,7 +37,7 @@ export interface SplitSelection {
 }
 
 export interface SplitSelectionContext {
-  trainingExperience?: "beginner" | "intermediate" | "advanced";
+  trainingExperience?: "beginner" | "intermediate" | "advanced" | "unknown";
   sessionDurationMinutes?: number;
   primaryGoal?: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass";
   emphasisMuscles?: readonly string[];

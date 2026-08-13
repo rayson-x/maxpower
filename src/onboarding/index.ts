@@ -1,4 +1,34 @@
-export { OnboardingService, projectOnboardingProgress } from "./OnboardingService";
+export {
+  OnboardingService,
+  projectOnboardingEntryState,
+  projectOnboardingProgress,
+} from "./OnboardingService";
 export { evaluateOnboardingPolicy } from "./policy";
+export {
+  ONBOARDING_FIELD_CATALOG,
+  ONBOARDING_FIELD_CATALOG_VERSION,
+  fieldById as onboardingFieldById,
+  goalDrivenOnboardingFrontier,
+  type DynamicFormCard,
+  type DynamicFormAnswer,
+  type DynamicFieldInput,
+  type OnboardingDynamicFormProposal,
+} from "./FieldCatalog";
+export {
+  projectOnboardingReadinessSafety,
+  type OnboardingReadinessSafetyAssessment,
+  type OnboardingReadinessState,
+  type OnboardingSafetyEvidence,
+  type OnboardingCapabilityGate,
+} from "./ReadinessSafety";
+export {
+  buildOnboardingDossierSummary,
+  type OnboardingDossierSummary,
+} from "./DossierSummary";
+export {
+  firstPlannerEvidence,
+  firstPlannerNeedsInput,
+  type FirstPlannerHandoffProposal,
+} from "./FirstPlannerHandoff";
 export type * from "./model";
 export type { OnboardingPolicyConstraint, OnboardingPolicyDecision } from "./policy";

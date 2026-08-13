@@ -10,6 +10,8 @@ export interface CoachToolCall {
 
 export interface CoachToolManifest {
   name: string;
+  /** Concise model-facing intent boundary; providers must preserve it. */
+  description?: string;
   schemaVersion: 1;
   accessClass: "read" | "proposal" | "human_input";
   executionMode: "local_deterministic" | "policy_gated" | "human_in_loop";
@@ -108,11 +110,13 @@ const AGENT_ADJUST_TASK_CHANGE_SCHEMA = Object.freeze({
 const COACH_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   {
     name: "plan.show_today", schemaVersion: 1, accessClass: "read", executionMode: "local_deterministic", offlineAvailable: true,
+    description: "plan.show_today: Read an already-materialized plan for one date. Use only when the user asks what is planned; do not use for a reported schedule change, unavailable date, missed training, recovery change, or a request to adjust future sessions.",
     permissionScopes: [], riskCeiling: "none", evidenceRequirements: ["current_local_plan"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["date"], properties: { date: { type: "string", format: "date" } } },
   },
   {
     name: "plan.show_current", schemaVersion: 1, accessClass: "read", executionMode: "local_deterministic", offlineAvailable: true,
+    description: "plan.show_current: Read the current materialized plan without changing it. Do not use when the user reports a new execution-time fact and asks to adjust the plan.",
     permissionScopes: [], riskCeiling: "none", evidenceRequirements: ["current_materialized_plan", "committed_nutrition_strategy"], output: "artifact_ref", outputLimit: 1,
     inputSchema: EXACT_EMPTY_OBJECT,
   },
@@ -169,7 +173,29 @@ const COACH_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   {
     name: "ui.request_choice", schemaVersion: 1, accessClass: "human_input", executionMode: "human_in_loop", offlineAvailable: true,
     permissionScopes: [], riskCeiling: "confirmation_required", evidenceRequirements: ["explicit_user_choice"], output: "pending_human_action", outputLimit: 1,
-    inputSchema: { type: "object", additionalProperties: false, required: ["prompt", "options", "risk"], properties: { prompt: { type: "string" }, options: { type: "array" }, risk: { enum: ["low", "review", "high"] } } },
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["prompt", "options", "risk"],
+      properties: {
+        prompt: { type: "string", minLength: 1, maxLength: 320 },
+        options: {
+          type: "array",
+          minItems: 1,
+          maxItems: 4,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "label"],
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 80 },
+              label: { type: "string", minLength: 1, maxLength: 120 },
+            },
+          },
+        },
+        risk: { enum: ["low", "review", "high"] },
+      },
+    },
   },
 ]);
 
@@ -203,11 +229,13 @@ const KNOWLEDGE_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
 const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   {
     name: "timeline.record_user_report", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    description: "timeline.record_user_report: Record a clear current-conversation user report as a Timeline fact. Use for completed training, activity, sleep, recovery, body, schedule, or rest facts when no future-plan adjustment is requested.",
     permissionScopes: ["coaching_mandate"], riskCeiling: "review", evidenceRequirements: ["current_user_statement"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["kind"], properties: { kind: { enum: ["training", "activity", "sleep", "recovery", "body", "schedule", "rest"] }, summary: { type: "string", maxLength: 240 }, note: { type: "string", maxLength: 480 }, exercises: { type: "array", maxItems: 20, items: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 120 }, sets: { type: "array", maxItems: 99, items: { type: "object", additionalProperties: false, properties: { reps: { type: "integer", minimum: 0, maximum: 200 }, loadKg: { type: "number", minimum: 0, maximum: 1000 }, rir: { type: "number", minimum: 0, maximum: 10 } } } } } } }, activityType: { type: "string", maxLength: 120 }, durationMinutes: { type: "number", minimum: 0, maximum: 1440 }, intensity: { enum: ["easy", "moderate", "hard", "unknown"] }, energyKcal: { type: "number", minimum: 0, maximum: 10000 }, energyEstimateKcal: { type: "number", minimum: 0, maximum: 10000 }, quality: { type: "integer", minimum: 1, maximum: 5 }, perceivedRecovery: { type: "integer", minimum: 1, maximum: 5 }, metric: { enum: ["body_weight", "body_fat_percentage"] }, value: { type: "number", minimum: 0, maximum: 1000 } } },
   },
   {
     name: "plan.adapt_from_user_report", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    description: "plan.adapt_from_user_report: Record an execution-time recovery, unavailable-date/schedule, missed-training, or extra-activity report and create a confirmation-required preview affecting only future sessions. For travel or no availability, use kind=schedule and pass unavailableDates. Prefer this over plan.show_today/current when the user explicitly asks to adjust.",
     permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["current_materialized_plan", "current_user_statement"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["kind", "summary"], properties: { kind: { enum: ["recovery", "schedule", "missed_training", "activity"] }, summary: { type: "string", minLength: 2, maxLength: 480 }, perceivedRecovery: { type: "integer", minimum: 1, maximum: 5 }, fatigue: { type: "integer", minimum: 1, maximum: 10 }, sorenessArea: { type: "string", maxLength: 120 }, sorenessSeverity: { type: "integer", minimum: 1, maximum: 10 }, qualitativeAssessment: { enum: ["poor_sleep_localized_lower_soreness"] }, requestedTrainingFocus: { enum: ["shoulders"] }, unavailableDates: { type: "array", minItems: 1, maxItems: 14, items: { type: "string", format: "date" } }, missedDates: { type: "array", minItems: 1, maxItems: 14, items: { type: "string", format: "date" } }, activityType: { type: "string", minLength: 1, maxLength: 120 }, durationMinutes: { type: "number", minimum: 0, maximum: 1440 }, intensity: { enum: ["easy", "moderate", "hard", "unknown"] } } },
   },
@@ -218,6 +246,7 @@ const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   },
   {
     name: "plan.propose_energy_rebalance", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    description: "plan.propose_energy_rebalance: Record a user-reported meal or intake excess and create a gentle, confirmation-required future energy/activity rebalance. Pass excessKcal only when the user states or confirms it; never prescribe punishment, extreme restriction, or high-intensity compensation.",
     permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["current_materialized_plan", "current_user_statement"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["description"], properties: { description: { type: "string", minLength: 2, maxLength: 240 }, excessKcal: { type: "number", minimum: 1, maximum: 10000 } } },
   },
@@ -235,6 +264,44 @@ const ACTION_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
     name: "plan.trigger_replan_with_context", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
     permissionScopes: ["coaching_mandate"], riskCeiling: "confirmation_required", evidenceRequirements: ["user_stated_context"], output: "artifact_ref", outputLimit: 1,
     inputSchema: { type: "object", additionalProperties: false, required: ["contextType"], properties: { contextType: { enum: ["progress_plateau", "goal_shift", "schedule_change", "feeling_stalled", "other"] }, note: { type: "string", maxLength: 240 } } },
+  },
+]);
+
+/**
+ * Tools available only while the session is attached to one onboarding draft.
+ * The model may choose a catalog field or save facts the person stated; it
+ * cannot manufacture a Profile or a Plan from either operation.
+ */
+const ONBOARDING_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
+  {
+    name: "onboarding.capture_fields", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    description: "onboarding.capture_fields: Normalize at most 3 values stated in the current onboarding user message into the same dossier draft. These remain review-needed conversation extractions until the user confirms the dossier. Use instead of requesting a card when the user already gave the answer.",
+    permissionScopes: [], riskCeiling: "review", evidenceRequirements: ["current_user_statement", "active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["captures"], properties: { captures: { type: "array", minItems: 1, maxItems: 3, items: { type: "object", additionalProperties: false, required: ["fieldId", "value"], properties: { fieldId: { type: "string", minLength: 1, maxLength: 120 }, value: {} } } } } },
+  },
+  {
+    name: "onboarding.capture_goal_narrative", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    description: "onboarding.capture_goal_narrative: Save a new or corrected goal statement exactly when the user states it in this onboarding conversation. It preserves the original wording and lets local normalization keep target facts separate from current measurements; never invent a target value.",
+    permissionScopes: [], riskCeiling: "review", evidenceRequirements: ["current_user_statement", "active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["narrative"], properties: { narrative: { type: "string", minLength: 1, maxLength: 600 } } },
+  },
+  {
+    name: "onboarding.request_form", schemaVersion: 1, accessClass: "human_input", executionMode: "human_in_loop", offlineAvailable: true,
+    description: "onboarding.request_form: Ask for 1–4 product catalog fields only when they can change the next onboarding decision. Use after reading the user's stated goal and existing draft; never request a fixed questionnaire or repeat a captured/explicitly-unknown field.",
+    permissionScopes: [], riskCeiling: "confirmation_required", evidenceRequirements: ["active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, required: ["topic", "fieldIds", "reasonCode", "requiredFor"], properties: { topic: { type: "string", minLength: 1, maxLength: 80 }, fieldIds: { type: "array", minItems: 1, maxItems: 4, items: { type: "string", minLength: 1, maxLength: 120 } }, reasonCode: { enum: ["goal_disambiguation", "planning_gate", "safety_gate", "measurement_quality", "schedule_feasibility", "conflict_resolution"] }, requiredFor: { type: "string", minLength: 1, maxLength: 80 } } },
+  },
+  {
+    name: "onboarding.capture_training_background", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
+    description: "onboarding.capture_training_background: Extract training facts from the current onboarding user message into a reviewable draft. Use for continuity, recent split, schedule, environment, equipment and exact comparable sets. Do not infer a beginner/intermediate/advanced level; follow with onboarding.assess_training_context when useful.",
+    permissionScopes: [], riskCeiling: "review", evidenceRequirements: ["current_user_statement", "active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: { type: "object", additionalProperties: false, properties: { cumulativeTrainingMonths: { type: "object", additionalProperties: false, required: ["minimum", "maximum"], properties: { minimum: { type: "integer", minimum: 0, maximum: 1200 }, maximum: { type: "integer", minimum: 0, maximum: 1200 } } }, recentContinuity: { type: "object", additionalProperties: false, properties: { consecutiveWeeks: { type: "integer", minimum: 0, maximum: 520 }, usualSessionsPerWeek: { type: "integer", minimum: 0, maximum: 14 }, timeAwayWeeks: { type: "integer", minimum: 0, maximum: 520 } } }, recentSplit: { type: "array", maxItems: 10, items: { type: "string", minLength: 1, maxLength: 80 } }, exactExerciseFamiliarity: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 120 } }, comparableSets: { type: "array", maxItems: 10, items: { type: "object", additionalProperties: false, required: ["exerciseVariantId", "loadKg", "reps", "performedOn"], properties: { exerciseVariantId: { type: "string", minLength: 1, maxLength: 120 }, loadKg: { type: "number", minimum: 0, maximum: 1000 }, reps: { type: "integer", minimum: 0, maximum: 200 }, rir: { type: "number", minimum: 0, maximum: 10 }, rpe: { type: "number", minimum: 1, maximum: 10 }, performedOn: { type: "string", format: "date" }, conditions: { type: "string", maxLength: 240 } } } }, environments: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 80 } }, availableEquipment: { type: "array", maxItems: 30, items: { type: "string", minLength: 1, maxLength: 120 } }, schedule: { type: "object", additionalProperties: false, required: ["weeklyFrequency", "sessionDurationMinutes"], properties: { weeklyFrequency: { type: "integer", minimum: 1, maximum: 14 }, sessionDurationMinutes: { type: "integer", minimum: 10, maximum: 360 } } }, executionStability: { enum: ["reported_consistent", "reported_variable", "unknown"] } } },
+  },
+  {
+    name: "onboarding.assess_training_context", schemaVersion: 1, accessClass: "read", executionMode: "local_deterministic", offlineAvailable: true,
+    description: "onboarding.assess_training_context: Create a multi-dimensional assessment from the already captured training background. It does not assign a single level and preserves unknown dimensions.",
+    permissionScopes: [], riskCeiling: "none", evidenceRequirements: ["active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
+    inputSchema: EXACT_EMPTY_OBJECT,
   },
 ]);
 
@@ -336,15 +403,36 @@ export class CoachToolRegistry {
         input: { sessionId: string; contextType: string; note?: string },
         execution: ToolExecutionIdentity,
       ): Promise<ShowArtifactResult>;
+      requestOnboardingForm(
+        input: { sessionId: string; proposal: import("../onboarding").OnboardingDynamicFormProposal },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      captureOnboardingTrainingBackground(
+        input: { sessionId: string; background: Omit<import("../onboarding").TrainingBackgroundDraft, "capturedAt" | "source"> },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      assessOnboardingTrainingContext(
+        input: { sessionId: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      captureOnboardingGoalNarrative(
+        input: { sessionId: string; narrative: string },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
+      captureOnboardingFields(
+        input: { sessionId: string; captures: readonly { fieldId: string; value: unknown }[] },
+        execution: ToolExecutionIdentity,
+      ): Promise<ShowArtifactResult>;
     },
     private readonly options: { knowledgeToolsEnabled?: boolean; actionToolsEnabled?: boolean } = {},
   ) {}
 
-  manifest(): readonly CoachToolManifest[] {
+  manifest(input?: { contextKind?: import("./model").CoachContextKind }): readonly CoachToolManifest[] {
     const base = this.options.knowledgeToolsEnabled
       ? [...COACH_TOOL_MANIFEST, ...KNOWLEDGE_TOOL_MANIFEST]
       : [...COACH_TOOL_MANIFEST];
-    return this.options.actionToolsEnabled ? [...base, ...ACTION_TOOL_MANIFEST] : base;
+    const withActions = this.options.actionToolsEnabled ? [...base, ...ACTION_TOOL_MANIFEST] : base;
+    return input?.contextKind === "onboarding" ? [...withActions, ...ONBOARDING_TOOL_MANIFEST] : withActions;
   }
 
   async invoke(input: {
@@ -352,6 +440,40 @@ export class CoachToolRegistry {
     runId: string;
     call: CoachToolCall;
   }): Promise<readonly CoachRunEvent[]> {
+    if (input.call.toolName === "onboarding.capture_fields") {
+      const parsed = parseExactObject(input.call.input, ["captures"]);
+      if (!Array.isArray(parsed.captures) || !parsed.captures.length || parsed.captures.length > 3) throw new ToolSchemaError("invalid_tool_input");
+      const captures = parsed.captures.map((raw) => {
+        const item = parseExactObject(raw, ["fieldId", "value"]);
+        if (typeof item.fieldId !== "string" || !item.fieldId.trim() || item.value === undefined) throw new ToolSchemaError("invalid_tool_input");
+        return { fieldId: item.fieldId.trim(), value: item.value };
+      });
+      if (new Set(captures.map((capture) => capture.fieldId)).size !== captures.length) throw new ToolSchemaError("invalid_tool_input");
+      const result = await this.handlers.captureOnboardingFields({ sessionId: input.sessionId, captures }, { runId: input.runId, toolCallId: input.call.toolCallId });
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "onboarding.capture_goal_narrative") {
+      const parsed = parseExactObject(input.call.input, ["narrative"]);
+      if (typeof parsed.narrative !== "string" || !parsed.narrative.trim() || parsed.narrative.length > 600) throw new ToolSchemaError("invalid_tool_input");
+      const result = await this.handlers.captureOnboardingGoalNarrative({ sessionId: input.sessionId, narrative: parsed.narrative.trim() }, { runId: input.runId, toolCallId: input.call.toolCallId });
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "onboarding.request_form") {
+      const parsed = parseExactObject(input.call.input, ["topic", "fieldIds", "reasonCode", "requiredFor"]);
+      if (typeof parsed.topic !== "string" || !Array.isArray(parsed.fieldIds) || parsed.fieldIds.some((field) => typeof field !== "string") || typeof parsed.reasonCode !== "string" || typeof parsed.requiredFor !== "string") throw new ToolSchemaError("invalid_tool_input");
+      const result = await this.handlers.requestOnboardingForm({ sessionId: input.sessionId, proposal: { topic: parsed.topic, fieldIds: parsed.fieldIds, reasonCode: parsed.reasonCode as import("../onboarding").OnboardingQuestionReasonCode, requiredFor: parsed.requiredFor as import("../onboarding").OnboardingActionGate } }, { runId: input.runId, toolCallId: input.call.toolCallId });
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "onboarding.capture_training_background") {
+      const background = parseOnboardingTrainingBackground(input.call.input);
+      const result = await this.handlers.captureOnboardingTrainingBackground({ sessionId: input.sessionId, background }, { runId: input.runId, toolCallId: input.call.toolCallId });
+      return this.validateResultIdentity(input, result.events);
+    }
+    if (input.call.toolName === "onboarding.assess_training_context") {
+      parseExactObject(input.call.input, []);
+      const result = await this.handlers.assessOnboardingTrainingContext({ sessionId: input.sessionId }, { runId: input.runId, toolCallId: input.call.toolCallId });
+      return this.validateResultIdentity(input, result.events);
+    }
     if (input.call.toolName === "knowledge.lookup_exercise") {
       if (!this.options.knowledgeToolsEnabled) throw new ToolSchemaError("unknown_tool");
       const parsed = parseExactObject(input.call.input, ["query"]);
@@ -730,6 +852,58 @@ function parseAdaptivePlanReport(input: unknown): AdaptivePlanReportInput {
     return { kind, summary, activityType, ...(durationMinutes === undefined ? {} : { durationMinutes }), ...(intensity === undefined ? {} : { intensity }) };
   }
   throw new ToolSchemaError("invalid_tool_input");
+}
+
+function parseOnboardingTrainingBackground(
+  input: unknown,
+): Omit<import("../onboarding").TrainingBackgroundDraft, "capturedAt" | "source"> {
+  const parsed = parseExactObject(input, ["cumulativeTrainingMonths", "recentContinuity", "recentSplit", "exactExerciseFamiliarity", "comparableSets", "environments", "availableEquipment", "schedule", "executionStability"]);
+  const stringList = (value: unknown, maximum: number): readonly string[] | undefined => {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.length > maximum || value.some((item) => typeof item !== "string" || !item.trim())) throw new ToolSchemaError("invalid_tool_input");
+    return [...new Set(value.map((item) => item.trim()))];
+  };
+  const months = parsed.cumulativeTrainingMonths === undefined ? undefined : parseExactObject(parsed.cumulativeTrainingMonths, ["minimum", "maximum"]);
+  const minimumMonths = months ? optionalBoundedInteger(months.minimum, 0, 1200) : undefined;
+  const maximumMonths = months ? optionalBoundedInteger(months.maximum, 0, 1200) : undefined;
+  if (months && (minimumMonths === undefined || maximumMonths === undefined || maximumMonths < minimumMonths)) throw new ToolSchemaError("invalid_tool_input");
+  const continuity = parsed.recentContinuity === undefined ? undefined : parseExactObject(parsed.recentContinuity, ["consecutiveWeeks", "usualSessionsPerWeek", "timeAwayWeeks"]);
+  const consecutiveWeeks = continuity?.consecutiveWeeks === undefined ? undefined : optionalBoundedInteger(continuity.consecutiveWeeks, 0, 520);
+  const usualSessionsPerWeek = continuity?.usualSessionsPerWeek === undefined ? undefined : optionalBoundedInteger(continuity.usualSessionsPerWeek, 0, 14);
+  const timeAwayWeeks = continuity?.timeAwayWeeks === undefined ? undefined : optionalBoundedInteger(continuity.timeAwayWeeks, 0, 520);
+  if (continuity && ((continuity.consecutiveWeeks !== undefined && consecutiveWeeks === undefined) || (continuity.usualSessionsPerWeek !== undefined && usualSessionsPerWeek === undefined) || (continuity.timeAwayWeeks !== undefined && timeAwayWeeks === undefined))) throw new ToolSchemaError("invalid_tool_input");
+  const schedule = parsed.schedule === undefined ? undefined : parseExactObject(parsed.schedule, ["weeklyFrequency", "sessionDurationMinutes"]);
+  const weeklyFrequency = schedule ? optionalBoundedInteger(schedule.weeklyFrequency, 1, 14) : undefined;
+  const sessionDurationMinutes = schedule ? optionalBoundedInteger(schedule.sessionDurationMinutes, 10, 360) : undefined;
+  if (schedule && (weeklyFrequency === undefined || sessionDurationMinutes === undefined)) throw new ToolSchemaError("invalid_tool_input");
+  const executionStability = parsed.executionStability;
+  if (executionStability !== undefined && executionStability !== "reported_consistent" && executionStability !== "reported_variable" && executionStability !== "unknown") throw new ToolSchemaError("invalid_tool_input");
+  const comparableSets = parsed.comparableSets === undefined ? undefined : parseOnboardingComparableSets(parsed.comparableSets);
+  const background = {
+    ...(months ? { cumulativeTrainingMonths: { minimum: minimumMonths!, maximum: maximumMonths! } } : {}),
+    ...(continuity ? { recentContinuity: { ...(consecutiveWeeks === undefined ? {} : { consecutiveWeeks }), ...(usualSessionsPerWeek === undefined ? {} : { usualSessionsPerWeek }), ...(timeAwayWeeks === undefined ? {} : { timeAwayWeeks }) } } : {}),
+    ...(stringList(parsed.recentSplit, 10) ? { recentSplit: stringList(parsed.recentSplit, 10) } : {}),
+    ...(stringList(parsed.exactExerciseFamiliarity, 20) ? { exactExerciseFamiliarity: stringList(parsed.exactExerciseFamiliarity, 20) } : {}),
+    ...(comparableSets ? { comparableSets } : {}),
+    ...(stringList(parsed.environments, 8) ? { environments: stringList(parsed.environments, 8) } : {}),
+    ...(stringList(parsed.availableEquipment, 30) ? { availableEquipment: stringList(parsed.availableEquipment, 30) } : {}),
+    ...(schedule ? { schedule: { weeklyFrequency: weeklyFrequency!, sessionDurationMinutes: sessionDurationMinutes! } } : {}),
+    ...(executionStability ? { executionStability: executionStability as "reported_consistent" | "reported_variable" | "unknown" } : {}),
+  };
+  if (!Object.keys(background).length) throw new ToolSchemaError("invalid_tool_input");
+  return background;
+}
+
+function parseOnboardingComparableSets(value: unknown): NonNullable<import("../onboarding").TrainingBackgroundDraft["comparableSets"]> {
+  if (!Array.isArray(value) || !value.length || value.length > 10) throw new ToolSchemaError("invalid_tool_input");
+  return value.map((raw) => {
+    const set = parseExactObject(raw, ["exerciseVariantId", "loadKg", "reps", "rir", "rpe", "performedOn", "conditions"]);
+    const loadKg = optionalBoundedNumber(set.loadKg, 0, 1000);
+    const reps = optionalBoundedInteger(set.reps, 0, 200);
+    if (typeof set.exerciseVariantId !== "string" || !set.exerciseVariantId.trim() || loadKg === undefined || reps === undefined || typeof set.performedOn !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(set.performedOn)) throw new ToolSchemaError("invalid_tool_input");
+    if ((set.rir !== undefined && (typeof set.rir !== "number" || !Number.isFinite(set.rir) || set.rir < 0 || set.rir > 10)) || (set.rpe !== undefined && (typeof set.rpe !== "number" || !Number.isFinite(set.rpe) || set.rpe < 1 || set.rpe > 10)) || (set.conditions !== undefined && (typeof set.conditions !== "string" || set.conditions.length > 240))) throw new ToolSchemaError("invalid_tool_input");
+    return { exerciseVariantId: set.exerciseVariantId.trim(), load: { value: loadKg, unit: "kg" as const }, reps, ...(typeof set.rir === "number" ? { rir: set.rir } : {}), ...(typeof set.rpe === "number" ? { rpe: set.rpe } : {}), performedOn: set.performedOn, ...(typeof set.conditions === "string" && set.conditions.trim() ? { conditions: set.conditions.trim() } : {}) };
+  });
 }
 
 function parseUserReportedExercises(value: unknown): readonly NonNullable<Extract<UserStatedRecordInput, { kind: "training" }>["exercises"]>[number][] | undefined {

@@ -168,6 +168,22 @@ export class GoalCyclePlanner {
     assertPlannerRequest(request);
     const pins = this.knowledge.versionPins();
     const frontier = factFrontier(request.facts);
+    // A profile's legacy experience label is not an assessment. In particular
+    // `unknown` is the explicit calibration state created by the new dossier
+    // flow, never a licence to silently select a population volume band.
+    if (request.facts.profile.value.trainingExperience === "unknown") {
+      return {
+        kind: "infeasible_plan",
+        id: `infeasible-${stableHash({ userId: request.facts.userId, reason: "coaching_level_assessment_required" })}`,
+        reasonCodes: ["coaching_level_assessment_required", "legacy_planner_cannot_infer_experience"],
+        suppressedGoals: [request.facts.goalContract.value.primaryGoal],
+        hardConflicts: ["coaching_level_assessment_required"],
+        minimumRelaxations: [],
+        evidenceRefs: factEvidence(request.facts),
+        knowledgePins: pins,
+      };
+    }
+    const assessedLegacyExperience = request.facts.profile.value.trainingExperience;
     const hardFailure = this.evaluateGlobalHardConstraints(request, pins);
     if (hardFailure) return hardFailure;
     const trainingRule = this.trainingRules.current(request.facts.goalContract.value.primaryGoal);
@@ -594,8 +610,20 @@ export class GoalCyclePlanner {
     const planId = context.facts.priorPlan?.value.id ?? `plan-${stableHash(context.facts.userId)}`;
     let upcomingSevenDays = upcomingSevenDaysFrom(materializedWeeks, context.request.currentDate);
     const nutritionGuidance = nutritionGuidanceFor(context.facts, context.adaptive.nutrition.energyApproach, tiering);
-    const targetDailyDeficit = nutritionGuidance.maintenanceKcalEstimate !== undefined && nutritionGuidance.dailyEnergyTargetKcal
-      ? Math.round(nutritionGuidance.maintenanceKcalEstimate - (nutritionGuidance.dailyEnergyTargetKcal.min + nutritionGuidance.dailyEnergyTargetKcal.max) / 2)
+    // Dynamic energy recovery follows the committed nutrition target, not a
+    // transient training strategy label. A fat-loss user can temporarily use
+    // a maintenance-recomposition training phase while their confirmed
+    // calorie range still carries a real deficit.
+    const committedNutrition = [...context.facts.nutritionStrategies]
+      .sort((left, right) => right.revision - left.revision)[0]?.value;
+    const adjustmentTarget = committedNutrition?.status === "active" && committedNutrition.calorieRange
+      ? {
+          min: committedNutrition.calorieRange.min.value,
+          max: committedNutrition.calorieRange.max.value,
+        }
+      : nutritionGuidance.dailyEnergyTargetKcal;
+    const targetDailyDeficit = nutritionGuidance.maintenanceKcalEstimate !== undefined && adjustmentTarget
+      ? Math.max(0, Math.round(nutritionGuidance.maintenanceKcalEstimate - (adjustmentTarget.min + adjustmentTarget.max) / 2))
       : undefined;
     const rollingEnergyAdjustment = rollingEnergyAdjustmentFor({
       currentDate: context.request.currentDate,
@@ -606,6 +634,14 @@ export class GoalCyclePlanner {
       futureDates: sessions
         .filter((session) => session.scheduledFor >= context.request.currentDate && session.aerobicBlock?.placement === "after_strength")
         .map((session) => session.scheduledFor),
+      futureCardioCapacityMinutes: Object.fromEntries(
+        sessions
+          .filter((session) => session.scheduledFor >= context.request.currentDate && session.aerobicBlock?.placement === "after_strength")
+          .map((session) => [
+            session.scheduledFor,
+            Math.max(0, (session.durationBudget?.value ?? 0) - (session.estimatedDuration?.value ?? 0)),
+          ]),
+      ),
     });
     if (rollingEnergyAdjustment.status === "gentle_rebalance") {
       materializedWeeks = applyRollingEnergyActions(materializedWeeks, rollingEnergyAdjustment);
@@ -1252,7 +1288,7 @@ export class GoalCyclePlanner {
       }
       const targetBand = weeklyDirectSetTarget(
         strategies,
-        context.facts.profile.value.trainingExperience,
+        assessedLegacyExperience,
         context.facts.goalContract.value.primaryGoal,
       );
       const baseTarget = trainingCommitmentTarget(targetBand, context.facts.goalContract.value.commitmentPreferences?.training);
@@ -2382,6 +2418,8 @@ function comparablePlan(plan: PlanRevisionData) {
     materializedWeeks: plan.materializedWeeks,
     futureIntentRefs: plan.futureIntentRefs,
     sessions: plan.sessions,
+    dailyEnergyBudgets: plan.dailyEnergyBudgets,
+    rollingEnergyAdjustment: plan.rollingEnergyAdjustment,
     knowledgePins: plan.knowledgePins,
   };
 }

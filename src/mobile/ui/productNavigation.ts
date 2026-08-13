@@ -14,6 +14,26 @@ export type ProductDeepLinkRoute =
   | "profile"
   | "workout";
 
+/**
+ * A route the product shell can render. `onboarding` intentionally remains
+ * outside the deep-link registry: it is selected from a trusted dossier
+ * projection, never requested by an external URL.
+ */
+export type ProductShellEntryRoute = ProductDeepLinkRoute | "onboarding" | "video_library" | "replay";
+
+/**
+ * The User dossier is a product entry gate, not an optional empty-state
+ * action. This pure projection lets the mobile shell preserve its normal
+ * recovered route while redirecting an incomplete account before it renders
+ * any Home, plan, or media workspace.
+ */
+export function resolveUserDossierEntryRoute(input: {
+  requestedRoute: ProductShellEntryRoute;
+  onboardingRequired: boolean;
+}): ProductShellEntryRoute {
+  return input.onboardingRequired ? "onboarding" : input.requestedRoute;
+}
+
 export type ProductDeepLinkIntent =
   | { route: "today" | "calendar" | "progress"; date: string }
   | { route: "plan" | "profile" }

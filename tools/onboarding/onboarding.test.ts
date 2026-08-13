@@ -4,11 +4,14 @@ import test from "node:test";
 import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 
-function fixture(options: { notifications?: { requestAuthorization?(): Promise<"granted" | "denied">; schedule(input: { id: string; at: string; title: string; body: string }): Promise<void>; cancel(id: string): Promise<void> } } = {}) {
+function fixture(options: {
+  notifications?: { requestAuthorization?(): Promise<"granted" | "denied">; schedule(input: { id: string; at: string; title: string; body: string }): Promise<void>; cancel(id: string): Promise<void> };
+  now?: () => string;
+} = {}) {
   const ledger = new InMemoryCoachLedger();
   let sequence = 0;
   const runtime = {
-    now: () => "2026-08-08T12:00:00.000+08:00",
+    now: options.now ?? (() => "2026-08-08T12:00:00.000+08:00"),
     nextId: (prefix: string) => `${prefix}-${++sequence}`,
   };
   return { ledger, runtime, app: new CoachApplication({ ledger, runtime, notifications: options.notifications }) };
@@ -74,6 +77,35 @@ const basicPatch = {
   },
 };
 
+test("云端确认建档在 ACK 前只存在于 staging Ledger", async () => {
+  const state = fixture();
+  const staged = await state.app.stageOnboardingMutation({
+    userId: "cloud-user",
+    mutate: async (application) => {
+      const draft = await application.startOnboarding({ userId: "cloud-user", depth: "basic" });
+      await application.saveOnboardingProgress({
+        draftId: draft.id,
+        inputMode: "form",
+        patch: basicPatch,
+        confirmedSections: ["profile", "goal", "mandate", "permissions", "safety"],
+        idempotencyKey: "cloud-staged-progress",
+      });
+      return application.completeOnboarding({
+        draftId: draft.id,
+        idempotencyKey: "cloud-staged-complete",
+      });
+    },
+  });
+
+  assert.equal((await state.app.readDomainProjection({ userId: "cloud-user" })).profile, undefined);
+  assert.equal(staged.domain.profile?.value.trainingExperience, "beginner");
+  await staged.commit();
+  assert.equal(
+    (await state.app.readDomainProjection({ userId: "cloud-user" })).profile?.value.trainingExperience,
+    "beginner",
+  );
+});
+
 test("基础建档完全离线保存、重启恢复，并只在确认后生成权威事实", async () => {
   const state = fixture();
   const draft = await state.app.startOnboarding({ userId: "user-1", depth: "basic" });
@@ -115,6 +147,154 @@ test("基础建档完全离线保存、重启恢复，并只在确认后生成�
   assert.equal(facts.permissions?.value.health, "not_configured");
   assert.equal(facts.safetyConstraints[0]?.value.disposition, "clear");
   assert.equal(restarted.runtimeStatus().remoteProviderRequests, 0);
+});
+
+test("建档入口按 User dossier 与最近草稿投影，重启后继续同一草稿而非创建重复草稿", async () => {
+  const state = fixture();
+
+  assert.deepEqual(await state.app.readOnboardingEntryState({ userId: "entry-user" }), {
+    status: "not_started",
+    destination: "onboarding",
+  });
+
+  const draft = await state.app.startOnboarding({ userId: "entry-user", depth: "basic" });
+  await state.app.saveOnboardingProgress({
+    draftId: draft.id,
+    inputMode: "conversation",
+    patch: { profile: { demographics: { ageYears: 30 } } },
+    confirmedSections: [],
+    idempotencyKey: "entry-progress",
+  });
+
+  const restarted = new CoachApplication(state.ledger, state.runtime);
+  const resumed = await restarted.readOnboardingEntryState({ userId: "entry-user" });
+  assert.equal(resumed.status, "in_progress");
+  assert.equal(resumed.destination, "onboarding");
+  assert.equal(resumed.draft?.id, draft.id);
+  assert.equal(resumed.draft?.patch.profile?.demographics?.ageYears, 30);
+
+  await restarted.saveOnboardingProgress({
+    draftId: draft.id,
+    inputMode: "form",
+    patch: basicPatch,
+    confirmedSections: ["profile", "goal", "mandate", "permissions", "safety"],
+    idempotencyKey: "entry-ready",
+  });
+  const ready = await restarted.readOnboardingEntryState({ userId: "entry-user" });
+  assert.equal(ready.status, "ready_for_confirmation");
+  assert.equal(ready.draft?.id, draft.id);
+
+  await restarted.completeOnboarding({ draftId: draft.id, idempotencyKey: "entry-complete" });
+  assert.deepEqual(await restarted.readOnboardingEntryState({ userId: "entry-user" }), {
+    status: "dossier_complete",
+    destination: "home",
+  });
+});
+
+test("建档入口选择最近实际更新的草稿，并复用正式安全限制的暂停语义", async () => {
+  let minute = 0;
+  const state = fixture({
+    now: () => `2026-08-08T12:${String(minute++).padStart(2, "0")}:00.000+08:00`,
+  });
+  const earlier = await state.app.startOnboarding({ userId: "entry-order", depth: "basic" });
+  const later = await state.app.startOnboarding({ userId: "entry-order", depth: "basic" });
+  await state.app.saveOnboardingProgress({
+    draftId: earlier.id,
+    inputMode: "conversation",
+    patch: {
+      safety: {
+        pregnancyOrPostpartumSpecialConsideration: true,
+        stopSignals: [],
+      },
+    },
+    confirmedSections: [],
+    idempotencyKey: "entry-order-latest-update",
+  });
+
+  const entry = await state.app.readOnboardingEntryState({ userId: "entry-order" });
+  assert.equal(entry.draft?.id, earlier.id);
+  assert.equal(entry.status, "safety_hold");
+  assert.equal(entry.destination, "onboarding");
+});
+
+test("已有档案再次提交按 revision 修订，不把编辑入口当成首次创建", async () => {
+  const state = fixture();
+  const first = await state.app.startOnboarding({ userId: "returning-user", depth: "basic" });
+  await state.app.saveOnboardingProgress({
+    draftId: first.id,
+    inputMode: "form",
+    patch: basicPatch,
+    confirmedSections: ["profile", "goal", "mandate", "permissions", "safety"],
+    idempotencyKey: "returning-first-progress",
+  });
+  await state.app.completeOnboarding({ draftId: first.id, idempotencyKey: "returning-first-complete" });
+
+  const second = await state.app.startOnboarding({ userId: "returning-user", depth: "basic" });
+  await state.app.saveOnboardingProgress({
+    draftId: second.id,
+    inputMode: "form",
+    patch: {
+      ...basicPatch,
+      profile: {
+        ...basicPatch.profile,
+        trainingExperience: "advanced",
+        schedule: { weeklyFrequency: 4, sessionDurationMinutes: 75 },
+      },
+      mandate: { ...basicPatch.mandate, mode: "managed" },
+    },
+    confirmedSections: ["profile", "goal", "mandate", "permissions", "safety"],
+    idempotencyKey: "returning-second-progress",
+  });
+  const completed = await state.app.completeOnboarding({
+    draftId: second.id,
+    idempotencyKey: "returning-second-complete",
+  });
+
+  assert.equal(completed.status, "completed");
+  const projection = await state.app.readDomainProjection({ userId: "returning-user" });
+  assert.equal(projection.profile?.revision, 2);
+  assert.equal(projection.profile?.value.trainingExperience, "advanced");
+  assert.equal(projection.profile?.value.schedule?.weeklyFrequency, 4);
+  assert.equal(projection.goalContract?.revision, 2);
+  assert.equal(projection.mandate?.revision, 2);
+  assert.equal(projection.mandate?.value.mode, "managed");
+  assert.equal(projection.permissions?.revision, 2);
+  assert.equal(projection.safetyConstraints[0]?.revision, 2);
+});
+
+test("建档未填写可选设备权限时默认启用核心云 AI 与数据同步", async () => {
+  const state = fixture();
+  const draft = await state.app.startOnboarding({ userId: "managed-cloud-user", depth: "basic" });
+  await state.app.saveOnboardingProgress({
+    draftId: draft.id,
+    inputMode: "form",
+    patch: {
+      ...basicPatch,
+      permissions: {
+        camera: "not_configured",
+        health: "not_configured",
+        notifications: "not_configured",
+        mediaUpload: "not_configured",
+      },
+    },
+    confirmedSections: ["profile", "goal", "mandate", "permissions", "safety"],
+    idempotencyKey: "managed-cloud-progress",
+  });
+  await state.app.completeOnboarding({
+    draftId: draft.id,
+    idempotencyKey: "managed-cloud-complete",
+  });
+
+  const permissions = (await state.app.readDomainProjection({
+    userId: "managed-cloud-user",
+  })).permissions?.value;
+  assert.equal(permissions?.remoteLlm, "granted");
+  assert.equal(permissions?.cloudSync, "granted");
+  assert.equal(
+    permissions?.remoteLlmDisclosure?.taskRelevantHealthTrainingNutritionSleepAndExperienceSent,
+    true,
+  );
+  assert.equal(permissions?.mediaUpload, "not_configured");
 });
 
 test("建档保留身体基线、目标约束、平台历史与体脂估算 provenance，不把未知字段补成事实", async () => {
@@ -295,6 +475,13 @@ test("未确认的对话建议保持 draft；专业建档的历史重量、RIR�
   await state.app.completeOnboarding({ draftId: draft.id, idempotencyKey: "complete-pro" });
 
   const facts = await state.app.readDomainProjection({ userId: "pro-1" });
+  const snapshot = await state.ledger.read();
+  assert.equal(
+    snapshot.domainEvents
+      .filter((event) => event.aggregate.kind === "timeline")
+      .every((event) => event.aggregate.id === "timeline.pro-1"),
+    true,
+  );
   assert.equal(facts.timeline.current.length, 5);
   assert.deepEqual(
     facts.timeline.current.map((event) => event.fact.kind).sort(),
