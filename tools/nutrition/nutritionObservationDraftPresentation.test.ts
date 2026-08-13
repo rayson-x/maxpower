@@ -17,7 +17,7 @@ test("照片估算卡披露实际 Provider、将发送的输入和本地媒体�
     mediaConsent: "provider_authorized",
     inputMediaRefs: ["local-media-secret-1", "local-media-secret-2"],
     status: "draft",
-  });
+  }, "zh");
 
   assert.equal(disclosure.remoteProcessing, true);
   assert.equal(disclosure.providerLabel, "nutrition-vision · 2026-08");
@@ -37,7 +37,7 @@ test("本机照片草稿不宣称已经上传，并要求用户补充后才可�
     clarificationRequired: true,
     status: "draft" as const,
   };
-  const disclosure = nutritionDraftDisclosure(draft);
+  const disclosure = nutritionDraftDisclosure(draft, "zh");
   assert.equal(disclosure.remoteProcessing, false);
   assert.deepEqual(disclosure.sentInputs, []);
   assert.match(disclosure.mediaPolicy, /不会上传/);

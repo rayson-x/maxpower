@@ -64,6 +64,7 @@ export interface RemoteNutritionObservationProviderConfig {
 export class NutritionObservationError extends Error {
   constructor(readonly code:
     | "cancelled"
+    | "remote_llm_consent_required"
     | "media_consent_required"
     | "credential_unavailable"
     | "invalid_media"

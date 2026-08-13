@@ -23,7 +23,13 @@ export interface OpenAICompatibleNutritionTransportOptions {
   /** Full, user-configured OpenAI-compatible Chat Completions endpoint. */
   endpoint: string;
   model: string;
+  requestHeaders?: (
+    input: Parameters<NutritionRemoteTransport["estimate"]>[0],
+  ) => Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>>;
   fetch?: OpenAICompatibleNutritionFetch;
+  onCancelled?: (
+    input: Parameters<NutritionRemoteTransport["estimate"]>[0],
+  ) => Promise<void> | void;
 }
 
 /**
@@ -44,9 +50,12 @@ export class OpenAICompatibleNutritionTransport implements NutritionRemoteTransp
 
   async estimate(input: Parameters<NutritionRemoteTransport["estimate"]>[0]): Promise<Awaited<ReturnType<NutritionRemoteTransport["estimate"]>>> {
     try {
+      const requestHeaders = await this.options.requestHeaders?.(input) ?? {};
+      assertSafeAdditionalHeaders(requestHeaders);
       const response = await this.fetchImpl(this.options.endpoint, {
         method: "POST",
         headers: {
+          ...requestHeaders,
           "content-type": "application/json",
           authorization: `Bearer ${input.credential}`,
         },
@@ -56,10 +65,25 @@ export class OpenAICompatibleNutritionTransport implements NutritionRemoteTransp
       if (!response.ok) throw responseError(response.status);
       return parseResponse(await response.json());
     } catch (cause) {
-      if (input.signal?.aborted) throw new NutritionRemoteTransportError("cancelled");
+      if (input.signal?.aborted) {
+        await this.options.onCancelled?.(input);
+        throw new NutritionRemoteTransportError("cancelled");
+      }
       if (cause instanceof NutritionRemoteTransportError) throw cause;
       if (cause instanceof Error && cause.message === "nutrition_remote_http_failure") throw cause;
       throw new NutritionRemoteTransportError("timeout");
+    }
+  }
+}
+
+function assertSafeAdditionalHeaders(headers: Readonly<Record<string, string>>): void {
+  for (const [name, value] of Object.entries(headers)) {
+    const normalized = name.trim().toLowerCase();
+    if (!normalized || normalized === "authorization" || normalized === "content-type") {
+      throw new Error("nutrition_remote_reserved_header");
+    }
+    if (!value.trim() || /[\r\n]/.test(name) || /[\r\n]/.test(value)) {
+      throw new Error("nutrition_remote_invalid_header");
     }
   }
 }
