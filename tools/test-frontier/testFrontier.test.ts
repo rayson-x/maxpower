@@ -7,7 +7,7 @@ import test from "node:test";
 import { resolveTestFrontier } from "../testFrontier";
 
 test("test frontier includes every nested source test in deterministic order", () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), "form-coach-test-frontier-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "maxpower-test-frontier-"));
   try {
     mkdirSync(join(projectRoot, "tools", "alpha"), { recursive: true });
     mkdirSync(join(projectRoot, "tools", "nested", "beta"), { recursive: true });
@@ -33,7 +33,7 @@ test("test frontier includes every nested source test in deterministic order", (
 });
 
 test("test frontier rejects a source test without a compiled test", () => {
-  const projectRoot = mkdtempSync(join(tmpdir(), "form-coach-test-frontier-"));
+  const projectRoot = mkdtempSync(join(tmpdir(), "maxpower-test-frontier-"));
   try {
     mkdirSync(join(projectRoot, "tools", "pose"), { recursive: true });
     writeFileSync(join(projectRoot, "tools", "pose", "continuity.test.ts"), "");
