@@ -40,7 +40,9 @@ export interface ReviewConclusionProposal {
   readonly state: ReviewProposalState;
   readonly value: unknown;
   readonly confidence: number | null;
+  readonly summary: string;
   readonly reason: string | null;
+  readonly evidence: readonly string[];
   readonly reviewStatus?: QualityReviewStatus;
 }
 
@@ -922,9 +924,12 @@ function validateConclusions(
     ids.add(conclusion.conclusionId);
     dimensions.add(conclusion.dimension);
     const frozenConclusion = frozen.get(conclusion.conclusionId);
-    if (!frozenConclusion || frozenConclusion.state !== conclusion.state) {
+    if (
+      !frozenConclusion ||
+      !sameCanonicalConclusionPayload(frozenConclusion, conclusion)
+    ) {
       throw new Error(
-        `${context.contextId}:${conclusion.conclusionId}: conclusion is not frozen QLT1`,
+        `${context.contextId}:${conclusion.conclusionId}: canonical Rust conclusion payload mismatch`,
       );
     }
     if (conclusion.state === "abstained") {
@@ -964,6 +969,63 @@ function validateConclusions(
       `${context.contextId}: every review Rep needs all eight quality dimensions`,
     );
   }
+}
+
+interface CanonicalConclusionPayload {
+  readonly conclusionId: string;
+  readonly dimension: QualityDimension;
+  readonly state: ReviewProposalState;
+  readonly confidence: number | null;
+  readonly summary: string;
+  readonly reason: string | null;
+  readonly evidence: readonly string[];
+  readonly value: unknown;
+}
+
+function sameCanonicalConclusionPayload(
+  frozen: unknown,
+  review: ReviewConclusionProposal,
+): boolean {
+  const frozenPayload = canonicalConclusionPayload(frozen);
+  const reviewPayload = canonicalConclusionPayload(review);
+  return (
+    frozenPayload !== null &&
+    reviewPayload !== null &&
+    stableStringify(frozenPayload) === stableStringify(reviewPayload)
+  );
+}
+
+function canonicalConclusionPayload(
+  value: unknown,
+): CanonicalConclusionPayload | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const conclusion = value as Record<string, unknown>;
+  if (
+    !Object.hasOwn(conclusion, "value") ||
+    !QUALITY_DIMENSIONS.includes(conclusion.dimension as QualityDimension) ||
+    (conclusion.state !== "proposed" && conclusion.state !== "abstained") ||
+    (conclusion.confidence !== null &&
+      (typeof conclusion.confidence !== "number" ||
+        !Number.isFinite(conclusion.confidence))) ||
+    typeof conclusion.conclusionId !== "string" ||
+    typeof conclusion.summary !== "string" ||
+    (conclusion.reason !== null && typeof conclusion.reason !== "string") ||
+    !Array.isArray(conclusion.evidence) ||
+    conclusion.evidence.some((reference) => typeof reference !== "string") ||
+    conclusion.value === undefined
+  ) {
+    return null;
+  }
+  return {
+    conclusionId: conclusion.conclusionId,
+    dimension: conclusion.dimension as QualityDimension,
+    state: conclusion.state,
+    confidence: conclusion.confidence,
+    summary: conclusion.summary,
+    reason: conclusion.reason,
+    evidence: [...conclusion.evidence] as string[],
+    value: conclusion.value,
+  };
 }
 
 function cloneEndpoints(

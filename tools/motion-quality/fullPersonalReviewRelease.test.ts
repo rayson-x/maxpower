@@ -132,29 +132,35 @@ function predictionsFor(
         },
         reps,
         qualityConclusions: reps.flatMap((rep) =>
-          QUALITY_DIMENSIONS.map((dimension) => ({
-            conclusionId: `${rep.repId}:${dimension}`,
-            state:
-              dimension === "standard_variant_compatibility"
-                ? ("abstained" as const)
-                : ("proposed" as const),
-            ...(withQualityReviews
-              ? {
-                  reviewStatus:
-                    (
-                      {
-                        task_completion: "correct",
-                        range_of_motion: "incorrect",
-                      } as Partial<
-                        Record<
-                          (typeof QUALITY_DIMENSIONS)[number],
-                          QualityReviewStatus
+          QUALITY_DIMENSIONS.map((dimension) => {
+            const abstained = dimension === "standard_variant_compatibility";
+            return {
+              conclusionId: `${rep.repId}:${dimension}`,
+              dimension,
+              state: abstained ? ("abstained" as const) : ("proposed" as const),
+              value: abstained ? null : "observed",
+              confidence: abstained ? null : 0.8,
+              summary: abstained ? "cannot judge" : `${dimension} observed`,
+              reason: abstained ? "no_exact_reviewed_reference" : null,
+              evidence: abstained ? [] : [`rust:${rep.repId}:${dimension}`],
+              ...(withQualityReviews
+                ? {
+                    reviewStatus:
+                      (
+                        {
+                          task_completion: "correct",
+                          range_of_motion: "incorrect",
+                        } as Partial<
+                          Record<
+                            (typeof QUALITY_DIMENSIONS)[number],
+                            QualityReviewStatus
+                          >
                         >
-                      >
-                    )[dimension] ?? "unreviewed",
-                }
-              : {}),
-          })),
+                      )[dimension] ?? "unreviewed",
+                  }
+                : {}),
+            };
+          }),
         ),
       };
     }),
@@ -192,26 +198,20 @@ function reviewContexts(
           reason: null,
         },
       },
-      conclusions: QUALITY_DIMENSIONS.map((dimension) => ({
-        conclusionId: `${rep.repId}:${dimension}`,
-        dimension,
-        state:
-          dimension === "standard_variant_compatibility"
-            ? "abstained"
-            : "proposed",
-        value:
-          dimension === "standard_variant_compatibility" ? null : "observed",
-        confidence: dimension === "standard_variant_compatibility" ? null : 0.8,
-        reason:
-          dimension === "standard_variant_compatibility"
-            ? "no_exact_reviewed_reference"
-            : null,
-        reviewStatus:
-          context.qualityConclusions.find(
-            (conclusion) =>
-              conclusion.conclusionId === `${rep.repId}:${dimension}`,
-          )?.reviewStatus ?? "unreviewed",
-      })),
+      conclusions: QUALITY_DIMENSIONS.map((dimension) => {
+        const frozen = context.qualityConclusions.find(
+          (conclusion) =>
+            conclusion.conclusionId === `${rep.repId}:${dimension}`,
+        ) as unknown as
+          | FullDataContextReviewProposal["reps"][number]["conclusions"][number]
+          | undefined;
+        assert.ok(frozen);
+        return {
+          ...frozen,
+          evidence: [...frozen.evidence],
+          reviewStatus: frozen.reviewStatus ?? "unreviewed",
+        };
+      }),
     })),
   }));
 }
@@ -605,4 +605,71 @@ test("rejects incomplete review queues and non-causal Rust endpoint proposals", 
       }),
     /invalid or non-causal/u,
   );
+});
+
+test("rejects any tampering of a canonical Rust conclusion payload", () => {
+  const tamperCases: ReadonlyArray<
+    readonly [
+      string,
+      (
+        conclusion: FullDataContextReviewProposal["reps"][number]["conclusions"][number],
+      ) => FullDataContextReviewProposal["reps"][number]["conclusions"][number],
+    ]
+  > = [
+    [
+      "dimension",
+      (conclusion) => ({ ...conclusion, dimension: "range_of_motion" }),
+    ],
+    ["state", (conclusion) => ({ ...conclusion, state: "abstained" })],
+    ["confidence", (conclusion) => ({ ...conclusion, confidence: 0.1 })],
+    [
+      "summary",
+      (conclusion) => ({ ...conclusion, summary: "tampered summary" }),
+    ],
+    ["reason", (conclusion) => ({ ...conclusion, reason: "tampered_reason" })],
+    [
+      "evidence",
+      (conclusion) => ({ ...conclusion, evidence: ["tampered:evidence"] }),
+    ],
+    ["value/null", (conclusion) => ({ ...conclusion, value: null })],
+  ];
+
+  for (const [field, tamperConclusion] of tamperCases) {
+    const tampered = fixtureInput();
+    const [firstContext, ...remainingContexts] =
+      tampered.fullDataProposal.reviewContexts;
+    assert.ok(firstContext);
+    const [firstRep, ...remainingReps] = firstContext.reps;
+    assert.ok(firstRep);
+    const [firstConclusion, ...remainingConclusions] = firstRep.conclusions;
+    assert.ok(firstConclusion);
+
+    assert.throws(
+      () =>
+        assembleFullPersonalReviewRelease({
+          ...tampered,
+          fullDataProposal: {
+            ...tampered.fullDataProposal,
+            reviewContexts: [
+              {
+                ...firstContext,
+                reps: [
+                  {
+                    ...firstRep,
+                    conclusions: [
+                      tamperConclusion(firstConclusion),
+                      ...remainingConclusions,
+                    ],
+                  },
+                  ...remainingReps,
+                ],
+              },
+              ...remainingContexts,
+            ],
+          },
+        }),
+      /canonical Rust conclusion payload mismatch/u,
+      field,
+    );
+  }
 });
