@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "maxpower-external-dataset-validation/v1",
+  "dataset": "repcount-pose",
+  "validatedAt": "2026-08-09",
+  "localStatus": {
+    "metadataDirectory": "data/external/repcount-pose/metadata",
+    "metadataReadable": true,
+    "archiveDownloaded": false,
+    "reason": "The official Google Drive archive is 9,517,369,897 bytes and exceeds the current safe disk budget."
+  },
+  "archive": {
+    "filename": "RepCount_pose.tar.gz",
+    "bytes": 9517369897,
+    "acceptRanges": true,
+    "publishedChecksum": null
+  },
+  "actions": [
+    { "sourceId": "front_raise", "candidateMaxPowerId": "front_raise" },
+    { "sourceId": "pull_up", "candidateMaxPowerId": "pull_up" },
+    { "sourceId": "squat", "candidateMaxPowerId": "bodyweight_squat" },
+    { "sourceId": "bench_pressing", "candidateMaxPowerId": "barbell_bench_press", "mappingStatus": "needs_video_review" },
+    { "sourceId": "jump_jack", "candidateMaxPowerId": "jumping_jack", "mappingStatus": "new_catalog_candidate" },
+    { "sourceId": "situp", "candidateMaxPowerId": "sit_up", "mappingStatus": "new_catalog_candidate" },
+    { "sourceId": "push_up", "candidateMaxPowerId": "push_up" },
+    { "sourceId": "pommelhorse", "candidateMaxPowerId": null, "mappingStatus": "out_of_scope" }
+  ],
+  "guardrails": [
+    "The repository MIT license covers source code; no explicit license for the downloaded dataset was found.",
+    "Do not download the archive on the current machine without freeing disk and resolving dataset usage rights.",
+    "Do not map bench_pressing to a MaxPower bench-press variant until representative videos are reviewed.",
+    "PoseRAC's benchmark metrics do not validate MaxPower's MediaPipe-to-Rust pipeline."
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "maxpower-external-dataset-validation/v1",
+  "dataset": "mm-fit-pose-labels",
+  "validatedAt": "2026-08-09",
+  "localStatus": {
+    "directory": "data/external/mm-fit/pose-labels",
+    "gitIgnored": true,
+    "sessionCount": 21,
+    "fileCount": 63,
+    "sizeBytes": 1074852017,
+    "checksumManifest": "data/external/mm-fit/pose-labels/SHA256SUMS"
+  },
+  "readability": {
+    "allSessionsReadable": true,
+    "pose2d": {
+      "dtype": "float64",
+      "shapeContract": [2, "frames", 19],
+      "meaning": "frame column plus 18 COCO-format 2D joints"
+    },
+    "pose3d": {
+      "dtype": "float64",
+      "shapeContract": [3, "frames", 18],
+      "meaning": "frame column plus 17 COCO-format 3D joints"
+    },
+    "labels": {
+      "columns": ["startFrame", "endFrame", "repetitionCount", "activityClass"],
+      "totalLabeledRepetitions": 6160
+    }
+  },
+  "actions": [
+    { "sourceId": "squats", "setCount": 64, "repCount": 639 },
+    { "sourceId": "pushups", "setCount": 65, "repCount": 649 },
+    { "sourceId": "dumbbell_shoulder_press", "setCount": 60, "repCount": 598 },
+    { "sourceId": "lunges", "setCount": 62, "repCount": 624 },
+    { "sourceId": "dumbbell_rows", "setCount": 64, "repCount": 644 },
+    { "sourceId": "situps", "setCount": 65, "repCount": 640 },
+    { "sourceId": "tricep_extensions", "setCount": 64, "repCount": 645 },
+    { "sourceId": "bicep_curls", "setCount": 59, "repCount": 599 },
+    { "sourceId": "lateral_shoulder_raises", "setCount": 56, "repCount": 559 },
+    { "sourceId": "jumping_jacks", "setCount": 57, "repCount": 563 }
+  ],
+  "guardrails": [
+    "MM-Fit labels set boundaries and a set-level repetition count; they do not provide per-repetition boundaries.",
+    "Participants were demonstrated the exercise but their form was not corrected, so these observations are not form-quality ground truth.",
+    "The skeleton schemas are COCO-18/COCO-17 rather than MaxPower BlazePose-33 and require an explicit joint mapping.",
+    "No Rust profile threshold may be promoted from this dataset without held-out MaxPower-format evaluation."
+  ]
+}

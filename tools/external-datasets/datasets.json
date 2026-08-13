@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "maxpower-external-dataset-sources/v1",
+  "generatedAt": "2026-08-09",
+  "policy": {
+    "externalRoot": "data/external",
+    "committedToGit": false,
+    "allowedUses": [
+      "offline_research",
+      "benchmarking",
+      "candidate_profile_exploration"
+    ],
+    "forbiddenWithoutSeparateReview": [
+      "production_model_training",
+      "profile_promotion",
+      "redistribution",
+      "assuming_source_code_license_applies_to_dataset"
+    ]
+  },
+  "datasets": [
+    {
+      "id": "mm-fit-pose-labels",
+      "homepage": "https://mmfit.github.io/",
+      "paper": "https://doi.org/10.1145/3432701",
+      "codeRepository": "https://github.com/KDMStromback/mm-fit",
+      "sourceArchive": {
+        "url": "https://s3.eu-west-2.amazonaws.com/vradu.uk/mm-fit.zip",
+        "bytes": 1742309258,
+        "lastModified": "2020-12-27T20:23:44Z",
+        "etag": "c72b4cb675f8947c448aa57622f86af3-102",
+        "etagIsCryptographicFileChecksum": false
+      },
+      "excludedLargeSource": {
+        "url": "https://zenodo.org/records/7672767",
+        "bytes": 39109960473,
+        "reason": "RGB archive exceeds the local disk budget and is not required to inspect labels and supplied poses."
+      },
+      "license": {
+        "code": "MIT",
+        "zenodoVideoRecord": "CC-BY-4.0",
+        "s3MultimodalArchive": "not explicitly stated on the official download page",
+        "effectiveLocalPolicy": "research-and-benchmark-only pending written clarification for the S3 archive"
+      },
+      "actions": [
+        "squat",
+        "push-up",
+        "seated dumbbell shoulder press",
+        "lunge",
+        "standing dumbbell row",
+        "sit-up",
+        "overhead dumbbell triceps extension",
+        "alternating biceps curl",
+        "seated lateral raise",
+        "jumping jack"
+      ],
+      "extract": [
+        "mm-fit/*/*_pose_2d.npy",
+        "mm-fit/*/*_pose_3d.npy",
+        "mm-fit/*/*_labels.csv"
+      ]
+    },
+    {
+      "id": "repcount-pose",
+      "homepage": "https://github.com/MiracleDance/PoseRAC",
+      "paper": "https://arxiv.org/abs/2303.08450",
+      "codeRepository": "https://github.com/MiracleDance/PoseRAC",
+      "sourceArchive": {
+        "url": "https://drive.usercontent.google.com/download?id=1k9LLzOsJVh6ACXSX8iKbGNxTY9-L6X_x&export=download&confirm=t",
+        "filename": "RepCount_pose.tar.gz",
+        "bytes": 9517369897,
+        "lastModified": "2023-03-14T08:57:56Z",
+        "checksum": null
+      },
+      "license": {
+        "code": "MIT",
+        "dataset": "no explicit dataset license found in the official repository or download page",
+        "effectiveLocalPolicy": "metadata-only until disk capacity and dataset usage rights are resolved"
+      },
+      "actions": [
+        "front_raise",
+        "pull_up",
+        "squat",
+        "bench_pressing",
+        "jump_jack",
+        "situp",
+        "push_up",
+        "pommelhorse"
+      ],
+      "expectedAnnotations": [
+        "annotation/pose_train.csv",
+        "annotation/video_train.csv",
+        "annotation/valid.csv",
+        "annotation/test.csv"
+      ]
+    }
+  ]
+}
