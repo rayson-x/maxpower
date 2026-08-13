@@ -180,7 +180,7 @@ test("mirrored source images canonicalize signed torso lean before their separat
 
 test("five-split capture workflow reserves held-out video for every exact identity", () => {
   const workflow = buildFiveSplitPriorWorkflow();
-  assert.equal(workflow.groups.length, 5);
+  assert.equal(workflow.groups.length, MUSCLE_GROUPS.length);
   for (const group of workflow.groups) {
     const expectedExercises = EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.muscleGroup);
     for (const exercise of expectedExercises) {

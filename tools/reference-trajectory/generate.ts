@@ -184,7 +184,7 @@ function main(): void {
   });
 
   const artifact = {
-    schemaVersion: "form-coach-personal-provisional-reference-bundle/v1",
+    schemaVersion: "maxpower-personal-provisional-reference-bundle/v1",
     generatedAt: new Date().toISOString(),
     source: {
       approvalExport: path.resolve(approvalPath),

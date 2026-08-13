@@ -26,7 +26,7 @@ function main(): void {
 
   const workflow = buildFiveSplitPriorWorkflow();
   const artifact = {
-    schemaVersion: "form-coach-simulated-prior-bundle/v1",
+    schemaVersion: "maxpower-simulated-prior-bundle/v1",
     generatedAt: new Date().toISOString(),
     source: "simulated_kinematic_prior",
     evidenceStatus: "phase_direction_only",
