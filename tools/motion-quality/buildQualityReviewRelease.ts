@@ -348,7 +348,15 @@ export function computeRustQualityProposalContentHash(
     contentHash: "",
   };
   let hash = 0xcbf2_9ce4_8422_2325n;
-  for (const byte of Buffer.from(JSON.stringify(canonical), "utf8")) {
+  // serde_json preserves the fact that an integer-valued f32 is a float
+  // (`0.0`/`1.0`), while JSON.stringify collapses it to `0`/`1`. Confidence
+  // is the only floating-point field in this contract, so mirror Rust's
+  // representation before applying the shared FNV-1a hash.
+  const rustJson = JSON.stringify(canonical).replace(
+    /"confidence":([01])(?=[,}])/gu,
+    '"confidence":$1.0',
+  );
+  for (const byte of Buffer.from(rustJson, "utf8")) {
     hash ^= BigInt(byte);
     hash = BigInt.asUintN(64, hash * 0x0000_0100_0000_01b3n);
   }
