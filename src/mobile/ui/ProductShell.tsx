@@ -74,6 +74,7 @@ import { BaselineIntakeCard } from "./BaselineIntakeCard";
 import { EMPTY_BASELINE_INTAKE, type BaselineIntakeValues } from "./baselineIntake";
 import { DynamicOnboardingFormCard } from "./DynamicOnboardingFormCard";
 import {
+  answeredDynamicOnboardingFormFieldIds,
   createDynamicOnboardingFormValues,
   updateDynamicOnboardingFormValue,
   type DynamicOnboardingFormValue,
@@ -93,6 +94,7 @@ import {
   createCloudPlanRecoverySnapshot,
   createCloudProfileRecoverySnapshot,
   type ConfirmedProductBridge,
+  type ProductShellCloudProjection,
 } from "../product-data";
 import {
   applyInboundNavigationIntent,
@@ -666,7 +668,7 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
         if (optionId === "confirm") {
           const domain = await application.readDomainProjection({ userId });
           await cloudConfirmed.publishPlanThen({
-            localPlanId: screen.source.planId ?? preview.id,
+            localPlanId: screen?.source.planId ?? preview.id,
             title: "MaxPower 训练计划",
             snapshot: createCloudPlanRecoverySnapshot({
               artifactId: preview.id,
@@ -2420,7 +2422,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const onboardingDraftId = useRef<string | undefined>(entry?.draft?.id);
-  const dynamicRequestFrontier = useRef<string>();
+  const dynamicRequestFrontier = useRef<string | undefined>(undefined);
   const [dossierSummary, setDossierSummary] = useState<import("../../onboarding").OnboardingDossierSummary>();
   const [firstPlan, setFirstPlan] = useState<FirstPlannerHandoffProposal>();
   const [conversationText, setConversationText] = useState("");
@@ -2442,7 +2444,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
       currentWeightKg: baseline.currentWeight ? String(baseline.currentWeight.value.value) : "",
       goalNarrative: baseline.goalNarrative?.text ?? "",
     });
-    if (entry.draft.baselineMissingFields.length === 0) setBaselineSubmitted(true);
+    if (entry?.draft?.baselineMissingFields.length === 0) setBaselineSubmitted(true);
   }, [entry]);
   useEffect(() => {
     const draft = entry?.draft;
@@ -2537,7 +2539,9 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
     setDynamicSaving(true);
     setError(undefined);
     try {
-      const answers: DynamicFormAnswer[] = dynamicCard.fieldIds.map((fieldId) => dynamicUnknownFields.has(fieldId)
+      const answeredFieldIds = answeredDynamicOnboardingFormFieldIds(dynamicCard, values, dynamicUnknownFields);
+      if (!answeredFieldIds.length) throw new Error("请填写至少一项，或明确选择暂不填写。");
+      const answers: DynamicFormAnswer[] = answeredFieldIds.map((fieldId) => dynamicUnknownFields.has(fieldId)
         ? { fieldId, state: "explicit_unknown" }
         : { fieldId, state: "captured_explicit", value: dynamicFormValueToDomain(values[fieldId]) });
       await application.submitOnboardingDynamicForm({
@@ -2712,7 +2716,7 @@ function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages
         <Text style={styles.quickChoiceTitle}>还需要确认</Text>
         {firstPlan.needsInput.map((item) => <Text key={item} style={styles.quickChoiceHint}>· {item}</Text>)}
       </View> : <View style={styles.quickChoiceCard}>
-        <Text style={styles.quickChoiceTitle}>{firstPlan.plan?.title ?? "首次训练计划"}</Text>
+        <Text style={styles.quickChoiceTitle}>{firstPlan.plan?.strategy.name ?? "首次训练计划"}</Text>
         {firstPlan.plan?.week.sessions.map((session) => <Text key={session.id} style={styles.quickChoiceHint}>{session.focus} · {session.exercises.length} 个动作</Text>)}
         {firstPlan.unknowns.length ? <Text style={styles.quickChoiceHint}>仍待校准：{firstPlan.unknowns.join("、")}</Text> : null}
       </View>}
@@ -2912,7 +2916,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const [finishSaveState, setFinishSaveState] = useState<"idle" | "saving" | "failed" | "conflict">("idle");
   const [nextSetRecommendation, setNextSetRecommendation] = useState<Awaited<ReturnType<CoachApplication["recommendNextWorkoutSet"]>>>();
   const [poseRuntimeHealth, setPoseRuntimeHealth] = useState<PoseCameraRuntimeHealth>();
-  const restoredObservationId = useRef<string>();
+  const restoredObservationId = useRef<string | undefined>(undefined);
   const load = useCallback(async () => {
     try {
       setWorkout(await application.readWorkoutSession({ userId, workoutId }));
@@ -4041,7 +4045,7 @@ function dynamicFormValueToDomain(value: DynamicOnboardingFormValue): unknown {
   if ("start" in value && "end" in value) return { start: value.start, end: value.end };
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
     key,
-    key === "reps" || key === "rir_or_rpe" || key === "days_per_week" || key === "minutes_per_session"
+    key === "reps" || key === "effort_value" || key === "days_per_week" || key === "minutes_per_session"
       || key === "consecutive_weeks" || key === "usual_sessions_per_week" || key === "time_away_weeks"
       ? Number(nested)
       : dynamicFormValueToDomain(nested),

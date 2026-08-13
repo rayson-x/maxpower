@@ -56,6 +56,19 @@ export function updateDynamicOnboardingFormValue(
   return { ...values, [fieldId]: value };
 }
 
+/**
+ * Returns only fields the person actually completed or deliberately marked
+ * unknown. Empty control defaults are presentation state, never user facts.
+ */
+export function answeredDynamicOnboardingFormFieldIds(
+  card: DynamicFormCard,
+  values: DynamicOnboardingFormValues,
+  explicitUnknown: ReadonlySet<string>,
+): readonly string[] {
+  return card.fieldIds.filter((fieldId) =>
+    explicitUnknown.has(fieldId) || hasMeaningfulDynamicValue(values[fieldId]));
+}
+
 /** Maps the product-owned catalog control to a stable client interaction. */
 export function dynamicFormControlPresentation(field: OnboardingFieldDefinition): DynamicFormControlPresentation {
   switch (field.control.kind) {
@@ -87,4 +100,23 @@ function emptyFieldGroupValue(name: string): DynamicOnboardingFormValue {
     case "load": return { amount: "", unit: "kg" };
     default: return "";
   }
+}
+
+function hasMeaningfulDynamicValue(value: DynamicOnboardingFormValue): boolean {
+  if (typeof value === "string") return Boolean(value.trim());
+  if (Array.isArray(value)) return value.length > 0;
+  if (!value) return false;
+  if (isNumericWithUnitDraft(value)) return Boolean(value.amount.trim() && value.unit.trim());
+  if (isDateRangeDraft(value)) return Boolean(value.start.trim() || value.end.trim());
+  return Object.values(value).every((nested) => hasMeaningfulDynamicValue(nested));
+}
+
+function isNumericWithUnitDraft(value: object): value is NumericWithUnitDraft {
+  return "amount" in value && typeof value.amount === "string"
+    && "unit" in value && typeof value.unit === "string";
+}
+
+function isDateRangeDraft(value: object): value is DateRangeDraft {
+  return "start" in value && typeof value.start === "string"
+    && "end" in value && typeof value.end === "string";
 }

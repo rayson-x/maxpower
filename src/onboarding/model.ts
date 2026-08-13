@@ -9,6 +9,8 @@ import type {
   ProfessionalConstraint,
   StopSignal,
 } from "../coach/domain";
+import type { AgentKnowledgeArtifactRef } from "../agent-knowledge";
+import type { KnowledgeVersionPin } from "../agent-knowledge/runtimeSelection";
 import type { ExerciseConstraintState, MovementPattern } from "../knowledge/model";
 
 export const ONBOARDING_DRAFT_SCHEMA_VERSION = 1 as const;
@@ -246,6 +248,10 @@ export interface OnboardingDynamicFormRequest {
   fieldIds: readonly string[];
   reasonCode: OnboardingQuestionReasonCode;
   requiredFor: OnboardingActionGate;
+  /** Exact active knowledge inputs selected by the Agent for this card. */
+  knowledgeArtifactIds?: readonly string[];
+  knowledgeArtifactRefs?: readonly AgentKnowledgeArtifactRef[];
+  knowledgeReleasePin?: KnowledgeVersionPin;
 }
 
 /**
@@ -353,6 +359,12 @@ export interface TrainingBackgroundDraft {
   source: OnboardingInputSource;
   /** Conversation extraction stays reviewable until the dossier is confirmed. */
   captureStatus?: "captured_explicit" | "normalized_needs_review";
+  /** Per-field source survives later rounds; top-level source is only legacy fallback. */
+  fieldProvenance?: Readonly<Record<string, {
+    capturedAt: string;
+    source: OnboardingInputSource;
+    captureStatus: "captured_explicit" | "normalized_needs_review";
+  }>>;
   cumulativeTrainingMonths?: { minimum: number; maximum: number };
   recentContinuity?: {
     consecutiveWeeks?: number;

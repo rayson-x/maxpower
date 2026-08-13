@@ -3,7 +3,6 @@ import test from "node:test";
 
 import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
-import { goalDrivenOnboardingFrontier } from "../../src/onboarding/FieldCatalog";
 
 function fixture() {
   const ledger = new InMemoryCoachLedger();
@@ -180,33 +179,24 @@ test("旧卡片不能覆盖较新的草稿；明确不知道会留下受限行�
   );
 });
 
-test("不同目标的推荐表单选择不同字段，训练记录保持产品定义的复合字段", async () => {
+test("知识需求只能选择产品目录字段，训练记录保持产品定义的复合字段", async () => {
   const { app } = fixture();
   const draft = await baseline(app, "strength-user");
-  const fatLoss = app.recommendOnboardingDynamicForm({
-    draft,
-    goalKind: "fat_loss",
-  });
-  const strength = app.recommendOnboardingDynamicForm({
-    draft,
-    goalKind: "strength",
-  });
-  assert.ok(fatLoss.fieldIds.length > 3);
-  assert.ok(fatLoss.fieldIds.includes("training.cumulative_months"));
-  assert.ok(fatLoss.fieldIds.includes("profile.training_schedule"));
-  assert.ok(fatLoss.fieldIds.includes("profile.sex"));
-  assert.ok(fatLoss.fieldIds.includes("timeline.daily_activity"));
-  assert.ok(strength.fieldIds.includes("training.comparable_set"));
 
   const card = await app.requestOnboardingDynamicForm({
     draftId: draft.id,
     expectedDraftRevision: draft.revision,
     idempotencyKey: "strength-card",
-    proposal: strength,
+    proposal: {
+      topic: "goal_based_intake",
+      fieldIds: ["training.comparable_set"],
+      reasonCode: "planning_gate",
+      requiredFor: "initial_plan",
+    },
   });
   const comparableSet = card.fields.find((field) => field.id === "training.comparable_set");
   assert.equal(comparableSet?.control.kind, "field_group");
-  assert.deepEqual(comparableSet?.control.kind === "field_group" ? comparableSet.control.fields : [], ["exercise_variant", "load", "reps", "rir_or_rpe", "performed_on", "conditions"]);
+  assert.deepEqual(comparableSet?.control.kind === "field_group" ? comparableSet.control.fields : [], ["exercise_variant", "load", "reps", "effort_metric", "effort_value", "performed_on", "conditions"]);
 
   await assert.rejects(
     app.captureOnboardingDynamicFields({
@@ -221,7 +211,8 @@ test("不同目标的推荐表单选择不同字段，训练记录保持产品�
           exercise_variant: "barbell_bench_press",
           load: { value: 80, unit: "lb" },
           reps: 5,
-          rir_or_rpe: 2,
+          effort_metric: "rir",
+          effort_value: 2,
           performed_on: "2026-08-13",
           conditions: "normal",
         },
@@ -233,21 +224,30 @@ test("不同目标的推荐表单选择不同字段，训练记录保持产品�
   );
 });
 
-test("目标前沿直接返回不限三项的动态表单，提交后形成训练背景与多维评估", async () => {
+test("知识前沿返回不限三项的可选需求，提交后形成训练背景与多维评估", async () => {
   const { app } = fixture();
   const draft = await baseline(app, "goal-frontier-user");
-  const frontier = goalDrivenOnboardingFrontier(draft);
-  assert.equal(frontier.kind, "catalog_fields");
-  if (frontier.kind !== "catalog_fields") return;
-  assert.ok(frontier.fieldIds.length > 3);
-  assert.equal(frontier.fieldIds.includes("training.cumulative_months"), true);
-  assert.equal(frontier.fieldIds.includes("training.recent_continuity"), true);
-  assert.equal(frontier.fieldIds.includes("training.environment"), true);
+  const frontier = await app.readOnboardingKnowledgeFrontier({ draftId: draft.id });
+  assert.equal(frontier.kind, "knowledge_requirements");
+  if (frontier.kind !== "knowledge_requirements") return;
+  const fieldIds = [...new Set(frontier.requirements.flatMap((requirement) => requirement.fieldIds))];
+  assert.ok(fieldIds.length > 3);
+  assert.equal(fieldIds.includes("training.cumulative_months"), true);
+  assert.equal(fieldIds.includes("training.recent_continuity"), true);
+  assert.equal(fieldIds.includes("training.environment"), true);
 
   const card = await app.requestOnboardingDynamicForm({
     draftId: draft.id,
     expectedDraftRevision: draft.revision,
-    proposal: frontier,
+    proposal: {
+      topic: "goal_based_intake",
+      fieldIds,
+      reasonCode: "planning_gate",
+      requiredFor: "initial_plan",
+      knowledgeArtifactIds: frontier.requirements.map((requirement) => requirement.artifactRef.id),
+      knowledgeArtifactRefs: frontier.requirements.map((requirement) => requirement.artifactRef),
+      knowledgeReleasePin: frontier.knowledgeReleasePin,
+    },
     idempotencyKey: "goal-frontier-card",
   });
   const answer = (fieldId: string, value: unknown) => ({ fieldId, state: "captured_explicit" as const, value });
@@ -270,4 +270,71 @@ test("目标前沿直接返回不限三项的动态表单，提交后形成训�
   assert.equal(progress.patch.trainingBackground?.cumulativeTrainingMonths?.minimum, 24);
   assert.deepEqual(progress.patch.trainingBackground?.recentSplit, ["胸", "背", "腿", "肩"]);
   assert.equal(progress.coachingLevelAssessments?.at(-1)?.priority, "multi_dimensional_assessment");
+});
+
+test("建档问题来自已安装 Agent Knowledge 的决策需求，而不是目标关键词问卷", async () => {
+  const { app } = fixture();
+  const draft = await baseline(app, "knowledge-frontier-user");
+
+  const frontier = await app.readOnboardingKnowledgeFrontier({ draftId: draft.id });
+
+  assert.equal(frontier.kind, "knowledge_requirements");
+  if (frontier.kind !== "knowledge_requirements") return;
+  assert.equal(frontier.knowledgeReleasePin.id, "knowledge_release.maxpower.planner.v2");
+  const energy = frontier.requirements.find((requirement) =>
+    requirement.artifactRef.id === "calculator.initial-plan.energy-budget");
+  assert.ok(energy);
+  assert.deepEqual(energy.fieldIds, [
+    "profile.sex",
+    "timeline.daily_activity",
+    "nutrition.usual_intake",
+    "goal.target_horizon",
+  ]);
+  assert.ok(energy.sourceClaimRefs.includes("claim.weight.niddk-realistic-initial-goal"));
+  assert.equal("goalKind" in frontier, false);
+});
+
+test("空多选不能伪装成已回答；训练强度必须区分 RIR 与 RPE", async () => {
+  const { app } = fixture();
+  const draft = await baseline(app, "field-semantics-user");
+  await assert.rejects(
+    app.captureOnboardingDynamicFields({
+      draftId: draft.id,
+      expectedDraftRevision: draft.revision,
+      inputMode: "form",
+      idempotencyKey: "empty-environment",
+      captures: [{
+        fieldId: "training.environment",
+        state: "captured_explicit",
+        value: [],
+        observedAt: "2026-08-14T09:30:00.000+08:00",
+        source: { kind: "form_submission", submissionId: "empty-environment" },
+      }],
+    }),
+    /dynamic_form_rejected/,
+  );
+
+  const saved = await app.captureOnboardingDynamicFields({
+    draftId: draft.id,
+    expectedDraftRevision: draft.revision,
+    inputMode: "form",
+    idempotencyKey: "rir-set",
+    captures: [{
+      fieldId: "training.comparable_set",
+      state: "captured_explicit",
+      value: {
+        exercise_variant: "barbell_bench_press",
+        load: { value: 80, unit: "kg" },
+        reps: 5,
+        effort_metric: "rir",
+        effort_value: 2,
+        performed_on: "2026-08-13",
+        conditions: "normal",
+      },
+      observedAt: "2026-08-14T09:30:00.000+08:00",
+      source: { kind: "form_submission", submissionId: "rir-set" },
+    }],
+  });
+  assert.equal(saved.patch.trainingBackground?.comparableSets?.[0]?.rir, 2);
+  assert.equal(saved.patch.trainingBackground?.comparableSets?.[0]?.rpe, undefined);
 });

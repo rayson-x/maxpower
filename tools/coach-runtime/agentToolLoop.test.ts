@@ -6,6 +6,18 @@ import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import { BehaviorDecisionTraceRecorder, TraceRecorder } from "../../src/observability";
 
+const ALL_ONBOARDING_KNOWLEDGE_ARTIFACT_IDS = [
+  "policy.maxpower.initial-planning-baseline",
+  "objective.fat-loss.reduce-waist",
+  "action.initial-plan.select-split",
+  "action.initial-plan.resolve-exercises",
+  "action.initial-plan.allocate-dose",
+  "action.initial-plan.schedule-recovery",
+  "action.initial-plan.schedule-aerobic",
+  "calculator.initial-plan.energy-budget",
+  "validator.initial-plan.exercise-equipment",
+] as const;
+
 function fixture<T extends ScriptedLLMProvider | LocalCoachProvider>(provider: T, actionToolsEnabled = false) {
   let sequence = 0;
   const ledger = new InMemoryCoachLedger();
@@ -176,6 +188,7 @@ test("建档场景把 Agent 选择的临时表单写入同一草稿；其它场�
       input: {
         topic: "goal_based_intake",
         fieldIds: ["training.cumulative_months", "training.recent_continuity", "training.recent_split", "training.environment", "training.equipment", "training.execution_stability", "profile.training_schedule", "safety.activity_restrictions", "mandate.plan_adjustment_authority", "profile.sex", "timeline.daily_activity", "nutrition.usual_intake", "goal.target_horizon", "profile.body_measurement_method"],
+        knowledgeArtifactIds: ALL_ONBOARDING_KNOWLEDGE_ARTIFACT_IDS,
         reasonCode: "planning_gate",
         requiredFor: "initial_plan",
       },
@@ -213,6 +226,47 @@ test("建档场景把 Agent 选择的临时表单写入同一草稿；其它场�
   const otherSession = await other.app.startSession({ userId: "other-user", context: { kind: "profile", ref: "profile" } });
   await other.app.sendCoachTurn({ sessionId: otherSession.id, text: "你好" });
   assert.equal(nonOnboarding.requests[0]?.toolManifest.some((tool) => tool.name === "onboarding.request_form"), false);
+});
+
+test("建档 Agent 可从知识需求中选择相关字段，Harness 校验知识关联而非固定整表", async () => {
+  const provider = new ScriptedLLMProvider(
+    [{
+      type: "tool-call",
+      toolCallId: "knowledge-selected-form",
+      toolName: "onboarding.request_form",
+      input: {
+        topic: "goal_based_intake",
+        fieldIds: ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake", "goal.target_horizon"],
+        knowledgeArtifactIds: ["calculator.initial-plan.energy-budget"],
+        reasonCode: "planning_gate",
+        requiredFor: "initial_plan",
+      },
+    }, { type: "completed" }],
+    [],
+    [[{ type: "text-delta", delta: "填完继续。" }, { type: "completed" }]],
+  );
+  const { app } = fixture(provider, true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "knowledge-selected-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id,
+    inputMode: "form",
+    idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "想把体脂降到 12%，尽量保住力量", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+  const session = await app.startSession({ userId: draft.userId, context: { kind: "onboarding", ref: draft.id } });
+
+  await app.sendCoachTurn({ sessionId: session.id, text: "继续" });
+
+  const card = await app.readActiveOnboardingDynamicForm({ draftId: draft.id });
+  assert.deepEqual(card?.fieldIds, ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake", "goal.target_horizon"]);
+  assert.deepEqual(card?.knowledgeArtifactIds, ["calculator.initial-plan.energy-budget"]);
+  assert.equal(card?.knowledgeReleasePin?.id, "knowledge_release.maxpower.planner.v2");
 });
 
 test("建档 Agent 从自然语言回合保存训练背景，再创建多维评估而非训练等级", async () => {
@@ -270,6 +324,7 @@ test("基线完成后由 Agent 主动开始同一份草稿的下一回合，不�
           "profile.training_schedule", "safety.activity_restrictions", "mandate.plan_adjustment_authority",
           "profile.sex", "timeline.daily_activity", "nutrition.usual_intake", "goal.target_horizon", "profile.body_measurement_method",
         ],
+        knowledgeArtifactIds: ALL_ONBOARDING_KNOWLEDGE_ARTIFACT_IDS,
         reasonCode: "planning_gate",
         requiredFor: "initial_plan",
       },
@@ -296,7 +351,7 @@ test("基线完成后由 Agent 主动开始同一份草稿的下一回合，不�
   assert.equal(snapshot.messages.some((message) => message.role === "assistant" && message.content.includes("整理在卡片里")), true);
   assert.ok(((await app.readActiveOnboardingDynamicForm({ draftId: draft.id }))?.fieldIds.length ?? 0) > 3);
   assert.match(provider.requests[0]?.modelInput?.systemPrompt ?? "", /Onboarding scenario/);
-  assert.match(provider.requests[0]?.modelInput?.systemPrompt ?? "", /decision tree/);
+  assert.match(provider.requests[0]?.modelInput?.systemPrompt ?? "", /Agent Knowledge requirement blocks/);
 });
 
 test("建档 Agent 把用户已经说出的动态字段写入同一草稿，标记为待确认而非伪装明确填写", async () => {
@@ -371,4 +426,31 @@ test("建档前沿需要输入时，Harness 拒绝只有文字问题而没有表
   assert.equal(events.some((event) => event.type === "run-error"), true);
   assert.equal(snapshot.messages.some((message) => message.role === "assistant" && message.content.includes("最近一周练几次")), false);
   assert.equal(await app.readActiveOnboardingDynamicForm({ draftId: draft.id }), undefined);
+});
+
+test("建档普通问题即使被流式拆开也不能绕过表单工具", async () => {
+  const provider = new ScriptedLLMProvider([
+    { type: "text-delta", delta: "你通常每周训练" },
+    { type: "text-delta", delta: "几次。" },
+    { type: "completed" },
+  ]);
+  const { app, ledger } = fixture(provider, true);
+  const draft = await app.startOrResumeBaselineIntake({ userId: "onboarding-split-question-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline" };
+  await app.saveBaselineIntake({
+    draftId: draft.id,
+    inputMode: "form",
+    idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-13T08:00:00.000Z", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-13T08:00:00.000Z", source },
+      goalNarrative: { text: "想减脂", observedAt: "2026-08-13T08:00:00.000Z", source },
+    },
+  });
+
+  const events = await app.startOnboardingAgentTurn({ userId: draft.userId, draftId: draft.id });
+  const snapshot = await ledger.read();
+  assert.equal(events.some((event) => event.type === "run-error"), true);
+  assert.equal(snapshot.messages.some((message) => message.role === "assistant" && message.content.includes("每周训练几次")), false);
 });

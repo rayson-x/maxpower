@@ -39,6 +39,28 @@ export class AgentKnowledgeHarness {
     return this.backend.resolveDecision(input);
   }
 
+  /**
+   * Active decision artifacts that may declare inputs for dossier intake.
+   * The onboarding layer binds these artifact identities to product-owned
+   * field controls; it does not infer a questionnaire from goal keywords.
+   */
+  onboardingIntakeArtifacts() {
+    return (["policy", "objective", "action", "calculator", "validator"] as const)
+      .flatMap((kind) => this.backend.artifacts(kind))
+      .filter((artifact) => artifact.status === "active" && artifact.scopes.includes("initial_plan"))
+      .map((artifact) => ({
+        artifactRef: {
+          kind: artifact.kind,
+          id: artifact.id,
+          version: artifact.version,
+          contentHash: artifact.contentHash,
+        },
+        title: artifact.title,
+        tags: artifact.tags,
+        sourceClaimRefs: artifact.sourceClaimRefs,
+      }));
+  }
+
   createInitialPlan(input: {
     readonly profile: UserProfileData;
     readonly goalContract: GoalContractData;

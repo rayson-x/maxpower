@@ -37,7 +37,6 @@ import { stableHash } from "./stable";
 import { redactDirectIdentifiers } from "./remoteRedaction";
 import type { CoachToolCall, CoachToolRegistry } from "./toolRegistry";
 import { projectOnboardingProgress } from "../onboarding/OnboardingService";
-import { goalDrivenOnboardingFrontier } from "../onboarding/FieldCatalog";
 import { projectDomainEvents } from "./domain";
 
 const DEFAULT_PROVIDER_IDLE_TIMEOUT_MS = 45_000;
@@ -496,11 +495,11 @@ export class AgentRuntime {
     if (input.session.context.kind === "onboarding") {
       const snapshot = await this.ledger.read();
       const progress = projectOnboardingProgress(snapshot.onboardingDraftEvents, input.session.context.ref);
-      const frontier = goalDrivenOnboardingFrontier(progress);
+      const frontier = this.contextAssembler.onboardingFrontier(progress);
       const requestedForm = events.some((event) => event.type === "tool-started" && event.toolName === "onboarding.request_form");
-      const askedInText = events.some((event) => event.type === "text-delta" && onboardingTextAsksQuestion(event.delta));
+      const askedInText = onboardingTextAsksQuestion(text);
       if (askedInText) throw new Error("onboarding_question_must_use_form_tool");
-      if (frontier.kind === "catalog_fields" && !requestedForm) {
+      if (frontier.kind === "knowledge_requirements" && !requestedForm) {
         throw new Error("onboarding_form_tool_required");
       }
     }

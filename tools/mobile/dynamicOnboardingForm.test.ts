@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createDynamicOnboardingFormValues,
+  answeredDynamicOnboardingFormFieldIds,
   dynamicFormControlPresentation,
   updateDynamicOnboardingFormValue,
 } from "../../src/mobile/ui/dynamicOnboardingForm";
@@ -70,7 +71,7 @@ test("dynamic catalog controls map to their explicit interaction types", () => {
   );
   assert.deepEqual(
     dynamicFormControlPresentation(ONBOARDING_FIELD_CATALOG.find((field) => field.id === "training.comparable_set")!),
-    { kind: "field_group", fields: ["exercise_variant", "load", "reps", "rir_or_rpe", "performed_on", "conditions"] },
+    { kind: "field_group", fields: ["exercise_variant", "load", "reps", "effort_metric", "effort_value", "performed_on", "conditions"] },
   );
 });
 
@@ -83,9 +84,23 @@ test("field-group initial values preserve distinct training-set semantics", () =
       exercise_variant: "",
       load: { amount: "", unit: "kg" },
       reps: "",
-      rir_or_rpe: "",
+      effort_metric: "",
+      effort_value: "",
       performed_on: "",
       conditions: "",
     },
   });
+});
+
+test("untouched controls are not treated as answers", () => {
+  const card = cardFor("training.environment", "safety.activity_restrictions", "timeline.daily_activity");
+  const initial = createDynamicOnboardingFormValues(card);
+  assert.deepEqual(answeredDynamicOnboardingFormFieldIds(card, initial, new Set()), []);
+
+  const changed = updateDynamicOnboardingFormValue(card, initial, "timeline.daily_activity", "sedentary_remote_work");
+  assert.deepEqual(answeredDynamicOnboardingFormFieldIds(card, changed, new Set()), ["timeline.daily_activity"]);
+  assert.deepEqual(answeredDynamicOnboardingFormFieldIds(card, changed, new Set(["safety.activity_restrictions"])), [
+    "safety.activity_restrictions",
+    "timeline.daily_activity",
+  ]);
 });

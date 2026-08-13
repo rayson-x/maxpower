@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -37,7 +38,7 @@ test("baseline intake is complete only when all four values were supplied", () =
 });
 
 test("新用户建档界面不再保留固定训练等级、地点或协作模式问卷入口", async () => {
-  const source = await readFile(new URL("../../src/mobile/ui/ProductShell.tsx", import.meta.url), "utf8");
+  const source = await readFile(path.resolve(process.cwd(), "src/mobile/ui/ProductShell.tsx"), "utf8");
   const onboarding = source.slice(source.indexOf("function OnboardingScreen"), source.indexOf("function PlanningPreviewScreen"));
 
   assert.match(onboarding, /BaselineIntakeCard/);

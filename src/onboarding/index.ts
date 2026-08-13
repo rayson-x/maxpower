@@ -8,11 +8,14 @@ export {
   ONBOARDING_FIELD_CATALOG,
   ONBOARDING_FIELD_CATALOG_VERSION,
   fieldById as onboardingFieldById,
-  goalDrivenOnboardingFrontier,
+  knowledgeDrivenOnboardingFrontier,
+  validateKnowledgeSelectedProposal,
   type DynamicFormCard,
   type DynamicFormAnswer,
   type DynamicFieldInput,
   type OnboardingDynamicFormProposal,
+  type KnowledgeDrivenOnboardingFrontier,
+  type OnboardingKnowledgeRequirement,
 } from "./FieldCatalog";
 export {
   projectOnboardingReadinessSafety,

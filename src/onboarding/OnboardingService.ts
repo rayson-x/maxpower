@@ -40,7 +40,6 @@ import {
   ONBOARDING_FIELD_CATALOG_VERSION,
   fieldById,
   limitedActionsFor,
-  recommendFieldsForGoal,
   validateDynamicFieldInput,
   validateDynamicFormProposal,
   type DynamicFieldInput,
@@ -181,6 +180,9 @@ export class OnboardingService {
       fieldIds: [...input.proposal.fieldIds],
       reasonCode: input.proposal.reasonCode,
       requiredFor: input.proposal.requiredFor,
+      ...(input.proposal.knowledgeArtifactIds ? { knowledgeArtifactIds: [...input.proposal.knowledgeArtifactIds] } : {}),
+      ...(input.proposal.knowledgeArtifactRefs ? { knowledgeArtifactRefs: [...input.proposal.knowledgeArtifactRefs] } : {}),
+      ...(input.proposal.knowledgeReleasePin ? { knowledgeReleasePin: input.proposal.knowledgeReleasePin } : {}),
     };
     const event: OnboardingDraftEvent = {
       id: `onboarding-event:${stableHash({ kind: "dynamic_form_requested", cardId })}`,
@@ -268,13 +270,6 @@ export class OnboardingService {
     const fields = request.fieldIds.map(fieldById);
     if (fields.some((field) => !field)) return undefined;
     return { ...request, fields: fields as OnboardingFieldDefinition[] };
-  }
-
-  recommendDynamicForm(input: {
-    draft: OnboardingProgress;
-    goalKind: "fat_loss" | "hypertrophy" | "strength" | "visual_physique" | "general";
-  }): OnboardingDynamicFormProposal {
-    return recommendFieldsForGoal(input.goalKind);
   }
 
   /**
@@ -1436,6 +1431,8 @@ function validateNewDossierCompletion(
   const schedule = scheduleFromNewDossier(progress);
   const sex = sexFromNewDossier(dynamic);
   const dailyActivityLevel = dailyActivityLevelFromNewDossier(dynamic);
+  const goalHorizon = goalHorizonFromNewDossier(dynamic, now);
+  const adjustmentAuthority = planAdjustmentAuthorityFromNewDossier(dynamic);
   const remoteLlmCapture = dynamic["permission.remote_llm"];
   const remoteLlm = remoteLlmCapture?.state === "captured_explicit"
     && (remoteLlmCapture.value === "granted" || remoteLlmCapture.value === "denied")
@@ -1508,18 +1505,21 @@ function validateNewDossierCompletion(
       successMetrics: primaryGoal === "fat_loss_preserve_lean_mass"
         ? ["weekly_weight_trend", "training_performance_maintained"]
         : primaryGoal === "hypertrophy" ? ["training_volume_progress"] : ["training_load_progress"],
-      horizon: { startDate: now.slice(0, 10) },
+      horizon: goalHorizon,
       ...(targetBodyFat ? { targets: { targetBodyFat } } : {}),
       ...(primaryGoal === "fat_loss_preserve_lean_mass" ? { goalType: "fat_loss" as const } : { goalType: primaryGoal }),
     },
-    // This is the minimum-authority policy boundary, not a user-selected
-    // collaboration mode. It grants no autonomous plan changes.
     mandate: {
-      mode: "manual",
-      scopes: {
-        loadReps: "manual", volume: "manual", substitution: "manual",
-        schedule: "manual", deload: "manual", nutrition: "advice_only", recording: "confirm",
-      },
+      mode: adjustmentAuthority === "suggest_then_confirm" ? "collaborative" : "manual",
+      scopes: adjustmentAuthority === "suggest_then_confirm"
+        ? {
+            loadReps: "confirm", volume: "confirm", substitution: "confirm",
+            schedule: "confirm", deload: "confirm", nutrition: "confirm", recording: "confirm",
+          }
+        : {
+            loadReps: "manual", volume: "manual", substitution: "manual",
+            schedule: "manual", deload: "manual", nutrition: "advice_only", recording: "confirm",
+          },
       limits: {},
       locks: [],
     },
@@ -1571,6 +1571,29 @@ function dailyActivityLevelFromNewDossier(
     case "active_job": return "active";
     default: return undefined;
   }
+}
+
+function goalHorizonFromNewDossier(
+  dynamic: Readonly<Record<string, OnboardingDynamicFieldCapture>>,
+  now: string,
+): { startDate: string; endDate?: string } {
+  const capture = dynamic["goal.target_horizon"];
+  if (!isReviewableCapturedValue(capture) || !capture.value || typeof capture.value !== "object" || Array.isArray(capture.value)) {
+    return { startDate: now.slice(0, 10) };
+  }
+  const value = capture.value as Record<string, unknown>;
+  return typeof value.start === "string" && typeof value.end === "string"
+    ? { startDate: value.start, endDate: value.end }
+    : { startDate: now.slice(0, 10) };
+}
+
+function planAdjustmentAuthorityFromNewDossier(
+  dynamic: Readonly<Record<string, OnboardingDynamicFieldCapture>>,
+): "ask_every_time" | "suggest_then_confirm" {
+  const capture = dynamic["mandate.plan_adjustment_authority"];
+  return isReviewableCapturedValue(capture) && capture.value === "suggest_then_confirm"
+    ? "suggest_then_confirm"
+    : "ask_every_time";
 }
 
 /** The dossier confirmation, not the model, is the confirmation boundary. */
@@ -1781,13 +1804,23 @@ function trainingBackgroundFromCaptures(
   if (training.length === 0 && !schedule) return current;
   const sourceCapture = training[0] ?? schedule;
   if (!sourceCapture) return current;
+  const captureStatus = inputMode === "form" ? "captured_explicit" : "normalized_needs_review";
+  const allCaptures = [...training, ...(schedule ? [schedule] : [])];
   const next: TrainingBackgroundDraft = {
     ...(current ?? {}),
-    capturedAt: sourceCapture.observedAt,
-    source: sourceCapture.source,
-    captureStatus: inputMode === "form" ? "captured_explicit" : "normalized_needs_review",
+    capturedAt: current?.capturedAt ?? sourceCapture.observedAt,
+    source: current?.source ?? sourceCapture.source,
+    captureStatus: current?.captureStatus ?? captureStatus,
+    fieldProvenance: {
+      ...current?.fieldProvenance,
+      ...Object.fromEntries(allCaptures.map((capture) => [capture.fieldId, {
+        capturedAt: capture.observedAt,
+        source: capture.source,
+        captureStatus,
+      }])),
+    },
   };
-  for (const capture of [...training, ...(schedule ? [schedule] : [])]) {
+  for (const capture of allCaptures) {
     const value = capture.value;
     if (capture.fieldId === "training.cumulative_months" && isUnknownRecord(value) && typeof value.value === "number" && value.unit === "month") {
       next.cumulativeTrainingMonths = { minimum: value.value, maximum: value.value };
@@ -1812,7 +1845,8 @@ function trainingBackgroundFromCaptures(
         exerciseVariantId: value.exercise_variant,
         load: { value: value.load.value, unit: "kg" },
         reps: value.reps,
-        ...(typeof value.rir_or_rpe === "number" ? { rpe: value.rir_or_rpe } : {}),
+        ...(value.effort_metric === "rir" && typeof value.effort_value === "number" ? { rir: value.effort_value } : {}),
+        ...(value.effort_metric === "rpe" && typeof value.effort_value === "number" ? { rpe: value.effort_value } : {}),
         performedOn: value.performed_on,
         ...(typeof value.conditions === "string" ? { conditions: value.conditions } : {}),
       }];

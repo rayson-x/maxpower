@@ -28,12 +28,25 @@ function backgroundEvidence(
   code: Extract<CoachingAssessmentEvidence["code"], Exclude<CoachingAssessmentEvidence["code"], "duration_and_vocabulary_not_sufficient">>,
   exerciseVariantId?: string,
 ): CoachingAssessmentEvidence {
+  const fieldId = evidenceFieldId(code);
+  const provenance = fieldId ? background.fieldProvenance?.[fieldId] : undefined;
   return {
     code,
-    source: background.source,
-    capturedAt: background.capturedAt,
+    source: provenance?.source ?? background.source,
+    capturedAt: provenance?.capturedAt ?? background.capturedAt,
     ...(exerciseVariantId ? { exerciseVariantId } : {}),
   };
+}
+
+function evidenceFieldId(code: CoachingAssessmentEvidence["code"]): string | undefined {
+  switch (code) {
+    case "recent_continuity_reported":
+    case "recent_time_away_reported": return "training.recent_continuity";
+    case "recent_split_reported": return "training.recent_split";
+    case "comparable_set_reported": return "training.comparable_set";
+    case "execution_consistency_reported": return "training.execution_stability";
+    default: return undefined;
+  }
 }
 
 function continuity(background: TrainingBackgroundDraft): CoachingAssessmentDimension {

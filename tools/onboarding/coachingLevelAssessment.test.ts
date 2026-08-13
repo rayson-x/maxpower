@@ -147,3 +147,39 @@ test("用户更正训练背景会保留旧评估并生成新的 assessment revis
   assert.deepEqual(progress.coachingLevelAssessments?.map((item) => item.revision), [1, 2]);
   assert.equal(progress.coachingLevelAssessments?.[0]?.dimensions.trainingContinuity.status, "supported");
 });
+
+test("不同轮次采集的训练字段保留各自来源，评估不会全部指向最后一条消息", async () => {
+  const { app } = fixture();
+  const draft = await app.startOnboarding({ userId: "field-provenance-user", depth: "basic" });
+  const first = await app.captureOnboardingDynamicFields({
+    draftId: draft.id,
+    expectedDraftRevision: draft.revision,
+    inputMode: "conversation",
+    idempotencyKey: "continuity-message",
+    captures: [{
+      fieldId: "training.recent_continuity",
+      state: "captured_explicit",
+      value: { consecutive_weeks: 12, usual_sessions_per_week: 4, time_away_weeks: 0 },
+      observedAt: "2026-08-14T10:00:00.000+08:00",
+      source: { kind: "conversation_message", messageId: "continuity-message" },
+    }],
+  });
+  const second = await app.captureOnboardingDynamicFields({
+    draftId: draft.id,
+    expectedDraftRevision: first.revision,
+    inputMode: "conversation",
+    idempotencyKey: "split-message",
+    captures: [{
+      fieldId: "training.recent_split",
+      state: "captured_explicit",
+      value: "胸、背、腿、肩",
+      observedAt: "2026-08-14T10:05:00.000+08:00",
+      source: { kind: "conversation_message", messageId: "split-message" },
+    }],
+  });
+
+  const assessment = second.coachingLevelAssessments?.at(-1);
+  assert.equal(assessment?.dimensions.trainingContinuity.supportingEvidence[0]?.source?.kind, "conversation_message");
+  assert.equal((assessment?.dimensions.trainingContinuity.supportingEvidence[0]?.source as { messageId?: string })?.messageId, "continuity-message");
+  assert.equal((assessment?.dimensions.trainingProgrammingUnderstanding.supportingEvidence[0]?.source as { messageId?: string })?.messageId, "split-message");
+});

@@ -7,7 +7,11 @@ import { COACH_PLAYBOOK } from "../playbook";
 import type { CoachToolManifest } from "../toolRegistry";
 import { openAiCompatibleToolName } from "./openAiToolName";
 import { projectOnboardingProgress } from "../../onboarding/OnboardingService";
-import { goalDrivenOnboardingFrontier } from "../../onboarding/FieldCatalog";
+import {
+  knowledgeDrivenOnboardingFrontier,
+  type KnowledgeDrivenOnboardingFrontier,
+} from "../../onboarding/FieldCatalog";
+import { createInstalledAgentKnowledgeHarness } from "../../agent-knowledge";
 
 export type ProviderEvent =
   | { type: "text-delta"; delta: string }
@@ -242,6 +246,17 @@ const TIMELINE_DEGRADED_LIMIT = 50;
 const TIMELINE_MIN_LIMIT = 20;
 
 export class ContextAssembler {
+  constructor(
+    private readonly onboardingFrontierProjector: (
+      progress: ReturnType<typeof projectOnboardingProgress>,
+    ) => KnowledgeDrivenOnboardingFrontier = (progress) =>
+      knowledgeDrivenOnboardingFrontier(progress, createInstalledAgentKnowledgeHarness()),
+  ) {}
+
+  onboardingFrontier(progress: ReturnType<typeof projectOnboardingProgress>) {
+    return this.onboardingFrontierProjector(progress);
+  }
+
   assemble(
     snapshot: LedgerSnapshot,
     userId: string,
@@ -444,7 +459,7 @@ export class ContextAssembler {
           trainingBackground: onboardingDraft.patch.trainingBackground,
           assessment: onboardingDraft.coachingLevelAssessments?.at(-1),
           baselineMissingFields: onboardingDraft.baselineMissingFields,
-          questionFrontier: goalDrivenOnboardingFrontier(onboardingDraft),
+          questionFrontier: this.onboardingFrontier(onboardingDraft),
         }, "onboarding_draft", redactedPaths, false),
       } : {}),
     };
@@ -647,17 +662,19 @@ export class LocalCoachProvider implements LLMProvider {
     if (onboarding) {
       if (onboarding.kind === "assess_training_context") {
         yield { type: "tool-call", toolCallId: `local-onboarding-assessment-${request.runId}`, toolName: "onboarding.assess_training_context", input: {} };
-      } else if (onboarding.kind === "catalog_fields") {
+      } else if (onboarding.kind === "knowledge_requirements") {
+        const fieldIds = [...new Set(onboarding.requirements.flatMap((requirement) => requirement.fieldIds))];
         yield { type: "text-delta", delta: "我把下一步会影响这版目标安排的信息整理成一张小表。" };
         yield {
           type: "tool-call",
           toolCallId: `local-onboarding-form-${request.runId}`,
           toolName: "onboarding.request_form",
           input: {
-            topic: onboarding.topic,
-            fieldIds: onboarding.fieldIds,
-            reasonCode: onboarding.reasonCode,
-            requiredFor: onboarding.requiredFor,
+            topic: "goal_based_intake",
+            fieldIds,
+            knowledgeArtifactIds: onboarding.requirements.map((requirement) => requirement.artifactId),
+            reasonCode: "planning_gate",
+            requiredFor: "initial_plan",
           },
         };
       } else {
@@ -819,7 +836,7 @@ export class LocalCoachProvider implements LLMProvider {
 
 type LocalOnboardingFrontier =
   | { kind: "assess_training_context" }
-  | { kind: "catalog_fields"; topic: string; reasonCode: string; requiredFor: string; fieldIds: readonly string[] }
+  | { kind: "knowledge_requirements"; requirements: readonly { artifactId: string; fieldIds: readonly string[] }[] }
   | { kind: "review_dossier" };
 
 /** Reads only the local harness-owned frontier shape; malformed context falls back safely. */
@@ -828,16 +845,17 @@ function localOnboardingFrontier(value: Record<string, unknown> | undefined): Lo
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const frontier = raw as Record<string, unknown>;
   if (frontier.kind === "assess_training_context" || frontier.kind === "review_dossier") return { kind: frontier.kind };
-  if (
-    frontier.kind === "catalog_fields"
-    && typeof frontier.topic === "string"
-    && typeof frontier.reasonCode === "string"
-    && typeof frontier.requiredFor === "string"
-    && Array.isArray(frontier.fieldIds)
-    && frontier.fieldIds.length > 0
-    && frontier.fieldIds.every((fieldId) => typeof fieldId === "string")
-  ) {
-    return { kind: "catalog_fields", topic: frontier.topic, reasonCode: frontier.reasonCode, requiredFor: frontier.requiredFor, fieldIds: frontier.fieldIds };
+  if (frontier.kind === "knowledge_requirements" && Array.isArray(frontier.requirements)) {
+    const requirements = frontier.requirements.flatMap((raw): readonly { artifactId: string; fieldIds: readonly string[] }[] => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+      const requirement = raw as Record<string, unknown>;
+      const artifactRef = requirement.artifactRef;
+      if (!artifactRef || typeof artifactRef !== "object" || Array.isArray(artifactRef)) return [];
+      const artifactId = (artifactRef as Record<string, unknown>).id;
+      if (typeof artifactId !== "string" || !Array.isArray(requirement.fieldIds) || !requirement.fieldIds.every((fieldId) => typeof fieldId === "string")) return [];
+      return [{ artifactId, fieldIds: requirement.fieldIds as string[] }];
+    });
+    if (requirements.length) return { kind: "knowledge_requirements", requirements };
   }
   return undefined;
 }

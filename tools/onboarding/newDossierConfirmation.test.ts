@@ -194,3 +194,44 @@ test("训练背景校准会写入独立评估，并让新档案生成待确认�
   assert.equal(handoff.needsInput.length, 0);
   assert.ok(handoff.plan);
 });
+
+test("目标期限与计划调整确认方式会进入正式 Goal Contract 和 Coaching Mandate", async () => {
+  const { app } = fixture();
+  const draft = await app.startOrResumeBaselineIntake({ userId: "horizon-mandate-user" });
+  const source = { kind: "form_submission" as const, submissionId: "baseline-card" };
+  const filled = await app.saveBaselineIntake({
+    draftId: draft.id,
+    inputMode: "form",
+    idempotencyKey: "baseline",
+    values: {
+      age: { ageYears: 30, observedAt: "2026-08-14T11:00:00.000+08:00", source },
+      height: { value: { value: 178, unit: "cm" }, observedAt: "2026-08-14T11:00:00.000+08:00", source },
+      currentWeight: { value: { value: 75, unit: "kg" }, observedAt: "2026-08-14T11:00:00.000+08:00", source },
+      goalNarrative: { text: "减脂并保持力量", observedAt: "2026-08-14T11:00:00.000+08:00", source },
+    },
+  });
+  const captured = await app.captureOnboardingDynamicFields({
+    draftId: draft.id,
+    expectedDraftRevision: filled.revision,
+    inputMode: "form",
+    idempotencyKey: "goal-contract-fields",
+    captures: [
+      { fieldId: "goal.target_horizon", state: "captured_explicit", value: { start: "2026-08-14", end: "2026-10-09" }, observedAt: "2026-08-14T11:00:00.000+08:00", source },
+      { fieldId: "mandate.plan_adjustment_authority", state: "captured_explicit", value: "suggest_then_confirm", observedAt: "2026-08-14T11:00:00.000+08:00", source },
+    ],
+  });
+  const summary = await app.readOnboardingDossierSummary({ draftId: draft.id });
+  const staged = await app.stageOnboardingDossierConfirmation({
+    userId: draft.userId,
+    draftId: draft.id,
+    expectedDraftRevision: captured.revision,
+    expectedFactFrontier: summary.confirmation.factFrontier,
+    idempotencyKey: "confirm-horizon-mandate",
+  });
+  await staged.commitAcknowledged();
+
+  const domain = await app.readDomainProjection({ userId: draft.userId });
+  assert.deepEqual(domain.goalContract?.value.horizon, { startDate: "2026-08-14", endDate: "2026-10-09" });
+  assert.equal(domain.mandate?.value.mode, "collaborative");
+  assert.equal(domain.mandate?.value.scopes?.schedule, "confirm");
+});

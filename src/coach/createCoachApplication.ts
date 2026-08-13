@@ -19,6 +19,7 @@ import {
   type CanonicalTrainingFinalization,
 } from "./adapters/motion";
 import { AgentRuntime } from "./agentRuntime";
+import { ContextAssembler } from "./adapters/provider";
 import { planCoachStateSweep } from "./stateSweep";
 import {
   type CoachLedger,
@@ -117,7 +118,10 @@ import type {
 import { evaluateOnboardingPolicy } from "../onboarding/policy";
 import { projectOnboardingReadinessSafety } from "../onboarding/ReadinessSafety";
 import { buildOnboardingDossierSummary } from "../onboarding/DossierSummary";
-import { goalDrivenOnboardingFrontier } from "../onboarding/FieldCatalog";
+import {
+  knowledgeDrivenOnboardingFrontier,
+  validateKnowledgeSelectedProposal,
+} from "../onboarding/FieldCatalog";
 import {
   assessmentHasMeaningfulEvidence,
   firstPlannerEvidence,
@@ -452,7 +456,7 @@ export class CoachApplication {
       this.ledger,
       this.runtime,
       dependencies.llmProvider,
-      undefined,
+      new ContextAssembler((progress) => knowledgeDrivenOnboardingFrontier(progress, this.agentKnowledge)),
       tools,
       this.humanActions,
       dependencies.providerExecutionPolicy,
@@ -7116,6 +7120,13 @@ export class CoachApplication {
     return this.onboarding.assessCoachingLevel(input);
   }
 
+  async readOnboardingKnowledgeFrontier(input: { draftId: string }) {
+    return knowledgeDrivenOnboardingFrontier(
+      await this.onboarding.read(input.draftId),
+      this.agentKnowledge,
+    );
+  }
+
   /** The Agent requests catalog IDs only; all visible semantics are product-owned. */
   requestOnboardingDynamicForm(input: {
     draftId: string;
@@ -7173,13 +7184,6 @@ export class CoachApplication {
     return this.onboarding.readActiveDynamicForm(input.draftId);
   }
 
-  recommendOnboardingDynamicForm(input: {
-    draft: import("../onboarding").OnboardingProgress;
-    goalKind: "fat_loss" | "hypertrophy" | "strength" | "visual_physique" | "general";
-  }) {
-    return this.onboarding.recommendDynamicForm(input);
-  }
-
   /**
    * Agent-runtime adapter for the onboarding scenario. The draft id comes
    * from the session context, never from model input, so a tool call cannot
@@ -7191,19 +7195,12 @@ export class CoachApplication {
   ): Promise<ShowArtifactResult> {
     const { session, draftId } = await this.onboardingSession(input.sessionId);
     const draft = await this.onboarding.read(draftId);
-    const currentFrontier = goalDrivenOnboardingFrontier(draft);
-    if (
-      currentFrontier.kind !== "catalog_fields"
-      || currentFrontier.topic !== input.proposal.topic
-      || currentFrontier.reasonCode !== input.proposal.reasonCode
-      || currentFrontier.requiredFor !== input.proposal.requiredFor
-      || currentFrontier.fieldIds.length !== input.proposal.fieldIds.length
-      || currentFrontier.fieldIds.some((fieldId, index) => fieldId !== input.proposal.fieldIds[index])
-    ) throw new Error("onboarding_question_frontier_not_reached");
+    const currentFrontier = knowledgeDrivenOnboardingFrontier(draft, this.agentKnowledge);
+    const proposal = validateKnowledgeSelectedProposal(currentFrontier, input.proposal);
     const card = await this.onboarding.requestDynamicForm({
       draftId,
       expectedDraftRevision: draft.revision,
-      proposal: input.proposal,
+      proposal,
       idempotencyKey: `onboarding-agent:${session.id}:${execution.toolCallId}:form`,
     });
     return this.presentArtifactForTool({

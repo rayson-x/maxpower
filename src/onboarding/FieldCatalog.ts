@@ -6,6 +6,9 @@ import type {
   OnboardingProgress,
   OnboardingQuestionReasonCode,
 } from "./model";
+import type { AgentKnowledgeHarness } from "../agent-knowledge";
+import type { AgentKnowledgeArtifactRef } from "../agent-knowledge/model";
+import type { KnowledgeVersionPin } from "../agent-knowledge/runtimeSelection";
 
 /** Product-owned version pin. A model may reference IDs, never define schema. */
 export const ONBOARDING_FIELD_CATALOG_VERSION = "onboarding-field-catalog/v1" as const;
@@ -53,6 +56,8 @@ export interface OnboardingFieldDefinition {
   acceptsExplicitUnknown: boolean;
   writeCommand: string;
   dependencies?: readonly string[];
+  /** Compiled Agent Knowledge decisions whose input schema consumes this fact. */
+  knowledgeArtifactIds?: readonly string[];
 }
 
 /**
@@ -61,17 +66,23 @@ export interface OnboardingFieldDefinition {
  * form-card tool; conversation capture is reserved for facts the user already
  * volunteered.
  */
-export type GoalDrivenOnboardingFrontier =
+export interface OnboardingKnowledgeRequirement {
+  artifactRef: AgentKnowledgeArtifactRef;
+  title: { readonly zh?: string; readonly en?: string };
+  tags: readonly string[];
+  sourceClaimRefs: readonly string[];
+  fieldIds: readonly string[];
+}
+
+export type KnowledgeDrivenOnboardingFrontier =
   | { kind: "assess_training_context"; reason: "training_background_captured" }
   | {
-      kind: "catalog_fields";
-      reason: "goal_specific_planning_gate";
-      topic: string;
-      reasonCode: OnboardingDynamicFormProposal["reasonCode"];
-      requiredFor: OnboardingDynamicFormProposal["requiredFor"];
-      fieldIds: readonly string[];
+      kind: "knowledge_requirements";
+      reason: "active_agent_knowledge_inputs";
+      knowledgeReleasePin: KnowledgeVersionPin;
+      requirements: readonly OnboardingKnowledgeRequirement[];
     }
-  | { kind: "review_dossier"; reason: "no_unblocked_goal_specific_fields" };
+  | { kind: "review_dossier"; reason: "no_unblocked_knowledge_requirements" };
 
 const catalog = [
   {
@@ -93,6 +104,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_profile_sex",
+    knowledgeArtifactIds: ["calculator.initial-plan.energy-budget"],
   },
   {
     id: "timeline.daily_activity",
@@ -113,6 +125,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_timeline_daily_activity",
+    knowledgeArtifactIds: ["calculator.initial-plan.energy-budget", "action.initial-plan.schedule-aerobic"],
   },
   {
     id: "nutrition.usual_intake",
@@ -126,6 +139,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_usual_energy_intake",
+    knowledgeArtifactIds: ["calculator.initial-plan.energy-budget"],
   },
   {
     id: "profile.training_schedule",
@@ -139,6 +153,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_training_schedule",
+    knowledgeArtifactIds: ["action.initial-plan.select-split", "action.initial-plan.schedule-recovery", "action.initial-plan.schedule-aerobic"],
   },
   {
     id: "mandate.plan_adjustment_authority",
@@ -158,6 +173,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_plan_adjustment_authority",
+    knowledgeArtifactIds: ["policy.maxpower.initial-planning-baseline"],
   },
   {
     id: "permission.remote_llm",
@@ -190,6 +206,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_training_months",
+    knowledgeArtifactIds: ["action.initial-plan.select-split", "action.initial-plan.allocate-dose"],
   },
   {
     id: "training.recent_continuity",
@@ -203,6 +220,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_training_continuity",
+    knowledgeArtifactIds: ["action.initial-plan.select-split", "action.initial-plan.allocate-dose"],
   },
   {
     id: "training.recent_split",
@@ -216,6 +234,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_recent_split",
+    knowledgeArtifactIds: ["action.initial-plan.select-split", "action.initial-plan.schedule-recovery"],
   },
   {
     id: "training.environment",
@@ -229,6 +248,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_training_environment",
+    knowledgeArtifactIds: ["action.initial-plan.resolve-exercises"],
   },
   {
     id: "training.equipment",
@@ -242,6 +262,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_training_equipment",
+    knowledgeArtifactIds: ["action.initial-plan.resolve-exercises", "validator.initial-plan.exercise-equipment"],
   },
   {
     id: "training.execution_stability",
@@ -255,6 +276,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_execution_stability",
+    knowledgeArtifactIds: ["action.initial-plan.allocate-dose"],
   },
   {
     id: "training.comparable_set",
@@ -264,13 +286,14 @@ const catalog = [
     label: "一组近期可比较的训练表现",
     control: {
       kind: "field_group",
-      fields: ["exercise_variant", "load", "reps", "rir_or_rpe", "performed_on", "conditions"],
+      fields: ["exercise_variant", "load", "reps", "effort_metric", "effort_value", "performed_on", "conditions"],
     },
     requiredFor: ["comparable_strength_progression", "initial_plan"],
     themes: ["strength_baseline", "goal_based_intake"],
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_comparable_training_set",
+    knowledgeArtifactIds: ["action.initial-plan.allocate-dose"],
   },
   {
     id: "safety.activity_restrictions",
@@ -291,6 +314,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_activity_restrictions",
+    knowledgeArtifactIds: ["policy.maxpower.initial-planning-baseline", "action.initial-plan.schedule-aerobic"],
   },
   {
     id: "goal.target_horizon",
@@ -304,6 +328,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_goal_horizon",
+    knowledgeArtifactIds: ["calculator.initial-plan.energy-budget"],
   },
   {
     id: "profile.body_measurement_method",
@@ -325,6 +350,7 @@ const catalog = [
     allowedSources: ["conversation_message", "form_submission"],
     acceptsExplicitUnknown: true,
     writeCommand: "onboarding.capture_measurement_method",
+    knowledgeArtifactIds: ["objective.fat-loss.reduce-waist"],
   },
   {
     id: "readiness.perceived_recovery",
@@ -353,7 +379,7 @@ export const ONBOARDING_FIELD_CATALOG: readonly OnboardingFieldDefinition[] = ca
 
 export type OnboardingDynamicFormProposal = Pick<
   OnboardingDynamicFormRequest,
-  "topic" | "fieldIds" | "reasonCode" | "requiredFor"
+  "topic" | "fieldIds" | "reasonCode" | "requiredFor" | "knowledgeArtifactIds" | "knowledgeArtifactRefs" | "knowledgeReleasePin"
 >;
 
 export interface DynamicFormCard extends OnboardingDynamicFormRequest {
@@ -438,56 +464,60 @@ export function limitedActionsFor(progress: Pick<OnboardingProgress, "patch">): 
   )].sort();
 }
 
-export function recommendFieldsForGoal(goalKind: "fat_loss" | "hypertrophy" | "strength" | "visual_physique" | "general"): OnboardingDynamicFormProposal {
-  const common = [
-    "training.cumulative_months", "training.recent_continuity", "training.recent_split",
-    "training.environment", "training.equipment", "training.execution_stability",
-    "profile.training_schedule", "safety.activity_restrictions", "mandate.plan_adjustment_authority",
-  ];
-  const goalSpecific = goalKind === "fat_loss"
-    ? ["profile.sex", "timeline.daily_activity", "nutrition.usual_intake", "goal.target_horizon", "profile.body_measurement_method"]
-    : goalKind === "strength"
-      ? ["training.comparable_set", "goal.target_horizon"]
-      : goalKind === "visual_physique"
-        ? ["profile.body_measurement_method", "goal.target_horizon"]
-        : goalKind === "hypertrophy"
-          ? ["goal.target_horizon"]
-          : [];
-  return {
-    topic: "goal_based_intake",
-    fieldIds: [...common, ...goalSpecific],
-    reasonCode: "planning_gate",
-    requiredFor: "initial_plan",
-  };
-}
-
 /**
- * A goal-led decision frontier, not a fixed questionnaire. One card contains
- * every independent fact that is material now; its size is determined by the
- * goal and the remaining draft gaps, never by an arbitrary question limit.
+ * Exposes the facts consumed by the active Agent Knowledge decisions. The
+ * Agent receives the goal narrative plus these requirement blocks and chooses
+ * which relevant blocks to turn into a form. Local code validates the chosen
+ * Artifact-to-field relation but never classifies the goal with keywords.
  */
-export function goalDrivenOnboardingFrontier(progress: OnboardingProgress): GoalDrivenOnboardingFrontier {
-  const narrative = progress.patch.baseline?.goalNarrative?.text ?? "";
-  const goalKind = /(减脂|减重|体脂|腹肌|瘦)/u.test(narrative)
-    ? "fat_loss"
-    : /(力量|卧推|深蹲|硬拉|重量)/u.test(narrative)
-      ? "strength"
-      : /(体型|宽肩|窄腰|视觉|围度)/u.test(narrative)
-        ? "visual_physique"
-        : /(增肌|肌肉)/u.test(narrative)
-          ? "hypertrophy"
-          : "general";
-  const proposal = recommendFieldsForGoal(goalKind);
-  const fieldIds = proposal.fieldIds.filter((id) => {
-    const field = fieldById(id);
-    return field ? fieldIsAskable(progress, field) : false;
+export function knowledgeDrivenOnboardingFrontier(
+  progress: OnboardingProgress,
+  knowledge: Pick<AgentKnowledgeHarness, "selection" | "onboardingIntakeArtifacts">,
+): KnowledgeDrivenOnboardingFrontier {
+  const selection = knowledge.selection();
+  if (selection.backend !== "agent_knowledge") throw new Error("onboarding_requires_agent_knowledge");
+  const artifacts = knowledge.onboardingIntakeArtifacts();
+  const requirements = artifacts.flatMap((artifact): readonly OnboardingKnowledgeRequirement[] => {
+    const fieldIds = catalog
+      .filter((field) => (field as OnboardingFieldDefinition).knowledgeArtifactIds?.includes(artifact.artifactRef.id))
+      .filter((field) => fieldIsAskable(progress, field))
+      .map((field) => field.id);
+    return fieldIds.length ? [{ ...artifact, fieldIds }] : [];
   });
-  if (progress.patch.trainingBackground && !progress.coachingLevelAssessments?.length && fieldIds.length === 0) {
+  if (requirements.length) {
+    return {
+      kind: "knowledge_requirements",
+      reason: "active_agent_knowledge_inputs",
+      knowledgeReleasePin: selection.agentKnowledgeReleasePin,
+      requirements,
+    };
+  }
+  if (progress.patch.trainingBackground && !progress.coachingLevelAssessments?.length) {
     return { kind: "assess_training_context", reason: "training_background_captured" };
   }
-  return fieldIds.length
-    ? { kind: "catalog_fields", reason: "goal_specific_planning_gate", topic: proposal.topic, reasonCode: proposal.reasonCode, requiredFor: proposal.requiredFor, fieldIds }
-    : { kind: "review_dossier", reason: "no_unblocked_goal_specific_fields" };
+  return { kind: "review_dossier", reason: "no_unblocked_knowledge_requirements" };
+}
+
+export function validateKnowledgeSelectedProposal(
+  frontier: KnowledgeDrivenOnboardingFrontier,
+  proposal: OnboardingDynamicFormProposal,
+): OnboardingDynamicFormProposal {
+  if (frontier.kind !== "knowledge_requirements") throw new Error("onboarding_question_frontier_not_reached");
+  const selectedIds = proposal.knowledgeArtifactIds;
+  if (!selectedIds?.length || new Set(selectedIds).size !== selectedIds.length) {
+    throw new Error("onboarding_knowledge_requirement_missing");
+  }
+  const selected = selectedIds.map((id) => frontier.requirements.find((requirement) => requirement.artifactRef.id === id));
+  if (selected.some((requirement) => !requirement)) throw new Error("onboarding_knowledge_requirement_invalid");
+  const allowedFields = new Set(selected.flatMap((requirement) => requirement?.fieldIds ?? []));
+  if (!proposal.fieldIds.length || proposal.fieldIds.some((fieldId) => !allowedFields.has(fieldId))) {
+    throw new Error("onboarding_knowledge_field_not_required");
+  }
+  return {
+    ...proposal,
+    knowledgeArtifactRefs: selected.map((requirement) => requirement!.artifactRef),
+    knowledgeReleasePin: frontier.knowledgeReleasePin,
+  };
 }
 
 function fieldIsAskable(progress: OnboardingProgress, field: OnboardingFieldDefinition): boolean {
@@ -523,7 +553,8 @@ function validateValue(field: OnboardingFieldDefinition, value: unknown): void {
   }
   if (field.control.kind === "multi_select") {
     const options = field.control.options;
-    if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && options.some((option) => option.id === item))) throw new Error("dynamic_form_rejected");
+    if (!Array.isArray(value) || value.length === 0 || !value.every((item) => typeof item === "string" && options.some((option) => option.id === item))) throw new Error("dynamic_form_rejected");
+    if (field.id === "safety.activity_restrictions" && value.includes("none_declared") && value.length > 1) throw new Error("dynamic_form_rejected");
     return;
   }
   if (field.control.kind === "numeric_with_unit") {
@@ -546,11 +577,16 @@ function validateValue(field: OnboardingFieldDefinition, value: unknown): void {
     }
     if (field.id === "training.comparable_set") {
       const load = record.load as { value?: unknown; unit?: unknown } | undefined;
+      const effortMetric = record.effort_metric;
+      const effortValue = record.effort_value;
       if (
         typeof record.exercise_variant !== "string" || !record.exercise_variant.trim() ||
         !load || typeof load.value !== "number" || !Number.isFinite(load.value) || load.value < 0 || load.unit !== "kg" ||
         !isWholeNumberInRange(record.reps, 1, 100) ||
-        (record.rir_or_rpe !== undefined && (typeof record.rir_or_rpe !== "number" || record.rir_or_rpe < 0 || record.rir_or_rpe > 10)) ||
+        (effortMetric !== "rir" && effortMetric !== "rpe") ||
+        typeof effortValue !== "number" || !Number.isFinite(effortValue) ||
+        (effortMetric === "rir" && (effortValue < 0 || effortValue > 10)) ||
+        (effortMetric === "rpe" && (effortValue < 1 || effortValue > 10)) ||
         typeof record.performed_on !== "string" || !Number.isFinite(Date.parse(record.performed_on)) ||
         typeof record.conditions !== "string"
       ) throw new Error("dynamic_form_rejected");
@@ -558,7 +594,13 @@ function validateValue(field: OnboardingFieldDefinition, value: unknown): void {
     return;
   }
   if (field.control.kind === "date" || field.control.kind === "date_range") {
-    if (typeof value !== "string" && !(value && typeof value === "object")) throw new Error("dynamic_form_rejected");
+    if (field.control.kind === "date") {
+      if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new Error("dynamic_form_rejected");
+      return;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("dynamic_form_rejected");
+    const range = value as Record<string, unknown>;
+    if (typeof range.start !== "string" || typeof range.end !== "string" || !Number.isFinite(Date.parse(range.start)) || !Number.isFinite(Date.parse(range.end)) || range.end < range.start) throw new Error("dynamic_form_rejected");
     return;
   }
   if (typeof value !== "string" || !value.trim()) throw new Error("dynamic_form_rejected");

@@ -287,9 +287,9 @@ const ONBOARDING_TOOL_MANIFEST: readonly CoachToolManifest[] = Object.freeze([
   },
   {
     name: "onboarding.request_form", schemaVersion: 1, accessClass: "human_input", executionMode: "human_in_loop", offlineAvailable: true,
-    description: "onboarding.request_form: Ask product-catalog questions as one dynamic form card. Include every currently material independent field selected by the goal frontier; there is no arbitrary field-count limit. Never ask onboarding questions in ordinary text, request a fixed questionnaire, or repeat a captured/explicitly-unknown field.",
+    description: "onboarding.request_form: Select one or more active Agent Knowledge requirements and ask their still-missing product-catalog fields as a dynamic form card. Include knowledgeArtifactIds. Choose every currently relevant independent field, with no arbitrary field-count limit. Never ask onboarding questions in ordinary text, invent a requirement, request a fixed questionnaire, or repeat a captured/explicitly-unknown field.",
     permissionScopes: [], riskCeiling: "confirmation_required", evidenceRequirements: ["active_onboarding_draft"], output: "artifact_ref", outputLimit: 1,
-    inputSchema: { type: "object", additionalProperties: false, required: ["topic", "fieldIds", "reasonCode", "requiredFor"], properties: { topic: { type: "string", minLength: 1, maxLength: 80 }, fieldIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1, maxLength: 120 } }, reasonCode: { enum: ["goal_disambiguation", "planning_gate", "safety_gate", "measurement_quality", "schedule_feasibility", "conflict_resolution"] }, requiredFor: { type: "string", minLength: 1, maxLength: 80 } } },
+    inputSchema: { type: "object", additionalProperties: false, required: ["topic", "fieldIds", "knowledgeArtifactIds", "reasonCode", "requiredFor"], properties: { topic: { type: "string", minLength: 1, maxLength: 80 }, fieldIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1, maxLength: 120 } }, knowledgeArtifactIds: { type: "array", minItems: 1, items: { type: "string", minLength: 1, maxLength: 160 } }, reasonCode: { enum: ["goal_disambiguation", "planning_gate", "safety_gate", "measurement_quality", "schedule_feasibility", "conflict_resolution"] }, requiredFor: { type: "string", minLength: 1, maxLength: 80 } } },
   },
   {
     name: "onboarding.capture_training_background", schemaVersion: 1, accessClass: "proposal", executionMode: "policy_gated", offlineAvailable: true,
@@ -459,9 +459,9 @@ export class CoachToolRegistry {
       return this.validateResultIdentity(input, result.events);
     }
     if (input.call.toolName === "onboarding.request_form") {
-      const parsed = parseExactObject(input.call.input, ["topic", "fieldIds", "reasonCode", "requiredFor"]);
-      if (typeof parsed.topic !== "string" || !Array.isArray(parsed.fieldIds) || parsed.fieldIds.some((field) => typeof field !== "string") || typeof parsed.reasonCode !== "string" || typeof parsed.requiredFor !== "string") throw new ToolSchemaError("invalid_tool_input");
-      const result = await this.handlers.requestOnboardingForm({ sessionId: input.sessionId, proposal: { topic: parsed.topic, fieldIds: parsed.fieldIds, reasonCode: parsed.reasonCode as import("../onboarding").OnboardingQuestionReasonCode, requiredFor: parsed.requiredFor as import("../onboarding").OnboardingActionGate } }, { runId: input.runId, toolCallId: input.call.toolCallId });
+      const parsed = parseExactObject(input.call.input, ["topic", "fieldIds", "knowledgeArtifactIds", "reasonCode", "requiredFor"]);
+      if (typeof parsed.topic !== "string" || !Array.isArray(parsed.fieldIds) || parsed.fieldIds.some((field) => typeof field !== "string") || !Array.isArray(parsed.knowledgeArtifactIds) || parsed.knowledgeArtifactIds.some((id) => typeof id !== "string") || typeof parsed.reasonCode !== "string" || typeof parsed.requiredFor !== "string") throw new ToolSchemaError("invalid_tool_input");
+      const result = await this.handlers.requestOnboardingForm({ sessionId: input.sessionId, proposal: { topic: parsed.topic, fieldIds: parsed.fieldIds, knowledgeArtifactIds: parsed.knowledgeArtifactIds, reasonCode: parsed.reasonCode as import("../onboarding").OnboardingQuestionReasonCode, requiredFor: parsed.requiredFor as import("../onboarding").OnboardingActionGate } }, { runId: input.runId, toolCallId: input.call.toolCallId });
       return this.validateResultIdentity(input, result.events);
     }
     if (input.call.toolName === "onboarding.capture_training_background") {
