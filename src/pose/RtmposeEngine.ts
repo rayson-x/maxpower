@@ -1,244 +1,512 @@
 import { loadOrt, type OrtModule, type OrtSession } from "../shims/onnxRuntime";
-import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
+import type { PoseCandidateEstimate, PoseEstimate, PoseLandmark } from "./PoseEngine";
+import {
+  YoloxPersonDetector,
+  writeRgbaPixelsAsBgrChw,
+  type PersonDetection,
+} from "./YoloxPersonDetector";
 
-// RTMPose 输入尺寸(宽 x 高)与 SimCC 分桶(split ratio = 2)
-const INPUT_W = 192;
-const INPUT_H = 256;
-const SIMCC_BINS_X = INPUT_W * 2;
-const SIMCC_BINS_Y = INPUT_H * 2;
-const NUM_KEYPOINTS = 17; // COCO-17
+const INPUT_WIDTH = 192;
+const INPUT_HEIGHT = 256;
+const SIMCC_BINS_X = INPUT_WIDTH * 2;
+const SIMCC_BINS_Y = INPUT_HEIGHT * 2;
+const KEYPOINT_COUNT = 26;
+const BBOX_PADDING = 1.25;
+const MAX_PERSON_CANDIDATES = 4;
+const CANDIDATE_IDENTITY_MEMORY_MS = 1_500;
+const MEAN = [123.675, 116.28, 103.53] as const;
+const STD = [58.395, 57.12, 57.375] as const;
 
-// 注意:这个 ONNX 导出把归一化融进了图里,输入直接给 RGB 0-255 原值。
-// (实测:ImageNet 归一化后输出接近均匀分布,原值输入峰值 logit 4+)
+interface TrackedDetection extends PersonDetection {
+  candidateId: number;
+}
 
-/** 人均分接近此值时认为这一帧没检测到人,返回空骨架(放大后的量纲) */
-const MIN_MEAN_SCORE = 0.15;
+export interface CapturedLumaFrame {
+  readonly width: number;
+  readonly height: number;
+  readonly luma: Uint8Array;
+}
 
 /**
- * RTMPose (ONNX, SimCC) wrapper — 与 PoseEngine 同接口。
- *
- * top-down 结构需要紧凑人体框:不接独立人形检测器,改用追踪式 bbox——
- * 用上一帧的高分关键点外扩 40% 作为本帧裁剪框,首帧/丢失时用整帧。
- * 整帧直接喂模型时人只占输入的一小部分,SimCC 峰值过弱不可用。
- *
- * estimate() 是同步接口而 onnxruntime 推理是异步的:内部串行排队推理,
- * estimate 返回最近一次完成的结果(首帧完成前返回 null)。
+ * Deep visual-observation Module: frozen frame -> YOLOX people -> batched
+ * RTMPose Halpe-26 candidates. It emits raw model observations only. Subject
+ * selection, temporal repair, phase and rep truth remain in Rust.
  */
 export class RtmposeEngine {
-  private readonly canvas: HTMLCanvasElement;
-  private readonly ctx: CanvasRenderingContext2D;
-  private readonly inputData: Float32Array;
+  private readonly frameCanvas = document.createElement("canvas");
+  private readonly frameContext: CanvasRenderingContext2D;
+  private readonly cropCanvas = document.createElement("canvas");
+  private readonly cropContext: CanvasRenderingContext2D;
+  private readonly equipmentCanvas = document.createElement("canvas");
+  private readonly equipmentContext: CanvasRenderingContext2D;
   private busy = false;
-  private latest: PoseEstimate | null = null;
-  /** 当前裁剪框(原图坐标),null = 整帧 */
-  private bbox: { x: number; y: number; w: number; h: number } | null = null;
+  private closed = false;
+  private unreadCandidates: PoseCandidateEstimate[] | null = null;
+  private unreadInferenceMs = 0;
+  private trackedDetections: TrackedDetection[] = [];
+  private lastDetectorObservationMs: number | null = null;
+  private nextCandidateId = 0;
 
   private constructor(
     private readonly ort: OrtModule,
     private readonly session: OrtSession,
+    private readonly detector: YoloxPersonDetector,
   ) {
-    this.canvas = document.createElement("canvas");
-    this.canvas.width = INPUT_W;
-    this.canvas.height = INPUT_H;
-    const ctx = this.canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) throw new Error("无法创建 2D canvas context");
-    this.ctx = ctx;
-    this.inputData = new Float32Array(3 * INPUT_H * INPUT_W);
+    const frameContext = this.frameCanvas.getContext("2d", { willReadFrequently: true });
+    if (!frameContext) throw new Error("无法创建 RTMPose frame canvas context");
+    this.frameContext = frameContext;
+    this.cropCanvas.width = INPUT_WIDTH;
+    this.cropCanvas.height = INPUT_HEIGHT;
+    const cropContext = this.cropCanvas.getContext("2d", { willReadFrequently: true });
+    if (!cropContext) throw new Error("无法创建 RTMPose crop canvas context");
+    this.cropContext = cropContext;
+    const equipmentContext = this.equipmentCanvas.getContext("2d", { willReadFrequently: true });
+    if (!equipmentContext) throw new Error("无法创建器械识别 frame canvas context");
+    this.equipmentContext = equipmentContext;
   }
 
-  static async create(modelPath: string): Promise<RtmposeEngine> {
+  static async create(
+    poseModelPath: string,
+    detectorModelPath: string,
+  ): Promise<RtmposeEngine> {
     const ort = await loadOrt();
-    // WebGPU 优先,WASM(simd+多线程)兜底
-    let session: OrtSession;
-    try {
-      session = await ort.InferenceSession.create(modelPath, {
-        executionProviders: ["webgpu"],
-      });
-    } catch {
-      session = await ort.InferenceSession.create(modelPath, {
-        executionProviders: ["wasm"],
-      });
-    }
-    return new RtmposeEngine(ort, session);
+    const [detector, session] = await Promise.all([
+      YoloxPersonDetector.create(ort, detectorModelPath),
+      createSession(ort, poseModelPath),
+    ]);
+    return new RtmposeEngine(ort, session, detector);
+  }
+
+  get latestInferenceMs(): number {
+    return this.unreadInferenceMs;
   }
 
   estimate(video: HTMLVideoElement, timestampMs: number): PoseEstimate | null {
-    if (video.readyState < 2 || video.videoWidth === 0) return null;
+    return this.estimateCandidates(video, timestampMs)?.[0] ?? null;
+  }
+
+  estimateCandidates(
+    video: HTMLVideoElement,
+    timestampMs: number,
+  ): PoseCandidateEstimate[] | null {
+    if (video.readyState < 2 || video.videoWidth === 0 || this.closed) return null;
+    const completed = this.unreadCandidates;
+    this.unreadCandidates = null;
     if (!this.busy) {
       this.busy = true;
-      // 同一帧内完成采集,避免异步后视频已推进
-      this.preprocess(video);
-      void this.session
-        .run({
-          [this.session.inputNames[0]]: new this.ort.Tensor(
-            "float32",
-            this.inputData,
-            [1, 3, INPUT_H, INPUT_W],
-          ),
+      this.captureFrame(video);
+      const startedAt = performance.now();
+      void this.inferCapturedFrame(timestampMs)
+        .then((candidates) => {
+          if (this.closed) return;
+          this.unreadInferenceMs = performance.now() - startedAt;
+          this.unreadCandidates = candidates;
         })
-        .then((outputs) => {
-          this.latest = this.decode(outputs, video, timestampMs);
-        })
-        .catch(() => {
-          // 单帧失败不致命,保留上一帧结果
+        .catch((error) => {
+          console.warn("YOLOX + RTMPose frame failed", error);
         })
         .finally(() => {
           this.busy = false;
         });
     }
-    return this.latest;
+    return completed;
   }
 
-  /** 裁剪框 letterbox 到 192x256,记录本帧用的框供解码反映射 */
-  private frameBBox: { x: number; y: number; w: number; h: number } | null = null;
-
-  /** 初始框:假设被摄者在画面中心(健身自拍场景成立),中心 85% 高度、按输入宽高比裁剪 */
-  private initialBBox(vw: number, vh: number): { x: number; y: number; w: number; h: number } {
-    const h = vh * 0.85;
-    const w = Math.min(vw, (h * INPUT_W) / INPUT_H);
-    return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
-  }
-
-  private preprocess(video: HTMLVideoElement): void {
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    const bbox = this.bbox ?? this.initialBBox(vw, vh);
-    this.frameBBox = bbox;
-    const scale = Math.min(INPUT_W / bbox.w, INPUT_H / bbox.h);
-    const drawW = Math.max(1, Math.round(bbox.w * scale));
-    const drawH = Math.max(1, Math.round(bbox.h * scale));
-    this.ctx.fillStyle = "#000";
-    this.ctx.fillRect(0, 0, INPUT_W, INPUT_H);
-    this.ctx.drawImage(video, bbox.x, bbox.y, bbox.w, bbox.h, 0, 0, drawW, drawH);
-    const { data } = this.ctx.getImageData(0, 0, INPUT_W, INPUT_H);
-    const plane = INPUT_H * INPUT_W;
-    for (let i = 0; i < plane; i += 1) {
-      const rgba = i * 4;
-      this.inputData[i] = data[rgba];
-      this.inputData[plane + i] = data[rgba + 1];
-      this.inputData[plane * 2 + i] = data[rgba + 2];
-    }
-  }
-
-  /** 从上一帧高分关键点更新追踪 bbox(外扩 40%,限制在画面内) */
-  private updateBBox(landmarks: PoseLandmark[], vw: number, vh: number): void {
-    const good = landmarks.filter((l) => l.visibility >= 0.4);
-    if (good.length < 3) {
-      this.bbox = null; // 丢失目标,回初始中心框
-      return;
-    }
-    let minX = 1;
-    let minY = 1;
-    let maxX = 0;
-    let maxY = 0;
-    for (const l of good) {
-      minX = Math.min(minX, l.x);
-      minY = Math.min(minY, l.y);
-      maxX = Math.max(maxX, l.x);
-      maxY = Math.max(maxY, l.y);
-    }
-    const cx = ((minX + maxX) / 2) * vw;
-    const cy = ((minY + maxY) / 2) * vh;
-    const w = Math.max((maxX - minX) * vw * 1.4, 1);
-    const h = Math.max((maxY - minY) * vh * 1.4, 1);
-    this.bbox = {
-      x: Math.max(0, Math.min(vw - 1, cx - w / 2)),
-      y: Math.max(0, Math.min(vh - 1, cy - h / 2)),
-      w: Math.min(w, vw),
-      h: Math.min(h, vh),
-    };
-  }
-
-  /** SimCC 解码:每个关键点在 x/y 两个一维分布上 argmax,softmax 最大值作分数 */
-  private decode(
-    outputs: Record<string, { data: Float32Array; dims: readonly number[] }>,
+  /**
+   * Captures the video element's current decoded frame and resolves with the
+   * observations produced from that exact frame. This is the deterministic
+   * client-runtime path used by causal replay and native parity tests: unlike
+   * `estimateCandidates`, it never returns a result belonging to an earlier
+   * asynchronous request.
+   *
+   * The caller must keep calls sequential. A live camera loop may let the
+   * video advance while inference is running; the supplied timestamp remains
+   * the capture timestamp, so dropped frames do not shift pose evidence onto
+   * a newer image.
+   */
+  async estimateCapturedFrame(
     video: HTMLVideoElement,
     timestampMs: number,
-  ): PoseEstimate {
-    const tensors = Object.values(outputs);
-    const simccX =
-      outputs["simcc_x"] ??
-      tensors.find((t) => t.dims[t.dims.length - 1] === SIMCC_BINS_X) ??
-      tensors[0];
-    const simccY =
-      outputs["simcc_y"] ??
-      tensors.find((t) => t.dims[t.dims.length - 1] === SIMCC_BINS_Y) ??
-      tensors[1];
-    const vw = video.videoWidth;
-    const vh = video.videoHeight;
-    const bbox = this.frameBBox ?? { x: 0, y: 0, w: vw, h: vh };
-    const scale = Math.min(INPUT_W / bbox.w, INPUT_H / bbox.h);
-
-    const landmarks: PoseLandmark[] = [];
-    let scoreSum = 0;
-    for (let k = 0; k < NUM_KEYPOINTS; k += 1) {
-      const xOff = k * SIMCC_BINS_X;
-      const yOff = k * SIMCC_BINS_Y;
-      let xIdx = 0;
-      let xMax = -Infinity;
-      for (let i = 0; i < SIMCC_BINS_X; i += 1) {
-        const v = simccX.data[xOff + i];
-        if (v > xMax) {
-          xMax = v;
-          xIdx = i;
-        }
-      }
-      let yIdx = 0;
-      let yMax = -Infinity;
-      for (let i = 0; i < SIMCC_BINS_Y; i += 1) {
-        const v = simccY.data[yOff + i];
-        if (v > yMax) {
-          yMax = v;
-          yIdx = i;
-        }
-      }
-      // softmax 最大值作为置信度,并放大到近似 visibility 的量纲:
-      // SimCC 分桶多(384/512),可见点的典型 softmax 峰值只有 0.05-0.3
-      const rawScore = (softmaxMax(simccX.data, xOff, SIMCC_BINS_X, xMax) +
-        softmaxMax(simccY.data, yOff, SIMCC_BINS_Y, yMax)) / 2;
-      const score = Math.min(1, rawScore * 6);
-      scoreSum += score;
-      // SimCC 坐标(/2)→ 输入图坐标 → 反 letterbox 到裁剪框 → 原图归一化
-      landmarks.push({
-        x: (bbox.x + (xIdx / 2) / scale) / vw,
-        y: (bbox.y + (yIdx / 2) / scale) / vh,
-        z: 0,
-        visibility: score,
-      });
+  ): Promise<PoseCandidateEstimate[]> {
+    if (video.readyState < 2 || video.videoWidth === 0 || this.closed) return [];
+    if (this.busy) throw new Error("YOLOX + RTMPose already has an in-flight frame");
+    this.busy = true;
+    this.captureFrame(video);
+    const startedAt = performance.now();
+    try {
+      const candidates = await this.inferCapturedFrame(timestampMs);
+      this.unreadInferenceMs = performance.now() - startedAt;
+      return candidates;
+    } finally {
+      this.busy = false;
     }
-    // RTMPose 无伪 3D 输出,躯干倾角指标会自然显示"无法判断"
-    const meanScore = scoreSum / NUM_KEYPOINTS;
-    // debug: 观察实际分数分布以确定阈值
-    if (Math.random() < 0.03) {
-      const over50 = landmarks.filter((l) => l.visibility >= 0.5).length;
-      console.log(
-        `[rtmpose] mean=${meanScore.toFixed(3)} >0.5:${over50}/17 bbox=${this.bbox ? "track" : "full"}`,
+  }
+
+  /**
+   * Returns a downscaled luma copy of the exact frame most recently captured
+   * for YOLOX/RTMPose. Pixel conversion is the browser Adapter's only job;
+   * detection and causal trajectory state execute in shared Rust/WASM.
+   */
+  readCapturedLumaFrame(maximumDimension = 480): CapturedLumaFrame {
+    if (this.frameCanvas.width === 0 || this.frameCanvas.height === 0 || this.closed) {
+      throw new Error("RTMPose has no captured frame for Rust equipment recognition");
+    }
+    const scale = Math.min(
+      1,
+      maximumDimension / Math.max(this.frameCanvas.width, this.frameCanvas.height),
+    );
+    const width = Math.max(8, Math.round(this.frameCanvas.width * scale));
+    const height = Math.max(8, Math.round(this.frameCanvas.height * scale));
+    if (this.equipmentCanvas.width !== width || this.equipmentCanvas.height !== height) {
+      this.equipmentCanvas.width = width;
+      this.equipmentCanvas.height = height;
+    }
+    this.equipmentContext.drawImage(this.frameCanvas, 0, 0, width, height);
+    const rgba = this.equipmentContext.getImageData(0, 0, width, height).data;
+    const luma = new Uint8Array(width * height);
+    for (let pixel = 0, offset = 0; pixel < luma.length; pixel += 1, offset += 4) {
+      luma[pixel] = Math.round(
+        rgba[offset] * 0.299 + rgba[offset + 1] * 0.587 + rgba[offset + 2] * 0.114,
       );
     }
-    if (meanScore < MIN_MEAN_SCORE) {
-      this.bbox = null;
-      return { timestampMs, landmarks: [], worldLandmarks: [] };
+    return { width, height, luma };
+  }
+
+  /** Starts a new camera/file sequence without reloading the ONNX models. */
+  resetTracking(): void {
+    if (this.busy) throw new Error("Cannot reset RTMPose tracking during inference");
+    this.unreadCandidates = null;
+    this.unreadInferenceMs = 0;
+    this.trackedDetections = [];
+    this.lastDetectorObservationMs = null;
+    this.nextCandidateId = 0;
+  }
+
+  private captureFrame(video: HTMLVideoElement): void {
+    if (
+      this.frameCanvas.width !== video.videoWidth ||
+      this.frameCanvas.height !== video.videoHeight
+    ) {
+      this.frameCanvas.width = video.videoWidth;
+      this.frameCanvas.height = video.videoHeight;
     }
-    this.updateBBox(landmarks, vw, vh);
-    return { timestampMs, landmarks, worldLandmarks: [] };
+    this.frameContext.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+  }
+
+  private async inferCapturedFrame(timestampMs: number): Promise<PoseCandidateEstimate[]> {
+    const width = this.frameCanvas.width;
+    const height = this.frameCanvas.height;
+    const detections = (await this.detector.detect(this.frameCanvas, width, height))
+      .slice(0, MAX_PERSON_CANDIDATES);
+    if (detections.length === 0) return [];
+    if (
+      this.lastDetectorObservationMs !== null
+      && timestampMs - this.lastDetectorObservationMs > CANDIDATE_IDENTITY_MEMORY_MS
+    ) {
+      this.trackedDetections = [];
+    }
+    const association = associatePersonCandidateIds(
+      detections,
+      this.trackedDetections,
+      width,
+      height,
+      this.nextCandidateId,
+    );
+    this.trackedDetections = association.detections;
+    this.lastDetectorObservationMs = timestampMs;
+    this.nextCandidateId = association.nextCandidateId;
+    const poseDetections = association.detections;
+    if (poseDetections.length === 0) return [];
+    const input = this.preprocessBatch(poseDetections);
+    const outputs = await this.session.run({
+      [this.session.inputNames[0]]: new this.ort.Tensor(
+        "float32",
+        input,
+        [poseDetections.length, 3, INPUT_HEIGHT, INPUT_WIDTH],
+      ),
+    });
+    return this.decode(outputs, poseDetections, timestampMs, width, height);
+  }
+
+  private preprocessBatch(detections: readonly TrackedDetection[]): Float32Array {
+    const plane = INPUT_WIDTH * INPUT_HEIGHT;
+    const input = new Float32Array(detections.length * 3 * plane);
+    detections.forEach((detection, batchIndex) => {
+      const crop = paddedCrop(detection.bbox);
+      this.cropContext.fillStyle = "black";
+      this.cropContext.fillRect(0, 0, INPUT_WIDTH, INPUT_HEIGHT);
+      this.cropContext.drawImage(
+        this.frameCanvas,
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height,
+        0,
+        0,
+        INPUT_WIDTH,
+        INPUT_HEIGHT,
+      );
+      const pixels = this.cropContext.getImageData(0, 0, INPUT_WIDTH, INPUT_HEIGHT).data;
+      const batchOffset = batchIndex * 3 * plane;
+      writeRgbaPixelsAsBgrChw(pixels, input, batchOffset, plane, MEAN, STD);
+    });
+    return input;
+  }
+
+  private decode(
+    outputs: Record<string, { data: Float32Array | BigInt64Array | Int32Array; dims: readonly number[] }>,
+    detections: readonly TrackedDetection[],
+    timestampMs: number,
+    width: number,
+    height: number,
+  ): PoseCandidateEstimate[] {
+    const tensors = Object.values(outputs);
+    const simccX = outputs.simcc_x ?? tensors.find((tensor) => tensor.dims.at(-1) === SIMCC_BINS_X);
+    const simccY = outputs.simcc_y ?? tensors.find((tensor) => tensor.dims.at(-1) === SIMCC_BINS_Y);
+    if (!simccX || !simccY) return [];
+    const xData = simccX.data as Float32Array;
+    const yData = simccY.data as Float32Array;
+    return detections.map((detection, batchIndex) => {
+      const crop = paddedCrop(detection.bbox);
+      const landmarks: PoseLandmark[] = [];
+      for (let keypoint = 0; keypoint < KEYPOINT_COUNT; keypoint += 1) {
+        const keypointOffset = batchIndex * KEYPOINT_COUNT + keypoint;
+        const xOffset = keypointOffset * SIMCC_BINS_X;
+        const yOffset = keypointOffset * SIMCC_BINS_Y;
+        const [xIndex, xScore] = argmax(xData, xOffset, SIMCC_BINS_X);
+        const [yIndex, yScore] = argmax(yData, yOffset, SIMCC_BINS_Y);
+        landmarks.push({
+          x: (crop.x + (xIndex / 2 / INPUT_WIDTH) * crop.width) / width,
+          y: (crop.y + (yIndex / 2 / INPUT_HEIGHT) * crop.height) / height,
+          z: 0,
+          visibility: clamp((xScore + yScore) / 2, 0, 1),
+        });
+      }
+      return {
+        timestampMs,
+        candidateId: detection.candidateId,
+        landmarks,
+        worldLandmarks: [],
+        bbox: {
+          x: detection.bbox[0] / width,
+          y: detection.bbox[1] / height,
+          width: (detection.bbox[2] - detection.bbox[0]) / width,
+          height: (detection.bbox[3] - detection.bbox[1]) / height,
+        },
+        torsoColor: sampleTorsoColor(this.frameContext, landmarks, width, height),
+      };
+    });
   }
 
   close(): void {
-    this.bbox = null;
-    this.frameBBox = null;
+    this.closed = true;
+    this.unreadCandidates = null;
+    this.trackedDetections = [];
+    this.lastDetectorObservationMs = null;
+    this.detector.close();
     void this.session.release();
   }
 }
 
-function softmaxMax(
-  data: Float32Array,
-  offset: number,
-  length: number,
-  max: number,
-): number {
-  let sum = 0;
-  for (let i = 0; i < length; i += 1) {
-    sum += Math.exp(data[offset + i] - max);
+export interface PersonCandidateAssociation {
+  detections: TrackedDetection[];
+  nextCandidateId: number;
+}
+
+/**
+ * Associates current YOLOX boxes with prior frame-local identities without
+ * choosing the workout subject. Every retained candidate is sent through
+ * RTMPose and then to Rust, which remains the sole subject-selection owner.
+ */
+export function associatePersonCandidateIds(
+  current: readonly PersonDetection[],
+  previous: readonly TrackedDetection[],
+  width: number,
+  height: number,
+  initialNextCandidateId: number,
+): PersonCandidateAssociation {
+  const diagonal = Math.max(1, Math.hypot(width, height));
+  const available = new Set(previous.map((_, index) => index));
+  let nextCandidateId = initialNextCandidateId;
+  const detections = current.map((detection) => {
+    const ranked = [...available].map((index) => {
+      const prior = previous[index];
+      const iou = bboxIou(detection.bbox, prior.bbox);
+      const center = bboxCenterDistance(detection.bbox, prior.bbox, diagonal);
+      const scale = Math.abs(Math.log(
+        Math.max(1, bboxArea(detection.bbox)) / Math.max(1, bboxArea(prior.bbox)),
+      ));
+      return { index, iou, center, cost: (1 - iou) * 0.65 + center * 2.5 + scale * 0.10 };
+    }).sort((left, right) => left.cost - right.cost);
+    const match = ranked[0];
+    if (match && (match.iou >= 0.05 || match.center <= 0.12)) {
+      available.delete(match.index);
+      return { ...detection, candidateId: previous[match.index].candidateId };
+    }
+    return { ...detection, candidateId: nextCandidateId++ };
+  });
+  return { detections, nextCandidateId };
+}
+
+async function createSession(ort: OrtModule, modelPath: string): Promise<OrtSession> {
+  try {
+    return await ort.InferenceSession.create(modelPath, { executionProviders: ["webgpu"] });
+  } catch {
+    return ort.InferenceSession.create(modelPath, { executionProviders: ["wasm"] });
   }
-  return 1 / sum;
+}
+
+function paddedCrop(bbox: readonly [number, number, number, number]) {
+  const centerX = (bbox[0] + bbox[2]) / 2;
+  const centerY = (bbox[1] + bbox[3]) / 2;
+  let width = (bbox[2] - bbox[0]) * BBOX_PADDING;
+  let height = (bbox[3] - bbox[1]) * BBOX_PADDING;
+  const inputAspect = INPUT_WIDTH / INPUT_HEIGHT;
+  if (width > height * inputAspect) height = width / inputAspect;
+  else width = height * inputAspect;
+  return { x: centerX - width / 2, y: centerY - height / 2, width, height };
+}
+
+export interface DominantContinuousPersonSelection {
+  detection: PersonDetection | null;
+  reason:
+    | "no_detection"
+    | "initial_dominant_centered"
+    | "continuous_iou_center"
+    | "dominant_subject_reacquired"
+    | "identity_mismatch_rejected";
+  score: number;
+}
+
+/**
+ * Client port of the frozen `dominant-continuous-person/v5` corpus policy.
+ * It is deliberately frame-causal and uses only YOLOX boxes. Python remains
+ * an offline oracle; Web, Android and iOS execute this policy themselves.
+ */
+export function selectDominantContinuousPerson(
+  detections: readonly PersonDetection[],
+  previous: PersonDetection["bbox"] | null,
+  width: number,
+  height: number,
+): DominantContinuousPersonSelection {
+  if (detections.length === 0) return { detection: null, reason: "no_detection", score: 0 };
+  const frameArea = width * height;
+  const diagonal = Math.hypot(width, height);
+  const centerBox = [width * 0.45, height * 0.45, width * 0.55, height * 0.55] as const;
+  const largestArea = Math.max(...detections.map((detection) => bboxArea(detection.bbox)));
+
+  if (previous) {
+    const previousArea = Math.max(1, bboxArea(previous));
+    const dominant = [...detections].sort((left, right) => bboxArea(right.bbox) - bboxArea(left.bbox))[0];
+    const dominantArea = bboxArea(dominant.bbox);
+    const dominantCenterDistance = bboxCenterDistance(dominant.bbox, centerBox, diagonal);
+    if (
+      previousArea < frameArea * 0.05
+      && dominantArea >= Math.max(previousArea * 3, frameArea * 0.08)
+      && dominantCenterDistance <= 0.35
+    ) {
+      return { detection: dominant, reason: "dominant_subject_reacquired", score: 1 };
+    }
+  }
+
+  const ranked = detections.map((detection) => {
+    const area = bboxArea(detection.bbox);
+    const areaRelative = largestArea > 0 ? area / largestArea : 0;
+    const frameAreaRatio = Math.min(1, area / Math.max(frameArea * 0.35, 1));
+    const imageCenter = 1 - Math.min(1, bboxCenterDistance(detection.bbox, centerBox, diagonal));
+    const continuity = previous ? bboxIou(detection.bbox, previous) : 0;
+    const centerContinuity = previous
+      ? 1 - Math.min(1, bboxCenterDistance(detection.bbox, previous, diagonal) * 3)
+      : 0;
+    const score = previous
+      ? continuity * 0.58 + centerContinuity * 0.25 + areaRelative * 0.12 + imageCenter * 0.05
+      : areaRelative * 0.55 + frameAreaRatio * 0.20 + imageCenter * 0.25;
+    return { detection, score, continuity };
+  }).sort((left, right) => right.score - left.score);
+  const selected = ranked[0];
+  if (previous) {
+    const previousArea = Math.max(1, bboxArea(previous));
+    const selectedArea = bboxArea(selected.detection.bbox);
+    const sizeRatio = selectedArea / previousArea;
+    const centerJump = bboxCenterDistance(selected.detection.bbox, previous, diagonal);
+    const identityJump = selected.continuity < 0.12 && centerJump > 0.10;
+    const implausibleScaleJump = selected.continuity < 0.05 && !(sizeRatio >= 0.45 && sizeRatio <= 2.5);
+    if (identityJump || implausibleScaleJump) {
+      return { detection: null, reason: "identity_mismatch_rejected", score: selected.score };
+    }
+  }
+  return {
+    detection: selected.detection,
+    reason: previous ? "continuous_iou_center" : "initial_dominant_centered",
+    score: selected.score,
+  };
+}
+
+function bboxIou(
+  left: readonly [number, number, number, number],
+  right: readonly [number, number, number, number],
+): number {
+  const intersectionWidth = Math.max(0, Math.min(left[2], right[2]) - Math.max(left[0], right[0]));
+  const intersectionHeight = Math.max(0, Math.min(left[3], right[3]) - Math.max(left[1], right[1]));
+  const intersection = intersectionWidth * intersectionHeight;
+  const union = bboxArea(left) + bboxArea(right) - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+function bboxArea(bbox: readonly [number, number, number, number]): number {
+  return Math.max(0, bbox[2] - bbox[0]) * Math.max(0, bbox[3] - bbox[1]);
+}
+
+function bboxCenterDistance(
+  left: readonly [number, number, number, number],
+  right: readonly [number, number, number, number],
+  diagonal: number,
+): number {
+  const leftX = (left[0] + left[2]) / 2;
+  const leftY = (left[1] + left[3]) / 2;
+  const rightX = (right[0] + right[2]) / 2;
+  const rightY = (right[1] + right[3]) / 2;
+  return Math.hypot(leftX - rightX, leftY - rightY) / diagonal;
+}
+
+function argmax(data: Float32Array, offset: number, length: number): readonly [number, number] {
+  let index = 0;
+  let maximum = -Infinity;
+  for (let cursor = 0; cursor < length; cursor += 1) {
+    const value = data[offset + cursor];
+    if (value > maximum) {
+      maximum = value;
+      index = cursor;
+    }
+  }
+  return [index, maximum];
+}
+
+function sampleTorsoColor(
+  context: CanvasRenderingContext2D,
+  landmarks: readonly PoseLandmark[],
+  width: number,
+  height: number,
+): readonly [number, number, number] {
+  const torso = [landmarks[5], landmarks[6], landmarks[11], landmarks[12]];
+  if (torso.some((landmark) => !landmark || landmark.visibility < 0.2)) return [0, 0, 0];
+  const left = clamp(Math.floor(Math.min(...torso.map((point) => point.x)) * width), 0, width - 1);
+  const right = clamp(Math.ceil(Math.max(...torso.map((point) => point.x)) * width), left + 1, width);
+  const top = clamp(Math.floor(Math.min(...torso.map((point) => point.y)) * height), 0, height - 1);
+  const bottom = clamp(Math.ceil(Math.max(...torso.map((point) => point.y)) * height), top + 1, height);
+  const pixels = context.getImageData(left, top, right - left, bottom - top).data;
+  let red = 0;
+  let green = 0;
+  let blue = 0;
+  const count = pixels.length / 4;
+  for (let offset = 0; offset < pixels.length; offset += 4) {
+    red += pixels[offset];
+    green += pixels[offset + 1];
+    blue += pixels[offset + 2];
+  }
+  return count > 0 ? [red / count / 255, green / count / 255, blue / count / 255] : [0, 0, 0];
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }

@@ -7,7 +7,7 @@
  * WASM 产物放在 public/ort/,通过 env.wasm.wasmPaths 指过去。
  */
 export interface OrtTensor {
-  data: Float32Array;
+  data: Float32Array | BigInt64Array | Int32Array;
   dims: readonly number[];
 }
 

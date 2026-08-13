@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MaxPower Client Single-Pass Agent Harness</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #090d0b; color: #eaf5ed; }
+    body { margin: 0; padding: 24px; }
+    main { max-width: 1100px; margin: auto; }
+    h1 { font-size: 20px; color: #c8ff3d; }
+    #status, #progress { padding: 10px 0; }
+    video { width: 360px; max-height: 260px; background: #000; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #b5c1ba; font-size: 11px; }
+  </style>
+</head>
+<body data-test-state="booting">
+  <main>
+    <h1>CLIENT SINGLE-PASS · NO PYTHON VISION</h1>
+    <div id="status">Booting…</div>
+    <div id="progress"></div>
+    <video id="runtime-video" playsinline muted></video>
+    <pre id="output"></pre>
+  </main>
+  <script type="module" src="/client-harness/runtime/tools/client-realtime-agent/browserHarness.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "maxpower-web-vision-model-manifest/v1",
+  "runtime": "onnxruntime-web@1.22.0",
+  "models": [
+    {
+      "id": "yolox-nano-humanart-416x416",
+      "role": "person_candidates_only",
+      "publicPath": "/models/yolox-nano-humanart-416x416.onnx",
+      "destination": "public/models/yolox-nano-humanart-416x416.onnx",
+      "sourceArchive": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_nano_8xb8-300e_humanart-40f6f0d0.zip",
+      "archiveMemberSuffix": "/end2end.onnx",
+      "bytes": 3722395,
+      "sha256": "1450966de24902b18aada1a78913d7efd8fc8dcd51bd4d0d5591476bd4a38821"
+    },
+    {
+      "id": "rtmpose-m-halpe26-256x192",
+      "role": "halpe26_pose_candidates",
+      "publicPath": "/models/rtmpose-m-halpe26-256x192.onnx",
+      "destination": "public/models/rtmpose-m-halpe26-256x192.onnx",
+      "sourceArchive": "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7-halpe26_700e-256x192-4d3e73dd_20230605.zip",
+      "archiveMemberSuffix": "/end2end.onnx",
+      "bytes": 55685444,
+      "sha256": "26f3a19e61304a600dfb82d1001d41d24343b89fc70a33ffc84657e0b0bf2ecf"
+    }
+  ],
+  "boundary": {
+    "yoloxClassesUsed": ["person"],
+    "equipmentClassesAvailable": [],
+    "subjectSelectionOwner": "rust-motion-sdk",
+    "temporalAndRepOwner": "rust-motion-sdk",
+    "modelBinariesCommitted": false
+  }
+}

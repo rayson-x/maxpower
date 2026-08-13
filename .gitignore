@@ -53,6 +53,7 @@ tools/harness/out/
 .simulated-reference-report-build/
 .simulated-prior-build/
 .motion-sdk-eval-build/
+.client-realtime-agent-web-build/
 .home-workout-validation-build/
 /target/
 /target-arm64/
@@ -61,6 +62,8 @@ tools/harness/out/
 /target-native-apple/
 /target-wasm/
 /public/motion-sdk/
+/public/models/rtmpose-m-halpe26-256x192.onnx
+/public/models/yolox-nano-humanart-416x416.onnx
 
 # Derived skeletal trajectories remain local unless explicitly de-identified.
 /data/
