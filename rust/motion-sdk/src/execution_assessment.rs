@@ -91,7 +91,8 @@ impl AssessmentDimension {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssessmentConclusionState {
-    ObservedFact,
+    ObservedAcceptable,
+    ObservedDeviation,
     CannotJudge,
     NotApplicable,
 }
@@ -473,12 +474,12 @@ fn conclusion_for(
         AssessmentDimension::TaskCompletion => {
             let (state, summary, reason) = match rep.disposition {
                 RepDisposition::Confirmed => (
-                    AssessmentConclusionState::ObservedFact,
+                    AssessmentConclusionState::ObservedAcceptable,
                     "A complete start–turnaround–return cycle was confirmed.",
                     None,
                 ),
                 RepDisposition::NeedsReview => (
-                    AssessmentConclusionState::ObservedFact,
+                    AssessmentConclusionState::ObservedDeviation,
                     "A complete cycle candidate was preserved for review.",
                     Some("Recognition evidence did not satisfy the confirmed-volume gate."),
                 ),
@@ -516,7 +517,11 @@ fn conclusion_for(
             QualityConclusion {
                 conclusion_id: id,
                 dimension,
-                state: AssessmentConclusionState::ObservedFact,
+                state: if below {
+                    AssessmentConclusionState::ObservedDeviation
+                } else {
+                    AssessmentConclusionState::ObservedAcceptable
+                },
                 summary: if below {
                     "The visible excursion was below the active recognition profile expectation."
                 } else {
@@ -533,10 +538,17 @@ fn conclusion_for(
         }
         AssessmentDimension::PhaseControl => {
             let contract = contract.expect("supported capability lost its action contract");
+            let faster_than_expected = rep
+                .observation_findings
+                .contains(&RepObservationFinding::CycleFasterThanExpected);
             QualityConclusion {
                 conclusion_id: id,
                 dimension,
-                state: AssessmentConclusionState::ObservedFact,
+                state: if faster_than_expected {
+                    AssessmentConclusionState::ObservedDeviation
+                } else {
+                    AssessmentConclusionState::ObservedAcceptable
+                },
                 summary: format!(
                     "Observed {} for {}ms, then {} for {}ms.",
                     contract.first_phase,
@@ -548,7 +560,10 @@ fn conclusion_for(
                     "turnaround_causally_confirmed_at={}ms",
                     rep.turnaround_confirmed_timestamp_ms
                 )],
-                reason: None,
+                reason: faster_than_expected.then(|| {
+                    "The complete cycle was faster than the active recognition profile expectation; this is not a force or effort claim."
+                        .into()
+                }),
                 confidence,
             }
         }
@@ -557,11 +572,20 @@ fn conclusion_for(
             let equipment_primary = rep
                 .observation_findings
                 .contains(&RepObservationFinding::EquipmentPrimaryBoundary);
+            let equipment_coverage_low = rep
+                .observation_findings
+                .contains(&RepObservationFinding::EquipmentPathCoverageLow);
             QualityConclusion {
                 conclusion_id: id,
                 dimension,
-                state: AssessmentConclusionState::ObservedFact,
-                summary: if equipment_primary {
+                state: if equipment_coverage_low {
+                    AssessmentConclusionState::ObservedDeviation
+                } else {
+                    AssessmentConclusionState::ObservedAcceptable
+                },
+                summary: if equipment_coverage_low {
+                    "The subject-associated equipment path coverage was below the active evidence gate."
+                } else if equipment_primary {
                     "The phase boundary and path came from the subject-associated equipment track."
                 } else {
                     "A continuous canonical pose trajectory produced the sealed cycle."
@@ -571,24 +595,60 @@ fn conclusion_for(
                     format!("equipment_role={}", contract.equipment_role),
                     format!("canonical_slice_hash={:016x}", rep.canonical_slice_hash),
                 ],
-                reason: None,
+                reason: equipment_coverage_low.then(|| {
+                    "This reports visible equipment-path coverage only; it does not infer force, strength or compensation."
+                        .into()
+                }),
                 confidence,
             }
         }
-        AssessmentDimension::ObservationConfidence => QualityConclusion {
-            conclusion_id: id,
-            dimension,
-            state: AssessmentConclusionState::ObservedFact,
-            summary: match rep.disposition {
-                RepDisposition::Confirmed => "The cycle satisfied the current evidence gate.",
-                RepDisposition::NeedsReview => "The cycle is usable but requires human review.",
-                RepDisposition::Rejected => "The observation was insufficient for a Rep claim.",
+        AssessmentDimension::ObservationConfidence => {
+            let channel_conflict = rep
+                .observation_findings
+                .contains(&RepObservationFinding::PoseEquipmentTurnaroundConflict);
+            let equipment_coverage_low = rep
+                .observation_findings
+                .contains(&RepObservationFinding::EquipmentPathCoverageLow);
+            let observed_deviation = rep.disposition == RepDisposition::NeedsReview
+                || channel_conflict
+                || equipment_coverage_low;
+            QualityConclusion {
+                conclusion_id: id,
+                dimension,
+                state: match rep.disposition {
+                    RepDisposition::Rejected => AssessmentConclusionState::CannotJudge,
+                    _ if observed_deviation => AssessmentConclusionState::ObservedDeviation,
+                    _ => AssessmentConclusionState::ObservedAcceptable,
+                },
+                summary: match rep.disposition {
+                    RepDisposition::Confirmed if channel_conflict => {
+                        "Pose and equipment disagreed on the observed turnaround."
+                    }
+                    RepDisposition::Confirmed if equipment_coverage_low => {
+                        "The equipment path had insufficient measured coverage."
+                    }
+                    RepDisposition::Confirmed => "The cycle satisfied the current evidence gate.",
+                    RepDisposition::NeedsReview => "The cycle is usable but requires human review.",
+                    RepDisposition::Rejected => {
+                        "The observation was insufficient for a Rep claim."
+                    }
+                }
+                .into(),
+                evidence: rep_finding_evidence(rep),
+                reason: match rep.disposition {
+                    RepDisposition::Rejected => Some(
+                        "The Rust rep disposition rejected this candidate, so no positive observation-confidence claim is available."
+                            .into(),
+                    ),
+                    _ => rep.evidence_reason.map(|reason| format!("{reason:?}")),
+                },
+                confidence: if rep.disposition == RepDisposition::Rejected {
+                    0.0
+                } else {
+                    confidence
+                },
             }
-            .into(),
-            evidence: rep_finding_evidence(rep),
-            reason: rep.evidence_reason.map(|reason| format!("{reason:?}")),
-            confidence,
-        },
+        }
         AssessmentDimension::SupportStability => cannot_judge(
             id,
             dimension,

@@ -68,7 +68,11 @@ export type MotionAssessmentDimension =
   | "trajectory_control"
   | "standard_variant_compatibility"
   | "observation_confidence";
-export type MotionQualityConclusionState = "observed_fact" | "cannot_judge" | "not_applicable";
+export type MotionQualityConclusionState =
+  | "observed_acceptable"
+  | "observed_deviation"
+  | "cannot_judge"
+  | "not_applicable";
 
 export interface DecodedRepEndpointSnapshot {
   readonly kind: MotionEndpointKind;
@@ -761,7 +765,7 @@ function decodeQualityConclusion(
   const conclusion = requireRecord(value, label);
   const state = requireEnum(
     conclusion.state,
-    ["observed_fact", "cannot_judge", "not_applicable"] as const,
+    ["observed_acceptable", "observed_deviation", "cannot_judge", "not_applicable"] as const,
     `${label} state`,
   );
   const reason = conclusion.reason === null

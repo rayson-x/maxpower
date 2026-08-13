@@ -491,7 +491,11 @@ test("v1.8 decodes and freezes Rust QLT1 proposals without recalculating quality
       conclusions: dimensions.map((dimension) => ({
         conclusionId: `rep:1:${dimension}`,
         dimension,
-        state: dimension === "support_stability" ? "cannot_judge" : "observed_fact",
+        state: dimension === "support_stability"
+          ? "cannot_judge"
+          : dimension === "range_of_motion"
+            ? "observed_deviation"
+            : "observed_acceptable",
         summary: "proposal",
         evidence: [],
         reason: dimension === "support_stability" ? "missing support trajectory" : null,
@@ -504,7 +508,54 @@ test("v1.8 decodes and freezes Rust QLT1 proposals without recalculating quality
   assert.equal(packet.qualityProposals.length, 1);
   assert.equal(packet.qualityProposals[0].endpoints[1].kind, "primary_turnaround");
   assert.equal(packet.qualityProposals[0].conclusions.length, 8);
+  assert.equal(packet.qualityProposals[0].conclusions[0].state, "observed_acceptable");
+  assert.equal(packet.qualityProposals[0].conclusions[1].state, "observed_deviation");
   assert.equal(Object.isFrozen(packet.qualityProposals[0]), true);
+});
+
+test("v1.8 rejects the obsolete observed_fact quality state", () => {
+  const dimensions = [
+    "task_completion", "range_of_motion", "phase_control", "support_stability",
+    "bilateral_coordination", "trajectory_control", "standard_variant_compatibility",
+    "observation_confidence",
+  ];
+  assert.throws(() => decodeMotionPacket(makeV18QualityPacket({
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [{
+      schemaVersion: "maxpower.motion-quality-proposal/v1",
+      proposalId: "obsolete-state",
+      repId: 1,
+      actionId: "lat_pulldown",
+      capturePosition: "rear",
+      anatomicalSide: null,
+      equipmentRole: "cable_handle_not_observed",
+      capability: "phase_supported",
+      ruleBundleVersion: "personal-motion-quality-rules/v1",
+      profileIdentity: "lat-pulldown/rear/bilateral/cable/v1",
+      profileHash: "0000000000000001",
+      canonicalSliceHash: "0000000000000002",
+      endpoints: ["start_anchor", "primary_turnaround", "end_return"].map((kind, index) => ({
+        kind,
+        occurredFrameId: index + 1,
+        occurredTimestampMs: 100 + index * 100,
+        causalConfirmedTimestampMs: 300,
+        phaseBefore: "ready",
+        phaseAfter: "concentric",
+        confidence: 0.8,
+        evidenceChannels: ["pose_measured"],
+      })),
+      conclusions: dimensions.map((dimension) => ({
+        conclusionId: `rep:1:${dimension}`,
+        dimension,
+        state: "observed_fact",
+        summary: "obsolete state",
+        evidence: [],
+        reason: null,
+        confidence: 0.8,
+      })),
+      contentHash: "0123456789abcdef",
+    }],
+  })), /quality.*state/i);
 });
 
 test("v1.8 refuses a QLT1 proposal with a missing required dimension", () => {

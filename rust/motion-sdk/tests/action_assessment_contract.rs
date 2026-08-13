@@ -377,8 +377,8 @@ fn every_personal_exact_view_resolves_without_guessing_a_different_context() {
         } else {
             assert_eq!(
                 phase.state,
-                AssessmentConclusionState::ObservedFact,
-                "supported context must expose its phase fact for {} / {}",
+                AssessmentConclusionState::ObservedAcceptable,
+                "supported context must expose an acceptable observed phase for {} / {}",
                 expected.action_id,
                 expected.view
             );
@@ -546,7 +546,7 @@ fn unilateral_cable_lateral_raise_requires_anatomical_side_before_phase() {
         );
         assert_eq!(
             conclusion(&proposal, AssessmentDimension::PhaseControl).state,
-            AssessmentConclusionState::ObservedFact,
+            AssessmentConclusionState::ObservedAcceptable,
             "known anatomical side should expose phase: {side}",
         );
     }
@@ -623,6 +623,76 @@ fn bench_equipment_path_and_pose_are_distinct_evidence_channels() {
     );
 }
 
+#[test]
+fn confirmed_ordered_cycle_marks_only_observable_non_deviating_dimensions_acceptable() {
+    let proposal = proposal_for("barbell_bench_press", "front", "bilateral", Vec::new());
+
+    assert_eq!(proposal.conclusions.len(), AssessmentDimension::ALL.len());
+    for dimension in [
+        AssessmentDimension::TaskCompletion,
+        AssessmentDimension::RangeOfMotion,
+        AssessmentDimension::PhaseControl,
+        AssessmentDimension::TrajectoryControl,
+        AssessmentDimension::ObservationConfidence,
+    ] {
+        assert_eq!(
+            conclusion(&proposal, dimension).state,
+            AssessmentConclusionState::ObservedAcceptable,
+            "a confirmed, ordered and non-deviating observation should be acceptable for {dimension:?}",
+        );
+    }
+    for dimension in [
+        AssessmentDimension::SupportStability,
+        AssessmentDimension::BilateralCoordination,
+        AssessmentDimension::StandardVariantCompatibility,
+    ] {
+        assert_eq!(
+            conclusion(&proposal, dimension).state,
+            AssessmentConclusionState::CannotJudge,
+            "missing dimension-specific evidence must remain unknown for {dimension:?}",
+        );
+    }
+}
+
+#[test]
+fn measured_profile_relative_deviations_are_scoped_to_applicable_dimensions() {
+    let proposal = proposal_for_identity_with_disposition(
+        "barbell_bench_press/front/bilateral/barbell/action-assessment-contract-v1",
+        vec![
+            RepObservationFinding::PrimaryRangeBelowExpectation,
+            RepObservationFinding::CycleFasterThanExpected,
+            RepObservationFinding::PoseEquipmentTurnaroundConflict,
+            RepObservationFinding::EquipmentPathCoverageLow,
+        ],
+        RepDisposition::NeedsReview,
+    );
+
+    for dimension in [
+        AssessmentDimension::TaskCompletion,
+        AssessmentDimension::RangeOfMotion,
+        AssessmentDimension::PhaseControl,
+        AssessmentDimension::TrajectoryControl,
+        AssessmentDimension::ObservationConfidence,
+    ] {
+        assert_eq!(
+            conclusion(&proposal, dimension).state,
+            AssessmentConclusionState::ObservedDeviation,
+            "the applicable measured/profile-relative deviation must be explicit for {dimension:?}",
+        );
+    }
+    for dimension in [
+        AssessmentDimension::SupportStability,
+        AssessmentDimension::BilateralCoordination,
+        AssessmentDimension::StandardVariantCompatibility,
+    ] {
+        assert_eq!(
+            conclusion(&proposal, dimension).state,
+            AssessmentConclusionState::CannotJudge,
+            "a finding in another dimension must not create evidence for {dimension:?}",
+        );
+    }
+}
+
 fn proposal_for(
     action_id: &str,
     view: &str,
@@ -651,6 +721,33 @@ fn proposal_for_identity_with_maturity(
     profile_maturity: &'static str,
     findings: Vec<RepObservationFinding>,
 ) -> RustQualityProposal {
+    proposal_for_identity_with_maturity_and_disposition(
+        profile_identity,
+        profile_maturity,
+        findings,
+        RepDisposition::Confirmed,
+    )
+}
+
+fn proposal_for_identity_with_disposition(
+    profile_identity: &str,
+    findings: Vec<RepObservationFinding>,
+    disposition: RepDisposition,
+) -> RustQualityProposal {
+    proposal_for_identity_with_maturity_and_disposition(
+        profile_identity,
+        "provisional",
+        findings,
+        disposition,
+    )
+}
+
+fn proposal_for_identity_with_maturity_and_disposition(
+    profile_identity: &str,
+    profile_maturity: &'static str,
+    findings: Vec<RepObservationFinding>,
+    disposition: RepDisposition,
+) -> RustQualityProposal {
     let rep = SealedRep {
         rep_id: 1,
         start_frame_id: 10,
@@ -667,7 +764,7 @@ fn proposal_for_identity_with_maturity(
         profile_maturity,
         quality_verdict: None,
         recovered_across_gap: false,
-        disposition: RepDisposition::Confirmed,
+        disposition,
         evidence_reason: None,
         observation_findings: findings,
     };
