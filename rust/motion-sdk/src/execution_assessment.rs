@@ -392,6 +392,8 @@ fn conclusion_for(
     confidence: f32,
 ) -> QualityConclusion {
     let id = format!("rep:{}:{}", rep.rep_id, dimension.as_str());
+    let has_ordered_cycle = rep.start_timestamp_ms < rep.peak_timestamp_ms
+        && rep.peak_timestamp_ms < rep.end_timestamp_ms;
     if capability == AssessmentCapability::Unsupported {
         return cannot_judge(
             id,
@@ -413,6 +415,22 @@ fn conclusion_for(
             dimension,
             "This exact action/view/side context is observation-only; Rust will not claim Rep or phase semantics.",
             confidence,
+        );
+    }
+    if !has_ordered_cycle
+        && matches!(
+            dimension,
+            AssessmentDimension::TaskCompletion
+                | AssessmentDimension::RangeOfMotion
+                | AssessmentDimension::PhaseControl
+                | AssessmentDimension::TrajectoryControl
+        )
+    {
+        return cannot_judge(
+            id,
+            dimension,
+            "The sealed candidate does not contain three strictly ordered start, turnaround and return timestamps.",
+            confidence.min(0.25),
         );
     }
     match dimension {
@@ -587,6 +605,11 @@ fn proposal_confidence(rep: &SealedRep) -> f32 {
     {
         confidence -= 0.20;
     }
+    if !(rep.start_timestamp_ms < rep.peak_timestamp_ms
+        && rep.peak_timestamp_ms < rep.end_timestamp_ms)
+    {
+        confidence = confidence.min(0.25);
+    }
     confidence.clamp(0.0, 1.0)
 }
 
@@ -636,6 +659,29 @@ fn proposal_hash(proposal: &RustQualityProposal) -> String {
 mod tests {
     use super::*;
 
+    fn sealed_rep_with_timestamps(start: u64, turnaround: u64, end: u64) -> SealedRep {
+        SealedRep {
+            rep_id: 1,
+            start_frame_id: 10,
+            start_timestamp_ms: start,
+            peak_frame_id: 20,
+            peak_timestamp_ms: turnaround,
+            turnaround_confirmed_timestamp_ms: turnaround,
+            end_frame_id: 30,
+            end_timestamp_ms: end,
+            revision: 0,
+            canonical_slice_hash: 1,
+            profile_identity: "barbell_bench_press/front/v1".into(),
+            profile_hash: 2,
+            profile_maturity: "observed",
+            quality_verdict: None,
+            recovered_across_gap: false,
+            disposition: RepDisposition::Confirmed,
+            evidence_reason: None,
+            observation_findings: Vec::new(),
+        }
+    }
+
     #[test]
     fn all_supported_action_contracts_keep_one_shared_endpoint_shape() {
         assert_eq!(ACTION_CONTRACTS.len(), 12);
@@ -682,5 +728,19 @@ mod tests {
             AssessmentCapability::Unsupported,
             "an unvalidated view is not inherited from another projection"
         );
+    }
+
+    #[test]
+    fn zero_duration_return_is_reviewable_but_never_claimed_as_a_complete_cycle() {
+        let proposal = build_quality_proposal(&sealed_rep_with_timestamps(7_400, 8_100, 8_100));
+        assert_eq!(proposal.endpoints.len(), 3);
+        assert!(proposal.conclusions.iter().filter(|conclusion| matches!(
+            conclusion.dimension,
+            AssessmentDimension::TaskCompletion
+                | AssessmentDimension::RangeOfMotion
+                | AssessmentDimension::PhaseControl
+                | AssessmentDimension::TrajectoryControl
+        )).all(|conclusion| conclusion.state == AssessmentConclusionState::CannotJudge));
+        assert!(proposal.conclusions.iter().all(|conclusion| conclusion.confidence <= 0.25));
     }
 }
