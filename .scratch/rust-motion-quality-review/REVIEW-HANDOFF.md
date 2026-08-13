@@ -1,6 +1,8 @@
 # Rust 动作质量审核交接
 
-Status: review-started
+Status: implementation-in-progress
+
+> 本文件中的旧冻结数字已失效：独立检查发现同源衍生数据泄漏与器械未进入 Rust 因果流。正式审核尚未开始；只有重新生成全部产物并通过第二轮独立检查后，本文件才会更新为可审核状态。
 
 ## 审核入口
 

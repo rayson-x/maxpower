@@ -1,4 +1,4 @@
-Status: review-ready
+Status: implementation-in-progress
 
 # Rust 单次因果动作理解与人工质量审核 MVP
 

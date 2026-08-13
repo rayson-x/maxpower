@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "maxpower-source-independent-bench-profiles/v1",
+  "evidence": {
+    "source": "builtin_source_independent_provisional",
+    "fittedSourceIds": [],
+    "fittedDerivativeSourceIds": [],
+    "purpose": "Causal barbell-cycle segmentation only; no standard-form or quality truth"
+  },
+  "profiles": [
+    {
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "front",
+      "profile": {
+        "identity": "barbell_bench_press/front/bilateral/barbell/builtin-source-independent-provisional-v1",
+        "maturity": "provisional",
+        "schema": "halpe26",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "barbell-axis-primary-ready-effort-return/v1",
+        "requiredCapabilities": ["canonical-landmarks", "subject-lock"],
+        "direction": "decreasing",
+        "primarySignal": { "kind": "joint-angle", "landmarks": [6, 8, 10] },
+        "secondarySignal": { "kind": "joint-angle", "landmarks": [5, 7, 9] },
+        "startAmplitude": 10,
+        "minPrimaryAmplitude": 30,
+        "minSecondaryAmplitude": 30,
+        "returnHysteresis": 15,
+        "readyTolerance": 8,
+        "maxGapMs": 1000,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 10000
+      }
+    },
+    {
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "frontLeft45",
+      "profile": {
+        "identity": "barbell_bench_press/frontLeft45/bilateral/barbell/builtin-source-independent-provisional-v1",
+        "maturity": "provisional",
+        "schema": "halpe26",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "barbell-axis-primary-ready-effort-return/v1",
+        "requiredCapabilities": ["canonical-landmarks", "subject-lock"],
+        "direction": "decreasing",
+        "primarySignal": { "kind": "joint-angle", "landmarks": [6, 8, 10] },
+        "secondarySignal": { "kind": "joint-angle", "landmarks": [5, 7, 9] },
+        "startAmplitude": 10,
+        "minPrimaryAmplitude": 30,
+        "minSecondaryAmplitude": 30,
+        "returnHysteresis": 15,
+        "readyTolerance": 8,
+        "maxGapMs": 1000,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 10000
+      }
+    },
+    {
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "frontRight45",
+      "profile": {
+        "identity": "barbell_bench_press/frontRight45/bilateral/barbell/builtin-source-independent-provisional-v1",
+        "maturity": "provisional",
+        "schema": "halpe26",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "barbell-axis-primary-ready-effort-return/v1",
+        "requiredCapabilities": ["canonical-landmarks", "subject-lock"],
+        "direction": "decreasing",
+        "primarySignal": { "kind": "joint-angle", "landmarks": [6, 8, 10] },
+        "secondarySignal": { "kind": "joint-angle", "landmarks": [5, 7, 9] },
+        "startAmplitude": 10,
+        "minPrimaryAmplitude": 30,
+        "minSecondaryAmplitude": 30,
+        "returnHysteresis": 15,
+        "readyTolerance": 8,
+        "maxGapMs": 1000,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 10000
+      }
+    }
+  ]
+}

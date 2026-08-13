@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -117,6 +118,35 @@ test("quality review rejects a release video path outside its configured root", 
   }
 });
 
+test("quality review rejects a release whose stable content hash was tampered", async () => {
+  const harness = await qualityReleaseHarness(frozenRelease("capture-a.mp4"));
+  try {
+    const release = JSON.parse(await readFile(harness.releasePath, "utf8")) as ReturnType<typeof frozenRelease>;
+    release.items[0]!.title = "tampered after freeze";
+    await writeFile(harness.releasePath, `${JSON.stringify(release)}\n`);
+
+    const response = await fetch(`${harness.baseUrl}/api/review/quality-release`);
+    assert.equal(response.status, 409);
+    assert.match((await response.json() as { error: string }).error, /release hash mismatch/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("quality review rejects a tampered proposal even when the outer release hash is recomputed", async () => {
+  const release = frozenRelease("capture-a.mp4");
+  release.items[0]!.proposal.reps[0]!.conclusions[0]!.confidence = 0.01;
+  release.releaseHash = stableHash(release, "releaseHash", true);
+  const harness = await qualityReleaseHarness(release);
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/review/quality-release`);
+    assert.equal(response.status, 409);
+    assert.match((await response.json() as { error: string }).error, /proposal hash mismatch/);
+  } finally {
+    await harness.close();
+  }
+});
+
 function serverOptions(quality: Pick<RecognitionReviewServerOptions,
   "qualityReviewPagePath" | "qualityReviewReleasePath" | "qualityReviewVideoRoot"
 >): RecognitionReviewServerOptions {
@@ -141,10 +171,10 @@ function serverOptions(quality: Pick<RecognitionReviewServerOptions,
 }
 
 function frozenRelease(videoPath: string) {
-  return {
+  const release = {
     schemaVersion: "maxpower-motion-quality-review-release/v1",
     releaseId: "release-a",
-    releaseHash: "sha256:release-a",
+    releaseHash: "",
     frozenAt: "2026-08-13T23:30:00.000Z",
     runKind: "full_data_proposal",
     items: [{
@@ -166,7 +196,7 @@ function frozenRelease(videoPath: string) {
       },
       proposal: {
         schemaVersion: "maxpower-motion-quality-proposal/v1",
-        proposalHash: "sha256:proposal-a",
+        proposalHash: "",
         lineage: {
           runId: "run-a",
           runKind: "full_data_proposal",
@@ -190,4 +220,50 @@ function frozenRelease(videoPath: string) {
       },
     }],
   };
+  release.items[0]!.proposal.proposalHash = stableHash(release.items[0]!.proposal, "proposalHash");
+  release.releaseHash = stableHash(release, "releaseHash", true);
+  return release;
+}
+
+async function qualityReleaseHarness(release: ReturnType<typeof frozenRelease>) {
+  const root = await mkdtemp(join(tmpdir(), "maxpower-quality-review-"));
+  temporaryRoots.push(root);
+  const publicRoot = join(root, "public");
+  const videoRoot = join(root, "videos");
+  await Promise.all([mkdir(publicRoot), mkdir(videoRoot)]);
+  const pagePath = join(publicRoot, "quality-review.html");
+  const releasePath = join(root, "frozen-release.json");
+  await Promise.all([
+    writeFile(pagePath, "<!doctype html>"),
+    writeFile(releasePath, `${JSON.stringify(release)}\n`),
+  ]);
+  const server = createRecognitionReviewServer(serverOptions({
+    qualityReviewPagePath: pagePath,
+    qualityReviewReleasePath: releasePath,
+    qualityReviewVideoRoot: videoRoot,
+  }));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    releasePath,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
+}
+
+function stableHash(value: Record<string, unknown>, hashField: string, prefix = false): string {
+  const semantic = { ...value };
+  delete semantic[hashField];
+  const digest = createHash("sha256").update(stableStringify(semantic)).digest("hex");
+  return prefix ? `sha256:${digest}` : digest;
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }

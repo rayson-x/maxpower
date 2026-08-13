@@ -34,15 +34,19 @@
     end_return: "返回端点",
   };
   const DIMENSION_LABELS = {
-    movement_task_completion: "动作任务完成",
-    rom_endpoint_completeness: "行程与端点",
+    task_completion: "动作任务完成",
+    range_of_motion: "行程与端点",
     phase_control: "阶段控制",
-    support_trunk_stability: "支撑与躯干稳定",
+    support_stability: "支撑稳定",
     bilateral_coordination: "双侧协调",
-    equipment_body_trajectory_control: "器械 / 身体轨迹",
+    trajectory_control: "轨迹控制",
     standard_variant_compatibility: "标准变式兼容性",
     observation_confidence: "观测可信度",
   };
+
+  function dimensionLabel(key) {
+    return DIMENSION_LABELS[key] || key;
+  }
 
   function createWorkspace(rawRelease, rawReviewer) {
     const release = freezeJson(cloneJson(normalizeRelease(rawRelease)));
@@ -366,7 +370,7 @@
       const stateValue = conclusion.state ?? conclusion.value ?? "cannot_judge";
       const evidence = Array.isArray(conclusion.evidence) ? conclusion.evidence : [];
       return `<article class="review-card conclusion-card" data-kind="conclusion" data-rep-id="${escapeHtml(rep.repId)}" data-conclusion-id="${escapeHtml(conclusion.conclusionId)}">
-        <div class="conclusion-head"><div><span class="dimension">${escapeHtml(DIMENSION_LABELS[conclusion.dimension] || conclusion.dimension)}</span><h3>${escapeHtml(conclusion.text || conclusion.summary || stateValue)}</h3></div><span class="confidence">${formatConfidence(conclusion.confidence)}</span></div>
+        <div class="conclusion-head"><div><span class="dimension">${escapeHtml(dimensionLabel(conclusion.dimension))}</span><h3>${escapeHtml(conclusion.text || conclusion.summary || stateValue)}</h3></div><span class="confidence">${formatConfidence(conclusion.confidence)}</span></div>
         <p class="conclusion-state ${escapeHtml(stateValue)}">${escapeHtml(stateValue.replaceAll("_", " "))}${conclusion.reason ? ` · ${escapeHtml(conclusion.reason)}` : ""}</p>
         ${evidence.length ? `<div class="evidence-list">${evidence.map((entry) => `<code>${escapeHtml(typeof entry === "string" ? entry : JSON.stringify(entry))}</code>`).join("")}</div>` : "<p class=muted>没有额外证据引用</p>"}
         ${decisionControls(decision, "可选修正值（JSON 或文本）", correctionText(decision?.correctedValue), "text")}
@@ -719,6 +723,7 @@
     EXPORT_SCHEMA,
     RELEASE_SCHEMA,
     createWorkspace,
+    dimensionLabel,
     frameAt,
     mount,
     trajectoryUntil,

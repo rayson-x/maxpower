@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -6,9 +5,28 @@ import {
   RustCanonicalWasmSession,
   computeRustExerciseProfileHash,
   instantiateRustMotionWasm,
+  type RustEquipmentObservation,
   type RustExerciseProfileData,
 } from "../../src/motion/rustCanonicalWasm";
-import type { DecodedRustQualityProposal } from "../../src/motion/motionPacket";
+import type {
+  DecodedMotionPacket,
+  DecodedRustQualityProposal,
+} from "../../src/motion/motionPacket";
+import {
+  equipmentFramesByTimestamp,
+  loadBenchEquipmentSidecar,
+  loadInputCatalog,
+  loadRawObservationSidecar,
+  loadSourceIndependentBenchProfiles,
+  measuredAxisToEquipmentObservation,
+  pinInputBytes,
+  rawFrameCandidates,
+  sha256,
+  submitRawFrameToRust,
+  type BenchEquipmentFrame,
+  type InputAssetPin,
+  type RawObservationFrame,
+} from "./runnerInputs";
 
 export interface TimestampedFrame {
   readonly timestampMs: number;
@@ -163,36 +181,6 @@ interface GoldenDataset {
   readonly records: readonly GoldenRecord[];
 }
 
-interface CanonicalLandmark {
-  readonly x: number | null;
-  readonly y: number | null;
-  readonly z: number | null;
-  readonly visibility: number | null;
-}
-
-interface CanonicalPose extends TimestampedFrame {
-  readonly landmarks: readonly CanonicalLandmark[];
-}
-
-interface CanonicalCapture {
-  readonly sourceCaptureId: string;
-  readonly sourcePoseSha256?: string;
-  readonly sourceVideoSha256?: string;
-  readonly image?: Readonly<{
-    widthPx?: number;
-    heightPx?: number;
-    mirrored?: boolean;
-  }>;
-  readonly poses: readonly CanonicalPose[];
-}
-
-interface CanonicalCorpus {
-  readonly schemaVersion: string;
-  readonly inputPipeline?: string;
-  readonly rustWasmSha256?: string;
-  readonly captures: Readonly<Record<string, CanonicalCapture>>;
-}
-
 interface SerializedProfile extends Omit<RustExerciseProfileData, "contentHash"> {
   readonly contentHash: string | number;
 }
@@ -210,8 +198,11 @@ interface ProfileArtifact {
 
 export interface FullDataProposalRunnerOptions {
   readonly datasetPath: string;
-  readonly canonicalCorpusPath: string;
+  readonly rawObservationRoot: string;
+  readonly benchEquipmentObservationRoot: string;
   readonly profileArtifactPath: string;
+  readonly sourceIndependentBenchProfilePath: string;
+  readonly governanceInputCatalogPath: string;
   readonly wasmPath: string;
   readonly outputPath: string;
   readonly runId: string;
@@ -224,14 +215,15 @@ export async function runFullDataProposal(
     key,
     key === "runId" ? value : resolve(value),
   ])) as unknown as FullDataProposalRunnerOptions;
-  const [datasetBytes, corpusBytes, profileBytes, wasmBytes] = await Promise.all([
+  const catalogLoaded = await loadInputCatalog(options.governanceInputCatalogPath);
+  const catalog = catalogLoaded.value;
+  const [datasetBytes, profileBytes, wasmBytes, independentBench] = await Promise.all([
     readFile(options.datasetPath),
-    readFile(options.canonicalCorpusPath),
     readFile(options.profileArtifactPath),
     readFile(options.wasmPath),
+    loadSourceIndependentBenchProfiles(options.sourceIndependentBenchProfilePath, catalog),
   ]);
   const dataset = JSON.parse(datasetBytes.toString("utf8")) as GoldenDataset;
-  const corpus = JSON.parse(corpusBytes.toString("utf8")) as CanonicalCorpus;
   const profiles = JSON.parse(profileBytes.toString("utf8")) as ProfileArtifact;
   const recordsBySource = new Map<string, GoldenRecord[]>();
   for (const record of dataset.records) {
@@ -240,25 +232,47 @@ export async function runFullDataProposal(
     records.push(record);
     recordsBySource.set(sourceId, records);
   }
-  const captureBySource = new Map(
-    Object.values(corpus.captures).map((capture) => [capture.sourceCaptureId, capture]),
-  );
+  const independentBenchByView = new Map(independentBench.value.map((entry) => [
+    entry.capturePosition,
+    entry,
+  ]));
   const sources: Array<Readonly<Record<string, unknown>>> = [];
+  const inputAssetPins: InputAssetPin[] = [
+    catalogLoaded.pin,
+    pinInputBytes(catalog, "humanRanges", options.datasetPath, datasetBytes),
+    pinInputBytes(catalog, "profileArtifact", options.profileArtifactPath, profileBytes),
+    pinInputBytes(catalog, "rustWasm", options.wasmPath, wasmBytes),
+    independentBench.pin,
+  ];
   let submittedFrameCount = 0;
+  let sourceFrameCount = 0;
+  let equipmentInputFrameCount = 0;
+  let equipmentObservedFrameCount = 0;
+  let equipmentMeasuredEndpointCount = 0;
   for (const [sourceCaptureId, records] of [...recordsBySource].sort(([left], [right]) => left.localeCompare(right))) {
-    const capture = captureBySource.get(sourceCaptureId);
-    if (!capture) throw new Error(`${sourceCaptureId}: canonical Halpe-26 capture missing`);
+    const raw = await loadRawObservationSidecar(options.rawObservationRoot, sourceCaptureId, catalog);
+    inputAssetPins.push(raw.pin);
+    sourceFrameCount += raw.value.frames.length;
+    const benchRecords = records.filter((record) => record.exerciseId === "barbell_bench_press");
+    const benchEquipment = benchRecords.length > 0
+      ? await loadBenchEquipmentSidecar(options.benchEquipmentObservationRoot, sourceCaptureId, catalog)
+      : null;
+    if (benchEquipment) inputAssetPins.push(benchEquipment.pin);
+    const benchEquipmentByTimestamp = benchEquipment
+      ? equipmentFramesByTimestamp(benchEquipment.value)
+      : new Map<number, BenchEquipmentFrame>();
     const windows = records.map((record) => ({
       captureId: record.captureId,
       startMs: record.evaluationWindow?.startMs ?? 0,
       endMs: record.evaluationWindow?.endMs
         ?? record.source?.durationMs
-        ?? capture.poses.at(-1)?.timestampMs
+        ?? raw.value.source.durationMs
+        ?? raw.value.frames.at(-1)?.timestampMs
         ?? 0,
     }));
-    const routed = routeSourceFramesOnce(capture.poses, windows);
+    const routed = routeSourceFramesOnce(raw.value.frames, windows);
     submittedFrameCount += routed.length;
-    const framesByContext = new Map<string, CanonicalPose[]>();
+    const framesByContext = new Map<string, RawObservationFrame[]>();
     for (const entry of routed) {
       const frames = framesByContext.get(entry.captureId) ?? [];
       frames.push(entry.frame);
@@ -268,10 +282,12 @@ export async function runFullDataProposal(
     for (const record of records.sort((left, right) => (
       (left.evaluationWindow?.startMs ?? 0) - (right.evaluationWindow?.startMs ?? 0)
     ))) {
-      const profileEntry = profiles.profiles.find((candidate) => (
-        candidate.exerciseId === record.exerciseId
-        && candidate.capturePosition === record.capturePosition
-      ));
+      const profileEntry = record.exerciseId === "barbell_bench_press"
+        ? independentBenchByView.get(record.capturePosition as "front" | "frontLeft45" | "frontRight45")
+        : profiles.profiles.find((candidate) => (
+          candidate.exerciseId === record.exerciseId
+          && candidate.capturePosition === record.capturePosition
+        ));
       if (!profileEntry) throw new Error(`${record.captureId}: full-data profile missing`);
       const side = anatomicalSideForContext(record.exerciseId, record.capturePosition);
       const profile = materializeProfile(profileEntry.profile, side);
@@ -280,9 +296,9 @@ export async function runFullDataProposal(
         sequenceId: `${options.runId}:${record.captureId}`,
         schema: "halpe26",
         image: {
-          widthPx: capture.image?.widthPx ?? 1280,
-          heightPx: capture.image?.heightPx ?? 720,
-          mirrored: capture.image?.mirrored ?? false,
+          widthPx: raw.value.source.widthPx,
+          heightPx: raw.value.source.heightPx,
+          mirrored: false,
           rotationDegrees: 0,
         },
         stabilization: "fusion",
@@ -293,6 +309,7 @@ export async function runFullDataProposal(
       const reps = new Map<string, (typeof motion.lastCompletedReps)[number]>();
       const rustProposals = new Map<string, Readonly<DecodedRustQualityProposal>>();
       const sourceTimestampsMs: number[] = [];
+      const currentRustFrames: Array<Readonly<Record<string, unknown>>> = [];
       const collect = (): void => {
         for (const rep of motion.lastCompletedReps) reps.set(rep.repId.toString(), rep);
         for (const proposal of motion.lastQualityProposals) {
@@ -300,18 +317,24 @@ export async function runFullDataProposal(
         }
       };
       for (const frame of framesByContext.get(record.captureId) ?? []) {
-        sourceTimestampsMs.push(frame.timestampMs);
-        motion.process({
-          timestampMs: frame.timestampMs,
-          landmarks: frame.landmarks.map((landmark) => ({
-            x: finiteOrZero(landmark.x),
-            y: finiteOrZero(landmark.y),
-            z: finiteOrZero(landmark.z),
-            visibility: finiteOrZero(landmark.visibility),
-          })),
-          worldLandmarks: [],
-        });
+        const timestampMs = Math.round(frame.timestampMs);
+        sourceTimestampsMs.push(timestampMs);
+        const axisFrame = record.exerciseId === "barbell_bench_press"
+          ? benchEquipmentByTimestamp.get(timestampMs)
+          : undefined;
+        const equipment: readonly RustEquipmentObservation[] = measuredAxisToEquipmentObservation(
+          axisFrame?.axis ?? null,
+          frame.frameNumber + 1,
+        );
+        if (equipment.length > 0) equipmentInputFrameCount += 1;
+        submitRawFrameToRust(motion, frame, equipment);
         collect();
+        const packet = motion.lastDecodedPacket;
+        if (!packet || Number(packet.sourceTimestampMs) !== timestampMs) {
+          throw new Error(`${record.captureId}: Rust packet timestamp mismatch`);
+        }
+        if (packet.equipment.status.kind === "observed") equipmentObservedFrameCount += 1;
+        currentRustFrames.push(serializeCurrentRustFrame(packet, motion.lastCanonicalHash));
       }
       motion.finishSet();
       collect();
@@ -327,6 +350,17 @@ export async function runFullDataProposal(
         profileHash,
         rustProposals: [...rustProposals.values()] as unknown as readonly Readonly<Record<string, unknown>>[],
       });
+      equipmentMeasuredEndpointCount += [...rustProposals.values()].reduce((sum, proposal) => (
+        sum + proposal.endpoints.filter((endpoint) => (
+          endpoint.evidenceChannels.includes("equipment_measured")
+        )).length
+      ), 0);
+      const evidenceSemantic = {
+        schemaVersion: "maxpower-current-rust-context-evidence/v1",
+        packetSchema: "MOTN/1.8+QLT1",
+        producer: "current_rust_single_pass",
+        frames: currentRustFrames,
+      };
       contexts.push(deepFreeze({
         captureId: record.captureId,
         actionId: record.exerciseId,
@@ -356,19 +390,25 @@ export async function runFullDataProposal(
         })),
         qualityProposals: [...rustProposals.values()],
         reviewProposal,
+        currentRustEvidence: {
+          ...evidenceSemantic,
+          evidenceHash: sha256(stableStringify(evidenceSemantic)),
+        },
       }));
       motion.close();
     }
     sources.push(deepFreeze({
       sourceCaptureId,
-      sourcePoseSha256: capture.sourcePoseSha256 ?? null,
-      sourceVideoSha256: capture.sourceVideoSha256 ?? null,
-      videoRef: records[0]?.source?.video ?? null,
-      sourceFrameCount: capture.poses.length,
+      sourcePoseSha256: raw.pin.sha256,
+      sourceVideoSha256: raw.value.source.sha256,
+      videoRef: records[0]?.source?.video ?? raw.value.source.video,
+      sourceFrameCount: raw.value.frames.length,
       submittedFrameCount: routed.length,
+      inputAssets: benchEquipment ? [raw.pin, benchEquipment.pin] : [raw.pin],
       contexts,
     }));
   }
+  const uniqueInputPins = uniquePins(inputAssetPins);
   const semantic = {
     schemaVersion: "maxpower-motion-quality-rust-full-data-proposals/v1",
     runId: options.runId,
@@ -377,7 +417,7 @@ export async function runFullDataProposal(
     acceptanceEligible: false,
     accuracyClaim: "forbidden_full_data_proposal_is_review_queue_only",
     runtime: {
-      visualModel: "YOLOX + RTMPose Halpe-26 client-deployable observation contract",
+      visualModel: "raw YOLOX + RTMPose Halpe-26 sidecar → current Rust single pass",
       actionAuthority: "Rust Motion SDK",
       packetSchema: "MOTN/1.8+QLT1",
       pythonVisionUsed: false,
@@ -389,26 +429,25 @@ export async function runFullDataProposal(
     inventory: {
       uniqueSourceCount: recordsBySource.size,
       exactContextCount: dataset.records.length,
-      sourceFrameCount: Object.values(corpus.captures).reduce(
-        (sum, capture) => sum + capture.poses.length,
-        0,
-      ),
+      sourceFrameCount,
       submittedFrameCount,
+      equipmentInputFrameCount,
+      equipmentObservedFrameCount,
+      equipmentMeasuredEndpointCount,
     },
     reproducibility: {
       datasetSha256: sha256(datasetBytes),
-      canonicalCorpusSha256: sha256(corpusBytes),
       profileArtifactSha256: sha256(profileBytes),
       rustWasmSha256: sha256(wasmBytes),
-      canonicalCorpusDeclaredRustWasmSha256: corpus.rustWasmSha256 ?? null,
-      canonicalInputPipeline: corpus.inputPipeline ?? null,
-      canonicalSchemaVersion: corpus.schemaVersion,
       profileSchemaVersion: profiles.schemaVersion,
+      inputAssets: uniqueInputPins,
+      inputAssetManifestSha256: sha256(stableStringify(uniqueInputPins)),
     },
     limitations: [
       "This full-data proposal may use profiles fitted with the same sources and is not blind accuracy evidence.",
-      "The canonical corpus is client-deployable Halpe-26 observation replay, not a repeated Python visual model.",
-      "Equipment tracks are present only when supplied by the frozen client observation stream.",
+      "Accepted runner input is the raw client-deployable Halpe-26 sidecar, not personal-rust-canonical-v2.",
+      "Bench uses a source-independent provisional Rust barbell graph and measured prototype axes as proposal-only features.",
+      "Non-bench actions are pose-only; equipment proposal features are never treated as human truth.",
       "No physiological force, strength, muscle activation, joint-torque or medical conclusion is measured.",
     ],
     sources,
@@ -422,12 +461,14 @@ export async function runFullDataProposal(
 }
 
 function materializeProfile(
-  serialized: SerializedProfile,
+  serialized: SerializedProfile | RustExerciseProfileData,
   side: "left" | "right" | null,
 ): RustExerciseProfileData {
   const original = {
     ...serialized,
-    contentHash: BigInt(serialized.contentHash),
+    contentHash: typeof serialized.contentHash === "bigint"
+      ? serialized.contentHash
+      : BigInt(serialized.contentHash),
   } as RustExerciseProfileData;
   if (!side) return original;
   const identity = original.identity.replace("/bilateral/", `/${side}/`);
@@ -435,8 +476,56 @@ function materializeProfile(
   return { ...withoutHash, contentHash: computeRustExerciseProfileHash(withoutHash) };
 }
 
-function finiteOrZero(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+function serializeCurrentRustFrame(
+  packet: DecodedMotionPacket,
+  canonicalHash: bigint,
+): Readonly<Record<string, unknown>> {
+  return deepFreeze({
+    timestampMs: Number(packet.sourceTimestampMs),
+    frameId: packet.frameId.toString(),
+    canonicalPacketHash: canonicalHash.toString(16).padStart(16, "0"),
+    target: {
+      ...packet.target,
+      selectedCandidateId: packet.target.selectedCandidateId?.toString() ?? null,
+    },
+    landmarks: packet.canonical.map((landmark) => ({ ...landmark })),
+    equipmentStatus: { ...packet.equipment.status },
+    equipment: packet.equipment.tracks.map((track) => ({
+      trackId: track.trackId.toString(),
+      proposalId: track.proposalId.toString(),
+      subjectCandidateId: track.subjectCandidateId.toString(),
+      kind: track.kind,
+      source: track.source,
+      x: track.bbox.x,
+      y: track.bbox.y,
+      width: track.bbox.width,
+      height: track.bbox.height,
+      centerX: track.centerX,
+      centerY: track.centerY,
+      observationScore: track.observationScore,
+      associationConfidence: track.associationConfidence,
+      uncertaintyPx: track.uncertaintyPx,
+      heldBy: track.heldBy,
+      judgeablePath: track.judgeablePath,
+    })),
+    equipmentRejections: {
+      reflection: packet.equipment.rejectedReflectionCount,
+      static: packet.equipment.rejectedStaticCount,
+      lowConfidenceOrInvalid: packet.equipment.rejectedLowConfidenceOrInvalidCount,
+      outsideSubject: packet.equipment.rejectedOutsideSubjectCount,
+    },
+  });
+}
+
+function uniquePins(pins: readonly InputAssetPin[]): readonly InputAssetPin[] {
+  const byIdentity = new Map<string, InputAssetPin>();
+  for (const pin of pins) {
+    const key = `${pin.assetId}\u0000${pin.path}\u0000${pin.sha256}`;
+    byIdentity.set(key, pin);
+  }
+  return Object.freeze([...byIdentity.values()].sort((left, right) => (
+    left.assetId.localeCompare(right.assetId) || left.path.localeCompare(right.path)
+  )));
 }
 
 function requireRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
@@ -474,10 +563,6 @@ function sortJson(value: unknown): unknown {
   return value;
 }
 
-function sha256(value: string | NodeJS.ArrayBufferView): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     Object.values(value as Record<string, unknown>).forEach(deepFreeze);
@@ -491,8 +576,11 @@ async function main(): Promise<void> {
   const outputPath = process.argv[2] ?? "data/workflows/motion-quality-review/full-data-proposals-v1.json";
   await runFullDataProposal({
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
-    canonicalCorpusPath: "data/workflows/motion-profile/personal-halpe26-v1/run-2026-08-11/corpus/personal-rust-canonical-v2.json",
+    rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
+    benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
+    sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
     outputPath,
     runId: "personal-full-data-proposal-rust-qlt1-v1",

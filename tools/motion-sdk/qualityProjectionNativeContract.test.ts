@@ -115,7 +115,7 @@ test("native event projection adds only the Rust envelope and does not derive qu
   assert.equal("qualityScore" in projected, false);
 });
 
-test("legacy MOTN packets remain unchanged and future additive packet bytes are ignored", () => {
+test("legacy MOTN packets remain unchanged and QLT1 must terminate the declared packet", () => {
   const legacy = poseEvent(Buffer.from(packet(7)).toString("base64"));
   assert.equal(projectRustQualityFromPacket(packet(7)), null);
   assert.equal(projectPoseEventQuality(legacy), legacy);
@@ -125,11 +125,7 @@ test("legacy MOTN packets remain unchanged and future additive packet bytes are 
     proposals: [{ proposalId: "p", contentHash: "aaaaaaaaaaaaaaaa" }],
   };
   const futureTail = encoder.encode("FTR1\u0003\u0000\u0000\u0000xyz");
-  const projection = projectRustQualityFromPacket(
-    packet(9, payload, futureTail),
-  );
-  assert.equal(projection?.payloadJson, JSON.stringify(payload));
-  assert.deepEqual(projection?.proposalHashes, ["aaaaaaaaaaaaaaaa"]);
+  assert.equal(projectRustQualityFromPacket(packet(9, payload, futureTail)), null);
 
   const empty = projectRustQualityFromPacket(
     packet(8, {
@@ -139,6 +135,35 @@ test("legacy MOTN packets remain unchanged and future additive packet bytes are 
     }),
   );
   assert.deepEqual(empty?.proposalHashes, []);
+});
+
+test("native projection ignores pseudo QLT1 markers outside a legal tail envelope", () => {
+  const fakePayload = encoder.encode(JSON.stringify({
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [{ proposalId: "fake", contentHash: "bbbbbbbbbbbbbbbb" }],
+  }));
+  const pseudoMarker = new Uint8Array(8 + fakePayload.length + 3);
+  const pseudoView = new DataView(pseudoMarker.buffer);
+  pseudoMarker.set(encoder.encode("QLT1"), 0);
+  pseudoView.setUint32(4, fakePayload.length, true);
+  pseudoMarker.set(fakePayload, 8);
+  pseudoMarker.set(encoder.encode("xyz"), 8 + fakePayload.length);
+  assert.equal(projectRustQualityFromPacket(packet(8, undefined, pseudoMarker)), null);
+
+  const realPayload = {
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [{ proposalId: "real", contentHash: "cccccccccccccccc" }],
+  };
+  const prefixWithPseudoMarker = packet(8, undefined, pseudoMarker);
+  const realBytes = encoder.encode(JSON.stringify(realPayload));
+  const bytes = new Uint8Array(prefixWithPseudoMarker.length + 8 + realBytes.length);
+  bytes.set(prefixWithPseudoMarker);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, bytes.length, true);
+  bytes.set(encoder.encode("QLT1"), prefixWithPseudoMarker.length);
+  view.setUint32(prefixWithPseudoMarker.length + 4, realBytes.length, true);
+  bytes.set(realBytes, prefixWithPseudoMarker.length + 8);
+  assert.deepEqual(projectRustQualityFromPacket(bytes)?.proposalIds, ["real"]);
 });
 
 test("malformed or hashless QLT1 is not projected into a misleading host object", () => {

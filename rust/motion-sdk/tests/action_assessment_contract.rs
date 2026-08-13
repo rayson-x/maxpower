@@ -309,6 +309,11 @@ fn all_twelve_personal_actions_publish_phase_and_equipment_contracts() {
             "wrong equipment role for {}",
             expected.action_id
         );
+        assert!(
+            !actual.accepted_equipment.is_empty(),
+            "{} must declare at least one accepted profile equipment token",
+            expected.action_id
+        );
         assert_eq!(
             actual.default_capability, expected.capability,
             "wrong capability for {}",
@@ -430,6 +435,62 @@ fn pull_up_is_observation_only_for_the_annotated_rear_left_view() {
 }
 
 #[test]
+fn built_in_lat_pulldown_identity_normalizes_kebab_case_view() {
+    let proposal =
+        proposal_for_identity("lat-pulldown/rear-left-45/bilateral/cable/v1", Vec::new());
+
+    assert_eq!(proposal.action_id, "lat_pulldown");
+    assert_eq!(proposal.capture_position, "rearLeft45");
+    assert_eq!(proposal.anatomical_side, None);
+    assert_eq!(proposal.equipment_role, "cable_handle_not_observed");
+    assert_eq!(proposal.capability, AssessmentCapability::PhaseSupported);
+}
+
+#[test]
+fn built_in_profile_with_mismatched_equipment_is_unsupported() {
+    let proposal = proposal_for_identity(
+        "barbell-bench-press/front/bilateral/dumbbell/v1",
+        Vec::new(),
+    );
+
+    assert_eq!(proposal.capability, AssessmentCapability::Unsupported);
+    assert_eq!(proposal.equipment_role, "unsupported");
+    assert_eq!(
+        conclusion(&proposal, AssessmentDimension::PhaseControl).state,
+        AssessmentConclusionState::CannotJudge,
+    );
+}
+
+#[test]
+fn source_independent_bench_profiles_accept_the_declared_barbell_equipment() {
+    for view in ["front", "frontLeft45", "frontRight45"] {
+        let proposal = proposal_for_identity(
+            &format!(
+                "barbell_bench_press/{view}/bilateral/barbell/builtin-source-independent-provisional-v1"
+            ),
+            Vec::new(),
+        );
+
+        assert_eq!(proposal.action_id, "barbell_bench_press");
+        assert_eq!(proposal.capture_position, view);
+        assert_eq!(proposal.equipment_role, "barbell_axis_phase_and_path");
+        assert_eq!(proposal.capability, AssessmentCapability::QualitySupported);
+    }
+}
+
+#[test]
+fn observed_profile_without_equipment_token_never_invents_equipment_semantics() {
+    let proposal = proposal_for_identity_with_maturity(
+        "barbell-bench-press/front/bilateral/v1",
+        "observed",
+        Vec::new(),
+    );
+
+    assert_eq!(proposal.capability, AssessmentCapability::Unsupported);
+    assert_eq!(proposal.equipment_role, "unsupported");
+}
+
+#[test]
 fn unilateral_cable_lateral_raise_requires_anatomical_side_before_phase() {
     for side in ["left", "right"] {
         let proposal = proposal_for(
@@ -528,6 +589,28 @@ fn proposal_for(
     anatomical_side: &str,
     findings: Vec<RepObservationFinding>,
 ) -> RustQualityProposal {
+    let equipment = action_assessment_contract(action_id)
+        .and_then(|contract| contract.accepted_equipment.first())
+        .copied()
+        .unwrap_or("unknown");
+    proposal_for_identity(
+        &format!("{action_id}/{view}/{anatomical_side}/{equipment}/action-assessment-contract-v1"),
+        findings,
+    )
+}
+
+fn proposal_for_identity(
+    profile_identity: &str,
+    findings: Vec<RepObservationFinding>,
+) -> RustQualityProposal {
+    proposal_for_identity_with_maturity(profile_identity, "provisional", findings)
+}
+
+fn proposal_for_identity_with_maturity(
+    profile_identity: &str,
+    profile_maturity: &'static str,
+    findings: Vec<RepObservationFinding>,
+) -> RustQualityProposal {
     let rep = SealedRep {
         rep_id: 1,
         start_frame_id: 10,
@@ -539,11 +622,9 @@ fn proposal_for(
         end_timestamp_ms: 3_000,
         revision: 0,
         canonical_slice_hash: 0x0123_4567_89ab_cdef,
-        profile_identity: format!(
-            "{action_id}/{view}/{anatomical_side}/fixture/action-assessment-contract-v1"
-        ),
+        profile_identity: profile_identity.into(),
         profile_hash: 0xfedc_ba98_7654_3210,
-        profile_maturity: "provisional",
+        profile_maturity,
         quality_verdict: None,
         recovered_across_gap: false,
         disposition: RepDisposition::Confirmed,

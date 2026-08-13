@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
   RustCanonicalWasmSession,
   instantiateRustMotionWasm,
+  type RustEquipmentObservation,
   type RustExerciseProfileData,
 } from "../../src/motion/rustCanonicalWasm";
 import {
@@ -18,7 +18,24 @@ import {
   type TruthFreePlan,
   type FrozenPredictionRun,
 } from "./blindEvaluation";
-import { anatomicalSideForContext, routeSourceFramesOnce } from "./rustFullDataProposalRunner";
+import { routeSourceFramesOnce } from "./rustFullDataProposalRunner";
+import {
+  equipmentFramesByTimestamp,
+  loadBenchEquipmentSidecar,
+  loadInputCatalog,
+  loadRawObservationSidecar,
+  loadSourceIndependentBenchProfiles,
+  measuredAxisToEquipmentObservation,
+  normalizeSourceCaptureId,
+  pinInputBytes,
+  rawFrameCandidates,
+  rawObservationDerivativeId,
+  sha256,
+  submitRawFrameToRust,
+  type BenchEquipmentFrame,
+  type InputAssetPin,
+  type SourceIndependentBenchProfileEntry,
+} from "./runnerInputs";
 
 interface ProfileEntry {
   readonly exerciseId: string;
@@ -34,64 +51,90 @@ interface ProfileArtifact {
   readonly profiles: readonly ProfileEntry[];
 }
 
-interface CanonicalPose {
-  readonly timestampMs: number;
-  readonly landmarks: readonly Readonly<{
-    x: number | null;
-    y: number | null;
-    z: number | null;
-    visibility: number | null;
-  }>[];
-}
-
-interface CanonicalCapture {
-  readonly sourceCaptureId: string;
-  readonly image?: Readonly<{ widthPx?: number; heightPx?: number; mirrored?: boolean }>;
-  readonly poses: readonly CanonicalPose[];
-}
-
-interface CanonicalCorpus {
-  readonly captures: Readonly<Record<string, CanonicalCapture>>;
-}
-
-export function actualProfileBundles(artifact: ProfileArtifact): readonly ProfileBundle[] {
-  return Object.freeze(artifact.profiles.map((entry) => {
+export function actualProfileBundles(
+  artifact: ProfileArtifact,
+  independentBench: readonly SourceIndependentBenchProfileEntry[] = [],
+): readonly ProfileBundle[] {
+  const fitted = artifact.profiles.map((entry) => {
     const bundleId = profileBundleId(entry);
+    const fittedSourceIds = uniqueStrings((entry.evidence?.sourceCaptureIds ?? [])
+      .map(normalizeSourceCaptureId));
     return Object.freeze({
       bundleId,
       bundleHash: sha256(stableStringify(entry)),
       actionId: entry.exerciseId,
       capturePosition: entry.capturePosition,
       capability: capabilityFor(entry.exerciseId),
-      fittedSourceIds: Object.freeze([...(entry.evidence?.sourceCaptureIds ?? [])]),
-      fittedDerivativeSourceIds: Object.freeze([]),
+      fittedSourceIds,
+      fittedDerivativeSourceIds: Object.freeze(fittedSourceIds.map(rawObservationDerivativeId)),
       versions: Object.freeze({
         profile: entry.profile.identity,
         rulePack: "personal-motion-quality-rules/v1",
       }),
     });
+  });
+  const sourceIndependent = independentBench.map((entry) => Object.freeze({
+    bundleId: independentBenchBundleId(entry),
+    bundleHash: sha256(stableStringify(serializeProfile(entry.profile))),
+    actionId: entry.exerciseId,
+    capturePosition: entry.capturePosition,
+    capability: "quality_supported" as const,
+    fittedSourceIds: Object.freeze([]),
+    fittedDerivativeSourceIds: Object.freeze([]),
+    versions: Object.freeze({
+      profile: entry.profile.identity,
+      rulePack: "personal-motion-quality-rules/v1",
+    }),
   }));
+  return Object.freeze([...sourceIndependent, ...fitted]);
 }
 
 export async function writeTruthFreeBlindPlan(input: Readonly<{
   datasetPath: string;
   profileArtifactPath: string;
+  sourceIndependentBenchProfilePath: string;
+  governanceInputCatalogPath: string;
   outputPath: string;
   seed: string;
   runId: string;
-}>): Promise<Readonly<TruthFreePlan>> {
-  const [datasetBytes, profileBytes] = await Promise.all([
+}>): Promise<Readonly<TruthFreePlan> & Readonly<Record<string, unknown>>> {
+  const catalogLoaded = await loadInputCatalog(input.governanceInputCatalogPath);
+  const [datasetBytes, profileBytes, independentBench] = await Promise.all([
     readFile(resolve(input.datasetPath)),
     readFile(resolve(input.profileArtifactPath)),
+    loadSourceIndependentBenchProfiles(input.sourceIndependentBenchProfilePath, catalogLoaded.value),
   ]);
   const dataset = JSON.parse(datasetBytes.toString("utf8")) as PersonalGoldenDataset;
   const artifact = JSON.parse(profileBytes.toString("utf8")) as ProfileArtifact;
-  const plan = buildTruthFreePlan(dataset, actualProfileBundles(artifact), {
+  const derivativeSourceIdsBySource = Object.fromEntries(dataset.records.map((record) => {
+    const sourceCaptureId = normalizeSourceCaptureId(record.sourceCaptureId ?? record.captureId);
+    return [sourceCaptureId, [rawObservationDerivativeId(sourceCaptureId)]];
+  }));
+  const plan = buildTruthFreePlan(dataset, actualProfileBundles(artifact, independentBench.value), {
     seed: input.seed,
     runId: input.runId,
+    derivativeSourceIdsBySource,
   });
-  await writeFile(resolve(input.outputPath), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
-  return plan;
+  const { planDigest: _oldDigest, ...planSemantic } = plan;
+  const inputAssets = uniquePins([
+    catalogLoaded.pin,
+    pinInputBytes(catalogLoaded.value, "humanRanges", input.datasetPath, datasetBytes),
+    pinInputBytes(catalogLoaded.value, "profileArtifact", input.profileArtifactPath, profileBytes),
+    independentBench.pin,
+  ]);
+  const enrichedSemantic = {
+    ...planSemantic,
+    reproducibility: {
+      inputAssets,
+      inputAssetManifestSha256: sha256(stableStringify(inputAssets)),
+    },
+  };
+  const enriched = deepFreeze({
+    ...enrichedSemantic,
+    planDigest: sha256(stableStringify(enrichedSemantic)),
+  }) as Readonly<TruthFreePlan> & Readonly<Record<string, unknown>>;
+  await writeFile(resolve(input.outputPath), `${JSON.stringify(enriched, null, 2)}\n`, "utf8");
+  return enriched;
 }
 
 /**
@@ -100,38 +143,63 @@ export async function writeTruthFreeBlindPlan(input: Readonly<{
  */
 export async function runFrozenBlindPlan(input: Readonly<{
   planPath: string;
-  canonicalCorpusPath: string;
+  rawObservationRoot: string;
+  benchEquipmentObservationRoot: string;
   profileArtifactPath: string;
+  sourceIndependentBenchProfilePath: string;
+  governanceInputCatalogPath: string;
   wasmPath: string;
   outputPath: string;
-}>): Promise<ReturnType<typeof freezePredictions>> {
-  const [planBytes, corpusBytes, profileBytes, wasmBytes] = await Promise.all([
+}>): Promise<Readonly<FrozenPredictionRun> & Readonly<Record<string, unknown>>> {
+  const catalogLoaded = await loadInputCatalog(input.governanceInputCatalogPath);
+  const [planBytes, profileBytes, wasmBytes, independentBench] = await Promise.all([
     readFile(resolve(input.planPath)),
-    readFile(resolve(input.canonicalCorpusPath)),
     readFile(resolve(input.profileArtifactPath)),
     readFile(resolve(input.wasmPath)),
+    loadSourceIndependentBenchProfiles(input.sourceIndependentBenchProfilePath, catalogLoaded.value),
   ]);
   const plan = JSON.parse(planBytes.toString("utf8")) as TruthFreePlan;
-  const corpus = JSON.parse(corpusBytes.toString("utf8")) as CanonicalCorpus;
   const artifact = JSON.parse(profileBytes.toString("utf8")) as ProfileArtifact;
-  const captures = new Map(Object.values(corpus.captures).map((capture) => [
-    capture.sourceCaptureId,
-    capture,
-  ]));
-  const profilesByBundleId = new Map(artifact.profiles.map((entry) => [
+  const profilesByBundleId = new Map<string, RustExerciseProfileData | ProfileEntry["profile"]>(artifact.profiles.map((entry) => [
     profileBundleId(entry),
     entry.profile,
   ]));
+  for (const entry of independentBench.value) {
+    profilesByBundleId.set(independentBenchBundleId(entry), entry.profile);
+  }
+  const inputAssetPins: InputAssetPin[] = [
+    catalogLoaded.pin,
+    pinInputBytes(catalogLoaded.value, "blindPlan", input.planPath, planBytes),
+    pinInputBytes(catalogLoaded.value, "profileArtifact", input.profileArtifactPath, profileBytes),
+    pinInputBytes(catalogLoaded.value, "rustWasm", input.wasmPath, wasmBytes),
+    independentBench.pin,
+  ];
   const predictions: InjectedContextPrediction[] = [];
   for (const source of plan.sources) {
-    const capture = captures.get(source.sourceCaptureId);
-    if (!capture) throw new Error(`${source.sourceCaptureId}: canonical stream missing`);
-    const routed = routeSourceFramesOnce(capture.poses, source.contexts.map((context) => ({
+    const raw = await loadRawObservationSidecar(
+      input.rawObservationRoot,
+      source.sourceCaptureId,
+      catalogLoaded.value,
+    );
+    inputAssetPins.push(raw.pin);
+    const hasBench = source.contexts.some((context) => context.actionId === "barbell_bench_press");
+    const benchEquipment = hasBench
+      ? await loadBenchEquipmentSidecar(
+        input.benchEquipmentObservationRoot,
+        source.sourceCaptureId,
+        catalogLoaded.value,
+      )
+      : null;
+    if (benchEquipment) inputAssetPins.push(benchEquipment.pin);
+    const benchEquipmentByTimestamp = benchEquipment
+      ? equipmentFramesByTimestamp(benchEquipment.value)
+      : new Map<number, BenchEquipmentFrame>();
+    const routed = routeSourceFramesOnce(raw.value.frames, source.contexts.map((context) => ({
       captureId: context.contextId,
       startMs: context.inputWindow.fromTimestampMs,
       endMs: context.inputWindow.untilTimestampMs,
     })));
-    const framesByContext = new Map<string, CanonicalPose[]>();
+    const framesByContext = new Map<string, typeof raw.value.frames[number][]>();
     for (const entry of routed) {
       const rows = framesByContext.get(entry.captureId) ?? [];
       rows.push(entry.frame);
@@ -141,50 +209,33 @@ export async function runFrozenBlindPlan(input: Readonly<{
       const frames = framesByContext.get(context.contextId) ?? [];
       if (frames.length === 0) throw new Error(`${context.contextId}: no causal input frames`);
       const timestamps = frames.map((frame) => Math.round(frame.timestampMs));
-      if (!context.bundle) {
-        predictions.push({
-          runKind: "blind_evaluation",
-          sourceCaptureId: source.sourceCaptureId,
-          contextId: context.contextId,
-          processing: {
-            chronologicalMonotonic: true,
-            singlePass: true,
-            sourceTimestampsMs: timestamps,
-          },
-          packetHash: sha256(stableStringify({ context: context.contextId, unsupported: true, timestamps })),
-          proposalHash: sha256("[]"),
-          versions: {
-            visualModel: "client-halpe26-canonical-observation-v1",
-            rustEngine: "not_run_no_legal_source_excluded_profile",
-            packetSchema: "MOTN/1.8+QLT1",
-            profileBundle: "none",
-            rulePack: "none",
-          },
-          reps: [],
-          qualityConclusions: [],
-        });
-        continue;
+      const serialized = context.bundle
+        ? profilesByBundleId.get(context.bundle.bundleId)
+        : null;
+      if (context.bundle && !serialized) {
+        throw new Error(`${context.contextId}: planned profile bundle missing`);
       }
-      const serialized = profilesByBundleId.get(context.bundle.bundleId);
-      if (!serialized) throw new Error(`${context.contextId}: planned profile bundle missing`);
-      const profile = {
-        ...serialized,
-        contentHash: BigInt(serialized.contentHash),
-      } as RustExerciseProfileData;
       const wasm = await instantiateRustMotionWasm(wasmBytes);
       const motion = new RustCanonicalWasmSession({
         sequenceId: `${plan.runId}:${context.contextId}`,
         schema: "halpe26",
         image: {
-          widthPx: capture.image?.widthPx ?? 1280,
-          heightPx: capture.image?.heightPx ?? 720,
-          mirrored: capture.image?.mirrored ?? false,
+          widthPx: raw.value.source.widthPx,
+          heightPx: raw.value.source.heightPx,
+          mirrored: false,
           rotationDegrees: 0,
         },
         stabilization: "fusion",
         setLifecycleMode: "preview",
       }, wasm);
-      motion.installExerciseProfileData(profile);
+      if (serialized) {
+        motion.installExerciseProfileData({
+          ...serialized,
+          contentHash: typeof serialized.contentHash === "bigint"
+            ? serialized.contentHash
+            : BigInt(serialized.contentHash),
+        } as RustExerciseProfileData);
+      }
       motion.beginSet();
       const reps = new Map<string, (typeof motion.lastCompletedReps)[number]>();
       const proposals = new Map<string, (typeof motion.lastQualityProposals)[number]>();
@@ -193,20 +244,24 @@ export async function runFrozenBlindPlan(input: Readonly<{
         for (const proposal of motion.lastQualityProposals) proposals.set(proposal.proposalId, proposal);
       };
       for (const frame of frames) {
-        motion.process({
-          timestampMs: frame.timestampMs,
-          landmarks: frame.landmarks.map((point) => ({
-            x: finiteOrZero(point.x),
-            y: finiteOrZero(point.y),
-            z: finiteOrZero(point.z),
-            visibility: finiteOrZero(point.visibility),
-          })),
-          worldLandmarks: [],
-        });
+        const timestampMs = Math.round(frame.timestampMs);
+        const axisFrame = context.actionId === "barbell_bench_press"
+          ? benchEquipmentByTimestamp.get(timestampMs)
+          : undefined;
+        const equipment: readonly RustEquipmentObservation[] = measuredAxisToEquipmentObservation(
+          axisFrame?.axis ?? null,
+          frame.frameNumber + 1,
+        );
+        submitRawFrameToRust(motion, frame, equipment);
         collect();
       }
       motion.finishSet();
       collect();
+      const finalPacket = motion.lastDecodedPacket;
+      if (!finalPacket) throw new Error(`${context.contextId}: current Rust packet missing`);
+      if (!context.bundle && (reps.size !== 0 || proposals.size !== 0)) {
+        throw new Error(`${context.contextId}: unsupported no-profile run emitted reps`);
+      }
       const injectedReps = [...reps.values()].map((rep) => ({
         repId: rep.repId.toString(),
         startMs: Number(rep.startTimestampMs),
@@ -240,11 +295,11 @@ export async function runFrozenBlindPlan(input: Readonly<{
         })),
         proposalHash: sha256(stableStringify(proposalJson)),
         versions: {
-          visualModel: "client-halpe26-canonical-observation-v1",
-          rustEngine: "maxpower-motion-sdk/MOTN-1.8-QLT1",
-          packetSchema: "MOTN/1.8+QLT1",
-          profileBundle: context.bundle.profileVersion,
-          rulePack: context.bundle.rulePackVersion,
+          visualModel: raw.value.inference.pipeline,
+          rustEngine: finalPacket.lineage.algorithmVersion,
+          packetSchema: `MOTN/${finalPacket.lineage.contract.major}.${finalPacket.lineage.contract.minor}+QLT1`,
+          profileBundle: context.bundle?.profileVersion ?? "none",
+          rulePack: context.bundle?.rulePackVersion ?? "none",
         },
         reps: injectedReps,
         qualityConclusions: quality,
@@ -253,8 +308,21 @@ export async function runFrozenBlindPlan(input: Readonly<{
     }
   }
   const frozen = freezePredictions(plan, predictions);
-  await writeFile(resolve(input.outputPath), `${JSON.stringify(frozen, null, 2)}\n`, "utf8");
-  return frozen;
+  const { frozenDigest: _oldDigest, ...frozenSemantic } = frozen;
+  const inputAssets = uniquePins(inputAssetPins);
+  const enrichedSemantic = {
+    ...frozenSemantic,
+    reproducibility: {
+      inputAssets,
+      inputAssetManifestSha256: sha256(stableStringify(inputAssets)),
+    },
+  };
+  const enriched = deepFreeze({
+    ...enrichedSemantic,
+    frozenDigest: sha256(stableStringify(enrichedSemantic)),
+  }) as Readonly<FrozenPredictionRun> & Readonly<Record<string, unknown>>;
+  await writeFile(resolve(input.outputPath), `${JSON.stringify(enriched, null, 2)}\n`, "utf8");
+  return enriched;
 }
 
 /** Loads formal truth only after the frozen-before-truth artifact exists. */
@@ -284,8 +352,26 @@ function profileBundleId(entry: ProfileEntry): string {
   return `${entry.exerciseId}/${entry.capturePosition}/${entry.profile.identity}`;
 }
 
-function finiteOrZero(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+export function independentBenchBundleId(entry: SourceIndependentBenchProfileEntry): string {
+  return `0000-source-independent/${entry.capturePosition}/${entry.profile.identity}`;
+}
+
+function serializeProfile(profile: RustExerciseProfileData): Readonly<Record<string, unknown>> {
+  return { ...profile, contentHash: profile.contentHash.toString() };
+}
+
+function uniqueStrings(values: readonly string[]): readonly string[] {
+  return Object.freeze([...new Set(values)].sort());
+}
+
+function uniquePins(pins: readonly InputAssetPin[]): readonly InputAssetPin[] {
+  const byIdentity = new Map<string, InputAssetPin>();
+  for (const pin of pins) {
+    byIdentity.set(`${pin.assetId}\u0000${pin.path}\u0000${pin.sha256}`, pin);
+  }
+  return Object.freeze([...byIdentity.values()].sort((left, right) => (
+    left.assetId.localeCompare(right.assetId) || left.path.localeCompare(right.path)
+  )));
 }
 
 function stableStringify(value: unknown): string {
@@ -297,8 +383,12 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function sha256(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.values(value as Record<string, unknown>).forEach(deepFreeze);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 async function main(): Promise<void> {
@@ -307,6 +397,8 @@ async function main(): Promise<void> {
     await writeTruthFreeBlindPlan({
       datasetPath: "data/training/personal-golden-segmentation-v2.json",
       profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
+      sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+      governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
       outputPath: "data/workflows/motion-quality-review/blind-inference-pack-v1.json",
       seed: "personal-motion-quality-blind-v1-fixed-seed",
       runId: "personal-blind-rust-qlt1-v1",
@@ -316,8 +408,11 @@ async function main(): Promise<void> {
   if (mode === "infer") {
     await runFrozenBlindPlan({
       planPath: "data/workflows/motion-quality-review/blind-inference-pack-v1.json",
-      canonicalCorpusPath: "data/workflows/motion-profile/personal-halpe26-v1/run-2026-08-11/corpus/personal-rust-canonical-v2.json",
+      rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
+      benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
       profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
+      sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+      governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
       wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
       outputPath: "data/workflows/motion-quality-review/blind-predictions-before-truth-v1.json",
     });

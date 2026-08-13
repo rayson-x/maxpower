@@ -29,17 +29,16 @@ export function projectRustQualityFromPacket(
   if (major !== 1 || minor < 8 || declaredLength !== bytes.byteLength)
     return null;
 
-  for (
-    let offset = MOTN_HEADER_BYTES;
-    offset + 8 <= bytes.byteLength;
-    offset += 1
-  ) {
+  // QLT1 is an additive terminal envelope. Search only for candidates whose
+  // declared payload ends exactly at the MOTN boundary; markers embedded in
+  // core fields or followed by another extension are not quality envelopes.
+  for (let offset = bytes.byteLength - 8; offset >= MOTN_HEADER_BYTES; offset -= 1) {
     if (!isQltMarker(bytes, offset)) continue;
     const payloadLength = view.getUint32(offset + 4, true);
     if (payloadLength > MAX_QUALITY_PAYLOAD_BYTES) continue;
     const payloadStart = offset + 8;
     const payloadEnd = payloadStart + payloadLength;
-    if (!Number.isSafeInteger(payloadEnd) || payloadEnd > bytes.byteLength)
+    if (!Number.isSafeInteger(payloadEnd) || payloadEnd !== bytes.byteLength)
       continue;
 
     const projection = decodeQualityEnvelope(

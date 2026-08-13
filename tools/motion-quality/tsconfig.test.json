@@ -11,5 +11,12 @@
     "noEmitOnError": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["./blindEvaluation.ts", "./blindEvaluation.test.ts"]
+  "include": [
+    "./blindEvaluation.ts",
+    "./blindEvaluation.test.ts",
+    "./actionContractCatalog.ts",
+    "./actionContractCatalog.test.ts",
+    "./fusionAblation.ts",
+    "./fusionAblation.test.ts"
+  ]
 }

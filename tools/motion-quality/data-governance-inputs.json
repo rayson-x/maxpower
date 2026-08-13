@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "maxpower-motion-quality-input-catalog/v1",
+  "catalogId": "motion-quality-runner-inputs-v1",
+  "assets": {
+    "humanRanges": {
+      "assetId": "personal-human-rep-ranges-v2",
+      "admission": "label_allowed",
+      "authority": "user_reviewed",
+      "groupKey": "sourceCaptureId"
+    },
+    "rawHalpe26": {
+      "assetId": "personal-native-rtmpose-halpe26-observations",
+      "admission": "feature_only",
+      "authority": "model_generated",
+      "groupKey": "sourceCaptureId"
+    },
+    "benchBarbellAxis": {
+      "assetId": "barbell-geometry-alignment-prototype",
+      "admission": "proposal_only",
+      "authority": "model_generated",
+      "groupKey": "sourceCaptureId"
+    },
+    "profileArtifact": {
+      "assetId": "client-single-pass-predictions-and-agent-output",
+      "admission": "evaluation_only",
+      "authority": "frozen_prediction_or_report",
+      "groupKey": "sourceCaptureId"
+    },
+    "blindPlan": {
+      "assetId": "client-single-pass-predictions-and-agent-output",
+      "admission": "evaluation_only",
+      "authority": "frozen_prediction_or_report",
+      "groupKey": "sourceCaptureId"
+    },
+    "rustWasm": {
+      "assetId": "maxpower-motion-sdk-wasm",
+      "admission": "protected",
+      "authority": "application_runtime",
+      "groupKey": "not_applicable"
+    },
+    "sourceIndependentBenchProfile": {
+      "assetId": "source-independent-bench-profile-config",
+      "admission": "reference_only",
+      "authority": "source_independent_rule_config",
+      "groupKey": "not_applicable"
+    },
+    "fullDataRun": {
+      "assetId": "client-single-pass-predictions-and-agent-output",
+      "admission": "evaluation_only",
+      "authority": "frozen_prediction_or_report",
+      "groupKey": "sourceCaptureId"
+    }
+  }
+}

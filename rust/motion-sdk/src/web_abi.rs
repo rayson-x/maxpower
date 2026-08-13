@@ -596,8 +596,16 @@ pub extern "C" fn motion_sdk_begin_visual_equipment_frame(
     let Some(expected) = expected else {
         return -2;
     };
-    if runtime.engine.is_none()
-        || width < 8
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    // Visual equipment geometry uses the COCO-17 prefix shared by Halpe-26.
+    // BlazePose-33 has different shoulder/wrist indices and must never enter
+    // this path implicitly.
+    if runtime.pose_schema != super::PoseSchemaId::Halpe26 {
+        return -3;
+    }
+    if width < 8
         || height < 8
         || expected != length as usize
         || expected > 1280 * 1280
@@ -843,13 +851,17 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     if runtime.visual_equipment_processed && !runtime.visual_luma.is_empty() {
         let visual_subjects = selected.as_ref().map_or(&[][..], std::slice::from_ref);
         let mut visual_tracker = std::mem::take(&mut runtime.visual_equipment_tracker);
-        let axis = visual_tracker.process(
+        let axis = match visual_tracker.process(
+            runtime.pose_schema,
             &runtime.visual_luma,
             runtime.visual_width,
             runtime.visual_height,
             timestamp_ms,
             visual_subjects,
-        );
+        ) {
+            Ok(axis) => axis,
+            Err(super::VisualEquipmentError::UnsupportedPoseSchema) => return -4,
+        };
         runtime.visual_equipment_tracker = visual_tracker;
         runtime.visual_barbell_axis = axis;
         if let Some(observation) =

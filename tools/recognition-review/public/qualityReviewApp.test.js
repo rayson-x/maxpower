@@ -5,9 +5,32 @@ const test = require("node:test");
 
 const {
   createWorkspace,
+  dimensionLabel,
   frameAt,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
+
+test("current Rust eight-dimension keys render with Chinese review labels", () => {
+  assert.deepEqual(Object.fromEntries([
+    "task_completion",
+    "range_of_motion",
+    "phase_control",
+    "support_stability",
+    "bilateral_coordination",
+    "trajectory_control",
+    "standard_variant_compatibility",
+    "observation_confidence",
+  ].map((key) => [key, dimensionLabel(key)])), {
+    task_completion: "动作任务完成",
+    range_of_motion: "行程与端点",
+    phase_control: "阶段控制",
+    support_stability: "支撑稳定",
+    bilateral_coordination: "双侧协调",
+    trajectory_control: "轨迹控制",
+    standard_variant_compatibility: "标准变式兼容性",
+    observation_confidence: "观测可信度",
+  });
+});
 
 test("workspace keeps proposals frozen and exports endpoint and conclusion decisions only on demand", () => {
   const release = fixtureRelease();

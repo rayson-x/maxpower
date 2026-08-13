@@ -6,7 +6,7 @@
 
 use crate::{
     EquipmentAttributes, EquipmentKind, EquipmentObservation, EquipmentOcclusion, EquipmentSource,
-    NormalizedRect, PoseCandidate,
+    NormalizedRect, PoseCandidate, PoseSchemaId,
 };
 
 const EDGE_THRESHOLD: i16 = 26;
@@ -17,6 +17,11 @@ pub enum BarbellAxisSource {
     Measured,
     Fused,
     Predicted,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VisualEquipmentError {
+    UnsupportedPoseSchema,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -33,10 +38,11 @@ pub struct BarbellAxisObservation {
 }
 
 impl BarbellAxisObservation {
-    /// Predicted geometry is private continuity/display state and must never be
-    /// published as a measured equipment proposal.
+    /// Only image-measured geometry is an independent equipment observation.
+    /// Pose-derived fusion and prediction remain private continuity/display
+    /// state so one pose source cannot be counted twice as pose + equipment.
     pub fn equipment_observation(self) -> Option<EquipmentObservation> {
-        (self.source != BarbellAxisSource::Predicted).then(|| EquipmentObservation {
+        (self.source == BarbellAxisSource::Measured).then(|| EquipmentObservation {
             proposal_id: self.proposal_id,
             kind: EquipmentKind::BarbellShaft,
             bbox: NormalizedRect::new(
@@ -97,6 +103,21 @@ pub struct BarbellAxisVisualTracker {
 
 impl BarbellAxisVisualTracker {
     pub fn process(
+        &mut self,
+        schema: PoseSchemaId,
+        luma: &[u8],
+        width: usize,
+        height: usize,
+        timestamp_ms: u64,
+        subjects: &[PoseCandidate],
+    ) -> Result<Option<BarbellAxisObservation>, VisualEquipmentError> {
+        if schema != PoseSchemaId::Halpe26 {
+            return Err(VisualEquipmentError::UnsupportedPoseSchema);
+        }
+        Ok(self.process_halpe26(luma, width, height, timestamp_ms, subjects))
+    }
+
+    fn process_halpe26(
         &mut self,
         luma: &[u8],
         width: usize,

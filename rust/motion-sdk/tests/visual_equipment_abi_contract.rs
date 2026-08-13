@@ -2,16 +2,35 @@ use maxpower_motion_sdk::web_abi::{
     motion_sdk_begin_candidate, motion_sdk_begin_multi, motion_sdk_begin_visual_equipment_frame,
     motion_sdk_close, motion_sdk_commit_candidate, motion_sdk_copy_visual_equipment_luma,
     motion_sdk_detect_barbell_axis, motion_sdk_process_multi, motion_sdk_reset,
-    motion_sdk_set_landmark, motion_sdk_visual_barbell_axis_number,
+    motion_sdk_set_landmark, motion_sdk_set_pose_schema, motion_sdk_visual_barbell_axis_number,
     motion_sdk_visual_barbell_axis_source,
 };
+use std::sync::Mutex;
 
 const WIDTH: usize = 640;
 const HEIGHT: usize = 360;
+static ABI_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn visual_equipment_abi_rejects_blazepose_before_allocating_a_coco_indexed_frame() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(WIDTH as u32, HEIGHT as u32, 1), 0);
+    assert_eq!(
+        motion_sdk_begin_visual_equipment_frame(
+            WIDTH as u32,
+            HEIGHT as u32,
+            (WIDTH * HEIGHT) as u32,
+        ),
+        -3,
+    );
+    assert_eq!(motion_sdk_close(), 0);
+}
 
 #[test]
 fn native_visual_abi_runs_the_shared_detector_before_the_same_multi_frame() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
     assert_eq!(motion_sdk_reset(WIDTH as u32, HEIGHT as u32, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
     assert_eq!(motion_sdk_begin_multi(1_000, 0), 0);
     assert_eq!(
         motion_sdk_begin_candidate(1, 0, 0.2, 0.15, 0.6, 0.82, 0.3, 0.3, 0.3, 26),

@@ -143,6 +143,9 @@ pub struct ActionAssessmentContract {
     pub first_phase: &'static str,
     pub second_phase: &'static str,
     pub equipment_role: &'static str,
+    /// Exact equipment tokens accepted in the five-part recognition profile
+    /// identity (`action/view/laterality/equipment/version`).
+    pub accepted_equipment: &'static [&'static str],
     pub default_capability: AssessmentCapability,
     pub capture_positions: &'static [&'static str],
     pub requires_anatomical_side: bool,
@@ -154,6 +157,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "eccentric",
         second_phase: "concentric",
         equipment_role: "barbell_axis_phase_and_path",
+        accepted_equipment: &["barbell"],
         default_capability: AssessmentCapability::QualitySupported,
         capture_positions: &["front", "frontLeft45", "frontRight45"],
         requires_anatomical_side: false,
@@ -163,6 +167,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "barbell_axis_phase_and_path",
+        accepted_equipment: &["barbell"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &[
             "front",
@@ -178,6 +183,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "machine_handle_not_observed",
+        accepted_equipment: &["machine"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["front", "frontRight45"],
         requires_anatomical_side: false,
@@ -187,6 +193,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "external_load_not_observed",
+        accepted_equipment: &["dumbbell"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["front"],
         requires_anatomical_side: false,
@@ -196,6 +203,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "eccentric",
         second_phase: "concentric",
         equipment_role: "not_applicable",
+        accepted_equipment: &["bodyweight"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["rearRight45"],
         requires_anatomical_side: false,
@@ -205,6 +213,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "cable_handle_not_observed",
+        accepted_equipment: &["cable"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["rear", "rearLeft45"],
         requires_anatomical_side: false,
@@ -214,6 +223,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "fixed_structure_not_tracked",
+        accepted_equipment: &["bodyweight", "pull_up_bar"],
         default_capability: AssessmentCapability::ObservationOnly,
         capture_positions: &["rearLeft45"],
         requires_anatomical_side: false,
@@ -223,6 +233,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "cable_handle_not_observed",
+        accepted_equipment: &["cable"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["frontLeft45", "rearLeft45", "right"],
         requires_anatomical_side: false,
@@ -232,6 +243,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "cable_handle_not_observed",
+        accepted_equipment: &["cable"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["frontLeft45", "frontRight45"],
         requires_anatomical_side: false,
@@ -241,6 +253,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "dumbbells_not_observed",
+        accepted_equipment: &["dumbbell"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["front"],
         requires_anatomical_side: false,
@@ -250,6 +263,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "external_load_not_observed",
+        accepted_equipment: &["dumbbell"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["front"],
         requires_anatomical_side: false,
@@ -259,6 +273,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         first_phase: "concentric",
         second_phase: "eccentric",
         equipment_role: "cable_handle_not_observed",
+        accepted_equipment: &["cable"],
         default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["frontLeft45", "rearRight45"],
         requires_anatomical_side: true,
@@ -280,7 +295,11 @@ pub fn resolve_action_capability(
     let Some(contract) = action_assessment_contract(action_id) else {
         return AssessmentCapability::Unsupported;
     };
-    if !contract.capture_positions.contains(&capture_position) {
+    let capture_position = normalize_capture_position(capture_position);
+    if !contract
+        .capture_positions
+        .contains(&capture_position.as_str())
+    {
         return AssessmentCapability::Unsupported;
     }
     if contract.requires_anatomical_side
@@ -296,11 +315,27 @@ pub fn build_quality_proposals(reps: &[SealedRep]) -> Vec<RustQualityProposal> {
 }
 
 fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
-    let (raw_action, capture_position, raw_side) = profile_context(&rep.profile_identity);
-    let action_id = normalize_action_id(raw_action);
+    let profile = profile_context(&rep.profile_identity);
+    let action_id = normalize_action_id(profile.action);
+    let capture_position = normalize_capture_position(profile.capture_position);
     let contract = action_assessment_contract(&action_id);
-    let anatomical_side = matches!(raw_side, "left" | "right").then_some(raw_side);
-    let capability = resolve_action_capability(&action_id, capture_position, anatomical_side);
+    let anatomical_side =
+        matches!(profile.laterality, "left" | "right").then_some(profile.laterality);
+    let profile_equipment = normalize_equipment(profile.equipment);
+    let equipment_matches = contract.is_some_and(|value| {
+        profile.complete
+            && !profile.version.trim().is_empty()
+            && value
+                .accepted_equipment
+                .contains(&profile_equipment.as_str())
+            && ((!value.requires_anatomical_side && profile.laterality == "bilateral")
+                || (value.requires_anatomical_side && anatomical_side.is_some()))
+    });
+    let capability = if equipment_matches {
+        resolve_action_capability(&action_id, &capture_position, anatomical_side)
+    } else {
+        AssessmentCapability::Unsupported
+    };
     let first_phase = contract.map_or("unknown_first_phase", |value| value.first_phase);
     let second_phase = contract.map_or("unknown_second_phase", |value| value.second_phase);
     let equipment_primary = rep
@@ -366,9 +401,10 @@ fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
         ),
         rep_id: rep.rep_id,
         action_id,
-        capture_position: capture_position.into(),
+        capture_position,
         anatomical_side: anatomical_side.map(str::to_owned),
         equipment_role: contract
+            .filter(|_| equipment_matches)
             .map_or("unsupported", |value| value.equipment_role)
             .into(),
         capability,
@@ -462,7 +498,11 @@ fn conclusion_for(
                     rep.start_timestamp_ms, rep.peak_timestamp_ms, rep.end_timestamp_ms
                 )],
                 reason: reason.map(str::to_owned),
-                confidence,
+                confidence: if state == AssessmentConclusionState::CannotJudge {
+                    0.0
+                } else {
+                    confidence
+                },
             }
         }
         AssessmentDimension::RangeOfMotion => {
@@ -574,7 +614,7 @@ fn cannot_judge(
     conclusion_id: String,
     dimension: AssessmentDimension,
     reason: &str,
-    confidence: f32,
+    _confidence: f32,
 ) -> QualityConclusion {
     QualityConclusion {
         conclusion_id,
@@ -583,7 +623,11 @@ fn cannot_judge(
         summary: "Cannot judge from the available visual evidence.".into(),
         evidence: Vec::new(),
         reason: Some(reason.into()),
-        confidence,
+        // `confidence` is the confidence of a positive visual claim.  A
+        // refusal has no positive claim to calibrate; publishing the parent
+        // Rep confidence here made review UIs look overconfident about a
+        // dimension for which Rust explicitly has no evidence.
+        confidence: 0.0,
     }
 }
 
@@ -613,13 +657,36 @@ fn proposal_confidence(rep: &SealedRep) -> f32 {
     confidence.clamp(0.0, 1.0)
 }
 
-fn profile_context(identity: &str) -> (&str, &str, &str) {
+struct ProfileContext<'a> {
+    action: &'a str,
+    capture_position: &'a str,
+    laterality: &'a str,
+    equipment: &'a str,
+    version: &'a str,
+    complete: bool,
+}
+
+fn profile_context(identity: &str) -> ProfileContext<'_> {
     let mut parts = identity.split('/');
-    (
-        parts.next().unwrap_or("unknown"),
-        parts.next().unwrap_or("unknown"),
-        parts.next().unwrap_or("unknown"),
-    )
+    let action = parts.next().unwrap_or("unknown");
+    let capture_position = parts.next().unwrap_or("unknown");
+    let laterality = parts.next().unwrap_or("unknown");
+    let equipment = parts.next().unwrap_or("unknown");
+    let version = parts.next().unwrap_or("");
+    let complete = !action.is_empty()
+        && !capture_position.is_empty()
+        && !laterality.is_empty()
+        && !equipment.is_empty()
+        && !version.is_empty()
+        && parts.next().is_none();
+    ProfileContext {
+        action,
+        capture_position,
+        laterality,
+        equipment,
+        version,
+        complete,
+    }
 }
 
 fn normalize_action_id(value: &str) -> String {
@@ -630,6 +697,33 @@ fn normalize_action_id(value: &str) -> String {
             "single_arm_cable_lateral_raise".into()
         }
         _ => normalized,
+    }
+}
+
+fn normalize_capture_position(value: &str) -> String {
+    match value
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['-', '_'], "")
+        .as_str()
+    {
+        "frontleft45" => "frontLeft45".into(),
+        "frontright45" => "frontRight45".into(),
+        "rearleft45" => "rearLeft45".into(),
+        "rearright45" => "rearRight45".into(),
+        "front" => "front".into(),
+        "rear" => "rear".into(),
+        "left" => "left".into(),
+        "right" => "right".into(),
+        _ => value.trim().into(),
+    }
+}
+
+fn normalize_equipment(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "dumbbells" => "dumbbell".into(),
+        "pullup_bar" => "pull_up_bar".into(),
+        normalized => normalized.into(),
     }
 }
 
@@ -734,13 +828,22 @@ mod tests {
     fn zero_duration_return_is_reviewable_but_never_claimed_as_a_complete_cycle() {
         let proposal = build_quality_proposal(&sealed_rep_with_timestamps(7_400, 8_100, 8_100));
         assert_eq!(proposal.endpoints.len(), 3);
-        assert!(proposal.conclusions.iter().filter(|conclusion| matches!(
-            conclusion.dimension,
-            AssessmentDimension::TaskCompletion
-                | AssessmentDimension::RangeOfMotion
-                | AssessmentDimension::PhaseControl
-                | AssessmentDimension::TrajectoryControl
-        )).all(|conclusion| conclusion.state == AssessmentConclusionState::CannotJudge));
-        assert!(proposal.conclusions.iter().all(|conclusion| conclusion.confidence <= 0.25));
+        assert!(
+            proposal
+                .conclusions
+                .iter()
+                .filter(|conclusion| matches!(
+                    conclusion.dimension,
+                    AssessmentDimension::TaskCompletion
+                        | AssessmentDimension::RangeOfMotion
+                        | AssessmentDimension::PhaseControl
+                        | AssessmentDimension::TrajectoryControl
+                ))
+                .all(|conclusion| conclusion.state == AssessmentConclusionState::CannotJudge)
+        );
+        assert!(proposal.conclusions.iter().all(|conclusion| {
+            conclusion.state != AssessmentConclusionState::CannotJudge
+                || conclusion.confidence == 0.0
+        }));
     }
 }

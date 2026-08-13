@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -6,8 +9,15 @@ import {
   buildReviewProposal,
   routeSourceFramesOnce,
 } from "./rustFullDataProposalRunner.js";
-import { actualProfileBundles } from "./rustBlindProposalRunner.js";
+import { actualProfileBundles, runFrozenBlindPlan } from "./rustBlindProposalRunner.js";
 import { validateSourceAwareLeakage } from "./blindEvaluation.js";
+import {
+  loadInputCatalog,
+  loadSourceIndependentBenchProfiles,
+  measuredAxisToEquipmentObservation,
+  rawObservationDerivativeId,
+  submitRawFrameToRust,
+} from "./runnerInputs.js";
 
 test("one source frame is routed to at most one exact context window", () => {
   const routed = routeSourceFramesOnce(
@@ -103,18 +113,124 @@ test("actual profile lineage excludes same-source bundles from blind inference",
         identity: "barbell_bench_press/front/bilateral/fixture/v1",
         contentHash: "1",
       } as never,
-      evidence: { sourceCaptureIds: ["source-a"] },
+      evidence: { sourceCaptureIds: ["source-a::left-window"] },
     }],
   });
   assert.equal(bundles.length, 1);
   assert.match(bundles[0].bundleHash, /^[a-f0-9]{64}$/u);
   assert.equal(bundles[0].capability, "quality_supported");
-  assert.deepEqual(validateSourceAwareLeakage("source-a", [], bundles[0]), {
+  assert.deepEqual(bundles[0].fittedSourceIds, ["source-a"]);
+  assert.deepEqual(bundles[0].fittedDerivativeSourceIds, [rawObservationDerivativeId("source-a")]);
+  assert.deepEqual(validateSourceAwareLeakage(
+    "source-a",
+    [rawObservationDerivativeId("source-a")],
+    bundles[0],
+  ), {
     valid: false,
-    conflictingIds: ["source-a"],
+    conflictingIds: ["personal-native-rtmpose-halpe26-observations/source-a", "source-a"],
   });
   assert.deepEqual(validateSourceAwareLeakage("source-b", [], bundles[0]), {
     valid: true,
     conflictingIds: [],
   });
+});
+
+test("measured axis becomes a geometry barbell observation submitted with raw candidates", () => {
+  const equipment = measuredAxisToEquipmentObservation({
+    source: "measured",
+    confidence: 0.92,
+    x1: 0.2,
+    y1: 0.4,
+    x2: 0.8,
+    y2: 0.41,
+    centerY: 0.405,
+  }, 7);
+  assert.equal(equipment.length, 1);
+  assert.equal(equipment[0].kind, "barbell_shaft");
+  assert.equal(equipment[0].source, "geometry");
+  assert.ok(Math.abs(equipment[0].bbox.width - 0.6) < 1e-12);
+
+  const calls: unknown[][] = [];
+  const frame = {
+    frameNumber: 3,
+    timestampMs: 100.4,
+    selectedBbox: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+    landmarks: Array.from({ length: 26 }, () => ({
+      x: 0.5, y: 0.5, z: null, visibility: 0.9,
+    })),
+  };
+  submitRawFrameToRust({
+    processCandidates(candidates, timestampMs, submittedEquipment) {
+      calls.push([candidates, timestampMs, submittedEquipment]);
+    },
+  }, frame, equipment);
+  assert.equal(calls.length, 1);
+  assert.equal((calls[0][0] as unknown[]).length, 1);
+  assert.equal(calls[0][1], 100);
+  assert.equal(calls[0][2], equipment);
+});
+
+test("source-independent bench identity keeps barbell in the equipment segment", async () => {
+  const catalog = await loadInputCatalog("tools/motion-quality/data-governance-inputs.json");
+  const loaded = await loadSourceIndependentBenchProfiles(
+    "tools/motion-quality/source-independent-bench-profiles.json",
+    catalog.value,
+  );
+  assert.equal(loaded.value.length, 3);
+  for (const entry of loaded.value) {
+    assert.deepEqual(entry.profile.identity.split("/"), [
+      "barbell_bench_press",
+      entry.capturePosition,
+      "bilateral",
+      "barbell",
+      "builtin-source-independent-provisional-v1",
+    ]);
+  }
+  const bundles = actualProfileBundles({ schemaVersion: "profiles/v1", profiles: [] }, loaded.value);
+  assert.equal(bundles.length, 3);
+  assert.ok(bundles.every((bundle) => bundle.fittedSourceIds.length === 0));
+});
+
+test("unsupported context still runs current Rust WASM over every raw frame without a profile", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "maxpower-motion-quality-"));
+  const planPath = join(directory, "plan.json");
+  const outputPath = join(directory, "prediction.json");
+  const sourceCaptureId = "1ffdb9483b96090c6caf40a2ca3e6c46";
+  await writeFile(planPath, JSON.stringify({
+    schemaVersion: "maxpower-motion-quality-truth-free-plan/v1",
+    runId: "unsupported-real-wasm-test",
+    runKind: "blind_evaluation",
+    seed: "test",
+    planDigest: "a".repeat(64),
+    sources: [{
+      sourceCaptureId,
+      videoRef: null,
+      contexts: [{
+        contextId: "unsupported-context",
+        actionId: "machine_chest_press",
+        capturePosition: "front",
+        capability: "unsupported",
+        bundle: null,
+        selection: "no_legal_bundle",
+        inputWindow: { fromTimestampMs: 0, untilTimestampMs: 500 },
+      }],
+    }],
+  }));
+  const frozen = await runFrozenBlindPlan({
+    planPath,
+    rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
+    benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
+    profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
+    sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
+    wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
+    outputPath,
+  });
+  const context = frozen.contexts[0];
+  assert.equal(context.capability, "unsupported");
+  assert.equal(context.versions.profileBundle, "none");
+  assert.doesNotMatch(context.versions.rustEngine, /not_run/u);
+  assert.match(context.versions.rustEngine, /rust-canonical/u);
+  assert.deepEqual(context.reps, []);
+  assert.equal(context.processing.sourceTimestampsMs.length, 6);
 });

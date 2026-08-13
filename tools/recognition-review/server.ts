@@ -46,7 +46,7 @@ export function createRecognitionReviewServer(options: RecognitionReviewServerOp
       const message = error instanceof Error ? error.message : String(error);
       const status = /not found/i.test(message)
         ? 404
-        : /stale/i.test(message)
+        : /stale|hash mismatch|tamper/i.test(message)
           ? 409
           : /invalid|requires|too long|unsupported/i.test(message)
             ? 400
@@ -426,6 +426,7 @@ async function readQualityReviewRelease(
   const frozenAt = requireJsonString(release.frozenAt, "quality review frozen timestamp");
   const runKind = requireJsonString(release.runKind, "quality review run kind");
   if (!Array.isArray(release.items)) throw new Error("quality review release items are invalid");
+  requireStableHash(release, "releaseHash", releaseHash, "quality review release", true);
 
   const itemIds = new Set<string>();
   const items = release.items.map((rawItem, index): QualityReviewReleaseItem => {
@@ -436,7 +437,8 @@ async function readQualityReviewRelease(
     const videoPath = requireJsonString(item.videoPath, `quality review item ${itemId} video path`);
     resolveQualityReviewVideoPath(options, videoPath);
     const proposal = requireJsonRecord(item.proposal, `quality review item ${itemId} proposal`);
-    requireJsonString(proposal.proposalHash, `quality review item ${itemId} proposal hash`);
+    const proposalHash = requireJsonString(proposal.proposalHash, `quality review item ${itemId} proposal hash`);
+    requireStableHash(proposal, "proposalHash", proposalHash, `quality review item ${itemId} proposal`);
     requireJsonRecord(proposal.lineage, `quality review item ${itemId} proposal lineage`);
     if (!Array.isArray(proposal.reps)) throw new Error(`quality review item ${itemId} proposal reps are invalid`);
     return { ...item, itemId, videoPath, proposal };
@@ -451,6 +453,32 @@ async function readQualityReviewRelease(
     runKind,
     items,
   };
+}
+
+function requireStableHash(
+  value: Record<string, unknown>,
+  hashField: string,
+  storedHash: string,
+  label: string,
+  requireSha256Prefix = false,
+): void {
+  const semantic = { ...value };
+  delete semantic[hashField];
+  const digest = createHash("sha256").update(stableStringify(semantic)).digest("hex");
+  const expected = requireSha256Prefix || storedHash.startsWith("sha256:")
+    ? `sha256:${digest}`
+    : digest;
+  if (storedHash !== expected) throw new Error(`${label} hash mismatch`);
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableStringify(child)}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function resolveQualityReviewVideoPath(
