@@ -20,6 +20,7 @@ import { createExpoSecureCredentialPort } from "../native";
 import { createMobileAccountRuntimeFactory, type MobileAccountRuntime } from "../runtime";
 import { ProductShell } from "./ProductShell";
 import { resolveMaxPowerDeepLink } from "./productNavigation";
+import { WebInteractionPreview, shouldShowWebInteractionPreview } from "./WebInteractionPreview";
 import { colors } from "./theme";
 
 type AuthComposition =
@@ -33,17 +34,18 @@ type AuthComposition =
 /** Mobile composition root: authentication owns whether an account runtime exists. */
 export function MaxPowerApp() {
   const [composition] = useState<AuthComposition>(createAuthComposition);
+  const [webInteractionPreview] = useState(shouldShowWebInteractionPreview);
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }}>
         <StatusBar barStyle="dark-content" />
-        {composition.status === "ready" ? (
+        {webInteractionPreview ? <WebInteractionPreview /> : composition.status === "ready" ? (
           <AuthRoot
             controller={composition.controller}
             socialAuthorization={composition.socialAuthorization}
-            renderProduct={({ accountId, runtime }) => (
-              <AuthenticatedProduct key={accountId} accountId={accountId} runtime={runtime} />
+            renderProduct={({ accountId, runtime, openAccountSettings }) => (
+              <AuthenticatedProduct key={accountId} accountId={accountId} runtime={runtime} onOpenAccountSettings={openAccountSettings} />
             )}
           />
         ) : (
@@ -57,7 +59,7 @@ export function MaxPowerApp() {
   );
 }
 
-function AuthenticatedProduct({ accountId, runtime }: { accountId: string; runtime: MobileAccountRuntime }) {
+function AuthenticatedProduct({ accountId, runtime, onOpenAccountSettings }: { accountId: string; runtime: MobileAccountRuntime; onOpenAccountSettings(): void }) {
   const [incomingDeepLink, setIncomingDeepLink] = useState<string>();
 
   useEffect(() => {
@@ -105,16 +107,21 @@ function AuthenticatedProduct({ accountId, runtime }: { accountId: string; runti
       incomingDeepLink={incomingDeepLink}
       productShellStateStore={runtime.productShellStateStore}
       initialProductShellRecovery={runtime.initialProductShellRecovery}
-      cloudProductData={runtime.cloudProductData}
+      confirmedProduct={runtime.confirmedProduct}
       cloudMediaLibrary={runtime.cloudMediaLibrary}
+      onTimelineChanged={runtime.settleTimelineRisk}
+      onOpenAccountSettings={onOpenAccountSettings}
     />
   );
 }
 
+// MVP clients talk directly to the deployed development server. Keep one
+// explicit endpoint instead of runtime environment or protocol switches.
+const MVP_API_ENDPOINT = "http://54.151.241.139:3000";
+
 function createAuthComposition(): AuthComposition {
   try {
-    const baseUrl = process.env.EXPO_PUBLIC_MAXPOWER_API_BASE_URL?.trim();
-    if (!baseUrl) throw new Error("请配置 EXPO_PUBLIC_MAXPOWER_API_BASE_URL（HTTPS）。");
+    const baseUrl = MVP_API_ENDPOINT;
     const credentials = Platform.OS === "web"
       // Web development is intentionally process-only; native builds use
       // Keychain/Keystore and no browser storage receives a session token.
@@ -123,6 +130,7 @@ function createAuthComposition(): AuthComposition {
     const socialExchangeBinding = new SocialExchangeBindingVault(credentials);
     const auth = new ServerAuthClient({
       baseUrl,
+      allowInsecureHttp: true,
       socialExchangeBinding: () => socialExchangeBinding.readOrCreate(),
     });
     const serviceAccessTokens = new MemoryServiceAccessTokenStore();
@@ -137,7 +145,7 @@ function createAuthComposition(): AuthComposition {
       deletionRecovery: new DeletionRecoveryVault(credentials),
       serviceAccessTokens,
       runtimes: new AccountRuntimeCoordinator({
-        create: createMobileAccountRuntimeFactory({ apiBaseUrl: baseUrl }),
+        create: createMobileAccountRuntimeFactory({ apiBaseUrl: baseUrl, allowInsecureHttp: true }),
       }),
     });
     return { status: "ready", controller, socialAuthorization };

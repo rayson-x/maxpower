@@ -25,6 +25,7 @@ export interface AuthRootProps<TRuntime extends AccountRuntime> {
     accountId: string;
     displayName: string;
     runtime: TRuntime;
+    openAccountSettings(): void;
   }): ReactNode;
 }
 
@@ -35,6 +36,7 @@ export function AuthRoot<TRuntime extends AccountRuntime>({
   renderProduct,
 }: AuthRootProps<TRuntime>) {
   const [state, setState] = useState<OnlineAuthState<TRuntime>>(controller.currentState());
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -67,10 +69,13 @@ export function AuthRoot<TRuntime extends AccountRuntime>({
           accountId: state.identity.accountId,
           displayName: state.identity.displayName,
           runtime: state.runtime,
+          openAccountSettings: () => setAccountSettingsOpen(true),
         })}
         <AuthenticatedAccountControls
           controller={controller}
           socialAuthorization={socialAuthorization}
+          open={accountSettingsOpen}
+          onClose={() => setAccountSettingsOpen(false)}
         />
       </View>
     );
@@ -114,11 +119,14 @@ export function AuthRoot<TRuntime extends AccountRuntime>({
 function AuthenticatedAccountControls<TRuntime extends AccountRuntime>({
   controller,
   socialAuthorization,
+  open,
+  onClose,
 }: {
   controller: OnlineAuthController<TRuntime>;
   socialAuthorization?: SocialAuthorizationPort;
+  open: boolean;
+  onClose(): void;
 }) {
-  const [open, setOpen] = useState(false);
   const [identities, setIdentities] = useState<readonly LinkedIdentity[]>([]);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -154,28 +162,7 @@ function AuthenticatedAccountControls<TRuntime extends AccountRuntime>({
     setIdentities(await controller.unlinkIdentity(identity));
   });
 
-  if (!open) {
-    return (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="账号设置"
-        onPress={() => setOpen(true)}
-        style={({ pressed }) => ({
-          position: "absolute",
-          top: 8,
-          right: 12,
-          borderRadius: 999,
-          paddingHorizontal: 10,
-          paddingVertical: 6,
-          backgroundColor: pressed ? "#e6e0d5" : "rgba(250,247,241,0.94)",
-          borderWidth: 1,
-          borderColor: "#d9d1c3",
-        })}
-      >
-        <Text style={{ color: "#48443d", fontSize: 12, fontWeight: "700" }}>账号设置</Text>
-      </Pressable>
-    );
-  }
+  if (!open) return null;
 
   const availableProviders = socialAuthorization?.availableProviders() ?? [];
   return (
@@ -220,7 +207,7 @@ function AuthenticatedAccountControls<TRuntime extends AccountRuntime>({
           onPress={() => void run(() => controller.deleteAccount())}
         />
         <PrimaryButton label="退出当前账号" disabled={busy} onPress={() => void controller.logout()} />
-        <Pressable disabled={busy} onPress={() => setOpen(false)} style={{ alignItems: "center", padding: 14 }}>
+        <Pressable disabled={busy} onPress={onClose} style={{ alignItems: "center", padding: 14 }}>
           <Text style={{ color: "#4e4941", fontWeight: "800" }}>关闭</Text>
         </Pressable>
         {error ? <Text style={{ color: "#a33c32", marginTop: 8 }}>{error}</Text> : null}
