@@ -16,4 +16,4 @@
 
 ## Comments
 
-- 2026-08-13 完成：补齐 Wiki Corpus schema、工作流状态、许可与原文保留边界、来源 revision/hash pin、更新传播检查和 13 个契约 fixture；knowledge lint、eligible、detect-updates、Wiki lint/reindex 与 diff 检查全部通过。后续审查又补入严格未知 Schema 拒绝、生命周期编译门禁和冻结发布不可改写测试。
+- 2026-08-13 完成：补齐 Wiki Corpus schema、工作流状态、许可与原文保留边界、来源 revision/hash pin、更新传播检查和 14 个契约 fixture；knowledge lint、eligible、detect-updates、Wiki lint/reindex 与 diff 检查全部通过。后续审查又补入严格未知 Schema 拒绝、生命周期编译门禁、冻结发布不可改写，以及 active Action 不得经 explanation-only Claim 间接提升规划权限的真实 Agent Release 失败测试。
