@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../.motion-sdk-bench-promotion-build",
+    "rootDir": "../..",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "benchProfilePromotion.test.ts",
+    "../../src/motion/benchProfilePromotion.ts",
+    "../../src/motion/benchProfileSelector.ts"
+  ]
+}
