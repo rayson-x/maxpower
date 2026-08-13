@@ -256,6 +256,59 @@ export interface NutritionSafetyScreen {
   acuteSignal?: "chest_discomfort" | "fainting" | "severe_dizziness" | "rapid_unexplained_weight_change";
 }
 
+export interface MaintenanceEnergyEstimate {
+  estimatedMaintenanceKcal: number;
+  restingEnergyKcal: number;
+  activityFactor: number;
+  method: "mifflin_st_jeor_with_planned_training_factor";
+  confidence: "provisional";
+  assumptions: readonly string[];
+}
+
+/**
+ * Produces an explicitly provisional starting point when the person supplied
+ * all equation inputs but does not know a stable maintenance intake. Planned
+ * training contributes only a bounded factor; ordinary daily movement remains
+ * unknown and the result must be recalibrated from intake + weight trend.
+ */
+export function estimateMaintenanceEnergy(input: {
+  ageYears?: number;
+  sex?: "female" | "male" | "prefer_not_to_say" | "unknown";
+  heightCm?: number;
+  bodyMassKg?: number;
+  weeklyTrainingFrequency?: number;
+  sessionDurationMinutes?: number;
+}): MaintenanceEnergyEstimate | undefined {
+  const { ageYears, heightCm, bodyMassKg } = input;
+  if (
+    ageYears === undefined || ageYears < 18 || ageYears > 100 ||
+    heightCm === undefined || heightCm < 120 || heightCm > 230 ||
+    bodyMassKg === undefined || bodyMassKg < 35 || bodyMassKg > 300 ||
+    (input.sex !== "female" && input.sex !== "male")
+  ) return undefined;
+
+  const frequency = clampEstimate(input.weeklyTrainingFrequency ?? 0, 0, 7);
+  const sessionMinutes = clampEstimate(input.sessionDurationMinutes ?? 0, 0, 180);
+  const weeklyTrainingMinutes = frequency * sessionMinutes;
+  const activityFactor = Math.round((1.2 + Math.min(0.3, weeklyTrainingMinutes / 1_200)) * 100) / 100;
+  const sexConstant = input.sex === "male" ? 5 : -161;
+  const restingEnergyKcal = Math.round(10 * bodyMassKg + 6.25 * heightCm - 5 * ageYears + sexConstant);
+  const estimatedMaintenanceKcal = Math.round((restingEnergyKcal * activityFactor) / 10) * 10;
+  return {
+    estimatedMaintenanceKcal,
+    restingEnergyKcal,
+    activityFactor,
+    method: "mifflin_st_jeor_with_planned_training_factor",
+    confidence: "provisional",
+    assumptions: [
+      "demographics_are_user_reported",
+      "planned_training_factor_is_bounded",
+      "non_training_daily_activity_is_unknown",
+      "recalibrate_from_14_day_intake_and_weight_trend",
+    ],
+  };
+}
+
 export function createNutritionStrategy(input: {
   id: string;
   goalContractRef: NutritionStrategyData["goalContractRef"];
@@ -275,7 +328,7 @@ export function createNutritionStrategy(input: {
         min: round(input.bodyMassKg * rules.proteinGramsPerKg[input.phase].min),
         max: round(input.bodyMassKg * rules.proteinGramsPerKg[input.phase].max),
       }
-    : { min: 0, max: 0 };
+    : undefined;
   return {
     id: input.id,
     goalContractRef: input.goalContractRef,
@@ -283,14 +336,19 @@ export function createNutritionStrategy(input: {
     phase: input.phase,
     ...(maintenance ? {
       calorieRange: {
-        min: { value: round(maintenance * multiplier * 0.95), unit: "kcal" },
-        max: { value: round(maintenance * multiplier * 1.05), unit: "kcal" },
+        // A daily calorie target does not gain useful accuracy from decimal
+        // kcal. Whole numbers make the provisional range easier to read while
+        // preserving the exact same bounded rule.
+        min: { value: Math.round(maintenance * multiplier * 0.95), unit: "kcal" },
+        max: { value: Math.round(maintenance * multiplier * 1.05), unit: "kcal" },
       },
     } : {}),
-    macronutrientTargets: {
-      proteinGrams: proteinRange,
-      fatEnergyFloorPercent: rules.fatFloorPercent,
-    },
+    ...(proteinRange ? {
+      macronutrientTargets: {
+        proteinGrams: proteinRange,
+        fatEnergyFloorPercent: rules.fatFloorPercent,
+      },
+    } : {}),
     reviewWindow: input.reviewWindow,
     ruleVersion: `${rules.id}@${rules.version}`,
     confidence: maintenance && input.bodyMassKg ? "provisional" : "low",
@@ -535,6 +593,10 @@ export function nutritionSafetyBlockReason(safety: NutritionSafetyScreen): strin
 }
 
 function round(value: number): number { return Math.round(value * 10) / 10; }
+
+function clampEstimate(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
 
 function inWindow(date: string, window: { startDate: string; endDate: string } | undefined): boolean {
   return Boolean(window && date >= window.startDate && date <= window.endDate);

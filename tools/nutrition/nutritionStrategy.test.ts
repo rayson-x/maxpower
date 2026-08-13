@@ -6,6 +6,7 @@ import {
   createNutritionStrategy,
   deriveNutritionReviewEvidence,
   deriveNutritionPlanCoordination,
+  estimateMaintenanceEnergy,
   proposeNutritionChange,
   proposeNutritionPlanCoordination,
 } from "../../src/nutrition";
@@ -20,6 +21,25 @@ const base = {
   safety: { adultConfirmed: true },
 };
 
+test("完整基础资料可生成明确标注为 provisional 的起始维持热量估算", () => {
+  const estimate = estimateMaintenanceEnergy({
+    ageYears: 30,
+    sex: "male",
+    heightCm: 178,
+    bodyMassKg: 78,
+    weeklyTrainingFrequency: 3,
+    sessionDurationMinutes: 60,
+  });
+  assert.equal(estimate?.restingEnergyKcal, 1748);
+  assert.equal(estimate?.activityFactor, 1.35);
+  assert.equal(estimate?.estimatedMaintenanceKcal, 2360);
+  assert.equal(estimate?.confidence, "provisional");
+  assert.ok(estimate?.assumptions.includes("recalibrate_from_14_day_intake_and_weight_trend"));
+
+  assert.equal(estimateMaintenanceEnergy({ ageYears: 30, sex: "unknown", heightCm: 178, bodyMassKg: 78 }), undefined);
+  assert.equal(estimateMaintenanceEnergy({ ageYears: 16, sex: "male", heightCm: 178, bodyMassKg: 78 }), undefined);
+});
+
 test("Nutrition Strategy 生成保守的增肌、力量与减脂范围，而非观察到的 TDEE", () => {
   const gain = createNutritionStrategy({ ...base, phase: "hypertrophy" });
   const strength = createNutritionStrategy({ ...base, id: "strength", phase: "strength_stable" });
@@ -29,7 +49,22 @@ test("Nutrition Strategy 生成保守的增肌、力量与减脂范围，而非�
   assert.equal(gain.calorieRange.min.value < gain.calorieRange.max.value, true);
   assert.equal(strength.calorieRange.min.value < gain.calorieRange.min.value, true);
   assert.equal(loss.calorieRange.max.value < strength.calorieRange.max.value, true);
+  assert.equal(Number.isInteger(loss.calorieRange.min.value), true);
+  assert.equal(Number.isInteger(loss.calorieRange.max.value), true);
   assert.equal(loss.macronutrientTargets?.proteinGrams.min, 144);
+});
+
+test("未提供体重时保持蛋白质目标未知，不生成 0–0 g 的伪目标", () => {
+  const strategy = createNutritionStrategy({
+    ...base,
+    id: "nutrition-without-body-mass",
+    bodyMassKg: undefined,
+    estimatedMaintenanceKcal: undefined,
+    phase: "hypertrophy",
+  });
+  assert.equal(strategy.calorieRange, undefined);
+  assert.equal(strategy.macronutrientTargets, undefined);
+  assert.equal(strategy.confidence, "low");
 });
 
 test("趋势不足或简化记录永远不触发伪精确热量调整，可靠趋势也只形成确认 Proposal", () => {
@@ -48,7 +83,7 @@ test("趋势不足或简化记录永远不触发伪精确热量调整，可靠�
   }
 });
 
-test("碳水分配不改变七日总能量，安全筛查暂停自动数值处方", () => {
+test("碳水分配不改变七日总能量，安全筛查暂停自动数值建议", () => {
   const strategy = createNutritionStrategy({
     ...base,
     phase: "hypertrophy",

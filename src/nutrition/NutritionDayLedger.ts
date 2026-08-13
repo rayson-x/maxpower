@@ -75,9 +75,12 @@ export function deriveNutritionDayPlan(input: {
   date: string;
   timezoneOffsetMinutes: number;
   strategy?: NutritionStrategyData;
+  /** Canonical fallback from the materialized plan when strategy day-types have not yet been revised. */
+  plannedDayKind?: NutritionDayPlan["dayKind"];
   recoveryConstraint?: Pick<RecoveryConstraintData, "id" | "level" | "validUntil" | "scope">;
 }): NutritionDayPlan {
   const day = input.strategy?.dayTypes?.find((candidate) => candidate.date === input.date);
+  const dayKind = day?.kind ?? input.plannedDayKind ?? "unknown";
   const energy = day?.energy
     ?? (input.strategy?.calorieRange ? midpointEnergy(input.strategy.calorieRange) : undefined);
   const proteinRange = input.strategy?.macronutrientTargets?.proteinGrams;
@@ -86,7 +89,7 @@ export function deriveNutritionDayPlan(input: {
   return {
     date: input.date,
     timezoneOffsetMinutes: input.timezoneOffsetMinutes,
-    dayKind: day?.kind ?? "unknown",
+    dayKind,
     targets: {
       energy: energy
         ? { value: energy.value, basis: day?.energy ? "day_type" : "strategy_range_midpoint", ...(day?.energy ? {} : { range: { min: input.strategy!.calorieRange!.min.value, max: input.strategy!.calorieRange!.max.value } }) }
@@ -100,14 +103,15 @@ export function deriveNutritionDayPlan(input: {
     ...(input.recoveryConstraint ? { recoveryLevel: input.recoveryConstraint.level } : {}),
     assumptions: [
       ...(input.strategy ? [] : ["no_active_nutrition_strategy"]),
-      ...(input.strategy && !day ? ["day_type_missing_targets_use_strategy_range_or_unknown"] : []),
+      ...(input.strategy && !day && input.plannedDayKind ? ["day_type_from_materialized_plan_targets_use_strategy_range"] : []),
+      ...(input.strategy && !day && !input.plannedDayKind ? ["day_type_missing_targets_use_strategy_range_or_unknown"] : []),
     ],
     notes: input.recoveryConstraint && input.recoveryConstraint.level !== "normal"
       ? [`recovery constraint ${input.recoveryConstraint.level} changes today's coaching context, not the long-term energy direction`]
       : [],
     missing: [
       ...(input.strategy ? [] : ["no_active_nutrition_strategy"]),
-      ...(input.strategy && !day ? ["day_type_missing"] : []),
+      ...(input.strategy && !day && !input.plannedDayKind ? ["day_type_missing"] : []),
     ],
   };
 }
