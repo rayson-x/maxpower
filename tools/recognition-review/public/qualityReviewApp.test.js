@@ -8,6 +8,7 @@ const {
   createWorkspace,
   dimensionLabel,
   frameAt,
+  lineageSummary,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
 
@@ -17,6 +18,14 @@ test("review release exposes untouched frozen benchmark evidence beside calibrat
   assert.equal(evidence.contextId, "capture-a");
   assert.equal(evidence.reps[0].turnaroundTimestampMs, 2_050);
   assert.equal(release.evidenceRuns.benchmark.frozenPredictions.contexts[0].proposalHash, "sha256:benchmark-a");
+});
+
+test("lineage readout exposes the applied equipment policy instead of a generic placeholder", () => {
+  assert.equal(lineageSummary({
+    profileIdentity: "barbell_bench_press/frontLeft45/bilateral/barbell/touched-v1",
+    profileHash: "profile-a",
+    appliedPolicy: { candidate: "equipment_only", policyHash: "policy-a" },
+  }), "barbell_bench_press/frontLeft45/bilateral/barbell/touched-v1 · profile-a · equipment_only · policy-a");
 });
 
 test("current Rust eight-dimension keys render with Chinese review labels", () => {

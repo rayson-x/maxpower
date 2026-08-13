@@ -195,6 +195,19 @@
     return contexts.find((context) => context.contextId === contextId) || null;
   }
 
+  function lineageSummary(lineage) {
+    const value = lineage || {};
+    const appliedPolicy = value.appliedPolicy || {};
+    return [
+      value.profileIdentity ?? value.profileVersion,
+      value.profileHash,
+      appliedPolicy.candidate,
+      appliedPolicy.policyHash ?? appliedPolicy.reportDigest,
+      value.ruleVersion,
+      value.motionPacketHash,
+    ].filter(Boolean).join(" · ") || value.runId || value.schemaVersion || "lineage pinned";
+  }
+
   function targetCount(proposal) {
     return proposal.reps.reduce((sum, rep) => sum + ENDPOINTS.length + rep.conclusions.length, 0);
   }
@@ -369,8 +382,7 @@
       } else {
         byId("proposalHash").textContent = state.activeReview.proposal.proposalHash;
         const lineage = state.activeReview.proposal.lineage;
-        byId("lineageReadout").textContent = [lineage.profileVersion, lineage.ruleVersion, lineage.motionPacketHash]
-          .filter(Boolean).join(" · ") || lineage.runId || "lineage pinned";
+        byId("lineageReadout").textContent = lineageSummary(lineage);
       }
     }
 
@@ -822,6 +834,7 @@
     createWorkspace,
     dimensionLabel,
     frameAt,
+    lineageSummary,
     mount,
     trajectoryUntil,
   };
