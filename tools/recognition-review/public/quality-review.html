@@ -85,6 +85,7 @@
       clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%);
     }
     .eyebrow { color: var(--muted); font: 800 10px/1.4 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+    .brand-copy { min-width: 0; display: grid; justify-items: start; }
     .brand h1 { margin: 3px 0 0; font-size: 21px; line-height: 1.1; letter-spacing: -.015em; }
     .release-meta { display: grid; grid-template-columns: repeat(2, auto); gap: 7px 20px; }
     .meta-pair { min-width: 140px; }
@@ -106,9 +107,9 @@
     .button:hover, .file-button:hover { transform: translateY(-1px); border-color: var(--paper); }
     .button.primary { border-color: var(--acid); background: var(--acid); color: var(--ink); }
     .file-button input { display: none; }
-    .evidence-mode-switch { display: flex; border: 1px solid var(--line-strong); }
+    .evidence-mode-switch { display: flex; width: max-content; margin-top: 8px; border: 1px solid var(--line-strong); }
     .evidence-mode {
-      min-height: 40px; border: 0; border-right: 1px solid var(--line-strong);
+      min-height: 28px; border: 0; border-right: 1px solid var(--line-strong);
       padding: 0 12px; background: #080b09; color: var(--muted);
       font: 800 9px/1 var(--mono); cursor: pointer;
     }
@@ -285,7 +286,13 @@
       <header class="topbar">
         <div class="brand">
           <div class="brand-mark">Q1</div>
-          <div><div class="eyebrow">MaxPower motion evidence lab</div><h1>Rust 动作质量冻结审核台</h1></div>
+          <div class="brand-copy">
+            <div class="eyebrow">MaxPower motion evidence lab</div><h1>Rust 动作质量冻结审核台</h1>
+            <div class="evidence-mode-switch" aria-label="证据来源">
+              <button type="button" class="evidence-mode" data-evidence-mode="benchmark">冻结基准</button>
+              <button type="button" class="evidence-mode active" data-evidence-mode="calibration">全量校准</button>
+            </div>
+          </div>
         </div>
         <div class="release-meta">
           <div class="meta-pair"><span>RELEASE</span><strong id="releaseId">—</strong></div>
@@ -294,10 +301,6 @@
           <div class="meta-pair"><span>FROZEN AT</span><strong id="frozenAt">—</strong></div>
         </div>
         <div class="top-actions">
-          <div class="evidence-mode-switch" aria-label="证据来源">
-            <button type="button" class="evidence-mode" data-evidence-mode="benchmark">冻结基准</button>
-            <button type="button" class="evidence-mode active" data-evidence-mode="calibration">全量校准</button>
-          </div>
           <label class="file-button">导入审核 JSON<input id="qualityImport" type="file" accept="application/json"></label>
           <button id="qualityExport" class="button primary" type="button">导出审核 JSON</button>
         </div>

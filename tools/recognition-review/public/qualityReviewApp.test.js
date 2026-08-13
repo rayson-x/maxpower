@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
 const test = require("node:test");
 
 const {
@@ -11,6 +12,16 @@ const {
   lineageSummary,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
+
+test("evidence mode controls remain visible in the sticky audit header", () => {
+  const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
+  const brand = html.match(/<div class="brand">([\s\S]*?)<\/div>\s*<\/div>/u)?.[1] ?? "";
+  const topActions = html.match(/<div class="top-actions">([\s\S]*?)<\/div>\s*<\/header>/u)?.[1] ?? "";
+
+  assert.match(brand, /class="evidence-mode-switch"/u);
+  assert.doesNotMatch(topActions, /class="evidence-mode-switch"/u);
+  assert.match(html, /\.brand-copy\s*\{[^}]*min-width:\s*0/iu);
+});
 
 test("review release exposes untouched frozen benchmark evidence beside calibration proposals", () => {
   const release = fixtureRelease();

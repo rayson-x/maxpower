@@ -17,6 +17,8 @@
   "include": [
     "rustFullDataProposalRunner.ts",
     "rustFullDataProposalRunner.test.ts",
+    "buildQualityReviewRelease.ts",
+    "buildQualityReviewRelease.test.ts",
     "rustBlindProposalRunner.ts",
     "blindEvaluation.ts",
     "../../src/motion/motionPacket.ts",
