@@ -36,6 +36,18 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# local compiler/test caches
+.*-build*/
+**/__pycache__/
+*.pyc
+
+# TypeScript files are the source of truth; ad-hoc compiler output stays local.
+/src/motion/*.js
+/src/pose/*.js
+/src/shims/tasksVision.js
+/src/agent-knowledge/releases/maxpower-planner.v1.json
+/tsconfig.pack2.json
+
 # generated native folders
 /ios
 /android
