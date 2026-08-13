@@ -43,6 +43,20 @@ interface ApprovedReview {
 
 interface ReviewAnnotation extends ReviewDraft {
   annotationStatus: "approved" | "autosaved_draft" | "user_confirmed_complete_draft";
+  sourceCaptureId?: string;
+  evaluationWindow?: { startMs: number; endMs: number };
+}
+
+interface ContextSplit {
+  captureId: string;
+  windows: Array<{
+    id: string;
+    capturePosition: string;
+    startMs: number;
+    endMs: number;
+    expectedCount: number;
+    repIndexes: number[];
+  }>;
 }
 
 interface ApprovalExport {
@@ -50,6 +64,11 @@ interface ApprovalExport {
   exportedAt: string;
   drafts?: Record<string, ReviewDraft>;
   approvals?: Record<string, ApprovedReview>;
+  sourceExports?: unknown[];
+  correctionArtifact?: unknown;
+  consent?: unknown;
+  summary?: unknown;
+  contextSplits?: ContextSplit[];
 }
 
 interface ManifestEntry {
@@ -81,10 +100,12 @@ interface RepCoverage {
 
 interface DatasetRecord {
   captureId: string;
+  sourceCaptureId: string;
   exerciseId: string;
   capturePosition: string;
   analysisView: string | null;
   expectedCount: number | null;
+  evaluationWindow: { startMs: number; endMs: number } | null;
   segments: HumanRepBoundary[];
   reviewedNegativeWindows: Array<{ startMs: number; endMs: number }>;
   note: string;
@@ -144,14 +165,35 @@ interface BucketReport {
 const projectRoot = process.cwd();
 const capturesRoot = path.join(projectRoot, "public", "archives", "confirmed-captures");
 const manifestPath = path.join(capturesRoot, "manifest.json");
-const datasetPath = path.join(projectRoot, "data", "training", "approved-segmentation-v1.json");
-const reportJsonPath = path.join(projectRoot, "docs", "reports", "segmentation-training-2026-08-03.json");
-const reportMarkdownPath = path.join(projectRoot, "docs", "reports", "segmentation-training-2026-08-03.md");
+
+function cliOption(name: string): string | null {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] ?? null : null;
+}
+
+const datasetPath = path.resolve(
+  projectRoot,
+  cliOption("--dataset") ?? "data/training/approved-segmentation-v1.json",
+);
+const reportJsonPath = path.resolve(
+  projectRoot,
+  cliOption("--report-json") ?? "docs/reports/segmentation-training-2026-08-03.json",
+);
+const reportMarkdownPath = path.resolve(
+  projectRoot,
+  cliOption("--report-md") ?? "docs/reports/segmentation-training-2026-08-03.md",
+);
 
 function main(): void {
-  const exportPath = process.argv.find((argument) => !argument.startsWith("--") && argument.endsWith(".json"));
+  const exportPath = cliOption("--approval-export") ?? process.argv
+    .slice(2)
+    .find((argument, index, argv) =>
+      !argument.startsWith("--") &&
+      argument.endsWith(".json") &&
+      !["--dataset", "--report-json", "--report-md"].includes(argv[index - 1] ?? ""),
+    );
   if (!exportPath) {
-    throw new Error("Usage: npm run train:segmentation -- /path/to/approvals.json --reviewed-all-sha256=<sha256>");
+    throw new Error("Usage: npm run train:segmentation -- --approval-export /path/to/approvals.json --reviewed-all-sha256=<sha256> [--dataset <path> --report-json <path> --report-md <path>]");
   }
   const exportBytes = fs.readFileSync(exportPath);
   const exportSha256 = createHash("sha256").update(exportBytes).digest("hex");
@@ -169,7 +211,7 @@ function main(): void {
   const loaded: LoadedRecord[] = [];
 
   for (const [captureId, draft] of annotations) {
-    const entry = manifestById.get(captureId);
+    const entry = manifestById.get(draft.sourceCaptureId ?? captureId);
     if (!entry) {
       loaded.push({ record: missingCaptureRecord(captureId, draft), trainingCapture: null });
       continue;
@@ -188,7 +230,7 @@ function main(): void {
   );
   const generatedAt = new Date().toISOString();
   const dataset = {
-    schemaVersion: "form-coach-segmentation-training-dataset/v1",
+    schemaVersion: "maxpower-segmentation-training-dataset/v1",
     generatedAt,
     intendedUse: ["rep_segmentation", "rep_counting", "anti_interference_evaluation"],
     excludedUse: ["standard_form_reference", "medical_assessment"],
@@ -201,11 +243,15 @@ function main(): void {
       draftCount: Object.keys(approvalExport.drafts ?? {}).length,
       manifest: path.relative(projectRoot, manifestPath),
       fullVideoReviewDeclared: reviewedAll,
+      sourceExports: approvalExport.sourceExports ?? null,
+      correctionArtifact: approvalExport.correctionArtifact ?? null,
+      consent: approvalExport.consent ?? null,
+      sourceSummary: approvalExport.summary ?? null,
     },
     records,
   };
   const report = {
-    schemaVersion: "form-coach-segmentation-calibration-report/v1",
+    schemaVersion: "maxpower-segmentation-calibration-report/v1",
     generatedAt,
     sourceDataset: path.relative(projectRoot, datasetPath),
     source: {
@@ -243,6 +289,10 @@ function buildRecord(
     Math.round(fixture.durationSec * 1000),
     fixture.poses.at(-1)?.timestampMs ?? 0,
   );
+  const evaluationWindow = draft.evaluationWindow ?? null;
+  const evaluationPoses = evaluationWindow
+    ? fixture.poses.filter((pose) => pose.timestampMs >= evaluationWindow.startMs && pose.timestampMs <= evaluationWindow.endMs)
+    : fixture.poses;
   const capturePosition = CAPTURE_POSITIONS.find((position) => position.id === draft.capturePosition);
   const analysisView = capturePosition?.analysisView ?? null;
   const profile = draft.exerciseId ? getKinematicsProfile(draft.exerciseId) : null;
@@ -257,10 +307,10 @@ function buildRecord(
   if (draft.capturePosition && !capturePosition) reasons.push("invalid_capture_position");
   if (!profile) reasons.push("missing_kinematics_profile");
   if (profile && analysisView && !profile.supportedViews.includes(analysisView)) reasons.push("unsupported_profile_view");
-  const signalSide = profile ? resolveSignalSide(fixture.poses, profile.phaseSignal.kind) : null;
+  const signalSide = profile ? resolveSignalSide(evaluationPoses, profile.phaseSignal.kind) : null;
   const repCoverage = profile && signalSide
     ? draft.draftSegments.map((segment) => signalCoverage(
-        fixture.poses,
+        evaluationPoses,
         segment,
         profile.phaseSignal.kind,
         signalSide,
@@ -280,13 +330,15 @@ function buildRecord(
   const antiInterference = completeReview && annotationIssues.length === 0;
   const record: DatasetRecord = {
     captureId,
+    sourceCaptureId: draft.sourceCaptureId ?? captureId,
     exerciseId: draft.exerciseId,
     capturePosition: draft.capturePosition,
     analysisView,
     expectedCount: Number.isInteger(Number(draft.expectedCount)) ? Number(draft.expectedCount) : null,
+    evaluationWindow,
     segments: draft.draftSegments.map((segment) => ({ ...segment })),
     reviewedNegativeWindows: antiInterference
-      ? reviewedNegativeWindows(durationMs, draft.draftSegments)
+      ? clipNegativeWindows(reviewedNegativeWindows(durationMs, draft.draftSegments), evaluationWindow)
       : [],
     note: draft.note?.trim() ?? "",
     annotationUpdatedAt: draft.updatedAt ?? null,
@@ -299,8 +351,8 @@ function buildRecord(
       frameCount: fixture.poses.length,
     },
     quality: {
-      poseCoverage: frameCoverage(fixture.poses, (pose) => pose.landmarks.length > 0),
-      torsoCoverage: frameCoverage(fixture.poses, (pose) =>
+      poseCoverage: frameCoverage(evaluationPoses, (pose) => pose.landmarks.length > 0),
+      torsoCoverage: frameCoverage(evaluationPoses, (pose) =>
         [11, 12, 23, 24].every((index) => (pose.landmarks[index]?.visibility ?? 0) >= 0.5),
       ),
       repCoverage,
@@ -319,7 +371,7 @@ function buildRecord(
     trainingCapture: evaluation && profile
       ? {
           captureId,
-          poses: fixture.poses,
+          poses: evaluationPoses,
           truth: draft.draftSegments,
           signal: profile.phaseSignal.kind,
           effortExtreme: profile.phaseSignal.effortExtreme,
@@ -327,6 +379,18 @@ function buildRecord(
         }
       : null,
   };
+}
+
+function clipNegativeWindows(
+  windows: readonly { startMs: number; endMs: number }[],
+  evaluationWindow: { startMs: number; endMs: number } | null,
+): Array<{ startMs: number; endMs: number }> {
+  if (!evaluationWindow) return windows.map((window) => ({ ...window }));
+  return windows.flatMap((window) => {
+    const startMs = Math.max(window.startMs, evaluationWindow.startMs);
+    const endMs = Math.min(window.endMs, evaluationWindow.endMs);
+    return endMs > startMs ? [{ startMs, endMs }] : [];
+  });
 }
 
 function buildBucketReports(loaded: readonly LoadedRecord[]): BucketReport[] {
@@ -507,10 +571,12 @@ function frameCoverage(poses: readonly PoseEstimate[], predicate: (pose: PoseEst
 function missingCaptureRecord(captureId: string, draft: ReviewAnnotation): DatasetRecord {
   return {
     captureId,
+    sourceCaptureId: draft.sourceCaptureId ?? captureId,
     exerciseId: draft.exerciseId,
     capturePosition: draft.capturePosition,
     analysisView: null,
     expectedCount: Number.isInteger(Number(draft.expectedCount)) ? Number(draft.expectedCount) : null,
+    evaluationWindow: draft.evaluationWindow ?? null,
     segments: draft.draftSegments ?? [],
     reviewedNegativeWindows: [],
     note: draft.note?.trim() ?? "",
@@ -531,6 +597,7 @@ function missingCaptureRecord(captureId: string, draft: ReviewAnnotation): Datas
 function summarize(records: readonly DatasetRecord[], promotedProfileCount: number) {
   return {
     captureCount: records.length,
+    sourceCaptureCount: new Set(records.map((record) => record.sourceCaptureId)).size,
     segmentCount: records.reduce((total, record) => total + record.segments.length, 0),
     evaluationCaptureCount: records.filter((record) => record.eligibility.evaluation).length,
     tuningCaptureCount: records.filter((record) => record.eligibility.tuning).length,
@@ -616,6 +683,26 @@ function normalizedAnnotations(
       updatedAt: approval.approvedAt,
       annotationStatus: "approved",
     });
+  }
+  for (const split of approvalExport.contextSplits ?? []) {
+    const source = annotations.get(split.captureId);
+    if (!source) throw new Error(`Context split target is missing from approval export: ${split.captureId}`);
+    annotations.delete(split.captureId);
+    for (const window of split.windows) {
+      const repIndexes = new Set(window.repIndexes);
+      const selected = source.draftSegments.filter((segment) => repIndexes.has(segment.repIndex));
+      if (selected.length !== window.repIndexes.length) {
+        throw new Error(`${split.captureId}/${window.id}: context split lost a human rep boundary`);
+      }
+      annotations.set(`${split.captureId}::${window.id}`, {
+        ...source,
+        sourceCaptureId: split.captureId,
+        capturePosition: window.capturePosition,
+        expectedCount: String(window.expectedCount),
+        draftSegments: selected.map((segment, index) => ({ ...segment, repIndex: index + 1 })),
+        evaluationWindow: { startMs: window.startMs, endMs: window.endMs },
+      });
+    }
   }
   return [...annotations.entries()];
 }

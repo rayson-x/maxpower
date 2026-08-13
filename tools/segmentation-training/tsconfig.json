@@ -11,5 +11,5 @@
     "noEmitOnError": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["train.ts"]
+  "include": ["train.ts", "preparePersonalGolden.ts", "preparePersonalGolden.test.ts"]
 }
