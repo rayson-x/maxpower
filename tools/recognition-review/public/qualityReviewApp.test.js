@@ -13,6 +13,7 @@ const {
   dimensionLabel,
   draftStorageKey,
   frameAt,
+  frameEvidenceLayers,
   lineageSummary,
   syncExistingDecisionDraft,
   restoreLocalDraft,
@@ -293,6 +294,39 @@ test("evidence helpers synchronize observations and equipment trails to the vide
     { timestampMs: 900, x: 0.4, y: 0.2 },
     { timestampMs: 1_200, x: 0.4, y: 0.3 },
   ]);
+});
+
+test("review overlay keeps raw pose visible and preserves an oblique equipment axis", () => {
+  const unknownCanonical = Array.from({ length: 26 }, () => ({
+    x: null,
+    y: null,
+    renderable: false,
+  }));
+  const inputPose = Array.from({ length: 26 }, (_, index) => ({
+    x: 0.2 + index / 100,
+    y: 0.3 + index / 200,
+    visibility: 0.8,
+  }));
+  const axis = {
+    kind: "barbell_shaft",
+    source: "geometry_input",
+    confidence: 0.91,
+    x1: 0.01,
+    y1: 0.434,
+    x2: 0.98,
+    y2: 0.478,
+  };
+
+  const layers = frameEvidenceLayers({
+    landmarks: unknownCanonical,
+    inputPose: { landmarks: inputPose },
+    equipment: [{ x: 0.01, y: 0.446, width: 0.97, height: 0.02 }],
+    inputEquipmentAxes: [axis],
+  });
+
+  assert.equal(layers.canonicalPose.length, 26);
+  assert.equal(layers.inputPose, inputPose);
+  assert.deepEqual(layers.equipment, [axis]);
 });
 
 function fixtureRelease() {

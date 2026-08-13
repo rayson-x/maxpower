@@ -23,6 +23,11 @@ interface ReviewEvidenceFrame {
   readonly timestampMs: number;
   readonly landmarks: readonly Readonly<Record<string, unknown>>[];
   readonly equipment?: readonly Readonly<Record<string, unknown>>[];
+  readonly inputPose?: Readonly<{
+    readonly source: "rtmpose_halpe26_input";
+    readonly landmarks: readonly Readonly<Record<string, unknown>>[];
+  }> | null;
+  readonly inputEquipmentAxes?: readonly Readonly<Record<string, unknown>>[];
 }
 
 type ReviewCapability =

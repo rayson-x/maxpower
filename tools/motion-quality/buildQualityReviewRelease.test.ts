@@ -65,6 +65,19 @@ test("review release keeps human start/end separate from immutable Rust proposal
     frames: [{
       timestampMs: 1_000,
       landmarks: [],
+      inputPose: {
+        source: "rtmpose_halpe26_input" as const,
+        landmarks: [{ x: 0.4, y: 0.5, visibility: 0.9 }],
+      },
+      inputEquipmentAxes: [{
+        kind: "barbell_shaft",
+        source: "geometry_input",
+        confidence: 0.9,
+        x1: 0.1,
+        y1: 0.38,
+        x2: 0.9,
+        y2: 0.42,
+      }],
       equipment: [{ centerX: 0.5, centerY: 0.4, source: "geometry" }],
     }],
   };
@@ -121,6 +134,8 @@ test("review release keeps human start/end separate from immutable Rust proposal
   assert.equal(release.items[0].videoSha256, sha256("fixture-video"));
   assert.equal(release.items[0].evidence.source, "current_rust_single_pass");
   assert.equal(release.items[0].evidence.equipmentTrajectories[0].points[0].y, 0.4);
+  assert.equal(release.items[0].evidence.frames[0].inputPose?.landmarks.length, 1);
+  assert.equal(release.items[0].evidence.frames[0].inputEquipmentAxes?.[0]?.y2, 0.42);
   const reviewEvidence = release.items[0].evidence as typeof release.items[0]["evidence"] & {
     lineage?: Readonly<{ sourceEvidenceHash: string }>;
   };

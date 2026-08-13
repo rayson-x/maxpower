@@ -13,6 +13,7 @@ import {
   releaseQualityProposalsForPolicy,
   reviewCapabilityForContext,
   resolveAppliedBenchPolicy,
+  reviewInputEvidence,
   routeSourceFramesOnce,
 } from "./rustFullDataProposalRunner.js";
 import {
@@ -292,6 +293,44 @@ test("measured axis becomes a geometry barbell observation submitted with raw ca
   assert.equal((calls[0][0] as unknown[]).length, 1);
   assert.equal(calls[0][1], 100);
   assert.equal(calls[0][2], equipment);
+});
+
+test("review evidence preserves raw Halpe-26 pose and the measured oblique shaft axis", () => {
+  const frame = {
+    frameNumber: 3,
+    timestampMs: 21_100,
+    selectedBbox: { x: 0.1, y: 0.2, width: 0.7, height: 0.6 },
+    landmarks: Array.from({ length: 26 }, (_, index) => ({
+      x: 0.2 + index / 100,
+      y: 0.3 + index / 200,
+      z: null,
+      visibility: 0.8,
+    })),
+  };
+  const axis = {
+    source: "measured" as const,
+    confidence: 0.91,
+    x1: 0.01,
+    y1: 0.434,
+    x2: 0.98,
+    y2: 0.478,
+    centerY: 0.456,
+  };
+
+  const evidence = reviewInputEvidence(frame, axis);
+
+  assert.equal(evidence.inputPose?.landmarks.length, 26);
+  assert.equal(evidence.inputPose?.source, "rtmpose_halpe26_input");
+  assert.deepEqual(evidence.inputEquipmentAxes, [{
+    kind: "barbell_shaft",
+    source: "geometry_input",
+    confidence: 0.91,
+    x1: 0.01,
+    y1: 0.434,
+    x2: 0.98,
+    y2: 0.478,
+    centerY: 0.456,
+  }]);
 });
 
 test("selected equipment-only policy preserves subject identity while withholding all 26 joints", async () => {

@@ -43,15 +43,16 @@ Status: `data-gated`
 
 | 字段 | Fresh value |
 | --- | --- |
-| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:f3ad0153ceab61bcfa4d245e0269d38bf9c2e8e0da22cdcbfa4174bc4f12aaf2` |
-| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `4bf32a61c1d9f6e3918c65014b3d35074bda1e0aec07e6293d137de5dfe76df4` |
+| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:caf6294fd87098ca12712597c5ac15ee8f836abbf81eed232a81d9487d567c37` |
+| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `6ae477cd3a2e0fc91a1efcdd9d8ac8bf58b7e7c97527166b8f3bccc842826343` |
 | touched benchmark run / digest | `personal-touched-benchmark-rust-qlt1-v1` / `97d4bb61935ad683f52adf29c8285d8db3f7c1499db006a2c29a9bc05bc57e53` |
 | Rust proposal count | `501` Reps / `5511` independent endpoint-or-conclusion review targets |
 | capability counts | `quality_supported=0`, `phase_supported=53`, `observation_only=1`, `unsupported=0` exact contexts |
 | conclusion states | `observed_acceptable=2030`, `observed_deviation=110`, `cannot_judge=1868`; these are proposals awaiting Audit A, not accepted truth |
 | calibration visual provenance | `offline_python_onnx_reference_only`; `pythonVisionUsed=true`; client visual acceptance ineligible |
-| equipment evidence | `2625` submitted equipment frames, `2357` Rust-observed frames, `135` equipment-measured endpoints |
-| review document/UI/server/export tests | public review document/UI `12/12`; review data/media/server `38/38`; fresh browser load/playback/toggle smoke passed |
+| review visual evidence | `14382` Halpe-26 input-pose frames retained separately from Rust canonical; all `1255` oblique-bench frames expose input pose even when the frozen `equipment_only` phase policy submits unknown pose to Rust |
+| equipment evidence | `2625` submitted equipment frames with ordered oblique shaft endpoints retained, `2357` Rust-observed frames, `135` equipment-measured endpoints |
+| review document/UI/server/export tests | public review document/UI `21/21`; review data/media/server `38/38`; fresh browser load/playback/toggle and frontRight45 input-pose/oblique-axis smoke passed |
 | runtime/contract tests | Rust `135/135`; Web verified-byte ONNX→Rust causal chain `11/11`; native prerequisite/timestamp preflight `5/5`; QLT1 native projection `5/5`; native Halpe-26/equipment contract `7/7`; iOS Rust-byte parity `14/14` frames; Android Rust/CMake `4/4` ABI; full proposal/release `19/19`; quality contracts `16/16`; ablation `6/6`; governance `3/3`; full release contract `8/8` |
 | governed input catalog | `maxpower-motion-training-data-v1`; local runner catalog SHA-256 `7c6f86d7ced060c6e15abb9459303b1f44bb184052ad5734cde3b7b16b35da51`; Rust WASM SHA-256 `176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6` |
 | model-acceptance metrics | data-gated |

@@ -25,6 +25,7 @@ import {
   sha256,
   type BenchEquipmentFrame,
   type InputAssetPin,
+  type MeasuredBarbellAxis,
   type MotionQualityInputCatalog,
   type RawObservationFrame,
 } from "./runnerInputs";
@@ -394,6 +395,51 @@ export function applyBenchPolicyToFrame(
   return deepFreeze({ candidates: measuredPose, equipment: measuredEquipment });
 }
 
+export function reviewInputEvidence(
+  frame: RawObservationFrame,
+  axis: BenchEquipmentFrame["axis"],
+): Readonly<{
+  inputPose: Readonly<{
+    source: "rtmpose_halpe26_input";
+    selectedBbox: RawObservationFrame["selectedBbox"];
+    landmarks: RawObservationFrame["landmarks"];
+  }> | null;
+  inputEquipmentAxes: readonly Readonly<{
+    kind: "barbell_shaft";
+    source: "geometry_input";
+    confidence: number;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    centerY: number;
+  }>[];
+}> {
+  const inputPose = frame.selectedBbox && frame.landmarks.length === 26
+    ? {
+        source: "rtmpose_halpe26_input" as const,
+        selectedBbox: { ...frame.selectedBbox },
+        landmarks: frame.landmarks.map((landmark) => ({ ...landmark })),
+      }
+    : null;
+  const measuredAxis = axis?.source === "measured" && "confidence" in axis
+    ? axis as MeasuredBarbellAxis
+    : null;
+  const inputEquipmentAxes = measuredAxis
+    ? [{
+        kind: "barbell_shaft" as const,
+        source: "geometry_input" as const,
+        confidence: measuredAxis.confidence,
+        x1: measuredAxis.x1,
+        y1: measuredAxis.y1,
+        x2: measuredAxis.x2,
+        y2: measuredAxis.y2,
+        centerY: measuredAxis.centerY,
+      }]
+    : [];
+  return deepFreeze({ inputPose, inputEquipmentAxes });
+}
+
 export interface FullDataProposalRunnerOptions {
   readonly datasetPath: string;
   readonly rawObservationRoot: string;
@@ -566,7 +612,11 @@ export async function runFullDataProposal(
           throw new Error(`${record.captureId}: Rust packet timestamp mismatch`);
         }
         if (packet.equipment.status.kind === "observed") equipmentObservedFrameCount += 1;
-        currentRustFrames.push(serializeCurrentRustFrame(packet, motion.lastCanonicalHash));
+        currentRustFrames.push(serializeCurrentRustFrame(
+          packet,
+          motion.lastCanonicalHash,
+          reviewInputEvidence(frame, axisFrame?.axis ?? null),
+        ));
       }
       motion.finishSet();
       collect();
@@ -729,7 +779,7 @@ export async function runFullDataProposal(
       "The Halpe-26 observations in this release were extracted by the offline Python ONNX reference pipeline. They calibrate Rust conclusions only and are not evidence of the Web, Android, or iOS visual runtime.",
       "Client visual acceptance requires a separately frozen ONNX Runtime Web or native YOLOX + RTMPose Halpe-26 → Rust single-pass result; this release is ineligible for that claim.",
       "Bench uses an explicitly touched-benchmark provisional Rust barbell graph and measured prototype axes as proposal-only features; this full-data queue is not unseen-source evidence.",
-      "Bench frontLeft45/frontRight45 execute the frozen equipment_only policy; all 26 pose landmarks are submitted as unknown.",
+      "Bench frontLeft45/frontRight45 execute the frozen equipment_only phase policy; all 26 pose landmarks are submitted to Rust as unknown, while the immutable review evidence separately preserves the raw Halpe-26 input pose and measured oblique shaft endpoints.",
       "Bench front has no frozen winner; its fused output is diagnostic_unselected_fused and is ineligible for a frozen policy claim.",
       "Non-bench actions are pose-only; equipment proposal features are never treated as human truth.",
       "No physiological force, strength, muscle activation, joint-torque or medical conclusion is measured.",
@@ -1031,6 +1081,7 @@ export function reviewCapabilityForContext(input: Readonly<{
 function serializeCurrentRustFrame(
   packet: DecodedMotionPacket,
   canonicalHash: bigint,
+  inputEvidence: ReturnType<typeof reviewInputEvidence>,
 ): Readonly<Record<string, unknown>> {
   return deepFreeze({
     timestampMs: Number(packet.sourceTimestampMs),
@@ -1041,6 +1092,8 @@ function serializeCurrentRustFrame(
       selectedCandidateId: packet.target.selectedCandidateId?.toString() ?? null,
     },
     landmarks: packet.canonical.map((landmark) => ({ ...landmark })),
+    inputPose: inputEvidence.inputPose,
+    inputEquipmentAxes: inputEvidence.inputEquipmentAxes,
     equipmentStatus: { ...packet.equipment.status },
     equipment: packet.equipment.tracks.map((track) => ({
       trackId: track.trackId.toString(),

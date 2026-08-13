@@ -261,6 +261,18 @@
     return points.filter((point) => Number.isFinite(point.timestampMs) && point.timestampMs <= timestampMs);
   }
 
+  function frameEvidenceLayers(frame) {
+    const value = frame || {};
+    const inputAxes = Array.isArray(value.inputEquipmentAxes) ? value.inputEquipmentAxes : [];
+    return Object.freeze({
+      canonicalPose: value.landmarks || value.skeleton || [],
+      inputPose: value.inputPose?.landmarks || [],
+      equipment: inputAxes.length
+        ? inputAxes
+        : (value.equipment || (value.axis ? [value.axis] : [])),
+    });
+  }
+
   function benchmarkEvidenceForItem(release, item) {
     const contexts = release?.evidenceRuns?.benchmark?.frozenPredictions?.contexts;
     if (!Array.isArray(contexts)) return null;
@@ -716,21 +728,28 @@
         offsetX: (width - video.videoWidth * scale) / 2,
         offsetY: (height - video.videoHeight * scale) / 2,
       };
+      const layers = frameEvidenceLayers(frame);
       if (state.layers.trails) drawTrajectories(evidence.equipmentTrajectories || [], currentMs, transform);
-      if (frame && state.layers.skeleton) drawSkeleton(frame.landmarks || frame.skeleton || [], transform);
-      if (frame && state.layers.equipment) drawEquipment(frame.equipment || (frame.axis ? [frame.axis] : []), transform);
-      const visible = frame ? (frame.landmarks || frame.skeleton || []).filter(isVisiblePoint).length : 0;
-      const equipmentCount = frame ? (frame.equipment || (frame.axis ? [frame.axis] : [])).length : 0;
+      if (frame && state.layers.skeleton) {
+        drawSkeleton(layers.inputPose, transform, "input");
+        drawSkeleton(layers.canonicalPose, transform, "canonical");
+      }
+      if (frame && state.layers.equipment) drawEquipment(layers.equipment, transform);
+      const canonicalVisible = layers.canonicalPose.filter(isVisiblePoint).length;
+      const inputVisible = layers.inputPose.filter(isVisiblePoint).length;
+      const equipmentCount = layers.equipment.length;
       byId("observationReadout").textContent = frame
-        ? `OBS ${formatMs(frame.timestampMs)} · POSE ${visible} · EQUIPMENT ${equipmentCount}`
+        ? `OBS ${formatMs(frame.timestampMs)} · POSE INPUT ${inputVisible} / RUST ${canonicalVisible} · EQUIPMENT ${equipmentCount}`
         : "OBSERVATION UNKNOWN · no frame within 150 ms";
     }
 
-    function drawSkeleton(points, transform) {
+    function drawSkeleton(points, transform, mode) {
+      if (!points.some(isVisiblePoint)) return;
+      const input = mode === "input";
       context.save();
       context.lineCap = "round";
       context.lineJoin = "round";
-      context.lineWidth = 2.4;
+      context.lineWidth = input ? 1.8 : 2.4;
       for (const [from, to] of HALPE26_EDGES) {
         const a = points[from];
         const b = points[to];
@@ -738,16 +757,20 @@
         const pa = mapPoint(a, transform);
         const pb = mapPoint(b, transform);
         const predicted = a.predicted || b.predicted || a.source === "predicted" || b.source === "predicted";
-        context.setLineDash(predicted ? [6, 5] : []);
-        context.strokeStyle = predicted ? "rgba(255,104,72,.92)" : "rgba(202,255,57,.92)";
+        context.setLineDash(input ? [5, 4] : (predicted ? [6, 5] : []));
+        context.strokeStyle = input
+          ? "rgba(85,220,231,.72)"
+          : (predicted ? "rgba(255,104,72,.92)" : "rgba(202,255,57,.92)");
         context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
       }
       context.setLineDash([]);
       points.forEach((point) => {
         if (!isVisiblePoint(point)) return;
         const position = mapPoint(point, transform);
-        context.fillStyle = point.predicted || point.source === "predicted" ? "#ff6848" : "#f7f7ed";
-        context.beginPath(); context.arc(position.x, position.y, 3.2, 0, Math.PI * 2); context.fill();
+        context.fillStyle = input
+          ? "rgba(85,220,231,.82)"
+          : (point.predicted || point.source === "predicted" ? "#ff6848" : "#f7f7ed");
+        context.beginPath(); context.arc(position.x, position.y, input ? 2.2 : 3.2, 0, Math.PI * 2); context.fill();
       });
       context.restore();
     }
@@ -998,6 +1021,7 @@
     dimensionLabel,
     draftStorageKey,
     frameAt,
+    frameEvidenceLayers,
     lineageSummary,
     mount,
     restoreLocalDraft,
