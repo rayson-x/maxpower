@@ -19,6 +19,6 @@ Delivered diagnostic evidence:
 
 Acceptance evidence still required:
 
-- [ ] Re-run and verify the selected per-view policy is consumed by the current full-data calibration release.
+- [x] Re-run and verify the selected per-view policy is consumed by the current full-data calibration release.
 - [ ] Keep row at `no_winner` until comparable equipment observations exist; do not infer a row policy from bench.
 - [ ] Validate any model-acceptance winner on untouched/new sources before promoting it beyond calibration diagnostics.

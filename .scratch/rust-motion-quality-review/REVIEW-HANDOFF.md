@@ -43,20 +43,22 @@ Status: `data-gated`
 
 | 字段 | Fresh value |
 | --- | --- |
-| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:0ce72d674cbc6dd51384f7dad12b6612a88d654a88365771b47db67921f3aff4` |
-| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `ed85b0e723df6e954b2222cc58c410062032d790a69e6120f521f89c45aeda44` |
-| touched benchmark run / digest | `personal-touched-benchmark-rust-qlt1-v1` / `151d1c1740c49eb7ae8467e4bc1c92aedb662246e47613b12efc1427ef3aba92` |
+| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:f3ad0153ceab61bcfa4d245e0269d38bf9c2e8e0da22cdcbfa4174bc4f12aaf2` |
+| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `4bf32a61c1d9f6e3918c65014b3d35074bda1e0aec07e6293d137de5dfe76df4` |
+| touched benchmark run / digest | `personal-touched-benchmark-rust-qlt1-v1` / `97d4bb61935ad683f52adf29c8285d8db3f7c1499db006a2c29a9bc05bc57e53` |
 | Rust proposal count | `501` Reps / `5511` independent endpoint-or-conclusion review targets |
 | capability counts | `quality_supported=0`, `phase_supported=53`, `observation_only=1`, `unsupported=0` exact contexts |
 | conclusion states | `observed_acceptable=2030`, `observed_deviation=110`, `cannot_judge=1868`; these are proposals awaiting Audit A, not accepted truth |
 | calibration visual provenance | `offline_python_onnx_reference_only`; `pythonVisionUsed=true`; client visual acceptance ineligible |
 | equipment evidence | `2625` submitted equipment frames, `2357` Rust-observed frames, `135` equipment-measured endpoints |
-| review document/UI/server/export tests | public review document/UI `11/11`; review data/media/server `37/37`; fresh browser load/playback/toggle smoke passed |
-| runtime/contract tests | Rust `135/135`; Web ONNX→Rust causal chain `12/12`; QLT1 native projection `5/5`; native Halpe-26/equipment contract `7/7`; iOS Rust-byte parity `14/14` frames; Android Rust/CMake `4/4` ABI; full proposal/release `17/17`; quality contracts `16/16`; ablation `6/6`; governance `3/3`; full release contract `8/8` |
+| review document/UI/server/export tests | public review document/UI `12/12`; review data/media/server `38/38`; fresh browser load/playback/toggle smoke passed |
+| runtime/contract tests | Rust `135/135`; Web verified-byte ONNX→Rust causal chain `11/11`; native prerequisite/timestamp preflight `5/5`; QLT1 native projection `5/5`; native Halpe-26/equipment contract `7/7`; iOS Rust-byte parity `14/14` frames; Android Rust/CMake `4/4` ABI; full proposal/release `19/19`; quality contracts `16/16`; ablation `6/6`; governance `3/3`; full release contract `8/8` |
 | governed input catalog | `maxpower-motion-training-data-v1`; local runner catalog SHA-256 `7c6f86d7ced060c6e15abb9459303b1f44bb184052ad5734cde3b7b16b35da51`; Rust WASM SHA-256 `176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6` |
 | model-acceptance metrics | data-gated |
 
-Native 验证边界：Android Rust/CMake 已覆盖 4 个 ABI，但本机剩余磁盘空间不足且没有连接真机，因此完整 Kotlin instrumentation/真机相机流不在本轮通过声明内。源码链与跨端契约已经交付；真机运行仍是客户端验收项，不得由编译通过替代。
+Native 验证边界：Android Rust/CMake 已覆盖 4 个 ABI，标准 Android/iOS 构建入口已对模型与 Rust 产物 fail closed，CameraX 时间轴也改为相机帧时间；但本轮没有连接真机，因此完整 Kotlin instrumentation/真实相机运行仍不在通过声明内。编译与预检不得替代真机客户端验收。
+
+完整性边界：release builder 会重算 full-data digest、校验 54 个上下文完整覆盖、保留离线 Python 视觉来源，并在构建与媒体服务时验证视频 SHA-256。Web 冻结结果绑定 YOLOX、RTMPose、Rust WASM、Profile archive、逐视频 Profile 和运行时身份；本地 Web 请求仍不具备硬件级来源证明，因此明确标记 `acceptanceEligible=false`，只能作为客户端运行诊断，不能替代 B 类 model acceptance。
 
 ## 已交付能力与仍待证据
 

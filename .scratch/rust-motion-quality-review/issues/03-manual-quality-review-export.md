@@ -6,7 +6,7 @@
 
 **Status:** ready-for-human (Audit A) / data-gated (Audit B)
 
-**Audit lane:** the UI behavior is implemented for full-data calibration, but Audit A does not start until a fresh release and its current tests are recorded. Loading untouched model-acceptance proposals remains data-gated with 02.
+**Audit lane:** Audit A is open on the fresh full-data calibration release and its current tests are recorded. Loading untouched model-acceptance proposals remains data-gated with 02.
 
 Delivered implementation evidence:
 
