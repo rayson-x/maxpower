@@ -6,7 +6,7 @@ Delivery scope update (2026-08-05): the user accepted deferring the full iOS cli
 
 ## Problem Statement
 
-Form Coach 已经能够在 PC Web 上采集骨架、生成 Rust canonical packet、录制和回放，但还不能证明普通用户在手机前完成居家低冲击动作时，系统能持续、离线并实时地识别当前指定动作、统计单侧完整次数并记录有效持续时间。
+MaxPower 已经能够在 PC Web 上采集骨架、生成 Rust canonical packet、录制和回放，但还不能证明普通用户在手机前完成居家低冲击动作时，系统能持续、离线并实时地识别当前指定动作、统计单侧完整次数并记录有效持续时间。
 
 当前 Android 端已有原生 MediaPipe 骨架采集，却仍使用独立的 TypeScript 计数器；iOS 端尚未实现骨架采集；Web 端则使用 Rust/WASM canonical recognition。三个平台因此没有共享同一套动作 profile、rep boundary 和 canonical packet 语义。只在单端增加规则会造成计数口径漂移，也无法说明移动端离线性能是否成立。
 
