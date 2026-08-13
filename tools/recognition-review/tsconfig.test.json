@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../.recognition-review-test-build",
+    "rootDir": "../..",
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["./reviewData.ts", "./techniqueReview.ts", "./equipmentReview.ts", "./dumbbellReview.ts", "./poseKeypointReview.ts", "./poseKeypointEvaluation.ts", "./benchPhaseReview.ts", "./equipmentDetectorCorpus.ts", "./server.ts", "./reviewData.test.ts", "./techniqueReview.test.ts", "./equipmentReview.test.ts", "./dumbbellReview.test.ts", "./poseKeypointReview.test.ts", "./poseKeypointEvaluation.test.ts", "./benchPhaseReview.test.ts", "./equipmentDetectorCorpus.test.ts", "./qualityReviewServer.test.ts"]
+}

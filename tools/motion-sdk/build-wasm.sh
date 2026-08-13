@@ -9,9 +9,9 @@ RUSTC="${RUSTC:-/Users/Ruihan/.cargo/bin/rustc}" \
 CARGO_TARGET_DIR="$target_dir" \
   /Users/Ruihan/.cargo/bin/cargo build \
   --manifest-path "$repo_root/Cargo.toml" \
-  -p form-coach-motion-sdk \
+  -p maxpower-motion-sdk \
   --target wasm32-unknown-unknown \
   --release
 
 mkdir -p "$output_dir"
-cp "$target_dir/wasm32-unknown-unknown/release/form_coach_motion_sdk.wasm" "$output_dir/"
+cp "$target_dir/wasm32-unknown-unknown/release/maxpower_motion_sdk.wasm" "$output_dir/"

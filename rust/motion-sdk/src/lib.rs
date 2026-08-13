@@ -1,7 +1,18 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod barbell_phase;
+mod equipment_fusion;
+mod equipment_pose_constraint;
+mod execution_assessment;
+#[doc(hidden)]
+pub mod temporal_template;
+mod visual_equipment;
 #[doc(hidden)]
 pub mod web_abi;
+
+pub use equipment_fusion::*;
+pub use execution_assessment::*;
+pub use visual_equipment::*;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
@@ -316,6 +327,9 @@ pub enum ContinuityReason {
     OutlierRejectedUnknown,
     PredictionTimeout,
     NoMeasurementBaseline,
+    /// A current subject-associated equipment path repaired an unreliable
+    /// wrist using a previously measured person/equipment relationship.
+    EquipmentPathConstraint,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -501,6 +515,24 @@ pub struct ExerciseSignal {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PoseSchemaId {
     BlazePose33,
+    /// RTMPose Halpe-26. Indices 0..16 are the unchanged COCO-17 prefix.
+    Halpe26,
+}
+
+impl PoseSchemaId {
+    const fn hash_code(self) -> u8 {
+        match self {
+            Self::BlazePose33 => 0,
+            Self::Halpe26 => 1,
+        }
+    }
+
+    const fn landmark_count(self) -> usize {
+        match self {
+            Self::BlazePose33 => 33,
+            Self::Halpe26 => 26,
+        }
+    }
 }
 
 pub const PROFILE_CAP_CANONICAL_LANDMARKS: u32 = 1 << 0;
@@ -533,6 +565,52 @@ pub struct ExerciseProfile {
 }
 
 impl ExerciseProfile {
+    fn into_halpe26(mut self) -> Result<Self, MotionError> {
+        const BLAZEPOSE33_TO_HALPE26: [(usize, usize); 21] = [
+            (0, 0),
+            (2, 1),
+            (5, 2),
+            (7, 3),
+            (8, 4),
+            (11, 5),
+            (12, 6),
+            (13, 7),
+            (14, 8),
+            (15, 9),
+            (16, 10),
+            (23, 11),
+            (24, 12),
+            (25, 13),
+            (26, 14),
+            (27, 15),
+            (28, 16),
+            (29, 24),
+            (30, 25),
+            (31, 20),
+            (32, 21),
+        ];
+        let map_signal = |signal: &mut ExerciseSignal| -> Result<(), MotionError> {
+            for index in &mut signal.landmarks {
+                let Some((_, mapped)) = BLAZEPOSE33_TO_HALPE26
+                    .iter()
+                    .find(|(source, _)| source == index)
+                else {
+                    return Err(MotionError::InvalidExerciseProfile(
+                        "BlazePose joint has no Halpe26 equivalent",
+                    ));
+                };
+                *index = *mapped;
+            }
+            Ok(())
+        };
+        map_signal(&mut self.primary_signal)?;
+        map_signal(&mut self.secondary_signal)?;
+        self.schema = PoseSchemaId::Halpe26;
+        self.identity = format!("{}-halpe26", self.identity);
+        self.content_hash = self.computed_content_hash();
+        Ok(self)
+    }
+
     pub fn march_in_place_front_provisional() -> Self {
         Self::with_computed_hash(Self {
             identity: "march-in-place/front/bilateral/bodyweight/v1".into(),
@@ -731,7 +809,7 @@ impl ExerciseProfile {
                 ExerciseMaturity::Calibrated => 1,
             }],
         );
-        hash = fnv_bytes(hash, [0]); // BlazePose33 schema code.
+        hash = fnv_bytes(hash, [self.schema.hash_code()]);
         hash = fnv_bytes(
             hash,
             [match self.direction {
@@ -771,11 +849,6 @@ impl ExerciseProfile {
         if self.content_hash == 0 || self.content_hash != self.computed_content_hash() {
             return Err(MotionError::InvalidExerciseProfile("content hash mismatch"));
         }
-        if self.schema != PoseSchemaId::BlazePose33 {
-            return Err(MotionError::InvalidExerciseProfile(
-                "unsupported pose schema",
-            ));
-        }
         if self.coordinate_unit
             != expected_coordinate_unit(self.primary_signal.kind, self.secondary_signal.kind)
         {
@@ -784,7 +857,20 @@ impl ExerciseProfile {
             ));
         }
         if self.state_machine_id != "ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-ready-effort-peak-return/v1"
+            && self.state_machine_id != "median-100ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "median-200ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "median-300ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "median-400ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "median-600ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-median-100ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-median-200ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-median-300ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-median-400ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-median-600ms-ready-effort-peak-return/v1"
+            && self.state_machine_id != "stable-cycle-200ms-ready-effort-peak-return/v1"
             && self.state_machine_id != "alternating-ready-effort-return/v1"
+            && self.state_machine_id != "barbell-axis-primary-ready-effort-return/v1"
         {
             return Err(MotionError::InvalidExerciseProfile(
                 "unsupported state graph",
@@ -800,7 +886,10 @@ impl ExerciseProfile {
                 "calibrated profile requires an evidence manifest",
             ));
         }
-        if !self.primary_signal.validate() || !self.secondary_signal.validate() {
+        let schema_landmark_count = self.schema.landmark_count();
+        if !self.primary_signal.validate(schema_landmark_count)
+            || !self.secondary_signal.validate(schema_landmark_count)
+        {
             return Err(MotionError::InvalidExerciseProfile("missing joint group"));
         }
         let joints = self
@@ -810,7 +899,7 @@ impl ExerciseProfile {
             .chain(&self.secondary_signal.landmarks)
             .copied()
             .collect::<Vec<_>>();
-        if joints.iter().any(|index| *index >= 33) {
+        if joints.iter().any(|index| *index >= schema_landmark_count) {
             return Err(MotionError::InvalidExerciseProfile(
                 "joint index outside schema",
             ));
@@ -841,6 +930,39 @@ impl ExerciseProfile {
     fn uses_alternating_state_graph(&self) -> bool {
         self.state_machine_id == "alternating-ready-effort-return/v1"
     }
+
+    fn uses_barbell_axis_state_graph(&self) -> bool {
+        self.state_machine_id == "barbell-axis-primary-ready-effort-return/v1"
+    }
+
+    fn uses_cycle_aligned_boundaries(&self) -> bool {
+        self.state_machine_id == "cycle-aligned-ready-effort-peak-return/v1"
+            || self.state_machine_id.starts_with("cycle-aligned-median-")
+            || self.state_machine_id.starts_with("stable-cycle-")
+    }
+
+    fn stable_phase_dwell_ms(&self) -> Option<u64> {
+        match self.state_machine_id.as_str() {
+            "stable-cycle-200ms-ready-effort-peak-return/v1" => Some(200),
+            _ => None,
+        }
+    }
+
+    fn signal_smoothing_ms(&self) -> Option<u64> {
+        match self.state_machine_id.as_str() {
+            "median-100ms-ready-effort-peak-return/v1" => Some(100),
+            "median-200ms-ready-effort-peak-return/v1" => Some(200),
+            "median-300ms-ready-effort-peak-return/v1" => Some(300),
+            "median-400ms-ready-effort-peak-return/v1" => Some(400),
+            "median-600ms-ready-effort-peak-return/v1" => Some(600),
+            "cycle-aligned-median-100ms-ready-effort-peak-return/v1" => Some(100),
+            "cycle-aligned-median-200ms-ready-effort-peak-return/v1" => Some(200),
+            "cycle-aligned-median-300ms-ready-effort-peak-return/v1" => Some(300),
+            "cycle-aligned-median-400ms-ready-effort-peak-return/v1" => Some(400),
+            "cycle-aligned-median-600ms-ready-effort-peak-return/v1" => Some(600),
+            _ => None,
+        }
+    }
 }
 
 impl ExerciseSignalKind {
@@ -857,7 +979,7 @@ impl ExerciseSignalKind {
 }
 
 impl ExerciseSignal {
-    fn validate(&self) -> bool {
+    fn validate(&self, schema_landmark_count: usize) -> bool {
         let expected_count = match self.kind {
             ExerciseSignalKind::LandmarkY => 1..=2,
             ExerciseSignalKind::JointAngle => 3..=3,
@@ -867,7 +989,10 @@ impl ExerciseSignal {
             ExerciseSignalKind::PairedLandmarkDistanceSum => 4..=4,
         };
         expected_count.contains(&self.landmarks.len())
-            && self.landmarks.iter().all(|index| *index < 33)
+            && self
+                .landmarks
+                .iter()
+                .all(|index| *index < schema_landmark_count)
             && self.landmarks.windows(2).all(|pair| pair[0] != pair[1])
     }
 }
@@ -931,11 +1056,17 @@ impl Default for SetStateSnapshot {
 }
 
 const SET_ARMING_STABLE_MS: u64 = 500;
+const SET_ARMING_MAX_MS: u64 = 2_000;
 const SET_PAUSE_IDLE_MS: u64 = 1_500;
+/// A cycle boundary is the observed ready extremum, not the first threshold
+/// crossing on the way back. Keep a short causal look-behind window so the
+/// sealed timestamp can point at that extremum without using a future frame.
+const CYCLE_ALIGNED_READY_DWELL_MS: u64 = 500;
 
 #[derive(Clone, Debug)]
 struct SetGate {
     state: SetStateSnapshot,
+    arming_since_ms: Option<u64>,
     stable_since_ms: Option<u64>,
     idle_since_ms: Option<u64>,
     previous_primary: Option<f32>,
@@ -945,6 +1076,7 @@ impl Default for SetGate {
     fn default() -> Self {
         Self {
             state: SetStateSnapshot::default(),
+            arming_since_ms: None,
             stable_since_ms: None,
             idle_since_ms: None,
             previous_primary: None,
@@ -958,6 +1090,7 @@ impl SetGate {
             state: SetStateSnapshot {
                 lifecycle: SetLifecycle::Active,
             },
+            arming_since_ms: None,
             stable_since_ms: None,
             idle_since_ms: None,
             previous_primary: None,
@@ -966,6 +1099,7 @@ impl SetGate {
 
     fn begin(&mut self) {
         self.state.lifecycle = SetLifecycle::Arming;
+        self.arming_since_ms = None;
         self.stable_since_ms = None;
         self.idle_since_ms = None;
         self.previous_primary = None;
@@ -973,6 +1107,7 @@ impl SetGate {
 
     fn finish(&mut self) {
         self.state.lifecycle = SetLifecycle::Finished;
+        self.arming_since_ms = None;
         self.stable_since_ms = None;
         self.idle_since_ms = None;
         self.previous_primary = None;
@@ -986,16 +1121,40 @@ impl SetGate {
         profile: Option<&ExerciseProfile>,
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
+        equipment: Option<&EquipmentFrameEvidence>,
         timestamp_ms: u64,
         rep_phase: RepPhase,
     ) -> bool {
         let primary = profile.and_then(|profile| {
-            profile_signal(profile, canonical).map(|(primary, _, _, _)| primary)
+            if profile.uses_barbell_axis_state_graph() {
+                equipment.and_then(|frame| {
+                    frame
+                        .tracks
+                        .iter()
+                        .filter(|track| {
+                            track.kind == EquipmentKind::BarbellShaft && track.judgeable_path
+                        })
+                        .max_by(|left, right| {
+                            (left.observation_score * left.association_confidence).total_cmp(
+                                &(right.observation_score * right.association_confidence),
+                            )
+                        })
+                        .map(|track| track.center_y)
+                })
+            } else {
+                profile_signal(profile, canonical).map(|(primary, _, _, _)| primary)
+            }
         });
         let observable =
             target_state == TargetState::Locked && (profile.is_none() || primary.is_some());
         let resume_delta = profile
-            .map(|profile| (profile.start_amplitude * 0.30).max(0.001))
+            .map(|profile| {
+                if profile.uses_barbell_axis_state_graph() {
+                    (32.0 / 640.0) * 0.30
+                } else {
+                    (profile.start_amplitude * 0.30).max(0.001)
+                }
+            })
             .unwrap_or(0.001);
 
         match self.state.lifecycle {
@@ -1006,6 +1165,7 @@ impl SetGate {
                     self.previous_primary = None;
                     return false;
                 }
+                let arming_since = *self.arming_since_ms.get_or_insert(timestamp_ms);
                 if let (Some(previous), Some(current)) = (self.previous_primary, primary) {
                     if (current - previous).abs() >= resume_delta {
                         self.stable_since_ms = Some(timestamp_ms);
@@ -1013,8 +1173,11 @@ impl SetGate {
                 }
                 let stable_since = *self.stable_since_ms.get_or_insert(timestamp_ms);
                 self.previous_primary = primary;
-                if timestamp_ms.saturating_sub(stable_since) >= SET_ARMING_STABLE_MS {
+                if timestamp_ms.saturating_sub(stable_since) >= SET_ARMING_STABLE_MS
+                    || timestamp_ms.saturating_sub(arming_since) >= SET_ARMING_MAX_MS
+                {
                     self.state.lifecycle = SetLifecycle::Active;
+                    self.arming_since_ms = None;
                 }
                 false
             }
@@ -1093,6 +1256,8 @@ pub struct SealedRep {
     pub start_timestamp_ms: u64,
     pub peak_frame_id: u64,
     pub peak_timestamp_ms: u64,
+    /// First later observation that causally confirmed the earlier extremum.
+    pub turnaround_confirmed_timestamp_ms: u64,
     pub end_frame_id: u64,
     pub end_timestamp_ms: u64,
     pub revision: u32,
@@ -1138,6 +1303,45 @@ pub enum RepObservationFinding {
     PrimaryRangeBelowExpectation,
     SecondaryRangeBelowExpectation,
     CycleFasterThanExpected,
+    /// Start/turnaround/end were established by the subject-associated shaft
+    /// trajectory. Pose remains an independent corroboration channel.
+    EquipmentPrimaryBoundary,
+    PoseEquipmentTurnaroundAligned,
+    PoseUnavailableAtTurnaround,
+    PoseEquipmentTurnaroundConflict,
+    EquipmentPathCoverageLow,
+}
+
+/// Stable anatomical names for the projected joint angles published with
+/// every canonical frame.  These definitions are deliberately independent of
+/// an exercise profile so every client sees the same number for the same
+/// three landmarks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JointAngleKind {
+    Elbow,
+    Shoulder,
+    Hip,
+    Knee,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BodySide {
+    Left,
+    Right,
+}
+
+/// One camera-plane angle derived from the canonical skeleton. `judgeable`
+/// is false when the subject is not locked, confidence is weak, or any input
+/// landmark is only predicted. Callers may retain the value for diagnostics,
+/// but must not present it as a trustworthy live measurement.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JointAngleSnapshot {
+    pub kind: JointAngleKind,
+    pub side: BodySide,
+    pub value_degrees: Option<f32>,
+    pub confidence: f32,
+    pub source: LandmarkSource,
+    pub judgeable: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1159,11 +1363,18 @@ pub struct MotionPacket {
     pub subject_epoch: u64,
     pub target: TargetSnapshot,
     pub canonical: Vec<CanonicalLandmark>,
+    pub joint_angles: Vec<JointAngleSnapshot>,
+    /// Subject-associated equipment evidence. Contract minors before 1.7 do
+    /// not serialize this field; callers must not infer equipment from wrists.
+    pub equipment: EquipmentFrameEvidence,
     pub set_state: SetStateSnapshot,
     pub rep_state: RepStateSnapshot,
     /// Newly sealed objects only. Consumers accumulate by `(subject_epoch,
     /// rep_id, revision)`; boundaries never mutate in later packets.
     pub completed_reps: Vec<SealedRep>,
+    /// Rust-authored, immutable review proposals for `completed_reps`.  This
+    /// remains empty for packet contract minors before 1.8.
+    pub quality_proposals: Vec<RustQualityProposal>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1171,6 +1382,8 @@ pub enum PacketEncodeError {
     FieldTooLong(&'static str),
     TooManyLandmarks,
     NonFiniteLandmark { index: usize },
+    NonFiniteEquipment { track_id: u64 },
+    QualityPayloadTooLarge,
     PacketTooLarge,
 }
 
@@ -1265,6 +1478,16 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
             landmark.canonical_confidence,
             landmark.uncertainty.unwrap_or(0.0),
         ] {
+            // Fused/predicted landmarks are produced by floating-point
+            // temporal math. Native ARM, native x86 and Wasm can differ by a
+            // single ULP even when they consume identical observations. Keep
+            // full precision inside the recognizer, but stabilize the public
+            // packet so all client bridges emit the same evidence bytes.
+            let value = if landmark.source == LandmarkSource::Measured {
+                value
+            } else {
+                stable_packet_landmark(value)
+            };
             bytes.extend_from_slice(&value.to_le_bytes());
         }
     }
@@ -1357,9 +1580,230 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
     bytes.extend_from_slice(&profile_identity_len.to_le_bytes());
     bytes.extend_from_slice(profile_identity);
 
+    if packet.lineage.contract.minor >= 6 {
+        bytes.extend_from_slice(b"ANG1");
+        let angle_count = u8::try_from(packet.joint_angles.len())
+            .map_err(|_| PacketEncodeError::PacketTooLarge)?;
+        bytes.push(angle_count);
+        for angle in &packet.joint_angles {
+            if !angle.confidence.is_finite()
+                || angle.value_degrees.is_some_and(|value| !value.is_finite())
+            {
+                return Err(PacketEncodeError::PacketTooLarge);
+            }
+            bytes.push(joint_angle_kind_code(angle.kind));
+            bytes.push(body_side_code(angle.side));
+            bytes.push(landmark_source_code(angle.source));
+            let mut flags = 0_u8;
+            if angle.value_degrees.is_some() {
+                flags |= 1;
+            }
+            if angle.judgeable {
+                flags |= 1 << 1;
+            }
+            bytes.push(flags);
+            bytes.extend_from_slice(
+                &stable_packet_angle(angle.value_degrees.unwrap_or(0.0)).to_le_bytes(),
+            );
+            bytes.extend_from_slice(&angle.confidence.to_le_bytes());
+        }
+    }
+
+    if packet.lineage.contract.minor >= 7 {
+        bytes.extend_from_slice(b"EQP1");
+        let (status_code, reason_code) = equipment_status_codes(packet.equipment.status);
+        bytes.push(status_code);
+        bytes.push(reason_code);
+        bytes.push(u8::from(packet.equipment.subject_candidate_id.is_some()));
+        bytes.extend_from_slice(
+            &packet
+                .equipment
+                .subject_candidate_id
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        for count in [
+            packet.equipment.rejected_reflection_count,
+            packet.equipment.rejected_static_count,
+            packet.equipment.rejected_low_confidence_or_invalid_count,
+            packet.equipment.rejected_outside_subject_count,
+        ] {
+            let count = u16::try_from(count).map_err(|_| PacketEncodeError::PacketTooLarge)?;
+            bytes.extend_from_slice(&count.to_le_bytes());
+        }
+        let track_count = u16::try_from(packet.equipment.tracks.len())
+            .map_err(|_| PacketEncodeError::PacketTooLarge)?;
+        bytes.extend_from_slice(&track_count.to_le_bytes());
+        for track in &packet.equipment.tracks {
+            let finite_values = [
+                track.bbox.x,
+                track.bbox.y,
+                track.bbox.width,
+                track.bbox.height,
+                track.center_x,
+                track.center_y,
+                track.observation_score,
+                stable_packet_confidence(track.association_confidence),
+                track.uncertainty_px.unwrap_or(0.0),
+            ];
+            if finite_values.iter().any(|value| !value.is_finite()) {
+                return Err(PacketEncodeError::NonFiniteEquipment {
+                    track_id: track.track_id,
+                });
+            }
+            bytes.extend_from_slice(&track.track_id.to_le_bytes());
+            bytes.extend_from_slice(&track.proposal_id.to_le_bytes());
+            bytes.extend_from_slice(&track.subject_candidate_id.to_le_bytes());
+            bytes.push(equipment_kind_code(track.kind));
+            bytes.push(equipment_source_code(track.source));
+            bytes.push(equipment_hand_code(track.held_by));
+            let mut flags = 0_u8;
+            if track.judgeable_path {
+                flags |= 1;
+            }
+            if track.uncertainty_px.is_some() {
+                flags |= 1 << 1;
+            }
+            bytes.push(flags);
+            for value in finite_values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+
+    if packet.lineage.contract.minor >= 8 {
+        bytes.extend_from_slice(b"QLT1");
+        let payload = serde_json::to_vec(&QualityExtension {
+            schema_version: QUALITY_SCHEMA_VERSION.into(),
+            proposals: packet.quality_proposals.clone(),
+        })
+        .map_err(|_| PacketEncodeError::PacketTooLarge)?;
+        const MAX_QUALITY_PAYLOAD_BYTES: usize = 1_048_576;
+        if payload.len() > MAX_QUALITY_PAYLOAD_BYTES {
+            return Err(PacketEncodeError::QualityPayloadTooLarge);
+        }
+        let payload_len =
+            u32::try_from(payload.len()).map_err(|_| PacketEncodeError::QualityPayloadTooLarge)?;
+        bytes.extend_from_slice(&payload_len.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+    }
+
     let packet_len = u32::try_from(bytes.len()).map_err(|_| PacketEncodeError::PacketTooLarge)?;
     bytes[8..12].copy_from_slice(&packet_len.to_le_bytes());
     Ok(bytes)
+}
+
+/// Platform libm implementations can differ by one `f32` ULP for `acos`.
+/// Quantize only the client-facing angle extension to 0.001° so identical
+/// canonical observations produce a stable packet on native and WebAssembly.
+fn stable_packet_angle(value: f32) -> f32 {
+    const SCALE: f32 = 1_000.0;
+    (value * SCALE).round() / SCALE
+}
+
+fn stable_packet_landmark(value: f32) -> f32 {
+    const SCALE: f64 = 100_000.0;
+    let scaled = f64::from(value) * SCALE;
+    let rounded = if scaled >= 0.0 {
+        (scaled + 0.5).floor()
+    } else {
+        (scaled - 0.5).ceil()
+    };
+    (rounded / SCALE) as f32
+}
+
+/// Subject association uses `hypot`, whose native and WebAssembly `f32`
+/// implementations can differ by one ULP. Preserve the full internal value,
+/// but publish confidence to five decimal places so one observation produces
+/// byte-identical MOTN packets on every client.
+fn stable_packet_confidence(value: f32) -> f32 {
+    const SCALE: f64 = 100_000.0;
+    let grid_value = (f64::from(value.clamp(0.0, 1.0)) * SCALE + 0.5) as u32;
+    (f64::from(grid_value) / SCALE) as f32
+}
+
+fn equipment_status_codes(status: EquipmentFrameStatus) -> (u8, u8) {
+    match status {
+        EquipmentFrameStatus::Observed => (0, 0),
+        EquipmentFrameStatus::CannotJudge(reason) => (1, equipment_reason_code(reason)),
+    }
+}
+
+fn equipment_reason_code(reason: EquipmentCannotJudgeReason) -> u8 {
+    match reason {
+        EquipmentCannotJudgeReason::NoLockedSubject => 1,
+        EquipmentCannotJudgeReason::NoEquipmentObservation => 2,
+        EquipmentCannotJudgeReason::TimestampNotMonotonic => 3,
+        EquipmentCannotJudgeReason::LowConfidenceOrInvalid => 4,
+        EquipmentCannotJudgeReason::ReflectionOrStaticOnly => 5,
+        EquipmentCannotJudgeReason::OutsideLockedSubject => 6,
+    }
+}
+
+fn equipment_kind_code(kind: EquipmentKind) -> u8 {
+    match kind {
+        EquipmentKind::WeightPlate => 0,
+        EquipmentKind::BarbellShaft => 1,
+        EquipmentKind::Dumbbell => 2,
+        EquipmentKind::MachineHandle => 3,
+    }
+}
+
+fn equipment_source_code(source: EquipmentSource) -> u8 {
+    match source {
+        EquipmentSource::Detector => 0,
+        EquipmentSource::OpticalFlow => 1,
+        EquipmentSource::Geometry => 2,
+        EquipmentSource::Predicted => 3,
+    }
+}
+
+fn equipment_hand_code(hand: EquipmentHand) -> u8 {
+    match hand {
+        EquipmentHand::Left => 0,
+        EquipmentHand::Right => 1,
+        EquipmentHand::Both => 2,
+        EquipmentHand::Unknown => 3,
+    }
+}
+
+#[cfg(test)]
+mod packet_float_stability_tests {
+    use super::stable_packet_angle;
+
+    #[test]
+    fn published_angles_collapse_one_ulp_platform_math_drift() {
+        let native = f32::from_bits(0x41e2_c21c);
+        let wasm = f32::from_bits(0x41e2_c21b);
+        let observed_native = 77.0792_f32;
+        let observed_wasm = 77.0791_f32;
+
+        assert_ne!(native.to_bits(), wasm.to_bits());
+        assert_eq!(
+            stable_packet_angle(native).to_bits(),
+            stable_packet_angle(wasm).to_bits()
+        );
+        assert_eq!(
+            stable_packet_angle(observed_native).to_bits(),
+            stable_packet_angle(observed_wasm).to_bits(),
+        );
+    }
+}
+
+fn joint_angle_kind_code(kind: JointAngleKind) -> u8 {
+    match kind {
+        JointAngleKind::Elbow => 0,
+        JointAngleKind::Shoulder => 1,
+        JointAngleKind::Hip => 2,
+        JointAngleKind::Knee => 3,
+    }
+}
+
+fn body_side_code(side: BodySide) -> u8 {
+    match side {
+        BodySide::Left => 0,
+        BodySide::Right => 1,
+    }
 }
 
 fn rep_disposition_code(disposition: RepDisposition) -> u8 {
@@ -1389,6 +1833,11 @@ fn rep_observation_findings_flags(findings: &[RepObservationFinding]) -> u8 {
                 RepObservationFinding::PrimaryRangeBelowExpectation => 1 << 0,
                 RepObservationFinding::SecondaryRangeBelowExpectation => 1 << 1,
                 RepObservationFinding::CycleFasterThanExpected => 1 << 2,
+                RepObservationFinding::EquipmentPrimaryBoundary => 1 << 3,
+                RepObservationFinding::PoseEquipmentTurnaroundAligned => 1 << 4,
+                RepObservationFinding::PoseUnavailableAtTurnaround => 1 << 5,
+                RepObservationFinding::PoseEquipmentTurnaroundConflict => 1 << 6,
+                RepObservationFinding::EquipmentPathCoverageLow => 1 << 7,
             }
     })
 }
@@ -1441,13 +1890,17 @@ fn continuity_reason_code(reason: Option<ContinuityReason>) -> u8 {
         Some(ContinuityReason::OutlierRejectedUnknown) => 4,
         Some(ContinuityReason::PredictionTimeout) => 5,
         Some(ContinuityReason::NoMeasurementBaseline) => 6,
+        Some(ContinuityReason::EquipmentPathConstraint) => 7,
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct InferenceResult {
-    pub candidates: Vec<PoseCandidate>,
+pub struct FrameObservations {
+    pub pose_candidates: Vec<PoseCandidate>,
+    pub equipment: Vec<EquipmentObservation>,
 }
+
+pub type InferenceResult = FrameObservations;
 
 pub trait InferenceAdapter {
     fn infer(&mut self, frame: &FrameLease) -> Result<InferenceResult, MotionError>;
@@ -1505,7 +1958,10 @@ impl InferenceAdapter for FixtureInferenceAdapter {
     fn infer(&mut self, _frame: &FrameLease) -> Result<InferenceResult, MotionError> {
         let candidates = self.frames.pop_front().unwrap_or_else(|| self.last.clone());
         self.last = candidates.clone();
-        Ok(InferenceResult { candidates })
+        Ok(FrameObservations {
+            pose_candidates: candidates,
+            equipment: Vec::new(),
+        })
     }
 }
 
@@ -1869,6 +2325,24 @@ struct ActiveRep {
     active_signal: ActiveSignal,
 }
 
+#[derive(Clone, Copy)]
+struct PendingActivation {
+    since_ms: u64,
+    start: RepSample,
+    peak: RepSample,
+    peak_amplitude: f32,
+    peak_secondary_amplitude: f32,
+    direction: MovementDirection,
+    active_signal: ActiveSignal,
+}
+
+#[derive(Clone, Copy)]
+struct PendingReady {
+    since_ms: u64,
+    best: RepSample,
+    best_absolute_amplitude: f32,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ActiveSignal {
     Bilateral,
@@ -1878,6 +2352,7 @@ enum ActiveSignal {
 
 struct RepEngine {
     profile: ExerciseProfile,
+    barbell_phase: Option<barbell_phase::BarbellBenchPhaseEngine>,
     state: RepStateSnapshot,
     baseline_primary: Option<f32>,
     baseline_secondary: Option<f32>,
@@ -1890,12 +2365,22 @@ struct RepEngine {
     active: Option<ActiveRep>,
     next_rep_id: u64,
     gap_since_ms: Option<u64>,
+    signal_window: VecDeque<RepSample>,
+    ready_history: VecDeque<RepSample>,
+    pending_activation: Option<PendingActivation>,
+    pending_return_since_ms: Option<u64>,
+    pending_ready: Option<PendingReady>,
+    finalized_outcomes: Option<Vec<SealedRep>>,
 }
 
 impl RepEngine {
     fn new(profile: ExerciseProfile) -> Self {
+        let barbell_phase = profile
+            .uses_barbell_axis_state_graph()
+            .then(barbell_phase::BarbellBenchPhaseEngine::new);
         Self {
             profile,
+            barbell_phase,
             state: RepStateSnapshot::default(),
             baseline_primary: None,
             baseline_secondary: None,
@@ -1905,10 +2390,21 @@ impl RepEngine {
             active: None,
             next_rep_id: 1,
             gap_since_ms: None,
+            signal_window: VecDeque::new(),
+            ready_history: VecDeque::new(),
+            pending_activation: None,
+            pending_return_since_ms: None,
+            pending_ready: None,
+            finalized_outcomes: None,
         }
     }
 
     fn abort_active(&mut self) {
+        if let Some(engine) = self.barbell_phase.as_mut() {
+            engine.abort_active();
+            self.sync_barbell_phase_state();
+            return;
+        }
         if self.active.take().is_some() {
             self.state.partial_attempts = self.state.partial_attempts.saturating_add(1);
         }
@@ -1916,14 +2412,102 @@ impl RepEngine {
         self.state.active_rep_id = None;
         self.state.recovered_across_gap = false;
         self.gap_since_ms = None;
+        self.pending_activation = None;
+        self.pending_return_since_ms = None;
+        self.pending_ready = None;
     }
 
     fn begin_set(&mut self) {
+        self.finalized_outcomes = None;
+        if let Some(engine) = self.barbell_phase.as_mut() {
+            engine.begin_set();
+            self.sync_barbell_phase_state();
+            return;
+        }
         self.abort_active();
+        self.signal_window.clear();
+        self.ready_history.clear();
         // Orientation is a set-level decision. A later set may legitimately
         // begin from the opposite physical extreme, so it must earn a fresh
         // auto-direction lock rather than inheriting the prior set's choice.
         self.locked_auto_direction = None;
+    }
+
+    fn finish_set(&mut self) -> Vec<SealedRep> {
+        if let Some(finalized) = self.finalized_outcomes.as_ref() {
+            return finalized.clone();
+        }
+        let finalized: Vec<SealedRep> = if self.barbell_phase.is_some() {
+            let candidates = self
+                .barbell_phase
+                .as_mut()
+                .expect("barbell phase graph disappeared")
+                .finish_set();
+            self.sync_barbell_phase_state();
+            candidates
+                .into_iter()
+                .map(|candidate| self.seal_barbell_candidate(candidate))
+                .collect()
+        } else {
+            self.reject_active(RepEvidenceReason::IncompleteCycle, self.previous)
+                .into_iter()
+                .collect()
+        };
+        self.finalized_outcomes = Some(finalized.clone());
+        finalized
+    }
+
+    /// Learns the observable setup pose while the explicit set gate is still
+    /// arming. These samples can never advance a rep, but the final stable
+    /// sample must be the reference for the first movement after arming.
+    fn prime_ready_baseline(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        target_state: TargetState,
+        canonical: &[CanonicalLandmark],
+    ) {
+        if self.barbell_phase.is_some() {
+            return;
+        }
+        if target_state != TargetState::Locked || self.state.phase != RepPhase::Ready {
+            return;
+        }
+        if !profile_signal_transition_eligible(&self.profile, canonical) {
+            return;
+        }
+        let Some((primary, secondary, torso, _repaired)) = profile_signal(&self.profile, canonical)
+        else {
+            return;
+        };
+        let sample = self.signal_sample(frame_id, timestamp_ms, primary, secondary, torso);
+        let (primary, secondary, torso) = (sample.primary, sample.secondary, sample.torso);
+        update_ready_baseline(self.profile.direction, &mut self.baseline_primary, primary);
+        update_ready_baseline(
+            self.profile.direction,
+            &mut self.baseline_secondary,
+            secondary,
+        );
+        update_ready_baseline(self.profile.direction, &mut self.baseline_torso, torso);
+        self.previous = Some(sample);
+    }
+
+    fn prime_barbell_ready(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        target_state: TargetState,
+        canonical: &[CanonicalLandmark],
+        equipment: &EquipmentFrameEvidence,
+    ) {
+        if target_state != TargetState::Locked {
+            return;
+        }
+        let pose_signal = barbell_bench_pose_signal(self.profile.schema, canonical);
+        if let Some(engine) = self.barbell_phase.as_mut() {
+            engine.prime_boundary(frame_id, timestamp_ms, equipment, pose_signal);
+            self.sync_barbell_phase_state();
+        }
     }
 
     /// The external seam for closing an active attempt. Callers only choose
@@ -1944,12 +2528,16 @@ impl RepEngine {
         self.state.active_rep_id = None;
         self.state.recovered_across_gap = false;
         self.gap_since_ms = None;
+        self.pending_activation = None;
+        self.pending_return_since_ms = None;
+        self.pending_ready = None;
         let sealed = SealedRep {
             rep_id: active.rep_id,
             start_frame_id: active.start.frame_id,
             start_timestamp_ms: active.start.timestamp_ms,
             peak_frame_id: active.peak.frame_id,
             peak_timestamp_ms: active.peak.timestamp_ms,
+            turnaround_confirmed_timestamp_ms: end.timestamp_ms.max(active.peak.timestamp_ms),
             end_frame_id: end.frame_id,
             end_timestamp_ms: end.timestamp_ms,
             revision: 0,
@@ -1974,6 +2562,10 @@ impl RepEngine {
         reason: RepEvidenceReason,
         end: Option<RepSample>,
     ) -> Option<SealedRep> {
+        if self.barbell_phase.is_some() {
+            self.abort_active();
+            return None;
+        }
         let active = self.active.take()?;
         let end = end.unwrap_or(active.peak);
         Some(self.finish_active(
@@ -1990,11 +2582,15 @@ impl RepEngine {
     /// only an anti-noise guard. A cycle between the two is still a real
     /// effort and must be returned with descriptive findings.
     fn minimum_observable_primary(&self) -> f32 {
-        (self.profile.min_primary_amplitude * 0.45).max(self.profile.start_amplitude * 1.20)
+        // `min_primary_amplitude` describes a normally comparable range, not
+        // whether a cycle happened. Low-range fatigue reps remain real reps
+        // and are surfaced with `PrimaryRangeBelowExpectation`; the start
+        // threshold still prevents detector jitter from becoming volume.
+        self.profile.start_amplitude * 1.20
     }
 
     fn minimum_observable_secondary(&self) -> f32 {
-        (self.profile.min_secondary_amplitude * 0.45).max(self.profile.start_amplitude * 0.50)
+        self.profile.start_amplitude * 0.50
     }
 
     fn minimum_observable_duration_ms(&self) -> u64 {
@@ -2059,7 +2655,111 @@ impl RepEngine {
         self.reject_active(RepEvidenceReason::SubjectChanged, self.previous)
     }
 
+    #[allow(dead_code)]
     fn process(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        target_state: TargetState,
+        canonical: &[CanonicalLandmark],
+    ) -> Vec<SealedRep> {
+        self.process_pose(frame_id, timestamp_ms, target_state, canonical)
+    }
+
+    fn process_with_equipment(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        target_state: TargetState,
+        canonical: &[CanonicalLandmark],
+        equipment: &EquipmentFrameEvidence,
+        raw_equipment: &[EquipmentObservation],
+    ) -> Vec<SealedRep> {
+        if self.barbell_phase.is_none() {
+            return self.process_pose(frame_id, timestamp_ms, target_state, canonical);
+        }
+        let active_barbell_rep = self
+            .barbell_phase
+            .as_ref()
+            .is_some_and(|engine| engine.snapshot().active_rep_id.is_some());
+        if target_state != TargetState::Locked && !active_barbell_rep {
+            return Vec::new();
+        }
+        let pose_signal = (target_state == TargetState::Locked)
+            .then(|| barbell_bench_pose_signal(self.profile.schema, canonical))
+            .flatten();
+        let candidates = self
+            .barbell_phase
+            .as_mut()
+            .expect("barbell phase graph disappeared")
+            .process(
+                frame_id,
+                timestamp_ms,
+                equipment,
+                raw_equipment,
+                pose_signal,
+                MovementDirection::Decreasing,
+            );
+        self.sync_barbell_phase_state();
+        candidates
+            .into_iter()
+            .map(|candidate| self.seal_barbell_candidate(candidate))
+            .collect()
+    }
+
+    fn sync_barbell_phase_state(&mut self) {
+        let Some(engine) = self.barbell_phase.as_ref() else {
+            return;
+        };
+        let snapshot = engine.snapshot();
+        self.state.phase = snapshot.phase;
+        self.state.active_rep_id = snapshot.active_rep_id;
+        self.state.partial_attempts = snapshot.partial_attempts;
+        self.state.recovered_across_gap = false;
+    }
+
+    fn seal_barbell_candidate(&self, candidate: barbell_phase::BarbellRepCandidate) -> SealedRep {
+        let mut findings = vec![RepObservationFinding::EquipmentPrimaryBoundary];
+        let mut disposition = candidate.disposition;
+        match candidate.pose_peak_timestamp_ms {
+            Some(pose_peak) if pose_peak.abs_diff(candidate.peak_timestamp_ms) <= 250 => {
+                findings.push(RepObservationFinding::PoseEquipmentTurnaroundAligned);
+            }
+            Some(_) => {
+                findings.push(RepObservationFinding::PoseEquipmentTurnaroundConflict);
+            }
+            None => findings.push(RepObservationFinding::PoseUnavailableAtTurnaround),
+        }
+        if candidate.equipment_coverage < 0.70 {
+            findings.push(RepObservationFinding::EquipmentPathCoverageLow);
+            if disposition == RepDisposition::Confirmed {
+                disposition = RepDisposition::NeedsReview;
+            }
+        }
+        SealedRep {
+            rep_id: candidate.rep_id,
+            start_frame_id: candidate.start_frame_id,
+            start_timestamp_ms: candidate.start_timestamp_ms,
+            peak_frame_id: candidate.peak_frame_id,
+            peak_timestamp_ms: candidate.peak_timestamp_ms,
+            turnaround_confirmed_timestamp_ms: candidate.turnaround_confirmed_timestamp_ms,
+            end_frame_id: candidate.end_frame_id,
+            end_timestamp_ms: candidate.end_timestamp_ms,
+            revision: 0,
+            canonical_slice_hash: candidate.path_hash,
+            profile_identity: self.profile.identity.clone(),
+            profile_hash: self.profile.content_hash,
+            profile_maturity: self.profile.maturity.as_str(),
+            quality_verdict: None,
+            recovered_across_gap: false,
+            disposition,
+            evidence_reason: (disposition == RepDisposition::Rejected)
+                .then_some(RepEvidenceReason::AntiInterferenceFilter),
+            observation_findings: findings,
+        }
+    }
+
+    fn process_pose(
         &mut self,
         frame_id: u64,
         timestamp_ms: u64,
@@ -2069,19 +2769,33 @@ impl RepEngine {
         if target_state != TargetState::Locked {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::LongContinuityLoss);
         }
-        let Some((primary, secondary, torso, repaired)) = profile_signal(&self.profile, canonical)
+        let Some((primary, secondary, torso, _repaired)) = profile_signal(&self.profile, canonical)
         else {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::RequiredJointLoss);
         };
+        // Short-horizon prediction remains useful to keep the canonical
+        // skeleton visually continuous, but it is not a new observation. In
+        // particular, a projected elbow can move outside the image and create
+        // an anatomically impossible joint-angle extremum. Freeze the rep
+        // engine until measured or topology-fused signal evidence returns;
+        // predicted/weak samples must never create start/peak/end events.
+        if !profile_signal_transition_eligible(&self.profile, canonical) {
+            return self.handle_gap(timestamp_ms, RepEvidenceReason::RequiredJointLoss);
+        }
+        let sample = self.signal_sample(frame_id, timestamp_ms, primary, secondary, torso);
+        let (primary, secondary, torso) = (sample.primary, sample.secondary, sample.torso);
         if let Some(gap_since) = self.gap_since_ms.take() {
-            if timestamp_ms.saturating_sub(gap_since) > self.profile.max_gap_ms {
+            let gap_duration_ms = timestamp_ms.saturating_sub(gap_since);
+            if gap_duration_ms > self.profile.max_gap_ms {
                 return self
                     .reject_active(RepEvidenceReason::LongContinuityLoss, self.previous)
                     .into_iter()
                     .collect();
             } else if let Some(active) = self.active.as_mut() {
-                active.recovered_across_gap = true;
-                self.state.recovered_across_gap = true;
+                if gap_duration_ms >= CONTINUITY_REVIEW_GAP_MS {
+                    active.recovered_across_gap = true;
+                    self.state.recovered_across_gap = true;
+                }
                 self.state.phase = if active.peak_amplitude >= self.profile.min_primary_amplitude {
                     RepPhase::Peak
                 } else {
@@ -2090,13 +2804,12 @@ impl RepEngine {
             }
         }
 
-        let sample = RepSample {
-            frame_id,
-            timestamp_ms,
-            primary,
-            secondary,
-            torso,
-        };
+        if let Some(dwell_ms) = self.profile.stable_phase_dwell_ms() {
+            let sealed = self.process_stable_cycle_sample(sample, dwell_ms);
+            self.previous = Some(sample);
+            return sealed;
+        }
+
         if self.state.phase == RepPhase::Ready {
             update_ready_baseline(self.profile.direction, &mut self.baseline_primary, primary);
             update_ready_baseline(
@@ -2105,6 +2818,14 @@ impl RepEngine {
                 secondary,
             );
             update_ready_baseline(self.profile.direction, &mut self.baseline_torso, torso);
+            self.ready_history.push_back(sample);
+            while self
+                .ready_history
+                .front()
+                .is_some_and(|ready| timestamp_ms.saturating_sub(ready.timestamp_ms) > 2_000)
+            {
+                self.ready_history.pop_front();
+            }
         }
         let baseline_primary = *self.baseline_primary.get_or_insert(primary);
         let baseline_secondary = *self.baseline_secondary.get_or_insert(secondary);
@@ -2178,17 +2899,23 @@ impl RepEngine {
             return rejected.into_iter().collect();
         }
 
-        if repaired {
-            if let Some(active) = self.active.as_mut() {
-                active.recovered_across_gap = true;
-                self.state.recovered_across_gap = true;
-            }
-        }
-
         match self.state.phase {
             RepPhase::Ready => {
                 if amplitude >= self.profile.start_amplitude {
-                    let start = self.previous.unwrap_or(sample);
+                    let start = if self.profile.uses_cycle_aligned_boundaries() {
+                        cycle_aligned_start_sample(
+                            &self.ready_history,
+                            sample,
+                            configured_direction,
+                            active_signal,
+                            baseline_primary,
+                            baseline_secondary,
+                            self.profile.start_amplitude,
+                        )
+                    } else {
+                        self.previous.unwrap_or(sample)
+                    };
+                    self.ready_history.clear();
                     let rep_id = self.next_rep_id;
                     self.active = Some(ActiveRep {
                         rep_id,
@@ -2249,7 +2976,40 @@ impl RepEngine {
                     active.peak = sample;
                     active.peak_amplitude = amplitude;
                     self.state.phase = RepPhase::Peak;
+                    self.pending_ready = None;
                 } else if amplitude <= seal_ready_threshold(&self.profile, active.peak_amplitude) {
+                    if self.profile.uses_cycle_aligned_boundaries() {
+                        let ready_distance = active_ready_distance(active, sample);
+                        match self.pending_ready.as_mut() {
+                            Some(pending) => {
+                                if ready_distance + 1e-6 < pending.best_absolute_amplitude {
+                                    pending.best = sample;
+                                    pending.best_absolute_amplitude = ready_distance;
+                                }
+                            }
+                            None => {
+                                self.pending_ready = Some(PendingReady {
+                                    since_ms: sample.timestamp_ms,
+                                    best: sample,
+                                    best_absolute_amplitude: ready_distance,
+                                });
+                            }
+                        }
+                        let pending = self.pending_ready.expect("pending cycle ready");
+                        if sample.timestamp_ms.saturating_sub(pending.since_ms)
+                            < CYCLE_ALIGNED_READY_DWELL_MS
+                        {
+                            self.previous = Some(sample);
+                            return sealed;
+                        }
+                        let end = pending.best;
+                        self.baseline_primary = Some(end.primary);
+                        self.baseline_secondary = Some(end.secondary);
+                        self.baseline_torso = Some(end.torso);
+                        sealed.extend(self.seal_active(end));
+                        self.previous = Some(sample);
+                        return sealed;
+                    }
                     let next_ready = self.active.as_ref().map(|active| {
                         if self.profile.direction == MovementDirection::Auto {
                             (
@@ -2273,6 +3033,20 @@ impl RepEngine {
                         self.baseline_secondary = Some(next_ready_secondary);
                         self.baseline_torso = Some(next_ready_torso);
                     }
+                } else if self.profile.uses_cycle_aligned_boundaries() {
+                    if let Some(pending) = self.pending_ready.take() {
+                        // A new departure before the dwell timer expires is
+                        // itself evidence that the prior cycle reached its
+                        // ready-side extremum. Seal the historical best now;
+                        // the following frame may causally arm the next rep.
+                        let end = pending.best;
+                        self.baseline_primary = Some(end.primary);
+                        self.baseline_secondary = Some(end.secondary);
+                        self.baseline_torso = Some(end.torso);
+                        self.ready_history.clear();
+                        self.ready_history.push_back(end);
+                        sealed.extend(self.seal_active(end));
+                    }
                 }
             }
             RepPhase::Frozen => {}
@@ -2281,12 +3055,295 @@ impl RepEngine {
         sealed
     }
 
+    /// Temporal variant of the profile graph. Thresholds remain the
+    /// exercise-specific amplitude contract, while transitions must persist
+    /// for `dwell_ms`. This prevents a single noisy shoulder/elbow fold from
+    /// splitting one human repetition into several short cycles and keeps the
+    /// reported boundaries at the ready/turning-point/ready extrema rather
+    /// than at arbitrary threshold crossings.
+    fn process_stable_cycle_sample(&mut self, sample: RepSample, dwell_ms: u64) -> Vec<SealedRep> {
+        let (primary, secondary, torso) = (sample.primary, sample.secondary, sample.torso);
+        let baseline_primary = *self.baseline_primary.get_or_insert(primary);
+        let baseline_secondary = *self.baseline_secondary.get_or_insert(secondary);
+        let baseline_torso = *self.baseline_torso.get_or_insert(torso);
+        let direction = self
+            .active
+            .as_ref()
+            .map(|active| active.direction)
+            .or_else(|| self.pending_activation.map(|pending| pending.direction))
+            .or_else(|| {
+                let configured = if self.profile.direction == MovementDirection::Auto {
+                    self.locked_auto_direction
+                        .unwrap_or(MovementDirection::Auto)
+                } else {
+                    self.profile.direction
+                };
+                activation_direction(
+                    configured,
+                    baseline_primary,
+                    primary,
+                    baseline_secondary,
+                    secondary,
+                    self.profile.start_amplitude,
+                )
+            });
+
+        let Some(direction) = direction else {
+            self.pending_activation = None;
+            self.record_stable_ready_sample(sample);
+            return Vec::new();
+        };
+        let primary_amplitude = directional_delta(direction, baseline_primary, primary);
+        let secondary_amplitude = directional_delta(direction, baseline_secondary, secondary);
+        let active_signal = self
+            .active
+            .as_ref()
+            .map(|active| active.active_signal)
+            .or_else(|| self.pending_activation.map(|pending| pending.active_signal))
+            .unwrap_or(ActiveSignal::Bilateral);
+        let amplitude = match active_signal {
+            ActiveSignal::Bilateral | ActiveSignal::Primary => primary_amplitude,
+            ActiveSignal::Secondary => secondary_amplitude,
+        };
+        let torso_amplitude = directional_delta(direction, baseline_torso, torso);
+
+        let translation_like = self.profile.primary_signal.kind == ExerciseSignalKind::LandmarkY
+            && self.profile.secondary_signal.kind == ExerciseSignalKind::LandmarkY
+            && amplitude > self.profile.start_amplitude
+            && torso_amplitude.abs() >= amplitude.abs() * 0.70
+            && secondary_amplitude.abs() >= amplitude.abs() * 0.70
+            && (torso_amplitude - amplitude).abs() <= 0.08
+            && (secondary_amplitude - amplitude).abs() <= 0.08;
+        if translation_like {
+            self.pending_activation = None;
+            self.pending_return_since_ms = None;
+            self.pending_ready = None;
+            return self
+                .reject_active(RepEvidenceReason::AntiInterferenceFilter, Some(sample))
+                .into_iter()
+                .collect();
+        }
+
+        match self.state.phase {
+            RepPhase::Ready => {
+                if amplitude < self.profile.start_amplitude * 0.65 {
+                    self.pending_activation = None;
+                    self.record_stable_ready_sample(sample);
+                    return Vec::new();
+                }
+
+                if self.pending_activation.is_none() {
+                    let start = cycle_aligned_start_sample(
+                        &self.ready_history,
+                        sample,
+                        direction,
+                        active_signal,
+                        baseline_primary,
+                        baseline_secondary,
+                        self.profile.start_amplitude,
+                    );
+                    self.pending_activation = Some(PendingActivation {
+                        since_ms: sample.timestamp_ms,
+                        start,
+                        peak: sample,
+                        peak_amplitude: amplitude,
+                        peak_secondary_amplitude: secondary_amplitude,
+                        direction,
+                        active_signal,
+                    });
+                    return Vec::new();
+                }
+
+                let pending = self
+                    .pending_activation
+                    .as_mut()
+                    .expect("pending activation");
+                if pending.direction != direction {
+                    self.pending_activation = None;
+                    return Vec::new();
+                }
+                if amplitude >= pending.peak_amplitude {
+                    pending.peak = sample;
+                    pending.peak_amplitude = amplitude;
+                }
+                pending.peak_secondary_amplitude =
+                    pending.peak_secondary_amplitude.max(secondary_amplitude);
+                if sample.timestamp_ms.saturating_sub(pending.since_ms) < dwell_ms {
+                    return Vec::new();
+                }
+
+                let pending = self.pending_activation.take().expect("pending activation");
+                let rep_id = self.next_rep_id;
+                self.active = Some(ActiveRep {
+                    rep_id,
+                    direction: pending.direction,
+                    start: pending.start,
+                    peak: pending.peak,
+                    peak_amplitude: pending.peak_amplitude,
+                    peak_secondary_amplitude: pending.peak_secondary_amplitude,
+                    hash: hash_sample(FNV_OFFSET, pending.start),
+                    recovered_across_gap: false,
+                    active_signal: pending.active_signal,
+                });
+                self.ready_history.clear();
+                self.state.phase = RepPhase::Effort;
+                self.state.active_rep_id = Some(rep_id);
+                Vec::new()
+            }
+            RepPhase::Effort | RepPhase::Peak => {
+                let active = self.active.as_mut().expect("active stable effort rep");
+                if sample
+                    .timestamp_ms
+                    .saturating_sub(active.start.timestamp_ms)
+                    > self.profile.max_rep_duration_ms
+                {
+                    return self
+                        .reject_active(RepEvidenceReason::DurationExceeded, Some(sample))
+                        .into_iter()
+                        .collect();
+                }
+                active.hash = hash_sample(active.hash, sample);
+                if amplitude >= active.peak_amplitude {
+                    active.peak = sample;
+                    active.peak_amplitude = amplitude;
+                    self.pending_return_since_ms = None;
+                }
+                active.peak_secondary_amplitude =
+                    active.peak_secondary_amplitude.max(secondary_amplitude);
+                let reversal = active.peak_amplitude - amplitude >= self.profile.return_hysteresis;
+                if !reversal {
+                    self.pending_return_since_ms = None;
+                    return Vec::new();
+                }
+                let since = *self
+                    .pending_return_since_ms
+                    .get_or_insert(sample.timestamp_ms);
+                if sample.timestamp_ms.saturating_sub(since) >= dwell_ms {
+                    self.state.phase = RepPhase::Return;
+                    self.pending_ready = None;
+                }
+                Vec::new()
+            }
+            RepPhase::Return => {
+                let active = self.active.as_mut().expect("active stable return rep");
+                active.hash = hash_sample(active.hash, sample);
+                if amplitude > active.peak_amplitude {
+                    active.peak = sample;
+                    active.peak_amplitude = amplitude;
+                    self.state.phase = RepPhase::Effort;
+                    self.pending_return_since_ms = None;
+                    self.pending_ready = None;
+                    return Vec::new();
+                }
+
+                let ready_threshold = self
+                    .profile
+                    .ready_tolerance
+                    .max(self.profile.start_amplitude * 0.35);
+                if amplitude.abs() > ready_threshold {
+                    self.pending_ready = None;
+                    return Vec::new();
+                }
+
+                match self.pending_ready.as_mut() {
+                    Some(pending) => {
+                        if amplitude.abs() <= pending.best_absolute_amplitude {
+                            pending.best = sample;
+                            pending.best_absolute_amplitude = amplitude.abs();
+                        }
+                    }
+                    None => {
+                        self.pending_ready = Some(PendingReady {
+                            since_ms: sample.timestamp_ms,
+                            best: sample,
+                            best_absolute_amplitude: amplitude.abs(),
+                        });
+                    }
+                }
+                let pending = self.pending_ready.expect("pending ready");
+                if sample.timestamp_ms.saturating_sub(pending.since_ms) < dwell_ms {
+                    return Vec::new();
+                }
+                let end = pending.best;
+                self.baseline_primary = Some(end.primary);
+                self.baseline_secondary = Some(end.secondary);
+                self.baseline_torso = Some(end.torso);
+                self.seal_active(end).into_iter().collect()
+            }
+            RepPhase::Frozen => Vec::new(),
+        }
+    }
+
+    fn record_stable_ready_sample(&mut self, sample: RepSample) {
+        update_ready_baseline(
+            self.profile.direction,
+            &mut self.baseline_primary,
+            sample.primary,
+        );
+        update_ready_baseline(
+            self.profile.direction,
+            &mut self.baseline_secondary,
+            sample.secondary,
+        );
+        update_ready_baseline(
+            self.profile.direction,
+            &mut self.baseline_torso,
+            sample.torso,
+        );
+        self.ready_history.push_back(sample);
+        while self
+            .ready_history
+            .front()
+            .is_some_and(|ready| sample.timestamp_ms.saturating_sub(ready.timestamp_ms) > 2_500)
+        {
+            self.ready_history.pop_front();
+        }
+    }
+
+    fn signal_sample(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        primary: f32,
+        secondary: f32,
+        torso: f32,
+    ) -> RepSample {
+        let raw = RepSample {
+            frame_id,
+            timestamp_ms,
+            primary,
+            secondary,
+            torso,
+        };
+        let Some(window_ms) = self.profile.signal_smoothing_ms() else {
+            return raw;
+        };
+        self.signal_window.push_back(raw);
+        while self
+            .signal_window
+            .front()
+            .is_some_and(|sample| timestamp_ms.saturating_sub(sample.timestamp_ms) > window_ms)
+        {
+            self.signal_window.pop_front();
+        }
+        RepSample {
+            frame_id,
+            timestamp_ms,
+            primary: median_values(self.signal_window.iter().map(|sample| sample.primary)),
+            secondary: median_values(self.signal_window.iter().map(|sample| sample.secondary)),
+            torso: median_values(self.signal_window.iter().map(|sample| sample.torso)),
+        }
+    }
+
     fn handle_gap(
         &mut self,
         timestamp_ms: u64,
         rejection_reason: RepEvidenceReason,
     ) -> Vec<SealedRep> {
         if self.active.is_none() {
+            self.pending_activation = None;
+            self.pending_return_since_ms = None;
+            self.pending_ready = None;
             return Vec::new();
         }
         let gap_since = *self.gap_since_ms.get_or_insert(timestamp_ms);
@@ -2301,6 +3358,122 @@ impl RepEngine {
     }
 }
 
+#[cfg(test)]
+mod profile_signal_smoothing_tests {
+    use super::{CanonicalLandmark, ExerciseProfile, RepEngine, RepPhase, TargetState};
+
+    fn canonical_frame(wrist_y: f32, elbow_y: f32) -> Vec<CanonicalLandmark> {
+        let mut landmarks = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.95); 33];
+        for (index, x) in [(15, 0.35), (16, 0.65)] {
+            landmarks[index] = CanonicalLandmark::measured(x, wrist_y, 0.0, 0.95);
+        }
+        for (index, x) in [(13, 0.40), (14, 0.60)] {
+            landmarks[index] = CanonicalLandmark::measured(x, elbow_y, 0.0, 0.95);
+        }
+        landmarks
+    }
+
+    fn engine(state_machine_id: &str) -> RepEngine {
+        let mut profile = ExerciseProfile::lat_pulldown_provisional();
+        profile.state_machine_id = state_machine_id.into();
+        profile.content_hash = profile.computed_content_hash();
+        RepEngine::new(profile)
+    }
+
+    #[test]
+    fn median_state_graphs_reject_spikes_by_elapsed_time_window() {
+        let mut regular = engine("ready-effort-peak-return/v1");
+        let mut short = engine("median-100ms-ready-effort-peak-return/v1");
+        let mut long = engine("median-400ms-ready-effort-peak-return/v1");
+        let frames = [
+            (0, 0.20, 0.30),
+            (100, 0.20, 0.30),
+            (200, 0.20, 0.30),
+            (300, 0.80, 0.70),
+            (400, 0.80, 0.70),
+        ];
+        for (frame_id, &(timestamp_ms, wrist_y, elbow_y)) in frames.iter().enumerate() {
+            let canonical = canonical_frame(wrist_y, elbow_y);
+            for engine in [&mut regular, &mut short, &mut long] {
+                engine.process(
+                    frame_id as u64,
+                    timestamp_ms,
+                    TargetState::Locked,
+                    &canonical,
+                );
+            }
+        }
+
+        assert_eq!(regular.state.phase, RepPhase::Effort);
+        assert_eq!(short.state.phase, RepPhase::Effort);
+        assert_eq!(long.state.phase, RepPhase::Ready);
+    }
+
+    #[test]
+    fn cycle_aligned_graph_backtracks_onset_and_waits_for_the_ready_pose() {
+        let mut regular = engine("ready-effort-peak-return/v1");
+        let mut aligned = engine("cycle-aligned-ready-effort-peak-return/v1");
+        let wrist_values = [
+            0.20, 0.20, 0.21, 0.26, 0.40, 0.50, 0.38, 0.33, 0.255, 0.22, 0.205, 0.20, 0.20, 0.20,
+            0.20,
+        ];
+        let mut regular_outcomes = Vec::new();
+        let mut aligned_outcomes = Vec::new();
+        for (frame_id, wrist_y) in wrist_values.into_iter().enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            let canonical = canonical_frame(wrist_y, wrist_y - 0.02);
+            regular_outcomes.extend(regular.process(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+            ));
+            aligned_outcomes.extend(aligned.process(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+            ));
+        }
+
+        assert_eq!(regular_outcomes.len(), 1);
+        assert_eq!(aligned_outcomes.len(), 1);
+        assert!(aligned_outcomes[0].start_timestamp_ms < regular_outcomes[0].start_timestamp_ms);
+        assert!(aligned_outcomes[0].end_timestamp_ms > regular_outcomes[0].end_timestamp_ms);
+        assert_eq!(aligned_outcomes[0].start_timestamp_ms, 200);
+        assert_eq!(aligned_outcomes[0].end_timestamp_ms, 1_000);
+    }
+
+    #[test]
+    fn stable_cycle_graph_does_not_split_one_rep_on_a_brief_reversal() {
+        let mut engine = engine("stable-cycle-200ms-ready-effort-peak-return/v1");
+        // One complete excursion contains a two-frame reversal at 800-900 ms.
+        // A threshold-only graph closes there and treats the remaining return
+        // as another movement.  The temporal graph must wait for a sustained
+        // reversal and a stable ready pose, while retaining the full-cycle
+        // boundary timestamps.
+        let wrist_values = [
+            0.20, 0.20, 0.20, 0.21, 0.25, 0.34, 0.45, 0.52, 0.43, 0.50, 0.53, 0.47, 0.39, 0.31,
+            0.24, 0.205, 0.20, 0.20,
+        ];
+        let mut outcomes = Vec::new();
+        for (frame_id, wrist_y) in wrist_values.into_iter().enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            outcomes.extend(engine.process(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical_frame(wrist_y, wrist_y - 0.02),
+            ));
+        }
+
+        assert_eq!(outcomes.len(), 1);
+        assert!(outcomes[0].start_timestamp_ms <= 400);
+        assert_eq!(outcomes[0].peak_timestamp_ms, 1_000);
+        assert!(outcomes[0].end_timestamp_ms >= 1_500);
+    }
+}
+
 fn profile_signal(
     profile: &ExerciseProfile,
     canonical: &[CanonicalLandmark],
@@ -2308,13 +3481,13 @@ fn profile_signal(
     let torso_origin_y = if profile.primary_signal.kind == ExerciseSignalKind::LandmarkY
         && profile.secondary_signal.kind == ExerciseSignalKind::LandmarkY
     {
-        stable_torso_origin_y(canonical)?
+        stable_torso_origin_y(profile.schema, canonical)?
     } else {
         0.0
     };
     Some((
-        measure_signal(&profile.primary_signal, canonical)?,
-        measure_signal(&profile.secondary_signal, canonical)?,
+        measure_signal(profile.schema, &profile.primary_signal, canonical)?,
+        measure_signal(profile.schema, &profile.secondary_signal, canonical)?,
         torso_origin_y,
         profile
             .primary_signal
@@ -2332,7 +3505,173 @@ fn profile_signal(
     ))
 }
 
-fn measure_signal(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> Option<f32> {
+/// Independent pose corroboration for a barbell-bench turnaround. Both arms
+/// must be judgeable in the current Halpe/Blaze schema; one drifting arm can
+/// therefore explain a conflict but can never relocate the shaft boundary.
+fn barbell_bench_pose_signal(schema: PoseSchemaId, canonical: &[CanonicalLandmark]) -> Option<f32> {
+    let angles = measure_joint_angles_for_schema(canonical, TargetState::Locked, schema);
+    let left = angles.iter().find(|angle| {
+        angle.kind == JointAngleKind::Elbow && angle.side == BodySide::Left && angle.judgeable
+    })?;
+    let right = angles.iter().find(|angle| {
+        angle.kind == JointAngleKind::Elbow && angle.side == BodySide::Right && angle.judgeable
+    })?;
+    Some((left.value_degrees? + right.value_degrees?) * 0.5)
+}
+
+const PHASE_SIGNAL_MIN_CONFIDENCE: f32 = 0.5;
+
+/// Whether every coordinate needed for a phase signal is backed by a current
+/// measured or topology-fused observation. Predicted points may be rendered
+/// for at most the continuity horizon, but cannot establish a new motion
+/// event or update the ready baseline.
+fn profile_signal_transition_eligible(
+    profile: &ExerciseProfile,
+    canonical: &[CanonicalLandmark],
+) -> bool {
+    profile
+        .primary_signal
+        .landmarks
+        .iter()
+        .chain(&profile.secondary_signal.landmarks)
+        .all(|&index| {
+            canonical.get(index).is_some_and(|landmark| {
+                matches!(
+                    landmark.source,
+                    LandmarkSource::Measured | LandmarkSource::Fused
+                ) && landmark.renderable
+                    && landmark.canonical_confidence.is_finite()
+                    && landmark.canonical_confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+                    && landmark.x.is_some_and(f32::is_finite)
+                    && landmark.y.is_some_and(f32::is_finite)
+            })
+        })
+}
+
+#[cfg(test)]
+mod rep_signal_observation_trust_tests {
+    use super::{
+        CanonicalLandmark, ContinuityReason, ExerciseMaturity, ExerciseProfile, ExerciseSignal,
+        ExerciseSignalKind, LandmarkSource, MovementDirection, PROFILE_REQUIRED_CAPABILITIES,
+        PoseSchemaId, RepEngine, TargetState,
+    };
+
+    fn elbow_point(angle_degrees: f32, mirrored: bool) -> (f32, f32) {
+        let radians = angle_degrees.to_radians();
+        let direction = if mirrored { -1.0 } else { 1.0 };
+        (
+            0.5 + direction * -radians.cos() * 0.1,
+            0.5 + radians.sin() * 0.1,
+        )
+    }
+
+    fn measured_arm_frame(angle_degrees: f32) -> Vec<CanonicalLandmark> {
+        let mut canonical = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        let (left_wrist_x, left_wrist_y) = elbow_point(angle_degrees, true);
+        let (right_wrist_x, right_wrist_y) = elbow_point(angle_degrees, false);
+        for (index, x, y) in [
+            (5, 0.6, 0.5),
+            (7, 0.5, 0.5),
+            (9, left_wrist_x, left_wrist_y),
+            (6, 0.4, 0.5),
+            (8, 0.5, 0.5),
+            (10, right_wrist_x, right_wrist_y),
+        ] {
+            canonical[index] = CanonicalLandmark::measured(x, y, 0.0, 0.95);
+        }
+        canonical
+    }
+
+    fn frame_with_out_of_bounds_predicted_right_elbow(
+        secondary_angle_degrees: f32,
+    ) -> Vec<CanonicalLandmark> {
+        let mut canonical = measured_arm_frame(secondary_angle_degrees);
+        canonical[6] = CanonicalLandmark::measured(0.40, 0.50, 0.0, 0.95);
+        canonical[8] = CanonicalLandmark {
+            x: Some(2.445),
+            y: Some(0.425),
+            z: Some(0.0),
+            observation_score: 0.05,
+            canonical_confidence: 0.06,
+            uncertainty: Some(0.05),
+            source: LandmarkSource::Predicted,
+            renderable: true,
+            reason: Some(ContinuityReason::ShortGapPrediction),
+        };
+        canonical[10] = CanonicalLandmark::measured(0.21, 0.43, 0.0, 0.95);
+        canonical
+    }
+
+    fn front_bench_joint_angle_engine() -> RepEngine {
+        let mut profile = ExerciseProfile {
+            identity: "barbell-bench-press/front/bilateral/barbell/test-signal-trust-v1".into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::Halpe26,
+            coordinate_unit: "image-angle-deg".into(),
+            state_machine_id: "cycle-aligned-ready-effort-peak-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::JointAngle,
+                landmarks: vec![6, 8, 10],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::JointAngle,
+                landmarks: vec![5, 7, 9],
+            },
+            direction: MovementDirection::Decreasing,
+            start_amplitude: 10.0,
+            min_primary_amplitude: 30.0,
+            min_secondary_amplitude: 30.0,
+            return_hysteresis: 15.0,
+            ready_tolerance: 8.0,
+            max_gap_ms: 400,
+            min_rep_duration_ms: 300,
+            max_rep_duration_ms: 3_000,
+        };
+        profile.content_hash = profile.computed_content_hash();
+        RepEngine::new(profile)
+    }
+
+    #[test]
+    fn predicted_low_confidence_joint_cannot_become_the_rep_peak() {
+        let mut engine = front_bench_joint_angle_engine();
+        engine.begin_set();
+        let mut outcomes = Vec::new();
+        let sequence = [
+            (0, measured_arm_frame(160.0)),
+            (200, measured_arm_frame(160.0)),
+            (400, measured_arm_frame(160.0)),
+            (600, measured_arm_frame(160.0)),
+            (700, measured_arm_frame(120.0)),
+            (800, frame_with_out_of_bounds_predicted_right_elbow(100.0)),
+            (900, measured_arm_frame(90.0)),
+            (1_000, measured_arm_frame(120.0)),
+            (1_100, measured_arm_frame(145.0)),
+            (1_200, measured_arm_frame(160.0)),
+            (1_400, measured_arm_frame(160.0)),
+            (1_600, measured_arm_frame(160.0)),
+            (1_800, measured_arm_frame(160.0)),
+        ];
+        for (frame_id, (timestamp_ms, canonical)) in sequence.into_iter().enumerate() {
+            outcomes.extend(engine.process(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+            ));
+        }
+
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].peak_timestamp_ms, 900);
+    }
+}
+
+fn measure_signal(
+    schema: PoseSchemaId,
+    signal: &ExerciseSignal,
+    canonical: &[CanonicalLandmark],
+) -> Option<f32> {
     match signal.kind {
         ExerciseSignalKind::LandmarkY => mean_landmark_y(&signal.landmarks, canonical),
         ExerciseSignalKind::JointAngle => {
@@ -2345,21 +3684,21 @@ fn measure_signal(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> O
         }
         ExerciseSignalKind::LandmarkDistance => {
             let [first, second]: [usize; 2] = signal.landmarks.as_slice().try_into().ok()?;
-            let scale = torso_scale(canonical)?;
+            let scale = torso_scale(schema, canonical)?;
             let (left_x, left_y) = landmark_xy(first, canonical)?;
             let (right_x, right_y) = landmark_xy(second, canonical)?;
             Some(((left_x - right_x).hypot(left_y - right_y)) / scale)
         }
         ExerciseSignalKind::LandmarkHorizontalDistance => {
             let [first, second]: [usize; 2] = signal.landmarks.as_slice().try_into().ok()?;
-            let scale = torso_scale(canonical)?;
+            let scale = torso_scale(schema, canonical)?;
             let (first_x, _) = landmark_xy(first, canonical)?;
             let (second_x, _) = landmark_xy(second, canonical)?;
             Some((first_x - second_x).abs() / scale)
         }
         ExerciseSignalKind::LandmarkVerticalDistance => {
             let [first, second]: [usize; 2] = signal.landmarks.as_slice().try_into().ok()?;
-            let scale = torso_scale(canonical)?;
+            let scale = torso_scale(schema, canonical)?;
             let (_, first_y) = landmark_xy(first, canonical)?;
             let (_, second_y) = landmark_xy(second, canonical)?;
             Some((first_y - second_y).abs() / scale)
@@ -2367,7 +3706,7 @@ fn measure_signal(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> O
         ExerciseSignalKind::PairedLandmarkDistanceSum => {
             let [first, second, third, fourth]: [usize; 4] =
                 signal.landmarks.as_slice().try_into().ok()?;
-            let scale = torso_scale(canonical)?;
+            let scale = torso_scale(schema, canonical)?;
             let distance = |left: usize, right: usize| {
                 let (left_x, left_y) = landmark_xy(left, canonical)?;
                 let (right_x, right_y) = landmark_xy(right, canonical)?;
@@ -2412,8 +3751,105 @@ fn joint_angle_degrees(first: (f32, f32), joint: (f32, f32), third: (f32, f32)) 
     Some(cosine.acos().to_degrees())
 }
 
-fn torso_scale(canonical: &[CanonicalLandmark]) -> Option<f32> {
-    for [left, right] in [[11, 12], [23, 24]] {
+/// Measures the eight stable left/right joint angles used by the live camera
+/// overlay. These are projected image-plane angles, not clinical 3D joint
+/// measurements. The triplets are fixed here so profile fitting and clients
+/// cannot silently assign different meanings to a named angle.
+pub fn measure_joint_angles(
+    canonical: &[CanonicalLandmark],
+    target_state: TargetState,
+) -> Vec<JointAngleSnapshot> {
+    measure_joint_angles_for_schema(canonical, target_state, PoseSchemaId::BlazePose33)
+}
+
+pub fn measure_joint_angles_for_schema(
+    canonical: &[CanonicalLandmark],
+    target_state: TargetState,
+    schema: PoseSchemaId,
+) -> Vec<JointAngleSnapshot> {
+    const BLAZEPOSE33_DEFINITIONS: [(JointAngleKind, BodySide, [usize; 3]); 8] = [
+        (JointAngleKind::Elbow, BodySide::Left, [11, 13, 15]),
+        (JointAngleKind::Elbow, BodySide::Right, [12, 14, 16]),
+        (JointAngleKind::Shoulder, BodySide::Left, [23, 11, 13]),
+        (JointAngleKind::Shoulder, BodySide::Right, [24, 12, 14]),
+        (JointAngleKind::Hip, BodySide::Left, [11, 23, 25]),
+        (JointAngleKind::Hip, BodySide::Right, [12, 24, 26]),
+        (JointAngleKind::Knee, BodySide::Left, [23, 25, 27]),
+        (JointAngleKind::Knee, BodySide::Right, [24, 26, 28]),
+    ];
+    const HALPE26_DEFINITIONS: [(JointAngleKind, BodySide, [usize; 3]); 8] = [
+        (JointAngleKind::Elbow, BodySide::Left, [5, 7, 9]),
+        (JointAngleKind::Elbow, BodySide::Right, [6, 8, 10]),
+        (JointAngleKind::Shoulder, BodySide::Left, [11, 5, 7]),
+        (JointAngleKind::Shoulder, BodySide::Right, [12, 6, 8]),
+        (JointAngleKind::Hip, BodySide::Left, [5, 11, 13]),
+        (JointAngleKind::Hip, BodySide::Right, [6, 12, 14]),
+        (JointAngleKind::Knee, BodySide::Left, [11, 13, 15]),
+        (JointAngleKind::Knee, BodySide::Right, [12, 14, 16]),
+    ];
+    let definitions = match schema {
+        PoseSchemaId::BlazePose33 => &BLAZEPOSE33_DEFINITIONS,
+        PoseSchemaId::Halpe26 => &HALPE26_DEFINITIONS,
+    };
+
+    definitions
+        .iter()
+        .copied()
+        .map(|(kind, side, [first, joint, third])| {
+            let landmarks = [first, joint, third].map(|index| canonical.get(index));
+            let confidence = landmarks
+                .iter()
+                .filter_map(|landmark| *landmark)
+                .map(|landmark| landmark.canonical_confidence)
+                .filter(|value| value.is_finite())
+                .fold(1.0_f32, f32::min)
+                .clamp(0.0, 1.0);
+            let source = landmarks
+                .iter()
+                .filter_map(|landmark| *landmark)
+                .map(|landmark| landmark.source)
+                .max_by_key(|source| landmark_source_risk(*source))
+                .unwrap_or(LandmarkSource::Unknown);
+            let value_degrees = match (
+                landmark_xy(first, canonical),
+                landmark_xy(joint, canonical),
+                landmark_xy(third, canonical),
+            ) {
+                (Some(first), Some(joint), Some(third)) => joint_angle_degrees(first, joint, third),
+                _ => None,
+            };
+            let inputs_renderable = landmarks
+                .iter()
+                .all(|landmark| landmark.is_some_and(|value| value.renderable));
+            let judgeable = target_state == TargetState::Locked
+                && value_degrees.is_some_and(f32::is_finite)
+                && confidence >= 0.5
+                && inputs_renderable
+                && matches!(source, LandmarkSource::Measured | LandmarkSource::Fused);
+            JointAngleSnapshot {
+                kind,
+                side,
+                value_degrees,
+                confidence,
+                source,
+                judgeable,
+            }
+        })
+        .collect()
+}
+
+fn landmark_source_risk(source: LandmarkSource) -> u8 {
+    match source {
+        LandmarkSource::Measured => 0,
+        LandmarkSource::Fused => 1,
+        LandmarkSource::Predicted => 2,
+        LandmarkSource::Unknown => 3,
+    }
+}
+
+fn torso_scale(schema: PoseSchemaId, canonical: &[CanonicalLandmark]) -> Option<f32> {
+    let [shoulders, hips] = torso_landmark_pairs(schema);
+    for [left, right] in [shoulders, hips] {
         let (Some((left_x, left_y)), Some((right_x, right_y))) =
             (landmark_xy(left, canonical), landmark_xy(right, canonical))
         else {
@@ -2427,18 +3863,51 @@ fn torso_scale(canonical: &[CanonicalLandmark]) -> Option<f32> {
     None
 }
 
-fn stable_torso_origin_y(canonical: &[CanonicalLandmark]) -> Option<f32> {
-    let left_hip = landmark_y(23, canonical);
-    let right_hip = landmark_y(24, canonical);
+fn stable_torso_origin_y(schema: PoseSchemaId, canonical: &[CanonicalLandmark]) -> Option<f32> {
+    let [
+        [left_shoulder_index, right_shoulder_index],
+        [left_hip_index, right_hip_index],
+    ] = torso_landmark_pairs(schema);
+    let left_hip = landmark_y(left_hip_index, canonical);
+    let right_hip = landmark_y(right_hip_index, canonical);
     if let (Some(left), Some(right)) = (left_hip, right_hip) {
         return Some((left + right) * 0.5);
     }
-    let left_shoulder = landmark_y(11, canonical);
-    let right_shoulder = landmark_y(12, canonical);
+    let left_shoulder = landmark_y(left_shoulder_index, canonical);
+    let right_shoulder = landmark_y(right_shoulder_index, canonical);
     let hip = left_hip.or(right_hip);
     match (left_shoulder, right_shoulder, hip) {
         (Some(left), Some(right), Some(hip)) => Some(((left + right) * 0.5 + hip) * 0.5),
         _ => None,
+    }
+}
+
+const fn torso_landmark_pairs(schema: PoseSchemaId) -> [[usize; 2]; 2] {
+    match schema {
+        PoseSchemaId::BlazePose33 => [[11, 12], [23, 24]],
+        PoseSchemaId::Halpe26 => [[5, 6], [11, 12]],
+    }
+}
+
+#[cfg(test)]
+mod pose_schema_geometry_tests {
+    use super::{CanonicalLandmark, PoseSchemaId, stable_torso_origin_y, torso_scale};
+
+    #[test]
+    fn halpe_torso_helpers_do_not_require_foot_landmarks() {
+        let mut canonical = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        canonical[5] = CanonicalLandmark::measured(0.30, 0.30, 0.0, 0.9);
+        canonical[6] = CanonicalLandmark::measured(0.70, 0.30, 0.0, 0.9);
+        canonical[11] = CanonicalLandmark::measured(0.40, 0.70, 0.0, 0.9);
+        canonical[12] = CanonicalLandmark::measured(0.60, 0.70, 0.0, 0.9);
+
+        assert_eq!(
+            stable_torso_origin_y(PoseSchemaId::Halpe26, &canonical),
+            Some(0.70)
+        );
+        assert!((torso_scale(PoseSchemaId::Halpe26, &canonical).unwrap() - 0.40).abs() < 1e-6);
+        assert_eq!(canonical[23].source, super::LandmarkSource::Unknown);
+        assert_eq!(canonical[24].source, super::LandmarkSource::Unknown);
     }
 }
 
@@ -2510,7 +3979,69 @@ fn activation_direction(
 /// retain the original ready anchor when sealing (see above), which prevents a
 /// mid-return close from becoming a second, opposite-direction action.
 fn seal_ready_threshold(profile: &ExerciseProfile, peak_amplitude: f32) -> f32 {
-    profile.ready_tolerance.max(peak_amplitude * 0.40)
+    if profile.uses_cycle_aligned_boundaries() {
+        // A camera-space baseline drifts slightly across otherwise valid
+        // repetitions (especially for a supine subject). Waiting for an exact
+        // historical baseline merges adjacent cycles. Seal in the terminal
+        // 30% of the observed excursion: late enough to represent the full
+        // human-labelled return, but tolerant of small perspective drift.
+        profile.ready_tolerance.max(peak_amplitude * 0.30)
+    } else {
+        profile.ready_tolerance.max(peak_amplitude * 0.40)
+    }
+}
+
+fn cycle_aligned_start_sample(
+    history: &VecDeque<RepSample>,
+    fallback: RepSample,
+    direction: MovementDirection,
+    active_signal: ActiveSignal,
+    _baseline_primary: f32,
+    _baseline_secondary: f32,
+    start_amplitude: f32,
+) -> RepSample {
+    let signal = |sample: RepSample| match active_signal {
+        ActiveSignal::Bilateral | ActiveSignal::Primary => sample.primary,
+        ActiveSignal::Secondary => sample.secondary,
+    };
+    let candidates = history
+        .iter()
+        .rev()
+        .copied()
+        .take_while(|sample| fallback.timestamp_ms.saturating_sub(sample.timestamp_ms) <= 1_500)
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return fallback;
+    }
+
+    // The baseline is deliberately adaptive while Ready, so using the latest
+    // baseline to back-project onset can move the boundary into the movement.
+    // Recover the most recent sample on the ready-side extremum instead. This
+    // is still causal: activation has already happened and every candidate is
+    // historical.
+    let extreme = match direction {
+        MovementDirection::Increasing | MovementDirection::Auto => candidates
+            .iter()
+            .map(|sample| signal(*sample))
+            .fold(f32::INFINITY, f32::min),
+        MovementDirection::Decreasing => candidates
+            .iter()
+            .map(|sample| signal(*sample))
+            .fold(f32::NEG_INFINITY, f32::max),
+    };
+    let ready_band = (start_amplitude * 0.35).max(0.002);
+    candidates
+        .into_iter()
+        .find(|sample| (signal(*sample) - extreme).abs() <= ready_band)
+        .unwrap_or(fallback)
+}
+
+fn active_ready_distance(active: &ActiveRep, sample: RepSample) -> f32 {
+    let signal = |value: RepSample| match active.active_signal {
+        ActiveSignal::Bilateral | ActiveSignal::Primary => value.primary,
+        ActiveSignal::Secondary => value.secondary,
+    };
+    (signal(sample) - signal(active.start)).abs()
 }
 
 fn update_ready_baseline(direction: MovementDirection, baseline: &mut Option<f32>, value: f32) {
@@ -2560,6 +4091,8 @@ pub struct MotionSession<I: InferenceAdapter, O: OutputAdapter> {
     subject_epoch: u64,
     continuity: ContinuityEngine,
     subject_tracker: SubjectTracker,
+    equipment_fusion: EquipmentFusionEngine,
+    equipment_pose_constraint: equipment_pose_constraint::EquipmentPoseConstraintEngine,
     rep_engine: Option<RepEngine>,
     set_gate: SetGate,
     pending_outcomes: Vec<SealedRep>,
@@ -2613,6 +4146,9 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             subject_epoch: 0,
             continuity,
             subject_tracker,
+            equipment_fusion: EquipmentFusionEngine::new(),
+            equipment_pose_constraint:
+                equipment_pose_constraint::EquipmentPoseConstraintEngine::new(),
             rep_engine: None,
             set_gate: SetGate::replay_active(),
             pending_outcomes: Vec::new(),
@@ -2631,11 +4167,11 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
 
     /// Seals the lifecycle without synthesising a rep from an incomplete
     /// movement. A later `begin_set` creates a fresh arming window.
-    pub fn finish_set(&mut self) {
+    pub fn finish_set(&mut self) -> Vec<SealedRep> {
         self.set_gate.finish();
-        if let Some(rep_engine) = self.rep_engine.as_mut() {
-            rep_engine.abort_active();
-        }
+        self.rep_engine
+            .as_mut()
+            .map_or_else(Vec::new, RepEngine::finish_set)
     }
 
     pub fn set_state(&self) -> SetStateSnapshot {
@@ -2690,6 +4226,9 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             start_timestamp_ms: revision.start_timestamp_ms,
             peak_frame_id: revision.peak_frame_id,
             peak_timestamp_ms: revision.peak_timestamp_ms,
+            turnaround_confirmed_timestamp_ms: revision
+                .end_timestamp_ms
+                .max(revision.peak_timestamp_ms),
             end_frame_id: revision.end_frame_id,
             end_timestamp_ms: revision.end_timestamp_ms,
             revision: next_revision,
@@ -2721,6 +4260,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             }
             if lease.timestamp_ms().saturating_sub(previous) > 1_000 {
                 self.continuity.reset();
+                self.equipment_pose_constraint.reset();
                 if let Some(rep_engine) = self.rep_engine.as_mut() {
                     self.pending_outcomes.extend(
                         rep_engine.reject_active(
@@ -2738,18 +4278,23 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             self.inference.infer(&lease)
         }))
         .map_err(|_| MotionError::PanicIsolated("inference_adapter"))??;
+        let FrameObservations {
+            pose_candidates,
+            equipment: raw_equipment,
+        } = result;
         let mut completed_reps = std::mem::take(&mut self.pending_outcomes);
         let (target, selected) = self
             .subject_tracker
-            .update(result.candidates, source_timestamp_ms);
+            .update(pose_candidates, source_timestamp_ms);
         if self.subject_tracker.take_identity_boundary() {
             self.subject_epoch = self.subject_epoch.saturating_add(1);
             self.continuity.reset();
+            self.equipment_pose_constraint.reset();
             if let Some(rep_engine) = self.rep_engine.as_mut() {
                 completed_reps.extend(rep_engine.reject_for_subject_change());
             }
         }
-        let canonical = if let Some(selected) = selected {
+        let mut canonical = if let Some(selected) = selected.as_ref() {
             self.continuity
                 .process(&selected.observations, source_timestamp_ms)
         } else {
@@ -2762,22 +4307,75 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 .unwrap_or(0);
             vec![CanonicalLandmark::unknown(0.0, None); landmark_count]
         };
+        let equipment = self.equipment_fusion.process(EquipmentFrameInput {
+            timestamp_ms: source_timestamp_ms,
+            selected_subject: selected.as_ref(),
+            canonical: &canonical,
+            equipment: &raw_equipment,
+        });
+        // Preserve the independent pose observation for phase fusion.  The
+        // equipment-conditioned repair is published to clients and quality
+        // metrics, but must not corroborate the same equipment twice.
+        let phase_pose_canonical = canonical.clone();
+        if self
+            .rep_engine
+            .as_ref()
+            .is_some_and(|engine| engine.profile.uses_barbell_axis_state_graph())
+        {
+            let schema = self
+                .rep_engine
+                .as_ref()
+                .map_or(PoseSchemaId::BlazePose33, |engine| engine.profile.schema);
+            self.equipment_pose_constraint.process_barbell(
+                schema,
+                source_timestamp_ms,
+                &mut canonical,
+                &equipment,
+            );
+        }
         let rep_phase = self
             .rep_engine
             .as_ref()
             .map_or(RepPhase::Ready, |engine| engine.state.phase);
+        if self.set_gate.state.lifecycle == SetLifecycle::Arming {
+            if let Some(rep_engine) = self.rep_engine.as_mut() {
+                rep_engine.prime_ready_baseline(
+                    frame_id,
+                    source_timestamp_ms,
+                    target.state,
+                    &phase_pose_canonical,
+                );
+            }
+        }
         let may_process_rep = self.set_gate.advance(
             self.rep_engine.as_ref().map(|engine| &engine.profile),
             target.state,
             &canonical,
+            Some(&equipment),
             source_timestamp_ms,
             rep_phase,
         );
         if may_process_rep {
             self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
-                engine.process(frame_id, source_timestamp_ms, target.state, &canonical)
+                engine.process_with_equipment(
+                    frame_id,
+                    source_timestamp_ms,
+                    target.state,
+                    &phase_pose_canonical,
+                    &equipment,
+                    &raw_equipment,
+                )
             })
         } else {
+            if let Some(rep_engine) = self.rep_engine.as_mut() {
+                rep_engine.prime_barbell_ready(
+                    frame_id,
+                    source_timestamp_ms,
+                    target.state,
+                    &phase_pose_canonical,
+                    &equipment,
+                );
+            }
             Vec::new()
         }
         .into_iter()
@@ -2787,6 +4385,11 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             .as_ref()
             .map_or_else(RepStateSnapshot::default, |engine| engine.state.clone());
         let active_profile = self.rep_engine.as_ref().map(|engine| &engine.profile);
+        let pose_schema = self
+            .rep_engine
+            .as_ref()
+            .map_or(PoseSchemaId::BlazePose33, |engine| engine.profile.schema);
+        let joint_angles = measure_joint_angles_for_schema(&canonical, target.state, pose_schema);
         let packet = MotionPacket {
             lineage: PacketLineage {
                 sequence_id: self.config.sequence_id.clone(),
@@ -2808,8 +4411,15 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             subject_epoch: self.subject_epoch,
             target,
             canonical,
+            joint_angles,
+            equipment,
             set_state: self.set_gate.state.clone(),
             rep_state,
+            quality_proposals: if self.config.contract.minor >= 8 {
+                build_quality_proposals(&completed_reps)
+            } else {
+                Vec::new()
+            },
             completed_reps,
         };
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.output.publish(packet)))
@@ -2831,6 +4441,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         let candidate_id = self.subject_tracker.select_at(x, y)?;
         self.subject_epoch = self.subject_epoch.saturating_add(1);
         self.continuity.reset();
+        self.equipment_pose_constraint.reset();
         if let Some(rep_engine) = self.rep_engine.as_mut() {
             self.pending_outcomes
                 .extend(rep_engine.reject_for_subject_change());
@@ -2854,13 +4465,25 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     }
 }
 
-const MEASURED_MIN_SCORE: f32 = 0.5;
-const WEAK_MIN_SCORE: f32 = 0.2;
+const BLAZEPOSE_MEASURED_MIN_SCORE: f32 = 0.5;
+const BLAZEPOSE_WEAK_MIN_SCORE: f32 = 0.2;
+// RTMPose SimCC peak responses are not MediaPipe visibility probabilities.
+// Keep weak observations available to the temporal/bone fusion path, but do
+// not promote them to reliable direct measurements. The raw response remains
+// available as `observation_score` so clients can distinguish model evidence
+// from canonical confidence.
+const HALPE26_MEASURED_MIN_SCORE: f32 = 0.5;
+const HALPE26_WEAK_MIN_SCORE: f32 = 0.12;
 const MIN_BASELINE_SAMPLES: usize = 5;
 const BASELINE_WINDOW: usize = 15;
 const MAX_RAW_BONE_RESIDUAL: f32 = 0.45;
 const MAX_PREDICTION_MS: u64 = 150;
-const SKELETON_BONES: [(usize, usize); 12] = [
+const MAX_WEAK_COORDINATE_INNOVATION_RATIO: f32 = 0.08;
+// One or two dropped 20 Hz inference frames are normal on mobile and must not
+// downgrade an otherwise continuous rep. Longer recoveries remain visible for
+// review; the profile-specific max gap still rejects an actual tracking loss.
+const CONTINUITY_REVIEW_GAP_MS: u64 = 500;
+const BLAZEPOSE33_SKELETON_BONES: [(usize, usize); 12] = [
     (11, 12),
     (11, 13),
     (13, 15),
@@ -2874,6 +4497,28 @@ const SKELETON_BONES: [(usize, usize); 12] = [
     (24, 26),
     (26, 28),
 ];
+const HALPE26_SKELETON_BONES: [(usize, usize); 18] = [
+    (5, 6),
+    (5, 7),
+    (7, 9),
+    (6, 8),
+    (8, 10),
+    (5, 11),
+    (6, 12),
+    (11, 12),
+    (11, 13),
+    (13, 15),
+    (12, 14),
+    (14, 16),
+    (15, 20),
+    (15, 22),
+    (15, 24),
+    (16, 21),
+    (16, 23),
+    (16, 25),
+];
+const BLAZEPOSE33_ARM_CHAINS: [(usize, usize, usize); 2] = [(11, 13, 15), (12, 14, 16)];
+const HALPE26_ARM_CHAINS: [(usize, usize, usize); 2] = [(5, 7, 9), (6, 8, 10)];
 
 #[derive(Clone, Copy)]
 struct Point {
@@ -2892,6 +4537,7 @@ struct MotionState {
 
 struct ContinuityEngine {
     mode: ContinuityMode,
+    schema: PoseSchemaId,
     width: f32,
     height: f32,
     motion: HashMap<usize, MotionState>,
@@ -2901,13 +4547,95 @@ struct ContinuityEngine {
 
 impl ContinuityEngine {
     fn new(mode: ContinuityMode, width: u32, height: u32) -> Self {
+        Self::new_with_schema(mode, width, height, PoseSchemaId::BlazePose33)
+    }
+
+    fn new_with_schema(
+        mode: ContinuityMode,
+        width: u32,
+        height: u32,
+        schema: PoseSchemaId,
+    ) -> Self {
         Self {
             mode,
+            schema,
             width: width as f32,
             height: height as f32,
             motion: HashMap::new(),
             previous_elbows: HashMap::new(),
             bone_lengths: HashMap::new(),
+        }
+    }
+
+    fn arm_chains(&self) -> &'static [(usize, usize, usize)] {
+        match self.schema {
+            PoseSchemaId::BlazePose33 => &BLAZEPOSE33_ARM_CHAINS,
+            PoseSchemaId::Halpe26 => &HALPE26_ARM_CHAINS,
+        }
+    }
+
+    fn skeleton_bones(&self) -> &'static [(usize, usize)] {
+        match self.schema {
+            PoseSchemaId::BlazePose33 => &BLAZEPOSE33_SKELETON_BONES,
+            PoseSchemaId::Halpe26 => &HALPE26_SKELETON_BONES,
+        }
+    }
+
+    /// RTMPose Halpe-26 often keeps a geometrically stable supine arm below
+    /// the calibrated 0.5 score when a bar occludes the wrists. Bootstrap only
+    /// arm-chain lengths from those weak coordinates. The raw point is not
+    /// promoted: `fuse_weak_child` still validates it against a multi-frame
+    /// topology baseline before it becomes usable canonical evidence.
+    fn allows_weak_bone_baseline(&self, from: usize, to: usize) -> bool {
+        self.schema == PoseSchemaId::Halpe26
+            && self.arm_chains().iter().any(|&(shoulder, elbow, wrist)| {
+                bone_key(from, to) == bone_key(shoulder, elbow)
+                    || bone_key(from, to) == bone_key(elbow, wrist)
+            })
+    }
+
+    fn measured_min_score(&self) -> f32 {
+        match self.schema {
+            PoseSchemaId::BlazePose33 => BLAZEPOSE_MEASURED_MIN_SCORE,
+            PoseSchemaId::Halpe26 => HALPE26_MEASURED_MIN_SCORE,
+        }
+    }
+
+    fn weak_min_score(&self) -> f32 {
+        match self.schema {
+            PoseSchemaId::BlazePose33 => BLAZEPOSE_WEAK_MIN_SCORE,
+            PoseSchemaId::Halpe26 => HALPE26_WEAK_MIN_SCORE,
+        }
+    }
+
+    fn normalized_confidence(&self, observation_score: f32) -> f32 {
+        if !observation_score.is_finite() || observation_score <= 0.0 {
+            return 0.0;
+        }
+        match self.schema {
+            PoseSchemaId::BlazePose33 => observation_score.clamp(0.0, 1.0),
+            PoseSchemaId::Halpe26 => {
+                let progress = (observation_score - HALPE26_MEASURED_MIN_SCORE)
+                    / (1.0 - HALPE26_MEASURED_MIN_SCORE);
+                (0.5 + progress * 0.5).clamp(0.0, 1.0)
+            }
+        }
+    }
+
+    fn raw_canonical(&self, observation: PoseObservation) -> CanonicalLandmark {
+        if !observation.is_finite() || observation.visibility <= 0.0 {
+            return CanonicalLandmark::unknown(0.0, None);
+        }
+        CanonicalLandmark {
+            x: Some(observation.x),
+            y: Some(observation.y),
+            z: Some(observation.z),
+            observation_score: observation.visibility,
+            canonical_confidence: self.normalized_confidence(observation.visibility),
+            uncertainty: None,
+            source: LandmarkSource::Measured,
+            renderable: observation.visibility >= self.measured_min_score(),
+            reason: None,
         }
     }
 
@@ -2917,13 +4645,19 @@ impl ContinuityEngine {
         timestamp_ms: u64,
     ) -> Vec<CanonicalLandmark> {
         if self.mode == ContinuityMode::Raw {
-            return observations.iter().copied().map(raw_canonical).collect();
+            return observations
+                .iter()
+                .copied()
+                .map(|observation| self.raw_canonical(observation))
+                .collect();
         }
 
+        let measured_min_score = self.measured_min_score();
+        let weak_min_score = self.weak_min_score();
         let rejected = self.find_outliers(observations, timestamp_ms);
         self.update_bone_baselines(observations, &rejected);
         let mut fused = HashMap::<usize, CanonicalLandmark>::new();
-        for (shoulder_index, elbow_index, wrist_index) in [(11, 13, 15), (12, 14, 16)] {
+        for &(shoulder_index, elbow_index, wrist_index) in self.arm_chains() {
             let (Some(shoulder), Some(elbow), Some(wrist)) = (
                 observations.get(shoulder_index).copied(),
                 observations.get(elbow_index).copied(),
@@ -2936,11 +4670,11 @@ impl ContinuityEngine {
             }
             let anchors_reliable = !rejected.contains(&shoulder_index)
                 && !rejected.contains(&wrist_index)
-                && shoulder.visibility >= MEASURED_MIN_SCORE
-                && wrist.visibility >= MEASURED_MIN_SCORE;
+                && shoulder.visibility >= measured_min_score
+                && wrist.visibility >= measured_min_score;
             if anchors_reliable
                 && !rejected.contains(&elbow_index)
-                && elbow.visibility >= MEASURED_MIN_SCORE
+                && elbow.visibility >= measured_min_score
             {
                 self.previous_elbows
                     .insert(elbow_index, self.to_pixels(elbow));
@@ -2948,7 +4682,7 @@ impl ContinuityEngine {
             }
             if !anchors_reliable
                 || rejected.contains(&elbow_index)
-                || elbow.visibility < WEAK_MIN_SCORE
+                || elbow.visibility < weak_min_score
             {
                 continue;
             }
@@ -2999,7 +4733,7 @@ impl ContinuityEngine {
                 y: elbow_px.y * raw_weight + constrained.y * (1.0 - raw_weight),
             };
             let uncertainty = distance(elbow_px, constrained) / self.width.hypot(self.height)
-                + (MEASURED_MIN_SCORE - elbow.visibility) * 0.025;
+                + (measured_min_score - elbow.visibility) * 0.025;
             let confidence =
                 shoulder.visibility.min(wrist.visibility) * (0.7 + elbow.visibility * 0.3);
             self.previous_elbows.insert(elbow_index, result);
@@ -3010,13 +4744,55 @@ impl ContinuityEngine {
                     y: Some(result.y / self.height),
                     z: Some(elbow.z),
                     observation_score: elbow.visibility,
-                    canonical_confidence: confidence.clamp(MEASURED_MIN_SCORE, 1.0),
+                    canonical_confidence: self.normalized_confidence(confidence).clamp(0.5, 1.0),
                     uncertainty: Some(uncertainty),
                     source: LandmarkSource::Fused,
                     renderable: true,
                     reason: Some(ContinuityReason::WeakObservationBoneFusion),
                 },
             );
+        }
+
+        // MediaPipe can keep geometrically coherent arm coordinates while
+        // assigning near-zero visibility to supine/occluded elbows and
+        // wrists. Pure velocity prediction correctly times out after 150 ms;
+        // it cannot follow a multi-second cyclic rep. Continue only when each
+        // weak coordinate agrees with both the learned bone length and the
+        // short-horizon motion prior, walking outward from a reliable
+        // shoulder. This is measurement fusion, not unbounded extrapolation.
+        for &(shoulder_index, elbow_index, wrist_index) in self.arm_chains() {
+            if !fused.contains_key(&elbow_index)
+                && observations
+                    .get(elbow_index)
+                    .is_some_and(|observation| observation.visibility < measured_min_score)
+            {
+                if let Some(landmark) = self.fuse_weak_child(
+                    shoulder_index,
+                    elbow_index,
+                    observations,
+                    &rejected,
+                    &fused,
+                    timestamp_ms,
+                ) {
+                    fused.insert(elbow_index, landmark);
+                }
+            }
+            if !fused.contains_key(&wrist_index)
+                && observations
+                    .get(wrist_index)
+                    .is_some_and(|observation| observation.visibility < measured_min_score)
+            {
+                if let Some(landmark) = self.fuse_weak_child(
+                    elbow_index,
+                    wrist_index,
+                    observations,
+                    &rejected,
+                    &fused,
+                    timestamp_ms,
+                ) {
+                    fused.insert(wrist_index, landmark);
+                }
+            }
         }
 
         observations
@@ -3030,9 +4806,9 @@ impl ContinuityEngine {
                 }
                 if !rejected.contains(&index)
                     && observation.is_finite()
-                    && observation.visibility >= MEASURED_MIN_SCORE
+                    && observation.visibility >= measured_min_score
                 {
-                    let landmark = raw_canonical(observation);
+                    let landmark = self.raw_canonical(observation);
                     self.accept_motion(index, &landmark, timestamp_ms);
                     return landmark;
                 }
@@ -3103,6 +4879,114 @@ impl ContinuityEngine {
         }
     }
 
+    fn fuse_weak_child(
+        &self,
+        parent_index: usize,
+        child_index: usize,
+        observations: &[PoseObservation],
+        rejected: &HashSet<usize>,
+        fused: &HashMap<usize, CanonicalLandmark>,
+        timestamp_ms: u64,
+    ) -> Option<CanonicalLandmark> {
+        if rejected.contains(&child_index) {
+            return None;
+        }
+        let child = observations.get(child_index).copied()?;
+        if !child.is_finite() || child.visibility <= 0.0 {
+            return None;
+        }
+        let (parent_point, parent_confidence) = if let Some(parent) = fused.get(&parent_index) {
+            let (Some(x), Some(y)) = (parent.x, parent.y) else {
+                return None;
+            };
+            (
+                Point {
+                    x: x * self.width,
+                    y: y * self.height,
+                },
+                parent.canonical_confidence,
+            )
+        } else {
+            let parent = observations.get(parent_index).copied()?;
+            if rejected.contains(&parent_index)
+                || !parent.is_finite()
+                || parent.visibility < self.measured_min_score()
+            {
+                return None;
+            }
+            (
+                self.to_pixels(parent),
+                self.normalized_confidence(parent.visibility),
+            )
+        };
+        let baseline_samples = self
+            .bone_lengths
+            .get(&bone_key(parent_index, child_index))?;
+        if baseline_samples.len() < MIN_BASELINE_SAMPLES {
+            return None;
+        }
+        let baseline = median(baseline_samples);
+        let raw_point = self.to_pixels(child);
+        let bone_residual = (distance(parent_point, raw_point) - baseline).abs() / baseline;
+        if !bone_residual.is_finite() || bone_residual > MAX_RAW_BONE_RESIDUAL {
+            return None;
+        }
+        let predicted = match self.motion.get(&child_index).copied() {
+            Some(state) => {
+                let elapsed = timestamp_ms.checked_sub(state.accepted_timestamp_ms)?;
+                if !(1..=MAX_PREDICTION_MS).contains(&elapsed) {
+                    return None;
+                }
+                Point {
+                    x: state.point.x + state.vx_per_ms * elapsed as f32,
+                    y: state.point.y + state.vy_per_ms * elapsed as f32,
+                }
+            }
+            // A stable topology baseline can initialize a weak arm point.
+            // Later frames use the normal short-horizon motion prior.
+            None => raw_point,
+        };
+        let diagonal = self.width.hypot(self.height);
+        let innovation = distance(raw_point, predicted);
+        if !innovation.is_finite() || innovation > diagonal * MAX_WEAK_COORDINATE_INNOVATION_RATIO {
+            return None;
+        }
+        // Treat visibility as the measurement gain. Near-zero observations
+        // may still steer a validated chain, but must not dominate the motion
+        // prior and turn coordinate jitter into artificial rep cycles.
+        let raw_weight = (0.08 + child.visibility * 0.84).clamp(0.08, 0.50);
+        let blended = Point {
+            x: raw_point.x * raw_weight + predicted.x * (1.0 - raw_weight),
+            y: raw_point.y * raw_weight + predicted.y * (1.0 - raw_weight),
+        };
+        let direction = Point {
+            x: blended.x - parent_point.x,
+            y: blended.y - parent_point.y,
+        };
+        let direction_length = direction.x.hypot(direction.y);
+        if !direction_length.is_finite() || direction_length <= 1e-6 {
+            return None;
+        }
+        let result = Point {
+            x: parent_point.x + direction.x / direction_length * baseline,
+            y: parent_point.y + direction.y / direction_length * baseline,
+        };
+        let uncertainty = innovation / diagonal
+            + bone_residual * 0.03
+            + (self.measured_min_score() - child.visibility).max(0.0) * 0.025;
+        Some(CanonicalLandmark {
+            x: Some(result.x / self.width),
+            y: Some(result.y / self.height),
+            z: Some(child.z),
+            observation_score: child.visibility,
+            canonical_confidence: (parent_confidence * 0.70).clamp(0.5, 0.75),
+            uncertainty: Some(uncertainty),
+            source: LandmarkSource::Fused,
+            renderable: true,
+            reason: Some(ContinuityReason::WeakObservationBoneFusion),
+        })
+    }
+
     fn accept_motion(&mut self, index: usize, landmark: &CanonicalLandmark, timestamp_ms: u64) {
         let (Some(x), Some(y), Some(z)) = (landmark.x, landmark.y, landmark.z) else {
             return;
@@ -3152,7 +5036,7 @@ impl ContinuityEngine {
             .enumerate()
             .filter_map(|(index, observation)| {
                 let state = self.motion.get(&index).copied()?;
-                if !observation.is_finite() || observation.visibility < MEASURED_MIN_SCORE {
+                if !observation.is_finite() || observation.visibility < self.measured_min_score() {
                     return None;
                 }
                 let elapsed = timestamp_ms.checked_sub(state.accepted_timestamp_ms)?;
@@ -3187,7 +5071,7 @@ impl ContinuityEngine {
                 let bone_residual =
                     self.topology_bone_residual(candidate.index, candidate.point, observations);
                 let candidate_motion = candidate.dx.hypot(candidate.dy);
-                let has_coherent_neighbor = SKELETON_BONES.iter().any(|&(from, to)| {
+                let has_coherent_neighbor = self.skeleton_bones().iter().any(|&(from, to)| {
                     let neighbor_index = if from == candidate.index {
                         Some(to)
                     } else if to == candidate.index {
@@ -3225,7 +5109,7 @@ impl ContinuityEngine {
         point: Point,
         observations: &[PoseObservation],
     ) -> f32 {
-        SKELETON_BONES
+        self.skeleton_bones()
             .iter()
             .filter_map(|&(from, to)| {
                 if from != index && to != index {
@@ -3251,19 +5135,24 @@ impl ContinuityEngine {
         observations: &[PoseObservation],
         rejected: &HashSet<usize>,
     ) {
-        for (from, to) in SKELETON_BONES {
+        for &(from, to) in self.skeleton_bones() {
             let (Some(left), Some(right)) = (
                 observations.get(from).copied(),
                 observations.get(to).copied(),
             ) else {
                 continue;
             };
+            let minimum_score = if self.allows_weak_bone_baseline(from, to) {
+                self.weak_min_score()
+            } else {
+                self.measured_min_score()
+            };
             if rejected.contains(&from)
                 || rejected.contains(&to)
                 || !left.is_finite()
                 || !right.is_finite()
-                || left.visibility < MEASURED_MIN_SCORE
-                || right.visibility < MEASURED_MIN_SCORE
+                || left.visibility < minimum_score
+                || right.visibility < minimum_score
             {
                 continue;
             }
@@ -3285,20 +5174,58 @@ impl ContinuityEngine {
     }
 }
 
-fn raw_canonical(observation: PoseObservation) -> CanonicalLandmark {
-    if !observation.is_finite() {
-        return CanonicalLandmark::unknown(0.0, None);
+#[cfg(test)]
+mod pose_score_calibration_tests {
+    use super::{ContinuityEngine, ContinuityMode, LandmarkSource, PoseObservation, PoseSchemaId};
+
+    #[test]
+    fn halpe_simcc_weak_scores_are_preserved_without_becoming_reliable_measurements() {
+        let weak_observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.15); 26];
+        let mut halpe = ContinuityEngine::new_with_schema(
+            ContinuityMode::Raw,
+            720,
+            1280,
+            PoseSchemaId::Halpe26,
+        );
+        let weak_halpe_output = halpe.process(&weak_observations, 0);
+        assert!(!weak_halpe_output[5].renderable);
+        assert!(weak_halpe_output[5].canonical_confidence < 0.5);
+        assert_eq!(weak_halpe_output[5].observation_score, 0.15);
+
+        let reliable_observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.6); 26];
+        let reliable_halpe_output = halpe.process(&reliable_observations, 100);
+        assert!(reliable_halpe_output[5].renderable);
+        assert!(reliable_halpe_output[5].canonical_confidence >= 0.5);
+
+        let mut blaze = ContinuityEngine::new(ContinuityMode::Raw, 720, 1280);
+        let blaze_output = blaze.process(&weak_observations, 0);
+        assert!(!blaze_output[5].renderable);
+        assert_eq!(blaze_output[5].canonical_confidence, 0.15);
     }
-    CanonicalLandmark {
-        x: Some(observation.x),
-        y: Some(observation.y),
-        z: Some(observation.z),
-        observation_score: observation.visibility,
-        canonical_confidence: observation.visibility,
-        uncertainty: None,
-        source: LandmarkSource::Measured,
-        renderable: observation.visibility >= MEASURED_MIN_SCORE,
-        reason: None,
+
+    #[test]
+    fn halpe_supine_arm_bootstraps_weak_elbow_and_wrist_from_stable_topology() {
+        let mut engine = ContinuityEngine::new_with_schema(
+            ContinuityMode::Fusion,
+            720,
+            1280,
+            PoseSchemaId::Halpe26,
+        );
+        let mut output = Vec::new();
+        for frame in 0..6 {
+            let mut observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.9); 26];
+            observations[5] = PoseObservation::new(0.35, 0.35, 0.0, 0.9);
+            observations[7] = PoseObservation::new(0.30, 0.50 + frame as f32 * 0.002, 0.0, 0.45);
+            observations[9] = PoseObservation::new(0.28, 0.66 + frame as f32 * 0.004, 0.0, 0.30);
+            output = engine.process(&observations, frame * 50);
+        }
+
+        assert_eq!(output[7].source, LandmarkSource::Fused);
+        assert_eq!(output[9].source, LandmarkSource::Fused);
+        assert!(output[7].renderable);
+        assert!(output[9].renderable);
+        assert_eq!(output[7].observation_score, 0.45);
+        assert_eq!(output[9].observation_score, 0.30);
     }
 }
 

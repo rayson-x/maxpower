@@ -1,0 +1,686 @@
+//! Canonical, review-first execution assessment emitted by the Rust SDK.
+//!
+//! The module deliberately turns only already-sealed recognition evidence into
+//! proposals.  It does not own a second counter and it never upgrades missing
+//! visual evidence into measured pose, force, strength, muscle activation or a
+//! medical conclusion.
+
+use serde::{Deserialize, Serialize};
+
+use crate::{RepDisposition, RepObservationFinding, SealedRep};
+
+pub const QUALITY_SCHEMA_VERSION: &str = "maxpower.motion-quality-proposal/v1";
+pub const QUALITY_RULE_BUNDLE_VERSION: &str = "personal-motion-quality-rules/v1";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentCapability {
+    QualitySupported,
+    PhaseSupported,
+    ObservationOnly,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointKind {
+    StartAnchor,
+    PrimaryTurnaround,
+    EndReturn,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceChannel {
+    PoseMeasured,
+    EquipmentMeasured,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepEndpointSnapshot {
+    pub kind: EndpointKind,
+    pub occurred_frame_id: u64,
+    pub occurred_timestamp_ms: u64,
+    pub causal_confirmed_timestamp_ms: u64,
+    pub phase_before: String,
+    pub phase_after: String,
+    pub confidence: f32,
+    pub evidence_channels: Vec<EvidenceChannel>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentDimension {
+    TaskCompletion,
+    RangeOfMotion,
+    PhaseControl,
+    SupportStability,
+    BilateralCoordination,
+    TrajectoryControl,
+    StandardVariantCompatibility,
+    ObservationConfidence,
+}
+
+impl AssessmentDimension {
+    pub const ALL: [Self; 8] = [
+        Self::TaskCompletion,
+        Self::RangeOfMotion,
+        Self::PhaseControl,
+        Self::SupportStability,
+        Self::BilateralCoordination,
+        Self::TrajectoryControl,
+        Self::StandardVariantCompatibility,
+        Self::ObservationConfidence,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TaskCompletion => "task_completion",
+            Self::RangeOfMotion => "range_of_motion",
+            Self::PhaseControl => "phase_control",
+            Self::SupportStability => "support_stability",
+            Self::BilateralCoordination => "bilateral_coordination",
+            Self::TrajectoryControl => "trajectory_control",
+            Self::StandardVariantCompatibility => "standard_variant_compatibility",
+            Self::ObservationConfidence => "observation_confidence",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentConclusionState {
+    ObservedFact,
+    CannotJudge,
+    NotApplicable,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QualityConclusion {
+    pub conclusion_id: String,
+    pub dimension: AssessmentDimension,
+    pub state: AssessmentConclusionState,
+    pub summary: String,
+    pub evidence: Vec<String>,
+    pub reason: Option<String>,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RustQualityProposal {
+    pub schema_version: String,
+    pub proposal_id: String,
+    pub rep_id: u64,
+    pub action_id: String,
+    pub capture_position: String,
+    pub anatomical_side: Option<String>,
+    pub equipment_role: String,
+    pub capability: AssessmentCapability,
+    pub rule_bundle_version: String,
+    pub profile_identity: String,
+    pub profile_hash: String,
+    pub canonical_slice_hash: String,
+    pub endpoints: Vec<RepEndpointSnapshot>,
+    pub conclusions: Vec<QualityConclusion>,
+    /// Lower-case fixed-width FNV-1a hex over the proposal with this field
+    /// empty.  A string avoids losing u64 precision in JavaScript clients.
+    pub content_hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QualityExtension {
+    pub schema_version: String,
+    pub proposals: Vec<RustQualityProposal>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActionAssessmentContract {
+    pub action_id: &'static str,
+    pub first_phase: &'static str,
+    pub second_phase: &'static str,
+    pub equipment_role: &'static str,
+    pub default_capability: AssessmentCapability,
+    pub capture_positions: &'static [&'static str],
+    pub requires_anatomical_side: bool,
+}
+
+const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
+    ActionAssessmentContract {
+        action_id: "barbell_bench_press",
+        first_phase: "eccentric",
+        second_phase: "concentric",
+        equipment_role: "barbell_axis_phase_and_path",
+        default_capability: AssessmentCapability::QualitySupported,
+        capture_positions: &["front", "frontLeft45", "frontRight45"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "barbell_row",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "barbell_axis_phase_and_path",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &[
+            "front",
+            "frontLeft45",
+            "frontRight45",
+            "rearLeft45",
+            "rearRight45",
+        ],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "machine_chest_press",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "machine_handle_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["front", "frontRight45"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "seated_shoulder_press",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "external_load_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["front"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "push_up",
+        first_phase: "eccentric",
+        second_phase: "concentric",
+        equipment_role: "not_applicable",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["rearRight45"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "lat_pulldown",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "cable_handle_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["rear", "rearLeft45"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "pull_up",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "fixed_structure_not_tracked",
+        default_capability: AssessmentCapability::ObservationOnly,
+        capture_positions: &["rearLeft45"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "seated_row",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "cable_handle_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["frontLeft45", "rearLeft45", "right"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "straight_arm_pulldown",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "cable_handle_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["frontLeft45", "frontRight45"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "lateral_raise",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "dumbbells_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["front"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "rear_delt_fly",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "external_load_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["front"],
+        requires_anatomical_side: false,
+    },
+    ActionAssessmentContract {
+        action_id: "single_arm_cable_lateral_raise",
+        first_phase: "concentric",
+        second_phase: "eccentric",
+        equipment_role: "cable_handle_not_observed",
+        default_capability: AssessmentCapability::PhaseSupported,
+        capture_positions: &["frontLeft45", "rearRight45"],
+        requires_anatomical_side: true,
+    },
+];
+
+pub fn action_assessment_contract(action_id: &str) -> Option<&'static ActionAssessmentContract> {
+    let normalized = normalize_action_id(action_id);
+    ACTION_CONTRACTS
+        .iter()
+        .find(|contract| contract.action_id == normalized)
+}
+
+pub fn resolve_action_capability(
+    action_id: &str,
+    capture_position: &str,
+    anatomical_side: Option<&str>,
+) -> AssessmentCapability {
+    let Some(contract) = action_assessment_contract(action_id) else {
+        return AssessmentCapability::Unsupported;
+    };
+    if !contract.capture_positions.contains(&capture_position) {
+        return AssessmentCapability::Unsupported;
+    }
+    if contract.requires_anatomical_side
+        && !anatomical_side.is_some_and(|side| matches!(side, "left" | "right"))
+    {
+        return AssessmentCapability::ObservationOnly;
+    }
+    contract.default_capability
+}
+
+pub fn build_quality_proposals(reps: &[SealedRep]) -> Vec<RustQualityProposal> {
+    reps.iter().map(build_quality_proposal).collect()
+}
+
+fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
+    let (raw_action, capture_position, raw_side) = profile_context(&rep.profile_identity);
+    let action_id = normalize_action_id(raw_action);
+    let contract = action_assessment_contract(&action_id);
+    let anatomical_side = matches!(raw_side, "left" | "right").then_some(raw_side);
+    let capability = resolve_action_capability(&action_id, capture_position, anatomical_side);
+    let first_phase = contract.map_or("unknown_first_phase", |value| value.first_phase);
+    let second_phase = contract.map_or("unknown_second_phase", |value| value.second_phase);
+    let equipment_primary = rep
+        .observation_findings
+        .contains(&RepObservationFinding::EquipmentPrimaryBoundary);
+    let pose_aligned = rep
+        .observation_findings
+        .contains(&RepObservationFinding::PoseEquipmentTurnaroundAligned);
+    let endpoint_channels = if equipment_primary {
+        let mut channels = vec![EvidenceChannel::EquipmentMeasured];
+        if pose_aligned {
+            channels.push(EvidenceChannel::PoseMeasured);
+        }
+        channels
+    } else {
+        vec![EvidenceChannel::PoseMeasured]
+    };
+    let confidence = proposal_confidence(rep);
+    let confirmed_at = rep.end_timestamp_ms;
+    let endpoints = vec![
+        RepEndpointSnapshot {
+            kind: EndpointKind::StartAnchor,
+            occurred_frame_id: rep.start_frame_id,
+            occurred_timestamp_ms: rep.start_timestamp_ms,
+            causal_confirmed_timestamp_ms: confirmed_at.max(rep.start_timestamp_ms),
+            phase_before: "ready".into(),
+            phase_after: first_phase.into(),
+            confidence,
+            evidence_channels: endpoint_channels.clone(),
+        },
+        RepEndpointSnapshot {
+            kind: EndpointKind::PrimaryTurnaround,
+            occurred_frame_id: rep.peak_frame_id,
+            occurred_timestamp_ms: rep.peak_timestamp_ms,
+            causal_confirmed_timestamp_ms: rep
+                .turnaround_confirmed_timestamp_ms
+                .max(rep.peak_timestamp_ms),
+            phase_before: first_phase.into(),
+            phase_after: second_phase.into(),
+            confidence,
+            evidence_channels: endpoint_channels.clone(),
+        },
+        RepEndpointSnapshot {
+            kind: EndpointKind::EndReturn,
+            occurred_frame_id: rep.end_frame_id,
+            occurred_timestamp_ms: rep.end_timestamp_ms,
+            causal_confirmed_timestamp_ms: confirmed_at,
+            phase_before: second_phase.into(),
+            phase_after: "ready".into(),
+            confidence,
+            evidence_channels: endpoint_channels,
+        },
+    ];
+    let conclusions = AssessmentDimension::ALL
+        .into_iter()
+        .map(|dimension| conclusion_for(rep, contract, capability, dimension, confidence))
+        .collect();
+    let mut proposal = RustQualityProposal {
+        schema_version: QUALITY_SCHEMA_VERSION.into(),
+        proposal_id: format!(
+            "{}:rep:{}:revision:{}",
+            rep.profile_identity, rep.rep_id, rep.revision
+        ),
+        rep_id: rep.rep_id,
+        action_id,
+        capture_position: capture_position.into(),
+        anatomical_side: anatomical_side.map(str::to_owned),
+        equipment_role: contract
+            .map_or("unsupported", |value| value.equipment_role)
+            .into(),
+        capability,
+        rule_bundle_version: QUALITY_RULE_BUNDLE_VERSION.into(),
+        profile_identity: rep.profile_identity.clone(),
+        profile_hash: format!("{:016x}", rep.profile_hash),
+        canonical_slice_hash: format!("{:016x}", rep.canonical_slice_hash),
+        endpoints,
+        conclusions,
+        content_hash: String::new(),
+    };
+    proposal.content_hash = proposal_hash(&proposal);
+    proposal
+}
+
+fn conclusion_for(
+    rep: &SealedRep,
+    contract: Option<&ActionAssessmentContract>,
+    capability: AssessmentCapability,
+    dimension: AssessmentDimension,
+    confidence: f32,
+) -> QualityConclusion {
+    let id = format!("rep:{}:{}", rep.rep_id, dimension.as_str());
+    if capability == AssessmentCapability::Unsupported {
+        return cannot_judge(
+            id,
+            dimension,
+            "No executable action assessment contract matches this profile.",
+            0.0,
+        );
+    }
+    if capability == AssessmentCapability::ObservationOnly
+        && matches!(
+            dimension,
+            AssessmentDimension::TaskCompletion
+                | AssessmentDimension::RangeOfMotion
+                | AssessmentDimension::PhaseControl
+        )
+    {
+        return cannot_judge(
+            id,
+            dimension,
+            "This exact action/view/side context is observation-only; Rust will not claim Rep or phase semantics.",
+            confidence,
+        );
+    }
+    match dimension {
+        AssessmentDimension::TaskCompletion => {
+            let (state, summary, reason) = match rep.disposition {
+                RepDisposition::Confirmed => (
+                    AssessmentConclusionState::ObservedFact,
+                    "A complete start–turnaround–return cycle was confirmed.",
+                    None,
+                ),
+                RepDisposition::NeedsReview => (
+                    AssessmentConclusionState::ObservedFact,
+                    "A complete cycle candidate was preserved for review.",
+                    Some("Recognition evidence did not satisfy the confirmed-volume gate."),
+                ),
+                RepDisposition::Rejected => (
+                    AssessmentConclusionState::CannotJudge,
+                    "The candidate did not establish a reviewable completed task.",
+                    Some("The Rust rep disposition rejected this candidate."),
+                ),
+            };
+            QualityConclusion {
+                conclusion_id: id,
+                dimension,
+                state,
+                summary: summary.into(),
+                evidence: vec![format!(
+                    "start={}ms turnaround={}ms end={}ms",
+                    rep.start_timestamp_ms, rep.peak_timestamp_ms, rep.end_timestamp_ms
+                )],
+                reason: reason.map(str::to_owned),
+                confidence,
+            }
+        }
+        AssessmentDimension::RangeOfMotion => {
+            let below = rep.observation_findings.iter().any(|finding| {
+                matches!(
+                    finding,
+                    RepObservationFinding::PrimaryRangeBelowExpectation
+                        | RepObservationFinding::SecondaryRangeBelowExpectation
+                )
+            });
+            QualityConclusion {
+                conclusion_id: id,
+                dimension,
+                state: AssessmentConclusionState::ObservedFact,
+                summary: if below {
+                    "The visible excursion was below the active recognition profile expectation."
+                } else {
+                    "The visible excursion reached the recognizer's cycle gate."
+                }
+                .into(),
+                evidence: rep_finding_evidence(rep),
+                reason: Some(
+                    "This is profile-relative visible motion, not a universal standard-ROM verdict."
+                        .into(),
+                ),
+                confidence,
+            }
+        }
+        AssessmentDimension::PhaseControl => {
+            let contract = contract.expect("supported capability lost its action contract");
+            QualityConclusion {
+                conclusion_id: id,
+                dimension,
+                state: AssessmentConclusionState::ObservedFact,
+                summary: format!(
+                    "Observed {} for {}ms, then {} for {}ms.",
+                    contract.first_phase,
+                    rep.peak_timestamp_ms.saturating_sub(rep.start_timestamp_ms),
+                    contract.second_phase,
+                    rep.end_timestamp_ms.saturating_sub(rep.peak_timestamp_ms)
+                ),
+                evidence: vec![format!(
+                    "turnaround_causally_confirmed_at={}ms",
+                    rep.turnaround_confirmed_timestamp_ms
+                )],
+                reason: None,
+                confidence,
+            }
+        }
+        AssessmentDimension::TrajectoryControl => {
+            let contract = contract.expect("supported capability lost its action contract");
+            let equipment_primary = rep
+                .observation_findings
+                .contains(&RepObservationFinding::EquipmentPrimaryBoundary);
+            QualityConclusion {
+                conclusion_id: id,
+                dimension,
+                state: AssessmentConclusionState::ObservedFact,
+                summary: if equipment_primary {
+                    "The phase boundary and path came from the subject-associated equipment track."
+                } else {
+                    "A continuous canonical pose trajectory produced the sealed cycle."
+                }
+                .into(),
+                evidence: vec![
+                    format!("equipment_role={}", contract.equipment_role),
+                    format!("canonical_slice_hash={:016x}", rep.canonical_slice_hash),
+                ],
+                reason: None,
+                confidence,
+            }
+        }
+        AssessmentDimension::ObservationConfidence => QualityConclusion {
+            conclusion_id: id,
+            dimension,
+            state: AssessmentConclusionState::ObservedFact,
+            summary: match rep.disposition {
+                RepDisposition::Confirmed => "The cycle satisfied the current evidence gate.",
+                RepDisposition::NeedsReview => "The cycle is usable but requires human review.",
+                RepDisposition::Rejected => "The observation was insufficient for a Rep claim.",
+            }
+            .into(),
+            evidence: rep_finding_evidence(rep),
+            reason: rep.evidence_reason.map(|reason| format!("{reason:?}")),
+            confidence,
+        },
+        AssessmentDimension::SupportStability => cannot_judge(
+            id,
+            dimension,
+            "The sealed Rep does not yet carry the required trunk/support trajectory features.",
+            confidence,
+        ),
+        AssessmentDimension::BilateralCoordination => cannot_judge(
+            id,
+            dimension,
+            "This view/Rep lacks validated side-specific persistent evidence; screen-space slope is not physical imbalance.",
+            confidence,
+        ),
+        AssessmentDimension::StandardVariantCompatibility => cannot_judge(
+            id,
+            dimension,
+            "No exact reviewed standard-variant corridor is attached to this proposal.",
+            confidence,
+        ),
+    }
+}
+
+fn cannot_judge(
+    conclusion_id: String,
+    dimension: AssessmentDimension,
+    reason: &str,
+    confidence: f32,
+) -> QualityConclusion {
+    QualityConclusion {
+        conclusion_id,
+        dimension,
+        state: AssessmentConclusionState::CannotJudge,
+        summary: "Cannot judge from the available visual evidence.".into(),
+        evidence: Vec::new(),
+        reason: Some(reason.into()),
+        confidence,
+    }
+}
+
+fn proposal_confidence(rep: &SealedRep) -> f32 {
+    let mut confidence: f32 = match rep.disposition {
+        RepDisposition::Confirmed => 0.90,
+        RepDisposition::NeedsReview => 0.60,
+        RepDisposition::Rejected => 0.25,
+    };
+    if rep
+        .observation_findings
+        .contains(&RepObservationFinding::EquipmentPathCoverageLow)
+    {
+        confidence -= 0.15;
+    }
+    if rep
+        .observation_findings
+        .contains(&RepObservationFinding::PoseEquipmentTurnaroundConflict)
+    {
+        confidence -= 0.20;
+    }
+    confidence.clamp(0.0, 1.0)
+}
+
+fn profile_context(identity: &str) -> (&str, &str, &str) {
+    let mut parts = identity.split('/');
+    (
+        parts.next().unwrap_or("unknown"),
+        parts.next().unwrap_or("unknown"),
+        parts.next().unwrap_or("unknown"),
+    )
+}
+
+fn normalize_action_id(value: &str) -> String {
+    let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "barbell_bench" | "bench_press" => "barbell_bench_press".into(),
+        "cable_lateral_raise" | "unilateral_cable_lateral_raise" => {
+            "single_arm_cable_lateral_raise".into()
+        }
+        _ => normalized,
+    }
+}
+
+fn rep_finding_evidence(rep: &SealedRep) -> Vec<String> {
+    let mut evidence = rep
+        .observation_findings
+        .iter()
+        .map(|finding| format!("{finding:?}"))
+        .collect::<Vec<_>>();
+    if evidence.is_empty() {
+        evidence.push("canonical_cycle_continuity".into());
+    }
+    evidence
+}
+
+fn proposal_hash(proposal: &RustQualityProposal) -> String {
+    let bytes = serde_json::to_vec(proposal).expect("quality proposal is JSON serializable");
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_supported_action_contracts_keep_one_shared_endpoint_shape() {
+        assert_eq!(ACTION_CONTRACTS.len(), 12);
+        assert!(ACTION_CONTRACTS.iter().all(|contract| {
+            !contract.first_phase.is_empty()
+                && !contract.second_phase.is_empty()
+                && contract.first_phase != contract.second_phase
+        }));
+        assert_eq!(
+            action_assessment_contract("barbell-bench-press")
+                .unwrap()
+                .first_phase,
+            "eccentric"
+        );
+        assert_eq!(
+            action_assessment_contract("lateral_raise")
+                .unwrap()
+                .first_phase,
+            "concentric"
+        );
+        assert_eq!(
+            resolve_action_capability("pull_up", "rearLeft45", None),
+            AssessmentCapability::ObservationOnly
+        );
+        assert_eq!(
+            resolve_action_capability("single_arm_cable_lateral_raise", "frontLeft45", None,),
+            AssessmentCapability::ObservationOnly,
+            "the engine must not invent an anatomical side"
+        );
+        assert_eq!(
+            resolve_action_capability(
+                "single_arm_cable_lateral_raise",
+                "rearRight45",
+                Some("left"),
+            ),
+            AssessmentCapability::PhaseSupported
+        );
+        assert_eq!(
+            resolve_action_capability("seated_row", "right", None),
+            AssessmentCapability::PhaseSupported
+        );
+        assert_eq!(
+            resolve_action_capability("seated_row", "front", None),
+            AssessmentCapability::Unsupported,
+            "an unvalidated view is not inherited from another projection"
+        );
+    }
+}

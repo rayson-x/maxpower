@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "../../.motion-quality-full-proposal-build",
+    "rootDir": "../..",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "rustFullDataProposalRunner.ts",
+    "rustFullDataProposalRunner.test.ts",
+    "rustBlindProposalRunner.ts",
+    "blindEvaluation.ts",
+    "buildQualityReviewRelease.ts",
+    "buildQualityReviewRelease.test.ts",
+    "../../src/motion/motionPacket.ts",
+    "../../src/motion/rustCanonicalWasm.ts",
+    "../../src/pose/PoseEngine.ts",
+    "../../src/pose/canonicalPose.ts"
+  ]
+}

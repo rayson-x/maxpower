@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     AdapterCapabilities, CanonicalLandmark, ContractVersion, DiagnosticLevel,
     FixtureInferenceAdapter, FrameLease, InferenceAdapter, InferenceResult, MotionError,
     MotionSession, RecordingOutputAdapter, SessionConfig, TargetState, encode_motion_packet,
@@ -20,8 +20,8 @@ fn replay_session_emits_one_versioned_packet_and_releases_the_frame_once() {
             diagnostics: DiagnosticLevel::Summary,
             image_width_px: 1_000,
             image_height_px: 1_000,
-            continuity: form_coach_motion_sdk::ContinuityMode::Raw,
-            subject_policy: form_coach_motion_sdk::SubjectPolicy::AssumeSingle,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
         },
         AdapterCapabilities::fixture(),
         FixtureInferenceAdapter::single_pose(vec![CanonicalLandmark::measured(
@@ -66,8 +66,8 @@ fn motion_packet_binary_has_a_stable_header_and_declared_length() {
             diagnostics: DiagnosticLevel::Off,
             image_width_px: 1_000,
             image_height_px: 1_000,
-            continuity: form_coach_motion_sdk::ContinuityMode::Raw,
-            subject_policy: form_coach_motion_sdk::SubjectPolicy::AssumeSingle,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
         },
         AdapterCapabilities::fixture(),
         FixtureInferenceAdapter::single_pose(vec![CanonicalLandmark::measured(
@@ -100,8 +100,8 @@ fn incompatible_contract_major_is_refused_at_open() {
             diagnostics: DiagnosticLevel::Off,
             image_width_px: 1_000,
             image_height_px: 1_000,
-            continuity: form_coach_motion_sdk::ContinuityMode::Raw,
-            subject_policy: form_coach_motion_sdk::SubjectPolicy::AssumeSingle,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
         },
         AdapterCapabilities::fixture(),
         FixtureInferenceAdapter::single_pose(Vec::new()),
@@ -123,8 +123,8 @@ fn dominant_subject_policy_refuses_an_adapter_without_multi_pose_capability() {
             diagnostics: DiagnosticLevel::Off,
             image_width_px: 1_000,
             image_height_px: 1_000,
-            continuity: form_coach_motion_sdk::ContinuityMode::Raw,
-            subject_policy: form_coach_motion_sdk::SubjectPolicy::DominantVisible,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::DominantVisible,
         },
         capabilities,
         FixtureInferenceAdapter::single_pose(Vec::new()),
@@ -152,8 +152,8 @@ fn adapter_panic_is_isolated_and_the_frame_is_still_released() {
             diagnostics: DiagnosticLevel::Summary,
             image_width_px: 1_000,
             image_height_px: 1_000,
-            continuity: form_coach_motion_sdk::ContinuityMode::Raw,
-            subject_policy: form_coach_motion_sdk::SubjectPolicy::AssumeSingle,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
         },
         AdapterCapabilities::fixture(),
         PanickingInference,

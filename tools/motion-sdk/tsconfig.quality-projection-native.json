@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../.motion-sdk-quality-projection-build",
+    "rootDir": "../..",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"],
+    "jsx": "react-jsx",
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "qualityProjectionNativeContract.test.ts",
+    "../../modules/pose-camera/src/PoseCameraView.tsx",
+    "../../modules/pose-camera/src/qualityProjection.ts",
+    "../../modules/pose-camera/src/types.ts"
+  ]
+}

@@ -1,6 +1,6 @@
 use std::{env, fs};
 
-use form_coach_motion_sdk::web_abi::{
+use maxpower_motion_sdk::web_abi::{
     motion_sdk_begin_frame, motion_sdk_begin_replay_set, motion_sdk_begin_sequence,
     motion_sdk_close, motion_sdk_commit_sequence, motion_sdk_copy_packet, motion_sdk_packet_len,
     motion_sdk_process_frame, motion_sdk_reset, motion_sdk_set_landmark, motion_sdk_set_profile,

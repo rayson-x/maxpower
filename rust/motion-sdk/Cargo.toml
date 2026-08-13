@@ -1,11 +1,11 @@
 [package]
-name = "form-coach-motion-sdk"
+name = "maxpower-motion-sdk"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
 crate-type = ["rlib", "cdylib", "staticlib"]
-name = "form_coach_motion_sdk"
+name = "maxpower_motion_sdk"
 path = "src/lib.rs"
 
 [dependencies]

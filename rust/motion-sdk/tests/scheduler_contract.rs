@@ -1,4 +1,4 @@
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     InferenceRequest, InferenceScheduler, TargetState, safe_degradation_policy,
 };
 

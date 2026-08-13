@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     fs.readFileSync(path.join(root, "data/training/approved-segmentation-v1.json"), "utf8"),
   ) as { records: DatasetRecord[] };
   wasm = await instantiateRustMotionWasm(
-    fs.readFileSync(path.join(root, "public/motion-sdk/form_coach_motion_sdk.wasm")),
+    fs.readFileSync(path.join(root, "public/motion-sdk/maxpower_motion_sdk.wasm")),
   );
   const rows = dataset.records
     .map((record) => ({ record, profile: profileForRecord(record) }))
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     && heldOut.negativeWindowFalsePositives === 0;
   const promotionPassed = false;
   const report = {
-  schemaVersion: "form-coach-rust-motion-evaluation/v1",
+  schemaVersion: "maxpower-rust-motion-evaluation/v1",
   generatedAt: new Date().toISOString(),
   algorithmVersion: "rust-canonical-wasm/v1 + generic-rep-state-machine/v1",
   evaluationMode: "canonical-sidecar-compatibility-replay",

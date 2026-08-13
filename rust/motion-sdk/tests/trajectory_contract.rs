@@ -1,7 +1,7 @@
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     BodyNormalizationConfig, CanonicalFrameSample, CanonicalLandmark, ExerciseProfile,
-    LandmarkSource, PhaseName, ReferenceIdentity, RepDisposition, SealedRep,
-    constrained_phase_dtw, extract_profile_signal_reference_rep, normalize_rep_trajectory,
+    LandmarkSource, PhaseName, ReferenceIdentity, RepDisposition, SealedRep, constrained_phase_dtw,
+    extract_profile_signal_reference_rep, normalize_rep_trajectory,
 };
 
 #[test]
@@ -115,8 +115,20 @@ fn generic_profile_signal_extractor_uses_the_sealed_slice_and_normalizes_each_re
         pose_model_version: "mediapipe-pose@0.10.14".into(),
     };
     let profile = ExerciseProfile::lat_pulldown_provisional();
-    let a = extract_profile_signal_reference_rep(identity.clone(), &rep, &profile, &frames(0.0, 1.0, &[0, 100, 200, 300, 400])).unwrap();
-    let b = extract_profile_signal_reference_rep(identity, &rep, &profile, &frames(3.0, 2.0, &[0, 100, 200, 300, 400])).unwrap();
+    let a = extract_profile_signal_reference_rep(
+        identity.clone(),
+        &rep,
+        &profile,
+        &frames(0.0, 1.0, &[0, 100, 200, 300, 400]),
+    )
+    .unwrap();
+    let b = extract_profile_signal_reference_rep(
+        identity,
+        &rep,
+        &profile,
+        &frames(3.0, 2.0, &[0, 100, 200, 300, 400]),
+    )
+    .unwrap();
 
     assert_eq!(a.nodes.len(), 32);
     assert_eq!(a.nodes[0].phase, "to_extreme");
@@ -138,6 +150,7 @@ fn sealed(start: u64, peak: u64, end: u64) -> SealedRep {
         start_timestamp_ms: start * 100,
         peak_frame_id: peak,
         peak_timestamp_ms: peak * 100,
+        turnaround_confirmed_timestamp_ms: peak * 100,
         end_frame_id: end,
         end_timestamp_ms: end * 100,
         revision: 0,

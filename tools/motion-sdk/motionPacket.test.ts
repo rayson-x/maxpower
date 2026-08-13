@@ -192,6 +192,340 @@ test("minor extension decodes subject identity and immutable sealed rep", () => 
   assert.equal(packet.setState.lifecycle, "paused");
 });
 
+test("v1.6 decodes Rust joint angle snapshots without recomputing them in the client", () => {
+  const sequence = new TextEncoder().encode("fixture:angles");
+  const algorithm = new TextEncoder().encode("rust-canonical-wasm/v1");
+  const baseLength = 44 + sequence.length + algorithm.length;
+  const length = baseLength + 34 + 5 + 21 + 29;
+  const buffer = new ArrayBuffer(length);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  bytes.set(new TextEncoder().encode("MOTN"), 0);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 6, true);
+  view.setUint32(8, length, true);
+  view.setUint8(36, 1);
+  view.setUint8(37, 1);
+  view.setUint16(38, sequence.length, true);
+  let offset = 40;
+  bytes.set(sequence, offset);
+  offset += sequence.length;
+  view.setUint16(offset, algorithm.length, true);
+  offset += 2;
+  bytes.set(algorithm, offset);
+  offset += algorithm.length;
+  view.setUint16(offset, 0, true);
+  offset += 2;
+
+  bytes.set(new TextEncoder().encode("RPS1"), offset);
+  offset += 4;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setUint16(offset, 0, true);
+  offset += 2;
+
+  bytes.set(new TextEncoder().encode("SET1"), offset);
+  offset += 4;
+  view.setUint8(offset, 0);
+  offset += 1;
+
+  bytes.set(new TextEncoder().encode("VER1"), offset);
+  offset += 4;
+  for (let index = 0; index < 3; index += 1) {
+    view.setUint16(offset, 0, true);
+    offset += 2;
+  }
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint16(offset, 0, true);
+  offset += 2;
+
+  bytes.set(new TextEncoder().encode("ANG1"), offset);
+  offset += 4;
+  view.setUint8(offset, 2);
+  offset += 1;
+  for (const angle of [
+    { kind: 0, side: 0, source: 0, flags: 0b11, value: 90, confidence: 0.95 },
+    { kind: 3, side: 1, source: 2, flags: 0, value: 0, confidence: 0.4 },
+  ]) {
+    view.setUint8(offset, angle.kind);
+    view.setUint8(offset + 1, angle.side);
+    view.setUint8(offset + 2, angle.source);
+    view.setUint8(offset + 3, angle.flags);
+    view.setFloat32(offset + 4, angle.value, true);
+    view.setFloat32(offset + 8, angle.confidence, true);
+    offset += 12;
+  }
+  assert.equal(offset, length);
+
+  const packet = decodeMotionPacket(buffer);
+  assert.deepEqual(packet.jointAngles[0], {
+    kind: "elbow",
+    side: "left",
+    valueDeg: 90,
+    confidence: Math.fround(0.95),
+    source: "measured",
+    judgeable: true,
+  });
+  assert.deepEqual(packet.jointAngles[1], {
+    kind: "knee",
+    side: "right",
+    valueDeg: null,
+    confidence: Math.fround(0.4),
+    source: "predicted",
+    judgeable: false,
+  });
+});
+
+test("v1.7 decodes Rust-associated equipment without inferring pose landmarks", () => {
+  const sequence = new TextEncoder().encode("fixture:equipment");
+  const algorithm = new TextEncoder().encode("motion-session-replay/v1");
+  const baseLength = 44 + sequence.length + algorithm.length;
+  const length = baseLength + 34 + 5 + 21 + 5 + 25 + 64;
+  const buffer = new ArrayBuffer(length);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  bytes.set(new TextEncoder().encode("MOTN"), 0);
+  view.setUint16(4, 1, true);
+  view.setUint16(6, 7, true);
+  view.setUint32(8, length, true);
+  view.setBigUint64(20, 1_000n, true);
+  view.setUint8(36, 1);
+  view.setUint8(37, 2);
+  view.setUint16(38, sequence.length, true);
+  let offset = 40;
+  bytes.set(sequence, offset);
+  offset += sequence.length;
+  view.setUint16(offset, algorithm.length, true);
+  offset += 2;
+  bytes.set(algorithm, offset);
+  offset += algorithm.length;
+  view.setUint16(offset, 0, true);
+  offset += 2;
+
+  bytes.set(new TextEncoder().encode("RPS1"), offset);
+  offset += 4;
+  view.setUint8(offset, 1);
+  offset += 1;
+  view.setBigUint64(offset, 41n, true);
+  offset += 8;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setUint16(offset, 0, true);
+  offset += 2;
+
+  bytes.set(new TextEncoder().encode("SET1"), offset);
+  offset += 4;
+  view.setUint8(offset, 0);
+  offset += 1;
+
+  bytes.set(new TextEncoder().encode("VER1"), offset);
+  offset += 4;
+  for (let index = 0; index < 3; index += 1) {
+    view.setUint16(offset, 0, true);
+    offset += 2;
+  }
+  view.setUint8(offset, 0);
+  offset += 1;
+  view.setBigUint64(offset, 0n, true);
+  offset += 8;
+  view.setUint16(offset, 0, true);
+  offset += 2;
+
+  bytes.set(new TextEncoder().encode("ANG1"), offset);
+  offset += 4;
+  view.setUint8(offset, 0);
+  offset += 1;
+
+  bytes.set(new TextEncoder().encode("EQP1"), offset);
+  offset += 4;
+  view.setUint8(offset, 0);
+  view.setUint8(offset + 1, 0);
+  view.setUint8(offset + 2, 1);
+  offset += 3;
+  view.setBigUint64(offset, 41n, true);
+  offset += 8;
+  for (const count of [1, 0, 0, 0]) {
+    view.setUint16(offset, count, true);
+    offset += 2;
+  }
+  view.setUint16(offset, 1, true);
+  offset += 2;
+  view.setBigUint64(offset, 5n, true);
+  offset += 8;
+  view.setBigUint64(offset, 77n, true);
+  offset += 8;
+  view.setBigUint64(offset, 41n, true);
+  offset += 8;
+  view.setUint8(offset, 1);
+  view.setUint8(offset + 1, 0);
+  view.setUint8(offset + 2, 3);
+  view.setUint8(offset + 3, 0b11);
+  offset += 4;
+  for (const value of [0.22, 0.42, 0.56, 0.035, 0.5, 0.4375, 0.92, 0.88, 2]) {
+    view.setFloat32(offset, value, true);
+    offset += 4;
+  }
+  assert.equal(offset, length);
+
+  const packet = decodeMotionPacket(buffer);
+  assert.equal(packet.canonical.length, 0);
+  assert.deepEqual(packet.equipment.status, {
+    kind: "observed",
+    reason: null,
+  });
+  assert.equal(packet.equipment.subjectCandidateId, 41n);
+  assert.equal(packet.equipment.rejectedReflectionCount, 1);
+  assert.equal(packet.equipment.tracks.length, 1);
+  assert.deepEqual(packet.equipment.tracks[0], {
+    trackId: 5n,
+    proposalId: 77n,
+    subjectCandidateId: 41n,
+    kind: "barbell_shaft",
+    bbox: {
+      x: Math.fround(0.22),
+      y: Math.fround(0.42),
+      width: Math.fround(0.56),
+      height: Math.fround(0.035),
+    },
+    centerX: Math.fround(0.5),
+    centerY: Math.fround(0.4375),
+    observationScore: Math.fround(0.92),
+    associationConfidence: Math.fround(0.88),
+    uncertaintyPx: 2,
+    source: "detector",
+    heldBy: "unknown",
+    judgeablePath: true,
+  });
+});
+
+function makeV18QualityPacket(quality: unknown): ArrayBuffer {
+  const encoder = new TextEncoder();
+  const sequence = encoder.encode("q");
+  const algorithm = encoder.encode("a");
+  const payload = encoder.encode(JSON.stringify(quality));
+  const length = 40 + sequence.length + 2 + algorithm.length + 2
+    + 34 + 5 + 21 + 5 + 25 + 8 + payload.length;
+  const buffer = new ArrayBuffer(length);
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  let offset = 0;
+  const marker = (value: string) => {
+    bytes.set(encoder.encode(value), offset);
+    offset += 4;
+  };
+  const u8 = (value: number) => { view.setUint8(offset, value); offset += 1; };
+  const u16 = (value: number) => { view.setUint16(offset, value, true); offset += 2; };
+  const u32 = (value: number) => { view.setUint32(offset, value, true); offset += 4; };
+  const u64 = (value: bigint) => { view.setBigUint64(offset, value, true); offset += 8; };
+
+  marker("MOTN");
+  u16(1); u16(8); u32(length); u64(1n); u64(100n); u64(0n);
+  u8(1); u8(1); u16(sequence.length);
+  bytes.set(sequence, offset); offset += sequence.length;
+  u16(algorithm.length); bytes.set(algorithm, offset); offset += algorithm.length;
+  u16(0);
+  marker("RPS1"); u8(0); u64(0n); u8(0); u64(0n); u8(0); u64(0n); u8(0); u16(0);
+  marker("SET1"); u8(4);
+  marker("VER1"); u16(0); u16(0); u16(0); u8(0); u64(0n); u16(0);
+  marker("ANG1"); u8(0);
+  marker("EQP1"); u8(1); u8(2); u8(0); u64(0n); u16(0); u16(0); u16(0); u16(0); u16(0);
+  marker("QLT1"); u32(payload.length); bytes.set(payload, offset); offset += payload.length;
+  assert.equal(offset, length);
+  return buffer;
+}
+
+test("v1.8 decodes and freezes Rust QLT1 proposals without recalculating quality", () => {
+  const dimensions = [
+    "task_completion", "range_of_motion", "phase_control", "support_stability",
+    "bilateral_coordination", "trajectory_control", "standard_variant_compatibility",
+    "observation_confidence",
+  ];
+  const packet = decodeMotionPacket(makeV18QualityPacket({
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [{
+      schemaVersion: "maxpower.motion-quality-proposal/v1",
+      proposalId: "proposal-1",
+      repId: 1,
+      actionId: "lat_pulldown",
+      capturePosition: "rear",
+      anatomicalSide: null,
+      equipmentRole: "cable_handle_not_observed",
+      capability: "phase_supported",
+      ruleBundleVersion: "personal-motion-quality-rules/v1",
+      profileIdentity: "lat-pulldown/rear/bilateral/cable/v1",
+      profileHash: "0000000000000001",
+      canonicalSliceHash: "0000000000000002",
+      endpoints: ["start_anchor", "primary_turnaround", "end_return"].map((kind, index) => ({
+        kind,
+        occurredFrameId: index + 1,
+        occurredTimestampMs: 100 + index * 100,
+        causalConfirmedTimestampMs: 300,
+        phaseBefore: "ready",
+        phaseAfter: "concentric",
+        confidence: 0.8,
+        evidenceChannels: ["pose_measured"],
+      })),
+      conclusions: dimensions.map((dimension) => ({
+        conclusionId: `rep:1:${dimension}`,
+        dimension,
+        state: dimension === "support_stability" ? "cannot_judge" : "observed_fact",
+        summary: "proposal",
+        evidence: [],
+        reason: dimension === "support_stability" ? "missing support trajectory" : null,
+        confidence: 0.8,
+      })),
+      contentHash: "0123456789abcdef",
+    }],
+  }));
+
+  assert.equal(packet.qualityProposals.length, 1);
+  assert.equal(packet.qualityProposals[0].endpoints[1].kind, "primary_turnaround");
+  assert.equal(packet.qualityProposals[0].conclusions.length, 8);
+  assert.equal(Object.isFrozen(packet.qualityProposals[0]), true);
+});
+
+test("v1.8 refuses a QLT1 proposal with a missing required dimension", () => {
+  assert.throws(() => decodeMotionPacket(makeV18QualityPacket({
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [{
+      endpoints: ["start_anchor", "primary_turnaround", "end_return"].map((kind) => ({
+        kind,
+        occurredFrameId: 1,
+        occurredTimestampMs: 100,
+        causalConfirmedTimestampMs: 100,
+        phaseBefore: "ready",
+        phaseAfter: "concentric",
+        confidence: 0.8,
+        evidenceChannels: ["pose_measured"],
+      })),
+      conclusions: [],
+    }],
+  })), /quality.*dimension/i);
+});
+
 test("web rendering recording counting and analysis receive one immutable motion packet", () => {
   const packet = createWebMotionPacket({
     canonical: { frameId: 3 } as never,

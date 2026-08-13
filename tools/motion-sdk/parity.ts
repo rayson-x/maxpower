@@ -38,7 +38,7 @@ const config = (sequenceId: string) => ({
 
 async function main(): Promise<void> {
   const wasm = await instantiateRustMotionWasm(
-    fs.readFileSync(path.join(process.cwd(), "public/motion-sdk/form_coach_motion_sdk.wasm")),
+    fs.readFileSync(path.join(process.cwd(), "public/motion-sdk/maxpower_motion_sdk.wasm")),
   );
   const ts = createPoseContinuitySession(config("parity:continuity"));
   const rust = new RustCanonicalWasmSession(config("parity:continuity"), wasm);
@@ -630,7 +630,7 @@ function broadReviewedReferenceProfile(): PersonalProvisionalReferenceProfile {
     })),
   );
   return {
-    schemaVersion: "form-coach-provisional-reference-profile/v1",
+    schemaVersion: "maxpower-provisional-reference-profile/v1",
     profileStatus: "personal_provisional_expert_reviewed",
     identity,
     intendedUse: "compare_observed_reps_to_personal_provisional_corridor",

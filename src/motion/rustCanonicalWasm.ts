@@ -12,6 +12,7 @@ import {
   decodeMotionPacket,
   type DecodedMotionLandmark,
   type DecodedMotionPacket,
+  type DecodedRustQualityProposal,
 } from "./motionPacket";
 
 export type RustTargetState = "acquiring" | "locked" | "uncertain" | "lost" | "reacquiring";
@@ -36,6 +37,40 @@ export interface RustCandidateDiagnostic {
   decision: "selected" | "dominant-candidate" | "temporal-match" | "alternate-candidate";
   selected: boolean;
 }
+export type RustEquipmentObservationKind =
+  | "weight_plate"
+  | "barbell_shaft"
+  | "dumbbell"
+  | "machine_handle";
+export type RustEquipmentObservationSource = "detector" | "optical_flow" | "geometry" | "predicted";
+export interface RustEquipmentObservation {
+  /** Frame-local detector/tracker id. Rust assigns the stable track id. */
+  proposalId: number;
+  kind: RustEquipmentObservationKind;
+  bbox: { x: number; y: number; width: number; height: number };
+  score: number;
+  uncertaintyPx: number | null;
+  source: RustEquipmentObservationSource;
+  reflectionCandidate?: boolean;
+  staticRackCandidate?: boolean;
+  occlusion?: "none" | "partial" | "heavy";
+  truncated?: boolean;
+}
+export interface RustVisualEquipmentLumaFrame {
+  readonly width: number;
+  readonly height: number;
+  readonly luma: Uint8Array;
+}
+export interface RustVisualBarbellAxis {
+  readonly source: "measured" | "fused" | "predicted";
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly centerY: number;
+  readonly confidence: number;
+  readonly uncertaintyPx: number;
+}
 
 const RUST_CANDIDATE_FIELD = Object.freeze({
   id: 0,
@@ -52,6 +87,10 @@ const RUST_CANDIDATE_FIELD = Object.freeze({
   switchThreshold: 12,
   switchConfirmMs: 13,
 });
+const RUST_EQUIPMENT_KIND_CODE: Readonly<Record<RustEquipmentObservationKind, number>> =
+  Object.freeze({ weight_plate: 0, barbell_shaft: 1, dumbbell: 2, machine_handle: 3 });
+const RUST_EQUIPMENT_SOURCE_CODE: Readonly<Record<RustEquipmentObservationSource, number>> =
+  Object.freeze({ detector: 0, optical_flow: 1, geometry: 2, predicted: 3 });
 export type RustExerciseProfile =
   | "lat_pulldown"
   | "lat_pulldown_rear_left_45"
@@ -98,19 +137,39 @@ export interface RustSealedRep {
     | "primary_range_below_expectation"
     | "secondary_range_below_expectation"
     | "cycle_faster_than_expected"
+    | "equipment_primary_boundary"
+    | "pose_equipment_turnaround_aligned"
+    | "pose_unavailable_at_turnaround"
+    | "pose_equipment_turnaround_conflict"
+    | "equipment_path_coverage_low"
   )[];
 }
 export interface RustExerciseProfileData {
   identity: string;
   contentHash: bigint;
   maturity: "provisional";
-  schema: "blazepose33";
+  schema: "blazepose33" | "halpe26";
   coordinateUnit:
     | "image-normalized-y"
     | "image-angle-deg"
     | "torso-normalized-distance"
     | "derived-kinematic-signal";
-  stateMachineId: "ready-effort-peak-return/v1";
+  stateMachineId:
+    | "ready-effort-peak-return/v1"
+    | "cycle-aligned-ready-effort-peak-return/v1"
+    | "median-100ms-ready-effort-peak-return/v1"
+    | "median-200ms-ready-effort-peak-return/v1"
+    | "median-300ms-ready-effort-peak-return/v1"
+    | "median-400ms-ready-effort-peak-return/v1"
+    | "median-600ms-ready-effort-peak-return/v1"
+    | "cycle-aligned-median-100ms-ready-effort-peak-return/v1"
+    | "cycle-aligned-median-200ms-ready-effort-peak-return/v1"
+    | "cycle-aligned-median-300ms-ready-effort-peak-return/v1"
+    | "cycle-aligned-median-400ms-ready-effort-peak-return/v1"
+    | "cycle-aligned-median-600ms-ready-effort-peak-return/v1"
+    | "stable-cycle-200ms-ready-effort-peak-return/v1"
+    | "barbell-axis-primary-ready-effort-return/v1"
+    | "alternating-ready-effort-return/v1";
   requiredCapabilities: readonly ["canonical-landmarks", "subject-lock"];
   direction: "increasing" | "decreasing" | "auto";
   primarySignal: RustExerciseSignal;
@@ -125,9 +184,37 @@ export interface RustExerciseProfileData {
   maxRepDurationMs: number;
 }
 export interface RustExerciseSignal {
-  kind: "landmark-y" | "joint-angle" | "landmark-distance";
+  kind:
+    | "landmark-y"
+    | "joint-angle"
+    | "landmark-distance"
+    | "landmark-horizontal-distance"
+    | "landmark-vertical-distance";
   landmarks: readonly [number, number?, number?];
 }
+
+/** Scalar form shared by WASM and native adapters when installing a data profile. */
+export interface RustExerciseProfileInstallation {
+  identity: string;
+  /** Exact argument order after identity in `motion_sdk_install_profile`. */
+  abiArguments: readonly [
+    number, number, number, number, number, number, number, number,
+    number, number, number, number, number, number, number, number,
+    number, number, number, number, number, number, number, number,
+  ];
+}
+
+export const RUST_EXERCISE_PROFILE_CODES: Readonly<Record<Exclude<RustExerciseProfile, null>, number>> =
+  Object.freeze({
+    lat_pulldown: 1,
+    seated_shoulder_press: 2,
+    lat_pulldown_rear_left_45: 3,
+    seated_shoulder_press_front: 4,
+    march_in_place: 5,
+    side_step_touch: 6,
+    alternating_knee_raise: 7,
+    step_jack: 8,
+  });
 export interface RustReferenceComparisonUnavailable {
   readonly status: "unavailable";
   readonly reason:
@@ -181,7 +268,7 @@ export interface RustReferenceProfileInstallation {
 }
 export interface RustSimulatedTrajectoryBaselineInstallation {
   readonly baseline: Readonly<{
-    schemaVersion: "form-coach-simulated-trajectory-baseline/v1";
+    schemaVersion: "maxpower-simulated-trajectory-baseline/v1";
     source: "simulated_kinematic_prior";
     evidenceStatus: "uncalibrated";
     calibrationStatus: "uncalibrated";
@@ -221,6 +308,7 @@ export interface MotionWasmExports extends WebAssembly.Exports {
   motion_sdk_commit_sequence(): number;
   motion_sdk_close(): number;
   motion_sdk_reset(width: number, height: number, fusion: number): number;
+  motion_sdk_set_pose_schema(schema: number): number;
   motion_sdk_begin_set(): number;
   motion_sdk_begin_replay_set(): number;
   motion_sdk_finish_set(): number;
@@ -248,6 +336,24 @@ export interface MotionWasmExports extends WebAssembly.Exports {
     count: number,
   ): number;
   motion_sdk_commit_candidate(): number;
+  motion_sdk_add_equipment_observation(
+    idLow: number,
+    idHigh: number,
+    kind: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    score: number,
+    uncertaintyPx: number,
+    source: number,
+    flags: number,
+  ): number;
+  motion_sdk_begin_visual_equipment_frame(width: number, height: number, length: number): number;
+  motion_sdk_visual_equipment_luma_ptr(): number;
+  motion_sdk_detect_barbell_axis(): number;
+  motion_sdk_visual_barbell_axis_source(): number;
+  motion_sdk_visual_barbell_axis_number(field: number): number;
   motion_sdk_process_multi(): number;
   motion_sdk_target_field(field: number): number;
   motion_sdk_candidate_count(): number;
@@ -316,7 +422,7 @@ export interface MotionWasmExports extends WebAssembly.Exports {
 let wasmPromise: Promise<MotionWasmExports> | null = null;
 
 export function loadRustMotionWasm(
-  url = "/motion-sdk/form_coach_motion_sdk.wasm",
+  url = "/motion-sdk/maxpower_motion_sdk.wasm",
 ): Promise<MotionWasmExports> {
   wasmPromise ??= fetch(url)
     .then(async (response) => {
@@ -355,10 +461,13 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   };
   lastSetLifecycle: RustSetLifecycle = "idle";
   lastCompletedReps: readonly RustSealedRep[] = [];
+  /** Immutable Rust QLT1 proposals; clients render/export but never recompute. */
+  lastQualityProposals: readonly Readonly<DecodedRustQualityProposal>[] = [];
   lastCanonicalHash = 0n;
   lastFrameValid = false;
   lastDecodedPacket: DecodedMotionPacket | null = null;
   lastCandidateDiagnostics: readonly RustCandidateDiagnostic[] = [];
+  lastVisualBarbellAxis: RustVisualBarbellAxis | null = null;
   lastTiming: RustWasmTiming = Object.freeze({ coreMs: 0, decodeMs: 0 });
   referenceComparison: RustReferenceComparison = Object.freeze({
     status: "unavailable",
@@ -394,6 +503,10 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
         config.stabilization === "raw" ? 0 : 1,
       ),
       "reset",
+    );
+    ensureOk(
+      wasm.motion_sdk_set_pose_schema(config.schema === "halpe26" ? 1 : 0),
+      "set_pose_schema",
     );
     if (config.setLifecycleMode !== "preview") {
       ensureOk(wasm.motion_sdk_begin_replay_set(), "begin_replay_set");
@@ -449,6 +562,8 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   processCandidates(
     candidates: readonly PoseCandidateEstimate[],
     timestampMs: number,
+    equipment: readonly RustEquipmentObservation[] = [],
+    visualEquipmentFrame?: RustVisualEquipmentLumaFrame,
   ): CanonicalPoseFrame {
     const coreStartedAt = performance.now();
     const timestamp = BigInt(Math.max(0, Math.round(timestampMs)));
@@ -490,7 +605,56 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       });
       ensureOk(this.wasm.motion_sdk_commit_candidate(), "commit_candidate");
     }
+    this.lastVisualBarbellAxis = null;
+    if (visualEquipmentFrame) {
+      const { width, height, luma } = visualEquipmentFrame;
+      if (
+        !Number.isSafeInteger(width)
+        || !Number.isSafeInteger(height)
+        || width < 8
+        || height < 8
+        || luma.length !== width * height
+      ) {
+        throw new Error("Rust visual equipment luma frame is invalid");
+      }
+      ensureOk(
+        this.wasm.motion_sdk_begin_visual_equipment_frame(width, height, luma.length),
+        "begin_visual_equipment_frame",
+      );
+      const pointer = this.wasm.motion_sdk_visual_equipment_luma_ptr();
+      if (pointer <= 0 || pointer + luma.length > this.wasm.memory.buffer.byteLength) {
+        throw new Error("Rust visual equipment luma memory range is invalid");
+      }
+      new Uint8Array(this.wasm.memory.buffer, pointer, luma.length).set(luma);
+      ensureOk(this.wasm.motion_sdk_detect_barbell_axis(), "detect_barbell_axis");
+    }
+    for (const observation of equipment) {
+      const id = BigInt(observation.proposalId);
+      let flags = 0;
+      if (observation.reflectionCandidate) flags |= 1;
+      if (observation.staticRackCandidate) flags |= 1 << 1;
+      if (observation.occlusion === "partial") flags |= 1 << 2;
+      if (observation.occlusion === "heavy") flags |= 1 << 3;
+      if (observation.truncated) flags |= 1 << 4;
+      ensureOk(
+        this.wasm.motion_sdk_add_equipment_observation(
+          Number(id & 0xffff_ffffn),
+          Number(id >> 32n),
+          RUST_EQUIPMENT_KIND_CODE[observation.kind],
+          observation.bbox.x,
+          observation.bbox.y,
+          observation.bbox.width,
+          observation.bbox.height,
+          observation.score,
+          observation.uncertaintyPx ?? -1,
+          RUST_EQUIPMENT_SOURCE_CODE[observation.source],
+          flags,
+        ),
+        "add_equipment_observation",
+      );
+    }
     ensureOk(this.wasm.motion_sdk_process_multi(), "process_multi");
+    if (visualEquipmentFrame) this.lastVisualBarbellAxis = this.readVisualBarbellAxis();
     this.lastFrameValid = this.wasm.motion_sdk_current_frame_valid() === 1;
     this.lastCanonicalHash = combineU64(
       this.wasm.motion_sdk_output_hash(0),
@@ -526,9 +690,34 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   close(): void {
     ensureOk(this.wasm.motion_sdk_close(), "close");
     this.lastDecodedPacket = null;
+    this.lastQualityProposals = [];
     this.lastFrameValid = false;
     this.lastCandidateDiagnostics = [];
+    this.lastVisualBarbellAxis = null;
     this.resetReferenceComparison();
+  }
+
+  private readVisualBarbellAxis(): RustVisualBarbellAxis | null {
+    const source = this.wasm.motion_sdk_visual_barbell_axis_source();
+    if (source === 0) return null;
+    if (source !== 1 && source !== 2 && source !== 3) {
+      throw new Error(`Rust visual barbell source ${source} is invalid`);
+    }
+    const number = (field: number) => this.wasm.motion_sdk_visual_barbell_axis_number(field);
+    const values = Array.from({ length: 7 }, (_, field) => number(field));
+    if (values.some((value) => !Number.isFinite(value))) {
+      throw new Error("Rust visual barbell axis contains a non-finite value");
+    }
+    return Object.freeze({
+      source: source === 1 ? "measured" : source === 3 ? "fused" : "predicted",
+      x1: values[0],
+      y1: values[1],
+      x2: values[2],
+      y2: values[3],
+      centerY: values[4],
+      confidence: values[5],
+      uncertaintyPx: values[6],
+    });
   }
 
   beginSet(): void {
@@ -542,23 +731,8 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
   }
 
   setExerciseProfile(profile: RustExerciseProfile): void {
-    const code = profile === "lat_pulldown"
-      ? 1
-      : profile === "seated_shoulder_press"
-        ? 2
-        : profile === "lat_pulldown_rear_left_45"
-          ? 3
-          : profile === "seated_shoulder_press_front"
-            ? 4
-            : profile === "march_in_place"
-              ? 5
-              : profile === "side_step_touch"
-                ? 6
-                : profile === "alternating_knee_raise"
-                  ? 7
-                  : profile === "step_jack"
-                    ? 8
-                    : 0;
+    const baseCode = profile === null ? 0 : RUST_EXERCISE_PROFILE_CODES[profile];
+    const code = profile !== null && this.config.schema === "halpe26" ? baseCode + 100 : baseCode;
     ensureOk(this.wasm.motion_sdk_set_profile(code), "set_profile");
     this.lastRepState = {
       phase: "ready",
@@ -567,11 +741,14 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       recoveredAcrossGap: false,
     };
     this.lastCompletedReps = [];
+    this.lastQualityProposals = [];
     this.resetReferenceComparison();
   }
 
-  installExerciseProfileData(profile: RustExerciseProfileData): void {
-    const identity = new TextEncoder().encode(profile.identity);
+  installExerciseProfileData(profile: RustExerciseProfileData): RustExerciseProfileData {
+    const sessionProfile = adaptRustExerciseProfileToPoseSchema(profile, this.config.schema);
+    const installation = encodeRustExerciseProfileInstallation(sessionProfile);
+    const identity = new TextEncoder().encode(installation.identity);
     ensureOk(this.wasm.motion_sdk_begin_profile_identity(identity.length), "begin_profile_identity");
     identity.forEach((value, index) => {
       ensureOk(
@@ -579,36 +756,9 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
         `profile_identity_byte_${index}`,
       );
     });
-    if (computeRustExerciseProfileHash(profile) !== profile.contentHash) {
-      throw new Error("Exercise profile content hash does not match its canonical bundle");
-    }
     ensureOk(
       this.wasm.motion_sdk_install_profile(
-        Number(profile.contentHash & 0xffff_ffffn),
-        Number(profile.contentHash >> 32n),
-        0,
-        0,
-        rustCoordinateUnit(profile.coordinateUnit),
-        0,
-        Number(profile.requiredCapabilities.includes("canonical-landmarks"))
-          | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1),
-        profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2,
-        rustExerciseSignalKind(profile.primarySignal.kind),
-        profile.primarySignal.landmarks[0],
-        profile.primarySignal.landmarks[1] ?? 0xffff_ffff,
-        profile.primarySignal.landmarks[2] ?? 0xffff_ffff,
-        rustExerciseSignalKind(profile.secondarySignal.kind),
-        profile.secondarySignal.landmarks[0],
-        profile.secondarySignal.landmarks[1] ?? 0xffff_ffff,
-        profile.secondarySignal.landmarks[2] ?? 0xffff_ffff,
-        profile.startAmplitude,
-        profile.minPrimaryAmplitude,
-        profile.minSecondaryAmplitude,
-        profile.returnHysteresis,
-        profile.readyTolerance,
-        profile.maxGapMs,
-        profile.minRepDurationMs,
-        profile.maxRepDurationMs,
+        ...installation.abiArguments,
       ),
       "install_profile",
     );
@@ -619,7 +769,9 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       recoveredAcrossGap: false,
     };
     this.lastCompletedReps = [];
+    this.lastQualityProposals = [];
     this.resetReferenceComparison();
+    return sessionProfile;
   }
 
   installReferenceProfile(input: RustReferenceProfileInstallation): void {
@@ -795,6 +947,7 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
       evidenceReason: rep.evidenceReason,
       observationFindings: rep.observationFindings,
     })));
+    this.lastQualityProposals = packet.qualityProposals;
   }
 
   private resetReferenceComparison(): void {
@@ -1051,7 +1204,11 @@ export function computeRustExerciseProfileHash(
   const capabilities = Number(profile.requiredCapabilities.includes("canonical-landmarks"))
     | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1);
   updateU32(capabilities);
-  update([0, 0, profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2]);
+  update([
+    0,
+    profile.schema === "halpe26" ? 1 : 0,
+    profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2,
+  ]);
   for (const signal of [profile.primarySignal, profile.secondarySignal]) {
     const landmarks = signal.landmarks.filter((value): value is number => value !== undefined);
     update([rustExerciseSignalKind(signal.kind), landmarks.length, ...landmarks]);
@@ -1075,8 +1232,118 @@ export function computeRustExerciseProfileHash(
   return hash;
 }
 
+/**
+ * Validates a profile's lineage and encodes the exact scalar order expected by
+ * `motion_sdk_install_profile`. Native adapters consume the same encoding, so
+ * enum and missing-landmark conventions cannot drift between Web and Android.
+ */
+export function encodeRustExerciseProfileInstallation(
+  profile: RustExerciseProfileData,
+): RustExerciseProfileInstallation {
+  if (computeRustExerciseProfileHash(profile) !== profile.contentHash) {
+    throw new Error("Exercise profile content hash does not match its canonical bundle");
+  }
+  const abiArguments = [
+    Number(profile.contentHash & 0xffff_ffffn),
+    Number((profile.contentHash >> 32n) & 0xffff_ffffn),
+    // Rust ABI order is maturity followed by pose schema. Both legacy
+    // provisional BlazePose values were zero, which previously hid a swapped
+    // argument bug until the first Halpe-26 data profile was installed.
+    0,
+    profile.schema === "halpe26" ? 1 : 0,
+    rustCoordinateUnit(profile.coordinateUnit),
+    rustExerciseStateMachine(profile.stateMachineId),
+    Number(profile.requiredCapabilities.includes("canonical-landmarks"))
+      | (Number(profile.requiredCapabilities.includes("subject-lock")) << 1),
+    profile.direction === "increasing" ? 0 : profile.direction === "decreasing" ? 1 : 2,
+    rustExerciseSignalKind(profile.primarySignal.kind),
+    profile.primarySignal.landmarks[0],
+    profile.primarySignal.landmarks[1] ?? 0xffff_ffff,
+    profile.primarySignal.landmarks[2] ?? 0xffff_ffff,
+    rustExerciseSignalKind(profile.secondarySignal.kind),
+    profile.secondarySignal.landmarks[0],
+    profile.secondarySignal.landmarks[1] ?? 0xffff_ffff,
+    profile.secondarySignal.landmarks[2] ?? 0xffff_ffff,
+    profile.startAmplitude,
+    profile.minPrimaryAmplitude,
+    profile.minSecondaryAmplitude,
+    profile.returnHysteresis,
+    profile.readyTolerance,
+    profile.maxGapMs,
+    profile.minRepDurationMs,
+    profile.maxRepDurationMs,
+  ] as const;
+  return { identity: profile.identity, abiArguments };
+}
+
+const BLAZEPOSE33_TO_HALPE26 = new Map<number, number>([
+  [0, 0], [2, 1], [5, 2], [7, 3], [8, 4],
+  [11, 5], [12, 6], [13, 7], [14, 8], [15, 9], [16, 10],
+  [23, 11], [24, 12], [25, 13], [26, 14], [27, 15], [28, 16],
+  // BlazePose heel and foot-index points have direct Halpe foot equivalents.
+  [29, 24], [30, 25], [31, 20], [32, 21],
+]);
+
+export function adaptRustExerciseProfileToPoseSchema(
+  profile: RustExerciseProfileData,
+  targetSchema: PoseContinuitySessionConfig["schema"],
+): RustExerciseProfileData {
+  if (targetSchema === profile.schema) return profile;
+  if (targetSchema !== "halpe26" || profile.schema !== "blazepose33") {
+    throw new Error(`Unsupported profile schema adaptation: ${profile.schema} -> ${targetSchema}`);
+  }
+  const adaptSignal = (signal: RustExerciseSignal): RustExerciseSignal => ({
+    ...signal,
+    landmarks: signal.landmarks.map((index) => {
+      if (index === undefined) return undefined;
+      const mapped = BLAZEPOSE33_TO_HALPE26.get(index);
+      if (mapped === undefined) {
+        throw new Error(`BlazePose joint ${index} has no Halpe-26 equivalent`);
+      }
+      return mapped;
+    }) as unknown as RustExerciseSignal["landmarks"],
+  });
+  const withoutHash: RustExerciseProfileData = {
+    ...profile,
+    identity: `${profile.identity}-halpe26`,
+    contentHash: 0n,
+    schema: "halpe26",
+    primarySignal: adaptSignal(profile.primarySignal),
+    secondarySignal: adaptSignal(profile.secondarySignal),
+  };
+  return {
+    ...withoutHash,
+    contentHash: computeRustExerciseProfileHash(withoutHash),
+  };
+}
+
 function rustExerciseSignalKind(kind: RustExerciseSignal["kind"]): number {
-  return kind === "landmark-y" ? 0 : kind === "joint-angle" ? 1 : 2;
+  return kind === "landmark-y" ? 0
+    : kind === "joint-angle" ? 1
+      : kind === "landmark-distance" ? 2
+        : kind === "landmark-horizontal-distance" ? 3
+          : 4;
+}
+
+function rustExerciseStateMachine(stateMachineId: RustExerciseProfileData["stateMachineId"]): number {
+  const codeById: Readonly<Record<RustExerciseProfileData["stateMachineId"], number>> = {
+    "ready-effort-peak-return/v1": 0,
+    "alternating-ready-effort-return/v1": 1,
+    "median-100ms-ready-effort-peak-return/v1": 2,
+    "median-200ms-ready-effort-peak-return/v1": 3,
+    "median-300ms-ready-effort-peak-return/v1": 4,
+    "median-400ms-ready-effort-peak-return/v1": 5,
+    "median-600ms-ready-effort-peak-return/v1": 6,
+    "cycle-aligned-ready-effort-peak-return/v1": 7,
+    "cycle-aligned-median-100ms-ready-effort-peak-return/v1": 8,
+    "cycle-aligned-median-200ms-ready-effort-peak-return/v1": 9,
+    "cycle-aligned-median-300ms-ready-effort-peak-return/v1": 10,
+    "cycle-aligned-median-400ms-ready-effort-peak-return/v1": 11,
+    "cycle-aligned-median-600ms-ready-effort-peak-return/v1": 12,
+    "stable-cycle-200ms-ready-effort-peak-return/v1": 13,
+    "barbell-axis-primary-ready-effort-return/v1": 14,
+  };
+  return codeById[stateMachineId];
 }
 
 function rustCoordinateUnit(unit: RustExerciseProfileData["coordinateUnit"]): number {

@@ -24,12 +24,22 @@ pub const CANDIDATE_FIELD_SWITCH_CONFIRM_MS: u32 = 13;
 #[derive(Default)]
 struct WebRuntime {
     engine: Option<ContinuityEngine>,
+    equipment_fusion: super::EquipmentFusionEngine,
+    pose_schema: super::PoseSchemaId,
     timestamp_ms: u64,
     last_processed_timestamp_ms: Option<u64>,
     observations: Vec<PoseObservation>,
     output: Vec<CanonicalLandmark>,
     candidates: Vec<PoseCandidate>,
     candidate_meta: Option<(u64, NormalizedRect, [f32; 3])>,
+    equipment_observations: Vec<super::EquipmentObservation>,
+    equipment_output: Option<super::EquipmentFrameEvidence>,
+    visual_equipment_tracker: super::BarbellAxisVisualTracker,
+    visual_luma: Vec<u8>,
+    visual_width: usize,
+    visual_height: usize,
+    visual_equipment_processed: bool,
+    visual_barbell_axis: Option<super::BarbellAxisObservation>,
     subject_tracker: Option<SubjectTracker>,
     target: Option<TargetSnapshot>,
     subject_epoch: u64,
@@ -56,6 +66,12 @@ struct WebRuntime {
     simulated_baseline_binding: Option<(String, u64)>,
     simulated_baseline_state: ReferenceRuntimeState,
     frame_history: Vec<super::CanonicalFrameSample>,
+}
+
+impl Default for super::PoseSchemaId {
+    fn default() -> Self {
+        Self::BlazePose33
+    }
 }
 
 #[derive(Default)]
@@ -245,7 +261,8 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     if width == 0 || height == 0 {
         return -2;
     }
-    runtime.engine = Some(ContinuityEngine::new(
+    runtime.pose_schema = super::PoseSchemaId::BlazePose33;
+    runtime.engine = Some(ContinuityEngine::new_with_schema(
         if fusion == 0 {
             ContinuityMode::Raw
         } else {
@@ -253,11 +270,21 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
         },
         width,
         height,
+        runtime.pose_schema,
     ));
+    runtime.equipment_fusion = super::EquipmentFusionEngine::new();
     runtime.observations.clear();
     runtime.output.clear();
     runtime.candidates.clear();
     runtime.candidate_meta = None;
+    runtime.equipment_observations.clear();
+    runtime.equipment_output = None;
+    runtime.visual_equipment_tracker.reset();
+    runtime.visual_luma.clear();
+    runtime.visual_width = 0;
+    runtime.visual_height = 0;
+    runtime.visual_equipment_processed = false;
+    runtime.visual_barbell_axis = None;
     runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::DominantVisible));
     runtime.target = None;
     runtime.subject_epoch = 0;
@@ -276,6 +303,43 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.reference_exercise_profile_binding = None;
     runtime.reference_state = ReferenceRuntimeState::Unavailable;
     runtime.frame_history.clear();
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let schema = match schema {
+        0 => super::PoseSchemaId::BlazePose33,
+        1 => super::PoseSchemaId::Halpe26,
+        _ => return -2,
+    };
+    let Some(engine) = runtime.engine.as_ref() else {
+        return -3;
+    };
+    let mode = engine.mode;
+    let width = engine.width as u32;
+    let height = engine.height as u32;
+    runtime.pose_schema = schema;
+    runtime.engine = Some(ContinuityEngine::new_with_schema(
+        mode, width, height, schema,
+    ));
+    runtime.observations.clear();
+    runtime.output.clear();
+    runtime.candidates.clear();
+    runtime.candidate_meta = None;
+    runtime.equipment_fusion = super::EquipmentFusionEngine::new();
+    runtime.equipment_observations.clear();
+    runtime.equipment_output = None;
+    runtime.visual_equipment_tracker.reset();
+    runtime.visual_luma.clear();
+    runtime.visual_width = 0;
+    runtime.visual_height = 0;
+    runtime.visual_equipment_processed = false;
+    runtime.visual_barbell_axis = None;
+    runtime.last_processed_timestamp_ms = None;
     0
 }
 
@@ -328,10 +392,10 @@ pub extern "C" fn motion_sdk_finish_set() -> i32 {
         return -2;
     }
     runtime.set_gate.finish();
-    let terminal_outcome = runtime.rep_engine.as_mut().and_then(|engine| {
-        engine.reject_active(super::RepEvidenceReason::IncompleteCycle, engine.previous)
-    });
-    runtime.completed_reps = terminal_outcome.into_iter().collect();
+    runtime.completed_reps = runtime
+        .rep_engine
+        .as_mut()
+        .map_or_else(Vec::new, super::RepEngine::finish_set);
     runtime.pending_outcomes.clear();
     runtime.rep_state = runtime
         .rep_engine
@@ -367,6 +431,11 @@ pub extern "C" fn motion_sdk_begin_frame(
     runtime.output.clear();
     runtime.candidates.clear();
     runtime.candidate_meta = None;
+    runtime.equipment_observations.clear();
+    runtime.equipment_output = None;
+    runtime.visual_luma.clear();
+    runtime.visual_equipment_processed = false;
+    runtime.visual_barbell_axis = None;
     0
 }
 
@@ -401,6 +470,12 @@ pub extern "C" fn motion_sdk_process_frame() -> i32 {
         return -3;
     }
     let observations = runtime.observations.clone();
+    let selected_subject = PoseCandidate {
+        id: 0,
+        bbox: NormalizedRect::new(0.0, 0.0, 1.0, 1.0),
+        observations: observations.clone(),
+        torso_color: [0.0, 0.0, 0.0],
+    };
     let Some(engine) = runtime.engine.as_mut() else {
         return -2;
     };
@@ -410,7 +485,19 @@ pub extern "C" fn motion_sdk_process_frame() -> i32 {
         candidate_count: 1,
         selected_candidate_id: Some(0),
     });
-    process_rep(&mut runtime);
+    let equipment_observations = std::mem::take(&mut runtime.equipment_observations);
+    let canonical = runtime.output.clone();
+    runtime.equipment_output = Some(
+        runtime
+            .equipment_fusion
+            .process(super::EquipmentFrameInput {
+                timestamp_ms,
+                selected_subject: Some(&selected_subject),
+                canonical: &canonical,
+                equipment: &equipment_observations,
+            }),
+    );
+    process_rep(&mut runtime, &equipment_observations);
     runtime.last_processed_timestamp_ms = Some(timestamp_ms);
     0
 }
@@ -435,6 +522,11 @@ pub extern "C" fn motion_sdk_begin_multi(timestamp_low: u32, timestamp_high: u32
     runtime.output.clear();
     runtime.candidates.clear();
     runtime.candidate_meta = None;
+    runtime.equipment_observations.clear();
+    runtime.equipment_output = None;
+    runtime.visual_luma.clear();
+    runtime.visual_equipment_processed = false;
+    runtime.visual_barbell_axis = None;
     0
 }
 
@@ -484,6 +576,212 @@ pub extern "C" fn motion_sdk_commit_candidate() -> i32 {
     0
 }
 
+/// Allocates one downscaled luma plane for the current multi-candidate frame.
+/// Platform adapters own RGBA/YUV conversion only; visual equipment semantics
+/// and all trajectory state stay in this Rust runtime.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_begin_visual_equipment_frame(
+    width: u32,
+    height: u32,
+    length: u32,
+) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let expected = usize::try_from(width).ok().and_then(|width| {
+        usize::try_from(height)
+            .ok()
+            .and_then(|height| width.checked_mul(height))
+    });
+    let Some(expected) = expected else {
+        return -2;
+    };
+    if runtime.engine.is_none()
+        || width < 8
+        || height < 8
+        || expected != length as usize
+        || expected > 1280 * 1280
+        || runtime.visual_equipment_processed
+    {
+        return -2;
+    }
+    runtime.visual_width = width as usize;
+    runtime.visual_height = height as usize;
+    runtime.visual_luma = vec![0; expected];
+    0
+}
+
+/// WASM hosts write directly into linear memory after allocation. Native hosts
+/// must use `motion_sdk_copy_visual_equipment_luma` because pointers are wider.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_visual_equipment_luma_ptr() -> u32 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Ok(runtime) = runtime().lock() else {
+            return 0;
+        };
+        return runtime.visual_luma.as_ptr() as u32;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    0
+}
+
+/// Copies a same-frame luma plane from Android/iOS/native hosts.
+///
+/// # Safety
+/// `input` must point to `length` readable bytes for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn motion_sdk_copy_visual_equipment_luma(
+    input: *const u8,
+    length: usize,
+) -> i32 {
+    if input.is_null() {
+        return -1;
+    }
+    let Ok(mut runtime) = runtime().lock() else {
+        return -2;
+    };
+    if runtime.visual_luma.len() != length || length == 0 {
+        return -3;
+    }
+    // SAFETY: the caller contract above guarantees a readable input range;
+    // the destination Vec has exactly the validated length.
+    let source = unsafe { std::slice::from_raw_parts(input, length) };
+    runtime.visual_luma.copy_from_slice(source);
+    0
+}
+
+/// Arms shared visual equipment processing for the current frame. Detection
+/// runs inside `motion_sdk_process_multi`, after Rust has selected the current
+/// foreground subject, so mirrors/bystanders cannot contribute wrist context.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_detect_barbell_axis() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.visual_equipment_processed
+        || runtime.visual_luma.is_empty()
+        || runtime.candidate_meta.is_some()
+    {
+        return -2;
+    }
+    runtime.visual_equipment_processed = true;
+    0
+}
+
+/// 0=none, 1=measured, 2=predicted, 3=calibrated pose/equipment fusion.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_visual_barbell_axis_source() -> u32 {
+    let Ok(runtime) = runtime().lock() else {
+        return 0;
+    };
+    match runtime.visual_barbell_axis.map(|axis| axis.source) {
+        Some(super::BarbellAxisSource::Measured) => 1,
+        Some(super::BarbellAxisSource::Predicted) => 2,
+        Some(super::BarbellAxisSource::Fused) => 3,
+        None => 0,
+    }
+}
+
+/// Numeric visual-axis fields: 0=x1, 1=y1, 2=x2, 3=y2, 4=centerY,
+/// 5=confidence, 6=uncertaintyPx. Missing/unknown fields return NaN.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_visual_barbell_axis_number(field: u32) -> f32 {
+    let Ok(runtime) = runtime().lock() else {
+        return f32::NAN;
+    };
+    let Some(axis) = runtime.visual_barbell_axis else {
+        return f32::NAN;
+    };
+    match field {
+        0 => axis.x1,
+        1 => axis.y1,
+        2 => axis.x2,
+        3 => axis.y2,
+        4 => axis.center_y,
+        5 => axis.confidence,
+        6 => axis.uncertainty_px,
+        _ => f32::NAN,
+    }
+}
+
+/// Adds one frame-local equipment proposal. Hosts may call this after either
+/// `motion_sdk_begin_frame` or `motion_sdk_begin_multi` and before processing
+/// the frame. Rust validates and associates proposals with the locked subject;
+/// proposal ids are diagnostic only and never become stable track ids.
+///
+/// Kind: 0=weight plate, 1=barbell shaft, 2=dumbbell, 3=machine handle.
+/// Source: 0=detector, 1=optical flow, 2=geometry, 3=predicted.
+/// Flags: bit0=reflection, bit1=static rack, bit2=partial occlusion,
+/// bit3=heavy occlusion, bit4=truncated. Negative uncertainty means unknown.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_add_equipment_observation(
+    id_low: u32,
+    id_high: u32,
+    kind: u32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    score: f32,
+    uncertainty_px: f32,
+    source: u32,
+    flags: u32,
+) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    let kind = match kind {
+        0 => super::EquipmentKind::WeightPlate,
+        1 => super::EquipmentKind::BarbellShaft,
+        2 => super::EquipmentKind::Dumbbell,
+        3 => super::EquipmentKind::MachineHandle,
+        _ => return -3,
+    };
+    let source = match source {
+        0 => super::EquipmentSource::Detector,
+        1 => super::EquipmentSource::OpticalFlow,
+        2 => super::EquipmentSource::Geometry,
+        3 => super::EquipmentSource::Predicted,
+        _ => return -4,
+    };
+    if flags & !0b1_1111 != 0 || flags & 0b1100 == 0b1100 {
+        return -5;
+    }
+    let uncertainty_px = if uncertainty_px < 0.0 {
+        None
+    } else {
+        Some(uncertainty_px)
+    };
+    let occlusion = if flags & 0b1000 != 0 {
+        super::EquipmentOcclusion::Heavy
+    } else if flags & 0b0100 != 0 {
+        super::EquipmentOcclusion::Partial
+    } else {
+        super::EquipmentOcclusion::None
+    };
+    runtime
+        .equipment_observations
+        .push(super::EquipmentObservation {
+            proposal_id: (u64::from(id_high) << 32) | u64::from(id_low),
+            kind,
+            bbox: NormalizedRect::new(x, y, width, height),
+            score,
+            uncertainty_px,
+            source,
+            attributes: super::EquipmentAttributes {
+                is_reflection_candidate: flags & 0b00001 != 0,
+                is_static_rack_candidate: flags & 0b00010 != 0,
+                occlusion,
+                truncated: flags & 0b10000 != 0,
+            },
+        });
+    0
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_process_multi() -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
@@ -520,6 +818,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
             .as_mut()
             .and_then(super::RepEngine::reject_for_subject_change);
         runtime.pending_outcomes.extend(subject_change_outcome);
+        runtime.visual_equipment_tracker.reset();
         reset_reference_subject(&mut runtime);
     }
     let landmark_count = runtime
@@ -533,7 +832,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
                 .max()
         })
         .unwrap_or(0);
-    runtime.output = if let Some(selected) = selected {
+    runtime.output = if let Some(selected) = selected.as_ref() {
         let Some(engine) = runtime.engine.as_mut() else {
             return -2;
         };
@@ -541,8 +840,41 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     } else {
         vec![CanonicalLandmark::unknown(0.0, None); landmark_count]
     };
+    if runtime.visual_equipment_processed && !runtime.visual_luma.is_empty() {
+        let visual_subjects = selected.as_ref().map_or(&[][..], std::slice::from_ref);
+        let mut visual_tracker = std::mem::take(&mut runtime.visual_equipment_tracker);
+        let axis = visual_tracker.process(
+            &runtime.visual_luma,
+            runtime.visual_width,
+            runtime.visual_height,
+            timestamp_ms,
+            visual_subjects,
+        );
+        runtime.visual_equipment_tracker = visual_tracker;
+        runtime.visual_barbell_axis = axis;
+        if let Some(observation) =
+            axis.and_then(super::BarbellAxisObservation::equipment_observation)
+        {
+            runtime.equipment_observations.push(observation);
+        }
+    }
+    let equipment_observations = std::mem::take(&mut runtime.equipment_observations);
+    let canonical = runtime.output.clone();
+    let selected_for_equipment = (target.state == TargetState::Locked)
+        .then_some(selected.as_ref())
+        .flatten();
+    runtime.equipment_output = Some(
+        runtime
+            .equipment_fusion
+            .process(super::EquipmentFrameInput {
+                timestamp_ms,
+                selected_subject: selected_for_equipment,
+                canonical: &canonical,
+                equipment: &equipment_observations,
+            }),
+    );
     runtime.target = Some(target);
-    process_rep(&mut runtime);
+    process_rep(&mut runtime, &equipment_observations);
     runtime.last_processed_timestamp_ms = Some(timestamp_ms);
     0
 }
@@ -560,14 +892,21 @@ pub extern "C" fn motion_sdk_current_frame_valid() -> i32 {
         .target
         .as_ref()
         .is_some_and(|target| target.state == TargetState::Locked);
-    let observable = runtime
-        .rep_engine
-        .as_ref()
-        .is_some_and(|engine| super::profile_signal(&engine.profile, &runtime.output).is_some());
+    let observable = runtime.rep_engine.as_ref().is_some_and(|engine| {
+        if engine.profile.uses_barbell_axis_state_graph() {
+            runtime.equipment_output.as_ref().is_some_and(|equipment| {
+                equipment.tracks.iter().any(|track| {
+                    track.kind == super::EquipmentKind::BarbellShaft && track.judgeable_path
+                })
+            })
+        } else {
+            super::profile_signal(&engine.profile, &runtime.output).is_some()
+        }
+    });
     i32::from(target_locked && observable)
 }
 
-fn process_rep(runtime: &mut WebRuntime) {
+fn process_rep(runtime: &mut WebRuntime, raw_equipment: &[super::EquipmentObservation]) {
     runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
     if runtime.reference_profile.is_some() || runtime.simulated_baseline.is_some() {
         runtime.frame_history.push(super::CanonicalFrameSample {
@@ -597,26 +936,47 @@ fn process_rep(runtime: &mut WebRuntime) {
         .rep_engine
         .as_ref()
         .map_or(super::RepPhase::Ready, |engine| engine.state.phase);
+    let equipment = runtime.equipment_output.clone().unwrap_or_else(|| {
+        super::EquipmentFrameEvidence::cannot_judge(
+            runtime.timestamp_ms,
+            target.selected_candidate_id,
+            super::EquipmentCannotJudgeReason::NoEquipmentObservation,
+        )
+    });
     let may_process_rep = runtime.set_gate.advance(
         runtime.rep_engine.as_ref().map(|engine| &engine.profile),
         target.state,
         &runtime.output,
+        Some(&equipment),
         runtime.timestamp_ms,
         rep_phase,
     );
     if may_process_rep {
         if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-            runtime.completed_reps.extend(rep_engine.process(
-                runtime.frame_id,
-                runtime.timestamp_ms,
-                target.state,
-                &runtime.output,
-            ));
+            runtime
+                .completed_reps
+                .extend(rep_engine.process_with_equipment(
+                    runtime.frame_id,
+                    runtime.timestamp_ms,
+                    target.state,
+                    &runtime.output,
+                    &equipment,
+                    raw_equipment,
+                ));
             runtime.rep_state = rep_engine.state.clone();
         } else {
             runtime.rep_state = super::RepStateSnapshot::default();
         }
     } else {
+        if let Some(rep_engine) = runtime.rep_engine.as_mut() {
+            rep_engine.prime_barbell_ready(
+                runtime.frame_id,
+                runtime.timestamp_ms,
+                target.state,
+                &runtime.output,
+                &equipment,
+            );
+        }
         runtime.rep_state = runtime
             .rep_engine
             .as_ref()
@@ -699,13 +1059,37 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
         candidate_count: 0,
         selected_candidate_id: None,
     });
+    let pose_schema = runtime
+        .rep_engine
+        .as_ref()
+        .map_or(super::PoseSchemaId::BlazePose33, |engine| {
+            engine.profile.schema
+        });
+    let joint_angles =
+        super::measure_joint_angles_for_schema(&runtime.output, target.state, pose_schema);
+    let selected_candidate_id = target.selected_candidate_id;
+    let equipment = runtime.equipment_output.clone().unwrap_or_else(|| {
+        super::EquipmentFrameEvidence::cannot_judge(
+            runtime.timestamp_ms,
+            selected_candidate_id,
+            if selected_candidate_id.is_some() && target.state == super::TargetState::Locked {
+                super::EquipmentCannotJudgeReason::NoEquipmentObservation
+            } else {
+                super::EquipmentCannotJudgeReason::NoLockedSubject
+            },
+        )
+    });
     let packet = super::MotionPacket {
         lineage: super::PacketLineage {
             sequence_id: runtime.sequence_id.clone(),
-            contract: super::ContractVersion { major: 1, minor: 5 },
+            contract: super::ContractVersion { major: 1, minor: 8 },
             algorithm_version: "rust-canonical-wasm/v1".into(),
             config_version: "web-motion-config/v1".into(),
-            inference_version: "mediapipe-host-adapter/v1".into(),
+            inference_version: match runtime.pose_schema {
+                super::PoseSchemaId::BlazePose33 => "mediapipe-host-adapter/v1",
+                super::PoseSchemaId::Halpe26 => "yolox-rtmpose-halpe26-host-adapter/v1",
+            }
+            .into(),
             diagnostic_version: "web-motion-diagnostics/v1".into(),
             active_profile_identity: runtime
                 .rep_engine
@@ -721,8 +1105,11 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
         subject_epoch: runtime.subject_epoch,
         target,
         canonical: runtime.output.clone(),
+        joint_angles,
+        equipment,
         set_state: runtime.set_gate.state.clone(),
         rep_state: runtime.rep_state.clone(),
+        quality_proposals: super::build_quality_proposals(&runtime.completed_reps),
         completed_reps: runtime.completed_reps.clone(),
     };
     runtime.packet_bytes = super::encode_motion_packet(&packet).unwrap_or_default();
@@ -773,7 +1160,7 @@ pub extern "C" fn motion_sdk_contract_major() -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_contract_minor() -> u32 {
-    5
+    8
 }
 
 #[unsafe(no_mangle)]
@@ -791,8 +1178,38 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
         6 => Some(super::ExerciseProfile::side_step_touch_front_provisional()),
         7 => Some(super::ExerciseProfile::alternating_knee_raise_front_provisional()),
         8 => Some(super::ExerciseProfile::step_jack_front_provisional()),
+        101 => super::ExerciseProfile::lat_pulldown_provisional()
+            .into_halpe26()
+            .ok(),
+        102 => super::ExerciseProfile::seated_shoulder_press_provisional()
+            .into_halpe26()
+            .ok(),
+        103 => super::ExerciseProfile::lat_pulldown_rear_left_45_provisional()
+            .into_halpe26()
+            .ok(),
+        104 => super::ExerciseProfile::seated_shoulder_press_front_provisional()
+            .into_halpe26()
+            .ok(),
+        105 => super::ExerciseProfile::march_in_place_front_provisional()
+            .into_halpe26()
+            .ok(),
+        106 => super::ExerciseProfile::side_step_touch_front_provisional()
+            .into_halpe26()
+            .ok(),
+        107 => super::ExerciseProfile::alternating_knee_raise_front_provisional()
+            .into_halpe26()
+            .ok(),
+        108 => super::ExerciseProfile::step_jack_front_provisional()
+            .into_halpe26()
+            .ok(),
         _ => return -2,
     };
+    if profile
+        .as_ref()
+        .is_some_and(|profile| profile.schema != runtime.pose_schema)
+    {
+        return -3;
+    }
     runtime.rep_engine = profile.map(super::RepEngine::new);
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
@@ -868,8 +1285,12 @@ pub extern "C" fn motion_sdk_install_profile(
     };
     let schema = match schema {
         0 => super::PoseSchemaId::BlazePose33,
+        1 => super::PoseSchemaId::Halpe26,
         _ => return -5,
     };
+    if schema != runtime.pose_schema {
+        return -7;
+    }
     let coordinate_unit = match coordinate_unit {
         0 => "image-normalized-y",
         1 => "image-angle-deg",
@@ -879,6 +1300,20 @@ pub extern "C" fn motion_sdk_install_profile(
     };
     let state_machine_id = match state_machine {
         0 => "ready-effort-peak-return/v1",
+        1 => "alternating-ready-effort-return/v1",
+        2 => "median-100ms-ready-effort-peak-return/v1",
+        3 => "median-200ms-ready-effort-peak-return/v1",
+        4 => "median-300ms-ready-effort-peak-return/v1",
+        5 => "median-400ms-ready-effort-peak-return/v1",
+        6 => "median-600ms-ready-effort-peak-return/v1",
+        7 => "cycle-aligned-ready-effort-peak-return/v1",
+        8 => "cycle-aligned-median-100ms-ready-effort-peak-return/v1",
+        9 => "cycle-aligned-median-200ms-ready-effort-peak-return/v1",
+        10 => "cycle-aligned-median-300ms-ready-effort-peak-return/v1",
+        11 => "cycle-aligned-median-400ms-ready-effort-peak-return/v1",
+        12 => "cycle-aligned-median-600ms-ready-effort-peak-return/v1",
+        13 => "stable-cycle-200ms-ready-effort-peak-return/v1",
+        14 => "barbell-axis-primary-ready-effort-return/v1",
         _ => return -5,
     };
     let direction = match direction {
@@ -891,6 +1326,8 @@ pub extern "C" fn motion_sdk_install_profile(
         0 => Some(super::ExerciseSignalKind::LandmarkY),
         1 => Some(super::ExerciseSignalKind::JointAngle),
         2 => Some(super::ExerciseSignalKind::LandmarkDistance),
+        3 => Some(super::ExerciseSignalKind::LandmarkHorizontalDistance),
+        4 => Some(super::ExerciseSignalKind::LandmarkVerticalDistance),
         _ => None,
     };
     let joints = |first: u32, second: u32, third: u32| {
@@ -1077,7 +1514,7 @@ pub extern "C" fn motion_sdk_commit_reference_profile() -> i32 {
         corridor,
         matching_policy,
     } = envelope.profile;
-    if schema_version != "form-coach-provisional-reference-profile/v1"
+    if schema_version != "maxpower-provisional-reference-profile/v1"
         || (profile_status != "personal_provisional_expert_reviewed"
             && profile_status != "simulated_nominal")
         || phase_model.normalization != "piecewise_linear_start_bottom_end"
@@ -1215,7 +1652,7 @@ pub extern "C" fn motion_sdk_commit_simulated_baseline() -> i32 {
         corridor,
         matching_policy,
     } = envelope.baseline;
-    if schema_version != "form-coach-simulated-trajectory-baseline/v1"
+    if schema_version != "maxpower-simulated-trajectory-baseline/v1"
         || source != "simulated_kinematic_prior"
         || evidence_status != "uncalibrated"
         || calibration_status != "uncalibrated"

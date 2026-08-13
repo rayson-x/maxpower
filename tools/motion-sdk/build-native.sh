@@ -30,7 +30,7 @@ if [ "$platform" = "android" ]; then
       -t x86 \
       -t x86_64 \
       -o "$output_dir" \
-      build --manifest-path "$repo_root/Cargo.toml" -p form-coach-motion-sdk --release
+      build --manifest-path "$repo_root/Cargo.toml" -p maxpower-motion-sdk --release
   exit 0
 fi
 
@@ -38,22 +38,22 @@ if [ "$platform" = "apple" ]; then
   developer_dir=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}
   target_dir="$repo_root/target-native-apple"
   DEVELOPER_DIR="$developer_dir" CARGO_TARGET_DIR="$target_dir" \
-    "$cargo_bin" build -p form-coach-motion-sdk --release --target aarch64-apple-ios
+    "$cargo_bin" build -p maxpower-motion-sdk --release --target aarch64-apple-ios
   DEVELOPER_DIR="$developer_dir" CARGO_TARGET_DIR="$target_dir" \
-    "$cargo_bin" build -p form-coach-motion-sdk --release --target aarch64-apple-ios-sim
+    "$cargo_bin" build -p maxpower-motion-sdk --release --target aarch64-apple-ios-sim
   DEVELOPER_DIR="$developer_dir" CARGO_TARGET_DIR="$target_dir" \
-    "$cargo_bin" build -p form-coach-motion-sdk --release --target x86_64-apple-ios
+    "$cargo_bin" build -p maxpower-motion-sdk --release --target x86_64-apple-ios
   simulator_dir="$target_dir/ios-simulator-universal"
   mkdir -p "$simulator_dir"
   DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun lipo -create \
-    "$target_dir/aarch64-apple-ios-sim/release/libform_coach_motion_sdk.a" \
-    "$target_dir/x86_64-apple-ios/release/libform_coach_motion_sdk.a" \
-    -output "$simulator_dir/libform_coach_motion_sdk.a"
+    "$target_dir/aarch64-apple-ios-sim/release/libmaxpower_motion_sdk.a" \
+    "$target_dir/x86_64-apple-ios/release/libmaxpower_motion_sdk.a" \
+    -output "$simulator_dir/libmaxpower_motion_sdk.a"
   rm -rf "$output_dir/MotionSdk.xcframework"
   DEVELOPER_DIR="$developer_dir" /usr/bin/xcrun xcodebuild -create-xcframework \
-    -library "$target_dir/aarch64-apple-ios/release/libform_coach_motion_sdk.a" \
+    -library "$target_dir/aarch64-apple-ios/release/libmaxpower_motion_sdk.a" \
     -headers "$repo_root/modules/pose-camera/common" \
-    -library "$simulator_dir/libform_coach_motion_sdk.a" \
+    -library "$simulator_dir/libmaxpower_motion_sdk.a" \
     -headers "$repo_root/modules/pose-camera/common" \
     -output "$output_dir/MotionSdk.xcframework"
   exit 0

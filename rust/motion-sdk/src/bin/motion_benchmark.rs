@@ -1,7 +1,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     CorridorPoint, ObservedReferenceNode, ObservedReferenceRep, ReferenceCorridorNode,
     ReferenceIdentity, ReferenceTrajectoryProfile, benchmark_canonical_core,
     match_reference_trajectory,

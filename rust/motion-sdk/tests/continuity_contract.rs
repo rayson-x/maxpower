@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     AdapterCapabilities, ContinuityMode, ContinuityReason, ContractVersion, DiagnosticLevel,
     FixtureInferenceAdapter, FrameLease, LandmarkSource, MotionError, MotionSession,
     PoseObservation, RecordingOutputAdapter, SessionConfig,
@@ -17,8 +17,30 @@ fn config(sequence_id: &str) -> SessionConfig {
         image_width_px: 1_000,
         image_height_px: 1_000,
         continuity: ContinuityMode::Fusion,
-        subject_policy: form_coach_motion_sdk::SubjectPolicy::AssumeSingle,
+        subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
     }
+}
+
+#[test]
+fn raw_mode_keeps_zero_confidence_missing_points_unknown() {
+    let output = RecordingOutputAdapter::default();
+    let mut raw_config = config("synthetic:raw-missing");
+    raw_config.continuity = ContinuityMode::Raw;
+    let mut session = MotionSession::open(
+        raw_config,
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::sequence(vec![vec![PoseObservation::new(0.0, 0.0, 0.0, 0.0)]]),
+        output.clone(),
+    )
+    .unwrap();
+    session
+        .offer(FrameLease::fixture(0, 100, Arc::new(AtomicUsize::new(0))))
+        .unwrap();
+
+    let landmark = &output.packets()[0].canonical[0];
+    assert_eq!(landmark.source, LandmarkSource::Unknown);
+    assert_eq!(landmark.x, None);
+    assert!(!landmark.renderable);
 }
 
 #[test]
@@ -160,6 +182,37 @@ fn weak_elbow_is_fused_from_stable_arm_bones_without_changing_anchors() {
 }
 
 #[test]
+fn sustained_weak_arm_coordinates_remain_kinematically_tracked() {
+    let mut frames = vec![arm_frame_with_scores(0.55, 0.95, 0.95); 5];
+    frames.extend((0..8).map(|_| arm_frame_with_scores(0.55, 0.01, 0.01)));
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        config("synthetic:sustained-weak-arm"),
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::sequence(frames),
+        output.clone(),
+    )
+    .unwrap();
+    let releases = Arc::new(AtomicUsize::new(0));
+    for frame_id in 0..13 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                frame_id * 50,
+                Arc::clone(&releases),
+            ))
+            .unwrap();
+    }
+
+    let packet = output.packets().pop().unwrap();
+    assert_eq!(packet.canonical[11].source, LandmarkSource::Measured);
+    assert_eq!(packet.canonical[13].source, LandmarkSource::Fused);
+    assert_eq!(packet.canonical[15].source, LandmarkSource::Fused);
+    assert!(packet.canonical[13].renderable);
+    assert!(packet.canonical[15].renderable);
+}
+
+#[test]
 fn isolated_high_confidence_spike_is_rejected_before_it_can_pollute_continuity() {
     let mut frames = vec![arm_frame(0.55, 0.95); 5];
     frames.push(arm_frame(0.98, 0.95));
@@ -269,10 +322,18 @@ fn out_of_order_frame_is_refused_and_its_lease_is_released_once() {
 }
 
 fn arm_frame(elbow_y: f32, elbow_visibility: f32) -> Vec<PoseObservation> {
+    arm_frame_with_scores(elbow_y, elbow_visibility, 0.95)
+}
+
+fn arm_frame_with_scores(
+    elbow_y: f32,
+    elbow_visibility: f32,
+    wrist_visibility: f32,
+) -> Vec<PoseObservation> {
     let mut landmarks = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.95); 17];
     landmarks[11] = PoseObservation::new(0.4, 0.4, 0.0, 0.95);
     landmarks[13] = PoseObservation::new(0.5, elbow_y, 0.0, elbow_visibility);
-    landmarks[15] = PoseObservation::new(0.6, 0.4, 0.0, 0.95);
+    landmarks[15] = PoseObservation::new(0.6, 0.4, 0.0, wrist_visibility);
     landmarks
 }
 

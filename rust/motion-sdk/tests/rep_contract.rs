@@ -1,10 +1,11 @@
 use std::sync::{Arc, atomic::AtomicUsize};
 
-use form_coach_motion_sdk::{
-    AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseProfile,
-    ExerciseMaturity, ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter, FrameLease,
+use maxpower_motion_sdk::{
+    AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseMaturity,
+    ExerciseProfile, ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter, FrameLease,
     MotionSession, MovementDirection, PoseObservation, PoseSchemaId, RecordingOutputAdapter,
-    RepBoundaryRevision, RepDisposition, RepEvidenceReason, RepObservationFinding, RepPhase, SessionConfig, SetLifecycle, SubjectPolicy,
+    RepBoundaryRevision, RepDisposition, RepEvidenceReason, RepObservationFinding, RepPhase,
+    SessionConfig, SetLifecycle, SubjectPolicy,
 };
 
 fn config() -> SessionConfig {
@@ -117,7 +118,11 @@ fn explicit_set_arming_excludes_setup_motion_and_finish_never_seals_a_partial_re
     let releases = Arc::new(AtomicUsize::new(0));
     for frame in 0..wrist_y.len() as u64 {
         session
-            .offer(FrameLease::fixture(frame, frame * 100, Arc::clone(&releases)))
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
             .unwrap();
     }
     assert_eq!(session.set_state().lifecycle, SetLifecycle::Arming);
@@ -133,6 +138,97 @@ fn explicit_set_arming_excludes_setup_motion_and_finish_never_seals_a_partial_re
 
     session.finish_set();
     assert_eq!(session.set_state().lifecycle, SetLifecycle::Finished);
+}
+
+#[test]
+fn stable_arming_pose_primes_the_first_rep_baseline() {
+    let mut wrist_y = vec![0.20; 6]; // Exactly 500ms satisfies arming.
+    wrist_y.extend([0.28, 0.30, 0.32, 0.31, 0.27, 0.23, 0.21]);
+    let mut elbow_y = vec![0.30; 6];
+    elbow_y.extend([0.34, 0.37, 0.39, 0.38, 0.35, 0.32, 0.30]);
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        config(),
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::sequence(rep_frames(&wrist_y, &elbow_y)),
+        output.clone(),
+    )
+    .unwrap();
+    session
+        .install_exercise_profile(ExerciseProfile::lat_pulldown_provisional())
+        .unwrap();
+    session.begin_set();
+
+    let releases = Arc::new(AtomicUsize::new(0));
+    for frame in 0..wrist_y.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
+            .unwrap();
+    }
+
+    let packets = output.packets();
+    let completed = packets
+        .iter()
+        .flat_map(|packet| packet.completed_reps.iter())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        completed.len(),
+        1,
+        "the first post-arming cycle must not be lost"
+    );
+    assert_eq!(completed[0].start_frame_id, 5);
+}
+
+#[test]
+fn noisy_setup_pose_cannot_keep_an_explicit_set_arming_forever() {
+    // Adjacent-frame pose noise is larger than the normal resume threshold,
+    // so the stable-window heuristic alone can never finish arming. Once the
+    // bounded setup window has elapsed, the next complete cycle must count.
+    let mut wrist_y = (0..20)
+        .map(|frame| if frame % 2 == 0 { 0.20 } else { 0.22 })
+        .collect::<Vec<_>>();
+    wrist_y.extend([
+        0.20, 0.22, 0.30, 0.45, 0.65, 0.78, 0.75, 0.60, 0.40, 0.25, 0.21,
+    ]);
+    let elbow_y = wrist_y.iter().map(|value| value + 0.10).collect::<Vec<_>>();
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        config(),
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::sequence(rep_frames(&wrist_y, &elbow_y)),
+        output.clone(),
+    )
+    .unwrap();
+    session
+        .install_exercise_profile(ExerciseProfile::lat_pulldown_provisional())
+        .unwrap();
+    session.begin_set();
+
+    let releases = Arc::new(AtomicUsize::new(0));
+    for frame in 0..wrist_y.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
+            .unwrap();
+    }
+
+    let completed = output
+        .packets()
+        .iter()
+        .map(|packet| packet.completed_reps.len())
+        .sum::<usize>();
+    assert_eq!(session.set_state().lifecycle, SetLifecycle::Active);
+    assert_eq!(
+        completed, 1,
+        "the first complete post-setup cycle must count"
+    );
 }
 
 #[test]
@@ -156,7 +252,11 @@ fn an_idle_recorded_set_pauses_then_resumes_on_a_real_excursion() {
     let releases = Arc::new(AtomicUsize::new(0));
     for frame in 0..wrist_y.len() as u64 {
         session
-            .offer(FrameLease::fixture(frame, frame * 100, Arc::clone(&releases)))
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
             .unwrap();
     }
     assert!(
@@ -205,6 +305,36 @@ fn profile_bundle_rejects_tampering_and_unsupported_contract_fields() {
 }
 
 #[test]
+fn profile_bundle_accepts_all_versioned_median_state_graphs() {
+    for state_machine_id in [
+        "median-100ms-ready-effort-peak-return/v1",
+        "median-200ms-ready-effort-peak-return/v1",
+        "median-300ms-ready-effort-peak-return/v1",
+        "median-400ms-ready-effort-peak-return/v1",
+        "median-600ms-ready-effort-peak-return/v1",
+        "cycle-aligned-ready-effort-peak-return/v1",
+        "cycle-aligned-median-100ms-ready-effort-peak-return/v1",
+        "cycle-aligned-median-200ms-ready-effort-peak-return/v1",
+        "cycle-aligned-median-300ms-ready-effort-peak-return/v1",
+        "cycle-aligned-median-400ms-ready-effort-peak-return/v1",
+        "cycle-aligned-median-600ms-ready-effort-peak-return/v1",
+    ] {
+        let mut profile = ExerciseProfile::lat_pulldown_provisional();
+        profile.state_machine_id = state_machine_id.into();
+        profile.content_hash = profile.computed_content_hash();
+        let result = MotionSession::open(
+            config(),
+            AdapterCapabilities::fixture(),
+            FixtureInferenceAdapter::sequence(Vec::new()),
+            RecordingOutputAdapter::default(),
+        )
+        .unwrap()
+        .install_exercise_profile(profile);
+        assert!(result.is_ok(), "{state_machine_id} must be installable");
+    }
+}
+
+#[test]
 fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
     let angles = [90.0, 92.0, 105.0, 128.0, 150.0, 147.0, 125.0, 102.0, 91.0];
     let frames = angles.into_iter().map(angle_frame).collect::<Vec<_>>();
@@ -246,10 +376,20 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
     session.install_exercise_profile(profile.clone()).unwrap();
     let releases = Arc::new(AtomicUsize::new(0));
     for frame in 0..angles.len() as u64 {
-        session.offer(FrameLease::fixture(frame, frame * 100, Arc::clone(&releases))).unwrap();
+        session
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
+            .unwrap();
     }
     assert_eq!(
-        output.packets().iter().map(|packet| packet.completed_reps.len()).sum::<usize>(),
+        output
+            .packets()
+            .iter()
+            .map(|packet| packet.completed_reps.len())
+            .sum::<usize>(),
         1,
     );
 
@@ -257,7 +397,10 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
     // Auto orientation must therefore also seal a cycle whose first excursion
     // decreases the elbow angle rather than increases it.
     let reverse_angles = [150.0, 148.0, 135.0, 112.0, 90.0, 93.0, 115.0, 140.0, 150.0];
-    let reverse_frames = reverse_angles.into_iter().map(angle_frame).collect::<Vec<_>>();
+    let reverse_frames = reverse_angles
+        .into_iter()
+        .map(angle_frame)
+        .collect::<Vec<_>>();
     let reverse_output = RecordingOutputAdapter::default();
     let mut reverse_session = MotionSession::open(
         config(),
@@ -266,10 +409,16 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
         reverse_output.clone(),
     )
     .unwrap();
-    reverse_session.install_exercise_profile(profile.clone()).unwrap();
+    reverse_session
+        .install_exercise_profile(profile.clone())
+        .unwrap();
     for frame in 0..reverse_angles.len() as u64 {
         reverse_session
-            .offer(FrameLease::fixture(frame, frame * 100, Arc::clone(&releases)))
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
             .unwrap();
     }
     assert_eq!(
@@ -282,8 +431,8 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
     );
 
     let two_cycles = [
-        90.0, 92.0, 105.0, 128.0, 150.0, 147.0, 125.0, 102.0, 91.0,
-        93.0, 106.0, 129.0, 151.0, 146.0, 124.0, 101.0, 90.0,
+        90.0, 92.0, 105.0, 128.0, 150.0, 147.0, 125.0, 102.0, 91.0, 93.0, 106.0, 129.0, 151.0,
+        146.0, 124.0, 101.0, 90.0,
     ];
     let two_cycle_frames = two_cycles.into_iter().map(angle_frame).collect::<Vec<_>>();
     let two_cycle_output = RecordingOutputAdapter::default();
@@ -297,7 +446,11 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
     two_cycle_session.install_exercise_profile(profile).unwrap();
     for frame in 0..two_cycles.len() as u64 {
         two_cycle_session
-            .offer(FrameLease::fixture(frame, frame * 100, Arc::clone(&releases)))
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
             .unwrap();
     }
     assert_eq!(
@@ -347,12 +500,10 @@ fn bottom_oscillation_does_not_double_count_and_limited_cycle_keeps_feedback() {
 #[test]
 fn limited_cycles_keep_unique_immutable_ids_and_findings() {
     let half_wrist = [
-        0.20, 0.28, 0.38, 0.44, 0.35, 0.24, 0.20,
-        0.20, 0.28, 0.38, 0.44, 0.35, 0.24, 0.20,
+        0.20, 0.28, 0.38, 0.44, 0.35, 0.24, 0.20, 0.20, 0.28, 0.38, 0.44, 0.35, 0.24, 0.20,
     ];
     let half_elbow = [
-        0.30, 0.34, 0.39, 0.42, 0.38, 0.32, 0.30,
-        0.30, 0.34, 0.39, 0.42, 0.38, 0.32, 0.30,
+        0.30, 0.34, 0.39, 0.42, 0.38, 0.32, 0.30, 0.30, 0.34, 0.39, 0.42, 0.38, 0.32, 0.30,
     ];
     let packets = replay(&half_wrist, &half_elbow);
     let outcomes = packets
@@ -362,13 +513,21 @@ fn limited_cycles_keep_unique_immutable_ids_and_findings() {
     assert_eq!(outcomes.len(), 2);
     assert_eq!(outcomes[0].disposition, RepDisposition::Confirmed);
     assert_eq!(outcomes[1].disposition, RepDisposition::NeedsReview);
-    assert!(outcomes.iter().all(|rep| rep.observation_findings
-        .contains(&RepObservationFinding::SecondaryRangeBelowExpectation)));
-    assert!(outcomes[1].observation_findings
-        .contains(&RepObservationFinding::CycleFasterThanExpected));
+    assert!(outcomes.iter().all(|rep| {
+        rep.observation_findings
+            .contains(&RepObservationFinding::SecondaryRangeBelowExpectation)
+    }));
+    assert!(
+        outcomes[1]
+            .observation_findings
+            .contains(&RepObservationFinding::CycleFasterThanExpected)
+    );
     assert_eq!(outcomes[0].rep_id, 1);
     assert_eq!(outcomes[1].rep_id, 2);
-    assert_ne!(outcomes[0].canonical_slice_hash, outcomes[1].canonical_slice_hash);
+    assert_ne!(
+        outcomes[0].canonical_slice_hash,
+        outcomes[1].canonical_slice_hash
+    );
 }
 
 #[test]
@@ -393,7 +552,7 @@ fn small_but_coherent_multi_joint_cycle_counts_with_range_feedback() {
 }
 
 #[test]
-fn short_unknown_gap_recovers_but_long_gap_aborts_without_fabricated_coordinates() {
+fn micro_gap_stays_confirmed_meaningful_gap_is_reviewed_and_long_gap_aborts() {
     let wrist_y = [0.20, 0.30, 0.50, 0.70, 0.78, 0.70, 0.55, 0.35, 0.21];
     let elbow_y = [0.30, 0.35, 0.45, 0.55, 0.61, 0.57, 0.49, 0.37, 0.30];
     let mut frames = rep_frames(&wrist_y, &elbow_y);
@@ -406,8 +565,24 @@ fn short_unknown_gap_recovers_but_long_gap_aborts_without_fabricated_coordinates
         .flat_map(|packet| &packet.completed_reps)
         .collect::<Vec<_>>();
     assert_eq!(completed.len(), 1);
-    assert!(completed[0].recovered_across_gap);
-    assert_eq!(completed[0].disposition, RepDisposition::NeedsReview);
+    assert!(!completed[0].recovered_across_gap);
+    assert_eq!(completed[0].disposition, RepDisposition::Confirmed);
+
+    let mut review_frames = rep_frames(&wrist_y, &elbow_y);
+    for index in [15, 16, 13, 14] {
+        review_frames[5][index].visibility = 0.0;
+    }
+    let reviewed = replay_frames(review_frames, 600);
+    let reviewed_outcomes = reviewed
+        .iter()
+        .flat_map(|packet| &packet.completed_reps)
+        .collect::<Vec<_>>();
+    assert_eq!(reviewed_outcomes.len(), 1);
+    assert!(reviewed_outcomes[0].recovered_across_gap);
+    assert_eq!(
+        reviewed_outcomes[0].disposition,
+        RepDisposition::NeedsReview
+    );
 
     let mut long_frames = rep_frames(&wrist_y, &elbow_y);
     for frame in &mut long_frames[4..8] {
@@ -502,13 +677,19 @@ fn body_translation_and_handle_adjustment_are_rejected_but_the_paired_action_cou
         .flat_map(|packet| packet.completed_reps.iter())
         .collect::<Vec<_>>();
     assert_eq!(
-        handle_outcomes.iter().filter(|rep| rep.disposition == RepDisposition::Confirmed).count(),
+        handle_outcomes
+            .iter()
+            .filter(|rep| rep.disposition == RepDisposition::Confirmed)
+            .count(),
         0,
         "wrist-only handle movement can never become formal training volume",
     );
     assert_eq!(handle_outcomes.len(), 1);
     assert_eq!(handle_outcomes[0].disposition, RepDisposition::Rejected);
-    assert_eq!(handle_outcomes[0].evidence_reason, Some(RepEvidenceReason::IncompleteCycle));
+    assert_eq!(
+        handle_outcomes[0].evidence_reason,
+        Some(RepEvidenceReason::IncompleteCycle)
+    );
 
     let action_elbows = [
         0.30, 0.31, 0.36, 0.43, 0.53, 0.60, 0.59, 0.51, 0.41, 0.33, 0.30,
@@ -548,14 +729,14 @@ fn a_valid_rep_survives_missing_shoulders_when_the_hip_pair_is_stable() {
     );
 }
 
-fn replay(wrist_y: &[f32], elbow_y: &[f32]) -> Vec<form_coach_motion_sdk::MotionPacket> {
+fn replay(wrist_y: &[f32], elbow_y: &[f32]) -> Vec<maxpower_motion_sdk::MotionPacket> {
     replay_frames(rep_frames(wrist_y, elbow_y), 100)
 }
 
 fn replay_frames(
     frames: Vec<Vec<PoseObservation>>,
     frame_interval_ms: u64,
-) -> Vec<form_coach_motion_sdk::MotionPacket> {
+) -> Vec<maxpower_motion_sdk::MotionPacket> {
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
         config(),

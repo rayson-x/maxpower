@@ -1,0 +1,928 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Motion Forensics · 识别失败取证台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #0a0c0d;
+      --panel: #111416;
+      --panel-raised: #181c1e;
+      --line: #303638;
+      --muted: #818b8d;
+      --paper: #f1f2e9;
+      --acid: #d8ff45;
+      --orange: #ff6846;
+      --cyan: #48d9e8;
+      --warning: #ffc857;
+      --display: "Songti SC", "STSong", Georgia, serif;
+      --condensed: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      --mono: "SFMono-Regular", Menlo, Monaco, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--paper); }
+    body { font-family: var(--condensed); overflow: hidden; }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+
+    .shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+    .masthead {
+      min-height: 86px;
+      display: grid;
+      grid-template-columns: minmax(280px, 1fr) auto;
+      align-items: stretch;
+      border-bottom: 1px solid var(--line);
+      background: #0d1011;
+    }
+    .brand { display: flex; align-items: center; gap: 18px; padding: 13px 22px; }
+    .brand-mark {
+      width: 49px; height: 49px; flex: 0 0 auto;
+      display: grid; place-items: center;
+      border: 1px solid var(--acid); color: var(--acid);
+      font: 700 18px/1 var(--mono); transform: rotate(-3deg);
+    }
+    h1 { margin: 0; font: 600 clamp(23px, 2vw, 34px)/.95 var(--display); letter-spacing: -.035em; }
+    .eyebrow { margin: 0 0 6px; color: var(--acid); font: 700 10px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+    .brand-copy { margin: 7px 0 0; color: var(--muted); font-size: 12px; letter-spacing: .04em; }
+    .brand-tools { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+    .brand-link { display: inline-flex; min-height: 25px; align-items: center; padding: 0 8px; border: 1px solid #55632e; color: var(--acid); text-decoration: none; font: 700 8px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .brand-link:hover { background: var(--acid); color: var(--ink); }
+    .headline-stats { display: grid; grid-template-columns: repeat(4, minmax(105px, 1fr)); border-left: 1px solid var(--line); }
+    .headline-stat { min-width: 112px; padding: 14px 17px; border-left: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; }
+    .headline-stat:first-child { border-left: 0; }
+    .headline-stat strong { font: 700 25px/1 var(--mono); letter-spacing: -.07em; }
+    .headline-stat span { margin-top: 7px; color: var(--muted); font: 700 9px/1.2 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .headline-stat.alert strong { color: var(--orange); }
+    .headline-stat.acid strong { color: var(--acid); }
+
+    .workspace { min-height: 0; height: 100%; overflow: hidden; display: grid; grid-template-columns: 326px minmax(520px, 1fr) 386px; }
+    .left-rail, .evidence { min-height: 0; background: var(--panel); }
+    .left-rail { border-right: 1px solid var(--line); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
+    .evidence { border-left: 1px solid var(--line); overflow-y: auto; }
+    .viewer { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(340px, 1fr) auto; background: #080a0b; }
+
+    .source-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); }
+    .source-tab { position: relative; padding: 16px 14px 13px; border: 0; border-right: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+    .source-tab:last-child { border-right: 0; }
+    .source-tab span { display: block; color: var(--muted); font: 700 9px/1 var(--mono); letter-spacing: .12em; }
+    .source-tab strong { display: block; margin-top: 7px; font: 600 18px/1 var(--display); }
+    .source-tab b { position: absolute; right: 12px; bottom: 13px; color: var(--muted); font: 700 11px/1 var(--mono); }
+    .source-tab.active { background: var(--paper); color: var(--ink); }
+    .source-tab.active span, .source-tab.active b { color: #5d6260; }
+    .source-tab.active::after { content: ""; position: absolute; left: 0; bottom: -1px; width: 46%; height: 4px; background: var(--acid); }
+
+    .filters { padding: 13px 14px; border-bottom: 1px solid var(--line); }
+    .search-wrap { position: relative; }
+    .search-wrap::before { content: "⌕"; position: absolute; left: 11px; top: 7px; color: var(--muted); font: 16px var(--mono); }
+    .search { width: 100%; height: 35px; padding: 0 10px 0 33px; border: 1px solid var(--line); background: #090b0c; color: var(--paper); border-radius: 0; }
+    .search::placeholder { color: #596163; }
+    .filter-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+    select { min-width: 0; height: 32px; padding: 0 25px 0 8px; border: 1px solid var(--line); border-radius: 0; background: var(--panel-raised); color: var(--paper); font-size: 11px; }
+    .status-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+    .status-pill { padding: 6px 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); font: 700 9px/1 var(--mono); cursor: pointer; }
+    .status-pill.active { border-color: var(--acid); color: var(--acid); }
+    .audit-row { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 5px; margin-top: 9px; }
+    .audit-pill { min-height: 29px; padding: 5px 6px; border: 1px solid #3a4143; background: #0b0e0f; color: var(--muted); font: 700 8px/1.15 var(--mono); cursor: pointer; }
+    .audit-pill.active { border-color: var(--cyan); color: var(--cyan); background: #0d181a; }
+    [hidden] { display: none !important; }
+
+    .cause-summary { padding: 12px 14px 13px; border-bottom: 1px solid var(--line); background: #15191a; }
+    .section-label { margin: 0; color: var(--muted); font: 700 9px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+    .cause-bars { display: grid; gap: 8px; margin-top: 10px; }
+    .cause-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+    .cause-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; }
+    .cause-count { color: var(--orange); font: 700 10px/1 var(--mono); }
+    .cause-track { grid-column: 1 / -1; height: 2px; background: var(--line); }
+    .cause-fill { height: 100%; background: var(--orange); }
+
+    .video-list { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    .list-count { padding: 10px 14px; color: var(--muted); border-bottom: 1px solid #252a2c; font: 700 9px/1 var(--mono); letter-spacing: .1em; position: sticky; top: 0; z-index: 3; background: var(--panel); }
+    .video-card { width: 100%; display: grid; grid-template-columns: 37px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 12px 12px; border: 0; border-bottom: 1px solid #252a2c; background: transparent; text-align: left; cursor: pointer; opacity: 0; animation: card-in .3s ease forwards; animation-delay: min(calc(var(--i) * 14ms), 220ms); }
+    .video-card:hover { background: #1a1f20; }
+    .video-card.active { background: var(--acid); color: var(--ink); }
+    .video-card.active .card-meta, .video-card.active .card-id { color: #535a4b; }
+    .video-card.active .count-box { border-color: #5b6436; }
+    .status-glyph { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line); font: 700 13px/1 var(--mono); }
+    .status-glyph.failure { color: var(--orange); border-color: #724334; }
+    .status-glyph.exact { color: var(--acid); border-color: #56662b; }
+    .status-glyph.not_evaluated, .status-glyph.annotation_blocked { color: var(--warning); border-color: #6e5c36; }
+    .video-card.active .status-glyph { color: var(--ink); border-color: #596137; }
+    .card-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 650 13px/1.15 var(--condensed); }
+    .card-meta { margin-top: 5px; color: var(--muted); font: 700 9px/1 var(--mono); text-transform: uppercase; }
+    .card-id { margin-top: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #596163; font: 9px/1 var(--mono); }
+    .count-box { min-width: 41px; padding: 6px 5px; border: 1px solid var(--line); text-align: center; font: 700 11px/1 var(--mono); }
+    .count-box i { display: block; margin-top: 4px; color: var(--muted); font: normal 7px/1 var(--mono); }
+    .count-box .align-mini { display: block; margin-top: 5px; padding-top: 4px; border-top: 1px solid var(--line); color: var(--orange); font: 700 8px/1 var(--mono); }
+    .video-card.active .count-box .align-mini { border-color: #7a8745; color: #39400f; }
+
+    .stage { position: relative; min-height: 0; overflow: hidden; display: grid; place-items: center; background: #050708; }
+    .stage::before, .stage::after { content: ""; position: absolute; z-index: 4; pointer-events: none; }
+    .stage::before { left: 20px; right: 20px; top: 18px; height: 1px; background: #282e30; }
+    .stage::after { left: 20px; top: 18px; width: 1px; bottom: 18px; background: #282e30; }
+    .stage-video, .skeleton-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+    .stage-video { background: #050708; }
+    .skeleton-canvas { z-index: 2; pointer-events: none; }
+    .stage-scan { position: absolute; z-index: 3; left: 20px; right: 20px; top: 22%; height: 1px; background: rgba(216,255,69,.13); pointer-events: none; animation: scan 6s linear infinite; }
+    .stage-click { position: absolute; inset: 0; z-index: 2; border: 0; background: transparent; cursor: pointer; }
+    .stage-labels { position: absolute; z-index: 5; left: 34px; top: 31px; right: 34px; display: flex; justify-content: space-between; align-items: flex-start; pointer-events: none; }
+    .stage-tool-stack { display: grid; justify-items: end; gap: 7px; pointer-events: auto; }
+    .stage-chip { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border: 1px solid var(--line); background: rgba(10,12,13,.82); color: var(--paper); font: 700 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .stage-chip.acid { border-color: var(--acid); color: var(--acid); }
+    .stage-chip.orange { border-color: var(--orange); color: var(--orange); }
+    .stage-chip.warning { border-color: var(--warning); color: var(--warning); }
+    .pose-switch { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); background: rgba(10,12,13,.9); box-shadow: 0 8px 22px rgba(0,0,0,.24); }
+    .pose-mode { min-height: 27px; padding: 0 9px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); font: 700 8px/1 var(--mono); letter-spacing: .06em; cursor: pointer; text-transform: uppercase; }
+    .pose-mode:last-child { border-right: 0; }
+    .pose-mode.active { background: var(--acid); color: var(--ink); }
+    .no-rgb { position: absolute; z-index: 1; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+    .no-rgb[hidden] { display: none; }
+    .no-rgb strong { font: 600 25px/1 var(--display); }
+    .no-rgb span { margin-top: 8px; color: var(--muted); font: 10px/1.5 var(--mono); letter-spacing: .08em; }
+    .loading-plate { position: absolute; z-index: 8; inset: 0; display: grid; place-content: center; background: #080a0b; color: var(--acid); font: 700 10px/1 var(--mono); letter-spacing: .15em; }
+    .loading-plate[hidden] { display: none; }
+
+    .transport { border-top: 1px solid var(--line); background: #0d1011; }
+    .timeline-wrap { padding: 14px 18px 8px; }
+    .timeline-legend { display: flex; gap: 16px; margin-bottom: 9px; color: var(--muted); font: 8px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .legend-dot { display: inline-block; width: 7px; height: 7px; margin-right: 5px; }
+    .legend-dot.truth { background: var(--acid); }
+    .legend-dot.pred { background: var(--orange); }
+    .legend-dot.baseline { background: var(--cyan); }
+    .timeline { position: relative; height: 42px; background: #171b1c; border: 1px solid #2a3032; cursor: ew-resize; overflow: hidden; }
+    .timeline::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: #3a4143; }
+    .segment { position: absolute; min-width: 2px; }
+    .segment::after { content: ""; position: absolute; left: var(--peak, 50%); top: -2px; width: 2px; height: calc(100% + 4px); background: #fff; opacity: .9; transform: translateX(-1px); }
+    .segment.truth { top: 6px; height: 8px; background: var(--acid); }
+    .segment.pred { bottom: 6px; height: 8px; background: var(--orange); }
+    .segment.baseline { bottom: 18px; height: 3px; background: var(--cyan); }
+    .timeline-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--paper); box-shadow: 0 0 0 1px rgba(0,0,0,.35); pointer-events: none; }
+    .timeline-cursor::before { content: ""; position: absolute; left: -3px; top: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-top: 5px solid var(--paper); }
+    .transport-controls { display: grid; grid-template-columns: auto auto 1fr auto; gap: 9px; align-items: center; padding: 0 18px 14px; }
+    .transport-btn { height: 32px; min-width: 38px; padding: 0 10px; border: 1px solid var(--line); background: var(--panel-raised); cursor: pointer; }
+    .transport-btn.primary { border-color: var(--acid); color: var(--acid); }
+    .timecode { color: var(--paper); font: 700 10px/1 var(--mono); }
+    .timecode .muted { color: var(--muted); }
+    .playback-note { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font: 9px/1 var(--mono); }
+
+    .evidence-head { padding: 18px 18px 16px; border-bottom: 1px solid var(--line); position: relative; }
+    .evidence-head::before { content: ""; position: absolute; left: 0; top: 0; width: 5px; height: 43px; background: var(--orange); }
+    .evidence-head.exact::before { background: var(--acid); }
+    .evidence-head.unknown::before { background: var(--warning); }
+    .case-number { color: var(--muted); font: 700 9px/1 var(--mono); letter-spacing: .12em; }
+    .case-title { margin: 10px 0 0; font: 600 25px/1.02 var(--display); }
+    .case-id { margin: 9px 0 0; color: var(--muted); overflow-wrap: anywhere; font: 9px/1.45 var(--mono); }
+    .count-comparison { display: grid; grid-template-columns: 1fr 24px 1fr; align-items: end; margin-top: 18px; }
+    .metric strong { display: block; font: 700 36px/.85 var(--mono); letter-spacing: -.08em; }
+    .metric span { display: block; margin-top: 8px; color: var(--muted); font: 700 8px/1 var(--mono); letter-spacing: .12em; }
+    .metric.predicted strong { color: var(--orange); }
+    .evidence-head.exact .metric.predicted strong { color: var(--acid); }
+    .metric-arrow { color: var(--muted); padding-bottom: 18px; text-align: center; }
+    .timing-comparison { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 14px; border: 1px solid var(--line); background: var(--line); }
+    .timing-cell { padding: 9px; background: #0d1011; }
+    .timing-cell strong { display: block; color: var(--orange); font: 700 16px/1 var(--mono); }
+    .timing-cell span { display: block; margin-top: 5px; color: var(--muted); font: 700 7px/1.25 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .evidence-block { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+    .verdict { margin-top: 11px; padding: 11px 12px; border-left: 2px solid var(--orange); background: #1a1716; font: 13px/1.45 var(--display); }
+    .verdict.data { border-color: var(--warning); background: #1a1813; }
+    .verdict.exact { border-color: var(--acid); background: #161a12; }
+    .reason-list { display: grid; gap: 8px; margin-top: 11px; }
+    .reason-card { padding: 10px 11px; border: 1px solid var(--line); background: #0d1011; }
+    .reason-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .reason-top strong { font-size: 12px; }
+    .layer-tag { color: var(--muted); font: 700 8px/1 var(--mono); text-transform: uppercase; }
+    .reason-card p { margin: 6px 0 0; color: #9ca5a7; font-size: 11px; line-height: 1.45; }
+    .meter-block { margin-top: 12px; }
+    .meter-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 7px; margin-top: 9px; font-size: 10px; }
+    .meter-value { color: var(--acid); font: 700 10px/1 var(--mono); }
+    .meter-track { grid-column: 1 / -1; height: 4px; background: #303638; }
+    .meter-fill { height: 100%; background: var(--acid); }
+    .diagnostic-caveat { margin: 11px 0 0; padding: 9px; border: 1px solid #564d2e; color: var(--warning); font: 9px/1.45 var(--mono); }
+    .fact-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 9px; margin-top: 12px; }
+    .fact dt { color: var(--muted); font: 700 8px/1 var(--mono); letter-spacing: .09em; text-transform: uppercase; }
+    .fact dd { margin: 5px 0 0; overflow-wrap: anywhere; font-size: 11px; }
+    .notes { margin: 10px 0 0; padding-left: 16px; color: #b9bfbd; font-size: 11px; line-height: 1.5; }
+
+    .review-panel { margin: 12px 0 0; border: 1px solid #485229; background: #11150f; }
+    .review-panel-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 11px 12px; border-bottom: 1px solid #384021; }
+    .review-panel-head strong { font: 700 10px/1 var(--mono); color: var(--acid); letter-spacing: .08em; }
+    .review-progress { color: var(--muted); font: 700 8px/1 var(--mono); }
+    .rep-strip { display: flex; gap: 5px; padding: 9px 10px; overflow-x: auto; border-bottom: 1px solid #303820; scrollbar-width: thin; }
+    .rep-chip { flex: 0 0 auto; min-width: 34px; height: 28px; border: 1px solid var(--line); background: #0b0e0b; color: var(--muted); cursor: pointer; font: 700 9px/1 var(--mono); }
+    .rep-chip.submitted { border-color: #668030; color: var(--acid); }
+    .rep-chip.disagreement { border-color: var(--orange); color: var(--orange); }
+    .rep-chip.active { background: var(--acid); color: var(--ink); border-color: var(--acid); }
+    .review-form { display: grid; gap: 11px; padding: 12px; }
+    .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .review-field { display: grid; gap: 5px; min-width: 0; }
+    .review-field.full { grid-column: 1 / -1; }
+    .review-field label, .choice-title { color: var(--muted); font: 700 7px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .review-field input, .review-field select, .review-field textarea { width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 0; background: #080b09; color: var(--paper); }
+    .review-field input, .review-field select { height: 31px; padding: 0 7px; }
+    .review-field textarea { min-height: 74px; padding: 8px; resize: vertical; line-height: 1.45; }
+    .choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .choice { display: flex; align-items: flex-start; gap: 6px; padding: 7px; border: 1px solid #2a302b; background: #0c0f0d; color: #aeb5ae; font-size: 9px; line-height: 1.3; }
+    .choice input { accent-color: var(--acid); margin: 1px 0 0; }
+    .review-policy { padding: 9px; border-left: 2px solid var(--warning); background: #19170f; color: #c7b978; font: 8px/1.5 var(--mono); }
+    .review-status { min-height: 30px; padding: 8px 9px; border: 1px solid var(--line); color: var(--muted); font: 8px/1.45 var(--mono); }
+    .review-status.agreement { border-color: #52662c; color: var(--acid); }
+    .review-status.disagreement { border-color: #754334; color: var(--orange); }
+    .review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .review-action { min-height: 34px; border: 1px solid var(--line); background: #171c18; cursor: pointer; font: 700 9px/1 var(--mono); letter-spacing: .05em; }
+    .review-action.primary { background: var(--acid); border-color: var(--acid); color: var(--ink); }
+    .review-action:disabled { opacity: .45; cursor: wait; }
+    .review-flash { color: var(--warning); font: 8px/1.4 var(--mono); }
+    .segment.truth.selected { box-shadow: 0 0 0 2px var(--paper), 0 0 14px rgba(216,255,69,.55); }
+
+    .empty { padding: 28px 18px; color: var(--muted); font: 11px/1.6 var(--mono); }
+    @keyframes card-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    @keyframes scan { 0% { transform: translateY(0); } 50% { transform: translateY(42vh); } 100% { transform: translateY(0); } }
+
+    @media (max-width: 1180px) {
+      body { overflow: auto; }
+      .shell { height: auto; min-height: 100vh; overflow: visible; }
+      .workspace { height: auto; overflow: visible; }
+      .workspace { grid-template-columns: 300px minmax(0, 1fr); grid-template-rows: minmax(650px, calc(100vh - 86px)) auto; }
+      .evidence { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); }
+      .evidence-head { grid-row: span 2; }
+    }
+    @media (max-width: 760px) {
+      .masthead { grid-template-columns: 1fr; }
+      .headline-stats { border-left: 0; border-top: 1px solid var(--line); grid-template-columns: repeat(2, 1fr); }
+      .headline-stat { min-width: 0; }
+      .workspace { display: block; }
+      .left-rail { height: 520px; border-right: 0; }
+      .viewer { min-height: 670px; }
+      .stage { min-height: 430px; }
+      .evidence { display: block; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="brand">
+        <div class="brand-mark">MF</div>
+        <div>
+          <p class="eyebrow">Motion Forensics / Evidence Read-only · Labels Append-only</p>
+          <h1>识别失败取证台</h1>
+          <p class="brand-copy">来源留出预测 × 同录像链路基线 × 人工标注 × Rust canonical</p>
+          <div class="brand-tools"><a class="brand-link" href="/pose-keypoints.html">卧推骨架真值 →</a><a class="brand-link" href="/equipment.html">杠铃轴标定 →</a><a class="brand-link" href="/dumbbell.html">MM-Fit 哑铃框标注 →</a></div>
+        </div>
+      </div>
+      <div class="headline-stats" id="headline-stats">
+        <div class="headline-stat"><strong>—</strong><span>个人标注视频</span></div>
+        <div class="headline-stat"><strong>—</strong><span>个人标注 reps</span></div>
+        <div class="headline-stat alert"><strong>—</strong><span>MM-Fit 失败组</span></div>
+        <div class="headline-stat acid"><strong>—</strong><span>MM-Fit 精确率</span></div>
+      </div>
+    </header>
+
+    <section class="workspace">
+      <aside class="left-rail" aria-label="视频选择">
+        <div class="source-tabs">
+          <button class="source-tab active" data-source="personal"><span>YOUR CAPTURES</span><strong>个人标注</strong><b id="personal-tab-count">—</b></button>
+          <button class="source-tab" data-source="mmfit"><span>PUBLIC DATASET</span><strong>MM-Fit</strong><b id="mmfit-tab-count">—</b></button>
+        </div>
+        <div class="filters">
+          <div class="search-wrap"><input id="search" class="search" type="search" placeholder="搜索动作 / ID / 朝向" aria-label="搜索视频"></div>
+          <div class="filter-row">
+            <select id="split-filter" aria-label="数据分组"><option value="all">全部分组</option></select>
+            <select id="exercise-filter" aria-label="动作"><option value="all">全部动作</option></select>
+          </div>
+          <div class="audit-row" id="audit-row" aria-label="盲测范围">
+            <button class="audit-pill active" data-audit="random">固定种子随机抽查</button>
+            <button class="audit-pill" data-audit="heldout">全部来源留出</button>
+            <button class="audit-pill" data-audit="annotated">全部标注</button>
+          </div>
+          <div class="status-row" id="status-row">
+            <button class="status-pill active" data-status="all">全部</button>
+            <button class="status-pill" data-status="failure">识别失败</button>
+            <button class="status-pill" data-status="not_evaluated">未评测</button>
+            <button class="status-pill" data-status="exact">时间轴通过</button>
+          </div>
+        </div>
+        <section class="cause-summary">
+          <p class="section-label">当前筛选 · 主要原因</p>
+          <div id="cause-bars" class="cause-bars"></div>
+        </section>
+        <div class="video-list" id="video-list"><div class="empty">正在加载取证索引…</div></div>
+      </aside>
+
+      <section class="viewer" aria-label="骨架视频播放器">
+        <div class="stage" id="stage">
+          <video id="stage-video" class="stage-video" playsinline preload="metadata"></video>
+          <div class="no-rgb" id="no-rgb" hidden><strong>Skeleton evidence only</strong><span>该 split 的 RGB 未下载<br>正在回放官方 OpenPose 骨架</span></div>
+          <canvas id="skeleton-canvas" class="skeleton-canvas"></canvas>
+          <div class="stage-scan"></div>
+          <button class="stage-click" id="stage-click" aria-label="播放或暂停"></button>
+          <div class="stage-labels">
+            <span class="stage-chip acid" id="source-chip">等待选择</span>
+            <div class="stage-tool-stack">
+              <div class="pose-switch" aria-label="骨架数据层">
+                <button class="pose-mode active" id="pose-canonical" data-pose-mode="canonical">Rust canonical</button>
+                <button class="pose-mode" id="pose-raw" data-pose-mode="raw">Raw Pose</button>
+              </div>
+              <span class="stage-chip" id="rgb-chip">—</span>
+            </div>
+          </div>
+          <div class="loading-plate" id="loading-plate">LOADING EVIDENCE…</div>
+        </div>
+        <div class="transport">
+          <div class="timeline-wrap">
+            <div class="timeline-legend"><span><i class="legend-dot truth"></i>人工 / 官方真值</span><span id="pred-legend"><i class="legend-dot pred"></i>来源留出预测</span><span id="baseline-legend"><i class="legend-dot baseline"></i>同录像回放（仅链路）</span></div>
+            <div class="timeline" id="timeline"><div class="timeline-cursor" id="timeline-cursor"></div></div>
+          </div>
+          <div class="transport-controls">
+            <button class="transport-btn primary" id="play-btn" aria-label="播放">▶</button>
+            <button class="transport-btn" id="step-btn" aria-label="前进一帧">+1F</button>
+            <div class="playback-note" id="playback-note">选择左侧条目开始复核</div>
+            <div class="timecode"><span id="current-time">00:00.000</span> <span class="muted">/</span> <span class="muted" id="end-time">00:00.000</span></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="evidence" id="evidence" aria-label="失败原因证据">
+        <div class="empty">选择一个失败视频后，这里会显示计数差异、失败层级、骨架覆盖率和证据来源。</div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="/playerMath.js"></script>
+  <script>
+    const BLAZEPOSE33_CONNECTIONS = [[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,29],[29,31],[28,30],[30,32]];
+    const HALPE26_CONNECTIONS = [[17,18],[18,5],[18,6],[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,19],[12,19],[11,13],[13,15],[12,14],[14,16],[15,20],[15,22],[15,24],[20,22],[16,21],[16,23],[16,25],[21,23]];
+    const LABELS = {
+      incomplete_cycle: "动作周期未闭合",
+      duration_exceeded: "动作窗口超时",
+      cycle_faster_than_expected: "周期快于阈值",
+      secondary_range_below_threshold: "辅助关节幅度不足",
+      primary_range_below_threshold: "主关节幅度不足",
+      initializer_fallback_profile: "初始化兜底 profile",
+      not_in_current_training_snapshot: "当前训练快照漏收",
+      not_in_current_evaluation: "尚未运行统一回放",
+      legacy_evaluation_only: "仅有旧版 Rust 结果",
+      missing_exercise_annotation: "动作标签为空",
+      needs_review_candidates: "候选被送入复核",
+      timeline_boundary_misaligned: "次数相同但 start / peak / end 错位",
+      weak_set_count_candidate: "仅由组次数支持的候选",
+      missed_rep_without_explicit_evidence: "识别少于人工标注",
+      false_positive_without_explicit_evidence: "识别多于人工标注"
+    };
+    const EXERCISES = {
+      bodyweight_squat: "深蹲", alternating_lunge: "交替弓步", push_up: "俯卧撑", sit_up: "仰卧起坐",
+      jumping_jack: "开合跳", dumbbell_shoulder_press: "哑铃肩推", lateral_raise: "侧平举",
+      overhead_triceps_extension: "过顶臂屈伸", alternating_dumbbell_biceps_curl: "交替弯举", standing_dumbbell_row: "站姿哑铃划船",
+      machine_chest_press: "器械推胸", barbell_bench_press: "杠铃卧推", seated_shoulder_press: "坐姿肩推",
+      lat_pulldown: "高位下拉", pull_up: "引体向上", rear_delt_fly: "反向飞鸟", single_arm_cable_lateral_raise: "单臂绳索侧平举"
+    };
+    const LAYERS = { data_pipeline: "数据管道", pose_extractor: "姿态提取", profile: "PROFILE", state_machine: "状态机", annotation: "标注" };
+    const SPLITS = { train: "Train", validation: "Validation", test: "Test", unseen_test: "Unseen", personal_current: "当前批次", personal_golden: "个人黄金集", personal_legacy: "历史批次" };
+    const FEATURE_GROUPS = {
+      torso_pelvis: "躯干 / 骨盆", bilateral_coordination: "左右协调", body_joint_path: "人体关节路径",
+      equipment_path: "器械路径", tempo_phase: "节奏 / 阶段", rom_endpoint: "ROM / 端点", base_support: "支撑 / 重心"
+    };
+    const STRATEGIES = {
+      momentum_assistance: "惯性借力", torso_extension_assistance: "躯干伸展借力", hip_drive_assistance: "髋部驱动借力",
+      shoulder_elevation_strategy: "肩部上提策略", range_shortening: "缩短行程", asymmetric_path: "双侧路径不一致",
+      tempo_loss: "节奏失控", equipment_path_deviation: "器械路径偏移", balance_shift: "支撑 / 重心偏移", other_visible_strategy: "其他可见策略"
+    };
+
+    const dom = Object.fromEntries(["headline-stats","personal-tab-count","mmfit-tab-count","search","split-filter","exercise-filter","audit-row","status-row","cause-bars","video-list","stage","stage-video","no-rgb","skeleton-canvas","stage-click","source-chip","rgb-chip","pose-canonical","pose-raw","loading-plate","timeline","timeline-cursor","pred-legend","baseline-legend","play-btn","step-btn","playback-note","current-time","end-time","evidence"].map(id => [id, document.getElementById(id)]));
+    const ctx = dom["skeleton-canvas"].getContext("2d");
+    const state = {
+      index: null, source: "personal", audit: "random", status: "all", split: "all", exercise: "all", search: "",
+      selectedId: null, detail: null, technique: null, techniqueRepIndex: null, reviewSaving: false, reviewFlash: "",
+      poseMode: "canonical", playing: false, currentMs: 0, animationStart: 0, animationOrigin: 0, requestToken: 0
+    };
+
+    boot().catch(showFatal);
+
+    async function boot() {
+      const response = await fetch("/api/review/index");
+      if (!response.ok) throw new Error("无法加载识别取证索引");
+      state.index = await response.json();
+      bindEvents();
+      renderHeader();
+      refreshFilters();
+      renderList(true);
+      requestAnimationFrame(animationLoop);
+    }
+
+    function bindEvents() {
+      document.querySelectorAll(".source-tab").forEach(button => button.addEventListener("click", () => {
+        state.source = button.dataset.source;
+        state.status = state.source === "mmfit" ? "failure" : "all";
+        state.audit = state.source === "personal" ? "random" : "official";
+        state.split = "all"; state.exercise = "all"; state.search = ""; dom.search.value = "";
+        document.querySelectorAll(".source-tab").forEach(tab => tab.classList.toggle("active", tab === button));
+        refreshFilters(); renderList(true);
+      }));
+      dom.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderList(false); });
+      dom["split-filter"].addEventListener("change", event => { state.split = event.target.value; renderList(true); });
+      dom["exercise-filter"].addEventListener("change", event => { state.exercise = event.target.value; renderList(true); });
+      dom["audit-row"].addEventListener("click", event => {
+        const button = event.target.closest("[data-audit]"); if (!button) return;
+        state.audit = button.dataset.audit;
+        [...dom["audit-row"].children].forEach(child => child.classList.toggle("active", child === button));
+        renderList(true);
+      });
+      dom["status-row"].addEventListener("click", event => {
+        const button = event.target.closest("[data-status]"); if (!button) return;
+        state.status = button.dataset.status;
+        [...dom["status-row"].children].forEach(child => child.classList.toggle("active", child === button));
+        renderList(true);
+      });
+      dom["video-list"].addEventListener("click", event => { const card = event.target.closest("[data-id]"); if (card) selectItem(card.dataset.id); });
+      dom["play-btn"].addEventListener("click", togglePlayback);
+      dom["stage-click"].addEventListener("click", togglePlayback);
+      dom["step-btn"].addEventListener("click", () => {
+        pause();
+        const frames = state.poseMode === "raw" ? state.detail?.rawFrames || [] : state.detail?.frames || [];
+        seekTo(ReviewPlayerMath.nextFrameTimestamp(frames, state.currentMs, state.detail?.clipEndMs || state.currentMs));
+      });
+      dom["pose-canonical"].addEventListener("click", () => setPoseMode("canonical"));
+      dom["pose-raw"].addEventListener("click", () => setPoseMode("raw"));
+      dom.timeline.addEventListener("pointerdown", seekFromPointer);
+      dom["stage-video"].addEventListener("ended", pause);
+      window.addEventListener("resize", () => drawSkeleton(state.currentMs));
+    }
+
+    function renderHeader() {
+      const stats = state.index.stats;
+      const acceptance = state.index.personalHeldOutAcceptance;
+      const metrics = acceptance.metrics;
+      const personalTimelineRate = stats.personalTimelineTruthReps ? stats.personalAlignedReps / stats.personalTimelineTruthReps : 0;
+      dom["headline-stats"].innerHTML = `
+        <div class="headline-stat alert"><strong>${percent(metrics.candidatePrecision)} / ${percent(metrics.candidateRecall)}</strong><span>来源留出 · Precision / Recall</span></div>
+        <div class="headline-stat alert"><strong>${stats.personalCountExactVideos}/${stats.personalEvaluatedVideos}</strong><span>来源留出 · 整组次数一致</span></div>
+        <div class="headline-stat alert"><strong>${stats.personalAlignedReps}/${stats.personalTimelineTruthReps}</strong><span>来源留出 · 区间对齐 ${percent(personalTimelineRate)}</span></div>
+        <div class="headline-stat alert"><strong>${escapeHtml(acceptance.overallStatus.toUpperCase())}</strong><span>95% GATE · NO PROMOTION</span></div>`;
+      dom["personal-tab-count"].textContent = stats.personalAnnotatedVideos;
+      dom["mmfit-tab-count"].textContent = stats.mmfitClips;
+    }
+
+    function refreshFilters() {
+      const sourceItems = state.index.items.filter(item => item.source === state.source);
+      dom["audit-row"].hidden = state.source !== "personal";
+      [...dom["audit-row"].children].forEach(child => child.classList.toggle("active", child.dataset.audit === state.audit));
+      fillSelect(dom["split-filter"], "全部分组", unique(sourceItems.map(item => item.split)), value => SPLITS[value] || value);
+      fillSelect(dom["exercise-filter"], "全部动作", unique(sourceItems.map(item => item.exerciseId).filter(Boolean)), exerciseLabel);
+      [...dom["status-row"].children].forEach(child => child.classList.toggle("active", child.dataset.status === state.status));
+    }
+
+    function fillSelect(select, allLabel, values, labeler) {
+      select.innerHTML = `<option value="all">${allLabel}</option>` + values.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(labeler(value))}</option>`).join("");
+      select.value = "all";
+    }
+
+    function filteredItems() {
+      return state.index.items.filter(item => {
+        if (item.source !== state.source) return false;
+        if (state.source === "personal" && state.audit === "random" && item.auditSelection !== "seeded_random_audit") return false;
+        if (state.source === "personal" && state.audit === "heldout" && item.evidenceLevel !== "source_held_out_research") return false;
+        if (state.status === "failure" && item.status !== "failure") return false;
+        if (state.status === "not_evaluated" && !["not_evaluated", "annotation_blocked"].includes(item.status)) return false;
+        if (state.status === "exact" && item.status !== "exact") return false;
+        if (state.split !== "all" && item.split !== state.split) return false;
+        if (state.exercise !== "all" && item.exerciseId !== state.exercise) return false;
+        if (state.search) {
+          const haystack = [item.sequenceId, item.exerciseId, exerciseLabel(item.exerciseId), item.view, item.failureCategory].filter(Boolean).join(" ").toLowerCase();
+          if (!haystack.includes(state.search)) return false;
+        }
+        return true;
+      }).sort((a, b) => {
+        const priority = { failure: 0, annotation_blocked: 1, not_evaluated: 2, exact: 3 };
+        const alignmentA = a.timelineAlignmentRatio ?? 1;
+        const alignmentB = b.timelineAlignmentRatio ?? 1;
+        return priority[a.status] - priority[b.status]
+          || alignmentA - alignmentB
+          || (b.maxBoundaryErrorMs ?? 0) - (a.maxBoundaryErrorMs ?? 0)
+          || Math.abs(b.countDelta || 0) - Math.abs(a.countDelta || 0)
+          || a.sequenceId.localeCompare(b.sequenceId);
+      });
+    }
+
+    function renderList(autoSelect) {
+      const items = filteredItems();
+      renderCauseSummary(items);
+      dom["video-list"].innerHTML = `<div class="list-count">${items.length} ITEMS · CLICK TO INSPECT</div>` + (items.length ? items.map((item, index) => videoCard(item, index)).join("") : `<div class="empty">当前筛选没有条目。</div>`);
+      if (autoSelect && items.length && !items.some(item => item.id === state.selectedId)) selectItem(items[0].id);
+    }
+
+    function videoCard(item, index) {
+      const predicted = item.predictedCount === null ? "—" : item.predictedCount;
+      const glyph = item.status === "failure" ? "!" : item.status === "exact" ? "✓" : "?";
+      const media = item.source === "mmfit" ? (item.hasVideo ? "RGB+POSE" : "POSE ONLY") : (item.hasSkeleton ? "VIDEO+POSE" : "VIDEO");
+      const audit = item.auditSelection === "seeded_random_audit" ? "RANDOM AUDIT" : item.auditSelection === "held_out" ? "HELD-OUT" : "ANNOTATED";
+      const alignment = item.alignedCount === null ? "N/A" : `${item.alignedCount}/${item.timelineTruthCount}`;
+      return `<button class="video-card ${item.id === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.id)}" style="--i:${index}">
+        <span class="status-glyph ${item.status}">${glyph}</span>
+        <span><span class="card-title">${escapeHtml(exerciseLabel(item.exerciseId))}</span><span class="card-meta">${escapeHtml(SPLITS[item.split] || item.split)} · ${escapeHtml(item.view || "未知朝向")} · ${media} · ${audit}</span><span class="card-id">${escapeHtml(item.sequenceId)}</span></span>
+        <span class="count-box">${predicted}/${item.expectedCount}<i>COUNT</i><b class="align-mini">${alignment} TIME</b></span>
+      </button>`;
+    }
+
+    function renderCauseSummary(items) {
+      const counts = new Map();
+      items.forEach(item => item.reasonCodes.forEach(code => counts.set(code, (counts.get(code) || 0) + 1)));
+      const top = [...counts.entries()].sort((a,b) => b[1] - a[1]).slice(0, 3);
+      if (!top.length) { dom["cause-bars"].innerHTML = `<div class="cause-name">当前条目计数一致</div>`; return; }
+      const max = top[0][1];
+      dom["cause-bars"].innerHTML = top.map(([code, count]) => `<div class="cause-row"><span class="cause-name">${escapeHtml(LABELS[code] || code.replaceAll("_"," "))}</span><span class="cause-count">${count}</span><div class="cause-track"><div class="cause-fill" style="width:${count / max * 100}%"></div></div></div>`).join("");
+    }
+
+    async function selectItem(id) {
+      const token = ++state.requestToken;
+      pause(); state.selectedId = id; state.detail = null; state.technique = null; state.reviewFlash = ""; dom["loading-plate"].hidden = false;
+      document.querySelectorAll(".video-card").forEach(card => card.classList.toggle("active", card.dataset.id === id));
+      try {
+        const response = await fetch(`/api/review/item?id=${encodeURIComponent(id)}`);
+        if (!response.ok) throw new Error((await response.json()).error || "详情加载失败");
+        const detail = await response.json();
+        let technique = null;
+        if (detail.item.source === "personal") {
+          const techniqueResponse = await fetch(`/api/review/technique?captureId=${encodeURIComponent(detail.item.sequenceId)}`);
+          if (!techniqueResponse.ok) throw new Error((await techniqueResponse.json()).error || "技术复核队列加载失败");
+          technique = await techniqueResponse.json();
+        }
+        if (token !== state.requestToken) return;
+        state.detail = detail; state.technique = technique;
+        const repIndices = technique?.items?.map(item => item.queue.repIndex) || [];
+        state.techniqueRepIndex = repIndices.includes(state.techniqueRepIndex) ? state.techniqueRepIndex : (repIndices[0] || null);
+        state.currentMs = detail.clipStartMs; state.poseMode = "canonical";
+        configureMedia(detail); renderTimeline(detail); renderEvidence(detail); updateTransport(); drawSkeleton(state.currentMs);
+      } catch (error) {
+        if (token === state.requestToken) showFatal(error);
+      } finally {
+        if (token === state.requestToken) dom["loading-plate"].hidden = true;
+      }
+    }
+
+    function configureMedia(detail) {
+      const item = detail.item;
+      const auditLabel = item.auditSelection === "seeded_random_audit" ? "RANDOM AUDIT" : item.auditSelection === "held_out" ? "SOURCE HELD-OUT" : SPLITS[item.split] || item.split;
+      dom["source-chip"].textContent = `${item.source === "mmfit" ? "MM-FIT" : "PERSONAL"} · ${auditLabel}`;
+      dom["source-chip"].className = `stage-chip ${item.status === "failure" ? "orange" : item.status === "exact" ? "acid" : "warning"}`;
+      dom["rgb-chip"].textContent = item.hasVideo ? (item.source === "mmfit" ? "RGB + SKELETON" : "VIDEO + SKELETON") : "SKELETON ONLY";
+      dom["rgb-chip"].className = `stage-chip ${item.hasVideo ? "acid" : "warning"}`;
+      dom["pose-raw"].textContent = detail.poseSchema === "halpe26" ? "RAW RTMPOSE" : item.source === "mmfit" ? "RAW MM-FIT" : "RAW MEDIAPIPE";
+      dom["pred-legend"].innerHTML = `<i class="legend-dot pred"></i>${item.evidenceLevel === "source_held_out_research" ? "来源留出预测" : "当前预测"}`;
+      dom["baseline-legend"].innerHTML = `<i class="legend-dot baseline"></i>${item.source === "personal" ? "同录像回放（仅链路）" : "基线预测"}`;
+      updatePoseModeControls();
+      dom["no-rgb"].hidden = Boolean(item.hasVideo);
+      dom["stage-video"].hidden = !item.hasVideo;
+      dom["stage-video"].removeAttribute("src"); dom["stage-video"].load();
+      if (detail.videoUrl) {
+        dom["stage-video"].src = detail.videoUrl;
+        dom["stage-video"].addEventListener("loadedmetadata", () => {
+          dom["stage-video"].currentTime = detail.clipStartMs / 1000;
+          drawSkeleton(state.currentMs);
+        }, { once: true });
+      }
+      updatePlaybackNote();
+    }
+
+    function renderTimeline(detail) {
+      [...dom.timeline.querySelectorAll(".segment")].forEach(node => node.remove());
+      const start = detail.clipStartMs, span = Math.max(1, detail.clipEndMs - start);
+      const add = (segment, type) => {
+        const left = clamp((segment.startMs - start) / span, 0, 1) * 100;
+        const width = Math.max(.25, clamp((segment.endMs - segment.startMs) / span, 0, 1) * 100);
+        const peak = clamp((segment.peakMs - segment.startMs) / Math.max(1, segment.endMs - segment.startMs), 0, 1) * 100;
+        const node = document.createElement("span");
+        node.className = `segment ${type}${type === "truth" && segment.repIndex === state.techniqueRepIndex ? " selected" : ""}`;
+        node.style.left = `${left}%`; node.style.width = `${width}%`; node.style.setProperty("--peak", `${peak}%`);
+        node.title = `${type} rep ${segment.repIndex || ""} · ${formatTime(segment.startMs)} / ${formatTime(segment.peakMs)} / ${formatTime(segment.endMs)}`;
+        if (type === "truth" && segment.repIndex) {
+          node.dataset.repIndex = String(segment.repIndex);
+          node.addEventListener("pointerdown", event => event.stopPropagation());
+          node.addEventListener("click", () => selectTechniqueRep(segment.repIndex));
+        }
+        dom.timeline.appendChild(node);
+      };
+      detail.truthSegments.forEach(segment => add(segment, "truth"));
+      detail.baselineSegments.forEach(segment => add(segment, "baseline"));
+      detail.predictedSegments.forEach(segment => add(segment, "pred"));
+    }
+
+    function renderEvidence(detail) {
+      const item = detail.item;
+      const headClass = item.status === "exact" ? "exact" : item.status === "failure" ? "" : "unknown";
+      const predicted = item.predictedCount === null ? "—" : item.predictedCount;
+      const verdict = verdictFor(detail);
+      const alignment = item.alignedCount === null ? "N/A" : `${item.alignedCount}/${item.timelineTruthCount}`;
+      const meanError = item.meanBoundaryErrorMs === null ? "N/A" : `${Math.round(item.meanBoundaryErrorMs)}ms`;
+      const maxError = item.maxBoundaryErrorMs === null ? "N/A" : `${Math.round(item.maxBoundaryErrorMs)}ms`;
+      const predictionLabel = item.evidenceLevel === "source_held_out_research"
+        ? "PRED / SOURCE-HELD-OUT"
+        : item.evidenceLevel === "research_golden_replay" ? "PRED / 研究模板" : "PRED / RUST 输出";
+      const rawPoseLabel = detail.poseSchema === "halpe26" ? "原始 RTMPose Halpe-26" : item.source === "mmfit" ? "MM-Fit 官方姿态" : "原始 MediaPipe";
+      const poseInterval = detail.poseTiming?.medianFrameIntervalMs || 0;
+      const poseRateLabel = poseInterval > 0 ? `${(1000 / poseInterval).toFixed(1)} FPS` : "未知";
+      const reasons = detail.reasonDetails.length ? detail.reasonDetails.map(reason => `<article class="reason-card"><div class="reason-top"><strong>${escapeHtml(reason.title)}${reason.count ? ` × ${reason.count}` : ""}</strong><span class="layer-tag">${escapeHtml(LAYERS[reason.layer] || reason.layer)}</span></div><p>${escapeHtml(reason.explanation)}</p></article>`).join("") : `<div class="reason-card"><div class="reason-top"><strong>计数一致</strong><span class="layer-tag">RESULT</span></div><p>当前回放的组级计数与真值一致；这不代表逐帧边界完全一致。</p></div>`;
+      dom.evidence.innerHTML = `
+        <section class="evidence-head ${headClass}">
+          <div class="case-number">CASE / ${escapeHtml(item.sequenceId.slice(-18))}</div>
+          <h2 class="case-title">${escapeHtml(item.failureCategory)}</h2>
+          <p class="case-id">${escapeHtml(item.sequenceId)}<br>${escapeHtml(exerciseLabel(item.exerciseId))} · ${escapeHtml(item.view || "未知朝向")}</p>
+          <div class="count-comparison"><div class="metric"><strong>${item.expectedCount}</strong><span>TRUTH / 人工或官方标注</span></div><div class="metric-arrow">→</div><div class="metric predicted"><strong>${predicted}</strong><span>${predictionLabel}</span></div></div>
+          <div class="timing-comparison"><div class="timing-cell"><strong>${alignment}</strong><span>完整周期对齐</span></div><div class="timing-cell"><strong>${meanError}</strong><span>平均边界绝对误差</span></div><div class="timing-cell"><strong>${maxError}</strong><span>最大边界偏差</span></div></div>
+        </section>
+        <section class="evidence-block"><p class="section-label">关键结论</p><div class="verdict ${verdict.kind}">${escapeHtml(verdict.text)}</div></section>
+        <section class="evidence-block"><p class="section-label">失败证据</p><div class="reason-list">${reasons}</div></section>
+        <section class="evidence-block"><p class="section-label">姿态数据链 · RAW → CANONICAL</p>
+          <div class="meter-block"><div class="meter-row"><span>${escapeHtml(rawPoseLabel)} 肩 / 肘 / 腕置信度 ≥ 0.5</span><span class="meter-value">${percent(detail.rawPoseDiagnostics.upperBodyVisibleRatio)}</span><div class="meter-track"><div class="meter-fill" style="width:${detail.rawPoseDiagnostics.upperBodyVisibleRatio * 100}%"></div></div></div>
+          <div class="meter-row"><span>Rust canonical 可观测关节</span><span class="meter-value">${percent(detail.poseDiagnostics.upperBodyVisibleRatio)}</span><div class="meter-track"><div class="meter-fill" style="width:${detail.poseDiagnostics.upperBodyVisibleRatio * 100}%"></div></div></div>
+          <div class="meter-row"><span>Rust 短时预测关节</span><span class="meter-value">${percent(detail.poseDiagnostics.predictedJointRatio)}</span><div class="meter-track"><div class="meter-fill" style="width:${detail.poseDiagnostics.predictedJointRatio * 100}%"></div></div></div>
+          <div class="meter-row"><span>Rust 拒绝 / unknown 关节</span><span class="meter-value">${percent(detail.poseDiagnostics.unknownJointRatio)}</span><div class="meter-track"><div class="meter-fill" style="width:${detail.poseDiagnostics.unknownJointRatio * 100}%"></div></div></div></div>
+          <p class="diagnostic-caveat">默认画 Rust canonical：绿色=实测，黄色=骨长约束融合，青色虚线=≤150ms 预测，unknown 不画。姿态按媒体时间戳叠加，离当前视频超过 150ms 的旧帧不绘制。</p>
+        </section>
+        <section class="evidence-block"><p class="section-label">证据来源</p><dl class="fact-grid">
+          <div class="fact"><dt>Dataset</dt><dd>${item.source === "mmfit" ? "MM-Fit" : "个人录制"}</dd></div>
+          <div class="fact"><dt>Split</dt><dd>${escapeHtml(SPLITS[item.split] || item.split)}</dd></div>
+          <div class="fact"><dt>Evaluation</dt><dd>${escapeHtml(evidenceLabel(item.evidenceLevel))}</dd></div>
+          <div class="fact"><dt>Audit</dt><dd>${escapeHtml(auditLabel(item.auditSelection))}</dd></div>
+          <div class="fact"><dt>Profile</dt><dd>${escapeHtml(item.profileSource || "未路由")}</dd></div>
+          <div class="fact"><dt>Pose</dt><dd>${escapeHtml(detail.posePipeline)} · ${escapeHtml(detail.poseSchema.toUpperCase())}</dd></div>
+          <div class="fact"><dt>Pose timing</dt><dd>${escapeHtml(detail.poseTimestampDomain)} · ${escapeHtml(poseRateLabel)}</dd></div>
+          <div class="fact"><dt>Media</dt><dd>${item.hasVideo ? "本地视频可播放" : "RGB 未下载"}</dd></div>
+          <div class="fact"><dt>Provenance</dt><dd>${escapeHtml(item.provenance)}</dd></div>
+        </dl>${detail.notes.length ? `<ul class="notes">${detail.notes.map(note => `<li>${escapeHtml(note)}</li>`).join("")}</ul>` : ""}</section>
+        ${renderTechniquePanel(detail)}`;
+      bindTechniquePanel();
+    }
+
+    function renderTechniquePanel(detail) {
+      if (detail.item.source !== "personal") {
+        return `<section class="evidence-block"><p class="section-label">动作质量真值</p><p class="diagnostic-caveat">MM-Fit 只有动作与组次数标签，没有逐 rep 技术、借力或标准性真值；本页禁止把官方骨架自动当作标准动作。</p></section>`;
+      }
+      const capture = state.technique;
+      if (!capture?.items?.length) {
+        return `<section class="evidence-block"><p class="section-label">动作质量真值</p><p class="diagnostic-caveat">当前视频没有进入 464-rep 技术复核队列，不能保存或推断标准性。</p></section>`;
+      }
+      const selected = capture.items.find(item => item.queue.repIndex === state.techniqueRepIndex) || capture.items[0];
+      const reviewerId = localStorage.getItem("maxpower.techniqueReviewerId") || "local-owner";
+      const storedRole = localStorage.getItem("maxpower.techniqueReviewerRole") || "owner_observation";
+      const latest = selected.latestByReviewer.find(event => event.reviewerId === reviewerId);
+      const value = latest || {
+        reviewerRole: storedRole,
+        techniqueAdherence: "cannot_judge",
+        compensation: "cannot_judge",
+        stimulusCompatibility: "insufficient_evidence",
+        movementStrategies: [], independentFeatureGroups: [], note: "", reviewStatus: "draft"
+      };
+      const repChips = capture.items.map(item => {
+        const submitted = item.latestByReviewer.some(event => event.reviewStatus === "submitted");
+        const status = item.adjudicationStatus === "disagreement" ? "disagreement" : submitted ? "submitted" : "";
+        return `<button type="button" class="rep-chip ${status} ${item.queue.repIndex === selected.queue.repIndex ? "active" : ""}" data-technique-rep="${item.queue.repIndex}" title="${escapeHtml(adjudicationLabel(item.adjudicationStatus))}">R${item.queue.repIndex}</button>`;
+      }).join("");
+      const featureChoices = Object.entries(FEATURE_GROUPS).map(([id, label]) => `<label class="choice"><input type="checkbox" name="feature-group" value="${id}" ${value.independentFeatureGroups.includes(id) ? "checked" : ""}>${escapeHtml(label)}</label>`).join("");
+      const strategyChoices = Object.entries(STRATEGIES).map(([id, label]) => `<label class="choice"><input type="checkbox" name="movement-strategy" value="${id}" ${value.movementStrategies.includes(id) ? "checked" : ""}>${escapeHtml(label)}</label>`).join("");
+      return `<section class="evidence-block">
+        <p class="section-label">REP 级技术复核 · 人工真值入口</p>
+        <div class="review-panel">
+          <div class="review-panel-head"><strong>REP ${selected.queue.repIndex} · ${formatTime(selected.queue.startMs)} → ${formatTime(selected.queue.endMs)}</strong><span class="review-progress">${capture.submittedReps}/${capture.totalReps} SUBMITTED</span></div>
+          <div class="rep-strip">${repChips}</div>
+          <div class="review-form" id="technique-review-form">
+            <div class="review-grid">
+              <div class="review-field"><label for="reviewer-id">Reviewer ID</label><input id="reviewer-id" value="${escapeHtml(reviewerId)}" autocomplete="off" maxlength="64"></div>
+              <div class="review-field"><label for="reviewer-role">Reviewer role</label><select id="reviewer-role">${option("owner_observation", "本人观察", value.reviewerRole)}${option("coach", "教练", value.reviewerRole)}${option("biomechanics_reviewer", "生物力学复核", value.reviewerRole)}</select></div>
+              <div class="review-field"><label for="technique-adherence">技术契约</label><select id="technique-adherence">${option("cannot_judge", "无法判断", value.techniqueAdherence)}${option("within_contract", "符合当前动作契约", value.techniqueAdherence)}${option("observed_deviation", "观察到偏差", value.techniqueAdherence)}${option("outside_contract", "偏离所选动作契约", value.techniqueAdherence)}</select></div>
+              <div class="review-field"><label for="compensation-label">借力 / 代偿</label><select id="compensation-label">${option("cannot_judge", "无法判断", value.compensation)}${option("not_observed", "未观察到", value.compensation)}${option("possible", "可能存在", value.compensation)}${option("observed", "确认存在", value.compensation)}</select></div>
+              <div class="review-field full"><label for="stimulus-compatibility">训练意图兼容性</label><select id="stimulus-compatibility">${option("insufficient_evidence", "证据不足", value.stimulusCompatibility)}${option("consistent", "与目标一致", value.stimulusCompatibility)}${option("likely_consistent_with_observed_deviation", "有偏差但大概率仍兼容", value.stimulusCompatibility)}${option("possible_strategy_shift", "可能发生策略转移", value.stimulusCompatibility)}${option("inconsistent_with_selected_variant", "与所选变式不一致", value.stimulusCompatibility)}</select></div>
+            </div>
+            <div><p class="choice-title">独立证据组 · 确认借力至少选 2 组</p><div class="choice-grid">${featureChoices}</div></div>
+            <div><p class="choice-title">可见动作策略</p><div class="choice-grid">${strategyChoices}</div></div>
+            <div class="review-field"><label for="technique-note">证据说明</label><textarea id="technique-note" maxlength="1000" placeholder="描述发生阶段、方向、侧别，以及替代解释…">${escapeHtml(value.note)}</textarea></div>
+            <div class="review-policy">识别证据保持只读；保存只追加事件。个人视频不会因单次复核自动成为标准轨迹。确认“借力/代偿”需要至少两个独立特征组，专业金标仍需独立复核一致。</div>
+            <div class="review-status ${selected.adjudicationStatus}">${escapeHtml(adjudicationLabel(selected.adjudicationStatus))}${latest ? ` · 你当前为 ${latest.reviewStatus === "submitted" ? "已提交" : "草稿"} · ${escapeHtml(latest.recordedAt)}` : " · 当前 reviewer 尚未保存"}</div>
+            ${state.reviewFlash ? `<div class="review-flash">${escapeHtml(state.reviewFlash)}</div>` : ""}
+            <div class="review-actions"><button type="button" class="review-action" data-review-save="draft" ${state.reviewSaving ? "disabled" : ""}>保存草稿</button><button type="button" class="review-action primary" data-review-save="submitted" ${state.reviewSaving ? "disabled" : ""}>提交复核</button></div>
+          </div>
+        </div>
+      </section>`;
+    }
+
+    function bindTechniquePanel() {
+      document.querySelectorAll("[data-technique-rep]").forEach(button => button.addEventListener("click", () => selectTechniqueRep(Number(button.dataset.techniqueRep))));
+      const reviewer = document.getElementById("reviewer-id");
+      if (reviewer) reviewer.addEventListener("change", () => {
+        const value = reviewer.value.trim();
+        if (value) localStorage.setItem("maxpower.techniqueReviewerId", value);
+        state.reviewFlash = "已切换 reviewer；表单显示该 reviewer 的最新事件。";
+        renderEvidence(state.detail);
+      });
+      const role = document.getElementById("reviewer-role");
+      if (role) role.addEventListener("change", () => localStorage.setItem("maxpower.techniqueReviewerRole", role.value));
+      document.querySelectorAll("[data-review-save]").forEach(button => button.addEventListener("click", () => saveTechniqueReview(button.dataset.reviewSave)));
+    }
+
+    function selectTechniqueRep(repIndex) {
+      const item = state.technique?.items?.find(candidate => candidate.queue.repIndex === repIndex);
+      if (!item || !state.detail) return;
+      state.techniqueRepIndex = repIndex; state.reviewFlash = "";
+      seekTo(item.queue.peakMs);
+      renderTimeline(state.detail); renderEvidence(state.detail);
+    }
+
+    async function saveTechniqueReview(reviewStatus) {
+      if (!state.detail || !state.technique || state.reviewSaving) return;
+      const selected = state.technique.items.find(item => item.queue.repIndex === state.techniqueRepIndex);
+      if (!selected) return;
+      const reviewerId = document.getElementById("reviewer-id").value.trim();
+      const latest = selected.latestByReviewer.find(event => event.reviewerId === reviewerId);
+      const independentFeatureGroups = [...document.querySelectorAll('input[name="feature-group"]:checked')].map(input => input.value);
+      const compensation = document.getElementById("compensation-label").value;
+      if (compensation === "observed" && independentFeatureGroups.length < 2) {
+        state.reviewFlash = "确认借力失败：至少选择两个独立证据组。"; renderEvidence(state.detail); return;
+      }
+      const payload = {
+        reviewItemId: selected.queue.reviewItemId,
+        reviewerId,
+        reviewerRole: document.getElementById("reviewer-role").value,
+        reviewStatus,
+        expectedPriorEventId: latest?.eventId || null,
+        techniqueAdherence: document.getElementById("technique-adherence").value,
+        compensation,
+        stimulusCompatibility: document.getElementById("stimulus-compatibility").value,
+        movementStrategies: [...document.querySelectorAll('input[name="movement-strategy"]:checked')].map(input => input.value),
+        independentFeatureGroups,
+        note: document.getElementById("technique-note").value
+      };
+      state.reviewSaving = true; state.reviewFlash = "正在追加复核事件…"; renderEvidence(state.detail);
+      try {
+        const response = await fetch("/api/review/technique", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "技术复核保存失败");
+        localStorage.setItem("maxpower.techniqueReviewerId", reviewerId);
+        localStorage.setItem("maxpower.techniqueReviewerRole", payload.reviewerRole);
+        await reloadTechniqueReview();
+        state.reviewFlash = reviewStatus === "submitted" ? "复核已提交；事件已追加，历史版本保留。" : "草稿已保存；事件已追加，历史版本保留。";
+      } catch (error) {
+        if (String(error?.message || error).includes("stale")) await reloadTechniqueReview();
+        state.reviewFlash = `保存失败：${error instanceof Error ? error.message : error}`;
+      } finally {
+        state.reviewSaving = false;
+        renderTimeline(state.detail); renderEvidence(state.detail);
+      }
+    }
+
+    async function reloadTechniqueReview() {
+      const response = await fetch(`/api/review/technique?captureId=${encodeURIComponent(state.detail.item.sequenceId)}`);
+      if (!response.ok) throw new Error((await response.json()).error || "技术复核刷新失败");
+      state.technique = await response.json();
+    }
+
+    function option(value, label, selected) { return `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`; }
+    function adjudicationLabel(status) { return ({ pending: "待复核", single_review: "已有一名 reviewer 提交，尚非专业金标", agreement: "独立复核标签一致", disagreement: "复核结论冲突，需要裁决" })[status] || status; }
+
+    function verdictFor(detail) {
+      const item = detail.item;
+      if (item.evidenceLevel === "source_held_out_research" && item.status === "exact") return { kind: "exact", text: "该来源及其派生数据在训练时已排除；当前次数和所有人工区间均对齐。单条随机抽查只用于复核，正式通过仍由全部 48 条来源留出结果决定。" };
+      if (item.evidenceLevel === "source_held_out_research" && item.countExact && item.timelineAlignmentRatio !== null) return { kind: "", text: `该来源在训练时已排除。次数一致，但只有 ${item.alignedCount}/${item.timelineTruthCount} 个完整区间满足 start/end 与 IoU 门槛，因此仍判失败。` };
+      if (item.evidenceLevel === "source_held_out_research") return { kind: "", text: `该来源在训练时已排除：预测 ${item.predictedCount ?? "—"} 次，人工 ${item.expectedCount} 次，完整区间对齐 ${item.alignedCount ?? "—"}/${item.timelineTruthCount ?? "—"}。这是泛化证据，不是同录像模板回放。` };
+      if (item.status === "exact" && item.evidenceLevel === "research_golden_replay") return { kind: "exact", text: "个人标注黄金回放中，次数与已有的 start / peak / end 均通过严格时间轴验收；这是同视频回放，不是未见视频泛化率。" };
+      if (item.status === "exact") return { kind: "exact", text: "次数与每个 start / peak / end 均通过严格时间轴验收。" };
+      if (item.countExact && item.timelineAlignmentRatio !== null) return { kind: "", text: `次数虽然一致，但只有 ${item.alignedCount}/${item.timelineTruthCount} 个完整周期对齐；这条视频不能算识别成功。` };
+      if (item.status === "not_evaluated" || item.status === "annotation_blocked") return { kind: "data", text: "这不是视频识别失败证据；当前阻塞发生在标注迁移或动作路由层。" };
+      if (item.reasonCodes.includes("initializer_fallback_profile")) return { kind: "", text: "主要风险是没有命中学习后的 profile，回退初始化规则后发生计数偏差。" };
+      if (item.reasonCodes.some(code => ["primary_range_below_threshold","secondary_range_below_threshold","cycle_faster_than_expected","duration_exceeded"].includes(code))) return { kind: "", text: "骨架已经存在，主要偏差来自 profile 阈值与真实动作幅度 / 速度不匹配。" };
+      if (item.reasonCodes.includes("incomplete_cycle")) return { kind: "", text: "骨架信号触发了动作，但 Rust 状态机没有闭合完整周期，因此漏记。" };
+      return { kind: "", text: item.predictedCount < item.expectedCount ? "当前 Rust 输出少于真值，需要沿时间轴定位被拒绝或未闭合的 rep。" : "当前 Rust 输出多于真值，需要沿时间轴定位重复触发。" };
+    }
+
+    function setPoseMode(mode) {
+      if (!state.detail || !["canonical", "raw"].includes(mode)) return;
+      state.poseMode = mode;
+      updatePoseModeControls();
+      updatePlaybackNote();
+      renderEvidence(state.detail);
+      drawSkeleton(state.currentMs);
+    }
+
+    function updatePoseModeControls() {
+      dom["pose-canonical"].classList.toggle("active", state.poseMode === "canonical");
+      dom["pose-raw"].classList.toggle("active", state.poseMode === "raw");
+    }
+
+    function updatePlaybackNote() {
+      if (!state.detail) return;
+      const item = state.detail.item;
+      const interval = state.detail.poseTiming?.medianFrameIntervalMs || 0;
+      const poseFps = interval > 0 ? `${(1000 / interval).toFixed(1)} FPS` : "未知采样率";
+      if (state.poseMode === "raw") {
+        dom["playback-note"].textContent = `RAW ${state.detail.poseSchema.toUpperCase()}：${state.detail.posePipeline} · ${poseFps} · 红色为低置信度点`;
+        return;
+      }
+      dom["playback-note"].textContent = `RUST CANONICAL ${state.detail.poseSchema.toUpperCase()}：媒体原速播放 · 姿态 ${poseFps} · 超过 150ms 不绘制旧帧`;
+    }
+
+    function togglePlayback() { if (!state.detail) return; state.playing ? pause() : play(); }
+    function play() {
+      if (!state.detail) return;
+      if (state.currentMs >= state.detail.clipEndMs - 20) seekTo(state.detail.clipStartMs);
+      state.playing = true; dom["play-btn"].textContent = "Ⅱ";
+      if (state.detail.videoUrl) dom["stage-video"].play().catch(() => pause());
+      else { state.animationStart = performance.now(); state.animationOrigin = state.currentMs; }
+    }
+    function pause() { state.playing = false; dom["play-btn"].textContent = "▶"; dom["stage-video"].pause(); }
+    function seekTo(ms) {
+      if (!state.detail) return;
+      state.currentMs = clamp(ms, state.detail.clipStartMs, state.detail.clipEndMs);
+      if (state.detail.videoUrl && Number.isFinite(dom["stage-video"].duration)) dom["stage-video"].currentTime = state.currentMs / 1000;
+      if (state.playing && !state.detail.videoUrl) { state.animationStart = performance.now(); state.animationOrigin = state.currentMs; }
+      updateTransport(); drawSkeleton(state.currentMs);
+    }
+    function seekFromPointer(event) { if (!state.detail) return; const rect = dom.timeline.getBoundingClientRect(); seekTo(state.detail.clipStartMs + clamp((event.clientX - rect.left) / rect.width, 0, 1) * (state.detail.clipEndMs - state.detail.clipStartMs)); }
+
+    function animationLoop(now) {
+      if (state.detail && state.playing) {
+        if (state.detail.videoUrl) state.currentMs = dom["stage-video"].currentTime * 1000;
+        else state.currentMs = state.animationOrigin + (now - state.animationStart);
+        if (state.currentMs >= state.detail.clipEndMs) { state.currentMs = state.detail.clipEndMs; pause(); }
+        updateTransport(); drawSkeleton(state.currentMs);
+      }
+      requestAnimationFrame(animationLoop);
+    }
+
+    function updateTransport() {
+      if (!state.detail) return;
+      const start = state.detail.clipStartMs, span = Math.max(1, state.detail.clipEndMs - start);
+      dom["timeline-cursor"].style.left = `${clamp((state.currentMs - start) / span, 0, 1) * 100}%`;
+      dom["current-time"].textContent = formatTime(state.currentMs - start);
+      dom["end-time"].textContent = formatTime(state.detail.clipEndMs - start);
+    }
+
+    function drawSkeleton(timestampMs) {
+      const canvas = dom["skeleton-canvas"], rect = dom.stage.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.round(rect.width)), height = Math.max(1, Math.round(rect.height));
+      if (canvas.width !== width * dpr || canvas.height !== height * dpr) { canvas.width = width * dpr; canvas.height = height * dpr; canvas.style.width = `${width}px`; canvas.style.height = `${height}px`; }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
+      const frames = state.poseMode === "raw" ? state.detail?.rawFrames || [] : state.detail?.frames || []; if (!frames.length) return;
+      const frame = ReviewPlayerMath.nearestFrameWithinAge(frames, timestampMs, state.detail?.poseTiming?.maximumOverlayAgeMs ?? 150); if (!frame || frame.landmarks.length < 17) return;
+      const box = renderBox(width, height, frame);
+      const point = landmark => ({ x: box.x + landmark.x * box.width, y: box.y + landmark.y * box.height });
+      ctx.save();
+      ctx.beginPath(); ctx.rect(box.x, box.y, box.width, box.height); ctx.clip();
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      const connections = state.detail?.poseSchema === "halpe26" ? HALPE26_CONNECTIONS : BLAZEPOSE33_CONNECTIONS;
+      for (const [a,b] of connections) {
+        const la = frame.landmarks[a], lb = frame.landmarks[b]; if (!la || !lb) continue;
+        if (!drawable(la) || !drawable(lb)) continue;
+        const pa = point(la), pb = point(lb), confidence = Math.min(la.visibility || 0, lb.visibility || 0);
+        const source = skeletonSource(la, lb);
+        ctx.setLineDash(source === "predicted" ? [6, 5] : []);
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.lineWidth = confidence >= .5 ? 3 : 2; ctx.strokeStyle = confidence >= .5 ? "#d8ff45" : "#ff6846"; ctx.globalAlpha = confidence >= .5 ? .92 : .64; ctx.stroke();
+        if (source === "predicted") { ctx.strokeStyle = "#48d9e8"; ctx.globalAlpha = .86; ctx.stroke(); }
+        else if (source === "fused") { ctx.strokeStyle = "#ffc857"; ctx.globalAlpha = .9; ctx.stroke(); }
+      }
+      ctx.setLineDash([]);
+      const connectedJoints = new Set(connections.flat());
+      frame.landmarks.forEach((landmark, index) => {
+        if (!connectedJoints.has(index)) return;
+        if (!drawable(landmark)) return;
+        const p = point(landmark), good = (landmark.visibility || 0) >= .5;
+        const source = landmark.source;
+        ctx.beginPath(); ctx.arc(p.x, p.y, good ? 4 : 3, 0, Math.PI * 2); ctx.fillStyle = source === "predicted" ? "#48d9e8" : source === "fused" ? "#ffc857" : good ? "#f1f2e9" : "#ff6846"; ctx.globalAlpha = .95; ctx.fill();
+      });
+      ctx.globalAlpha = 1; ctx.restore();
+    }
+
+    function drawable(landmark) {
+      if (!Number.isFinite(landmark?.x) || !Number.isFinite(landmark?.y)) return false;
+      return state.poseMode === "canonical" ? landmark.renderable === true : (landmark.visibility || 0) >= .05;
+    }
+
+    function skeletonSource(...landmarks) {
+      if (state.poseMode === "raw") return "raw";
+      if (landmarks.some(landmark => landmark.source === "predicted")) return "predicted";
+      if (landmarks.some(landmark => landmark.source === "fused")) return "fused";
+      return "measured";
+    }
+
+    function renderBox(width, height, frame) {
+      if (!state.detail?.videoUrl || !dom["stage-video"].videoWidth) return { x: width * .08, y: height * .06, width: width * .84, height: height * .88 };
+      const mediaRatio = dom["stage-video"].videoWidth / dom["stage-video"].videoHeight, stageRatio = width / height;
+      if (mediaRatio > stageRatio) { const renderedHeight = width / mediaRatio; return { x: 0, y: (height - renderedHeight) / 2, width, height: renderedHeight }; }
+      const renderedWidth = height * mediaRatio; return { x: (width - renderedWidth) / 2, y: 0, width: renderedWidth, height };
+    }
+
+    function evidenceLabel(level) { return ({ source_held_out_research: "来源留出推理（训练时排除本视频；Python 研究模型）", research_golden_replay: "个人黄金回放（研究候选，非泛化率）", current_replay: "当前 validation-gated 回放", legacy_replay: "旧版 Rust 回放", annotation_only: "仅人工标注，未统一回放", official_pose_replay: "官方骨架 + 当前 Rust 回放" })[level] || level; }
+    function auditLabel(value) { return ({ seeded_random_audit: "固定种子随机抽查（不参与最终判定）", held_out: "来源留出（纳入全部留出聚合）", not_held_out: "仅标注 / 非留出", official_split: "官方 split" })[value] || value; }
+    function exerciseLabel(value) { return value ? (EXERCISES[value] || value.replaceAll("_", " ")) : "动作标签待恢复"; }
+    function unique(values) { return [...new Set(values)].sort(); }
+    function percent(value) { return `${(value * 100).toFixed(1)}%`; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function formatTime(ms) { const total = Math.max(0, ms); const minutes = Math.floor(total / 60000); const seconds = Math.floor(total % 60000 / 1000); const millis = Math.floor(total % 1000); return `${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}.${String(millis).padStart(3,"0")}`; }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"})[char]); }
+    function showFatal(error) { dom["loading-plate"].hidden = false; dom["loading-plate"].textContent = `ERROR · ${error instanceof Error ? error.message : error}`; }
+  </script>
+</body>
+</html>

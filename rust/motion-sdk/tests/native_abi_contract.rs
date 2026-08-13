@@ -1,4 +1,4 @@
-use form_coach_motion_sdk::web_abi::{
+use maxpower_motion_sdk::web_abi::{
     motion_sdk_begin_frame, motion_sdk_begin_replay_set, motion_sdk_begin_sequence,
     motion_sdk_close, motion_sdk_commit_sequence, motion_sdk_contract_major,
     motion_sdk_contract_minor, motion_sdk_copy_packet, motion_sdk_current_frame_valid,
@@ -51,6 +51,7 @@ fn native_abi_copies_the_same_versioned_profile_packet_into_host_memory() {
             .windows(b"march-in-place/front/bilateral/bodyweight/v1".len())
             .any(|window| window == b"march-in-place/front/bilateral/bodyweight/v1")
     );
+    assert!(packet.windows(4).any(|window| window == b"ANG1"));
     assert_eq!(motion_sdk_close(), 0);
 }
 

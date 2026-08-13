@@ -1,6 +1,6 @@
 use std::sync::{Arc, atomic::AtomicUsize};
 
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseProfile,
     FixtureInferenceAdapter, FrameLease, MotionSession, PoseObservation, RecordingOutputAdapter,
     RepDisposition, SessionConfig, SubjectPolicy,

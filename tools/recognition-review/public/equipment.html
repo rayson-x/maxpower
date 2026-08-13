@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Equipment Truth Lab · 器械轨迹标定台</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --void: #07090a;
+      --panel: #101416;
+      --raised: #171d1f;
+      --line: #30383a;
+      --paper: #edf0e7;
+      --muted: #7e898b;
+      --acid: #d8ff45;
+      --cyan: #49dce9;
+      --ember: #ff6949;
+      --amber: #ffc95b;
+      --display: "Songti SC", "STSong", Georgia, serif;
+      --condensed: "DIN Condensed", "Avenir Next Condensed", "Arial Narrow", sans-serif;
+      --mono: "SFMono-Regular", Menlo, Monaco, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--void); color: var(--paper); }
+    body { overflow: hidden; font-family: var(--condensed); }
+    button, input, select, textarea { color: inherit; font: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+    [hidden] { display: none !important; }
+
+    .shell { height: 100vh; display: grid; grid-template-rows: 78px minmax(0, 1fr); overflow: hidden; }
+    .masthead { display: grid; grid-template-columns: minmax(390px, 1fr) auto; border-bottom: 1px solid var(--line); background: #0b0e0f; }
+    .brand { display: flex; align-items: center; min-width: 0; gap: 16px; padding: 11px 20px; }
+    .brand-mark { width: 49px; height: 49px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid var(--cyan); color: var(--cyan); font: 800 16px/1 var(--mono); transform: rotate(2deg); }
+    .eyebrow { margin: 0 0 5px; color: var(--cyan); font: 800 9px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 0; font: 600 28px/.95 var(--display); letter-spacing: -.035em; }
+    .subcopy { margin: 6px 0 0; color: var(--muted); font: 10px/1.2 var(--mono); }
+    .back { margin-left: auto; flex: 0 0 auto; padding: 8px 10px; border: 1px solid var(--line); color: var(--muted); text-decoration: none; font: 700 8px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .back:hover { border-color: var(--cyan); color: var(--cyan); }
+    .headline-stats { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); border-left: 1px solid var(--line); }
+    .headline-stat { min-width: 94px; padding: 11px 14px; border-left: 1px solid var(--line); display: grid; align-content: center; }
+    .headline-stat:first-child { border-left: 0; }
+    .headline-stat strong { font: 800 20px/1 var(--mono); letter-spacing: -.06em; }
+    .headline-stat span { margin-top: 6px; color: var(--muted); font: 700 7px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+    .headline-stat.acid strong { color: var(--acid); }
+    .headline-stat.alert strong { color: var(--ember); }
+
+    .workspace { min-height: 0; display: grid; grid-template-columns: 312px minmax(520px, 1fr) 370px; overflow: hidden; }
+    .rail, .inspector { min-height: 0; background: var(--panel); }
+    .rail { display: grid; grid-template-rows: auto auto minmax(0, 1fr); border-right: 1px solid var(--line); }
+    .inspector { border-left: 1px solid var(--line); overflow-y: auto; }
+    .viewer { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(360px, 1fr) auto; background: #040607; }
+
+    .filters { padding: 13px; border-bottom: 1px solid var(--line); }
+    .search { width: 100%; height: 35px; padding: 0 10px; border: 1px solid var(--line); border-radius: 0; background: #080b0c; }
+    .filter-label { margin: 12px 0 7px; color: var(--muted); font: 700 7px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .segmented { display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr); border: 1px solid var(--line); }
+    .filter-btn { min-height: 29px; padding: 0 5px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; font: 700 8px/1 var(--mono); }
+    .filter-btn:last-child { border-right: 0; }
+    .filter-btn.active { background: var(--acid); color: var(--void); }
+    .select-row { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 9px; }
+    select, input, textarea { border-radius: 0; border: 1px solid var(--line); background: #090c0d; color: var(--paper); }
+    select { min-width: 0; height: 32px; padding: 0 7px; font-size: 10px; }
+    .queue-summary { padding: 12px 13px; border-bottom: 1px solid var(--line); background: #14191b; }
+    .summary-line { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font: 8px/1.4 var(--mono); }
+    .summary-line strong { color: var(--paper); }
+    .progress { height: 3px; margin-top: 9px; background: #303638; }
+    .progress i { display: block; height: 100%; width: 0; background: var(--acid); transition: width .24s ease; }
+    .queue { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+    .queue-count { position: sticky; top: 0; z-index: 3; padding: 9px 12px; border-bottom: 1px solid #252b2d; background: var(--panel); color: var(--muted); font: 700 8px/1 var(--mono); letter-spacing: .08em; }
+    .queue-card { --status: var(--line); width: 100%; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 10px 11px; border: 0; border-bottom: 1px solid #252b2d; background: transparent; text-align: left; cursor: pointer; opacity: 0; animation: card-in .24s ease forwards; animation-delay: min(calc(var(--i) * 8ms), 180ms); }
+    .queue-card:hover { background: #181e20; }
+    .queue-card.active { background: var(--acid); color: var(--void); }
+    .queue-card.submitted { --status: var(--acid); }
+    .queue-card.draft { --status: var(--amber); }
+    .queue-card.disagreement { --status: var(--ember); }
+    .queue-glyph { width: 29px; height: 29px; display: grid; place-items: center; border: 1px solid var(--status); color: var(--status); font: 800 10px/1 var(--mono); }
+    .queue-card.active .queue-glyph { border-color: #58642c; color: var(--void); }
+    .queue-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 700 11px/1.1 var(--mono); }
+    .queue-meta { margin-top: 5px; color: var(--muted); font: 700 7px/1 var(--mono); text-transform: uppercase; }
+    .queue-card.active .queue-meta { color: #556044; }
+    .queue-split { padding: 5px; border: 1px solid var(--line); color: var(--muted); font: 700 7px/1 var(--mono); text-transform: uppercase; }
+    .queue-card.active .queue-split { border-color: #697442; color: #384014; }
+
+    .stage { position: relative; min-height: 0; overflow: hidden; background: radial-gradient(circle at 50% 45%, #151b1d 0, #060809 66%); touch-action: none; }
+    .stage::before { content: ""; position: absolute; inset: 18px; z-index: 4; pointer-events: none; border: 1px solid rgba(73,220,233,.13); }
+    .stage-img, .axis-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .stage-img { object-fit: contain; user-select: none; -webkit-user-drag: none; filter: contrast(1.04); }
+    .axis-canvas { z-index: 2; cursor: crosshair; }
+    .stage-grid { position: absolute; inset: 18px; z-index: 1; pointer-events: none; opacity: .14; background-image: linear-gradient(rgba(73,220,233,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(73,220,233,.18) 1px, transparent 1px); background-size: 8.333% 12.5%; }
+    .stage-labels { position: absolute; z-index: 5; left: 30px; top: 29px; right: 30px; display: flex; justify-content: space-between; pointer-events: none; }
+    .chip { display: inline-flex; min-height: 25px; align-items: center; padding: 0 8px; border: 1px solid var(--line); background: rgba(7,9,10,.84); color: var(--muted); font: 800 8px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .chip.cyan { border-color: var(--cyan); color: var(--cyan); }
+    .chip.acid { border-color: var(--acid); color: var(--acid); }
+    .chip.alert { border-color: var(--ember); color: var(--ember); }
+    .loading { position: absolute; inset: 0; z-index: 9; display: grid; place-content: center; background: #080b0c; color: var(--cyan); font: 800 9px/1 var(--mono); letter-spacing: .16em; }
+    .transport { padding: 12px 16px; border-top: 1px solid var(--line); background: #0d1112; }
+    .transport-main { display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; align-items: center; }
+    .transport button { min-height: 32px; padding: 0 11px; border: 1px solid var(--line); background: var(--raised); cursor: pointer; font: 800 8px/1 var(--mono); }
+    .transport button.primary { border-color: var(--cyan); color: var(--cyan); }
+    .transport-note { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font: 8px/1.3 var(--mono); }
+    .shortcut { color: var(--paper); font: 700 8px/1.4 var(--mono); }
+    .shortcut b { color: var(--acid); }
+
+    .inspector-head { position: relative; padding: 17px 17px 15px; border-bottom: 1px solid var(--line); }
+    .inspector-head::before { content: ""; position: absolute; left: 0; top: 0; width: 5px; height: 42px; background: var(--cyan); }
+    .case-number { color: var(--muted); font: 800 8px/1 var(--mono); letter-spacing: .1em; }
+    .case-title { margin: 9px 0 0; font: 600 23px/1 var(--display); }
+    .case-id { margin: 8px 0 0; color: var(--muted); overflow-wrap: anywhere; font: 8px/1.4 var(--mono); }
+    .policy { margin-top: 12px; padding: 9px 10px; border-left: 2px solid var(--amber); background: #19170f; color: #d3c47a; font: 8px/1.45 var(--mono); }
+    .section { padding: 14px 17px; border-bottom: 1px solid var(--line); }
+    .section-label { margin: 0 0 10px; color: var(--muted); font: 800 7px/1 var(--mono); letter-spacing: .13em; text-transform: uppercase; }
+    .target-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .target-btn { min-height: 38px; padding: 7px 8px; border: 1px solid var(--line); background: #0b0f10; color: #aeb7b8; cursor: pointer; text-align: left; font-size: 10px; }
+    .target-btn:first-child { grid-column: 1 / -1; }
+    .target-btn.active { border-color: var(--acid); background: #18200f; color: var(--acid); }
+    .target-btn.danger.active { border-color: var(--ember); background: #21130f; color: var(--ember); }
+    .target-btn small { display: block; margin-top: 3px; color: var(--muted); font: 7px/1 var(--mono); }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .field { display: grid; gap: 5px; min-width: 0; }
+    .field.full { grid-column: 1 / -1; }
+    .field label { color: var(--muted); font: 700 7px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .field input, .field select { width: 100%; min-width: 0; height: 31px; padding: 0 7px; }
+    .field textarea { width: 100%; min-height: 68px; padding: 8px; resize: vertical; line-height: 1.4; }
+    .checkbox { display: flex; align-items: center; gap: 7px; min-height: 31px; padding: 0 8px; border: 1px solid var(--line); background: #090c0d; color: #b0b8b8; font-size: 9px; }
+    .checkbox input { width: auto; height: auto; accent-color: var(--acid); }
+    .axis-readout { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 10px; border: 1px solid var(--line); background: var(--line); }
+    .axis-cell { padding: 7px; background: #0a0d0e; }
+    .axis-cell span { display: block; color: var(--muted); font: 7px/1 var(--mono); }
+    .axis-cell strong { display: block; margin-top: 5px; color: var(--cyan); font: 800 9px/1 var(--mono); }
+    .lineage { display: grid; gap: 7px; }
+    .lineage-row { display: grid; grid-template-columns: 88px 1fr; gap: 8px; font: 8px/1.4 var(--mono); }
+    .lineage-row dt { color: var(--muted); }
+    .lineage-row dd { margin: 0; overflow-wrap: anywhere; }
+    .flash { min-height: 31px; padding: 8px; border: 1px solid var(--line); color: var(--muted); font: 8px/1.4 var(--mono); }
+    .flash.ok { border-color: #52642d; color: var(--acid); }
+    .flash.error { border-color: #704033; color: var(--ember); }
+    .actions { display: grid; grid-template-columns: 1fr 1.4fr; gap: 7px; margin-top: 8px; }
+    .action { min-height: 37px; border: 1px solid var(--line); background: var(--raised); cursor: pointer; font: 800 9px/1 var(--mono); letter-spacing: .04em; }
+    .action.primary { border-color: var(--acid); background: var(--acid); color: var(--void); }
+    .action:disabled { opacity: .45; cursor: wait; }
+    .empty { padding: 24px 16px; color: var(--muted); font: 9px/1.6 var(--mono); }
+    @keyframes card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    @media (max-width: 1180px) {
+      body { overflow: auto; }
+      .shell { height: auto; min-height: 100vh; overflow: visible; }
+      .workspace { grid-template-columns: 290px minmax(0, 1fr); grid-template-rows: minmax(680px, calc(100vh - 78px)) auto; overflow: visible; }
+      .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, 1fr); }
+      .inspector-head { grid-row: span 2; }
+    }
+    @media (max-width: 760px) {
+      .masthead { grid-template-columns: 1fr; height: auto; }
+      .headline-stats { display: none; }
+      .workspace { display: block; }
+      .rail { height: 520px; }
+      .viewer { min-height: 670px; }
+      .stage { min-height: 480px; }
+      .inspector { display: block; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="brand">
+        <div class="brand-mark">EQ</div>
+        <div>
+          <p class="eyebrow">Equipment Truth Lab / Source-locked annotations</p>
+          <h1>器械轨迹标定台</h1>
+          <p class="subcopy">拖动真实杠铃轴 · 标记镜像与静态架位 · 人工事件只追加</p>
+        </div>
+        <a class="back" href="/">← 返回骨架取证台</a>
+      </div>
+      <div class="headline-stats" id="headline-stats"></div>
+    </header>
+
+    <section class="workspace">
+      <aside class="rail" aria-label="器械复核队列">
+        <div class="filters">
+          <input class="search" id="search" type="search" placeholder="搜索来源 / 帧号 / 阶段" aria-label="搜索器械复核项">
+          <p class="filter-label">Source split · 录像级隔离</p>
+          <div class="segmented" style="--cols:4" id="split-filter">
+            <button class="filter-btn active" data-split="train">TRAIN</button>
+            <button class="filter-btn" data-split="validation">VAL</button>
+            <button class="filter-btn" data-split="test">TEST</button>
+            <button class="filter-btn" data-split="all">ALL</button>
+          </div>
+          <p class="filter-label">Review state</p>
+          <div class="segmented" style="--cols:3" id="status-filter">
+            <button class="filter-btn active" data-status="unreviewed">未复核</button>
+            <button class="filter-btn" data-status="submitted">已提交</button>
+            <button class="filter-btn" data-status="all">全部</button>
+          </div>
+          <div class="select-row">
+            <select id="priority-filter" aria-label="复核优先级"><option value="all">全部优先级</option><option value="high">高优先级</option><option value="normal">普通</option></select>
+            <select id="source-filter" aria-label="来源录像"><option value="all">全部来源</option></select>
+          </div>
+        </div>
+        <div class="queue-summary">
+          <div class="summary-line"><span>当前筛选进度</span><strong id="filter-progress">0 / 0</strong></div>
+          <div class="progress"><i id="progress-bar"></i></div>
+        </div>
+        <div class="queue" id="queue"><div class="empty">正在读取冻结器械队列…</div></div>
+      </aside>
+
+      <section class="viewer" aria-label="杠铃轴标定画布">
+        <div class="stage" id="stage">
+          <img class="stage-img" id="stage-img" alt="待复核器械帧" draggable="false">
+          <div class="stage-grid"></div>
+          <canvas class="axis-canvas" id="axis-canvas"></canvas>
+          <div class="stage-labels">
+            <span class="chip cyan" id="source-chip">等待选择</span>
+            <span class="chip" id="state-chip">UNREVIEWED</span>
+          </div>
+          <div class="loading" id="loading">LOADING FROZEN FRAME…</div>
+        </div>
+        <div class="transport">
+          <div class="transport-main">
+            <button class="primary" id="previous">← PREV</button>
+            <button class="primary" id="next">NEXT →</button>
+            <div class="transport-note" id="transport-note">拖动两端圆点调整轴线；拖动线段整体平移；点击空白处移动到该高度。</div>
+            <div class="shortcut"><b>J/K</b> 前后 · <b>1–5</b> 标签 · <b>⌘↵</b> 提交</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector" id="inspector" aria-label="器械真值编辑器">
+        <div class="empty">选择左侧帧后，在这里确认真实器械、遮挡和轴线。</div>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const TARGETS = {
+      visible_barbell: ["真实杠铃可见", "保留并校正轴线", "1"],
+      no_target_equipment: ["无目标器械", "当前帧没有训练杠铃", "2"],
+      reflection_only: ["仅镜像器械", "不得关联到前景本人", "3"],
+      static_rack_only: ["仅静态架位", "架杆 / 杠铃架硬负样本", "4"],
+      ambiguous: ["无法确认", "遮挡或画面不足", "5"]
+    };
+    const SPLIT_LABEL = { train: "TRAIN", validation: "VALIDATION", test: "FROZEN TEST" };
+    const STATUS_GLYPH = { unreviewed: "○", draft: "◐", submitted: "✓", disagreement: "!" };
+    const dom = Object.fromEntries(["headline-stats","search","split-filter","status-filter","priority-filter","source-filter","filter-progress","progress-bar","queue","stage","stage-img","axis-canvas","source-chip","state-chip","loading","previous","next","transport-note","inspector"].map(id => [id, document.getElementById(id)]));
+    const canvas = dom["axis-canvas"];
+    const ctx = canvas.getContext("2d");
+    const state = {
+      index: null, detail: null, selectedId: null, split: "train", status: "unreviewed", priority: "all", source: "all", search: "",
+      target: "visible_barbell", axis: null, occlusion: "none", truncated: false, note: "", saving: false, flash: "", flashKind: "",
+      pointer: null, requestToken: 0
+    };
+
+    boot().catch(fatal);
+
+    async function boot() {
+      const response = await fetch("/api/review/equipment/index");
+      if (!response.ok) throw new Error("器械复核队列加载失败");
+      state.index = await response.json();
+      bind(); renderHeader(); renderSourceOptions(); renderQueue(true);
+    }
+
+    function bind() {
+      dom.search.addEventListener("input", event => { state.search = event.target.value.trim().toLowerCase(); renderQueue(false); });
+      dom["split-filter"].addEventListener("click", event => filterClick(event, "split"));
+      dom["status-filter"].addEventListener("click", event => filterClick(event, "status"));
+      dom["priority-filter"].addEventListener("change", event => { state.priority = event.target.value; renderQueue(true); });
+      dom["source-filter"].addEventListener("change", event => { state.source = event.target.value; renderQueue(true); });
+      dom.previous.addEventListener("click", () => step(-1));
+      dom.next.addEventListener("click", () => step(1));
+      dom["stage-img"].addEventListener("load", () => { dom.loading.hidden = true; resizeCanvas(); draw(); });
+      window.addEventListener("resize", () => { resizeCanvas(); draw(); });
+      canvas.addEventListener("pointerdown", pointerDown);
+      canvas.addEventListener("pointermove", pointerMove);
+      canvas.addEventListener("pointerup", pointerUp);
+      canvas.addEventListener("pointercancel", pointerUp);
+      document.addEventListener("keydown", shortcut);
+    }
+
+    function filterClick(event, key) {
+      const button = event.target.closest(`[data-${key}]`); if (!button) return;
+      state[key] = button.dataset[key];
+      [...event.currentTarget.children].forEach(child => child.classList.toggle("active", child === button));
+      renderQueue(true);
+    }
+
+    function renderHeader() {
+      const s = state.index.stats;
+      const values = [
+        [s.itemCount, "冻结帧"], [s.submittedItems, "人工提交"], [s.unreviewedItems, "待复核"], [s.highPriorityItems, "高优先级"], ["BLOCK", "禁止 PROMOTION"]
+      ];
+      dom["headline-stats"].innerHTML = values.map((value, index) => `<div class="headline-stat ${index === 1 ? "acid" : index === 4 ? "alert" : ""}"><strong>${value[0]}</strong><span>${value[1]}</span></div>`).join("");
+    }
+
+    function renderSourceOptions() {
+      const sources = [...new Set(state.index.items.map(item => item.sourceCaptureId))].sort();
+      dom["source-filter"].innerHTML = `<option value="all">全部来源</option>${sources.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id.slice(0, 8))}</option>`).join("")}`;
+    }
+
+    function filteredItems() {
+      return state.index.items.filter(item => {
+        if (state.split !== "all" && item.split !== state.split) return false;
+        if (state.status !== "all" && item.status !== state.status) return false;
+        if (state.priority !== "all" && item.reviewPriority !== state.priority) return false;
+        if (state.source !== "all" && item.sourceCaptureId !== state.source) return false;
+        const text = `${item.sourceCaptureId} ${item.frameIndex} ${item.timestampMs} ${item.phase || ""} ${item.sampleKind}`.toLowerCase();
+        return !state.search || text.includes(state.search);
+      }).sort((a, b) => Number(b.reviewPriority === "high") - Number(a.reviewPriority === "high") || a.sourceCaptureId.localeCompare(b.sourceCaptureId) || a.frameIndex - b.frameIndex);
+    }
+
+    function renderQueue(autoSelect) {
+      const items = filteredItems();
+      const submitted = items.filter(item => item.status === "submitted").length;
+      dom["filter-progress"].textContent = `${submitted} / ${items.length}`;
+      dom["progress-bar"].style.width = `${items.length ? submitted / items.length * 100 : 0}%`;
+      dom.queue.innerHTML = `<div class="queue-count">${items.length} FROZEN FRAMES · CAPTURE-DISJOINT</div>` + (items.length ? items.map((item, index) => `
+        <button class="queue-card ${item.status} ${item.reviewItemId === state.selectedId ? "active" : ""}" data-id="${escapeHtml(item.reviewItemId)}" style="--i:${index}">
+          <span class="queue-glyph">${STATUS_GLYPH[item.status] || "○"}</span>
+          <span><span class="queue-title">F${String(item.frameIndex).padStart(6, "0")} · ${formatTime(item.timestampMs)}</span><span class="queue-meta">${escapeHtml(item.phase || item.sampleKind)} · ${item.reviewPriority === "high" ? "HIGH REVIEW" : item.capturePosition}</span></span>
+          <span class="queue-split">${item.split === "validation" ? "VAL" : item.split}</span>
+        </button>`).join("") : `<div class="empty">当前筛选没有复核帧。</div>`);
+      dom.queue.querySelectorAll("[data-id]").forEach(button => button.addEventListener("click", () => selectItem(button.dataset.id)));
+      if (autoSelect && items.length && !items.some(item => item.reviewItemId === state.selectedId)) selectItem(items[0].reviewItemId);
+    }
+
+    async function selectItem(id) {
+      const token = ++state.requestToken;
+      state.selectedId = id; state.detail = null; state.flash = ""; state.pointer = null; dom.loading.hidden = false; renderQueue(false);
+      const response = await fetch(`/api/review/equipment/item?id=${encodeURIComponent(id)}`);
+      if (!response.ok) throw new Error((await response.json()).error || "器械复核项加载失败");
+      const detail = await response.json(); if (token !== state.requestToken) return;
+      state.detail = detail;
+      const reviewerId = localStorage.getItem("maxpower.equipmentReviewerId") || "local-owner";
+      const latest = detail.latestByReviewer.find(event => event.reviewerId === reviewerId) || null;
+      state.target = latest?.target || "visible_barbell";
+      state.axis = structuredClone(latest?.axis || detail.item.proposal.axis);
+      state.occlusion = latest?.occlusion || "none";
+      state.truncated = latest?.truncated || false;
+      state.note = latest?.note || "";
+      dom["stage-img"].src = `${detail.imageUrl}&v=${detail.item.imageSha256.slice(0, 12)}`;
+      dom["source-chip"].textContent = `${SPLIT_LABEL[detail.item.split]} · ${detail.item.capturePosition}`;
+      dom["state-chip"].textContent = (latest?.reviewStatus || "unreviewed").toUpperCase();
+      dom["state-chip"].className = `chip ${latest?.reviewStatus === "submitted" ? "acid" : detail.item.proposal.reviewPriority === "high" ? "alert" : ""}`;
+      renderInspector(); draw();
+    }
+
+    function renderInspector() {
+      if (!state.detail) { dom.inspector.innerHTML = `<div class="empty">请选择器械帧。</div>`; return; }
+      const item = state.detail.item;
+      const reviewerId = localStorage.getItem("maxpower.equipmentReviewerId") || "local-owner";
+      const reviewerRole = localStorage.getItem("maxpower.equipmentReviewerRole") || "owner_observation";
+      dom.inspector.innerHTML = `
+        <div class="inspector-head">
+          <div class="case-number">FRAME ${String(item.frameIndex).padStart(6,"0")} · ${SPLIT_LABEL[item.split]}</div>
+          <h2 class="case-title">杠铃轴人工真值</h2>
+          <p class="case-id">${escapeHtml(item.reviewItemId)}</p>
+          <div class="policy">录像级 split 已冻结。TEST 标签只用于模型冻结后的评测，绝不能进入训练或阈值调优；本页面提交不会自动 promotion。</div>
+        </div>
+        <section class="section">
+          <p class="section-label">Target classification · 快捷键 1–5</p>
+          <div class="target-grid">${Object.entries(TARGETS).map(([key, value]) => `<button class="target-btn ${key !== "visible_barbell" ? "danger" : ""} ${state.target === key ? "active" : ""}" data-target="${key}">${value[0]}<small>${value[2]} · ${value[1]}</small></button>`).join("")}</div>
+          <div class="axis-readout" id="axis-readout"></div>
+        </section>
+        <section class="section">
+          <p class="section-label">Observation attributes</p>
+          <div class="form-grid">
+            <div class="field"><label for="reviewer-id">Reviewer ID</label><input id="reviewer-id" maxlength="64" value="${escapeHtml(reviewerId)}"></div>
+            <div class="field"><label for="reviewer-role">Role</label><select id="reviewer-role"><option value="owner_observation" ${reviewerRole === "owner_observation" ? "selected" : ""}>Owner observation</option><option value="vision_annotator" ${reviewerRole === "vision_annotator" ? "selected" : ""}>Vision annotator</option><option value="vision_reviewer" ${reviewerRole === "vision_reviewer" ? "selected" : ""}>Vision reviewer</option></select></div>
+            <div class="field"><label for="occlusion">遮挡</label><select id="occlusion"><option value="none" ${state.occlusion === "none" ? "selected" : ""}>无遮挡</option><option value="partial" ${state.occlusion === "partial" ? "selected" : ""}>部分遮挡</option><option value="heavy" ${state.occlusion === "heavy" ? "selected" : ""}>重度遮挡</option><option value="unknown" ${state.occlusion === "unknown" ? "selected" : ""}>未知</option></select></div>
+            <div class="field"><label>画面截断</label><label class="checkbox"><input id="truncated" type="checkbox" ${state.truncated ? "checked" : ""}> 杠铃轴被画面边缘截断</label></div>
+            <div class="field full"><label for="review-note">证据说明</label><textarea id="review-note" maxlength="1000" placeholder="说明遮挡、镜像、架位或无法确认的原因…">${escapeHtml(state.note)}</textarea></div>
+          </div>
+        </section>
+        <section class="section">
+          <p class="section-label">Frozen lineage</p>
+          <dl class="lineage">
+            <div class="lineage-row"><dt>capture</dt><dd>${escapeHtml(item.sourceCaptureId)}</dd></div>
+            <div class="lineage-row"><dt>image sha</dt><dd>${item.imageSha256}</dd></div>
+            <div class="lineage-row"><dt>queue sha</dt><dd>${state.detail.queueSha256}</dd></div>
+            <div class="lineage-row"><dt>proposal</dt><dd>${escapeHtml(item.proposal.source)} · confidence ratio ${Number(item.proposal.confidenceRatio).toFixed(3)}</dd></div>
+            <div class="lineage-row"><dt>priority</dt><dd>${item.proposal.reviewPriority}${item.proposal.reviewReason ? ` · ${escapeHtml(item.proposal.reviewReason)}` : ""}</dd></div>
+          </dl>
+        </section>
+        <section class="section">
+          <div class="flash ${state.flashKind}" id="flash">${escapeHtml(state.flash || "未保存。草稿与提交都会追加新事件，不覆盖历史。")}</div>
+          <div class="actions"><button class="action" id="save-draft" ${state.saving ? "disabled" : ""}>保存草稿</button><button class="action primary" id="submit-next" ${state.saving ? "disabled" : ""}>提交并下一帧 ⌘↵</button></div>
+        </section>`;
+      dom.inspector.querySelectorAll("[data-target]").forEach(button => button.addEventListener("click", () => setTarget(button.dataset.target)));
+      document.getElementById("occlusion").addEventListener("change", event => state.occlusion = event.target.value);
+      document.getElementById("truncated").addEventListener("change", event => state.truncated = event.target.checked);
+      document.getElementById("review-note").addEventListener("input", event => state.note = event.target.value);
+      document.getElementById("reviewer-id").addEventListener("change", event => { if (event.target.value.trim()) localStorage.setItem("maxpower.equipmentReviewerId", event.target.value.trim()); });
+      document.getElementById("reviewer-role").addEventListener("change", event => localStorage.setItem("maxpower.equipmentReviewerRole", event.target.value));
+      document.getElementById("save-draft").addEventListener("click", () => save("draft", false));
+      document.getElementById("submit-next").addEventListener("click", () => save("submitted", true));
+      renderAxisReadout();
+    }
+
+    function setTarget(target) {
+      state.target = target;
+      if (target === "visible_barbell" && !state.axis) state.axis = structuredClone(state.detail.item.proposal.axis);
+      renderInspector(); draw();
+    }
+
+    function renderAxisReadout() {
+      const node = document.getElementById("axis-readout"); if (!node) return;
+      if (state.target !== "visible_barbell" || !state.axis) { node.innerHTML = `<div class="axis-cell" style="grid-column:1/-1"><span>AXIS</span><strong>NOT APPLICABLE</strong></div>`; return; }
+      node.innerHTML = Object.entries(state.axis).map(([key, value]) => `<div class="axis-cell"><span>${key.toUpperCase()}</span><strong>${Number(value).toFixed(4)}</strong></div>`).join("");
+    }
+
+    async function save(reviewStatus, moveNext) {
+      if (!state.detail || state.saving) return;
+      const reviewerId = document.getElementById("reviewer-id").value.trim();
+      const reviewerRole = document.getElementById("reviewer-role").value;
+      const latest = state.detail.latestByReviewer.find(event => event.reviewerId === reviewerId) || null;
+      const visible = state.target === "visible_barbell";
+      state.saving = true; state.flash = "正在追加人工事件…"; state.flashKind = ""; renderInspector();
+      try {
+        const response = await fetch("/api/review/equipment", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          reviewItemId: state.detail.item.reviewItemId, reviewerId, reviewerRole, reviewStatus,
+          expectedPriorEventId: latest?.eventId || null, target: state.target,
+          equipmentKind: visible ? "barbell_shaft" : null, axis: visible ? state.axis : null,
+          occlusion: visible ? state.occlusion : "unknown", truncated: visible ? state.truncated : false, note: state.note
+        }) });
+        const body = await response.json(); if (!response.ok) throw new Error(body.error || "保存失败");
+        localStorage.setItem("maxpower.equipmentReviewerId", reviewerId);
+        localStorage.setItem("maxpower.equipmentReviewerRole", reviewerRole);
+        state.flash = `已追加 ${reviewStatus === "submitted" ? "正式" : "草稿"}事件 ${body.eventId}`; state.flashKind = "ok";
+        const indexResponse = await fetch("/api/review/equipment/index"); state.index = await indexResponse.json(); renderHeader(); renderQueue(false);
+        if (moveNext) { await step(1, true); return; }
+        await selectItem(state.selectedId);
+      } catch (error) {
+        state.flash = error.message || String(error); state.flashKind = "error";
+      } finally { state.saving = false; renderInspector(); }
+    }
+
+    async function step(direction, preferUnreviewed = false) {
+      const items = filteredItems(); if (!items.length) return;
+      const index = items.findIndex(item => item.reviewItemId === state.selectedId);
+      if (index < 0) {
+        const candidate = direction > 0 ? items[0] : items[items.length - 1];
+        if (!preferUnreviewed || candidate.status === "unreviewed") {
+          await selectItem(candidate.reviewItemId); return;
+        }
+      }
+      for (let count = 1; count <= items.length; count++) {
+        const candidate = items[(index + direction * count + items.length * 2) % items.length];
+        if (!preferUnreviewed || candidate.status === "unreviewed") { await selectItem(candidate.reviewItemId); return; }
+      }
+    }
+
+    function resizeCanvas() {
+      const rect = canvas.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function imageRect() {
+      const width = canvas.clientWidth, height = canvas.clientHeight;
+      const naturalWidth = dom["stage-img"].naturalWidth || 1, naturalHeight = dom["stage-img"].naturalHeight || 1;
+      const scale = Math.min(width / naturalWidth, height / naturalHeight);
+      const w = naturalWidth * scale, h = naturalHeight * scale;
+      return { x: (width - w) / 2, y: (height - h) / 2, w, h };
+    }
+
+    function screenPoint(point, rect = imageRect()) { return { x: rect.x + point.x * rect.w, y: rect.y + point.y * rect.h }; }
+    function normalizedPoint(event) {
+      const bounds = canvas.getBoundingClientRect(), rect = imageRect();
+      const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+      return { x: clamp((x - rect.x) / rect.w), y: clamp((y - rect.y) / rect.h), sx: x, sy: y, rect };
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight); if (!state.detail || !dom["stage-img"].complete) return;
+      const rect = imageRect(); const proposal = state.detail.item.proposal.axis;
+      drawAxis(proposal, rect, "#49dce9", true, "PSEUDO");
+      if (state.target === "visible_barbell" && state.axis) drawAxis(state.axis, rect, "#d8ff45", false, "HUMAN");
+      else {
+        ctx.save(); ctx.fillStyle = state.target === "ambiguous" ? "#ffc95b" : "#ff6949"; ctx.font = "800 13px SFMono-Regular, monospace"; ctx.textAlign = "center";
+        ctx.fillText((TARGETS[state.target]?.[0] || state.target).toUpperCase(), rect.x + rect.w / 2, rect.y + rect.h / 2); ctx.restore();
+      }
+    }
+
+    function drawAxis(axis, rect, color, dashed, label) {
+      const a = screenPoint({ x: axis.x1, y: axis.y1 }, rect), b = screenPoint({ x: axis.x2, y: axis.y2 }, rect);
+      ctx.save(); ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = dashed ? 2 : 3; ctx.setLineDash(dashed ? [7, 6] : []); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      if (!dashed) for (const point of [a,b]) { ctx.beginPath(); ctx.arc(point.x, point.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#07090a"; ctx.beginPath(); ctx.arc(point.x, point.y, 2.5, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = color; }
+      ctx.font = "800 9px SFMono-Regular, monospace"; ctx.fillText(label, a.x + 8, a.y - 9); ctx.restore();
+    }
+
+    function pointerDown(event) {
+      if (!state.axis || state.target !== "visible_barbell") return;
+      const p = normalizedPoint(event), a = screenPoint({x:state.axis.x1,y:state.axis.y1},p.rect), b = screenPoint({x:state.axis.x2,y:state.axis.y2},p.rect);
+      const da = Math.hypot(p.sx-a.x,p.sy-a.y), db = Math.hypot(p.sx-b.x,p.sy-b.y), line = pointLineDistance(p.sx,p.sy,a.x,a.y,b.x,b.y);
+      const mode = da < 22 ? "a" : db < 22 ? "b" : line < 20 ? "line" : "height";
+      state.pointer = { id:event.pointerId, mode, start:p, axis:structuredClone(state.axis) }; canvas.setPointerCapture(event.pointerId);
+      if (mode === "height") { state.axis.y1 = p.y; state.axis.y2 = p.y; renderAxisReadout(); draw(); }
+    }
+
+    function pointerMove(event) {
+      if (!state.pointer || state.pointer.id !== event.pointerId || !state.axis) return;
+      const p = normalizedPoint(event), start = state.pointer.start, original = state.pointer.axis;
+      if (state.pointer.mode === "a") { state.axis.x1 = Math.min(p.x, state.axis.x2 - .02); state.axis.y1 = p.y; }
+      else if (state.pointer.mode === "b") { state.axis.x2 = Math.max(p.x, state.axis.x1 + .02); state.axis.y2 = p.y; }
+      else if (state.pointer.mode === "line") {
+        const dx = p.x - start.x, dy = p.y - start.y;
+        const minDx = -original.x1, maxDx = 1 - original.x2, minDy = -Math.min(original.y1,original.y2), maxDy = 1 - Math.max(original.y1,original.y2);
+        const tx = Math.max(minDx,Math.min(maxDx,dx)), ty = Math.max(minDy,Math.min(maxDy,dy));
+        state.axis = { x1:original.x1+tx, y1:original.y1+ty, x2:original.x2+tx, y2:original.y2+ty };
+      }
+      renderAxisReadout(); draw();
+    }
+    function pointerUp(event) { if (state.pointer?.id === event.pointerId) state.pointer = null; }
+
+    function shortcut(event) {
+      const tag = event.target?.tagName?.toLowerCase(); if (["input","textarea","select"].includes(tag)) return;
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); save("submitted", true); return; }
+      if (event.key.toLowerCase() === "j") step(1);
+      else if (event.key.toLowerCase() === "k") step(-1);
+      else if (event.key.toLowerCase() === "r" && state.detail) { state.axis = structuredClone(state.detail.item.proposal.axis); state.target = "visible_barbell"; renderInspector(); draw(); }
+      else if (/^[1-5]$/.test(event.key)) { const target = Object.keys(TARGETS).find(key => TARGETS[key][2] === event.key); if (target) setTarget(target); }
+    }
+
+    function pointLineDistance(px,py,x1,y1,x2,y2) { const dx=x2-x1,dy=y2-y1,l=dx*dx+dy*dy||1,t=Math.max(0,Math.min(1,((px-x1)*dx+(py-y1)*dy)/l)); return Math.hypot(px-(x1+t*dx),py-(y1+t*dy)); }
+    function clamp(value) { return Math.max(0, Math.min(1, value)); }
+    function formatTime(ms) { const total=Math.max(0,Number(ms)||0),m=Math.floor(total/60000),s=Math.floor(total/1000)%60,x=Math.round(total%1000); return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(x).padStart(3,"0")}`; }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[char]); }
+    function fatal(error) { dom.loading.hidden = true; dom.queue.innerHTML = `<div class="empty">${escapeHtml(error.message || error)}</div>`; dom.inspector.innerHTML = `<div class="empty">复核台启动失败。请确认已运行 equipment review queue builder。</div>`; }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>卧推阶段真值台 · MaxPower</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #070a09;
+      --panel: #0d1211;
+      --panel-2: #121917;
+      --line: #2b3734;
+      --muted: #84918d;
+      --text: #e9efec;
+      --acid: #caff39;
+      --yellow: #ffd84a;
+      --cyan: #55dce7;
+      --orange: #ff6848;
+      --green: #66e39c;
+      --danger: #ff4f68;
+      --mono: "SFMono-Regular", "Roboto Mono", "IBM Plex Mono", Menlo, monospace;
+      --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body { margin: 0; min-height: 100%; background: var(--ink); color: var(--text); font-family: var(--sans); }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .24;
+      background-image: linear-gradient(rgba(202,255,57,.025) 1px, transparent 1px), linear-gradient(90deg, rgba(202,255,57,.025) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(to bottom, black, transparent 75%);
+    }
+
+    .app { min-height: 100vh; display: grid; grid-template-rows: auto 1fr; position: relative; }
+    .topbar {
+      min-height: 72px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px 22px;
+      background: rgba(7,10,9,.94);
+      backdrop-filter: blur(14px);
+      z-index: 5;
+    }
+    .brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+    .brand-mark {
+      width: 42px; height: 42px; display: grid; place-items: center;
+      background: var(--acid); color: #071006; font: 900 18px/1 var(--mono);
+      clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%);
+    }
+    .eyebrow { color: var(--acid); font: 700 11px/1.2 var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+    h1 { margin: 5px 0 0; font-size: clamp(17px, 2vw, 23px); line-height: 1.1; letter-spacing: -.02em; }
+    .policy {
+      max-width: 560px; color: var(--muted); font-size: 12px; line-height: 1.45;
+      border-left: 2px solid var(--yellow); padding-left: 12px;
+    }
+    .policy strong { color: var(--yellow); }
+
+    .workspace { display: grid; grid-template-columns: 238px minmax(0, 1fr) 310px; min-height: 0; }
+    .rail { background: rgba(10,14,13,.92); min-height: 0; overflow: auto; }
+    .capture-rail { border-right: 1px solid var(--line); }
+    .rep-rail { border-left: 1px solid var(--line); }
+    .rail-head { position: sticky; top: 0; background: #0a0e0d; z-index: 2; padding: 17px 16px 13px; border-bottom: 1px solid var(--line); }
+    .rail-title { font: 800 11px/1 var(--mono); color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+    .rail-stat { margin-top: 8px; font: 700 13px/1.2 var(--mono); }
+    .capture-list, .rep-list { padding: 8px; display: grid; gap: 7px; }
+    .capture-card, .rep-card {
+      width: 100%; border: 1px solid transparent; background: var(--panel); text-align: left; cursor: pointer;
+      padding: 12px; transition: .14s ease; position: relative;
+    }
+    .capture-card:hover, .rep-card:hover { border-color: #41504c; transform: translateX(2px); }
+    .capture-card.active, .rep-card.active { border-color: var(--acid); background: #151d16; box-shadow: inset 3px 0 var(--acid); }
+    .capture-index { font: 800 10px/1 var(--mono); color: var(--muted); }
+    .capture-view { margin-top: 7px; font-size: 14px; font-weight: 750; }
+    .capture-id { margin-top: 5px; color: var(--muted); font: 10px/1.3 var(--mono); overflow: hidden; text-overflow: ellipsis; }
+    .capture-meta { margin-top: 9px; display: flex; justify-content: space-between; align-items: center; font: 10px/1 var(--mono); }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 5px; background: #53605c; }
+    .status-dot.draft { background: var(--yellow); box-shadow: 0 0 8px rgba(255,216,74,.5); }
+    .status-dot.submitted { background: var(--green); box-shadow: 0 0 8px rgba(102,227,156,.5); }
+
+    main { min-width: 0; overflow: auto; padding: 18px; }
+    .video-shell { border: 1px solid var(--line); background: #020403; position: relative; min-height: 320px; }
+    .video-stage { position: relative; height: min(58vh, 670px); min-height: 330px; overflow: hidden; display: grid; place-items: center; }
+    video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      object-position: 50% 50%;
+      display: block;
+      background: #020403;
+    }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .stage-badge {
+      position: absolute; top: 14px; left: 14px; border: 1px solid var(--acid); background: rgba(7,10,9,.82);
+      color: var(--acid); padding: 9px 11px; font: 800 11px/1 var(--mono); letter-spacing: .08em;
+    }
+    .phase-badge {
+      position: absolute; top: 14px; right: 14px; min-width: 162px; background: rgba(7,10,9,.84); border: 1px solid var(--line);
+      padding: 10px 12px; text-align: right; backdrop-filter: blur(8px);
+    }
+    .phase-name { font: 900 16px/1 var(--mono); color: var(--cyan); }
+    .phase-rep { margin-top: 6px; color: var(--muted); font: 10px/1 var(--mono); }
+    .axis-readout {
+      position: absolute; left: 14px; bottom: 14px; color: #071006; background: var(--yellow); padding: 7px 9px;
+      font: 800 10px/1 var(--mono); box-shadow: 5px 5px 0 rgba(0,0,0,.45);
+    }
+    .layer-controls { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 5px; z-index: 3; }
+    .layer-toggle {
+      min-height: 26px; border: 1px solid #43504d; background: rgba(7,10,9,.82); color: var(--muted);
+      padding: 0 8px; cursor: pointer; font: 800 8px/1 var(--mono); letter-spacing: .04em;
+    }
+    .layer-toggle.active[data-layer="raw"] { border-color: var(--cyan); color: var(--cyan); background: rgba(85,220,231,.1); }
+    .layer-toggle.active[data-layer="rust"] { border-color: var(--acid); color: var(--acid); background: rgba(202,255,57,.1); }
+    .layer-toggle.active[data-layer="axis"] { border-color: var(--yellow); color: var(--yellow); background: rgba(255,216,74,.1); }
+    .pose-readout {
+      position: absolute; right: 12px; bottom: 44px; z-index: 3; max-width: 270px; text-align: right;
+      color: var(--text); background: rgba(7,10,9,.78); padding: 5px 7px; font: 700 8px/1.35 var(--mono);
+    }
+    .video-empty { position: absolute; inset: 0; display: none; place-items: center; color: var(--danger); font: 700 13px/1.4 var(--mono); background: #080909; }
+
+    .transport { border-top: 1px solid var(--line); padding: 12px 14px; display: grid; grid-template-columns: auto auto auto auto 1fr; gap: 9px; align-items: center; }
+    .btn {
+      border: 1px solid var(--line); background: #111715; min-height: 38px; padding: 0 13px; cursor: pointer;
+      font: 800 11px/1 var(--mono); letter-spacing: .03em; transition: .12s ease;
+    }
+    .btn:hover { border-color: var(--acid); color: var(--acid); }
+    .btn.primary { border-color: var(--acid); background: var(--acid); color: #071006; }
+    .btn.primary:hover { background: #bdf22f; color: #071006; }
+    .btn.warn { border-color: var(--yellow); color: var(--yellow); }
+    .btn.submit { border-color: var(--green); color: var(--green); }
+    .btn:disabled { opacity: .38; cursor: not-allowed; }
+    .play { width: 48px; padding: 0; font-size: 17px; }
+    .timecode { font: 800 12px/1 var(--mono); color: var(--text); justify-self: end; white-space: nowrap; }
+    .timecode span { color: var(--muted); }
+
+    .editor { margin-top: 14px; border: 1px solid var(--line); background: rgba(13,18,17,.92); }
+    .editor-head { display: flex; justify-content: space-between; gap: 20px; padding: 14px 15px; border-bottom: 1px solid var(--line); align-items: flex-start; }
+    .editor-title { font-size: 14px; font-weight: 800; }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font: 10px/1 var(--mono); }
+    .legend i { width: 9px; height: 9px; display: inline-block; margin-right: 6px; vertical-align: -1px; }
+    .timeline-wrap { padding: 18px 16px 14px; overflow-x: auto; }
+    .timeline { height: 132px; min-width: 700px; position: relative; border: 1px solid var(--line); background: #0a0f0e; touch-action: none; cursor: crosshair; }
+    .ticks { position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(90deg, rgba(132,145,141,.18) 1px, transparent 1px); background-size: 10% 100%; }
+    .range-track { position: absolute; top: 31px; height: 19px; border: 1px solid rgba(102,227,156,.72); background: rgba(102,227,156,.18); }
+    .range-track.active { background: rgba(102,227,156,.35); box-shadow: 0 0 0 1px var(--green); }
+    .algorithm-mark { position: absolute; top: 14px; width: 2px; height: 52px; background: var(--yellow); opacity: .75; pointer-events: none; }
+    .algorithm-mark::before { content: "A"; position: absolute; top: -11px; left: -3px; color: var(--yellow); font: 800 8px/1 var(--mono); }
+    .handle { position: absolute; width: 13px; height: 62px; top: 24px; transform: translateX(-50%); border: 0; padding: 0; cursor: ew-resize; z-index: 3; background: transparent; }
+    .handle::before { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 3px; background: var(--cyan); }
+    .handle::after { content: ""; position: absolute; left: 1px; top: -2px; width: 11px; height: 11px; background: var(--cyan); transform: rotate(45deg); }
+    .handle.turnaround::before, .handle.turnaround::after { background: var(--orange); }
+    .handle.turnaround.candidate::before, .handle.turnaround.candidate::after { background: var(--yellow); }
+    .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: white; z-index: 4; pointer-events: none; box-shadow: 0 0 6px white; }
+    .playhead::before { content: ""; position: absolute; top: -1px; left: -4px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 7px solid white; }
+    .timeline-label { position: absolute; bottom: 9px; transform: translateX(-50%); font: 800 9px/1 var(--mono); color: var(--muted); pointer-events: none; }
+    .timeline-help { padding: 0 16px 15px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+    .active-editor { border-top: 1px solid var(--line); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; padding: 16px; }
+    .active-copy h2 { margin: 0; font: 900 16px/1 var(--mono); }
+    .active-copy p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .timing-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 9px; }
+    .timing-field { border: 1px solid var(--line); padding: 9px; background: #0a0f0e; }
+    .timing-field label { color: var(--muted); display: block; font: 700 9px/1 var(--mono); text-transform: uppercase; }
+    .timing-field input { width: 100%; margin-top: 7px; border: 0; border-bottom: 1px solid #42504d; background: transparent; color: var(--text); font: 800 15px/1 var(--mono); outline: none; }
+    .timing-field.center { border-color: var(--yellow); }
+    .timing-field.center.confirmed { border-color: var(--green); }
+    .active-actions { display: grid; gap: 8px; align-content: center; min-width: 190px; }
+
+    .rep-rail { display: flex; flex-direction: column; overflow: hidden; }
+    .rep-rail .rail-head { flex: 0 0 auto; }
+    .rep-rail .rep-list { flex: 1 1 auto; min-height: 110px; overflow-y: auto; }
+    .annotation-dock {
+      flex: 0 0 auto;
+      display: block;
+      padding: 11px 13px;
+      background: #0b100f;
+      border-top: 1px solid var(--acid);
+    }
+    .dock-kicker { color: var(--acid); font: 800 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 8px; }
+    .annotation-dock .active-copy h2 { font-size: 13px; }
+    .annotation-dock .active-copy p { margin-top: 5px; font-size: 9px; line-height: 1.35; }
+    .annotation-dock .timing-grid { margin-top: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+    .annotation-dock .timing-field { padding: 6px; }
+    .annotation-dock .timing-field label { font-size: 8px; white-space: nowrap; }
+    .annotation-dock .timing-field input { margin-top: 4px; font-size: 11px; }
+    .annotation-dock .active-actions { margin-top: 8px; grid-template-columns: 1fr 1fr; gap: 6px; min-width: 0; }
+    .annotation-dock .active-actions .btn { padding: 0 7px; min-height: 32px; font-size: 9px; }
+
+    .rep-number { font: 900 13px/1 var(--mono); }
+    .rep-state { margin-top: 7px; font: 700 10px/1.25 var(--mono); color: var(--yellow); }
+    .rep-state.confirmed { color: var(--green); }
+    .rep-times { margin-top: 8px; color: var(--muted); font: 9px/1.5 var(--mono); }
+    .rep-card .mini-bar { margin-top: 9px; height: 3px; background: #27302e; overflow: hidden; }
+    .rep-card .mini-bar b { display: block; height: 100%; background: var(--yellow); width: 0; }
+    .rep-card.confirmed .mini-bar b { background: var(--green); width: 100%; }
+
+    .save-panel { flex: 0 0 auto; padding: 11px 13px; border-top: 1px solid var(--line); position: static; background: #0a0e0d; }
+    .save-progress { display: flex; justify-content: space-between; font: 800 10px/1 var(--mono); color: var(--muted); margin-bottom: 9px; }
+    .progress { height: 5px; background: #222b28; margin-bottom: 12px; }
+    .progress b { display: block; height: 100%; background: var(--green); transition: width .2s ease; }
+    .save-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .message { min-height: 16px; margin-top: 9px; color: var(--muted); font: 10px/1.35 var(--mono); }
+    .message.error { color: var(--danger); }
+    .message.ok { color: var(--green); }
+
+    .loading { min-height: 100vh; display: grid; place-items: center; font: 800 12px/1.5 var(--mono); color: var(--acid); }
+
+    .video-shell:fullscreen,
+    .video-shell:-webkit-full-screen {
+      width: 100vw;
+      height: 100vh;
+      border: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      background: #020403;
+    }
+    .video-shell:fullscreen .video-stage,
+    .video-shell:-webkit-full-screen .video-stage { height: auto; min-height: 0; }
+    body.focus-mode { overflow: hidden; }
+    body.focus-mode .topbar,
+    body.focus-mode .capture-rail,
+    body.focus-mode .rep-rail,
+    body.focus-mode .editor { display: none; }
+    body.focus-mode .workspace { display: block; }
+    body.focus-mode main { padding: 0; overflow: hidden; }
+    body.focus-mode .video-shell {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      border: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      background: #020403;
+    }
+    body.focus-mode .video-stage { height: auto; min-height: 0; }
+
+    @media (min-width: 1181px) {
+      .workspace { height: calc(100vh - 72px); overflow: hidden; }
+      .capture-rail, .rep-rail, main { height: 100%; }
+    }
+
+    @media (max-width: 1180px) {
+      .workspace { grid-template-columns: 190px minmax(0, 1fr); }
+      .rep-rail { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); max-height: 320px; }
+      .rep-list { grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); }
+      .save-panel { position: static; }
+    }
+    @media (max-width: 760px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .workspace { display: block; }
+      .capture-rail { border-right: 0; border-bottom: 1px solid var(--line); max-height: 220px; }
+      .capture-list { grid-template-columns: repeat(6, minmax(145px, 1fr)); overflow-x: auto; }
+      main { padding: 9px; }
+      .video-stage { height: 52vh; min-height: 280px; }
+      .transport { grid-template-columns: auto auto auto auto 1fr; overflow-x: auto; }
+      .timecode { grid-column: 1 / -1; justify-self: start; }
+      .active-editor { grid-template-columns: 1fr; }
+      .timing-grid { grid-template-columns: 1fr; }
+      .active-actions { grid-template-columns: 1fr 1fr; min-width: 0; }
+    }
+    @media (max-height: 800px) and (min-width: 761px) {
+      .topbar { min-height: 58px; padding: 8px 18px; }
+      .brand-mark { width: 36px; height: 36px; font-size: 15px; }
+      .eyebrow { font-size: 9px; }
+      h1 { margin-top: 3px; font-size: 18px; }
+      .policy { max-width: 500px; font-size: 10px; line-height: 1.35; }
+      main { padding: 10px; }
+      .video-stage { height: calc(100vh - 58px - 20px - 64px); min-height: 300px; }
+      .transport { padding: 8px 10px; }
+      .btn { min-height: 34px; }
+      .editor { margin-top: 10px; }
+      .rail-head { padding-top: 12px; padding-bottom: 10px; }
+      .workspace { height: calc(100vh - 58px); }
+      .rep-card { padding: 9px 11px; }
+      .rep-times { margin-top: 5px; }
+      .rep-card .mini-bar { margin-top: 6px; }
+    }
+
+    /* Annotation-first desktop: video + inspector above, precision timeline always visible below. */
+    @media (min-width: 1181px) {
+      .app { grid-template-rows: 52px minmax(0, 1fr); height: 100vh; overflow: hidden; }
+      .topbar { min-height: 52px; padding: 7px 16px; }
+      .brand-mark { width: 34px; height: 34px; font-size: 14px; }
+      .eyebrow { font-size: 8px; }
+      h1 { margin-top: 2px; font-size: 16px; }
+      .policy { max-width: 520px; font-size: 9px; line-height: 1.3; }
+      .workspace {
+        height: auto;
+        grid-template-columns: 190px minmax(0, 1fr) 310px;
+        grid-template-rows: minmax(0, 1fr) 188px;
+        overflow: hidden;
+      }
+      .capture-rail { grid-column: 1; grid-row: 1 / 3; height: auto; }
+      main { display: contents; }
+      .video-shell {
+        grid-column: 2;
+        grid-row: 1;
+        min-height: 0;
+        margin: 8px 8px 0;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) auto;
+      }
+      .video-stage { height: auto; min-height: 0; }
+      .rep-rail {
+        grid-column: 3;
+        grid-row: 1;
+        height: auto;
+        margin: 8px 8px 0 0;
+        border: 1px solid var(--line);
+      }
+      .editor {
+        grid-column: 2 / 4;
+        grid-row: 2;
+        min-width: 0;
+        margin: 8px;
+        overflow: hidden;
+      }
+      .editor-head { min-height: 40px; padding: 8px 11px; align-items: center; }
+      .editor-head > div > div[style] { display: none; }
+      .timeline-wrap { padding: 15px 11px 8px; }
+      .timeline { height: 98px; min-width: 650px; }
+      .timeline-help { display: none; }
+    }
+
+    /* Codex browser narrow pane: the first viewport is the annotation workflow, not a landing page. */
+    @media (max-width: 760px) {
+      html, body { height: 100%; overflow: hidden; }
+      .app { display: block; height: 100vh; overflow: hidden; }
+      .topbar { display: none; }
+      .workspace {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      main { display: contents; }
+      .capture-rail {
+        order: 1;
+        flex: 0 0 82px;
+        max-height: none;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        overflow: hidden;
+      }
+      .capture-rail .rail-head { position: static; height: 28px; padding: 4px 10px; display: flex; align-items: center; justify-content: space-between; }
+      .capture-rail .rail-stat { margin: 0; font-size: 11px; }
+      .capture-list { height: 54px; padding: 4px 6px; display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; }
+      .capture-card { flex: 0 0 142px; height: 46px; padding: 5px 8px; }
+      .capture-card:hover { transform: none; }
+      .capture-index { font-size: 8px; }
+      .capture-view { margin-top: 3px; font-size: 10px; }
+      .capture-id { display: none; }
+      .capture-meta { margin-top: 3px; font-size: 7px; }
+
+      .video-shell {
+        order: 2;
+        flex: 0 0 auto;
+        margin: 6px;
+        min-height: 0;
+      }
+      .video-stage { height: 360px; min-height: 0; }
+      .stage-badge { top: 8px; left: 8px; padding: 6px 8px; font-size: 8px; }
+      .phase-badge { top: 8px; right: 8px; min-width: 120px; padding: 7px 8px; }
+      .phase-name { font-size: 12px; }
+      .axis-readout { left: 8px; bottom: 8px; padding: 5px 7px; font-size: 8px; }
+      .layer-controls { right: 8px; bottom: 8px; }
+      .pose-readout { right: 8px; bottom: 39px; max-width: 230px; }
+      .transport { min-height: 42px; padding: 5px 7px; grid-template-columns: auto auto auto auto 1fr; overflow: hidden; }
+      .transport .btn { min-height: 32px; padding: 0 9px; font-size: 9px; }
+      .transport .play { width: 40px; }
+      .timecode { grid-column: auto; justify-self: end; font-size: 9px; }
+
+      .rep-rail {
+        order: 3;
+        flex: 0 0 auto;
+        max-height: none;
+        border: 0;
+        border-top: 1px solid var(--line);
+        overflow: visible;
+      }
+      .rep-rail .rail-head { display: none; }
+      .rep-rail .rep-list {
+        flex: 0 0 52px;
+        min-height: 52px;
+        padding: 5px 6px;
+        display: flex;
+        gap: 5px;
+        overflow-x: auto;
+        overflow-y: hidden;
+      }
+      .rep-card { flex: 0 0 108px; height: 42px; padding: 6px 8px; }
+      .rep-card:hover { transform: none; }
+      .rep-number { font-size: 9px; }
+      .rep-state { margin-top: 4px; font-size: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .rep-times, .rep-card .mini-bar { display: none; }
+
+      .annotation-dock {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(250px, .85fr);
+        gap: 7px 10px;
+        padding: 8px 10px;
+      }
+      .dock-kicker { grid-column: 1 / -1; margin: 0; font-size: 8px; }
+      .annotation-dock .active-copy p { display: none; }
+      .annotation-dock .timing-grid { margin-top: 6px; }
+      .annotation-dock .active-actions { margin: 0; align-self: end; }
+      .annotation-dock .active-actions .btn { min-height: 29px; }
+
+      .save-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 250px;
+        grid-template-areas: "progress buttons" "message buttons";
+        gap: 4px 10px;
+        padding: 7px 10px;
+      }
+      .save-progress { grid-area: progress; margin: 0; align-self: end; }
+      .progress { grid-area: message; height: 4px; margin: 4px 0 0; }
+      .save-buttons { grid-area: buttons; align-self: center; }
+      .save-buttons .btn { min-height: 31px; font-size: 9px; }
+      .message { display: none; }
+
+      .editor {
+        order: 4;
+        flex: 0 0 160px;
+        margin: 6px;
+        overflow: hidden;
+      }
+      .editor-head { padding: 7px 9px; }
+      .editor-title { font-size: 11px; }
+      .editor-head > div > div[style], .timeline-help { display: none; }
+      .legend { gap: 7px; font-size: 7px; }
+      .timeline-wrap { padding: 14px 8px 7px; }
+      .timeline { height: 96px; min-width: 680px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">正在装载卧推阶段证据…</div>
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">MP</div>
+        <div>
+          <div class="eyebrow">Motion truth station / Bench press</div>
+          <h1>卧推离心・底部换向・向心标注台</h1>
+        </div>
+      </div>
+      <div class="policy"><strong>真值边界：</strong>绿色区间是你原来标注的动作起止；黄色竖线只是杠铃轨迹算法候选。每一组必须由你确认或调整后，才会成为换向点真值。</div>
+    </header>
+
+    <div class="workspace">
+      <aside class="rail capture-rail">
+        <div class="rail-head">
+          <div class="rail-title">视频集 / Capture set</div>
+          <div id="captureStat" class="rail-stat">—</div>
+        </div>
+        <div id="captureList" class="capture-list"></div>
+      </aside>
+
+      <main>
+        <section class="video-shell">
+          <div id="videoStage" class="video-stage">
+            <video id="video" playsinline preload="metadata"></video>
+            <canvas id="overlay"></canvas>
+            <div id="stageBadge" class="stage-badge">PERSONAL · BARBELL BENCH</div>
+            <div class="phase-badge"><div id="phaseName" class="phase-name">等待播放</div><div id="phaseRep" class="phase-rep">—</div></div>
+            <div id="axisReadout" class="axis-readout">BAR AXIS · —</div>
+            <div id="poseReadout" class="pose-readout">POSE · 等待逐帧数据</div>
+            <div class="layer-controls" aria-label="识别图层">
+              <button class="layer-toggle active" data-layer="raw" type="button">RTMPOSE</button>
+              <button class="layer-toggle" data-layer="rust" type="button">RUST</button>
+              <button class="layer-toggle active" data-layer="axis" type="button">BAR</button>
+            </div>
+            <div id="videoEmpty" class="video-empty">视频无法播放，请检查本地素材。</div>
+          </div>
+          <div class="transport">
+            <button id="playButton" class="btn primary play" type="button" aria-label="播放">▶</button>
+            <button id="prevFrame" class="btn" type="button">−1F</button>
+            <button id="nextFrame" class="btn" type="button">+1F</button>
+            <button id="fullscreenButton" class="btn" type="button" aria-label="全屏显示">⛶ 全屏</button>
+            <div id="timecode" class="timecode">00:00.000 <span>/ 00:00.000</span></div>
+          </div>
+        </section>
+
+        <section class="editor">
+          <div class="editor-head">
+            <div>
+              <div class="editor-title">整段时间轴</div>
+              <div style="margin-top:6px;color:var(--muted);font-size:11px">点击任意位置跳转；拖动蓝色起止点或橙/黄色换向点。</div>
+            </div>
+            <div class="legend">
+              <span><i style="background:var(--green)"></i>人工起止区间</span>
+              <span><i style="background:var(--yellow)"></i>算法候选</span>
+              <span><i style="background:var(--orange)"></i>人工换向点</span>
+              <span><i style="background:var(--cyan)"></i>区间边界</span>
+            </div>
+          </div>
+          <div class="timeline-wrap"><div id="timeline" class="timeline"><div class="ticks"></div><div id="playhead" class="playhead"></div></div></div>
+          <div class="timeline-help">拖动换向点 = 人工调整；如果黄色候选本来就正确，请点击“确认黄色候选”。两种操作都保留各自来源，不会混成算法自动真值。</div>
+        </section>
+      </main>
+
+      <aside class="rail rep-rail">
+        <div class="rail-head">
+          <div class="rail-title">逐次复核 / Repetitions</div>
+          <div id="repStat" class="rail-stat">—</div>
+        </div>
+        <div id="repList" class="rep-list"></div>
+        <div class="annotation-dock active-editor">
+          <div class="dock-kicker">标注当前帧 / Annotate while watching</div>
+          <div class="active-copy">
+            <h2 id="activeTitle">REP —</h2>
+            <p id="activeDescription">选择一组开始复核。</p>
+            <div class="timing-grid">
+              <div class="timing-field"><label>开始 ms</label><input id="startInput" type="number" step="1"></div>
+              <div id="turnaroundField" class="timing-field center"><label>换向 ms</label><input id="turnaroundInput" type="number" step="1"></div>
+              <div class="timing-field"><label>结束 ms</label><input id="endInput" type="number" step="1"></div>
+            </div>
+          </div>
+          <div class="active-actions">
+            <button id="setStart" class="btn" type="button">1 · 当前帧＝开始</button>
+            <button id="setTurnaround" class="btn warn" type="button">2 · 当前帧＝换向</button>
+            <button id="setEnd" class="btn" type="button">3 · 当前帧＝结束</button>
+            <button id="confirmCandidate" class="btn submit" type="button">C · 确认黄色候选</button>
+          </div>
+        </div>
+        <div class="save-panel">
+          <div class="save-progress"><span>人工换向真值</span><span id="confirmedText">0 / 0</span></div>
+          <div class="progress"><b id="progressBar" style="width:0"></b></div>
+          <div class="save-buttons">
+            <button id="saveDraft" class="btn" type="button">保存草稿</button>
+            <button id="submitReview" class="btn submit" type="button" disabled>提交真值</button>
+          </div>
+          <div id="message" class="message">尚未保存</div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      index: null,
+      detail: null,
+      captureId: null,
+      activeRep: 0,
+      reps: [],
+      expectedPriorEventId: null,
+      reviewerId: "owner",
+      dragging: null,
+      dirty: false,
+      layers: { raw: true, rust: false, axis: true },
+    };
+    const video = $("video");
+    const canvas = $("overlay");
+    const context = canvas.getContext("2d");
+    const timeline = $("timeline");
+
+    async function requestJson(url, options) {
+      const response = await fetch(url, options);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      return payload;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+    }
+
+    function formatMs(value) {
+      const ms = Math.max(0, Math.round(Number(value) || 0));
+      const minutes = Math.floor(ms / 60000);
+      const seconds = Math.floor((ms % 60000) / 1000);
+      const millis = ms % 1000;
+      return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
+    }
+
+    function pct(ms) {
+      return `${Math.max(0, Math.min(100, ms / state.detail.capture.durationMs * 100))}%`;
+    }
+
+    function isConfirmed(rep) {
+      return rep.turnaroundSource !== "algorithm_candidate";
+    }
+
+    async function init() {
+      state.index = await requestJson("/api/review/bench-phase/index");
+      renderCaptureList();
+      const first = state.index.items[0];
+      if (!first) throw new Error("没有可复核的视频");
+      await loadCapture(first.captureId);
+      $("loading").hidden = true;
+      $("app").hidden = false;
+      requestAnimationFrame(resizeOverlay);
+    }
+
+    function renderCaptureList() {
+      const { items, stats } = state.index;
+      $("captureStat").textContent = `${stats.captureCount} 条 · ${stats.repCount} reps`;
+      $("captureList").innerHTML = items.map((item, index) => `
+        <button class="capture-card ${item.captureId === state.captureId ? "active" : ""}" data-capture="${escapeHtml(item.captureId)}" type="button">
+          <div class="capture-index">CAPTURE ${String(index + 1).padStart(2, "0")}</div>
+          <div class="capture-view">${escapeHtml(item.capturePosition)}</div>
+          <div class="capture-id">${escapeHtml(item.captureId)}</div>
+          <div class="capture-meta"><span><i class="status-dot ${item.status}"></i>${item.status}</span><span>${item.repCount} reps</span></div>
+        </button>`).join("");
+      $("captureList").querySelectorAll("[data-capture]").forEach((button) => button.addEventListener("click", () => loadCapture(button.dataset.capture)));
+    }
+
+    async function loadCapture(captureId) {
+      if (state.dirty && captureId !== state.captureId && !window.confirm("当前视频有未保存修改，确定切换吗？")) return;
+      video.pause();
+      setMessage("正在读取视频证据…");
+      const detail = await requestJson(`/api/review/bench-phase/item?id=${encodeURIComponent(captureId)}`);
+      state.captureId = captureId;
+      state.detail = detail;
+      state.activeRep = 0;
+      const latest = detail.latestByReviewer.find((event) => event.reviewerId === state.reviewerId) || null;
+      state.expectedPriorEventId = latest ? latest.eventId : null;
+      if (latest) {
+        state.reps = latest.reps.map((rep) => ({ ...rep }));
+      } else {
+        state.reps = detail.humanRanges.map((range, index) => ({
+          repIndex: range.repIndex,
+          startMs: range.startMs,
+          turnaroundMs: detail.algorithmSegments[index].turnaroundMs,
+          endMs: range.endMs,
+          turnaroundSource: "algorithm_candidate",
+          note: "",
+        }));
+      }
+      state.dirty = false;
+      video.src = detail.videoUrl;
+      video.load();
+      video.currentTime = state.reps[0].startMs / 1000;
+      renderCaptureList();
+      renderAll();
+      setMessage(latest ? `已载入 ${latest.reviewStatus === "submitted" ? "已提交真值" : "草稿"}` : "尚未保存");
+    }
+
+    function renderAll() {
+      renderRepList();
+      renderTimeline();
+      renderActiveEditor();
+      renderSaveState();
+      updatePlaybackUi();
+      drawOverlay();
+    }
+
+    function renderRepList() {
+      const confirmed = state.reps.filter(isConfirmed).length;
+      $("repStat").textContent = `${confirmed}/${state.reps.length} 已确认`;
+      $("repList").innerHTML = state.reps.map((rep, index) => `
+        <button class="rep-card ${index === state.activeRep ? "active" : ""} ${isConfirmed(rep) ? "confirmed" : ""}" data-rep="${index}" type="button">
+          <div class="rep-number">REP ${String(rep.repIndex).padStart(2, "0")}</div>
+          <div class="rep-state ${isConfirmed(rep) ? "confirmed" : ""}">${sourceLabel(rep.turnaroundSource)}</div>
+          <div class="rep-times">${formatMs(rep.startMs)} → ${formatMs(rep.turnaroundMs)} → ${formatMs(rep.endMs)}</div>
+          <div class="mini-bar"><b></b></div>
+        </button>`).join("");
+      $("repList").querySelectorAll("[data-rep]").forEach((button) => button.addEventListener("click", () => selectRep(Number(button.dataset.rep), true)));
+    }
+
+    function renderTimeline() {
+      timeline.querySelectorAll(".range-track,.algorithm-mark,.handle,.timeline-label").forEach((node) => node.remove());
+      state.reps.forEach((rep, index) => {
+        const algorithm = state.detail.algorithmSegments[index];
+        const range = document.createElement("div");
+        range.className = `range-track ${index === state.activeRep ? "active" : ""}`;
+        range.style.left = pct(rep.startMs);
+        range.style.width = pct(rep.endMs - rep.startMs);
+        range.dataset.selectRep = String(index);
+        timeline.appendChild(range);
+
+        const algorithmMark = document.createElement("div");
+        algorithmMark.className = "algorithm-mark";
+        algorithmMark.style.left = pct(algorithm.turnaroundMs);
+        timeline.appendChild(algorithmMark);
+
+        for (const kind of ["start", "turnaround", "end"]) {
+          const handle = document.createElement("button");
+          handle.type = "button";
+          handle.className = `handle ${kind === "turnaround" ? `turnaround ${isConfirmed(rep) ? "" : "candidate"}` : ""}`;
+          handle.style.left = pct(rep[`${kind}Ms`]);
+          handle.dataset.rep = String(index);
+          handle.dataset.kind = kind;
+          handle.title = `REP ${rep.repIndex} ${kind}`;
+          timeline.appendChild(handle);
+        }
+
+        const label = document.createElement("div");
+        label.className = "timeline-label";
+        label.style.left = pct((rep.startMs + rep.endMs) / 2);
+        label.textContent = `R${rep.repIndex}`;
+        timeline.appendChild(label);
+      });
+    }
+
+    function renderActiveEditor() {
+      const rep = state.reps[state.activeRep];
+      const algorithm = state.detail.algorithmSegments[state.activeRep];
+      $("activeTitle").textContent = `REP ${String(rep.repIndex).padStart(2, "0")} · ${sourceLabel(rep.turnaroundSource)}`;
+      $("activeDescription").textContent = `算法候选 ${formatMs(algorithm.turnaroundMs)}，杠铃轴平均置信度 ${algorithm.meanAxisConfidence.toFixed(3)}。原人工数据只提供起止区间。`;
+      $("startInput").value = Math.round(rep.startMs);
+      $("turnaroundInput").value = Math.round(rep.turnaroundMs);
+      $("endInput").value = Math.round(rep.endMs);
+      $("turnaroundField").classList.toggle("confirmed", isConfirmed(rep));
+      $("confirmCandidate").disabled = rep.turnaroundSource === "human_confirmed_candidate" && rep.turnaroundMs === algorithm.turnaroundMs;
+    }
+
+    function renderSaveState() {
+      const confirmed = state.reps.filter(isConfirmed).length;
+      const total = state.reps.length;
+      $("confirmedText").textContent = `${confirmed} / ${total}`;
+      $("progressBar").style.width = `${total ? confirmed / total * 100 : 0}%`;
+      $("submitReview").disabled = confirmed !== total;
+    }
+
+    function selectRep(index, seek) {
+      state.activeRep = Math.max(0, Math.min(state.reps.length - 1, index));
+      if (seek) video.currentTime = state.reps[state.activeRep].startMs / 1000;
+      renderRepList();
+      renderTimeline();
+      renderActiveEditor();
+      updatePlaybackUi();
+    }
+
+    function sourceLabel(source) {
+      if (source === "human_adjusted") return "人工已调整";
+      if (source === "human_confirmed_candidate") return "人工确认候选";
+      return "待确认 · 算法候选";
+    }
+
+    function updateRep(kind, value, source) {
+      const rep = state.reps[state.activeRep];
+      const ms = Math.round(Number(value));
+      if (!Number.isFinite(ms)) return;
+      if (kind === "start") rep.startMs = Math.max(0, Math.min(ms, rep.turnaroundMs - 34));
+      if (kind === "turnaround") {
+        rep.turnaroundMs = Math.max(rep.startMs + 34, Math.min(ms, rep.endMs - 34));
+        rep.turnaroundSource = source || "human_adjusted";
+      }
+      if (kind === "end") rep.endMs = Math.max(rep.turnaroundMs + 34, Math.min(ms, state.detail.capture.durationMs));
+      state.dirty = true;
+      renderRepList();
+      renderTimeline();
+      renderActiveEditor();
+      renderSaveState();
+      setMessage("有未保存修改");
+    }
+
+    function setCurrent(kind) {
+      updateRep(kind, video.currentTime * 1000, "human_adjusted");
+    }
+
+    function confirmCandidate() {
+      const algorithm = state.detail.algorithmSegments[state.activeRep];
+      const rep = state.reps[state.activeRep];
+      rep.turnaroundMs = algorithm.turnaroundMs;
+      rep.turnaroundSource = "human_confirmed_candidate";
+      state.dirty = true;
+      renderAll();
+      setMessage(`REP ${rep.repIndex} 已人工确认算法候选`);
+    }
+
+    async function save(reviewStatus) {
+      try {
+        $("saveDraft").disabled = true;
+        $("submitReview").disabled = true;
+        setMessage(reviewStatus === "submitted" ? "正在提交人工真值…" : "正在保存草稿…");
+        const event = await requestJson("/api/review/bench-phase", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            captureId: state.captureId,
+            reviewerId: state.reviewerId,
+            reviewStatus,
+            expectedPriorEventId: state.expectedPriorEventId,
+            reps: state.reps.map(({ repIndex, startMs, turnaroundMs, endMs, turnaroundSource, note }) => ({ repIndex, startMs, turnaroundMs, endMs, turnaroundSource, note: note || "" })),
+            note: "卧推阶段人工复核",
+          }),
+        });
+        state.expectedPriorEventId = event.eventId;
+        state.reps = event.reps.map((rep) => ({ ...rep }));
+        state.dirty = false;
+        const item = state.index.items.find((candidate) => candidate.captureId === state.captureId);
+        if (item) {
+          item.status = reviewStatus;
+          item.confirmedRepCount = event.reps.filter((rep) => rep.humanTruth).length;
+        }
+        renderAll();
+        renderCaptureList();
+        setMessage(reviewStatus === "submitted" ? "人工真值已追加保存，可用于后续训练" : "草稿已追加保存", "ok");
+      } catch (error) {
+        setMessage(error.message || String(error), "error");
+      } finally {
+        $("saveDraft").disabled = false;
+        renderSaveState();
+      }
+    }
+
+    function setMessage(text, kind) {
+      const node = $("message");
+      node.textContent = text;
+      node.className = `message ${kind || ""}`;
+    }
+
+    function fullscreenActive() {
+      return Boolean(document.fullscreenElement || document.webkitFullscreenElement || document.body.classList.contains("focus-mode"));
+    }
+
+    function updateFullscreenButton() {
+      const active = fullscreenActive();
+      $("fullscreenButton").textContent = active ? "✕ 退出全屏" : "⛶ 全屏";
+      $("fullscreenButton").setAttribute("aria-label", active ? "退出全屏" : "全屏显示");
+      requestAnimationFrame(resizeOverlay);
+    }
+
+    async function toggleFullscreen() {
+      const shell = document.querySelector(".video-shell");
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) await exit.call(document);
+        return;
+      }
+      if (document.body.classList.contains("focus-mode")) {
+        document.body.classList.remove("focus-mode");
+        updateFullscreenButton();
+        return;
+      }
+      const enter = shell.requestFullscreen || shell.webkitRequestFullscreen;
+      if (enter) {
+        try {
+          await enter.call(shell);
+          return;
+        } catch (_) {
+          // Codex 内置浏览器可能禁用原生 Fullscreen API，自动退回沉浸模式。
+        }
+      }
+      document.body.classList.add("focus-mode");
+      updateFullscreenButton();
+    }
+
+    function phaseAt(ms) {
+      for (let index = 0; index < state.reps.length; index += 1) {
+        const rep = state.reps[index];
+        if (ms >= rep.startMs && ms <= rep.endMs) {
+          return { index, name: ms <= rep.turnaroundMs ? "离心下降" : "向心推起" };
+        }
+      }
+      return { index: null, name: "组间 / 准备" };
+    }
+
+    function updatePlaybackUi() {
+      if (!state.detail) return;
+      const currentMs = video.currentTime * 1000;
+      $("timecode").innerHTML = `${formatMs(currentMs)} <span>/ ${formatMs(state.detail.capture.durationMs)}</span>`;
+      $("playButton").textContent = video.paused ? "▶" : "Ⅱ";
+      $("playhead").style.left = pct(currentMs);
+      const phase = phaseAt(currentMs);
+      $("phaseName").textContent = phase.name;
+      $("phaseRep").textContent = phase.index === null ? state.detail.capture.capturePosition : `REP ${phase.index + 1} · ${formatMs(currentMs)}`;
+    }
+
+    function nearestFrame(frames, ms) {
+      if (!frames.length) return null;
+      let low = 0, high = frames.length - 1;
+      while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        if (frames[mid].timestampMs < ms) low = mid + 1; else high = mid;
+      }
+      const a = frames[low];
+      const b = frames[Math.max(0, low - 1)];
+      return Math.abs(a.timestampMs - ms) < Math.abs(b.timestampMs - ms) ? a : b;
+    }
+
+    const HALPE26_EDGES = [
+      [0,1],[0,2],[1,3],[2,4],
+      [5,7],[7,9],[6,8],[8,10],[5,6],[5,11],[6,12],[11,12],
+      [11,13],[13,15],[12,14],[14,16],
+      [17,18],[18,5],[18,6],[18,19],[19,11],[19,12],
+      [15,20],[15,22],[15,24],[20,22],[16,21],[16,23],[16,25],[21,23]
+    ];
+
+    function pointPosition(point, transform) {
+      if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+      return {
+        x: transform.offsetX + point.x * transform.renderedWidth,
+        y: transform.offsetY + point.y * transform.renderedHeight,
+      };
+    }
+
+    function drawRawPose(points, transform) {
+      context.save();
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.lineWidth = 2;
+      for (const [from, to] of HALPE26_EDGES) {
+        const a = points[from], b = points[to];
+        const pa = pointPosition(a, transform), pb = pointPosition(b, transform);
+        if (!pa || !pb || Math.min(a.visibility, b.visibility) < .15) continue;
+        const confidence = Math.min(a.visibility, b.visibility);
+        context.strokeStyle = confidence < .35 ? `rgba(255,104,72,${.45 + confidence})` : `rgba(85,220,231,${.35 + confidence * .65})`;
+        context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
+      }
+      points.forEach((point) => {
+        const position = pointPosition(point, transform);
+        if (!position || point.visibility < .15) return;
+        context.fillStyle = point.visibility < .35 ? "#ff6848" : "#55dce7";
+        context.beginPath(); context.arc(position.x, position.y, point.visibility < .35 ? 2.2 : 3.1, 0, Math.PI * 2); context.fill();
+      });
+      context.restore();
+    }
+
+    function drawRustPose(points, transform) {
+      context.save();
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.lineWidth = 2.5;
+      for (const [from, to] of HALPE26_EDGES) {
+        const a = points[from], b = points[to];
+        if (!a?.renderable || !b?.renderable) continue;
+        const pa = pointPosition(a, transform), pb = pointPosition(b, transform);
+        if (!pa || !pb) continue;
+        const predicted = a.predicted || b.predicted;
+        context.setLineDash(predicted ? [5, 4] : []);
+        context.strokeStyle = predicted ? "rgba(255,104,72,.95)" : "rgba(202,255,57,.92)";
+        context.beginPath(); context.moveTo(pa.x, pa.y); context.lineTo(pb.x, pb.y); context.stroke();
+      }
+      context.setLineDash([]);
+      points.forEach((point) => {
+        if (!point?.renderable) return;
+        const position = pointPosition(point, transform);
+        if (!position) return;
+        context.fillStyle = point.predicted ? "#ff6848" : point.usable ? "#caff39" : "#ffd84a";
+        context.beginPath(); context.arc(position.x, position.y, 3.4, 0, Math.PI * 2); context.fill();
+      });
+      context.restore();
+    }
+
+    function resizeOverlay() {
+      const rect = $("videoStage").getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(rect.width * ratio));
+      canvas.height = Math.max(1, Math.round(rect.height * ratio));
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      drawOverlay();
+    }
+
+    function drawOverlay() {
+      if (!state.detail || !video.videoWidth || !video.videoHeight) return;
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      context.clearRect(0, 0, width, height);
+      const frame = nearestFrame(state.detail.axisFrames, video.currentTime * 1000);
+      const rustFrame = nearestFrame(state.detail.rustCanonicalFrames || [], video.currentTime * 1000);
+      if (!frame) return;
+      const scale = Math.min(width / video.videoWidth, height / video.videoHeight);
+      const transform = {
+        renderedWidth: video.videoWidth * scale,
+        renderedHeight: video.videoHeight * scale,
+        offsetX: (width - video.videoWidth * scale) / 2,
+        offsetY: (height - video.videoHeight * scale) / 2,
+      };
+      if (state.layers.raw) drawRawPose(frame.landmarks || [], transform);
+      if (state.layers.rust && rustFrame) drawRustPose(rustFrame.landmarks || [], transform);
+      if (state.layers.axis && frame.axis) {
+        const axis = frame.axis;
+        const x1 = transform.offsetX + axis.x1 * transform.renderedWidth;
+        const y1 = transform.offsetY + axis.y1 * transform.renderedHeight;
+        const x2 = transform.offsetX + axis.x2 * transform.renderedWidth;
+        const y2 = transform.offsetY + axis.y2 * transform.renderedHeight;
+        context.save();
+        context.strokeStyle = "rgba(0,0,0,.72)";
+        context.lineWidth = 8;
+        context.beginPath(); context.moveTo(x1, y1); context.lineTo(x2, y2); context.stroke();
+        context.strokeStyle = axis.source === "measured" ? "#ffd84a" : "#55dce7";
+        context.lineWidth = 3;
+        context.beginPath(); context.moveTo(x1, y1); context.lineTo(x2, y2); context.stroke();
+        context.fillStyle = context.strokeStyle;
+        for (const [x, y] of [[x1, y1], [x2, y2]]) { context.beginPath(); context.arc(x, y, 5, 0, Math.PI * 2); context.fill(); }
+        context.restore();
+      }
+      const rawVisible = (frame.landmarks || []).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y) && point.visibility >= .15).length;
+      const rustRenderable = (rustFrame?.landmarks || []).filter((point) => point.renderable).length;
+      const rustUsable = (rustFrame?.landmarks || []).filter((point) => point.usable).length;
+      $("poseReadout").textContent = `RTMPOSE ${rawVisible}/26 · RUST ${rustUsable} usable / ${rustRenderable} shown · ${frame.fusionStatus}`;
+      $("axisReadout").textContent = frame.axis ? `BAR AXIS · ${frame.axis.source.toUpperCase()} · ${(frame.axis.confidence * 100).toFixed(0)}%` : "BAR AXIS · 未测得";
+      $("axisReadout").style.display = state.layers.axis ? "block" : "none";
+    }
+
+    function onVideoFrame() {
+      updatePlaybackUi();
+      drawOverlay();
+      if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(onVideoFrame);
+    }
+
+    $("playButton").addEventListener("click", () => video.paused ? video.play() : video.pause());
+    $("prevFrame").addEventListener("click", () => { video.pause(); video.currentTime = Math.max(0, video.currentTime - 1 / 30); });
+    $("nextFrame").addEventListener("click", () => { video.pause(); video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1 / 30); });
+    $("fullscreenButton").addEventListener("click", toggleFullscreen);
+    $("setStart").addEventListener("click", () => setCurrent("start"));
+    $("setTurnaround").addEventListener("click", () => setCurrent("turnaround"));
+    $("setEnd").addEventListener("click", () => setCurrent("end"));
+    $("confirmCandidate").addEventListener("click", confirmCandidate);
+    $("saveDraft").addEventListener("click", () => save("draft"));
+    $("submitReview").addEventListener("click", () => save("submitted"));
+    $("startInput").addEventListener("change", (event) => updateRep("start", event.target.value));
+    $("turnaroundInput").addEventListener("change", (event) => updateRep("turnaround", event.target.value, "human_adjusted"));
+    $("endInput").addEventListener("change", (event) => updateRep("end", event.target.value));
+    document.querySelectorAll("[data-layer]").forEach((button) => button.addEventListener("click", () => {
+      const layer = button.dataset.layer;
+      state.layers[layer] = !state.layers[layer];
+      button.classList.toggle("active", state.layers[layer]);
+      drawOverlay();
+    }));
+
+    timeline.addEventListener("pointerdown", (event) => {
+      const handle = event.target.closest(".handle");
+      if (handle) {
+        state.activeRep = Number(handle.dataset.rep);
+        state.dragging = { pointerId: event.pointerId, kind: handle.dataset.kind };
+        timeline.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        selectRep(state.activeRep, false);
+        return;
+      }
+      const rect = timeline.getBoundingClientRect();
+      video.currentTime = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * state.detail.capture.durationMs / 1000;
+    });
+    timeline.addEventListener("pointermove", (event) => {
+      if (!state.dragging || event.pointerId !== state.dragging.pointerId) return;
+      const rect = timeline.getBoundingClientRect();
+      const ms = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * state.detail.capture.durationMs;
+      updateRep(state.dragging.kind, ms, state.dragging.kind === "turnaround" ? "human_adjusted" : undefined);
+      video.currentTime = ms / 1000;
+    });
+    timeline.addEventListener("pointerup", () => { state.dragging = null; });
+    timeline.addEventListener("pointercancel", () => { state.dragging = null; });
+
+    video.addEventListener("play", updatePlaybackUi);
+    video.addEventListener("pause", updatePlaybackUi);
+    video.addEventListener("seeked", () => { updatePlaybackUi(); drawOverlay(); });
+    video.addEventListener("timeupdate", updatePlaybackUi);
+    video.addEventListener("loadedmetadata", () => { $("videoEmpty").style.display = "none"; resizeOverlay(); updatePlaybackUi(); });
+    video.addEventListener("error", () => { $("videoEmpty").style.display = "grid"; });
+    video.addEventListener("dblclick", toggleFullscreen);
+    document.addEventListener("fullscreenchange", updateFullscreenButton);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenButton);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && document.body.classList.contains("focus-mode")) {
+        document.body.classList.remove("focus-mode");
+        updateFullscreenButton();
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+      if (event.code === "Space") {
+        event.preventDefault();
+        video.paused ? video.play() : video.pause();
+      } else if (event.code === "ArrowLeft") {
+        event.preventDefault();
+        video.pause();
+        video.currentTime = Math.max(0, video.currentTime - 1 / 30);
+      } else if (event.code === "ArrowRight") {
+        event.preventDefault();
+        video.pause();
+        video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 1 / 30);
+      } else if (event.code === "Digit1") {
+        event.preventDefault();
+        setCurrent("start");
+      } else if (event.code === "Digit2") {
+        event.preventDefault();
+        setCurrent("turnaround");
+      } else if (event.code === "Digit3") {
+        event.preventDefault();
+        setCurrent("end");
+      } else if (event.code === "KeyC") {
+        event.preventDefault();
+        confirmCandidate();
+      }
+    });
+    new ResizeObserver(resizeOverlay).observe($("videoStage"));
+    if ("requestVideoFrameCallback" in video) video.requestVideoFrameCallback(onVideoFrame);
+    window.addEventListener("beforeunload", (event) => { if (state.dirty) { event.preventDefault(); event.returnValue = ""; } });
+
+    init().catch((error) => {
+      $("loading").innerHTML = `<div style="color:var(--danger);max-width:680px;padding:24px">页面装载失败<br><br>${escapeHtml(error.stack || error.message || error)}</div>`;
+    });
+  </script>
+</body>
+</html>

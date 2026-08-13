@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rust 动作质量冻结审核台</title>
+  <style>
+    :root {
+      --ink: #050706;
+      --panel: #0b0f0d;
+      --panel-2: #111713;
+      --line: #29312d;
+      --line-strong: #445048;
+      --paper: #eef2e8;
+      --muted: #87918b;
+      --acid: #caff39;
+      --acid-dim: #8fb525;
+      --amber: #ffd84a;
+      --cyan: #55dce7;
+      --coral: #ff6848;
+      --green: #63e6a2;
+      --mono: "SFMono-Regular", "Roboto Mono", "Noto Sans Mono CJK SC", monospace;
+      --sans: "Avenir Next Condensed", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; background: var(--ink); }
+    body {
+      margin: 0;
+      min-width: 1180px;
+      color: var(--paper);
+      background:
+        linear-gradient(rgba(202,255,57,.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(202,255,57,.025) 1px, transparent 1px),
+        var(--ink);
+      background-size: 42px 42px;
+      font-family: var(--sans);
+      font-weight: 600;
+    }
+
+    button, input { font: inherit; }
+    button { color: inherit; }
+    [hidden] { display: none !important; }
+
+    .loading {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 48px;
+      text-align: center;
+    }
+    .loading-card {
+      width: min(660px, 80vw);
+      border: 1px solid var(--line-strong);
+      background: rgba(11,15,13,.95);
+      padding: 50px;
+      box-shadow: 18px 18px 0 rgba(202,255,57,.08);
+    }
+    .loading-mark { color: var(--acid); font: 800 12px/1 var(--mono); letter-spacing: .22em; }
+    .loading h1 { margin: 22px 0 12px; font-size: 36px; letter-spacing: -.03em; }
+    .loading p { margin: 0; color: var(--muted); font: 500 14px/1.7 var(--mono); }
+    .loading.failed .loading-mark { color: var(--coral); }
+
+    .app { min-height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+    .topbar {
+      min-height: 88px;
+      display: grid;
+      grid-template-columns: minmax(340px, 1fr) auto auto;
+      gap: 24px;
+      align-items: center;
+      padding: 15px 22px;
+      border-bottom: 1px solid var(--line-strong);
+      background: rgba(5,7,6,.94);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(16px);
+    }
+    .brand { display: flex; align-items: center; gap: 18px; min-width: 0; }
+    .brand-mark {
+      width: 50px; height: 50px;
+      display: grid; place-items: center;
+      background: var(--acid); color: var(--ink);
+      font: 1000 18px/1 var(--mono);
+      clip-path: polygon(0 0, 100% 0, 100% 72%, 72% 100%, 0 100%);
+    }
+    .eyebrow { color: var(--muted); font: 800 10px/1.4 var(--mono); letter-spacing: .18em; text-transform: uppercase; }
+    .brand h1 { margin: 3px 0 0; font-size: 21px; line-height: 1.1; letter-spacing: -.015em; }
+    .release-meta { display: grid; grid-template-columns: repeat(2, auto); gap: 7px 20px; }
+    .meta-pair { min-width: 140px; }
+    .meta-pair span { display: block; color: var(--muted); font: 700 9px/1.4 var(--mono); letter-spacing: .12em; }
+    .meta-pair strong { display: block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--paper); font: 700 12px/1.5 var(--mono); white-space: nowrap; }
+    .top-actions { display: flex; align-items: center; gap: 9px; }
+    .button, .file-button {
+      min-height: 42px;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--line-strong);
+      background: var(--panel-2);
+      padding: 0 15px;
+      color: var(--paper);
+      font: 800 11px/1 var(--mono);
+      letter-spacing: .08em;
+      cursor: pointer;
+      transition: transform .15s ease, border-color .15s ease, background .15s ease;
+    }
+    .button:hover, .file-button:hover { transform: translateY(-1px); border-color: var(--paper); }
+    .button.primary { border-color: var(--acid); background: var(--acid); color: var(--ink); }
+    .file-button input { display: none; }
+
+    .layout {
+      min-height: calc(100vh - 88px);
+      display: grid;
+      grid-template-columns: 260px minmax(610px, 1.38fr) minmax(390px, .9fr);
+    }
+    .queue, .review-rail { background: rgba(9,13,11,.96); }
+    .queue { border-right: 1px solid var(--line); position: sticky; top: 88px; height: calc(100vh - 88px); overflow: auto; }
+    .queue-head, .rail-head { padding: 18px; border-bottom: 1px solid var(--line); }
+    .section-label { color: var(--muted); font: 800 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    .queue-head h2, .rail-head h2 { margin: 7px 0 0; font-size: 18px; }
+    .queue-list { padding: 10px; display: grid; gap: 7px; }
+    .queue-item {
+      width: 100%; min-height: 74px;
+      display: grid; grid-template-columns: 31px minmax(0,1fr) auto;
+      gap: 10px; align-items: center;
+      border: 1px solid transparent;
+      background: transparent;
+      padding: 11px 10px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .queue-item:hover { background: var(--panel-2); }
+    .queue-item.active { border-color: var(--acid); background: rgba(202,255,57,.07); }
+    .queue-index { color: var(--muted); font: 800 11px/1 var(--mono); }
+    .queue-item.active .queue-index { color: var(--acid); }
+    .queue-copy { min-width: 0; }
+    .queue-copy strong, .queue-copy small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .queue-copy strong { font-size: 13px; }
+    .queue-copy small { margin-top: 5px; color: var(--muted); font: 500 10px/1 var(--mono); }
+    .queue-progress { color: var(--muted); font: 700 10px/1 var(--mono); }
+
+    .evidence-column { min-width: 0; border-right: 1px solid var(--line); }
+    .item-head {
+      min-height: 82px;
+      display: grid; grid-template-columns: minmax(0,1fr) auto;
+      gap: 20px; align-items: center;
+      padding: 15px 20px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(11,15,13,.88);
+    }
+    .item-head h2 { margin: 3px 0; font-size: 23px; letter-spacing: -.025em; }
+    .item-sub { color: var(--muted); font: 600 11px/1.5 var(--mono); }
+    .item-badges { display: flex; align-items: center; gap: 8px; }
+    .badge { border: 1px solid var(--acid-dim); color: var(--acid); padding: 8px 10px; font: 800 9px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .badge.frozen { border-color: var(--cyan); color: var(--cyan); }
+
+    .video-shell { position: relative; background: #000; border-bottom: 1px solid var(--line); }
+    .video-stage { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center; overflow: hidden; }
+    video { width: 100%; height: 100%; object-fit: contain; display: block; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .stage-label, .observation-readout {
+      position: absolute; z-index: 2;
+      border: 1px solid rgba(202,255,57,.55);
+      background: rgba(5,7,6,.78);
+      backdrop-filter: blur(8px);
+      font: 800 10px/1 var(--mono);
+      letter-spacing: .1em;
+    }
+    .stage-label { top: 16px; left: 16px; padding: 10px 12px; color: var(--acid); }
+    .observation-readout { right: 16px; bottom: 16px; padding: 9px 11px; color: var(--paper); border-color: var(--line-strong); }
+    .layer-switches { position: absolute; z-index: 3; top: 16px; right: 16px; display: flex; gap: 6px; }
+    .layer-switch {
+      border: 1px solid var(--line-strong); background: rgba(5,7,6,.82); color: var(--muted);
+      padding: 9px 10px; font: 800 9px/1 var(--mono); cursor: pointer;
+    }
+    .layer-switch.active { border-color: var(--acid); color: var(--acid); }
+    .player-controls { display: grid; grid-template-columns: auto auto auto 1fr; gap: 8px; align-items: center; padding: 12px 16px; background: var(--panel); }
+    .transport { width: 46px; height: 39px; border: 1px solid var(--line-strong); background: var(--panel-2); cursor: pointer; }
+    .transport.play { border-color: var(--acid); color: var(--ink); background: var(--acid); font-size: 18px; }
+    .timecode { text-align: right; color: var(--paper); font: 800 12px/1 var(--mono); }
+
+    .timeline-panel { padding: 17px 18px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+    .timeline-legend { display: flex; gap: 18px; margin-bottom: 12px; color: var(--muted); font: 700 9px/1 var(--mono); }
+    .timeline-legend i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: -1px; }
+    .timeline-legend .truth { background: var(--acid); }
+    .timeline-legend .start { background: var(--cyan); }
+    .timeline-legend .turn { background: var(--amber); }
+    .timeline-legend .end { background: var(--coral); }
+    .timeline { position: relative; border: 1px solid var(--line-strong); background: #0e1310; padding: 10px 0; overflow: hidden; }
+    .track { position: relative; height: 28px; }
+    .track + .track { border-top: 1px solid var(--line); }
+    .track::before { content: attr(data-label); position: absolute; z-index: 3; left: 7px; top: 8px; color: var(--muted); font: 700 8px/1 var(--mono); pointer-events: none; }
+    .truth-range { position: absolute; top: 6px; height: 16px; border: 0; background: rgba(202,255,57,.78); color: var(--ink); cursor: pointer; }
+    .truth-range span { font: 900 8px/1 var(--mono); }
+    .endpoint-mark { position: absolute; top: 3px; width: 2px; height: 22px; border: 0; padding: 0; transform: translateX(-1px); cursor: pointer; }
+    .endpoint-mark span { position: absolute; top: 5px; left: 4px; font: 800 8px/1 var(--mono); color: var(--paper); }
+    .endpoint-mark.start_anchor { background: var(--cyan); }
+    .endpoint-mark.primary_turnaround { width: 3px; background: var(--amber); }
+    .endpoint-mark.end_return { background: var(--coral); }
+    .playhead { position: absolute; z-index: 5; top: 0; bottom: 0; width: 1px; background: white; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.45); }
+    .playhead::before { content: ""; position: absolute; left: -4px; top: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid white; }
+
+    .lineage-strip { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 12px; padding: 13px 18px; background: #080b09; border-bottom: 1px solid var(--line); }
+    .lineage-strip span { color: var(--muted); font: 800 9px/1.5 var(--mono); }
+    .lineage-strip code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--cyan); font: 600 9px/1.5 var(--mono); }
+
+    .review-rail { min-width: 0; height: calc(100vh - 88px); position: sticky; top: 88px; overflow: auto; }
+    .rail-head { position: sticky; top: 0; z-index: 8; background: rgba(9,13,11,.97); backdrop-filter: blur(12px); }
+    .rep-tabs { display: flex; gap: 6px; padding: 10px 12px; overflow-x: auto; border-bottom: 1px solid var(--line); }
+    .rep-tab { min-width: 82px; border: 1px solid var(--line); background: var(--panel); padding: 9px; cursor: pointer; }
+    .rep-tab span, .rep-tab small { display: block; font: 800 9px/1 var(--mono); }
+    .rep-tab small { margin-top: 5px; color: var(--muted); }
+    .rep-tab.active { border-color: var(--acid); color: var(--acid); }
+    .review-section { padding: 17px 14px 4px; }
+    .section-head { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 11px; }
+    .section-head h3 { margin: 0; font-size: 15px; }
+    .section-head span { color: var(--muted); font: 700 9px/1 var(--mono); }
+    .review-card { border: 1px solid var(--line); background: var(--panel); margin-bottom: 10px; padding: 13px; }
+    .card-lead { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px; align-items: center; }
+    .card-number { width: 28px; height: 28px; display: grid; place-items: center; background: var(--acid); color: var(--ink); font: 1000 11px/1 var(--mono); }
+    .review-card h3 { margin: 0; font-size: 13px; line-height: 1.35; }
+    .review-card p { margin: 4px 0 0; color: var(--muted); font: 600 9px/1.5 var(--mono); }
+    .seek-chip { border: 1px solid var(--line-strong); background: transparent; padding: 7px 8px; color: var(--cyan); font: 800 8px/1 var(--mono); cursor: pointer; }
+    .decision-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .verdicts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3,1fr); gap: 5px; }
+    .verdict { border: 1px solid var(--line-strong); background: #0c100e; padding: 9px 4px; color: var(--muted); font: 800 9px/1 var(--mono); cursor: pointer; }
+    .verdict:hover { color: var(--paper); border-color: var(--paper); }
+    .verdict.selected.correct { border-color: var(--green); background: rgba(99,230,162,.12); color: var(--green); }
+    .verdict.selected.incorrect { border-color: var(--coral); background: rgba(255,104,72,.12); color: var(--coral); }
+    .verdict.selected.cannot_judge { border-color: var(--amber); background: rgba(255,216,74,.12); color: var(--amber); }
+    .field span { display: block; margin: 0 0 5px 2px; color: var(--muted); font: 700 8px/1 var(--mono); }
+    .field input { width: 100%; border: 1px solid var(--line); background: #080b09; color: var(--paper); padding: 9px 8px; font: 600 10px/1 var(--mono); outline: 0; }
+    .field input:focus { border-color: var(--cyan); }
+    .conclusion-head { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; }
+    .dimension { display: block; margin-bottom: 6px; color: var(--cyan); font: 800 8px/1 var(--mono); letter-spacing: .08em; }
+    .confidence { align-self: start; color: var(--acid); font: 900 16px/1 var(--mono); }
+    .conclusion-state { display: inline-block; padding: 4px 6px; border: 1px solid var(--line); }
+    .conclusion-state.observed_deviation { color: var(--coral); border-color: var(--coral); }
+    .conclusion-state.observed_acceptable { color: var(--green); border-color: var(--green); }
+    .conclusion-state.cannot_judge { color: var(--amber); border-color: var(--amber); }
+    .evidence-list { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+    .evidence-list code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--muted); background: #080b09; padding: 5px 6px; font: 600 8px/1 var(--mono); }
+    .empty { padding: 20px; border: 1px dashed var(--line); text-align: center; }
+    .muted { color: var(--muted); }
+
+    .review-status {
+      position: sticky; bottom: 0; z-index: 9;
+      padding: 13px 14px 16px;
+      border-top: 1px solid var(--line-strong);
+      background: rgba(5,7,6,.97);
+      backdrop-filter: blur(12px);
+    }
+    .progress-head { display: flex; justify-content: space-between; font: 800 9px/1 var(--mono); }
+    .progress-track { height: 5px; margin-top: 9px; background: var(--line); overflow: hidden; }
+    .progress-track b { display: block; width: 0; height: 100%; background: var(--acid); transition: width .2s ease; }
+    .notice { margin-top: 10px; color: var(--muted); font: 600 9px/1.5 var(--mono); }
+    .notice.ok { color: var(--green); }
+    .notice.error { color: var(--coral); }
+
+    @media (max-height: 760px) {
+      .video-stage { aspect-ratio: 16 / 8.2; }
+      .topbar { min-height: 76px; }
+      .queue, .review-rail { top: 76px; height: calc(100vh - 76px); }
+    }
+  </style>
+</head>
+<body>
+  <div data-quality-review-app>
+    <section id="qualityLoading" class="loading">
+      <div class="loading-card">
+        <div class="loading-mark">RUST / QLT1 / FROZEN</div>
+        <h1 id="qualityLoadingTitle">正在打开冻结审核发布包</h1>
+        <p id="qualityLoadingDetail">只读加载视频证据、端点与逐项质量结论。页面不会自动保存、训练或修改 Profile。</p>
+      </div>
+    </section>
+
+    <div id="qualityApp" class="app" hidden>
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">Q1</div>
+          <div><div class="eyebrow">MaxPower motion evidence lab</div><h1>Rust 动作质量冻结审核台</h1></div>
+        </div>
+        <div class="release-meta">
+          <div class="meta-pair"><span>RELEASE</span><strong id="releaseId">—</strong></div>
+          <div class="meta-pair"><span>RUN KIND</span><strong id="runKind">—</strong></div>
+          <div class="meta-pair"><span>HASH</span><strong id="releaseHash">—</strong></div>
+          <div class="meta-pair"><span>FROZEN AT</span><strong id="frozenAt">—</strong></div>
+        </div>
+        <div class="top-actions">
+          <label class="file-button">导入审核 JSON<input id="qualityImport" type="file" accept="application/json"></label>
+          <button id="qualityExport" class="button primary" type="button">导出审核 JSON</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <aside class="queue">
+          <div class="queue-head"><div class="section-label">Frozen queue</div><h2>视频审核队列</h2></div>
+          <div id="qualityQueue" class="queue-list"></div>
+        </aside>
+
+        <section class="evidence-column">
+          <header class="item-head">
+            <div><div id="itemContext" class="eyebrow">—</div><h2 id="itemTitle">—</h2><div class="item-sub">CAPTURE · <span id="proposalHash">—</span></div></div>
+            <div class="item-badges"><span id="capabilityBadge" class="badge">—</span><span class="badge frozen">只读冻结</span></div>
+          </header>
+
+          <div class="video-shell">
+            <div id="qualityStage" class="video-stage">
+              <video id="qualityVideo" preload="metadata" playsinline></video>
+              <canvas id="qualityOverlay"></canvas>
+              <div class="stage-label">VIDEO + CANONICAL EVIDENCE</div>
+              <div class="layer-switches">
+                <button type="button" class="layer-switch active" data-quality-layer="skeleton">骨架</button>
+                <button type="button" class="layer-switch active" data-quality-layer="equipment">器械</button>
+                <button type="button" class="layer-switch active" data-quality-layer="trails">轨迹</button>
+              </div>
+              <div id="observationReadout" class="observation-readout">OBSERVATION —</div>
+            </div>
+            <div class="player-controls">
+              <button id="qualityPlay" class="transport play" type="button">▶</button>
+              <button id="qualityPrevFrame" class="transport" type="button">−1F</button>
+              <button id="qualityNextFrame" class="transport" type="button">+1F</button>
+              <div id="qualityTimecode" class="timecode">00:00.000 / 00:00.000</div>
+            </div>
+          </div>
+
+          <section class="timeline-panel">
+            <div class="timeline-legend"><span><i class="truth"></i>人工起止范围</span><span><i class="start"></i>Rust 起点</span><span><i class="turn"></i>Rust 换向</span><span><i class="end"></i>Rust 返回</span></div>
+            <div id="qualityTimeline" class="timeline">
+              <div id="truthTrack" class="track" data-label="HUMAN"></div>
+              <div id="proposalTrack" class="track" data-label="RUST"></div>
+              <div id="qualityPlayhead" class="playhead" style="left:0"></div>
+            </div>
+          </section>
+
+          <div class="lineage-strip"><span>PINNED LINEAGE</span><code id="lineageReadout">—</code></div>
+        </section>
+
+        <aside class="review-rail">
+          <header class="rail-head"><div class="section-label">Per-target decisions</div><h2>逐项审核 · <span id="activeRepTitle">—</span></h2></header>
+          <div id="repTabs" class="rep-tabs"></div>
+
+          <section class="review-section">
+            <div class="section-head"><h3>三个端点</h3><span>独立审核</span></div>
+            <div id="endpointReviews"></div>
+          </section>
+          <section class="review-section">
+            <div class="section-head"><h3>质量结论</h3><span>逐条判断</span></div>
+            <div id="conclusionReviews"></div>
+          </section>
+
+          <footer class="review-status">
+            <div class="progress-head"><span>本页内存审核进度</span><span id="reviewProgressText">0 / 0</span></div>
+            <div class="progress-track"><b id="reviewProgressBar"></b></div>
+            <div id="qualityNotice" class="notice">点击决定只会更新页面内存；只有“导出审核 JSON”会产生文件。</div>
+          </footer>
+        </aside>
+      </main>
+    </div>
+  </div>
+
+  <script src="/playerMath.js"></script>
+  <script src="/qualityReviewDocument.js"></script>
+  <script src="/qualityReviewApp.js"></script>
+</body>
+</html>

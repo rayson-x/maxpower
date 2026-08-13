@@ -8,4 +8,4 @@ RUSTDOC=$(rustup which rustdoc)
 CARGO_TARGET_DIR="$repo_root/target-native"
 export RUSTC RUSTDOC CARGO_TARGET_DIR
 
-exec "$cargo_bin" test --manifest-path "$repo_root/Cargo.toml" -p form-coach-motion-sdk
+exec "$cargo_bin" test --manifest-path "$repo_root/Cargo.toml" -p maxpower-motion-sdk

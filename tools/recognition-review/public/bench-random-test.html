@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>单次实时验收 · MaxPower</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink:#060908; --panel:#0c1110; --panel2:#111816; --line:#2a3733;
+      --text:#edf3ef; --muted:#899690; --acid:#caff39; --orange:#ff6848;
+      --cyan:#55dce7; --yellow:#ffd84a; --green:#62e39a; --red:#ff4f68;
+      --mono:"SFMono-Regular","Roboto Mono",Menlo,monospace;
+      --sans:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box} html,body{margin:0;min-height:100%;background:var(--ink);color:var(--text);font-family:var(--sans)}
+    button{font:inherit;color:inherit} [hidden]{display:none!important}
+    body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(202,255,57,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(202,255,57,.022) 1px,transparent 1px);background-size:30px 30px;mask-image:linear-gradient(#000,transparent 88%)}
+    .topbar{height:76px;position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:0 24px;border-bottom:1px solid var(--line);background:rgba(6,9,8,.94);backdrop-filter:blur(16px)}
+    .brand{display:flex;align-items:center;gap:14px}.mark{width:42px;height:42px;display:grid;place-items:center;background:var(--acid);color:#071006;font:900 16px/1 var(--mono);clip-path:polygon(0 0,100% 0,100% 70%,70% 100%,0 100%)}
+    .eyebrow{font:800 10px/1 var(--mono);letter-spacing:.16em;color:var(--acid)}h1{font-size:20px;line-height:1;margin:7px 0 0;letter-spacing:-.02em}
+    .seal{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--green);color:var(--green);font:800 10px/1.25 var(--mono);letter-spacing:.05em}.seal i{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green)}
+    .page{width:min(1600px,100%);margin:0 auto;padding:18px;position:relative}
+    .protocol{display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--line);margin-bottom:14px;background:rgba(12,17,16,.88)}
+    .protocol div{padding:12px 14px;border-right:1px solid var(--line)}.protocol div:last-child{border:0}.protocol b{display:block;font:900 11px/1 var(--mono);color:var(--acid)}.protocol span{display:block;margin-top:6px;color:var(--muted);font-size:10px;line-height:1.35}
+    .layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(330px,.72fr);gap:14px;align-items:start}
+    .panel{border:1px solid var(--line);background:rgba(12,17,16,.92)}
+    .stage{position:relative;height:min(63vh,720px);min-height:430px;background:#010302;overflow:hidden;display:grid;place-items:center}
+    video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#010302}canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+    .stage-tag{position:absolute;top:16px;left:16px;z-index:3;padding:10px 12px;border:1px solid var(--acid);background:rgba(6,9,8,.82);color:var(--acid);font:900 11px/1 var(--mono);letter-spacing:.08em}
+    .live-readout{position:absolute;top:16px;right:16px;z-index:3;min-width:190px;padding:11px 13px;background:rgba(6,9,8,.84);border:1px solid var(--line);font:800 10px/1.5 var(--mono);text-align:right}.live-readout strong{display:block;font-size:16px;color:var(--cyan)}
+    .axis-readout{position:absolute;left:16px;bottom:16px;z-index:3;background:var(--yellow);color:#151000;padding:8px 10px;font:900 10px/1 var(--mono);box-shadow:5px 5px 0 rgba(0,0,0,.4)}
+    .transport{display:grid;grid-template-columns:auto auto auto auto 1fr;gap:8px;align-items:center;padding:12px;border-top:1px solid var(--line)}
+    .btn{min-height:40px;border:1px solid var(--line);background:#111715;padding:0 13px;cursor:pointer;font:850 11px/1 var(--mono);transition:.12s}.btn:hover{border-color:var(--acid);color:var(--acid)}.btn.primary{background:var(--acid);border-color:var(--acid);color:#071006;font-size:16px;width:52px}.btn.active{border-color:var(--cyan);color:var(--cyan)}
+    .time{justify-self:end;font:900 12px/1 var(--mono)}.time span{color:var(--muted)}
+    .audit-note{padding:10px 13px;border-top:1px solid var(--line);color:var(--muted);font-size:11px;line-height:1.5}.audit-note strong{color:var(--yellow)}
+    .side{display:grid;gap:14px}.verdict{padding:18px;position:relative;overflow:hidden}.verdict:after{content:"01";position:absolute;right:-6px;top:-20px;color:rgba(202,255,57,.06);font:900 110px/1 var(--mono)}
+    .kicker{font:850 10px/1 var(--mono);letter-spacing:.14em;color:var(--muted)}.verdict h2{margin:10px 0 0;font-size:28px;line-height:1.02;max-width:330px}.verdict h2 em{font-style:normal;color:var(--acid)}
+    .verdict p{margin:12px 0 0;color:var(--muted);font-size:12px;line-height:1.55;max-width:390px}
+    .metric-grid{display:grid;grid-template-columns:1fr 1fr;margin-top:16px;border:1px solid var(--line)}.metric{padding:13px;min-height:92px;border-right:1px solid var(--line);border-bottom:1px solid var(--line)}.metric:nth-child(2n){border-right:0}.metric:nth-last-child(-n+2){border-bottom:0}.metric label{display:block;color:var(--muted);font:800 9px/1.2 var(--mono)}.metric b{display:block;margin-top:9px;font:900 22px/1 var(--mono)}.metric small{display:block;margin-top:7px;color:var(--muted);font-size:9px;line-height:1.35}.pass{color:var(--green)}.warn{color:var(--yellow)}.fail{color:var(--red)}.unknown{color:var(--muted)}
+    .runtime{padding:15px}.runtime-head{display:flex;align-items:center;justify-content:space-between;gap:16px}.runtime-title{font-weight:850;font-size:13px}.runtime-state{font:900 10px/1 var(--mono);color:var(--green)}
+    .runtime-bars{margin-top:13px;display:grid;gap:10px}.bar-row{display:grid;grid-template-columns:92px 1fr 58px;gap:9px;align-items:center;font:750 9px/1 var(--mono);color:var(--muted)}.bar{height:6px;background:#232d2a;overflow:hidden}.bar i{display:block;height:100%;background:var(--acid)}.bar-row output{text-align:right;color:var(--text)}
+    .timeline-panel{margin-top:14px;padding:16px}.section-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}.section-head h2{margin:0;font-size:15px}.legend{display:flex;gap:14px;color:var(--muted);font:750 9px/1 var(--mono)}.legend i{display:inline-block;width:9px;height:9px;margin-right:5px;vertical-align:-1px}
+    .timeline{position:relative;height:112px;margin-top:16px;border:1px solid var(--line);background:#080d0c;overflow:hidden;cursor:pointer}.ticks{position:absolute;inset:0;background:linear-gradient(90deg,rgba(137,150,144,.14) 1px,transparent 1px);background-size:10% 100%}.track-label{position:absolute;left:10px;color:var(--muted);font:800 8px/1 var(--mono)}.truth-label{top:15px}.pred-label{top:61px}.range{position:absolute;height:20px;border:1px solid}.truth-range{top:30px;background:rgba(202,255,57,.24);border-color:var(--acid)}.pred-range{top:75px;background:rgba(255,104,72,.22);border-color:var(--orange)}.range span{position:absolute;inset:0;display:grid;place-items:center;font:900 8px/1 var(--mono);color:#fff}.peak{position:absolute;width:2px;height:28px;z-index:3}.truth-peak{top:26px;background:var(--acid)}.pred-peak{top:71px;background:var(--orange)}.playhead{position:absolute;top:0;bottom:0;width:1px;background:#fff;z-index:5;box-shadow:0 0 6px #fff}.playhead:before{content:"";position:absolute;top:0;left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:7px solid #fff}
+    .report{margin-top:14px;border:1px solid var(--line);background:rgba(12,17,16,.94)}.report-lock{padding:26px;display:flex;justify-content:space-between;gap:20px;align-items:center}.report-lock h2{margin:0;font-size:18px}.report-lock p{margin:8px 0 0;color:var(--muted);font-size:12px}.report-body{padding:16px}.report-callout{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line)}.report-callout article{padding:14px;border-right:1px solid var(--line)}.report-callout article:last-child{border:0}.report-callout label{display:block;color:var(--muted);font:800 9px/1 var(--mono)}.report-callout b{display:block;margin-top:9px;font:900 18px/1.05 var(--mono)}
+    .table-wrap{margin-top:14px;overflow:auto;border:1px solid var(--line)}table{width:100%;border-collapse:collapse;min-width:850px}th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;font:750 10px/1.4 var(--mono)}th{color:var(--muted);background:#0a0f0e;position:sticky;top:0}tbody tr:last-child td{border:0}.zero{color:var(--green)}.offset{color:var(--yellow)}
+    .limitations{margin-top:14px;padding:14px;border-left:3px solid var(--yellow);background:#101512;color:var(--muted);font-size:11px;line-height:1.6}.limitations strong{color:var(--text)}
+    .error{padding:30px;color:var(--red);font:800 13px/1.5 var(--mono)}
+    @media(max-width:1050px){.layout{grid-template-columns:1fr}.side{grid-template-columns:1fr 1fr}.protocol{grid-template-columns:1fr 1fr}.protocol div{border-bottom:1px solid var(--line)}.report-callout{grid-template-columns:1fr 1fr}.report-callout article:nth-child(2){border-right:0}.report-callout article:nth-child(-n+2){border-bottom:1px solid var(--line)}}
+    @media(max-width:680px){.topbar{padding:0 12px}.seal{display:none}.page{padding:10px}.protocol,.side{grid-template-columns:1fr}.stage{min-height:360px;height:57vh}.transport{grid-template-columns:auto auto auto auto}.time{grid-column:1/-1;justify-self:start}.report-lock{align-items:flex-start;flex-direction:column}.report-callout{grid-template-columns:1fr}.report-callout article{border-right:0;border-bottom:1px solid var(--line)!important}.report-callout article:last-child{border-bottom:0!important}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><div class="mark">MP</div><div><div class="eyebrow">FORENSIC MOTION / ONE PASS</div><h1>随机单视频 · 首轮实时验收</h1></div></div>
+    <div class="seal"><i></i> PREDICTION SEALED BEFORE TRUTH</div>
+  </header>
+  <div class="page">
+    <section class="protocol" id="protocol"></section>
+    <div id="loading" class="panel error">正在载入首轮封存结果…</div>
+    <div id="app" hidden>
+      <div class="layout">
+        <section class="panel">
+          <div class="stage" id="stage">
+            <video id="video" playsinline preload="metadata"></video><canvas id="overlay"></canvas>
+            <div class="stage-tag" id="stageTag">PERSONAL · BARBELL BENCH</div>
+            <div class="live-readout"><strong id="phase">WAITING</strong><span id="repReadout">REP — / —</span></div>
+            <div class="axis-readout" id="axisReadout">BAR AXIS · WAITING</div>
+          </div>
+          <div class="transport">
+            <button class="btn primary" id="play" aria-label="播放">▶</button>
+            <button class="btn" id="prev">−1F</button><button class="btn" id="next">+1F</button>
+            <button class="btn active" id="layers">骨架 + 杠轴</button>
+            <div class="time"><b id="current">00:00.000</b> <span>/</span> <span id="duration">00:00.000</span></div>
+          </div>
+          <div class="audit-note"><strong>注意：</strong>这里播放的是已经封存的第一轮结果。暂停、逐帧和拖动只用于事后核查，不会再次运行 YOLOX、RTMPose 或 rep 识别。</div>
+        </section>
+        <aside class="side">
+          <section class="panel verdict">
+            <div class="kicker">FIRST-PASS VERDICT</div><h2 id="verdictTitle">动作任务 <em>已理解</em><br>动作质量未定级</h2>
+            <p id="verdictCopy"></p><div class="metric-grid" id="metricGrid"></div>
+          </section>
+          <section class="panel runtime"><div class="runtime-head"><div class="runtime-title">实时节奏 / RUNTIME</div><div class="runtime-state" id="runtimeState">PASS</div></div><div class="runtime-bars" id="runtimeBars"></div></section>
+        </aside>
+      </div>
+      <section class="panel timeline-panel"><div class="section-head"><div><div class="kicker">TIME ALIGNMENT</div><h2>人工真值 vs 首轮预测</h2></div><div class="legend"><span><i style="background:var(--acid)"></i>人工</span><span><i style="background:var(--orange)"></i>首轮预测</span></div></div><div class="timeline" id="timeline"><div class="ticks"></div><div class="track-label truth-label">HUMAN</div><div class="track-label pred-label">FIRST PASS</div><div class="playhead" id="playhead"></div></div></section>
+      <section class="report" id="report">
+        <div class="report-lock" id="reportLock"><div><div class="kicker">POST-SET REPORT</div><h2>训练完成后展开动作报告</h2><p>播放到结尾自动展开；也可直接查看已封存报告，不会重新识别。</p></div><button class="btn" id="reveal">查看已封存报告</button></div>
+        <div class="report-body" id="reportBody" hidden><div class="report-callout" id="reportCallout"></div><div class="table-wrap"><table><thead><tr><th>REP</th><th>人工 起/底/止</th><th>预测 起/底/止</th><th>起点误差</th><th>最低点误差</th><th>终点误差</th><th>区间 IoU</th></tr></thead><tbody id="repRows"></tbody></table></div><div class="limitations" id="limitations"></div></div>
+      </section>
+    </div>
+  </div>
+  <script>
+    const $=id=>document.getElementById(id);let data,report,prediction,evidence,drawLayers=true;
+    const fmt=ms=>{ms=Math.max(0,Number(ms)||0);const m=Math.floor(ms/60000),s=Math.floor(ms%60000/1000),x=Math.floor(ms%1000);return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}.${String(x).padStart(3,"0")}`};
+    const pct=v=>`${(Number(v)*100).toFixed(1)}%`;const cls=s=>s==="pass"?"pass":s==="fail"?"fail":s==="needs_improvement"?"warn":"unknown";
+    const nearest=(rows,ms)=>{if(!rows?.length)return null;let lo=0,hi=rows.length-1;while(lo<hi){const mid=(lo+hi)>>1;if(rows[mid].timestampMs<ms)lo=mid+1;else hi=mid}const a=rows[lo],b=rows[Math.max(0,lo-1)];return !b||Math.abs(a.timestampMs-ms)<Math.abs(b.timestampMs-ms)?a:b};
+    function protocol(){const p=report.protocol;const items=[["RANDOM",`seed 固定 · ${report.capture.captureId.slice(0,8)}…`],["ONE PASS",`seek ${p.seekCount} · 每帧最多推理 1 次`],["CAUSAL",p.futureFramesRead?"读取未来帧":"不读未来帧"],["LATE FRAME","超时丢弃 · 不补算"],["TRUTH",p.predictionPersistedBeforeTruthLoaded?"预测封存后才揭示":"协议失败"]];$("protocol").innerHTML=items.map(x=>`<div><b>${x[0]}</b><span>${x[1]}</span></div>`).join("")}
+    function metrics(){const c=report.completion;const rows=[['计次',`${c.repCompletion.predictedCount} / ${c.repCompletion.truthCount}`,c.repCompletion.status,'全部匹配'],['最低点',pct(c.lowestPointTiming.within250MsRate),c.lowestPointTiming.status,'±250 ms'],['完整时间轴',c.phaseBoundaries.meanIntervalIoU.toFixed(3),c.phaseBoundaries.status,'区间 IoU'],['标准动作','不可判断',c.standardTechnique.status,'缺少标准 envelope']];$("metricGrid").innerHTML=rows.map(r=>`<div class="metric"><label>${r[0]}</label><b class="${cls(r[2])}">${r[1]}</b><small>${r[3]}</small></div>`).join("");$("verdictCopy").textContent=`首轮识别正确找到 ${c.repCompletion.predictedCount} 次 rep 和最低点；但动作起点平均晚 ${Math.round(c.phaseBoundaries.startAbsoluteErrorMsMean)} ms，因此尚未完整理解离心阶段。`}
+    function runtime(){const r=report.runtime;$("runtimeState").textContent=report.completion.singlePassRuntime.status.toUpperCase();$("runtimeState").className=`runtime-state ${cls(report.completion.singlePassRuntime.status)}`;const rows=[['输入覆盖',r.inferenceCoverage,`${pct(r.inferenceCoverage)}`],['P95 延迟',Math.min(1,r.captureToResultMs.p95/250),`${r.captureToResultMs.p95.toFixed(1)} ms`],['帧时预算',Math.min(1,100/r.modelAndAxisInferenceMs.p95),`${r.modelAndAxisInferenceMs.p95.toFixed(1)} ms`]];$("runtimeBars").innerHTML=rows.map(x=>`<div class="bar-row"><span>${x[0]}</span><div class="bar"><i style="width:${Math.max(2,x[1]*100)}%"></i></div><output>${x[2]}</output></div>`).join("")}
+    function timeline(){const t=$("timeline"),duration=evidence.capture.durationMs;report.truth.reps.forEach((r,i)=>addRange(t,r,duration,'truth',i+1));report.prediction.predictedSegments.forEach((r,i)=>addRange(t,r,duration,'pred',i+1));t.onclick=e=>{const rect=t.getBoundingClientRect();$("video").currentTime=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width))*$("video").duration}}
+    function addRange(t,r,duration,kind,n){const el=document.createElement('div');el.className=`range ${kind}-range`;el.style.left=`${r.startMs/duration*100}%`;el.style.width=`${(r.endMs-r.startMs)/duration*100}%`;el.innerHTML=`<span>${n}</span>`;t.appendChild(el);const peak=document.createElement('i');peak.className=`peak ${kind}-peak`;peak.style.left=`${r.turnaroundMs/duration*100}%`;t.appendChild(peak)}
+    function reportBody(){const c=report.completion,r=report.runtime;const cards=[['动作任务',report.decision.movementTaskUnderstood?'通过':'失败',report.decision.movementTaskUnderstood?'pass':'fail'],['首轮完整验收',report.decision.onePassVideoAcceptance?'通过':'未通过',report.decision.onePassVideoAcceptance?'pass':'warn'],['实时覆盖',pct(r.inferenceCoverage),c.singlePassRuntime.status],['标准动作','不可判断','cannot_judge']];$("reportCallout").innerHTML=cards.map(x=>`<article><label>${x[0]}</label><b class="${cls(x[2])}">${x[1]}</b></article>`).join('');$("repRows").innerHTML=report.repComparison.map(x=>`<tr><td>#${x.repIndex}</td><td>${fmt(x.truth.startMs)} / ${fmt(x.truth.turnaroundMs)} / ${fmt(x.truth.endMs)}</td><td>${fmt(x.prediction.startMs)} / ${fmt(x.prediction.turnaroundMs)} / ${fmt(x.prediction.endMs)}</td>${['startMs','turnaroundMs','endMs'].map(k=>`<td class="${Math.abs(x.error[k])<=250?'zero':'offset'}">${x.error[k]>=0?'+':''}${Math.round(x.error[k])} ms</td>`).join('')}<td>${x.error.intervalIoU.toFixed(3)}</td></tr>`).join('');$("limitations").innerHTML=`<strong>报告边界：</strong>本轮确实只推理一次，但输入仍是预录视频按摄像头节奏播放，不是实际相机；rep 状态机是 Python 研究实现，不是生产 Rust SDK。最低点人工真值是你在算法候选上确认的点，不是独立盲标。杠轴倾斜只能描述画面中的双侧协调，不能直接写成左右发力差。`}
+    function reveal(){$("reportLock").hidden=true;$("reportBody").hidden=false;$("report").scrollIntoView({behavior:'smooth',block:'start'})}
+    function activeRep(ms){const truth=report.truth.reps.find(r=>ms>=r.startMs&&ms<=r.endMs);const pred=report.prediction.predictedSegments.find(r=>ms>=r.startMs&&ms<=r.endMs);return {truth,pred}}
+    function update(){const v=$("video"),ms=v.currentTime*1000;$("current").textContent=fmt(ms);$("duration").textContent=fmt(v.duration*1000||evidence.capture.durationMs);$("playhead").style.left=`${Math.min(100,ms/evidence.capture.durationMs*100)}%`;const a=activeRep(ms),seg=a.pred;let phase='READY';if(seg)phase=ms<seg.turnaroundMs?'ECCENTRIC':ms<seg.endMs?'CONCENTRIC':'LOCKOUT';$("phase").textContent=phase;$("repReadout").textContent=`PRED REP ${seg?.repIndex??'—'} / ${report.prediction.predictedSegments.length} · HUMAN ${a.truth?.repIndex??'—'}`;draw(ms)}
+    function draw(ms){const canvas=$("overlay"),ctx=canvas.getContext('2d'),stage=$("stage"),v=$("video");const dpr=devicePixelRatio||1,w=stage.clientWidth,h=stage.clientHeight;canvas.width=w*dpr;canvas.height=h*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);if(!drawLayers||!v.videoWidth)return;const scale=Math.min(w/v.videoWidth,h/v.videoHeight),dw=v.videoWidth*scale,dh=v.videoHeight*scale,ox=(w-dw)/2,oy=(h-dh)/2;const frame=nearest(prediction.observations,ms);if(!frame)return;const p=i=>{const q=frame.landmarks?.[i];return q&&Number.isFinite(q.x)&&Number.isFinite(q.y)?[ox+q.x*dw,oy+q.y*dh,q.visibility]:null};const links=[[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,12],[11,13],[13,15],[12,14],[14,16]];ctx.lineWidth=3;ctx.lineCap='round';links.forEach(([a,b])=>{const x=p(a),y=p(b);if(!x||!y)return;ctx.strokeStyle=Math.min(x[2],y[2])>=.3?'#caff39':'#ff6848';ctx.globalAlpha=Math.min(x[2],y[2])>=.3?.92:.58;ctx.beginPath();ctx.moveTo(x[0],x[1]);ctx.lineTo(y[0],y[1]);ctx.stroke()});ctx.globalAlpha=1;for(let i=5;i<=16;i++){const x=p(i);if(!x)continue;ctx.fillStyle=x[2]>=.3?'#edf3ef':'#ff6848';ctx.beginPath();ctx.arc(x[0],x[1],4,0,Math.PI*2);ctx.fill()}if(frame.axis){const a=frame.axis;ctx.strokeStyle=a.source==='measured'?'#ffd84a':'#ff9a3c';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(ox+a.x1*dw,oy+a.y1*dh);ctx.lineTo(ox+a.x2*dw,oy+a.y2*dh);ctx.stroke();$("axisReadout").textContent=`BAR AXIS · ${a.source.toUpperCase()} · ${Math.round(a.confidence*100)}%`}else $("axisReadout").textContent='BAR AXIS · UNAVAILABLE'}
+    async function init(){try{const res=await fetch('/api/review/bench-random-test');if(!res.ok)throw new Error(await res.text());data=await res.json();({report,prediction,evidence}=data);protocol();metrics();runtime();timeline();reportBody();const v=$("video");v.src=evidence.videoUrl;v.onloadedmetadata=()=>{update();$("duration").textContent=fmt(v.duration*1000)};v.ontimeupdate=update;v.onplay=()=>$("play").textContent='❚❚';v.onpause=()=>$("play").textContent='▶';v.onended=()=>{update();reveal()};$("play").onclick=()=>v.paused?v.play():v.pause();$("prev").onclick=()=>{v.pause();v.currentTime=Math.max(0,v.currentTime-1/30)};$("next").onclick=()=>{v.pause();v.currentTime=Math.min(v.duration||Infinity,v.currentTime+1/30)};$("layers").onclick=()=>{drawLayers=!drawLayers;$("layers").classList.toggle('active',drawLayers);update()};$("reveal").onclick=reveal;window.addEventListener('resize',update);$("loading").hidden=true;$("app").hidden=false}catch(e){$("loading").textContent=`无法载入：${e.message}`}}
+    init();
+  </script>
+</body>
+</html>

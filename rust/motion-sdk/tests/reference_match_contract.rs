@@ -1,4 +1,4 @@
-use form_coach_motion_sdk::{
+use maxpower_motion_sdk::{
     CanonicalFrameSample, CanonicalLandmark, CorridorPoint, LandmarkSource, ObservedReferenceNode,
     ObservedReferenceRep, ReferenceCorridorNode, ReferenceIdentity, ReferenceTrajectoryProfile,
     RepDisposition, SealedRep, TrajectoryComparisonStatus, extract_lat_pulldown_reference_rep,
@@ -223,6 +223,7 @@ fn sealed_rep() -> SealedRep {
         start_timestamp_ms: 0,
         peak_frame_id: 2,
         peak_timestamp_ms: 200,
+        turnaround_confirmed_timestamp_ms: 300,
         end_frame_id: 4,
         end_timestamp_ms: 400,
         revision: 0,
