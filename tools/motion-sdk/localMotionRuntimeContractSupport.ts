@@ -10,7 +10,11 @@ import {
   type RustCanonicalWasmSessionConfig,
   type RustEquipmentObservation,
 } from "../../src/motion/rustCanonicalWasm";
-import { decodeMotionPacket, type DecodedMotionPacket } from "../../src/motion/motionPacket";
+import {
+  decodeMotionPacket,
+  type DecodedLocalMotionCoordinate,
+  type DecodedMotionPacket,
+} from "../../src/motion/motionPacket";
 
 export const LOCAL_MOTION_FLOAT_TOLERANCE = 1e-5;
 export const FRONT_BENCH_FIXTURE = path.join(
@@ -38,6 +42,7 @@ export interface FixtureEquipmentObservation {
   readonly proposalId: number;
   readonly kind: "weight_plate" | "barbell_shaft" | "dumbbell" | "machine_handle";
   readonly bbox: readonly [number, number, number, number];
+  readonly axis?: Readonly<{ x1: number; y1: number; x2: number; y2: number }>;
   readonly score: number;
   readonly uncertaintyPx: number | null;
   readonly source: "detector" | "optical_flow" | "geometry" | "predicted";
@@ -84,28 +89,40 @@ export interface RuntimeAttempt<T> {
 export interface LocalMotionInspection {
   readonly availability: "missing" | "valid" | "invalid";
   readonly gate: ContractGate;
-  readonly value: Readonly<Record<string, unknown>> | null;
+  readonly value: Readonly<DecodedLocalMotionCoordinate> | null;
 }
 
 const REQUIRED_LOCAL_MOTION_PATHS = [
-  "contractVersion",
-  "frameId",
+  "schemaVersion",
+  "coordinateFrameId",
+  "sourceTimestampMs",
   "state",
-  "primaryAxis.x",
-  "primaryAxis.y",
-  "crossAxis.x",
-  "crossAxis.y",
-  "scale.value",
-  "scale.source",
-  "equipment.progress",
-  "equipment.crossPath",
-  "equipment.provenance",
-  "pose.progress",
-  "pose.crossPath",
-  "pose.provenance",
+  "reason",
+  "primaryAxis",
+  "crossAxis",
+  "origin",
+  "scale",
+  "scaleSource",
+  "equipmentTrackId",
+  "rawBarAxis",
+  "endpointOrderMapping",
+  "equipment",
+  "pose",
   "channelAgreement",
+  "endpointOneProgress",
+  "endpointTwoProgress",
+  "rawBarAngleRadians",
+  "baselineCorrectedBarAngleRadians",
   "confidence",
-  "abstentionReason",
+] as const;
+
+const REQUIRED_TRAJECTORY_CHANNEL_PATHS = [
+  "alongAxisProgress",
+  "crossAxisDisplacement",
+  "confidence",
+  "coverage",
+  "uncertainty",
+  "provenance",
 ] as const;
 
 export function loadFrontBenchFixture(): Halpe26EquipmentFixture {
@@ -140,6 +157,7 @@ export function mapEquipment(frame: FixtureFrame): readonly RustEquipmentObserva
       width: observation.bbox[2],
       height: observation.bbox[3],
     },
+    axis: observation.axis,
     score: observation.score,
     uncertaintyPx: observation.uncertaintyPx,
     source: observation.source,
@@ -192,6 +210,12 @@ export function replayFixtureThroughWasm(
   const packetHexes: string[] = [];
   const packets: DecodedMotionPacket[] = [];
   try {
+    if (fixture.bridgeConfig.profileCode === 110) {
+      session.setExerciseProfile("barbell_bench_press_local_front_left");
+    } else if (fixture.bridgeConfig.profileCode !== 0) {
+      throw new Error(`unsupported contract fixture profile code ${fixture.bridgeConfig.profileCode}`);
+    }
+    if (fixture.bridgeConfig.active) session.beginSet();
     for (const frame of fixture.frames) {
       submitFrame(session, frame);
       assert.ok(session.lastDecodedPacket, `missing packet at ${frame.timestampMs}ms`);
@@ -265,16 +289,6 @@ function record(value: unknown): Readonly<Record<string, unknown>> | null {
     : null;
 }
 
-function valueAt(root: Readonly<Record<string, unknown>>, dottedPath: string): unknown {
-  let current: unknown = root;
-  for (const part of dottedPath.split(".")) {
-    const currentRecord = record(current);
-    if (!currentRecord || !(part in currentRecord)) return undefined;
-    current = currentRecord[part];
-  }
-  return current;
-}
-
 export function inspectLocalMotionCoordinate(packet: DecodedMotionPacket): LocalMotionInspection {
   const packetRecord = packet as unknown as Readonly<Record<string, unknown>>;
   const value = record(packetRecord.localMotionCoordinate);
@@ -290,15 +304,27 @@ export function inspectLocalMotionCoordinate(packet: DecodedMotionPacket): Local
     };
   }
 
-  const missing = REQUIRED_LOCAL_MOTION_PATHS.filter((field) => valueAt(value, field) === undefined);
+  const missing: string[] = REQUIRED_LOCAL_MOTION_PATHS.filter((field) => !(field in value));
+  for (const channelName of ["equipment", "pose"] as const) {
+    const channel = record(value[channelName]);
+    if (value[channelName] !== null && !channel) {
+      missing.push(`${channelName} (object-or-null)`);
+      continue;
+    }
+    if (channel) {
+      for (const field of REQUIRED_TRAJECTORY_CHANNEL_PATHS) {
+        if (!(field in channel)) missing.push(`${channelName}.${field}`);
+      }
+    }
+  }
   if (missing.length > 0) {
     return {
       availability: "invalid",
-      value,
+      value: value as unknown as Readonly<DecodedLocalMotionCoordinate>,
       gate: {
         state: "data-gated",
         capability: "local-motion-coordinate-packet-contract",
-        reason: "localMotionCoordinate is present but violates the Ticket 06 comparison contract",
+      reason: "localMotionCoordinate is present but violates the decoded v1 comparison contract",
         evidence: { missing },
       },
     };
@@ -306,11 +332,13 @@ export function inspectLocalMotionCoordinate(packet: DecodedMotionPacket): Local
 
   return {
     availability: "valid",
-    value,
+    value: value as unknown as Readonly<DecodedLocalMotionCoordinate>,
     gate: {
       state: "passed",
       capability: "local-motion-coordinate-packet-contract",
-      reason: "required discrete, numeric, provenance, agreement and abstention fields are present",
+      reason: value.state === "uninitialized"
+        ? "uninitialized v1 coordinate is valid fail-closed evidence"
+        : "decoded v1 coordinate, trajectory channels, provenance and agreement fields are present",
     },
   };
 }
@@ -348,13 +376,33 @@ export function assertCoordinateParity(actual: unknown, expected: unknown, field
 }
 
 export function orderedObliqueAxisGate(): ContractGate {
+  const wasmAdapterSource = fs.readFileSync(
+    path.join(process.cwd(), "src/motion/rustCanonicalWasm.ts"),
+    "utf8",
+  );
+  const packetDecoderSource = fs.readFileSync(
+    path.join(process.cwd(), "src/motion/motionPacket.ts"),
+    "utf8",
+  );
+  const abiImplemented = wasmAdapterSource.includes("motion_sdk_add_equipment_axis_observation(")
+    && wasmAdapterSource.includes("observation.axis.x1")
+    && wasmAdapterSource.includes("observation.axis.y2");
+  const decoderImplemented = packetDecoderSource.includes('marker !== "AXI1"')
+    && packetDecoderSource.includes("projectedLength")
+    && packetDecoderSource.includes("imageAngleRadians");
+  const implemented = abiImplemented && decoderImplemented;
   return {
-    state: "data-gated",
+    state: implemented ? "passed" : "data-gated",
     capability: "ordered-oblique-bar-axis-input",
-    reason: "RustEquipmentObservation currently accepts bbox only; x1/y1/x2/y2 cannot enter the shared client-format stream",
+    reason: implemented
+      ? "the shared WASM ABI accepts ordered x1/y1/x2/y2 shaft endpoints and MotionPacket v1.9+ decodes the resulting axis"
+      : "the loaded WASM artifact does not export the ordered equipment-axis ABI",
     evidence: {
-      requiredExample: { x1: 0.20, y1: 0.42, x2: 0.80, y2: 0.48 },
-      availableFields: ["bbox.x", "bbox.y", "bbox.width", "bbox.height"],
+      orderedExample: { x1: 0.20, y1: 0.42, x2: 0.80, y2: 0.48 },
+      wasmExport: "motion_sdk_add_equipment_axis_observation",
+      decodedFields: ["x1", "y1", "x2", "y2", "projectedLength", "imageAngleRadians"],
+      abiImplemented,
+      decoderImplemented,
     },
   };
 }

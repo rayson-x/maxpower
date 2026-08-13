@@ -89,7 +89,7 @@ test("single-pass Node/WASM diagnostic preserves source order and measures Rust 
   ], diagnostics);
 });
 
-test("realtime scheduling, mobile FPS and coordinate-specific timings never pass without runtime metadata", () => {
+test("realtime scheduling and physical-device metrics never pass without runtime metadata", () => {
   const gates: ContractGate[] = [
     {
       state: "platform-gated",
@@ -109,7 +109,7 @@ test("realtime scheduling, mobile FPS and coordinate-specific timings never pass
     {
       state: "data-gated",
       capability: "coordinate-freeze-latency-and-per-frame-cost",
-      reason: "LocalMotionCoordinate and its timing instrumentation are absent",
+      reason: "the coordinate is implemented, but this bbox-only fixture cannot produce a measured shaft freeze event or isolate its per-frame cost",
     },
     {
       state: "data-gated",

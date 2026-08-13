@@ -410,6 +410,7 @@ test("v1.7 decodes Rust-associated equipment without inferring pose landmarks", 
       width: Math.fround(0.56),
       height: Math.fround(0.035),
     },
+    axis: null,
     centerX: Math.fround(0.5),
     centerY: Math.fround(0.4375),
     observationScore: Math.fround(0.92),
@@ -456,6 +457,91 @@ function makeV18QualityPacket(quality: unknown): ArrayBuffer {
   assert.equal(offset, length);
   return buffer;
 }
+
+test("v1.10 preserves oblique shaft endpoints and local coordinate provenance", () => {
+  const encoder = new TextEncoder();
+  const sequence = encoder.encode("axis");
+  const algorithm = encoder.encode("rust");
+  const quality = encoder.encode(JSON.stringify({
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [],
+  }));
+  const local = encoder.encode(JSON.stringify({
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    coordinateFrameId: 3,
+    sourceTimestampMs: 1000,
+    state: "frozen",
+    reason: null,
+    primaryAxis: [-0.2, 0.98],
+    crossAxis: [0.98, 0.2],
+    origin: [0.5, 0.4],
+    scale: 0.6,
+    scaleSource: "projected_bar_length",
+    equipmentTrackId: 5,
+    rawBarAxis: [0.2, 0.35, 0.8, 0.47],
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    equipment: { alongAxisProgress: 0.4, crossAxisDisplacement: 0.01, confidence: 0.92, coverage: 0.8, uncertainty: 0.08, provenance: "equipment_measured" },
+    pose: null,
+    channelAgreement: "equipment_only",
+    endpointOneProgress: 0.39,
+    endpointTwoProgress: 0.41,
+    rawBarAngleRadians: Math.atan2(0.12, 0.6),
+    baselineCorrectedBarAngleRadians: 0.01,
+    confidence: 0.92,
+  }));
+  const base = 40 + sequence.length + 2 + algorithm.length + 2;
+  const equipmentLength = 4 + 3 + 8 + 8 + 2 + 24 + 4 + 36;
+  const extensionLength = 8 + quality.length + 6 + 32 + 8 + local.length;
+  const length = base + 34 + 5 + 21 + 5 + equipmentLength + extensionLength;
+  const buffer = new ArrayBuffer(length);
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  bytes.set(encoder.encode("MOTN"), 0);
+  view.setUint16(4, 1, true); view.setUint16(6, 10, true); view.setUint32(8, length, true);
+  view.setUint8(36, 1); view.setUint8(37, 1); view.setUint16(38, sequence.length, true);
+  let offset = 40;
+  bytes.set(sequence, offset); offset += sequence.length;
+  view.setUint16(offset, algorithm.length, true); offset += 2;
+  bytes.set(algorithm, offset); offset += algorithm.length;
+  view.setUint16(offset, 0, true); offset += 2;
+  bytes.set(encoder.encode("RPS1"), offset); offset += 4;
+  view.setUint8(offset, 1); offset += 1; view.setBigUint64(offset, 7n, true); offset += 8;
+  view.setUint8(offset, 0); offset += 1; view.setBigUint64(offset, 0n, true); offset += 8;
+  view.setUint8(offset, 0); offset += 1; view.setBigUint64(offset, 0n, true); offset += 8;
+  view.setUint8(offset, 0); offset += 1; view.setUint16(offset, 0, true); offset += 2;
+  bytes.set(encoder.encode("SET1"), offset); offset += 4; view.setUint8(offset, 2); offset += 1;
+  bytes.set(encoder.encode("VER1"), offset); offset += 4;
+  for (let i = 0; i < 3; i += 1) { view.setUint16(offset, 0, true); offset += 2; }
+  view.setUint8(offset, 0); offset += 1; view.setBigUint64(offset, 0n, true); offset += 8;
+  view.setUint16(offset, 0, true); offset += 2;
+  bytes.set(encoder.encode("ANG1"), offset); offset += 4; view.setUint8(offset, 0); offset += 1;
+  bytes.set(encoder.encode("EQP1"), offset); offset += 4;
+  view.setUint8(offset, 0); view.setUint8(offset + 1, 0); view.setUint8(offset + 2, 1); offset += 3;
+  view.setBigUint64(offset, 7n, true); offset += 8;
+  for (let i = 0; i < 4; i += 1) { view.setUint16(offset, 0, true); offset += 2; }
+  view.setUint16(offset, 1, true); offset += 2;
+  view.setBigUint64(offset, 5n, true); offset += 8; view.setBigUint64(offset, 77n, true); offset += 8;
+  view.setBigUint64(offset, 7n, true); offset += 8;
+  view.setUint8(offset, 1); view.setUint8(offset + 1, 2); view.setUint8(offset + 2, 3); view.setUint8(offset + 3, 3); offset += 4;
+  for (const value of [0.2, 0.35, 0.6, 0.12, 0.5, 0.41, 0.94, 0.92, 1]) { view.setFloat32(offset, value, true); offset += 4; }
+  bytes.set(encoder.encode("QLT1"), offset); offset += 4; view.setUint32(offset, quality.length, true); offset += 4;
+  bytes.set(quality, offset); offset += quality.length;
+  bytes.set(encoder.encode("AXI1"), offset); offset += 4; view.setUint16(offset, 1, true); offset += 2;
+  view.setBigUint64(offset, 5n, true); offset += 8;
+  const axis = [0.2, 0.35, 0.8, 0.47];
+  for (const value of [...axis, Math.hypot(0.6, 0.12), Math.atan2(0.12, 0.6)]) { view.setFloat32(offset, value, true); offset += 4; }
+  bytes.set(encoder.encode("LMC1"), offset); offset += 4; view.setUint32(offset, local.length, true); offset += 4;
+  bytes.set(local, offset); offset += local.length;
+  assert.equal(offset, length);
+  const packet = decodeMotionPacket(buffer);
+  assert.ok((packet.equipment.tracks[0].axis?.imageAngleRadians ?? 0) > 0.1);
+  assert.deepEqual(packet.localMotionCoordinate?.rawBarAxis, axis);
+  assert.equal(packet.localMotionCoordinate?.endpointOrderMapping, "screen_ordered_anatomy_unknown");
+  assert.equal(packet.localMotionCoordinate?.equipment?.provenance, "equipment_measured");
+  assert.equal(packet.localMotionCoordinate?.equipment?.coverage, 0.8);
+  assert.equal(packet.localMotionCoordinate?.equipment?.uncertainty, 0.08);
+  assert.equal(packet.localMotionCoordinate?.channelAgreement, "equipment_only");
+});
 
 test("v1.8 decodes and freezes Rust QLT1 proposals without recalculating quality", () => {
   const dimensions = [

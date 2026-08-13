@@ -28,7 +28,8 @@ export type MotionRepEvidenceReason =
   | "incomplete_cycle"
   | "anti_interference_filter"
   | "duration_exceeded"
-  | "required_joint_loss";
+  | "required_joint_loss"
+  | "coordinate_provisional";
 export type MotionRepObservationFinding =
   | "primary_range_below_expectation"
   | "secondary_range_below_expectation"
@@ -83,6 +84,7 @@ export interface DecodedRepEndpointSnapshot {
   readonly phaseAfter: string;
   readonly confidence: number;
   readonly evidenceChannels: readonly MotionEvidenceChannel[];
+  readonly normalizedFeatures: Readonly<DecodedLocalMotionCoordinate> | null;
 }
 
 export interface DecodedQualityConclusion {
@@ -160,6 +162,14 @@ export interface DecodedEquipmentTrack {
   readonly subjectCandidateId: bigint;
   readonly kind: MotionEquipmentKind;
   readonly bbox: Readonly<{ x: number; y: number; width: number; height: number }>;
+  readonly axis: Readonly<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    projectedLength: number;
+    imageAngleRadians: number;
+  }> | null;
   readonly centerX: number;
   readonly centerY: number;
   readonly observationScore: number;
@@ -168,6 +178,47 @@ export interface DecodedEquipmentTrack {
   readonly source: MotionEquipmentSource;
   readonly heldBy: MotionEquipmentHand;
   readonly judgeablePath: boolean;
+}
+
+export type MotionLocalCoordinateState =
+  | "uninitialized" | "provisional" | "learning" | "frozen" | "degraded";
+export type MotionLocalCoordinateReason =
+  | "no_set" | "no_locked_subject" | "no_measured_bar_axis"
+  | "insufficient_preparation" | "subject_changed" | "observation_gap" | "invalid_geometry";
+export type MotionLocalChannelAgreement =
+  | "agreement" | "equipment_only" | "pose_only" | "conflict" | "cannot_judge";
+export interface DecodedLocalTrajectoryChannel {
+  readonly alongAxisProgress: number;
+  readonly crossAxisDisplacement: number;
+  readonly confidence: number;
+  readonly coverage: number;
+  readonly uncertainty: number;
+  readonly provenance: "equipment_measured" | "pose_measured";
+}
+export interface DecodedLocalMotionCoordinate {
+  readonly schemaVersion: "maxpower-local-motion-coordinate/v1";
+  readonly coordinateFrameId: number;
+  readonly sourceTimestampMs: number | null;
+  readonly state: MotionLocalCoordinateState;
+  readonly reason: MotionLocalCoordinateReason | null;
+  readonly primaryAxis: readonly [number, number] | null;
+  readonly crossAxis: readonly [number, number] | null;
+  readonly origin: readonly [number, number] | null;
+  readonly scale: number | null;
+  readonly scaleSource: "projected_bar_length" | null;
+  readonly equipmentTrackId: number | null;
+  readonly rawBarAxis: readonly [number, number, number, number] | null;
+  readonly endpointOrderMapping: "screen_ordered_anatomy_unknown";
+  readonly equipment: Readonly<DecodedLocalTrajectoryChannel> | null;
+  readonly pose: Readonly<DecodedLocalTrajectoryChannel> | null;
+  readonly channelAgreement: MotionLocalChannelAgreement;
+  /** Ordered raw shaft endpoint 1; not anatomical left/right. */
+  readonly endpointOneProgress: number | null;
+  /** Ordered raw shaft endpoint 2; not anatomical left/right. */
+  readonly endpointTwoProgress: number | null;
+  readonly rawBarAngleRadians: number | null;
+  readonly baselineCorrectedBarAngleRadians: number | null;
+  readonly confidence: number;
 }
 
 export interface DecodedEquipmentEvidence {
@@ -205,6 +256,7 @@ export interface DecodedMotionPacket {
   readonly canonical: readonly Readonly<DecodedMotionLandmark>[];
   readonly jointAngles: readonly Readonly<DecodedJointAngle>[];
   readonly equipment: Readonly<DecodedEquipmentEvidence>;
+  readonly localMotionCoordinate: Readonly<DecodedLocalMotionCoordinate> | null;
   readonly setState: Readonly<{
     lifecycle: MotionSetLifecycle;
   }>;
@@ -216,6 +268,13 @@ export interface DecodedMotionPacket {
   }>;
   readonly completedReps: readonly Readonly<DecodedSealedRep>[];
   readonly qualityProposals: readonly Readonly<DecodedRustQualityProposal>[];
+}
+
+const decodedRustPacketBrand = new WeakSet<object>();
+
+/** Runtime provenance check: only this module's binary decoder can brand a packet. */
+export function isDecodedRustMotionPacket(value: unknown): value is DecodedMotionPacket {
+  return typeof value === "object" && value !== null && decodedRustPacketBrand.has(value);
 }
 
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
@@ -323,6 +382,7 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     rejectedLowConfidenceOrInvalidCount: 0,
     rejectedOutsideSubjectCount: 0,
   });
+  let localMotionCoordinate: Readonly<DecodedLocalMotionCoordinate> | null = null;
   if (offset < declaredLength) {
     ensureAvailable(offset, 4, declaredLength, "rep extension marker");
     const marker = textDecoder.decode(bytes.subarray(offset, offset + 4));
@@ -561,6 +621,7 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
             width: values[2],
             height: values[3],
           }),
+          axis: null,
           centerX: values[4],
           centerY: values[5],
           observationScore: values[6],
@@ -603,12 +664,69 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
       offset += qualityLength;
       qualityProposals = decodeQualityExtension(decoded);
     }
+    if (minor >= 9) {
+      ensureAvailable(offset, 6, declaredLength, "equipment axis extension");
+      const marker = textDecoder.decode(bytes.subarray(offset, offset + 4));
+      if (marker !== "AXI1") throw new Error(`Unknown MotionPacket equipment axis extension ${marker}`);
+      offset += 4;
+      const axisCount = view.getUint16(offset, true);
+      offset += 2;
+      const tracksById = new Map(equipment.tracks.map((track) => [track.trackId, track]));
+      const axesById = new Map<bigint, DecodedEquipmentTrack["axis"]>();
+      for (let index = 0; index < axisCount; index += 1) {
+        ensureAvailable(offset, 32, declaredLength, `equipment axis ${index}`);
+        const trackId = view.getBigUint64(offset, true);
+        offset += 8;
+        if (!tracksById.has(trackId) || axesById.has(trackId)) {
+          throw new Error(`MotionPacket equipment axis ${index} has an unknown or duplicate track`);
+        }
+        const values = Array.from({ length: 6 }, () => {
+          const value = view.getFloat32(offset, true);
+          offset += 4;
+          if (!Number.isFinite(value)) throw new Error(`MotionPacket equipment axis ${index} is non-finite`);
+          return value;
+        });
+        const derivedLength = Math.hypot(values[2] - values[0], values[3] - values[1]);
+        const derivedAngle = Math.atan2(values[3] - values[1], values[2] - values[0]);
+        if (Math.abs(derivedLength - values[4]) > 1e-4 || Math.abs(derivedAngle - values[5]) > 1e-4) {
+          throw new Error(`MotionPacket equipment axis ${index} derived geometry mismatch`);
+        }
+        axesById.set(trackId, Object.freeze({
+          x1: values[0], y1: values[1], x2: values[2], y2: values[3],
+          projectedLength: values[4], imageAngleRadians: values[5],
+        }));
+      }
+      equipment = Object.freeze({
+        ...equipment,
+        tracks: Object.freeze(equipment.tracks.map((track) => Object.freeze({
+          ...track,
+          axis: axesById.get(track.trackId) ?? null,
+        }))),
+      });
+    }
+    if (minor >= 10) {
+      ensureAvailable(offset, 8, declaredLength, "local motion coordinate extension");
+      const marker = textDecoder.decode(bytes.subarray(offset, offset + 4));
+      if (marker !== "LMC1") throw new Error(`Unknown MotionPacket local coordinate extension ${marker}`);
+      offset += 4;
+      const payloadLength = view.getUint32(offset, true);
+      offset += 4;
+      ensureAvailable(offset, payloadLength, declaredLength, "local motion coordinate payload");
+      let decoded: unknown;
+      try {
+        decoded = JSON.parse(textDecoder.decode(bytes.subarray(offset, offset + payloadLength)));
+      } catch {
+        throw new Error("MotionPacket local motion coordinate payload is invalid UTF-8 or JSON");
+      }
+      offset += payloadLength;
+      localMotionCoordinate = decodeLocalMotionCoordinate(decoded);
+    }
     if (offset !== declaredLength) {
       throw new Error("MotionPacket has trailing or malformed extension bytes");
     }
   }
 
-  return Object.freeze({
+  const decoded = Object.freeze({
     lineage: Object.freeze({
       sequenceId,
       contract: Object.freeze({ major, minor }),
@@ -626,6 +744,7 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     canonical: Object.freeze(canonical),
     jointAngles: Object.freeze(jointAngles),
     equipment,
+    localMotionCoordinate,
     setState: Object.freeze({ lifecycle: setLifecycle }),
     repState: Object.freeze({
       phase: repPhase,
@@ -636,6 +755,8 @@ export function decodeMotionPacket(input: ArrayBuffer | ArrayBufferView): Decode
     completedReps: Object.freeze(completedReps),
     qualityProposals: Object.freeze(qualityProposals),
   });
+  decodedRustPacketBrand.add(decoded);
+  return decoded;
 }
 
 const QUALITY_DIMENSIONS: readonly MotionAssessmentDimension[] = Object.freeze([
@@ -648,6 +769,117 @@ const QUALITY_DIMENSIONS: readonly MotionAssessmentDimension[] = Object.freeze([
   "standard_variant_compatibility",
   "observation_confidence",
 ]);
+
+function decodeLocalMotionCoordinate(value: unknown): Readonly<DecodedLocalMotionCoordinate> {
+  const coordinate = requireRecord(value, "local motion coordinate");
+  if (coordinate.schemaVersion !== "maxpower-local-motion-coordinate/v1") {
+    throw new Error("MotionPacket local motion coordinate schema version is unsupported");
+  }
+  const nullableNumber = (raw: unknown, label: string): number | null => {
+    if (raw == null) return null;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      throw new Error(`MotionPacket ${label} must be finite or null`);
+    }
+    return raw;
+  };
+  const axis = (raw: unknown, label: string): readonly [number, number] | null => {
+    if (raw == null) return null;
+    if (!Array.isArray(raw) || raw.length !== 2
+      || raw.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))) {
+      throw new Error(`MotionPacket ${label} must contain two finite numbers`);
+    }
+    return Object.freeze([raw[0], raw[1]]) as readonly [number, number];
+  };
+  const channel = (raw: unknown, label: string): Readonly<DecodedLocalTrajectoryChannel> | null => {
+    if (raw == null) return null;
+    const record = requireRecord(raw, label);
+    const alongAxisProgress = nullableNumber(record.alongAxisProgress, `${label} alongAxisProgress`);
+    const crossAxisDisplacement = nullableNumber(record.crossAxisDisplacement, `${label} crossAxisDisplacement`);
+    const confidence = nullableNumber(record.confidence, `${label} confidence`);
+    const coverage = nullableNumber(record.coverage, `${label} coverage`);
+    const uncertainty = nullableNumber(record.uncertainty, `${label} uncertainty`);
+    if (alongAxisProgress == null || crossAxisDisplacement == null || confidence == null
+      || coverage == null || uncertainty == null
+      || confidence < 0 || confidence > 1 || coverage < 0 || coverage > 1
+      || uncertainty < 0 || uncertainty > 1) {
+      throw new Error(`MotionPacket ${label} is invalid`);
+    }
+    return Object.freeze({
+      alongAxisProgress,
+      crossAxisDisplacement,
+      confidence,
+      coverage,
+      uncertainty,
+      provenance: requireEnum(
+        record.provenance,
+        ["equipment_measured", "pose_measured"] as const,
+        `${label} provenance`,
+      ),
+    });
+  };
+  const confidence = nullableNumber(coordinate.confidence, "local coordinate confidence");
+  if (confidence == null || confidence < 0 || confidence > 1) {
+    throw new Error("MotionPacket local coordinate confidence must be between zero and one");
+  }
+  return Object.freeze({
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    coordinateFrameId: requireSafeInteger(coordinate.coordinateFrameId, "local coordinate frame id"),
+    sourceTimestampMs: coordinate.sourceTimestampMs == null
+      ? null
+      : requireSafeInteger(coordinate.sourceTimestampMs, "local coordinate source timestamp"),
+    state: requireEnum(
+      coordinate.state,
+      ["uninitialized", "provisional", "learning", "frozen", "degraded"] as const,
+      "local coordinate state",
+    ),
+    reason: coordinate.reason == null ? null : requireEnum(
+      coordinate.reason,
+      ["no_set", "no_locked_subject", "no_measured_bar_axis", "insufficient_preparation",
+        "subject_changed", "observation_gap", "invalid_geometry"] as const,
+      "local coordinate reason",
+    ),
+    primaryAxis: axis(coordinate.primaryAxis, "local coordinate primaryAxis"),
+    crossAxis: axis(coordinate.crossAxis, "local coordinate crossAxis"),
+    origin: axis(coordinate.origin, "local coordinate origin"),
+    scale: nullableNumber(coordinate.scale, "local coordinate scale"),
+    scaleSource: coordinate.scaleSource == null ? null : requireEnum(
+      coordinate.scaleSource,
+      ["projected_bar_length"] as const,
+      "local coordinate scaleSource",
+    ),
+    equipmentTrackId: coordinate.equipmentTrackId == null
+      ? null
+      : requireSafeInteger(coordinate.equipmentTrackId, "local coordinate equipment track id"),
+    rawBarAxis: (() => {
+      if (coordinate.rawBarAxis == null) return null;
+      if (!Array.isArray(coordinate.rawBarAxis) || coordinate.rawBarAxis.length !== 4
+        || coordinate.rawBarAxis.some((entry) => typeof entry !== "number" || !Number.isFinite(entry))) {
+        throw new Error("MotionPacket local coordinate raw bar axis is invalid");
+      }
+      return Object.freeze(coordinate.rawBarAxis.slice()) as readonly [number, number, number, number];
+    })(),
+    endpointOrderMapping: requireEnum(
+      coordinate.endpointOrderMapping,
+      ["screen_ordered_anatomy_unknown"] as const,
+      "local coordinate endpoint order mapping",
+    ),
+    equipment: channel(coordinate.equipment, "local coordinate equipment"),
+    pose: channel(coordinate.pose, "local coordinate pose"),
+    channelAgreement: requireEnum(
+      coordinate.channelAgreement,
+      ["agreement", "equipment_only", "pose_only", "conflict", "cannot_judge"] as const,
+      "local coordinate channelAgreement",
+    ),
+    endpointOneProgress: nullableNumber(coordinate.endpointOneProgress, "local coordinate endpoint one"),
+    endpointTwoProgress: nullableNumber(coordinate.endpointTwoProgress, "local coordinate endpoint two"),
+    rawBarAngleRadians: nullableNumber(coordinate.rawBarAngleRadians, "local coordinate raw bar angle"),
+    baselineCorrectedBarAngleRadians: nullableNumber(
+      coordinate.baselineCorrectedBarAngleRadians,
+      "local coordinate baseline corrected bar angle",
+    ),
+    confidence,
+  });
+}
 
 function decodeQualityExtension(value: unknown): readonly Readonly<DecodedRustQualityProposal>[] {
   const extension = requireRecord(value, "quality extension");
@@ -753,6 +985,9 @@ function decodeQualityEndpoint(
       ["pose_measured", "equipment_measured"] as const,
       `${label} evidence channel`,
     ))),
+    normalizedFeatures: endpoint.normalizedFeatures == null
+      ? null
+      : decodeLocalMotionCoordinate(endpoint.normalizedFeatures),
   });
 }
 
@@ -931,6 +1166,7 @@ function decodeRepEvidenceReason(code: number): MotionRepEvidenceReason | null {
     case 5: return "anti_interference_filter";
     case 6: return "duration_exceeded";
     case 7: return "required_joint_loss";
+    case 8: return "coordinate_provisional";
     default: throw new Error(`MotionPacket rep evidence reason code ${code} is invalid`);
   }
 }

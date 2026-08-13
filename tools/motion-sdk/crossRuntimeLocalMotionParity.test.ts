@@ -4,7 +4,11 @@ import path from "node:path";
 import test from "node:test";
 
 import { instantiateRustMotionWasm, RustCanonicalWasmSession } from "../../src/motion/rustCanonicalWasm";
-import type { DecodedMotionLandmark } from "../../src/motion/motionPacket";
+import type {
+  DecodedLocalMotionCoordinate,
+  DecodedMotionLandmark,
+  DecodedMotionPacket,
+} from "../../src/motion/motionPacket";
 import {
   LOCAL_MOTION_FLOAT_TOLERANCE,
   assertCoordinateParity,
@@ -81,7 +85,117 @@ test("front fixture preserves low-confidence wrists as non-measured canonical ev
   }
 });
 
-test("front-oblique ordered shaft geometry and mobile runtimes remain explicit gates", () => {
+test("host-native Rust and Web/WASM preserve one active oblique shaft coordinate stream", async () => {
+  assert.ok(fs.existsSync(wasmPath));
+  const wasm = await instantiateRustMotionWasm(fs.readFileSync(wasmPath));
+  const source = loadFrontBenchFixture();
+  const progress = [0, 0.004, 0.018, 0.05, 0.10, 0.17, 0.24, 0.31, 0.35,
+    0.34, 0.30, 0.24, 0.16, 0.08, 0.025, 0.004];
+  const angle = 0.22;
+  const cross = [Math.cos(angle), Math.sin(angle)] as const;
+  const primary = [-cross[1], cross[0]] as const;
+  const fixture = {
+    ...source,
+    bridgeConfig: {
+      ...source.bridgeConfig,
+      sequenceId: "ticket06:active-oblique-local",
+      profileCode: 110,
+      active: true,
+    },
+    frames: progress.map((value, index) => {
+      const basis = source.frames[Math.min(index, source.frames.length - 1)];
+      const center = [0.5 + primary[0] * value, 0.42 + primary[1] * value] as const;
+      const half = 0.30;
+      const axis = {
+        x1: center[0] - cross[0] * half,
+        y1: center[1] - cross[1] * half,
+        x2: center[0] + cross[0] * half,
+        y2: center[1] + cross[1] * half,
+      };
+      return {
+        ...basis,
+        sourceFrameNumber: index + 1,
+        timestampMs: 1_000 + index * 100,
+        equipmentObservations: [{
+          ...basis.equipmentObservations[0],
+          proposalId: 900 + index,
+          bbox: [
+            Math.min(axis.x1, axis.x2),
+            Math.min(axis.y1, axis.y2),
+            Math.abs(axis.x2 - axis.x1),
+            Math.max(Math.abs(axis.y2 - axis.y1), 0.005),
+          ] as const,
+          axis,
+          score: 0.96,
+        }],
+      };
+    }),
+  } satisfies import("./localMotionRuntimeContractSupport").Halpe26EquipmentFixture;
+  const temporaryDirectory = fs.mkdtempSync(path.join(process.cwd(), ".ticket06-oblique-fixture-"));
+  const fixturePath = path.join(temporaryDirectory, "active-oblique.json");
+  try {
+    fs.writeFileSync(fixturePath, `${JSON.stringify(fixture)}\n`);
+    const web = replayFixtureThroughWasm(wasm, fixture);
+    const native = replayFixtureThroughHostNative(fixturePath);
+    assert.ok(native.value, native.gate.reason);
+    assert.equal(web.packets.length, native.value.packets.length);
+    for (let index = 0; index < web.packets.length; index += 1) {
+      const webPacket = web.packets[index];
+      const nativePacket: DecodedMotionPacket = native.value.packets[index];
+      assert.equal(webPacket.frameId, nativePacket.frameId);
+      assert.equal(webPacket.sourceTimestampMs, nativePacket.sourceTimestampMs);
+      assert.equal(webPacket.repState.phase, nativePacket.repState.phase);
+      assert.equal(webPacket.setState.lifecycle, nativePacket.setState.lifecycle);
+      assertCoordinateParity(
+        webPacket.localMotionCoordinate,
+        nativePacket.localMotionCoordinate,
+        `active-oblique[${index}].localMotionCoordinate`,
+      );
+    }
+    const frozen = web.packets.map((packet) => packet.localMotionCoordinate)
+      .find((coordinate) => coordinate?.state === "frozen");
+    assert.ok(frozen, "active oblique stream must freeze a causal local frame");
+    assert.ok(Math.abs((frozen.rawBarAngleRadians ?? 0) - angle) < 1e-4);
+    assert.equal(frozen.endpointOrderMapping, "screen_ordered_anatomy_unknown");
+    assert.equal(frozen.equipment?.provenance, "equipment_measured");
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("uninitialized local coordinate remains valid fail-closed evidence", () => {
+  const coordinate: DecodedLocalMotionCoordinate = {
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    coordinateFrameId: 0,
+    sourceTimestampMs: null,
+    state: "uninitialized",
+    reason: "no_set",
+    primaryAxis: null,
+    crossAxis: null,
+    origin: null,
+    scale: null,
+    scaleSource: null,
+    equipmentTrackId: null,
+    rawBarAxis: null,
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    equipment: null,
+    pose: null,
+    channelAgreement: "cannot_judge",
+    endpointOneProgress: null,
+    endpointTwoProgress: null,
+    rawBarAngleRadians: null,
+    baselineCorrectedBarAngleRadians: null,
+    confidence: 0,
+  };
+  const inspection = inspectLocalMotionCoordinate({
+    localMotionCoordinate: coordinate,
+  } as DecodedMotionPacket);
+  assert.equal(inspection.availability, "valid");
+  assert.equal(inspection.gate.state, "passed");
+  assert.match(inspection.gate.reason, /fail-closed/);
+});
+
+test("front-oblique ordered shaft geometry is implemented while mobile runtimes remain explicit gates", () => {
   const gates: ContractGate[] = [
     orderedObliqueAxisGate(),
     {
@@ -95,20 +209,26 @@ test("front-oblique ordered shaft geometry and mobile runtimes remain explicit g
       reason: "iOS simulator bridge source exists, but no Ticket 06 front-oblique run artifact is available",
     },
   ];
-  assert.equal(gates[0].state, "data-gated");
+  assert.equal(gates[0].state, "passed");
   assert.equal(gates[1].state, "platform-gated");
   assert.equal(gates[2].state, "platform-gated");
   emitContractReport("front-oblique-cross-runtime", gates);
 });
 
-test("begin, finish and fresh-session reset use the public Rust set lifecycle", async () => {
+test("begin, pause, resume, finish and fresh-session reset use the public Rust set lifecycle", async () => {
   assert.ok(fs.existsSync(wasmPath));
   const wasm = await instantiateRustMotionWasm(fs.readFileSync(wasmPath));
   const fixture = loadFrontBenchFixture();
   const first = new RustCanonicalWasmSession(sessionConfig(fixture, "ticket06:lifecycle:first"), wasm);
   first.beginSet();
   assert.equal(first.lastSetLifecycle, "arming");
-  for (const frame of fixture.frames) submitFrame(first, frame);
+  first.pauseSet();
+  assert.equal(first.lastSetLifecycle, "paused");
+  submitFrame(first, fixture.frames[0]);
+  assert.equal(first.lastSetLifecycle, "paused", "explicit pause cannot auto-resume from motion");
+  first.resumeSet();
+  assert.equal(first.lastSetLifecycle, "active");
+  for (const frame of fixture.frames.slice(1)) submitFrame(first, frame);
   assert.ok(
     first.lastSetLifecycle === "arming" || first.lastSetLifecycle === "active",
     "a chronological stream may remain arming until the selected profile confirms activation",
@@ -130,8 +250,7 @@ test("begin, finish and fresh-session reset use the public Rust set lifecycle", 
   }
 
   emitContractReport("set-lifecycle", [
-    { state: "passed", capability: "begin-finish-fresh-reset", reason: "public WASM lifecycle was exercised" },
-    { state: "platform-gated", capability: "pause-resume", reason: "RustCanonicalWasmSession has no public pause/resume methods" },
+    { state: "passed", capability: "begin-pause-resume-finish-fresh-reset", reason: "public WASM lifecycle was exercised" },
   ]);
 });
 
