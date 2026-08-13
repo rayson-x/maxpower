@@ -47,6 +47,10 @@ pub struct RepEndpointSnapshot {
     pub phase_after: String,
     pub confidence: f32,
     pub evidence_channels: Vec<EvidenceChannel>,
+    /// Full causal local-coordinate snapshot at the observed endpoint.  Raw
+    /// shaft endpoints and channel provenance remain attached for audit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_features: Option<crate::LocalMotionCoordinateEvidence>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -193,10 +197,13 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         action_id: "seated_shoulder_press",
         first_phase: "concentric",
         second_phase: "eccentric",
-        equipment_role: "external_load_not_observed",
+        // The exact profile equipment selects the concrete evidence role in
+        // `build_quality_proposal`; this contract token only declares that
+        // the selected external load is part of the action context.
+        equipment_role: "selected_external_load",
         accepted_equipment: &["barbell", "dumbbell"],
         default_capability: AssessmentCapability::PhaseSupported,
-        capture_positions: &["front"],
+        capture_positions: &["front", "frontLeft45", "frontRight45"],
         requires_anatomical_side: false,
     },
     ActionAssessmentContract {
@@ -366,6 +373,10 @@ fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
             phase_after: first_phase.into(),
             confidence,
             evidence_channels: endpoint_channels.clone(),
+            normalized_features: rep
+                .normalized_endpoints
+                .as_ref()
+                .map(|value| value.start_anchor.clone()),
         },
         RepEndpointSnapshot {
             kind: EndpointKind::PrimaryTurnaround,
@@ -378,6 +389,10 @@ fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
             phase_after: second_phase.into(),
             confidence,
             evidence_channels: endpoint_channels.clone(),
+            normalized_features: rep
+                .normalized_endpoints
+                .as_ref()
+                .map(|value| value.primary_turnaround.clone()),
         },
         RepEndpointSnapshot {
             kind: EndpointKind::EndReturn,
@@ -388,12 +403,21 @@ fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
             phase_after: "ready".into(),
             confidence,
             evidence_channels: endpoint_channels,
+            normalized_features: rep
+                .normalized_endpoints
+                .as_ref()
+                .map(|value| value.end_return.clone()),
         },
     ];
     let conclusions = AssessmentDimension::ALL
         .into_iter()
         .map(|dimension| conclusion_for(rep, contract, capability, dimension, confidence))
         .collect();
+    let equipment_role = exact_equipment_role(
+        &action_id,
+        profile_equipment.as_str(),
+        contract.filter(|_| equipment_matches),
+    );
     let mut proposal = RustQualityProposal {
         schema_version: QUALITY_SCHEMA_VERSION.into(),
         proposal_id: format!(
@@ -404,10 +428,7 @@ fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
         action_id,
         capture_position,
         anatomical_side: anatomical_side.map(str::to_owned),
-        equipment_role: contract
-            .filter(|_| equipment_matches)
-            .map_or("unsupported", |value| value.equipment_role)
-            .into(),
+        equipment_role: equipment_role.into(),
         capability,
         rule_bundle_version: QUALITY_RULE_BUNDLE_VERSION.into(),
         profile_identity: rep.profile_identity.clone(),
@@ -419,6 +440,21 @@ fn build_quality_proposal(rep: &SealedRep) -> RustQualityProposal {
     };
     proposal.content_hash = proposal_hash(&proposal);
     proposal
+}
+
+fn exact_equipment_role<'a>(
+    action_id: &str,
+    equipment: &str,
+    contract: Option<&'a ActionAssessmentContract>,
+) -> &'a str {
+    let Some(contract) = contract else {
+        return "unsupported";
+    };
+    match (action_id, equipment) {
+        ("seated_shoulder_press", "barbell") => "barbell_axis_phase_and_path",
+        ("seated_shoulder_press", "dumbbell") => "dumbbells_not_observed",
+        _ => contract.equipment_role,
+    }
 }
 
 fn conclusion_for(
@@ -833,6 +869,7 @@ mod tests {
             disposition: RepDisposition::Confirmed,
             evidence_reason: None,
             observation_findings: Vec::new(),
+            normalized_endpoints: None,
         }
     }
 

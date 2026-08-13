@@ -7,7 +7,8 @@ use std::collections::VecDeque;
 
 use crate::{
     EquipmentFrameEvidence, EquipmentKind, EquipmentObservation, EquipmentSource,
-    MovementDirection, RepDisposition, RepPhase,
+    LocalMotionCoordinateEvidence, MovementDirection, NormalizedRepEndpointEvidence,
+    RepDisposition, RepPhase,
 };
 
 const ENTER_DELTA: f32 = 32.0 / 640.0;
@@ -57,6 +58,53 @@ const SIGNATURE_MIN_DURATION_RATIO: f32 = 0.55;
 const MAXIMUM_ACTIVE_UNASSOCIATED_STEP: f32 = 0.06;
 
 #[derive(Clone, Copy, Debug)]
+struct BarbellPhaseThresholds {
+    enter_delta: f32,
+    return_delta: f32,
+    turnaround_confirm_delta: f32,
+    reverse_step_epsilon: f32,
+    minimum_effort_duration_ms: u64,
+    maximum_effort_duration_ms: u64,
+    minimum_amplitude: f32,
+    maximum_endpoint_drift: f32,
+}
+
+impl BarbellPhaseThresholds {
+    const fn legacy_bench() -> Self {
+        Self {
+            enter_delta: ENTER_DELTA,
+            return_delta: RETURN_DELTA,
+            turnaround_confirm_delta: TURNAROUND_CONFIRM_DELTA,
+            reverse_step_epsilon: REVERSE_STEP_EPSILON,
+            minimum_effort_duration_ms: MINIMUM_EFFORT_DURATION_MS,
+            maximum_effort_duration_ms: MAXIMUM_EFFORT_DURATION_MS,
+            minimum_amplitude: MINIMUM_AMPLITUDE,
+            maximum_endpoint_drift: MAXIMUM_ENDPOINT_DRIFT,
+        }
+    }
+
+    fn local(
+        enter_delta: f32,
+        minimum_amplitude: f32,
+        return_delta: f32,
+        maximum_endpoint_drift: f32,
+        minimum_effort_duration_ms: u64,
+        maximum_effort_duration_ms: u64,
+    ) -> Self {
+        Self {
+            enter_delta,
+            return_delta,
+            turnaround_confirm_delta: (enter_delta * 0.08).max(0.004),
+            reverse_step_epsilon: (enter_delta * 0.02).max(0.001),
+            minimum_effort_duration_ms,
+            maximum_effort_duration_ms,
+            minimum_amplitude,
+            maximum_endpoint_drift,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct BarbellFrameSample {
     pub frame_id: u64,
     pub timestamp_ms: u64,
@@ -88,6 +136,8 @@ struct ActiveBarbellRep {
     pending_return: Option<PendingBarbellReturn>,
     samples: VecDeque<BarbellFrameSample>,
     hash: u64,
+    start_coordinate: Option<LocalMotionCoordinateEvidence>,
+    coordinate_history: VecDeque<LocalMotionCoordinateEvidence>,
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +165,7 @@ pub(crate) struct BarbellRepCandidate {
     pub pose_peak_timestamp_ms: Option<u64>,
     pub path_hash: u64,
     pub disposition: RepDisposition,
+    pub normalized_endpoints: Option<NormalizedRepEndpointEvidence>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -134,6 +185,7 @@ pub(crate) struct BarbellBenchPhaseEngine {
     phase: RepPhase,
     ready_history: VecDeque<BarbellFrameSample>,
     boundary_history: VecDeque<BarbellFrameSample>,
+    coordinate_history: VecDeque<LocalMotionCoordinateEvidence>,
     baseline: Option<f32>,
     active: Option<ActiveBarbellRep>,
     next_rep_id: u64,
@@ -142,14 +194,73 @@ pub(crate) struct BarbellBenchPhaseEngine {
     set_signature: Option<BarbellSetSignature>,
     last_candidate_end_ms: Option<u64>,
     confirmed_group_established: bool,
+    use_local_coordinate: bool,
+    local_direction: MovementDirection,
+    thresholds: BarbellPhaseThresholds,
 }
 
 impl BarbellBenchPhaseEngine {
     pub(crate) fn new() -> Self {
+        Self::with_local_coordinate(
+            false,
+            MovementDirection::Decreasing,
+            BarbellPhaseThresholds::legacy_bench(),
+        )
+    }
+
+    pub(crate) fn local_bench(
+        enter_delta: f32,
+        minimum_amplitude: f32,
+        return_delta: f32,
+        maximum_endpoint_drift: f32,
+        minimum_effort_duration_ms: u64,
+        maximum_effort_duration_ms: u64,
+    ) -> Self {
+        Self::with_local_coordinate(
+            true,
+            MovementDirection::Increasing,
+            BarbellPhaseThresholds::local(
+                enter_delta,
+                minimum_amplitude,
+                return_delta,
+                maximum_endpoint_drift,
+                minimum_effort_duration_ms,
+                maximum_effort_duration_ms,
+            ),
+        )
+    }
+
+    pub(crate) fn local_shoulder_press(
+        enter_delta: f32,
+        minimum_amplitude: f32,
+        return_delta: f32,
+        maximum_endpoint_drift: f32,
+        minimum_effort_duration_ms: u64,
+        maximum_effort_duration_ms: u64,
+    ) -> Self {
+        // Both profiles consume positive progress away from their own setup
+        // origin. Shoulder press owns distinct Profile gates and identity;
+        // it does not inherit a biomechanical conclusion from bench press.
+        Self::local_bench(
+            enter_delta,
+            minimum_amplitude,
+            return_delta,
+            maximum_endpoint_drift,
+            minimum_effort_duration_ms,
+            maximum_effort_duration_ms,
+        )
+    }
+
+    fn with_local_coordinate(
+        use_local_coordinate: bool,
+        local_direction: MovementDirection,
+        thresholds: BarbellPhaseThresholds,
+    ) -> Self {
         Self {
             phase: RepPhase::Ready,
             ready_history: VecDeque::new(),
             boundary_history: VecDeque::new(),
+            coordinate_history: VecDeque::new(),
             baseline: None,
             active: None,
             next_rep_id: 1,
@@ -158,6 +269,9 @@ impl BarbellBenchPhaseEngine {
             set_signature: None,
             last_candidate_end_ms: None,
             confirmed_group_established: false,
+            use_local_coordinate,
+            local_direction,
+            thresholds,
         }
     }
 
@@ -165,6 +279,7 @@ impl BarbellBenchPhaseEngine {
         self.abort_active();
         self.ready_history.clear();
         self.boundary_history.clear();
+        self.coordinate_history.clear();
         self.baseline = None;
         self.pending_signature_candidate = None;
         self.set_signature = None;
@@ -183,8 +298,12 @@ impl BarbellBenchPhaseEngine {
         // when the host explicitly closes the set.
         pending.disposition = if self.confirmed_group_established {
             RepDisposition::Rejected
-        } else {
+        } else if pending.disposition == RepDisposition::Confirmed {
             RepDisposition::Confirmed
+        } else {
+            // Finishing a legitimate one-rep set must not erase uncertainty
+            // already attached by the causal coordinate/evidence channels.
+            pending.disposition
         };
         vec![pending]
     }
@@ -210,8 +329,10 @@ impl BarbellBenchPhaseEngine {
         timestamp_ms: u64,
         equipment: &EquipmentFrameEvidence,
         pose_signal: Option<f32>,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) {
-        let Some((position, confidence)) = selected_bar_position(equipment) else {
+        let Some((position, confidence)) = self.selected_position(equipment, local_coordinate)
+        else {
             return;
         };
         let sample = BarbellFrameSample {
@@ -222,9 +343,10 @@ impl BarbellBenchPhaseEngine {
             pose_signal,
         };
         self.record_boundary_sample(sample);
-        let stable_ready = self
-            .baseline
-            .is_none_or(|baseline| (sample.position - baseline).abs() <= ENTER_DELTA * 0.30);
+        self.record_coordinate(local_coordinate);
+        let stable_ready = self.baseline.is_none_or(|baseline| {
+            (sample.position - baseline).abs() <= self.thresholds.enter_delta * 0.30
+        });
         if self.phase == RepPhase::Ready && stable_ready {
             self.prime_ready_sample(sample);
         }
@@ -238,9 +360,10 @@ impl BarbellBenchPhaseEngine {
         raw_equipment: &[EquipmentObservation],
         pose_signal: Option<f32>,
         pose_direction: MovementDirection,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<BarbellRepCandidate> {
         let mut emitted = Vec::new();
-        let associated = selected_bar_position(equipment);
+        let associated = self.selected_position(equipment, local_coordinate);
         let active_fallback = self.active.as_ref().and_then(|active| {
             selected_active_unassociated_bar_position(raw_equipment, active.previous_position)
         });
@@ -262,10 +385,13 @@ impl BarbellBenchPhaseEngine {
             pose_signal,
         };
         self.record_boundary_sample(sample);
+        self.record_coordinate(local_coordinate);
         match self.phase {
-            RepPhase::Ready => self.update_ready(sample),
+            RepPhase::Ready => self.update_ready(sample, local_coordinate),
             RepPhase::Effort | RepPhase::Peak | RepPhase::Return => {
-                if let Some(candidate) = self.update_effort(sample, pose_direction) {
+                if let Some(candidate) =
+                    self.update_effort(sample, pose_direction, local_coordinate)
+                {
                     emitted.extend(self.accept_candidate(candidate, timestamp_ms));
                 }
             }
@@ -274,13 +400,17 @@ impl BarbellBenchPhaseEngine {
         emitted
     }
 
-    fn update_ready(&mut self, sample: BarbellFrameSample) {
+    fn update_ready(
+        &mut self,
+        sample: BarbellFrameSample,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+    ) {
         self.prime_ready_sample(sample);
         let Some(baseline) = self.baseline else {
             return;
         };
         if self.ready_history.len() < MINIMUM_READY_SAMPLES
-            || sample.position < baseline + ENTER_DELTA
+            || sample.position < baseline + self.thresholds.enter_delta
         {
             return;
         }
@@ -288,11 +418,20 @@ impl BarbellBenchPhaseEngine {
             timestamp_ms: sample.timestamp_ms,
             value,
         });
-        let start = backtracked_ready_start(&self.ready_history, sample.timestamp_ms, baseline)
-            .unwrap_or(sample);
-        let reported_start =
-            backtracked_ready_start(&self.boundary_history, sample.timestamp_ms, baseline)
-                .unwrap_or(start);
+        let start = backtracked_ready_start(
+            &self.ready_history,
+            sample.timestamp_ms,
+            baseline,
+            self.thresholds.enter_delta,
+        )
+        .unwrap_or(sample);
+        let reported_start = backtracked_ready_start(
+            &self.boundary_history,
+            sample.timestamp_ms,
+            baseline,
+            self.thresholds.enter_delta,
+        )
+        .unwrap_or(start);
         self.active = Some(ActiveBarbellRep {
             rep_id: self.next_rep_id,
             start,
@@ -309,6 +448,12 @@ impl BarbellBenchPhaseEngine {
             pending_return: None,
             samples: VecDeque::from([sample]),
             hash: hash_bar_sample(FNV_OFFSET, sample),
+            start_coordinate: nearest_coordinate(
+                &self.coordinate_history,
+                reported_start.timestamp_ms,
+            )
+            .or_else(|| local_coordinate.cloned()),
+            coordinate_history: local_coordinate.cloned().into_iter().collect(),
         });
         self.next_rep_id = self.next_rep_id.saturating_add(1);
         self.phase = RepPhase::Effort;
@@ -343,15 +488,48 @@ impl BarbellBenchPhaseEngine {
         }
     }
 
+    fn record_coordinate(&mut self, coordinate: Option<&LocalMotionCoordinateEvidence>) {
+        if !self.use_local_coordinate {
+            return;
+        }
+        let Some(coordinate) = coordinate else {
+            return;
+        };
+        let Some(timestamp_ms) = coordinate.source_timestamp_ms else {
+            return;
+        };
+        if self
+            .coordinate_history
+            .back()
+            .and_then(|sample| sample.source_timestamp_ms)
+            == Some(timestamp_ms)
+        {
+            return;
+        }
+        self.coordinate_history.push_back(coordinate.clone());
+        while self.coordinate_history.len() > MAXIMUM_READY_HISTORY {
+            self.coordinate_history.pop_front();
+        }
+    }
+
     fn update_effort(
         &mut self,
         sample: BarbellFrameSample,
         pose_direction: MovementDirection,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Option<BarbellRepCandidate> {
         let baseline = self.baseline?;
         let active = self.active.as_mut()?;
         active.observed_samples = active.observed_samples.saturating_add(1);
         active.samples.push_back(sample);
+        if self.use_local_coordinate
+            && let Some(coordinate) = local_coordinate
+        {
+            active.coordinate_history.push_back(coordinate.clone());
+            while active.coordinate_history.len() > MAXIMUM_READY_HISTORY {
+                active.coordinate_history.pop_front();
+            }
+        }
         while active.samples.len() > MAXIMUM_READY_HISTORY {
             active.samples.pop_front();
         }
@@ -371,7 +549,8 @@ impl BarbellBenchPhaseEngine {
             active.reverse_sample_count = 0;
             active.pending_return = None;
             self.phase = RepPhase::Effort;
-        } else if active.previous_position - sample.position >= REVERSE_STEP_EPSILON {
+        } else if active.previous_position - sample.position >= self.thresholds.reverse_step_epsilon
+        {
             active.reverse_sample_count = active.reverse_sample_count.saturating_add(1);
         } else {
             active.reverse_sample_count = 0;
@@ -379,7 +558,7 @@ impl BarbellBenchPhaseEngine {
         if active.turnaround_confirmed_at_ms.is_none()
             && sample.timestamp_ms > active.peak.timestamp_ms
             && active.reverse_sample_count >= TURNAROUND_CONFIRM_SAMPLES
-            && active.peak.position - sample.position >= TURNAROUND_CONFIRM_DELTA
+            && active.peak.position - sample.position >= self.thresholds.turnaround_confirm_delta
         {
             active.turnaround_confirmed_at_ms = Some(sample.timestamp_ms);
             self.phase = RepPhase::Return;
@@ -389,8 +568,8 @@ impl BarbellBenchPhaseEngine {
             .timestamp_ms
             .saturating_sub(active.start.timestamp_ms);
         let returned = active.turnaround_confirmed_at_ms.is_some()
-            && sample.position <= baseline + RETURN_DELTA;
-        let timed_out = duration_ms > MAXIMUM_EFFORT_DURATION_MS;
+            && sample.position <= baseline + self.thresholds.return_delta;
+        let timed_out = duration_ms > self.thresholds.maximum_effort_duration_ms;
         if returned {
             let pending = active
                 .pending_return
@@ -403,7 +582,7 @@ impl BarbellBenchPhaseEngine {
             while pending.ready_samples.len() > MAXIMUM_READY_HISTORY {
                 pending.ready_samples.pop_front();
             }
-            if sample.position <= pending.best.position + REVERSE_STEP_EPSILON {
+            if sample.position <= pending.best.position + self.thresholds.reverse_step_epsilon {
                 pending.best = sample;
             }
             if sample.timestamp_ms.saturating_sub(pending.since_ms) < READY_ENDPOINT_DWELL_MS {
@@ -420,9 +599,9 @@ impl BarbellBenchPhaseEngine {
         let amplitude = active.peak.position - baseline;
         let valid = active.pending_return.is_some()
             && end.timestamp_ms.saturating_sub(active.start.timestamp_ms)
-                >= MINIMUM_EFFORT_DURATION_MS
-            && amplitude >= MINIMUM_AMPLITUDE
-            && (end.position - baseline).abs() <= MAXIMUM_ENDPOINT_DRIFT;
+                >= self.thresholds.minimum_effort_duration_ms
+            && amplitude >= self.thresholds.minimum_amplitude
+            && (end.position - baseline).abs() <= self.thresholds.maximum_endpoint_drift;
         let active = self.active.take().expect("active barbell rep disappeared");
         self.phase = RepPhase::Ready;
         self.ready_history = active
@@ -436,6 +615,11 @@ impl BarbellBenchPhaseEngine {
             return None;
         }
         let reported_peak = turnaround_plateau_midpoint(&active.samples, active.peak);
+        let start_coordinate = active.start_coordinate;
+        let peak_coordinate =
+            nearest_coordinate(&active.coordinate_history, reported_peak.timestamp_ms);
+        let end_coordinate = nearest_coordinate(&active.coordinate_history, end.timestamp_ms)
+            .or_else(|| local_coordinate.cloned());
         let equipment_coverage =
             1.0 - active.missed_samples as f32 / active.total_samples.max(1) as f32;
         Some(BarbellRepCandidate {
@@ -457,12 +641,44 @@ impl BarbellBenchPhaseEngine {
             signature_duration_ms: end.timestamp_ms.saturating_sub(active.start.timestamp_ms),
             pose_peak_timestamp_ms: active.pose_extreme.map(|extreme| extreme.timestamp_ms),
             path_hash: active.hash,
-            disposition: if equipment_coverage < LOW_EQUIPMENT_COVERAGE {
+            disposition: if equipment_coverage < LOW_EQUIPMENT_COVERAGE
+                || (self.use_local_coordinate
+                    && start_coordinate.as_ref().is_some_and(|coordinate| {
+                        coordinate.state != crate::LocalCoordinateState::Frozen
+                    })) {
                 RepDisposition::NeedsReview
             } else {
                 RepDisposition::Confirmed
             },
+            normalized_endpoints: match (start_coordinate, peak_coordinate, end_coordinate) {
+                (Some(start_anchor), Some(primary_turnaround), Some(end_return)) => {
+                    Some(NormalizedRepEndpointEvidence {
+                        coordinate_frame_id: start_anchor.coordinate_frame_id,
+                        start_anchor,
+                        primary_turnaround,
+                        end_return,
+                    })
+                }
+                _ => None,
+            },
         })
+    }
+
+    fn selected_position(
+        &self,
+        equipment: &EquipmentFrameEvidence,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+    ) -> Option<(f32, f32)> {
+        if !self.use_local_coordinate {
+            return selected_bar_position(equipment);
+        }
+        let coordinate = local_coordinate?;
+        let channel = coordinate.equipment?;
+        let mut position = channel.along_axis_progress;
+        if self.local_direction == MovementDirection::Decreasing {
+            position = -position;
+        }
+        Some((position, channel.confidence))
     }
 
     fn accept_candidate(
@@ -623,6 +839,21 @@ fn nearest_sample(
         .min_by_key(|sample| sample.timestamp_ms.abs_diff(target_ms))
 }
 
+fn nearest_coordinate(
+    history: &VecDeque<LocalMotionCoordinateEvidence>,
+    target_ms: u64,
+) -> Option<LocalMotionCoordinateEvidence> {
+    history
+        .iter()
+        .filter_map(|coordinate| {
+            coordinate
+                .source_timestamp_ms
+                .map(|timestamp_ms| (timestamp_ms.abs_diff(target_ms), coordinate))
+        })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, coordinate)| coordinate.clone())
+}
+
 fn turnaround_plateau_midpoint(
     samples: &VecDeque<BarbellFrameSample>,
     measured_peak: BarbellFrameSample,
@@ -733,8 +964,9 @@ fn backtracked_ready_start(
     history: &VecDeque<BarbellFrameSample>,
     activation_ms: u64,
     baseline: f32,
+    enter_delta: f32,
 ) -> Option<BarbellFrameSample> {
-    let ready_band = (ENTER_DELTA * 0.10).max(0.002);
+    let ready_band = (enter_delta * 0.10).max(0.002);
     history
         .iter()
         .rev()

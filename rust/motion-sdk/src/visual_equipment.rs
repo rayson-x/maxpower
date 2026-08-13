@@ -5,8 +5,8 @@
 //! trajectory state so platform adapters cannot silently diverge.
 
 use crate::{
-    EquipmentAttributes, EquipmentKind, EquipmentObservation, EquipmentOcclusion, EquipmentSource,
-    NormalizedRect, PoseCandidate, PoseSchemaId,
+    EquipmentAttributes, EquipmentAxis2d, EquipmentKind, EquipmentObservation, EquipmentOcclusion,
+    EquipmentSource, NormalizedRect, PoseCandidate, PoseSchemaId,
 };
 
 const EDGE_THRESHOLD: i16 = 26;
@@ -51,6 +51,12 @@ impl BarbellAxisObservation {
                 (self.x2 - self.x1).abs().clamp(0.0, 1.0),
                 (self.y2 - self.y1).abs().max(2.0 / 360.0).clamp(0.0, 1.0),
             ),
+            axis: Some(EquipmentAxis2d {
+                x1: self.x1,
+                y1: self.y1,
+                x2: self.x2,
+                y2: self.y2,
+            }),
             score: self.confidence,
             uncertainty_px: Some(self.uncertainty_px),
             source: EquipmentSource::Geometry,

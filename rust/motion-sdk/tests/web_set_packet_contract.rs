@@ -81,7 +81,7 @@ fn candidate_debug_abi_keeps_named_field_slots_in_sync() {
 }
 
 #[test]
-fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_8() {
+fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_10() {
     let _guard = ABI_TEST_LOCK.lock().unwrap();
     assert_eq!(motion_sdk_close(), 0);
     assert_eq!(motion_sdk_reset(640, 480, 1), 0);
@@ -106,7 +106,7 @@ fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_8() {
     // SAFETY: `packet` is writable for exactly the capacity passed to the ABI.
     let copied = unsafe { motion_sdk_copy_packet(packet.as_mut_ptr(), packet.len()) };
     assert_eq!(copied, packet.len() as isize);
-    assert_eq!(u16::from_le_bytes([packet[6], packet[7]]), 8);
+    assert_eq!(u16::from_le_bytes([packet[6], packet[7]]), 10);
     let equipment_offset = packet
         .windows(4)
         .position(|window| window == b"EQP1")
@@ -133,7 +133,7 @@ fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_8() {
     );
     assert!(
         packet.windows(4).any(|window| window == b"QLT1"),
-        "v1.8 packet must carry the additive Rust quality extension"
+        "v1.10 packet must preserve the additive Rust quality extension"
     );
     assert_eq!(motion_sdk_close(), 0);
 }

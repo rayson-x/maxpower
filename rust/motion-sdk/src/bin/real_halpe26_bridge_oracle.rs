@@ -1,6 +1,7 @@
 use maxpower_motion_sdk::web_abi::{
-    motion_sdk_add_equipment_observation, motion_sdk_begin_candidate, motion_sdk_begin_multi,
-    motion_sdk_begin_sequence, motion_sdk_close, motion_sdk_commit_candidate,
+    motion_sdk_add_equipment_axis_observation, motion_sdk_add_equipment_observation,
+    motion_sdk_begin_candidate, motion_sdk_begin_multi, motion_sdk_begin_sequence,
+    motion_sdk_begin_set, motion_sdk_close, motion_sdk_commit_candidate,
     motion_sdk_commit_sequence, motion_sdk_copy_packet, motion_sdk_current_frame_valid,
     motion_sdk_packet_len, motion_sdk_process_multi, motion_sdk_reset, motion_sdk_set_landmark,
     motion_sdk_set_pose_schema, motion_sdk_set_profile, motion_sdk_set_sequence_byte,
@@ -65,10 +66,19 @@ struct FixtureEquipmentObservation {
     proposal_id: u64,
     kind: String,
     bbox: [f32; 4],
+    axis: Option<FixtureEquipmentAxis>,
     score: f32,
     uncertainty_px: Option<f32>,
     source: String,
     attributes: FixtureEquipmentAttributes,
+}
+
+#[derive(Deserialize)]
+struct FixtureEquipmentAxis {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
 }
 
 #[derive(Deserialize)]
@@ -123,9 +133,6 @@ fn require_status(label: &str, status: i32) -> Result<(), String> {
 
 fn configure(fixture: &Fixture) -> Result<(), String> {
     let config = &fixture.bridge_config;
-    if config.active {
-        return Err("oracle only accepts inactive research replay fixtures".into());
-    }
     require_status("close", motion_sdk_close())?;
     require_status(
         "reset",
@@ -151,7 +158,11 @@ fn configure(fixture: &Fixture) -> Result<(), String> {
         )?;
     }
     require_status("commit sequence", motion_sdk_commit_sequence())?;
-    require_status("profile", motion_sdk_set_profile(config.profile_code))
+    require_status("profile", motion_sdk_set_profile(config.profile_code))?;
+    if config.active {
+        require_status("begin set", motion_sdk_begin_set())?;
+    }
+    Ok(())
 }
 
 fn replay(fixture: &Fixture) -> Result<Oracle, String> {
@@ -229,8 +240,25 @@ fn replay(fixture: &Fixture) -> Result<Oracle, String> {
             if observation.attributes.truncated {
                 flags |= 1 << 4;
             }
-            require_status(
-                "add equipment observation",
+            let status = if let Some(axis) = &observation.axis {
+                motion_sdk_add_equipment_axis_observation(
+                    observation.proposal_id as u32,
+                    (observation.proposal_id >> 32) as u32,
+                    kind,
+                    observation.bbox[0],
+                    observation.bbox[1],
+                    observation.bbox[2],
+                    observation.bbox[3],
+                    axis.x1,
+                    axis.y1,
+                    axis.x2,
+                    axis.y2,
+                    observation.score,
+                    observation.uncertainty_px.unwrap_or(-1.0),
+                    source,
+                    flags,
+                )
+            } else {
                 motion_sdk_add_equipment_observation(
                     observation.proposal_id as u32,
                     (observation.proposal_id >> 32) as u32,
@@ -243,8 +271,9 @@ fn replay(fixture: &Fixture) -> Result<Oracle, String> {
                     observation.uncertainty_px.unwrap_or(-1.0),
                     source,
                     flags,
-                ),
-            )?;
+                )
+            };
+            require_status("add equipment observation", status)?;
         }
         require_status("process multi", motion_sdk_process_multi())?;
         let mut packet = vec![0_u8; motion_sdk_packet_len() as usize];

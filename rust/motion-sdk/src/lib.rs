@@ -4,6 +4,7 @@ mod barbell_phase;
 mod equipment_fusion;
 mod equipment_pose_constraint;
 mod execution_assessment;
+mod local_motion_coordinate;
 #[doc(hidden)]
 pub mod temporal_template;
 mod visual_equipment;
@@ -12,6 +13,7 @@ pub mod web_abi;
 
 pub use equipment_fusion::*;
 pub use execution_assessment::*;
+pub use local_motion_coordinate::*;
 pub use visual_equipment::*;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -504,6 +506,12 @@ pub enum ExerciseSignalKind {
     LandmarkHorizontalDistance,
     LandmarkVerticalDistance,
     PairedLandmarkDistanceSum,
+    LocalAlongAxisProgress,
+    LocalCrossAxisDisplacement,
+    LocalEndpointRelativeProgress,
+    LocalDynamicBarAngle,
+    LocalChannelAgreement,
+    LocalObservability,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -781,6 +789,102 @@ impl ExerciseProfile {
         )
     }
 
+    pub fn barbell_bench_press_local_front_provisional() -> Self {
+        Self::local_barbell_profile(
+            "barbell-bench-press/front/bilateral/barbell/local-v1",
+            "local-barbell-bench-ready-effort-return/v1",
+            0.08,
+            0.13,
+            0.045,
+            0.07,
+            450,
+        )
+    }
+
+    pub fn barbell_bench_press_local_front_left_provisional() -> Self {
+        Self::with_identity(
+            Self::barbell_bench_press_local_front_provisional(),
+            "barbell-bench-press/front-left-45/bilateral/barbell/local-v1",
+        )
+    }
+
+    pub fn barbell_bench_press_local_front_right_provisional() -> Self {
+        Self::with_identity(
+            Self::barbell_bench_press_local_front_provisional(),
+            "barbell-bench-press/front-right-45/bilateral/barbell/local-v1",
+        )
+    }
+
+    pub fn seated_barbell_shoulder_press_local_front_provisional() -> Self {
+        Self::local_barbell_profile(
+            "seated-shoulder-press/front/bilateral/barbell/local-v1",
+            "local-barbell-shoulder-press-ready-effort-return/v1",
+            0.10,
+            0.18,
+            0.05,
+            0.08,
+            400,
+        )
+    }
+
+    pub fn seated_barbell_shoulder_press_local_front_left_provisional() -> Self {
+        Self::with_identity(
+            Self::seated_barbell_shoulder_press_local_front_provisional(),
+            "seated-shoulder-press/front-left-45/bilateral/barbell/local-v1",
+        )
+    }
+
+    pub fn seated_barbell_shoulder_press_local_front_right_provisional() -> Self {
+        Self::with_identity(
+            Self::seated_barbell_shoulder_press_local_front_provisional(),
+            "seated-shoulder-press/front-right-45/bilateral/barbell/local-v1",
+        )
+    }
+
+    pub fn dumbbell_shoulder_press_front_provisional() -> Self {
+        Self::with_identity(
+            Self::seated_shoulder_press_front_provisional(),
+            "dumbbell-shoulder-press/front/bilateral/dumbbell/v1",
+        )
+    }
+
+    fn local_barbell_profile(
+        identity: &str,
+        state_machine_id: &str,
+        start_amplitude: f32,
+        minimum_amplitude: f32,
+        return_hysteresis: f32,
+        ready_tolerance: f32,
+        min_rep_duration_ms: u64,
+    ) -> Self {
+        Self::with_computed_hash(Self {
+            identity: identity.into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::Halpe26,
+            coordinate_unit: "set-normalized-local-motion".into(),
+            state_machine_id: state_machine_id.into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LocalAlongAxisProgress,
+                landmarks: vec![],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::LocalChannelAgreement,
+                landmarks: vec![],
+            },
+            direction: MovementDirection::Increasing,
+            start_amplitude,
+            min_primary_amplitude: minimum_amplitude,
+            min_secondary_amplitude: 0.10,
+            return_hysteresis,
+            ready_tolerance,
+            max_gap_ms: 700,
+            min_rep_duration_ms,
+            max_rep_duration_ms: 6_000,
+        })
+    }
+
     fn with_identity(mut profile: Self, identity: &str) -> Self {
         profile.identity = identity.into();
         Self::with_computed_hash(profile)
@@ -871,6 +975,8 @@ impl ExerciseProfile {
             && self.state_machine_id != "stable-cycle-200ms-ready-effort-peak-return/v1"
             && self.state_machine_id != "alternating-ready-effort-return/v1"
             && self.state_machine_id != "barbell-axis-primary-ready-effort-return/v1"
+            && self.state_machine_id != "local-barbell-bench-ready-effort-return/v1"
+            && self.state_machine_id != "local-barbell-shoulder-press-ready-effort-return/v1"
         {
             return Err(MotionError::InvalidExerciseProfile(
                 "unsupported state graph",
@@ -933,6 +1039,16 @@ impl ExerciseProfile {
 
     fn uses_barbell_axis_state_graph(&self) -> bool {
         self.state_machine_id == "barbell-axis-primary-ready-effort-return/v1"
+            || self.uses_local_barbell_state_graph()
+    }
+
+    fn uses_local_barbell_state_graph(&self) -> bool {
+        self.state_machine_id == "local-barbell-bench-ready-effort-return/v1"
+            || self.state_machine_id == "local-barbell-shoulder-press-ready-effort-return/v1"
+    }
+
+    fn uses_local_shoulder_press_state_graph(&self) -> bool {
+        self.state_machine_id == "local-barbell-shoulder-press-ready-effort-return/v1"
     }
 
     fn uses_cycle_aligned_boundaries(&self) -> bool {
@@ -974,6 +1090,12 @@ impl ExerciseSignalKind {
             Self::LandmarkHorizontalDistance => 3,
             Self::PairedLandmarkDistanceSum => 4,
             Self::LandmarkVerticalDistance => 5,
+            Self::LocalAlongAxisProgress => 6,
+            Self::LocalCrossAxisDisplacement => 7,
+            Self::LocalEndpointRelativeProgress => 8,
+            Self::LocalDynamicBarAngle => 9,
+            Self::LocalChannelAgreement => 10,
+            Self::LocalObservability => 11,
         }
     }
 }
@@ -987,6 +1109,12 @@ impl ExerciseSignal {
             ExerciseSignalKind::LandmarkHorizontalDistance => 2..=2,
             ExerciseSignalKind::LandmarkVerticalDistance => 2..=2,
             ExerciseSignalKind::PairedLandmarkDistanceSum => 4..=4,
+            ExerciseSignalKind::LocalAlongAxisProgress
+            | ExerciseSignalKind::LocalCrossAxisDisplacement
+            | ExerciseSignalKind::LocalEndpointRelativeProgress
+            | ExerciseSignalKind::LocalDynamicBarAngle
+            | ExerciseSignalKind::LocalChannelAgreement
+            | ExerciseSignalKind::LocalObservability => 0..=0,
         };
         expected_count.contains(&self.landmarks.len())
             && self
@@ -1017,7 +1145,24 @@ fn expected_coordinate_unit(
             ExerciseSignalKind::PairedLandmarkDistanceSum,
             ExerciseSignalKind::PairedLandmarkDistanceSum,
         ) => "torso-normalized-distance",
+        (primary, secondary) if primary.is_local() && secondary.is_local() => {
+            "set-normalized-local-motion"
+        }
         _ => "derived-kinematic-signal",
+    }
+}
+
+impl ExerciseSignalKind {
+    const fn is_local(self) -> bool {
+        matches!(
+            self,
+            Self::LocalAlongAxisProgress
+                | Self::LocalCrossAxisDisplacement
+                | Self::LocalEndpointRelativeProgress
+                | Self::LocalDynamicBarAngle
+                | Self::LocalChannelAgreement
+                | Self::LocalObservability
+        )
     }
 }
 
@@ -1070,6 +1215,7 @@ struct SetGate {
     stable_since_ms: Option<u64>,
     idle_since_ms: Option<u64>,
     previous_primary: Option<f32>,
+    manually_paused: bool,
 }
 
 impl Default for SetGate {
@@ -1080,6 +1226,7 @@ impl Default for SetGate {
             stable_since_ms: None,
             idle_since_ms: None,
             previous_primary: None,
+            manually_paused: false,
         }
     }
 }
@@ -1094,6 +1241,7 @@ impl SetGate {
             stable_since_ms: None,
             idle_since_ms: None,
             previous_primary: None,
+            manually_paused: false,
         }
     }
 
@@ -1103,6 +1251,7 @@ impl SetGate {
         self.stable_since_ms = None;
         self.idle_since_ms = None;
         self.previous_primary = None;
+        self.manually_paused = false;
     }
 
     fn finish(&mut self) {
@@ -1111,6 +1260,26 @@ impl SetGate {
         self.stable_since_ms = None;
         self.idle_since_ms = None;
         self.previous_primary = None;
+        self.manually_paused = false;
+    }
+
+    fn pause(&mut self) {
+        if matches!(
+            self.state.lifecycle,
+            SetLifecycle::Arming | SetLifecycle::Active
+        ) {
+            self.state.lifecycle = SetLifecycle::Paused;
+            self.idle_since_ms = None;
+            self.manually_paused = true;
+        }
+    }
+
+    fn resume(&mut self) {
+        if self.state.lifecycle == SetLifecycle::Paused {
+            self.state.lifecycle = SetLifecycle::Active;
+            self.idle_since_ms = None;
+            self.manually_paused = false;
+        }
     }
 
     /// Returns whether this frame may advance the rep state machine.  The
@@ -1122,11 +1291,16 @@ impl SetGate {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
         equipment: Option<&EquipmentFrameEvidence>,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
         timestamp_ms: u64,
         rep_phase: RepPhase,
     ) -> bool {
         let primary = profile.and_then(|profile| {
-            if profile.uses_barbell_axis_state_graph() {
+            if profile.uses_local_barbell_state_graph() {
+                local_coordinate
+                    .and_then(|coordinate| coordinate.equipment)
+                    .map(|channel| channel.along_axis_progress)
+            } else if profile.uses_barbell_axis_state_graph() {
                 equipment.and_then(|frame| {
                     frame
                         .tracks
@@ -1149,7 +1323,9 @@ impl SetGate {
             target_state == TargetState::Locked && (profile.is_none() || primary.is_some());
         let resume_delta = profile
             .map(|profile| {
-                if profile.uses_barbell_axis_state_graph() {
+                if profile.uses_local_barbell_state_graph() {
+                    (profile.start_amplitude * 0.30).max(0.001)
+                } else if profile.uses_barbell_axis_state_graph() {
                     (32.0 / 640.0) * 0.30
                 } else {
                     (profile.start_amplitude * 0.30).max(0.001)
@@ -1206,6 +1382,9 @@ impl SetGate {
                 true
             }
             SetLifecycle::Paused => {
+                if self.manually_paused {
+                    return false;
+                }
                 if !observable {
                     return rep_phase != RepPhase::Ready;
                 }
@@ -1274,6 +1453,18 @@ pub struct SealedRep {
     /// differs from the recognition profile so callers can give useful
     /// feedback instead of silently discarding a smaller, real effort.
     pub observation_findings: Vec<RepObservationFinding>,
+    /// Causal normalized facts captured at the three immutable Rep endpoints.
+    /// This is additive shadow evidence; legacy profiles leave it absent.
+    pub normalized_endpoints: Option<NormalizedRepEndpointEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizedRepEndpointEvidence {
+    pub coordinate_frame_id: u64,
+    pub start_anchor: LocalMotionCoordinateEvidence,
+    pub primary_turnaround: LocalMotionCoordinateEvidence,
+    pub end_return: LocalMotionCoordinateEvidence,
 }
 
 /// Immutable recognition decision for one completed movement candidate. Only
@@ -1294,6 +1485,7 @@ pub enum RepEvidenceReason {
     AntiInterferenceFilter,
     DurationExceeded,
     RequiredJointLoss,
+    CoordinateProvisional,
 }
 
 /// Profile-relative observations attached to a sealed movement. They are not
@@ -1367,6 +1559,9 @@ pub struct MotionPacket {
     /// Subject-associated equipment evidence. Contract minors before 1.7 do
     /// not serialize this field; callers must not infer equipment from wrists.
     pub equipment: EquipmentFrameEvidence,
+    /// Additive camera-plane evidence from the per-set Rust coordinate layer.
+    /// Raw landmarks and equipment geometry remain authoritative observations.
+    pub local_motion_coordinate: LocalMotionCoordinateEvidence,
     pub set_state: SetStateSnapshot,
     pub rep_state: RepStateSnapshot,
     /// Newly sealed objects only. Consumers accumulate by `(subject_epoch,
@@ -1383,6 +1578,7 @@ pub enum PacketEncodeError {
     TooManyLandmarks,
     NonFiniteLandmark { index: usize },
     NonFiniteEquipment { track_id: u64 },
+    NonFiniteLocalCoordinate,
     QualityPayloadTooLarge,
     PacketTooLarge,
 }
@@ -1688,6 +1884,46 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
         bytes.extend_from_slice(&payload);
     }
 
+    if packet.lineage.contract.minor >= 9 {
+        bytes.extend_from_slice(b"AXI1");
+        let axes = packet
+            .equipment
+            .tracks
+            .iter()
+            .filter_map(|track| track.axis.map(|axis| (track.track_id, axis)))
+            .collect::<Vec<_>>();
+        let axis_count =
+            u16::try_from(axes.len()).map_err(|_| PacketEncodeError::PacketTooLarge)?;
+        bytes.extend_from_slice(&axis_count.to_le_bytes());
+        for (track_id, axis) in axes {
+            let values = [
+                axis.x1,
+                axis.y1,
+                axis.x2,
+                axis.y2,
+                axis.projected_length(),
+                axis.image_angle_radians(),
+            ];
+            if values.iter().any(|value| !value.is_finite()) {
+                return Err(PacketEncodeError::NonFiniteEquipment { track_id });
+            }
+            bytes.extend_from_slice(&track_id.to_le_bytes());
+            for value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+
+    if packet.lineage.contract.minor >= 10 {
+        bytes.extend_from_slice(b"LMC1");
+        let payload = serde_json::to_vec(&packet.local_motion_coordinate)
+            .map_err(|_| PacketEncodeError::NonFiniteLocalCoordinate)?;
+        let payload_len =
+            u32::try_from(payload.len()).map_err(|_| PacketEncodeError::PacketTooLarge)?;
+        bytes.extend_from_slice(&payload_len.to_le_bytes());
+        bytes.extend_from_slice(&payload);
+    }
+
     let packet_len = u32::try_from(bytes.len()).map_err(|_| PacketEncodeError::PacketTooLarge)?;
     bytes[8..12].copy_from_slice(&packet_len.to_le_bytes());
     Ok(bytes)
@@ -1823,6 +2059,7 @@ fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
         RepEvidenceReason::AntiInterferenceFilter => 5,
         RepEvidenceReason::DurationExceeded => 6,
         RepEvidenceReason::RequiredJointLoss => 7,
+        RepEvidenceReason::CoordinateProvisional => 8,
     }
 }
 
@@ -2375,9 +2612,31 @@ struct RepEngine {
 
 impl RepEngine {
     fn new(profile: ExerciseProfile) -> Self {
-        let barbell_phase = profile
-            .uses_barbell_axis_state_graph()
-            .then(barbell_phase::BarbellBenchPhaseEngine::new);
+        let barbell_phase = if profile.uses_local_shoulder_press_state_graph() {
+            Some(
+                barbell_phase::BarbellBenchPhaseEngine::local_shoulder_press(
+                    profile.start_amplitude,
+                    profile.min_primary_amplitude,
+                    profile.return_hysteresis,
+                    profile.ready_tolerance,
+                    profile.min_rep_duration_ms,
+                    profile.max_rep_duration_ms,
+                ),
+            )
+        } else if profile.uses_local_barbell_state_graph() {
+            Some(barbell_phase::BarbellBenchPhaseEngine::local_bench(
+                profile.start_amplitude,
+                profile.min_primary_amplitude,
+                profile.return_hysteresis,
+                profile.ready_tolerance,
+                profile.min_rep_duration_ms,
+                profile.max_rep_duration_ms,
+            ))
+        } else if profile.uses_barbell_axis_state_graph() {
+            Some(barbell_phase::BarbellBenchPhaseEngine::new())
+        } else {
+            None
+        };
         Self {
             profile,
             barbell_phase,
@@ -2499,13 +2758,20 @@ impl RepEngine {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
         equipment: &EquipmentFrameEvidence,
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) {
         if target_state != TargetState::Locked {
             return;
         }
-        let pose_signal = barbell_bench_pose_signal(self.profile.schema, canonical);
+        let pose_signal = barbell_pose_signal(&self.profile, canonical);
         if let Some(engine) = self.barbell_phase.as_mut() {
-            engine.prime_boundary(frame_id, timestamp_ms, equipment, pose_signal);
+            engine.prime_boundary(
+                frame_id,
+                timestamp_ms,
+                equipment,
+                pose_signal,
+                local_coordinate,
+            );
             self.sync_barbell_phase_state();
         }
     }
@@ -2550,6 +2816,7 @@ impl RepEngine {
             disposition,
             evidence_reason,
             observation_findings,
+            normalized_endpoints: None,
         };
         // Every outcome, including a filtered one, is immutable and
         // addressable evidence. Never reuse its id in the same set.
@@ -2674,6 +2941,7 @@ impl RepEngine {
         canonical: &[CanonicalLandmark],
         equipment: &EquipmentFrameEvidence,
         raw_equipment: &[EquipmentObservation],
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<SealedRep> {
         if self.barbell_phase.is_none() {
             return self.process_pose(frame_id, timestamp_ms, target_state, canonical);
@@ -2686,7 +2954,7 @@ impl RepEngine {
             return Vec::new();
         }
         let pose_signal = (target_state == TargetState::Locked)
-            .then(|| barbell_bench_pose_signal(self.profile.schema, canonical))
+            .then(|| barbell_pose_signal(&self.profile, canonical))
             .flatten();
         let candidates = self
             .barbell_phase
@@ -2699,6 +2967,7 @@ impl RepEngine {
                 raw_equipment,
                 pose_signal,
                 MovementDirection::Decreasing,
+                local_coordinate,
             );
         self.sync_barbell_phase_state();
         candidates
@@ -2736,6 +3005,10 @@ impl RepEngine {
                 disposition = RepDisposition::NeedsReview;
             }
         }
+        let coordinate_provisional = candidate
+            .normalized_endpoints
+            .as_ref()
+            .is_some_and(|value| value.start_anchor.state != LocalCoordinateState::Frozen);
         SealedRep {
             rep_id: candidate.rep_id,
             start_frame_id: candidate.start_frame_id,
@@ -2753,9 +3026,15 @@ impl RepEngine {
             quality_verdict: None,
             recovered_across_gap: false,
             disposition,
-            evidence_reason: (disposition == RepDisposition::Rejected)
-                .then_some(RepEvidenceReason::AntiInterferenceFilter),
+            evidence_reason: if disposition == RepDisposition::Rejected {
+                Some(RepEvidenceReason::AntiInterferenceFilter)
+            } else if disposition == RepDisposition::NeedsReview && coordinate_provisional {
+                Some(RepEvidenceReason::CoordinateProvisional)
+            } else {
+                None
+            },
             observation_findings: findings,
+            normalized_endpoints: candidate.normalized_endpoints,
         }
     }
 
@@ -3508,15 +3787,38 @@ fn profile_signal(
 /// Independent pose corroboration for a barbell-bench turnaround. Both arms
 /// must be judgeable in the current Halpe/Blaze schema; one drifting arm can
 /// therefore explain a conflict but can never relocate the shaft boundary.
-fn barbell_bench_pose_signal(schema: PoseSchemaId, canonical: &[CanonicalLandmark]) -> Option<f32> {
-    let angles = measure_joint_angles_for_schema(canonical, TargetState::Locked, schema);
+fn barbell_pose_signal(profile: &ExerciseProfile, canonical: &[CanonicalLandmark]) -> Option<f32> {
+    let angles = measure_joint_angles_for_schema(canonical, TargetState::Locked, profile.schema);
     let left = angles.iter().find(|angle| {
         angle.kind == JointAngleKind::Elbow && angle.side == BodySide::Left && angle.judgeable
     })?;
     let right = angles.iter().find(|angle| {
         angle.kind == JointAngleKind::Elbow && angle.side == BodySide::Right && angle.judgeable
     })?;
-    Some((left.value_degrees? + right.value_degrees?) * 0.5)
+    let elbow_flexion = (left.value_degrees? + right.value_degrees?) * 0.5;
+    if profile.uses_local_shoulder_press_state_graph() {
+        // Shoulder press gets a dedicated pose corroboration definition. The
+        // shaft still owns phase boundaries, while the mean wrist-to-shoulder
+        // rise distinguishes an overhead press from a bench-style elbow fold.
+        let left_shoulder = canonical.get(5)?;
+        let right_shoulder = canonical.get(6)?;
+        let left_wrist = canonical.get(9)?;
+        let right_wrist = canonical.get(10)?;
+        if [left_shoulder, right_shoulder, left_wrist, right_wrist]
+            .into_iter()
+            .any(|landmark| {
+                landmark.source == LandmarkSource::Unknown
+                    || landmark.canonical_confidence < PHASE_SIGNAL_MIN_CONFIDENCE
+                    || !landmark.renderable
+            })
+        {
+            return None;
+        }
+        let shoulder_y = (left_shoulder.y? + right_shoulder.y?) * 0.5;
+        let wrist_y = (left_wrist.y? + right_wrist.y?) * 0.5;
+        return Some(shoulder_y - wrist_y);
+    }
+    Some(elbow_flexion)
 }
 
 const PHASE_SIGNAL_MIN_CONFIDENCE: f32 = 0.5;
@@ -3714,6 +4016,12 @@ fn measure_signal(
             };
             Some((distance(first, second)? + distance(third, fourth)?) / scale)
         }
+        ExerciseSignalKind::LocalAlongAxisProgress
+        | ExerciseSignalKind::LocalCrossAxisDisplacement
+        | ExerciseSignalKind::LocalEndpointRelativeProgress
+        | ExerciseSignalKind::LocalDynamicBarAngle
+        | ExerciseSignalKind::LocalChannelAgreement
+        | ExerciseSignalKind::LocalObservability => None,
     }
 }
 
@@ -4093,6 +4401,7 @@ pub struct MotionSession<I: InferenceAdapter, O: OutputAdapter> {
     subject_tracker: SubjectTracker,
     equipment_fusion: EquipmentFusionEngine,
     equipment_pose_constraint: equipment_pose_constraint::EquipmentPoseConstraintEngine,
+    local_motion_coordinate: LocalMotionCoordinateEstimator,
     rep_engine: Option<RepEngine>,
     set_gate: SetGate,
     pending_outcomes: Vec<SealedRep>,
@@ -4149,6 +4458,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             equipment_fusion: EquipmentFusionEngine::new(),
             equipment_pose_constraint:
                 equipment_pose_constraint::EquipmentPoseConstraintEngine::new(),
+            local_motion_coordinate: LocalMotionCoordinateEstimator::new(),
             rep_engine: None,
             set_gate: SetGate::replay_active(),
             pending_outcomes: Vec::new(),
@@ -4160,6 +4470,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     /// default until it opts into the set lifecycle.
     pub fn begin_set(&mut self) {
         self.set_gate.begin();
+        self.local_motion_coordinate.begin_set();
         if let Some(rep_engine) = self.rep_engine.as_mut() {
             rep_engine.begin_set();
         }
@@ -4169,9 +4480,20 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     /// movement. A later `begin_set` creates a fresh arming window.
     pub fn finish_set(&mut self) -> Vec<SealedRep> {
         self.set_gate.finish();
+        self.local_motion_coordinate.finish_set();
         self.rep_engine
             .as_mut()
             .map_or_else(Vec::new, RepEngine::finish_set)
+    }
+
+    pub fn pause_set(&mut self) {
+        self.set_gate.pause();
+        self.local_motion_coordinate.pause_set();
+    }
+
+    pub fn resume_set(&mut self) {
+        self.set_gate.resume();
+        self.local_motion_coordinate.resume_set();
     }
 
     pub fn set_state(&self) -> SetStateSnapshot {
@@ -4244,6 +4566,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             disposition: original.disposition,
             evidence_reason: original.evidence_reason,
             observation_findings: original.observation_findings.clone(),
+            normalized_endpoints: original.normalized_endpoints.clone(),
         })
     }
 
@@ -4261,6 +4584,8 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             if lease.timestamp_ms().saturating_sub(previous) > 1_000 {
                 self.continuity.reset();
                 self.equipment_pose_constraint.reset();
+                self.local_motion_coordinate
+                    .reset_for_discontinuity(LocalCoordinateReason::ObservationGap);
                 if let Some(rep_engine) = self.rep_engine.as_mut() {
                     self.pending_outcomes.extend(
                         rep_engine.reject_active(
@@ -4290,6 +4615,8 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             self.subject_epoch = self.subject_epoch.saturating_add(1);
             self.continuity.reset();
             self.equipment_pose_constraint.reset();
+            self.local_motion_coordinate
+                .reset_for_discontinuity(LocalCoordinateReason::SubjectChanged);
             if let Some(rep_engine) = self.rep_engine.as_mut() {
                 completed_reps.extend(rep_engine.reject_for_subject_change());
             }
@@ -4317,6 +4644,12 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         // equipment-conditioned repair is published to clients and quality
         // metrics, but must not corroborate the same equipment twice.
         let phase_pose_canonical = canonical.clone();
+        let local_motion_coordinate = self.local_motion_coordinate.observe(
+            source_timestamp_ms,
+            target.selected_candidate_id,
+            &phase_pose_canonical,
+            &equipment,
+        );
         if self
             .rep_engine
             .as_ref()
@@ -4352,6 +4685,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             target.state,
             &canonical,
             Some(&equipment),
+            Some(&local_motion_coordinate),
             source_timestamp_ms,
             rep_phase,
         );
@@ -4364,6 +4698,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     &phase_pose_canonical,
                     &equipment,
                     &raw_equipment,
+                    Some(&local_motion_coordinate),
                 )
             })
         } else {
@@ -4374,6 +4709,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     target.state,
                     &phase_pose_canonical,
                     &equipment,
+                    Some(&local_motion_coordinate),
                 );
             }
             Vec::new()
@@ -4413,6 +4749,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             canonical,
             joint_angles,
             equipment,
+            local_motion_coordinate,
             set_state: self.set_gate.state.clone(),
             rep_state,
             quality_proposals: if self.config.contract.minor >= 8 {

@@ -163,6 +163,7 @@ fn sealed(start: u64, peak: u64, end: u64) -> SealedRep {
         disposition: RepDisposition::Confirmed,
         evidence_reason: None,
         observation_findings: vec![],
+        normalized_endpoints: None,
     }
 }
 

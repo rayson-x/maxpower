@@ -47,7 +47,7 @@ const ACTION_CONTRACTS: [ExpectedActionContract; 12] = [
         action_id: "seated_shoulder_press",
         first_phase: "concentric",
         second_phase: "eccentric",
-        equipment_role: "external_load_not_observed",
+        equipment_role: "selected_external_load",
         capability: AssessmentCapability::PhaseSupported,
     },
     ExpectedActionContract {
@@ -108,7 +108,7 @@ const ACTION_CONTRACTS: [ExpectedActionContract; 12] = [
     },
 ];
 
-const PERSONAL_EXACT_CONTEXTS: [ExpectedContext; 26] = [
+const PERSONAL_EXACT_CONTEXTS: [ExpectedContext; 28] = [
     context(
         "barbell_bench_press",
         "front",
@@ -172,6 +172,18 @@ const PERSONAL_EXACT_CONTEXTS: [ExpectedContext; 26] = [
     context(
         "seated_shoulder_press",
         "front",
+        "bilateral",
+        AssessmentCapability::PhaseSupported,
+    ),
+    context(
+        "seated_shoulder_press",
+        "frontLeft45",
+        "bilateral",
+        AssessmentCapability::PhaseSupported,
+    ),
+    context(
+        "seated_shoulder_press",
+        "frontRight45",
         "bilateral",
         AssessmentCapability::PhaseSupported,
     ),
@@ -344,12 +356,14 @@ fn every_personal_exact_view_resolves_without_guessing_a_different_context() {
         let expected_side = matches!(expected.anatomical_side, "left" | "right")
             .then_some(expected.anatomical_side);
         assert_eq!(proposal.anatomical_side.as_deref(), expected_side);
-        assert_eq!(
-            proposal.equipment_role,
+        let expected_equipment_role = if expected.action_id == "seated_shoulder_press" {
+            "barbell_axis_phase_and_path"
+        } else {
             action_assessment_contract(expected.action_id)
                 .expect("catalogued action")
-                .equipment_role,
-        );
+                .equipment_role
+        };
+        assert_eq!(proposal.equipment_role, expected_equipment_role);
         assert_eq!(
             proposal.capability, expected.capability,
             "wrong exact-context capability for {} / {} / {}",
@@ -484,6 +498,25 @@ fn exact_action_catalog_equipment_tokens_are_accepted_by_rust() {
             "Rust must accept the exact equipment token frozen by the action contract: {identity}",
         );
     }
+}
+
+#[test]
+fn seated_shoulder_press_keeps_barbell_and_dumbbell_evidence_semantics_distinct() {
+    for view in ["front", "frontLeft45", "frontRight45"] {
+        let barbell = proposal_for_identity(
+            &format!("seated_shoulder_press/{view}/bilateral/barbell/local-v1"),
+            Vec::new(),
+        );
+        assert_eq!(barbell.capability, AssessmentCapability::PhaseSupported);
+        assert_eq!(barbell.equipment_role, "barbell_axis_phase_and_path");
+    }
+
+    let dumbbell = proposal_for_identity(
+        "seated_shoulder_press/front/bilateral/dumbbell/v1",
+        Vec::new(),
+    );
+    assert_eq!(dumbbell.capability, AssessmentCapability::PhaseSupported);
+    assert_eq!(dumbbell.equipment_role, "dumbbells_not_observed");
 }
 
 #[test]
@@ -778,6 +811,7 @@ fn proposal_for_identity_with_maturity_and_disposition(
         disposition,
         evidence_reason: None,
         observation_findings: findings,
+        normalized_endpoints: None,
     };
     build_quality_proposals(&[rep])
         .into_iter()

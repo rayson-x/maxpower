@@ -47,6 +47,34 @@ pub struct EquipmentAttributes {
     pub truncated: bool,
 }
 
+/// Ordered camera-plane endpoints for a rigid equipment axis. The order is
+/// stable tracking geometry only; it is not anatomical left/right until the
+/// selected action/view context supplies that mapping.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EquipmentAxis2d {
+    pub x1: f32,
+    pub y1: f32,
+    pub x2: f32,
+    pub y2: f32,
+}
+
+impl EquipmentAxis2d {
+    pub fn image_angle_radians(self) -> f32 {
+        (self.y2 - self.y1).atan2(self.x2 - self.x1)
+    }
+
+    pub fn projected_length(self) -> f32 {
+        (self.x2 - self.x1).hypot(self.y2 - self.y1)
+    }
+
+    fn is_valid(self) -> bool {
+        [self.x1, self.y1, self.x2, self.y2]
+            .into_iter()
+            .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+            && self.projected_length() > 0.0
+    }
+}
+
 /// One frame-local detector/tracker observation. `proposal_id` is retained for
 /// diagnostics only and is never used as the stable Rust track identity.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +82,9 @@ pub struct EquipmentObservation {
     pub proposal_id: u64,
     pub kind: EquipmentKind,
     pub bbox: NormalizedRect,
+    /// Full ordered shaft geometry when the detector measured a rigid axis.
+    /// Generic detectors may leave this absent without fabricating endpoints.
+    pub axis: Option<EquipmentAxis2d>,
     pub score: f32,
     pub uncertainty_px: Option<f32>,
     pub source: EquipmentSource,
@@ -94,6 +125,7 @@ pub struct EquipmentTrackEvidence {
     pub subject_candidate_id: u64,
     pub kind: EquipmentKind,
     pub bbox: NormalizedRect,
+    pub axis: Option<EquipmentAxis2d>,
     pub center_x: f32,
     pub center_y: f32,
     pub observation_score: f32,
@@ -322,6 +354,7 @@ impl EquipmentFusionEngine {
                 subject_candidate_id: subject.id,
                 kind: observation.kind,
                 bbox: observation.bbox,
+                axis: observation.axis,
                 center_x,
                 center_y,
                 observation_score: observation.score,
@@ -361,6 +394,7 @@ fn valid_observation(observation: EquipmentObservation) -> bool {
             .uncertainty_px
             .is_none_or(|value| value.is_finite() && value >= 0.0)
         && valid_rect(observation.bbox)
+        && observation.axis.is_none_or(EquipmentAxis2d::is_valid)
 }
 
 fn valid_rect(rect: NormalizedRect) -> bool {

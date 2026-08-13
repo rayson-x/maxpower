@@ -30,6 +30,7 @@ fn observation(
         proposal_id,
         kind,
         bbox,
+        axis: None,
         score: 0.92,
         uncertainty_px: Some(2.0),
         source: EquipmentSource::Detector,

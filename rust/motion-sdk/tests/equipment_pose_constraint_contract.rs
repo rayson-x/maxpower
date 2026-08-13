@@ -76,6 +76,7 @@ fn bar(center_y: f32) -> EquipmentObservation {
         proposal_id: 70,
         kind: EquipmentKind::BarbellShaft,
         bbox: NormalizedRect::new(0.20, center_y - 0.01, 0.60, 0.02),
+        axis: None,
         score: 0.95,
         uncertainty_px: Some(2.0),
         source: EquipmentSource::Geometry,

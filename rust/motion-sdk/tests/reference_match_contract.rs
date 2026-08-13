@@ -236,6 +236,7 @@ fn sealed_rep() -> SealedRep {
         disposition: RepDisposition::Confirmed,
         evidence_reason: None,
         observation_findings: vec![],
+        normalized_endpoints: None,
     }
 }
 

@@ -34,6 +34,7 @@ struct WebRuntime {
     candidate_meta: Option<(u64, NormalizedRect, [f32; 3])>,
     equipment_observations: Vec<super::EquipmentObservation>,
     equipment_output: Option<super::EquipmentFrameEvidence>,
+    local_motion_coordinate: super::LocalMotionCoordinateEstimator,
     visual_equipment_tracker: super::BarbellAxisVisualTracker,
     visual_luma: Vec<u8>,
     visual_width: usize,
@@ -279,6 +280,7 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.candidate_meta = None;
     runtime.equipment_observations.clear();
     runtime.equipment_output = None;
+    runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new();
     runtime.visual_equipment_tracker.reset();
     runtime.visual_luma.clear();
     runtime.visual_width = 0;
@@ -333,6 +335,7 @@ pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
     runtime.equipment_fusion = super::EquipmentFusionEngine::new();
     runtime.equipment_observations.clear();
     runtime.equipment_output = None;
+    runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new();
     runtime.visual_equipment_tracker.reset();
     runtime.visual_luma.clear();
     runtime.visual_width = 0;
@@ -354,6 +357,7 @@ pub extern "C" fn motion_sdk_begin_set() -> i32 {
         return -2;
     }
     runtime.set_gate.begin();
+    runtime.local_motion_coordinate.begin_set();
     if let Some(rep_engine) = runtime.rep_engine.as_mut() {
         rep_engine.begin_set();
         runtime.rep_state = rep_engine.state.clone();
@@ -379,6 +383,7 @@ pub extern "C" fn motion_sdk_begin_replay_set() -> i32 {
         return -2;
     }
     runtime.set_gate = super::SetGate::replay_active();
+    runtime.local_motion_coordinate.begin_set();
     0
 }
 
@@ -392,6 +397,7 @@ pub extern "C" fn motion_sdk_finish_set() -> i32 {
         return -2;
     }
     runtime.set_gate.finish();
+    runtime.local_motion_coordinate.finish_set();
     runtime.completed_reps = runtime
         .rep_engine
         .as_mut()
@@ -403,6 +409,34 @@ pub extern "C" fn motion_sdk_finish_set() -> i32 {
         .map_or_else(super::RepStateSnapshot::default, |engine| {
             engine.state.clone()
         });
+    encode_current_packet(&mut runtime);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_pause_set() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    runtime.set_gate.pause();
+    runtime.local_motion_coordinate.pause_set();
+    encode_current_packet(&mut runtime);
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_resume_set() -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.engine.is_none() {
+        return -2;
+    }
+    runtime.set_gate.resume();
+    runtime.local_motion_coordinate.resume_set();
     encode_current_packet(&mut runtime);
     0
 }
@@ -777,6 +811,7 @@ pub extern "C" fn motion_sdk_add_equipment_observation(
             proposal_id: (u64::from(id_high) << 32) | u64::from(id_low),
             kind,
             bbox: NormalizedRect::new(x, y, width, height),
+            axis: None,
             score,
             uncertainty_px,
             source,
@@ -787,6 +822,62 @@ pub extern "C" fn motion_sdk_add_equipment_observation(
                 truncated: flags & 0b10000 != 0,
             },
         });
+    0
+}
+
+/// Additive v1.10 host ABI for a detector/tracker that measured the ordered
+/// endpoints of a rigid equipment shaft. Generic boxes keep using the legacy
+/// function above; no client is forced to invent endpoints.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_add_equipment_axis_observation(
+    id_low: u32,
+    id_high: u32,
+    kind: u32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    score: f32,
+    uncertainty_px: f32,
+    source: u32,
+    flags: u32,
+) -> i32 {
+    let status = motion_sdk_add_equipment_observation(
+        id_low,
+        id_high,
+        kind,
+        x,
+        y,
+        width,
+        height,
+        score,
+        uncertainty_px,
+        source,
+        flags,
+    );
+    if status != 0 {
+        return status;
+    }
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let Some(observation) = runtime.equipment_observations.last_mut() else {
+        return -2;
+    };
+    let axis = super::EquipmentAxis2d { x1, y1, x2, y2 };
+    if ![x1, y1, x2, y2]
+        .into_iter()
+        .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+        || axis.projected_length() <= f32::EPSILON
+    {
+        runtime.equipment_observations.pop();
+        return -6;
+    }
+    observation.axis = Some(axis);
     0
 }
 
@@ -827,6 +918,9 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
             .and_then(super::RepEngine::reject_for_subject_change);
         runtime.pending_outcomes.extend(subject_change_outcome);
         runtime.visual_equipment_tracker.reset();
+        runtime
+            .local_motion_coordinate
+            .reset_for_discontinuity(super::LocalCoordinateReason::SubjectChanged);
         reset_reference_subject(&mut runtime);
     }
     let landmark_count = runtime
@@ -885,6 +979,15 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
                 equipment: &equipment_observations,
             }),
     );
+    if let Some(equipment) = runtime.equipment_output.clone() {
+        let output = runtime.output.clone();
+        runtime.local_motion_coordinate.observe(
+            timestamp_ms,
+            target.selected_candidate_id,
+            &output,
+            &equipment,
+        );
+    }
     runtime.target = Some(target);
     process_rep(&mut runtime, &equipment_observations);
     runtime.last_processed_timestamp_ms = Some(timestamp_ms);
@@ -960,6 +1063,7 @@ fn process_rep(runtime: &mut WebRuntime, raw_equipment: &[super::EquipmentObserv
         target.state,
         &runtime.output,
         Some(&equipment),
+        Some(&runtime.local_motion_coordinate.snapshot()),
         runtime.timestamp_ms,
         rep_phase,
     );
@@ -974,6 +1078,7 @@ fn process_rep(runtime: &mut WebRuntime, raw_equipment: &[super::EquipmentObserv
                     &runtime.output,
                     &equipment,
                     raw_equipment,
+                    Some(&runtime.local_motion_coordinate.snapshot()),
                 ));
             runtime.rep_state = rep_engine.state.clone();
         } else {
@@ -987,6 +1092,7 @@ fn process_rep(runtime: &mut WebRuntime, raw_equipment: &[super::EquipmentObserv
                 target.state,
                 &runtime.output,
                 &equipment,
+                Some(&runtime.local_motion_coordinate.snapshot()),
             );
         }
         runtime.rep_state = runtime
@@ -1094,7 +1200,10 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
     let packet = super::MotionPacket {
         lineage: super::PacketLineage {
             sequence_id: runtime.sequence_id.clone(),
-            contract: super::ContractVersion { major: 1, minor: 8 },
+            contract: super::ContractVersion {
+                major: 1,
+                minor: 10,
+            },
             algorithm_version: "rust-canonical-wasm/v1".into(),
             config_version: "web-motion-config/v1".into(),
             inference_version: match runtime.pose_schema {
@@ -1119,6 +1228,7 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
         canonical: runtime.output.clone(),
         joint_angles,
         equipment,
+        local_motion_coordinate: runtime.local_motion_coordinate.snapshot(),
         set_state: runtime.set_gate.state.clone(),
         rep_state: runtime.rep_state.clone(),
         quality_proposals: super::build_quality_proposals(&runtime.completed_reps),
@@ -1172,7 +1282,7 @@ pub extern "C" fn motion_sdk_contract_major() -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_contract_minor() -> u32 {
-    8
+    10
 }
 
 #[unsafe(no_mangle)]
@@ -1214,6 +1324,23 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
         108 => super::ExerciseProfile::step_jack_front_provisional()
             .into_halpe26()
             .ok(),
+        109 => Some(super::ExerciseProfile::barbell_bench_press_local_front_provisional()),
+        110 => Some(super::ExerciseProfile::barbell_bench_press_local_front_left_provisional()),
+        111 => Some(super::ExerciseProfile::barbell_bench_press_local_front_right_provisional()),
+        112 => {
+            Some(super::ExerciseProfile::seated_barbell_shoulder_press_local_front_provisional())
+        }
+        113 => Some(
+            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_left_provisional(),
+        ),
+        114 => Some(
+            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_right_provisional(),
+        ),
+        115 => Some(
+            super::ExerciseProfile::dumbbell_shoulder_press_front_provisional()
+                .into_halpe26()
+                .unwrap(),
+        ),
         _ => return -2,
     };
     if profile
@@ -1308,6 +1435,7 @@ pub extern "C" fn motion_sdk_install_profile(
         1 => "image-angle-deg",
         2 => "torso-normalized-distance",
         3 => "derived-kinematic-signal",
+        4 => "set-normalized-local-motion",
         _ => return -5,
     };
     let state_machine_id = match state_machine {
@@ -1326,6 +1454,8 @@ pub extern "C" fn motion_sdk_install_profile(
         12 => "cycle-aligned-median-600ms-ready-effort-peak-return/v1",
         13 => "stable-cycle-200ms-ready-effort-peak-return/v1",
         14 => "barbell-axis-primary-ready-effort-return/v1",
+        15 => "local-barbell-bench-ready-effort-return/v1",
+        16 => "local-barbell-shoulder-press-ready-effort-return/v1",
         _ => return -5,
     };
     let direction = match direction {
@@ -1340,6 +1470,12 @@ pub extern "C" fn motion_sdk_install_profile(
         2 => Some(super::ExerciseSignalKind::LandmarkDistance),
         3 => Some(super::ExerciseSignalKind::LandmarkHorizontalDistance),
         4 => Some(super::ExerciseSignalKind::LandmarkVerticalDistance),
+        6 => Some(super::ExerciseSignalKind::LocalAlongAxisProgress),
+        7 => Some(super::ExerciseSignalKind::LocalCrossAxisDisplacement),
+        8 => Some(super::ExerciseSignalKind::LocalEndpointRelativeProgress),
+        9 => Some(super::ExerciseSignalKind::LocalDynamicBarAngle),
+        10 => Some(super::ExerciseSignalKind::LocalChannelAgreement),
+        11 => Some(super::ExerciseSignalKind::LocalObservability),
         _ => None,
     };
     let joints = |first: u32, second: u32, third: u32| {
