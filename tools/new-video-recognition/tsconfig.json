@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "rootDir": "../..",
+    "outDir": "../../.new-video-recognition-build",
+    "types": ["node"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "./evaluate.ts",
+    "../../src/motion/equipmentRecognitionPolicy.ts",
+    "../../src/motion/rustCanonicalWasm.ts",
+    "../../src/motion/simulatedRecognitionProfile.ts",
+    "../../src/pose/simulatedKinematicPrior.ts"
+  ]
+}
