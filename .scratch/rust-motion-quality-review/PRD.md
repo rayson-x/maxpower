@@ -8,7 +8,7 @@ Status: rust-calibration-audit-open / client-model-acceptance-data-gated
 
 用户需要验证的不是离线脚本能否反复拟合视频，而是客户端可运行的 YOLOX + RTMPose Halpe-26 视觉流进入同一套 Rust Motion SDK 后，能否在看不到人工时间线的前提下进行一次单向、因果识别，冻结每个 Rep 的开始、实际反向点、返回端点和分维度动作质量解释。冻结后再揭示已有人工开始/结束标注计算真实对齐，并由用户审核 Rust 首次提出的反向点与动作质量结论。
 
-用户不希望重新标注已有动作、方向、Rep 或开始/结束时间，也不希望系统自动保存、自动训练或自动修改 Profile。用户只需要在页面逐条判断 Rust 结论是否正确，可选填写正确答案，最后手动导出审核 JSON，供后续离线校准和新版本盲测使用。
+用户不希望重新标注已有动作、方向、Rep 或开始/结束时间，也不希望系统自动训练或自动修改 Profile。页面可以把未导出的审核草稿自动保存到当前浏览器的 `localStorage`，刷新后恢复；用户最后手动导出审核 JSON，供后续离线校准和新版本盲测使用。
 
 实现过程中已经确认一个必须写入验收语义的约束：现有 6 条卧推视频参与过阈值选择，因此它们属于 `touched_benchmark`，不能再证明未见数据泛化；其余大多数精确 action × view 上下文尚无可在排除目标来源后执行的 source-independent Profile/RulePack。现有语料仍然适合生成 Rust 首轮提案并由用户逐项校准，但不能凭这批语料启动模型通过/不通过的正式验收。
 
@@ -37,7 +37,7 @@ Rust 对每个 Rep 输出统一的 `start_anchor / primary_turnaround / end_retu
 
 所有已有动作立即进入统一管道，但按证据逐步从 observation/phase 晋级到 quality；不等待只做完卧推，也不因追求动作数量而输出未经验证的伪质量标签。
 
-Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械轨迹、三个端点和每条质量结论。审核以“每条结论”为最小单位，用户选择 `correct`、`incorrect` 或 `cannot_judge`；`corrected_value` 和备注均为可选。页面不在后台写入训练集、不自动更新 Profile，只在用户点击导出时生成带提案哈希和版本 lineage 的审核 JSON。
+Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械轨迹、三个端点和每条质量结论。审核以“每条结论”为最小单位，用户选择 `correct`、`incorrect` 或 `cannot_judge`；`corrected_value` 和备注均为可选。未导出的决定按 release ID 与冻结 hash 隔离并自动保存到当前浏览器的 `localStorage`，刷新后恢复；它不是正式审核产物。页面不在后台写入服务器或训练集、不自动更新 Profile，只有用户点击导出才生成带提案哈希和版本 lineage 的可携带审核 JSON。
 
 ## Audit Start Gates
 
@@ -124,7 +124,7 @@ Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械
 - The proposal is serialized as an additive length-prefixed `QLT1` payload in MotionPacket. Quality objects are schema-validated, versioned and content-hashed. Existing frame, landmark, joint-angle and equipment extensions retain their semantics.
 - TypeScript, Kotlin and Swift decode and project QLT1 but do not recalculate a quality conclusion, endpoint or Rep boundary. Unknown additive fields are ignored according to minor-version compatibility rules.
 - A review decision is scoped to one proposal conclusion or endpoint and stores `correct`, `incorrect` or `cannot_judge`. `corrected_value` and note are optional. `incorrect` with no corrected value remains valid negative supervision.
-- The review surface does not automatically persist or train. User actions remain page state until the user explicitly exports a versioned JSON artifact containing original proposal hashes, per-conclusion decisions, optional corrections and export metadata.
+- The review surface automatically persists an unexported draft only in browser `localStorage`, scoped by release ID and frozen hash; it does not write to the server or train. The user must still explicitly export the versioned JSON artifact containing original proposal hashes, per-conclusion decisions, optional corrections and export metadata.
 - Untouched model-acceptance, touched-benchmark diagnostic and full-data calibration artifacts use distinct run kinds, directories/identities and report headings. Neither a touched result nor a full-data result can satisfy a blind acceptance criterion.
 - Capability level is part of each exact action context. Unsupported quality claims count as abstentions or unsupported scope; they are never silently dropped from score denominators.
 - New lower-body videos are outside the already-complete personal annotation set and require their own action/view and Rep truth before they can contribute to accuracy metrics.

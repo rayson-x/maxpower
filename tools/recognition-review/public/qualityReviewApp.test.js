@@ -8,11 +8,15 @@ const QualityReviewI18n = require("./qualityReviewI18n.js");
 
 const {
   benchmarkEvidenceForItem,
+  clearLocalDraft,
   createWorkspace,
   dimensionLabel,
+  draftStorageKey,
   frameAt,
   lineageSummary,
   syncExistingDecisionDraft,
+  restoreLocalDraft,
+  saveLocalDraft,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
 
@@ -87,6 +91,55 @@ test("review page wires bilingual conclusion copy before mounting the app", () =
   assert.ok(i18nIndex >= 0 && i18nIndex < appIndex);
   assert.match(html, /\.conclusion-copy-zh\s*\{/u);
   assert.match(html, /\.conclusion-copy-en\s*\{/u);
+});
+
+test("release-scoped local draft survives a workspace refresh and can be cleared", () => {
+  const release = fixtureRelease();
+  const storage = memoryStorage();
+  const reviewer = { reviewerId: "owner", reviewerRole: "owner_observation" };
+  const first = createWorkspace(release, reviewer);
+  first.review("item-a").setDecision({
+    target: { kind: "endpoint", repId: "rep-1", endpoint: "primary_turnaround" },
+    verdict: "incorrect",
+    correctedValue: null,
+  });
+
+  const saved = saveLocalDraft(storage, first, "2026-08-14T01:02:03.000Z");
+  assert.equal(saved.decided, 1);
+  assert.equal(storage.getItem(draftStorageKey(first.release)) != null, true);
+
+  const refreshed = createWorkspace(fixtureRelease(), reviewer);
+  assert.deepEqual(restoreLocalDraft(storage, refreshed), {
+    restored: true,
+    decided: 1,
+    savedAt: "2026-08-14T01:02:03.000Z",
+  });
+  assert.equal(refreshed.progress().decided, 1);
+
+  clearLocalDraft(storage, refreshed.release);
+  assert.equal(storage.getItem(draftStorageKey(refreshed.release)), null);
+});
+
+test("local draft never crosses a frozen release hash boundary", () => {
+  const storage = memoryStorage();
+  const reviewer = { reviewerId: "owner", reviewerRole: "owner_observation" };
+  const original = createWorkspace(fixtureRelease(), reviewer);
+  saveLocalDraft(storage, original, "2026-08-14T01:02:03.000Z");
+  const nextRelease = fixtureRelease();
+  nextRelease.releaseHash = `sha256:${"b".repeat(64)}`;
+  const next = createWorkspace(nextRelease, reviewer);
+
+  assert.deepEqual(restoreLocalDraft(storage, next), { restored: false, decided: 0, savedAt: null });
+});
+
+test("review page declares browser-local autosave without weakening explicit export", () => {
+  const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
+  const app = readFileSync("tools/recognition-review/public/qualityReviewApp.js", "utf8");
+
+  assert.match(html, /id="qualityClearDraft"/u);
+  assert.match(html, /自动保存到此浏览器/u);
+  assert.match(app, /localStorage/u);
+  assert.match(app, /saveLocalDraft/u);
 });
 
 test("review release exposes touched frozen benchmark evidence beside calibration proposals", () => {
@@ -312,5 +365,14 @@ function fixtureRelease() {
         }],
       },
     }],
+  };
+}
+
+function memoryStorage() {
+  const values = new Map();
+  return {
+    getItem(key) { return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { values.set(key, String(value)); },
+    removeItem(key) { values.delete(key); },
   };
 }

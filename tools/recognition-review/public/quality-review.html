@@ -367,7 +367,7 @@
       <div class="loading-card">
         <div class="loading-mark">RUST / QLT1 / FROZEN</div>
         <h1 id="qualityLoadingTitle">正在打开冻结审核发布包</h1>
-        <p id="qualityLoadingDetail">只读加载视频证据、端点与逐项质量结论。页面不会自动保存、训练或修改 Profile。</p>
+        <p id="qualityLoadingDetail">只读加载视频证据、端点与逐项质量结论。审核草稿自动保存到此浏览器，但不会训练或修改 Profile。</p>
       </div>
     </section>
 
@@ -391,6 +391,7 @@
         </div>
         <div class="top-actions">
           <label class="file-button">导入审核 JSON<input id="qualityImport" type="file" accept="application/json"></label>
+          <button id="qualityClearDraft" class="button" type="button">清除本地草稿</button>
           <button id="qualityExport" class="button primary" type="button">导出审核 JSON</button>
         </div>
       </header>
@@ -453,9 +454,9 @@
           </section>
 
           <footer class="review-status">
-            <div class="progress-head"><span>本页内存审核进度</span><span id="reviewProgressText">0 / 0</span></div>
+            <div class="progress-head"><span>浏览器本地审核进度</span><span id="reviewProgressText">0 / 0</span></div>
             <div class="progress-track"><b id="reviewProgressBar"></b></div>
-            <div id="qualityNotice" class="notice">点击决定只会更新页面内存；只有“导出审核 JSON”会产生文件。</div>
+            <div id="qualityNotice" class="notice">审核会自动保存到此浏览器；只有“导出审核 JSON”才会生成正式文件。</div>
           </footer>
         </aside>
       </main>

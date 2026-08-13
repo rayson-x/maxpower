@@ -24,11 +24,11 @@ Status: calibration-audit-open / model-acceptance-data-gated
 - [x] 审核页加载的 proposal bytes、hash 和 lineage 与该 release 完全一致。
 - [x] 视频、帧步进、骨架、器械、proposal timeline 与人工 start/end overlay 同步。
 - [x] review document、UI、只读媒体服务和 export round-trip 测试在 fresh release 上通过，并把实际测试计数写入下方记录。
-- [x] 页面操作只保存在内存；只有用户点击“导出审核 JSON”才产生文件。
+- [x] 页面操作自动保存到按 release ID 与冻结 hash 隔离的浏览器本地草稿；刷新后恢复。只有用户点击“导出审核 JSON”才产生正式可携带文件。
 
 上述清单已在 2026-08-13 的 fresh release 上完成，A 审核状态为 `open`；人工校准可以开始，不需要等待新的盲测语料。
 
-审核入口预留为 `http://127.0.0.1:4318/quality-review.html`。每个 endpoint/结论分别选择 `correct`、`incorrect` 或 `cannot_judge`；修正值和备注可为空，`incorrect + corrected_value=null` 必须原样保存。审核不会自动训练、修改 Profile/RulePack 或 promotion。
+审核入口预留为 `http://127.0.0.1:4318/quality-review.html`。每个 endpoint/结论分别选择 `correct`、`incorrect` 或 `cannot_judge`；修正值和备注可为空，`incorrect + corrected_value=null` 必须原样保存。页面会自动保存浏览器本地草稿，但不会写入服务器、自动训练、修改 Profile/RulePack 或 promotion；正式文件仍需手动导出。
 
 ## B — Model-acceptance audit
 

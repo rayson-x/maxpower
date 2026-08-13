@@ -14,8 +14,8 @@ Delivered implementation evidence:
 - [x] Decisions support `correct`, `incorrect` and `cannot_judge`; corrected value and note are optional, including `incorrect + corrected_value=null`.
 - [x] Endpoint corrections preserve Rust's original proposal and proposal hash.
 - [x] Video playback, frame stepping, skeleton, equipment path, proposal timeline and human start/end overlay share one timestamp.
-- [x] Review actions remain local page state until explicit Export.
-- [x] No review action performs background persistence, automatic training, Profile mutation or production promotion.
+- [x] Review actions auto-save only to browser `localStorage`, scoped by release ID and frozen hash, and restore after refresh; explicit Export remains required for a portable review artifact.
+- [x] No review action writes to the server or performs automatic training, Profile mutation or production promotion.
 - [x] The export contract carries proposal hashes, per-target decisions, optional corrections and reviewer/export lineage and preserves null corrections on round trip.
 
 Fresh-release gate:

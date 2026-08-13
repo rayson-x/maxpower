@@ -24,6 +24,7 @@
 
   const RELEASE_SCHEMA = "maxpower-motion-quality-review-release/v1";
   const EXPORT_SCHEMA = "maxpower-motion-quality-review-release-export/v1";
+  const LOCAL_DRAFT_PREFIX = "maxpower.motion-quality-review.draft/v1";
   const ENDPOINTS = ["start_anchor", "primary_turnaround", "end_return"];
   const HALPE26_EDGES = [
     [0, 1], [0, 2], [1, 3], [2, 4],
@@ -149,6 +150,60 @@
       correctedValue: draft.correctedValue,
       note: draft.note ?? null,
     });
+  }
+
+  function draftStorageKey(release) {
+    const value = requireRecord(release, "quality review release");
+    const releaseId = requireString(value.releaseId, "releaseId");
+    const releaseHash = requireString(value.releaseHash, "releaseHash");
+    return `${LOCAL_DRAFT_PREFIX}:${encodeURIComponent(releaseId)}:${encodeURIComponent(releaseHash)}`;
+  }
+
+  function saveLocalDraft(storage, workspace, savedAt = new Date().toISOString()) {
+    requireStorage(storage);
+    const timestamp = requireString(savedAt, "local draft savedAt");
+    const progress = workspace.progress();
+    const json = workspace.exportJson({
+      exportId: `local-draft-${workspace.release.releaseId}-${timestamp.replace(/[:.]/g, "-")}`,
+      exportedAt: timestamp,
+      applicationVersion: "quality-review/v1",
+      persistence: "browser_local_draft",
+    });
+    storage.setItem(draftStorageKey(workspace.release), json);
+    return Object.freeze({ decided: progress.decided, savedAt: timestamp });
+  }
+
+  function restoreLocalDraft(storage, workspace) {
+    requireStorage(storage);
+    const json = storage.getItem(draftStorageKey(workspace.release));
+    if (json == null) return Object.freeze({ restored: false, decided: 0, savedAt: null });
+    let parsed;
+    try {
+      parsed = JSON.parse(json);
+    } catch (_) {
+      throw new Error("browser-local review draft is invalid JSON");
+    }
+    workspace.importJson(json);
+    return Object.freeze({
+      restored: true,
+      decided: workspace.progress().decided,
+      savedAt: parsed?.exportMetadata?.exportedAt ?? null,
+    });
+  }
+
+  function clearLocalDraft(storage, release) {
+    requireStorage(storage);
+    storage.removeItem(draftStorageKey(release));
+  }
+
+  function requireStorage(storage) {
+    if (!storage
+        || typeof storage.getItem !== "function"
+        || typeof storage.setItem !== "function"
+        || typeof storage.removeItem !== "function") {
+      throw new Error("browser-local review storage is unavailable");
+    }
+    return storage;
   }
 
   function normalizeRelease(value) {
@@ -307,10 +362,24 @@
           reviewerId: payload.defaultReviewer?.reviewerId || "owner",
           reviewerRole: payload.defaultReviewer?.reviewerRole || "owner_observation",
         });
+        let restoredDraft = null;
+        let restoreError = null;
+        try {
+          restoredDraft = restoreLocalDraft(window.localStorage, state.workspace);
+        } catch (error) {
+          restoreError = error;
+        }
         renderReleaseHeader();
         selectItem(state.workspace.release.items[0].itemId);
         byId("qualityLoading").hidden = true;
         byId("qualityApp").hidden = false;
+        if (restoreError) {
+          setNotice(`本地草稿无法恢复：${restoreError.message || String(restoreError)}。可清除草稿后继续；冻结提案未被修改。`, "error");
+        } else if (restoredDraft?.restored) {
+          setNotice(`已从此浏览器恢复本地草稿（${restoredDraft.decided} 项）；尚未导出正式文件。`, "ok");
+        } else {
+          setNotice("审核会自动保存到此浏览器；只有“导出审核 JSON”才会生成正式文件。", "ok");
+        }
         requestAnimationFrame(resizeOverlay);
       } catch (error) {
         byId("qualityLoadingTitle").textContent = "冻结发布包无法打开";
@@ -517,7 +586,7 @@
             correctedValue: draft.correctedValue,
             note: draft.note,
           });
-          setNotice("已保留在当前页面内存；尚未导出。", "ok");
+          persistLocalDraft();
           renderQueue();
           renderRepTabs();
           renderReviewPanel();
@@ -533,7 +602,7 @@
               return;
             }
             syncExistingDecisionDraft(state.activeReview, target, draft);
-            setNotice("修改已更新到当前页面内存；尚未导出。", "ok");
+            persistLocalDraft();
           };
           input.addEventListener("input", syncDraft);
           input.addEventListener("change", syncDraft);
@@ -767,13 +836,39 @@
       setNotice("审核 JSON 已显式导出；页面没有写入服务器、训练集或 Profile。", "ok");
     }
 
+    function persistLocalDraft() {
+      try {
+        const saved = saveLocalDraft(window.localStorage, state.workspace);
+        setNotice(`已自动保存到此浏览器（${saved.decided} 项）；尚未导出正式文件。`, "ok");
+      } catch (error) {
+        setNotice(`本地草稿保存失败：${error.message || String(error)}。请及时导出审核 JSON。`, "error");
+      }
+    }
+
+    function resetLocalDraft() {
+      if (!window.confirm("清除本地草稿并重置所有尚未导出的审核决定？")) return;
+      const release = state.workspace.release;
+      const reviewer = state.workspace.reviewer;
+      const activeItemId = state.activeItemId || release.items[0].itemId;
+      try {
+        clearLocalDraft(window.localStorage, release);
+        state.workspace = createWorkspace(release, reviewer);
+        renderReleaseHeader();
+        selectItem(activeItemId);
+        setNotice("本地草稿已清除；当前冻结发布包已恢复为未审核状态。", "ok");
+      } catch (error) {
+        setNotice(`本地草稿清除失败：${error.message || String(error)}`, "error");
+      }
+    }
+
     async function importReviews(file) {
       if (!file) return;
       try {
         state.workspace.importJson(await file.text());
         state.activeReview = state.workspace.review(state.activeItemId);
         renderQueue(); renderRepTabs(); renderReviewPanel(); renderProgress();
-        setNotice("已从本地文件恢复审核决定；仍只存在当前页面内存。", "ok");
+        persistLocalDraft();
+        setNotice("已导入审核 JSON，并自动保存为此发布包的浏览器本地草稿。", "ok");
       } catch (error) {
         setNotice(error.message || String(error), "error");
       }
@@ -789,6 +884,7 @@
     byId("qualityPrevFrame").addEventListener("click", () => stepFrame(-1));
     byId("qualityNextFrame").addEventListener("click", () => stepFrame(1));
     byId("qualityExport").addEventListener("click", exportReviews);
+    byId("qualityClearDraft").addEventListener("click", resetLocalDraft);
     byId("qualityImport").addEventListener("change", (event) => importReviews(event.target.files?.[0]));
     document.querySelectorAll("[data-evidence-mode]").forEach((button) => button.addEventListener("click", () => {
       selectEvidenceMode(button.dataset.evidenceMode);
@@ -894,13 +990,18 @@
 
   return {
     benchmarkEvidenceForItem,
+    clearLocalDraft,
     EXPORT_SCHEMA,
+    LOCAL_DRAFT_PREFIX,
     RELEASE_SCHEMA,
     createWorkspace,
     dimensionLabel,
+    draftStorageKey,
     frameAt,
     lineageSummary,
     mount,
+    restoreLocalDraft,
+    saveLocalDraft,
     syncExistingDecisionDraft,
     trajectoryUntil,
   };
