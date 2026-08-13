@@ -60,6 +60,10 @@ import { APPLE_HEALTHKIT_MVP_METRICS } from "../native/AppleHealthKitPort";
 import { ProgressScreen as VideoLibraryScreen, type ReplaySelection } from "./ProgressScreen";
 import { ReplayScreen } from "./ReplayScreen";
 import { WorkoutMonitorWorkspace } from "./WorkoutMonitorWorkspace";
+import {
+  readPoseCameraRuntimeHealth,
+  type PoseCameraRuntimeHealth,
+} from "../../../modules/pose-camera/src/PoseCameraView";
 import type { WorkoutSetRealtimeContext } from "./workoutRealtime";
 import { resolveWorkoutSetRealtimeCapability } from "./workoutRealtime";
 import { NutritionObservationDraftSheet } from "./NutritionObservationDraftSheet";
@@ -2907,6 +2911,8 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const [finishReviewOpen, setFinishReviewOpen] = useState(false);
   const [finishSaveState, setFinishSaveState] = useState<"idle" | "saving" | "failed" | "conflict">("idle");
   const [nextSetRecommendation, setNextSetRecommendation] = useState<Awaited<ReturnType<CoachApplication["recommendNextWorkoutSet"]>>>();
+  const [poseRuntimeHealth, setPoseRuntimeHealth] = useState<PoseCameraRuntimeHealth>();
+  const restoredObservationId = useRef<string>();
   const load = useCallback(async () => {
     try {
       setWorkout(await application.readWorkoutSession({ userId, workoutId }));
@@ -2916,6 +2922,13 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     }
   }, [application, userId, workoutId]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let active = true;
+    void readPoseCameraRuntimeHealth().then((health) => {
+      if (active) setPoseRuntimeHealth(health);
+    });
+    return () => { active = false; };
+  }, []);
   useEffect(() => {
     if (!workout?.state.restTimer) {
       setRestRemaining(null);
@@ -2934,6 +2947,28 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     const interval = setInterval(() => { void refreshRest(); }, 1_000);
     return () => { active = false; clearInterval(interval); };
   }, [application, userId, workoutId, workout?.state.restTimer?.id, workout?.state.restTimer?.deadlineWallClockAt]);
+  useEffect(() => {
+    if (!workout || workout.state.mode === "coach_monitor") return;
+    const resolvedSetIds = new Set([
+      ...workout.setOutcomes.map((outcome) => outcome.prescriptionSetId),
+      ...(workout.skippedSets ?? []).map((skippedSet) => skippedSet.prescriptionSetId),
+    ]);
+    const current = workout.frozenPrescription.tasks
+      .flatMap((task) => task.sets.map((set) => ({ task, set })))
+      .find(({ set }) => set.id === workout.state.currentSetId && !resolvedSetIds.has(set.id));
+    if (!current) return;
+    const observation = [...(workout.setObservations ?? [])].reverse()
+      .find((item) => item.prescriptionSetId === current.set.id);
+    if (!observation || restoredObservationId.current === observation.id) return;
+    restoredObservationId.current = observation.id;
+    const draft = workout.drafts.find((item) => item.prescriptionSetId === current.set.id);
+    setActualReps(draft?.actualReps !== undefined
+      ? String(draft.actualReps)
+      : observation.judgement === "observed" ? String(observation.counts.confirmed) : current.set.targetReps ? String(current.set.targetReps.max) : "");
+    setActualLoad(draft?.actualLoad ? String(draft.actualLoad.value) : current.set.targetLoad ? String(current.set.targetLoad.value) : "");
+    setActualRir(draft?.actualRir !== undefined ? String(draft.actualRir) : current.set.targetRir === undefined ? "" : String(current.set.targetRir));
+    setEditingActual(true);
+  }, [workout]);
   if (!workout) return error
     ? <ErrorState title="未找到这次训练" message={error} onRetry={onUnavailable} retryLabel="返回今天" />
     : <LoadingState />;
@@ -2955,7 +2990,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const realtimeCapability = pending ? resolveWorkoutSetRealtimeCapability({
     exerciseVariantId: pending.task.exerciseVariantId,
     platform: runtimePlatform,
-    nativeRuntimeAvailable: runtimePlatform !== "web",
+    nativeRuntimeAvailable:
+      poseRuntimeHealth?.canonicalBridgeReady === true
+      && poseRuntimeHealth.runtimeReady === true,
   }) : undefined;
   const realtimeAvailable = realtimeCapability?.available === true;
   const executionLoad = pendingDraft?.actualLoad ?? pending?.set.targetLoad;
@@ -3281,7 +3318,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.workoutTop}><View><Text style={styles.screenTitle}>{readablePlanSessionTitle(workout.frozenPrescription.title)}</Text><Text style={styles.screenSub}>统一训练执行</Text></View><View style={styles.workoutTopActions}>{skipped.size ? <Text style={{ color: colors.terra, fontSize: 11, fontWeight: "800" }}>已跳过 {skipped.size} 组</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel="打开训练中的 Coach" onPress={onOpenCoach} style={styles.workoutCoachButton}><Text style={styles.workoutCoachButtonText}>Coach</Text></Pressable></View></View>
       {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>组间休息</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <Text style={styles.workoutTaskBoundary}>下一组：{exerciseDisplayName(pending.task.exerciseVariantId)} · {setDose(pending.set)}</Text> : <Text style={styles.workoutTaskBoundary}>已没有待完成组</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel="减少三十秒休息" onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>−30 秒</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="增加三十秒休息" onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>+30 秒</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>结束</Text></Pressable></View></View> : null}
-      {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
+      {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
       {pending ? (
         <View style={styles.currentSetCard}>
           <View style={styles.currentSetHeader}><Text style={styles.cardEyebrow}>当前组 · 第 {pendingSetIndex} 组</Text>{currentExerciseOutcomes.length ? <Pressable accessibilityRole="button" accessibilityLabel={`${historyExpanded ? "收起" : "查看"}${currentExerciseOutcomes.length}组完成历史`} accessibilityState={{ expanded: historyExpanded }} onPress={() => setHistoryExpanded((value) => !value)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>已完成 {currentExerciseOutcomes.length} 组 ↻</Text></Pressable> : <Text style={styles.notRecordedText}>尚未记录</Text>}</View>
