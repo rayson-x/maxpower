@@ -105,6 +105,60 @@ test("用户确认 typed Proposal 后原子生成新计划、回执与 Action Lo
   assert.deepEqual(projection.actionLog[0]?.after, { loadKg: 62.5, targetRir: 2 });
 });
 
+test("卡片动作只经 CoachApplication 发送，UI 无需读取或持有一次性 token", async () => {
+  let sequence = 0;
+  const app = createInMemoryCoachApplication({
+    now: () => "2026-08-08T08:00:00.000Z",
+    nextId: (prefix: string) => `${prefix}-${++sequence}`,
+  });
+  const session = await app.startSession({
+    userId: "user-card",
+    context: { kind: "plan", ref: "plan:1" },
+  });
+  await app.seedUserState({
+    userId: "user-card",
+    profile: { goal: "hypertrophy", trainingExperience: "intermediate" },
+    plan: {
+      revision: 1,
+      effectiveDate: "2026-08-08",
+      title: "上肢推",
+      tasks: [{ id: "bench", name: "杠铃卧推", sets: 3, reps: "8", loadKg: 60, targetRir: 2 }],
+    },
+  });
+  const proposal = await app.proposePlanChange({
+    sessionId: session.id,
+    change: { kind: "adjust_task", taskId: "bench", loadKg: 62.5 },
+    reason: "用户确认递增",
+  });
+
+  const applied = await app.invokeArtifactCardAction({
+    userId: "user-card",
+    artifactId: proposal.artifact.id,
+    action: "apply",
+    idempotencyKey: "card-apply",
+  });
+  assert.equal("status" in applied && applied.status, "applied");
+  if (!("receipt" in applied)) return;
+  const persisted = await app.readSessionProjection(session.id);
+  assert.ok(persisted.artifacts.some((artifact) => artifact.id === applied.receipt.id));
+
+  const undone = await app.invokeArtifactCardAction({
+    userId: "user-card",
+    artifactId: applied.receipt.id,
+    action: "undo",
+    idempotencyKey: "card-undo",
+  });
+  assert.equal("status" in undone && undone.status, "undone");
+  const refreshedSession = await app.readSessionProjection(session.id);
+  assert.equal(
+    refreshedSession.presentations.find((presentation) => presentation.artifactId === applied.receipt.id)
+      ?.status,
+    "undone",
+  );
+  const projection = await app.readUserProjection("user-card");
+  assert.equal(projection.plan.tasks[0]?.loadKg, 60);
+});
+
 test("apply 后重建应用仍可通过回执创建补偿 revision，旧 ActionEvent 保持可追溯", async () => {
   let sequence = 0;
   const runtime = {
@@ -271,6 +325,33 @@ test("typed HITL 在重建应用后仍可用同一 run/toolCall 显式恢复且�
   );
 });
 
+test("HITL 选项由应用层恢复，移动端不接触 resume token", async () => {
+  let sequence = 0;
+  const app = createInMemoryCoachApplication({
+    now: () => "2026-08-08T08:00:00.000Z",
+    nextId: (prefix: string) => `${prefix}-${++sequence}`,
+  });
+  const session = await app.startSession({ userId: "user-hitl-card", context: { kind: "today", ref: "2026-08-08" } });
+  await app.seedUserState({
+    userId: "user-hitl-card",
+    profile: { goal: "hypertrophy", trainingExperience: "beginner" },
+    plan: { revision: 1, effectiveDate: "2026-08-08", title: "全身训练", tasks: [{ id: "squat", name: "徒手深蹲", sets: 3, reps: "12" }] },
+  });
+  const suspended = await app.suspendForHumanInput({
+    sessionId: session.id,
+    kind: "choose_option",
+    prompt: "今天更想训练还是休息？",
+    options: [{ id: "train", label: "训练" }, { id: "rest", label: "休息" }],
+  });
+  const resumed = await app.respondToPendingHumanAction({
+    userId: "user-hitl-card",
+    pendingActionId: suspended.pending.id,
+    optionId: "rest",
+  });
+  assert.deepEqual(resumed.output, { kind: "selected", optionId: "rest" });
+  assert.deepEqual(await app.listPendingHumanActions("user-hitl-card"), []);
+});
+
 test("Working Memory 跨 Session 保留、用户固定后 Agent 不可覆盖，且不改变事实规则输出", async () => {
   let sequence = 0;
   const runtime = {
@@ -332,6 +413,12 @@ test("Working Memory 跨 Session 保留、用户固定后 Agent 不可覆盖，�
   assert.equal(memories[0]?.content, "周末更喜欢上午训练");
   assert.equal(memories[0]?.pinned, true);
   assert.equal(after.artifact.hash, before.artifact.hash);
+  const memoryActions = await app.listActionLog("user-memory");
+  const memoryAction = memoryActions.find((event) => event.action === "memory.changed");
+  assert.equal(memoryAction?.targetType, "memory");
+  assert.equal(memoryAction?.after.authority, "non_authoritative");
+  assert.equal(memoryAction?.before.content, undefined);
+  assert.equal(memoryAction?.after.content, undefined);
 });
 
 test("manual/collaborative/managed 权限与 safety hold 在本地 PolicyGate 生效", async () => {
@@ -354,7 +441,16 @@ test("manual/collaborative/managed 权限与 safety hold 在本地 PolicyGate �
       tasks: [{ id: "bench", name: "卧推", sets: 3, reps: "5", loadKg: 60 }],
     },
   });
-  await app.setMandate({ userId: "user-policy", mode: "manual" });
+  const settingsAuthorization = {
+    kind: "local_user_presence" as const,
+    verifiedAt: "2026-08-08T08:00:00.000Z",
+    nonce: "policy-settings",
+  };
+  await app.setMandate({
+    userId: "user-policy",
+    mode: "manual",
+    authorization: settingsAuthorization,
+  });
   const advice = await app.proposePlanChange({
     sessionId: session.id,
     change: { kind: "adjust_task", taskId: "bench", loadKg: 62.5 },
@@ -374,7 +470,11 @@ test("manual/collaborative/managed 权限与 safety hold 在本地 PolicyGate �
     /advice_only/,
   );
 
-  await app.setMandate({ userId: "user-policy", mode: "managed" });
+  await app.setMandate({
+    userId: "user-policy",
+    mode: "managed",
+    authorization: settingsAuthorization,
+  });
   const managed = await app.executeManagedPlanChange({
     sessionId: session.id,
     change: { kind: "adjust_task", taskId: "bench", loadKg: 62.5 },
