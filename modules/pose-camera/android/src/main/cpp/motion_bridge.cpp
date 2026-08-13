@@ -354,24 +354,6 @@ Java_expo_modules_posecamera_MotionNative_nativeProcessObservations(
   return copy_packet(env);
 }
 
-extern "C" JNIEXPORT jdoubleArray JNICALL
-Java_expo_modules_posecamera_MotionNative_nativeVisualBarbellAxis(
-    JNIEnv *env, jobject) {
-  const uint32_t source = motion_sdk_visual_barbell_axis_source();
-  if (source == 0) return nullptr;
-  if (source > 3) return nullptr;
-  jdouble values[8] = {static_cast<jdouble>(source)};
-  for (uint32_t field = 0; field < 7; ++field) {
-    const float value = motion_sdk_visual_barbell_axis_number(field);
-    if (!std::isfinite(value)) return nullptr;
-    values[field + 1] = static_cast<jdouble>(value);
-  }
-  jdoubleArray output = env->NewDoubleArray(8);
-  if (output == nullptr) return nullptr;
-  env->SetDoubleArrayRegion(output, 0, 8, values);
-  return env->ExceptionCheck() ? nullptr : output;
-}
-
 extern "C" JNIEXPORT jboolean JNICALL
 Java_expo_modules_posecamera_MotionNative_nativeIsCurrentFrameValid(
     JNIEnv *, jobject) {

@@ -67,30 +67,6 @@ internal object MotionNative {
     visualWidth: Int,
     visualHeight: Int,
   ): ByteArray?
-  private external fun nativeVisualBarbellAxis(): DoubleArray?
-
-  fun visualBarbellAxis(): BarbellAxisObservation? {
-    val values = nativeVisualBarbellAxis() ?: return null
-    require(values.size == 8 && values.all(Double::isFinite)) {
-      "Rust visual barbell axis is invalid"
-    }
-    val source = when (values[0].toInt()) {
-      1 -> "measured"
-      2 -> "predicted"
-      3 -> "fused"
-      else -> return null
-    }
-    return BarbellAxisObservation(
-      source = source,
-      x1 = values[1],
-      y1 = values[2],
-      x2 = values[3],
-      y2 = values[4],
-      centerY = values[5],
-      confidence = values[6],
-      uncertaintyPx = values[7],
-    )
-  }
   external fun nativeIsCurrentFrameValid(): Boolean
   external fun nativeClose()
 }

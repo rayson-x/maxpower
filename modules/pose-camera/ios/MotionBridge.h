@@ -23,7 +23,6 @@ NS_ASSUME_NONNULL_BEGIN
                              visualWidth:(uint32_t)visualWidth
                             visualHeight:(uint32_t)visualHeight
                               timestampMs:(int64_t)timestampMs;
-- (nullable NSDictionary<NSString *, id> *)visualBarbellAxis;
 - (BOOL)isCurrentFrameValid;
 - (void)close;
 

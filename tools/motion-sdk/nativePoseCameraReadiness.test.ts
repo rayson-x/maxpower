@@ -55,9 +55,14 @@ test("native camera hosts return the Rust packet without owning QLT1 semantics",
   assert.match(iosView, /motionBridge\.processObservations\([\s\S]*packetBase64/);
   assert.doesNotMatch(androidView, /"landmarks"\s+to/);
   assert.doesNotMatch(iosView, /"landmarks"\s*:/);
+  assert.doesNotMatch(androidView, /payload\["equipmentAxis"\]/);
+  assert.doesNotMatch(iosView, /event\["equipmentAxis"\]/);
   assert.doesNotMatch(publicTypes, /^\s*landmarks\??:/m);
+  assert.doesNotMatch(publicTypes, /^\s*equipmentAxis\??:/m);
   assert.match(liveScreen, /packet\.canonical/);
   assert.match(replayScreen, /packet\.canonical/);
+  assert.match(liveScreen, /packet\?\.equipment\.tracks\.find/);
+  assert.match(replayScreen, /packet\?\.equipment\.tracks\.find/);
   assert.doesNotMatch(liveScreen, /nativeEvent\.landmarks/);
   assert.doesNotMatch(replayScreen, /nativeEvent\.landmarks/);
   assert.doesNotMatch(androidView, /QLT1|qualityProjection/);
@@ -81,16 +86,22 @@ test("Apple bridge parity rebuilds client Rust artifacts and excludes generated 
   assert.match(podspec, /s\.exclude_files = 'Frameworks\/\*\*\/\*'/);
 });
 
-test("Android and iOS project every Rust visual barbell source including fused", () => {
-  const androidBridge = source("modules/pose-camera/android/src/main/cpp/motion_bridge.cpp");
+test("Android and iOS do not publish a visual-equipment side channel beside the canonical packet", () => {
   const androidAdapter = source(
     "modules/pose-camera/android/src/main/java/expo/modules/posecamera/MotionNative.kt",
   );
+  const androidView = source(
+    "modules/pose-camera/android/src/main/java/expo/modules/posecamera/PoseCameraView.kt",
+  );
+  const iosHeader = source("modules/pose-camera/ios/MotionBridge.h");
   const iosBridge = source("modules/pose-camera/ios/MotionBridge.mm");
+  const iosView = source("modules/pose-camera/ios/PoseCameraModule.swift");
 
-  assert.match(androidBridge, /if \(source > 3\) return nullptr/);
-  assert.match(androidAdapter, /3 -> "fused"/);
-  assert.match(iosBridge, /source == 3 \? @"fused"/);
+  assert.doesNotMatch(androidAdapter, /nativeVisualBarbellAxis|visualBarbellAxis/);
+  assert.doesNotMatch(androidView, /equipmentAxis/);
+  assert.doesNotMatch(iosHeader, /visualBarbellAxis/);
+  assert.doesNotMatch(iosBridge, /visualBarbellAxis/);
+  assert.doesNotMatch(iosView, /equipmentAxis/);
 });
 
 test("native hosts declare canonical-feed mirroring separately from preview mirroring", () => {

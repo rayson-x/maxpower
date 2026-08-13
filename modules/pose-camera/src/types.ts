@@ -32,18 +32,6 @@ export interface PoseEvent {
   inferenceMs?: number;
   equipmentInferenceMs?: number;
   rustMs?: number;
-  /** Current causal detector state. Predicted axes are rendered but not submitted as measured Rust evidence. */
-  equipmentAxis?: {
-    kind: "barbell_shaft";
-    source: "measured" | "fused" | "predicted";
-    confidence: number;
-    x1: number;
-    y1: number;
-    x2: number;
-    y2: number;
-    centerY: number;
-    submittedToRust: boolean;
-  };
   droppedFrames?: number | null;
   maxBacklogFrames?: number;
   replayPositionMs?: number;

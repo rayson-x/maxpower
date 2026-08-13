@@ -476,7 +476,6 @@ class PoseCameraView(context: Context, appContext: AppContext) :
       visualWidth = visualFrame?.width ?: 0,
       visualHeight = visualFrame?.height ?: 0,
     )
-    val barbellAxis = MotionNative.visualBarbellAxis()
     val rustMs = elapsedMs(rustStartedAt)
     if (packet == null) {
       emitError("rust-frame", IllegalStateException("canonical packet unavailable"))
@@ -514,19 +513,6 @@ class PoseCameraView(context: Context, appContext: AppContext) :
       "rustMs" to averageRustMs,
       "maxBacklogFrames" to 1.0
     )
-    if (barbellAxis != null) {
-      payload["equipmentAxis"] = mapOf(
-        "kind" to "barbell_shaft",
-        "source" to barbellAxis.source,
-        "confidence" to barbellAxis.confidence,
-        "x1" to barbellAxis.x1,
-        "y1" to barbellAxis.y1,
-        "x2" to barbellAxis.x2,
-        "y2" to barbellAxis.y2,
-        "centerY" to barbellAxis.centerY,
-        "submittedToRust" to barbellAxis.submittedToRust,
-      )
-    }
     if (isReplay) {
       payload["replayPositionMs"] = timestampMs.toDouble()
       payload["replayDurationMs"] = replayDurationMs.toDouble()

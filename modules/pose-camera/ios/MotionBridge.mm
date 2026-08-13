@@ -260,28 +260,6 @@ NSData *CopyPacket() {
   return CopyPacket();
 }
 
-- (nullable NSDictionary<NSString *, id> *)visualBarbellAxis {
-  const uint32_t source = motion_sdk_visual_barbell_axis_source();
-  if (source == 0 || source > 3) return nil;
-  float values[7];
-  for (uint32_t field = 0; field < 7; ++field) {
-    values[field] = motion_sdk_visual_barbell_axis_number(field);
-    if (!std::isfinite(values[field])) return nil;
-  }
-  return @{
-    @"kind": @"barbell_shaft",
-    @"source": source == 1 ? @"measured" : source == 3 ? @"fused" : @"predicted",
-    @"x1": @(values[0]),
-    @"y1": @(values[1]),
-    @"x2": @(values[2]),
-    @"y2": @(values[3]),
-    @"centerY": @(values[4]),
-    @"confidence": @(values[5]),
-    @"uncertaintyPx": @(values[6]),
-    @"submittedToRust": @(source == 1 || source == 3),
-  };
-}
-
 - (BOOL)isCurrentFrameValid {
   return motion_sdk_current_frame_valid() == 1;
 }

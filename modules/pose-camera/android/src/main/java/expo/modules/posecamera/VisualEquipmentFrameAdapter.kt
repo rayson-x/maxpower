@@ -11,20 +11,6 @@ internal data class VisualEquipmentLumaFrame(
   val luma: ByteArray,
 )
 
-/** Read-only projection of the Rust visual tracker for the client overlay. */
-internal data class BarbellAxisObservation(
-  val source: String,
-  val x1: Double,
-  val y1: Double,
-  val x2: Double,
-  val y2: Double,
-  val centerY: Double,
-  val confidence: Double,
-  val uncertaintyPx: Double,
-) {
-  val submittedToRust: Boolean get() = source == "measured" || source == "fused"
-}
-
 internal fun Bitmap.visualEquipmentLumaFrame(maximumDimension: Int = 480): VisualEquipmentLumaFrame {
   require(maximumDimension >= 8)
   val longest = max(width, height)

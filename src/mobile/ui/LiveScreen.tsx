@@ -373,6 +373,10 @@ export function LiveScreen(props: {
       .filter((l) => Number.isFinite(l.x) && Number.isFinite(l.y) && l.visibility >= 0.3);
   }, [packet]);
 
+  const equipmentAxis = useMemo(() => packet?.equipment.tracks.find(
+    (track) => track.kind === "barbell_shaft" && track.axis !== null,
+  ) ?? null, [packet]);
+
   const pointOf = (index: number) => {
     const landmark = visibleLandmarks.find((entry) => entry.index === index);
     if (!landmark || !mapping) return null;
@@ -431,13 +435,13 @@ export function LiveScreen(props: {
           onVideo={onVideo}
         />
         <Svg style={StyleSheet.absoluteFill} viewBox={`0 0 ${viewSize.width} ${viewSize.height}`}>
-          {!compactWorkoutView && mapping && event?.equipmentAxis && (
+          {!compactWorkoutView && mapping && equipmentAxis?.axis && (
             <Line
-              x1={mapping.offsetX + (event.previewMirrored ? 1 - event.equipmentAxis.x1 : event.equipmentAxis.x1) * mapping.drawnWidth}
-              y1={mapping.offsetY + event.equipmentAxis.y1 * mapping.drawnHeight}
-              x2={mapping.offsetX + (event.previewMirrored ? 1 - event.equipmentAxis.x2 : event.equipmentAxis.x2) * mapping.drawnWidth}
-              y2={mapping.offsetY + event.equipmentAxis.y2 * mapping.drawnHeight}
-              stroke={event.equipmentAxis.source === "measured" ? "#FFD23F" : "#FF8A3D"}
+              x1={mapping.offsetX + (event?.previewMirrored ? 1 - equipmentAxis.axis.x1 : equipmentAxis.axis.x1) * mapping.drawnWidth}
+              y1={mapping.offsetY + equipmentAxis.axis.y1 * mapping.drawnHeight}
+              x2={mapping.offsetX + (event?.previewMirrored ? 1 - equipmentAxis.axis.x2 : equipmentAxis.axis.x2) * mapping.drawnWidth}
+              y2={mapping.offsetY + equipmentAxis.axis.y2 * mapping.drawnHeight}
+              stroke={equipmentAxis.source === "geometry" ? "#FFD23F" : "#FF8A3D"}
               strokeWidth="4"
               strokeLinecap="round"
             />

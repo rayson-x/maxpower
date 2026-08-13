@@ -323,7 +323,6 @@ public final class PoseCameraView: ExpoView,
         return
       }
       let rustMs = CACurrentMediaTime() * 1_000 - rustStartedAt
-      let barbellAxis = motionBridge.visualBarbellAxis()
       processedFrames += 1
       if motionBridge.isCurrentFrameValid() { validFrames += 1 }
       let now = CACurrentMediaTime() * 1_000
@@ -355,7 +354,6 @@ public final class PoseCameraView: ExpoView,
         "maxBacklogFrames": 1
       ]
       var event = payload
-      if let barbellAxis { event["equipmentAxis"] = barbellAxis }
       if let replayDurationMs {
         event["replayPositionMs"] = Double(timestampMs)
         event["replayDurationMs"] = replayDurationMs
