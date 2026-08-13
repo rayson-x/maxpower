@@ -101,6 +101,7 @@ test("CoachApplication 只用 canonical facts 投影 Today、Calendar、Plan、P
   assert.equal(screen.calendar.dates.length, 7);
   assert.equal(screen.calendar.selected.activityLog.entries.length, 1);
   assert.ok(screen.plan.currentWeek.length > 0);
+  assert.equal(screen.plan.intakeWeek.length, 7);
   assert.equal(screen.plan.strategySelection?.primary, "conservative_gain");
   assert.deepEqual(screen.plan.forecasts.map((forecast) => forecast.scenario), ["strict_aggressive", "balanced", "flexible"]);
   assert.equal(screen.plan.explanation?.researchEvidence[0]?.citationId, "maxpower.exercise-wiki.v1");
@@ -112,6 +113,10 @@ test("CoachApplication 只用 canonical facts 投影 Today、Calendar、Plan、P
   assert.deepEqual(screen.progress.metrics.map((metric) => metric.name), [
     "body_trend", "training_trend", "nutrition_adherence", "recovery_trend", "phase_progress", "goal_feasibility",
   ]);
+  const phaseProgress = screen.progress.metrics.find((metric) => metric.name === "phase_progress");
+  assert.equal(Number.isInteger(phaseProgress?.comparableDays), true);
+  assert.ok((phaseProgress?.comparableDays ?? 0) > 0);
+  assert.ok((phaseProgress?.value.score ?? 0) > 0 && (phaseProgress?.value.score ?? 0) < 1);
   assert.ok((await app.readMetricRegistry({ userId: "u1", startDate: "2026-07-20", endDate: workoutDate })).every((metric) => metric.window.end === workoutDate));
 
   await app.commitNutritionStrategy({
@@ -148,6 +153,15 @@ test("CoachApplication 只用 canonical facts 投影 Today、Calendar、Plan、P
   const afterMeal = await app.readProductProjection({ userId: "u1", date: workoutDate, timezoneOffsetMinutes: 480, calendarMode: "week", calendarAnchorDate: workoutDate });
   assert.equal(afterMeal.today.nutrition.ledger.coverage, "logged");
   assert.equal(afterMeal.today.nutrition.ledger.nutrients.energy.consumedLogged, 650);
+  assert.equal(afterMeal.today.nutrition.budget.baseTargetKcal, 2200);
+  assert.equal(afterMeal.today.nutrition.budget.dayTypeAdjustmentKcal, 0);
+  assert.equal(afterMeal.today.nutrition.budget.activityAdjustmentKcal, 30);
+  assert.equal(afterMeal.today.nutrition.budget.recommendedKcal, 2230);
+  assert.equal(afterMeal.today.nutrition.budget.status, "far_below");
+  assert.equal(afterMeal.plan.intakeWeek.find((budget) => budget.date === workoutDate)?.recommendedKcal, 2230);
+  const restBudget = afterMeal.plan.intakeWeek.find((budget) => budget.dayKind === "rest");
+  assert.ok(restBudget);
+  assert.ok((restBudget.recommendedKcal ?? Infinity) < (restBudget.baseTargetKcal ?? 0));
 
   const cycle = domain.goalCycles.at(-1)?.value.phasePath?.[0];
   assert.ok(cycle);
@@ -262,8 +276,8 @@ test("没有已确认档案时 Today 明确进入建档，而不是捏造训练�
   assert.equal(screen.calendar.dates.length, 31);
 });
 
-test("个人资料与建档不保留全局 Coach 气泡，任务页面仍可进入 task-scoped Coach", () => {
-  assert.equal(coachDrawerAvailableForRoute("profile"), false);
+test("四个主导航页面共享 Coach 抽屉，建档与媒体工作区保持专注", () => {
+  assert.equal(coachDrawerAvailableForRoute("profile"), true);
   assert.equal(coachDrawerAvailableForRoute("onboarding"), false);
   assert.equal(coachDrawerAvailableForRoute("today"), true);
   assert.equal(coachDrawerAvailableForRoute("calendar"), true);
