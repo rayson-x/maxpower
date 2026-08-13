@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +16,7 @@ import Svg, { Circle } from "react-native-svg";
 
 import type { CoachApplication } from "../../coach";
 import type { DynamicFormAnswer, DynamicFormCard, FirstPlannerHandoffProposal, OnboardingEntryState } from "../../onboarding";
-import type { NutritionStrategyData } from "../../coach/domain";
+import type { NutritionStrategyData, PlannedExerciseTask } from "../../coach/domain";
 import type { CoachContextKind, CoachMessage, CoachSession, ContextRef, EvidenceBriefArtifact, NutritionObservationDraftArtifact } from "../../coach/model";
 import type { CustomExerciseVariantView, MovementPattern } from "../../knowledge";
 import {
@@ -100,6 +101,7 @@ import {
 } from "../product-data";
 import { applyUpcomingWorkoutPlanChange } from "../../workout/UpcomingWorkoutPlanEditor";
 import { ProfessionalTermText } from "../ui-kit";
+import { workoutHorizontalIntent, workoutReorderIntent } from "./workoutGestures";
 import {
   applyInboundNavigationIntent,
   initialProductShellState,
@@ -2927,6 +2929,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const [finishReviewOpen, setFinishReviewOpen] = useState(false);
   const [finishSaveState, setFinishSaveState] = useState<"idle" | "saving" | "failed" | "conflict">("idle");
   const [nextSetRecommendation, setNextSetRecommendation] = useState<Awaited<ReturnType<CoachApplication["recommendNextWorkoutSet"]>>>();
+  const [removedTaskUndo, setRemovedTaskUndo] = useState<{ task: PlannedExerciseTask; index: number }>();
   const [poseRuntimeHealth, setPoseRuntimeHealth] = useState<PoseCameraRuntimeHealth>();
   const restoredObservationId = useRef<string | undefined>(undefined);
   const load = useCallback(async () => {
@@ -3366,23 +3369,58 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const currentExerciseOutcomes = pending
     ? workout.setOutcomes.filter((outcome) => outcome.exerciseVariantId === pending.task.exerciseVariantId)
     : [];
+  const switchableTasks = workout.frozenPrescription.tasks.filter((task) => task.sets.some((set) => !resolved.has(set.id)));
+  const switchableTaskIndex = pending ? switchableTasks.findIndex((task) => task.id === pending.task.id) : -1;
+  const swipeCurrentCard = (direction: "previous" | "next") => {
+    const offset = direction === "next" ? 1 : -1;
+    const task = switchableTasks[switchableTaskIndex + offset];
+    if (task) void focusTask(task.id);
+  };
+  const undoRemovedTask = async () => {
+    if (!removedTaskUndo) return;
+    try {
+      const change = { kind: "add_task" as const, task: removedTaskUndo.task, index: removedTaskUndo.index };
+      const currentDraft = workout.drafts.find((draft) => draft.prescriptionSetId === workout.state.currentSetId);
+      const applied = applyUpcomingWorkoutPlanChange({
+        before: workout.frozenPrescription,
+        change,
+        completedPrescriptionSetIds: [...resolved],
+        ...(currentDraft ? { draftedPrescriptionSetId: currentDraft.prescriptionSetId } : {}),
+      });
+      const key = `mobile-workout:${workoutId}:undo-remove-task:${removedTaskUndo.task.id}:${workout.revision}`;
+      await cloudConfirmed.updateWorkoutThen({
+        localWorkoutId: workoutId,
+        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
+        idempotencyKey: `${key}:cloud`,
+        commitLocal: () => application.editUpcomingWorkoutPlan({
+          userId,
+          workoutId,
+          change,
+          reason: "user_undid_removed_unstarted_task",
+          idempotencyKey: key,
+        }),
+      });
+      setRemovedTaskUndo(undefined);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "未能撤销移除，请重试。");
+    }
+  };
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.workoutTop}><View><Text style={styles.screenTitle}>{readablePlanSessionTitle(workout.frozenPrescription.title)}</Text><Text style={styles.screenSub}>统一训练执行</Text></View><View style={styles.workoutTopActions}>{skipped.size ? <Text style={{ color: colors.terra, fontSize: 11, fontWeight: "800" }}>已跳过 {skipped.size} 组</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel="打开训练中的 Coach" onPress={onOpenCoach} style={styles.workoutCoachButton}><Text style={styles.workoutCoachButtonText}>Coach</Text></Pressable></View></View>
       {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>组间休息</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <ProfessionalTermText text={`下一组：${exerciseDisplayName(pending.task.exerciseVariantId)} · ${setDose(pending.set)}`} style={styles.workoutTaskBoundary} /> : <Text style={styles.workoutTaskBoundary}>已没有待完成组</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel="减少三十秒休息" onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>−30 秒</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="增加三十秒休息" onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>+30 秒</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>结束</Text></Pressable></View></View> : null}
       {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => void dismissNextSetRecommendation("rejected")} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void dismissNextSetRecommendation("ignored")} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
       {pending ? (
-        <View style={styles.currentSetCard}>
+        <WorkoutSetFlipCard
+          flipped={historyExpanded}
+          swipeEnabled={!editingActual && !editingTarget && !historyExpanded}
+          onSwipe={swipeCurrentCard}
+          front={<>
           <View style={styles.currentSetHeader}><Text style={styles.cardEyebrow}>当前组 · 第 {pendingSetIndex} 组</Text>{currentExerciseOutcomes.length ? <Pressable accessibilityRole="button" accessibilityLabel={`${historyExpanded ? "收起" : "查看"}${currentExerciseOutcomes.length}组完成历史`} accessibilityState={{ expanded: historyExpanded }} onPress={() => setHistoryExpanded((value) => !value)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>已完成 {currentExerciseOutcomes.length} 组 ↻</Text></Pressable> : <Text style={styles.notRecordedText}>尚未记录</Text>}</View>
           <Text style={styles.currentSetTitle}>{exerciseDisplayName(pending.task.exerciseVariantId)}</Text>
           <ProfessionalTermText text={setDose(pending.set)} style={styles.currentSetDose} />
           <ProfessionalTermText text="重量、RIR 与疼痛只来自你的确认；相机不会替你推断。" style={styles.currentSetBoundary} />
-          {historyExpanded ? <View accessibilityLabel="已确认组历史" style={styles.completedHistory}>{currentExerciseOutcomes.map((outcome, index) => {
-            const previous = currentExerciseOutcomes[index - 1];
-            const loadChange = outcome.actualLoad && previous?.actualLoad && outcome.actualLoad.unit === previous.actualLoad.unit ? outcome.actualLoad.value - previous.actualLoad.value : undefined;
-            const repsChange = outcome.actualReps !== undefined && previous?.actualReps !== undefined ? outcome.actualReps - previous.actualReps : undefined;
-            return <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? "—"}</Text><Text style={styles.completedHistoryDelta}>{index === 0 ? "首组" : `${loadChange === undefined ? "负荷未知" : loadChange > 0 ? `加重 ${loadChange}` : loadChange < 0 ? `减重 ${Math.abs(loadChange)}` : "负荷持平"}${repsChange === undefined || repsChange === 0 ? "" : repsChange > 0 ? ` · +${repsChange} 次` : ` · ${repsChange} 次`}`}</Text></View>;
-          })}</View> : null}
           {editingActual ? (
             <View style={styles.actualForm}>
               <Text style={styles.setReviewTitle}>Set Review</Text>
@@ -3417,7 +3455,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
             </>
           )}
           {!editingActual && !editingTarget ? <Pressable accessibilityRole="button" onPress={() => setManagingUpcomingTasks(true)} style={styles.manageWorkoutTasksButton}><Text style={styles.manageWorkoutTasksText}>管理后续动作</Text></Pressable> : null}
-        </View>
+          </>}
+          back={<><View style={styles.currentSetHeader}><View><Text style={styles.cardEyebrow}>实际完成历史</Text><Text style={styles.currentSetTitle}>{exerciseDisplayName(pending.task.exerciseVariantId)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="返回当前组正面" onPress={() => setHistoryExpanded(false)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>返回 ↻</Text></Pressable></View><CompletedSetHistory outcomes={currentExerciseOutcomes} /></>}
+        />
       ) : <Empty label="本次计划中的组已处理。" />}
       <Text style={styles.sectionTitle}>今日动作路线</Text>
       {workout.frozenPrescription.tasks.map((task) => {
@@ -3425,15 +3465,189 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         const hasPending = task.sets.some((set) => !resolved.has(set.id));
         return <Pressable key={task.id} accessibilityRole="button" accessibilityLabel={`切换到${exerciseDisplayName(task.exerciseVariantId)}`} accessibilityState={{ selected: pending?.task.id === task.id, disabled: !hasPending }} disabled={!hasPending} onPress={() => void focusTask(task.id)} style={[styles.workoutTask, pending?.task.id === task.id && styles.workoutTaskSelected]}><View style={styles.workoutRouteRow}><View style={{ flex: 1 }}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.workoutRouteMeta}>{taskCompleted ? `已完成 ${taskCompleted} 组` : "尚未记录"}</Text></View><Text style={styles.chevron}>›</Text></View></Pressable>;
       })}
+      {removedTaskUndo ? <View style={styles.nextSetRecommendation}><Text style={styles.nextSetRecommendationDetail}>已移除 {exerciseDisplayName(removedTaskUndo.task.exerciseVariantId)}，已完成结果保持不变。</Text><Pressable accessibilityRole="button" onPress={() => void undoRemovedTask()} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>撤销移除</Text></Pressable></View> : null}
       {error ? <Text style={styles.formError}>{error}</Text> : null}
       <Pressable accessibilityRole="button" onPress={() => void pause()} style={styles.pauseButton}><Text style={styles.pauseButtonText}>暂停训练</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => setShowSafetyPauseChoices(true)} style={styles.safetyPauseButton}><Text style={styles.safetyPauseButtonText}>安全暂停</Text></Pressable>
       {finishReviewOpen ? <View style={styles.workoutTaskPicker}><Text style={styles.logTitle}>训练实际总结</Text><Text style={styles.workoutTaskBoundary}>已确认 {workout.setOutcomes.length} 组 · 已跳过 {skipped.size} 组 · canonical observation 覆盖 {(workout.setObservations ?? []).length} 组 · 用户修正 {workout.setOutcomes.filter((item) => item.performedRepsProvenance?.userAdjusted).length} 组</Text>{workout.setOutcomes.map((outcome, index) => <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{exerciseDisplayName(outcome.exerciseVariantId)}</Text><Text style={styles.completedHistoryDelta}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? outcome.actualDuration?.value ?? outcome.actualDistance?.value ?? "—"}{outcome.actualRir === undefined ? "" : ` · RIR ${outcome.actualRir}`}</Text></View>)}{(workout.skippedSets ?? []).map((item) => <Text key={item.id} style={styles.workoutTaskBoundary}>跳过：{exerciseDisplayName(item.exerciseVariantId)} · {item.reason}</Text>)}{workout.frozenPrescription.tasks.filter((task) => task.id.includes(":replacement:")).map((task) => <Text key={task.id} style={styles.workoutTaskBoundary}>替换剩余组：{exerciseDisplayName(task.exerciseVariantId)}</Text>)}<Text style={styles.workoutTaskBoundary}>保存状态：{finishSaveState === "saving" ? "等待云端确认" : finishSaveState === "conflict" ? "云端冲突，未保存" : finishSaveState === "failed" ? "未获云端确认，可重试" : "尚未提交"}</Text><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => setFinishReviewOpen(false)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>返回训练</Text></Pressable><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => void finish()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>{finishSaveState === "failed" || finishSaveState === "conflict" ? "重试确认" : pending ? "确认部分完成" : "确认完成"}</Text></Pressable></View></View> : <Pressable accessibilityRole="button" onPress={() => setFinishReviewOpen(true)} style={styles.finishButton}><Text style={styles.finishButtonText}>{pending ? "查看部分完成总结" : "查看训练总结"}</Text></Pressable>}
-      {managingUpcomingTasks ? <WorkoutTaskEditor application={application} cloudConfirmed={cloudConfirmed} userId={userId} workout={workout} onDismiss={() => setManagingUpcomingTasks(false)} onChanged={() => { setNextSetRecommendation(undefined); void load(); }} /> : null}
+      {managingUpcomingTasks ? <WorkoutTaskEditor application={application} cloudConfirmed={cloudConfirmed} userId={userId} workout={workout} onDismiss={() => setManagingUpcomingTasks(false)} onChanged={async () => { setNextSetRecommendation(undefined); await load(); }} onRemoved={(task, index) => setRemovedTaskUndo({ task, index })} /> : null}
       {showSafetyPauseChoices ? <SafetyPauseChoices onDismiss={() => setShowSafetyPauseChoices(false)} onSelect={(signal) => void pauseForSafety(signal)} /> : null}
       {showSkipSet && pending ? <SkipCurrentSetSheet exerciseVariantId={pending.task.exerciseVariantId} onDismiss={() => setShowSkipSet(false)} onConfirm={(reason) => void skipCurrentSet(reason)} /> : null}
     </ScrollView>
   );
+}
+
+function WorkoutSetFlipCard({
+  flipped,
+  swipeEnabled,
+  onSwipe,
+  front,
+  back,
+}: {
+  flipped: boolean;
+  swipeEnabled: boolean;
+  onSwipe: (direction: "previous" | "next") => void;
+  front: React.ReactNode;
+  back: React.ReactNode;
+}) {
+  const flip = useRef(new Animated.Value(flipped ? 1 : 0)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const height = useRef(new Animated.Value(280)).current;
+  const [frontHeight, setFrontHeight] = useState(280);
+  const [backHeight, setBackHeight] = useState(280);
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(flip, {
+        toValue: flipped ? 1 : 0,
+        duration: 360,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(height, {
+        toValue: flipped ? backHeight : frontHeight,
+        duration: 240,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [backHeight, flip, flipped, frontHeight, height]);
+
+  const panResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_event, gesture) => swipeEnabled
+      && workoutHorizontalIntent(gesture.dx, gesture.dy, 18) !== "none",
+    onPanResponderMove: (_event, gesture) => {
+      translateX.setValue(Math.max(-96, Math.min(96, gesture.dx)));
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      const intent = workoutHorizontalIntent(gesture.dx, gesture.dy, 64);
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 4 }).start();
+      if (intent !== "none") onSwipe(intent === "left" ? "next" : "previous");
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 4 }).start();
+    },
+  }), [onSwipe, swipeEnabled, translateX]);
+
+  const frontRotation = flip.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
+  const backRotation = flip.interpolate({ inputRange: [0, 1], outputRange: ["180deg", "360deg"] });
+  return <Animated.View
+    accessibilityActions={[{ name: "decrement", label: "上一个动作" }, { name: "increment", label: "下一个动作" }]}
+    onAccessibilityAction={(event) => onSwipe(event.nativeEvent.actionName === "increment" ? "next" : "previous")}
+    style={[styles.workoutSetFlipStage, { height, transform: [{ translateX }] }]}
+    {...panResponder.panHandlers}
+  >
+    <Animated.View
+      accessibilityElementsHidden={flipped}
+      importantForAccessibility={flipped ? "no-hide-descendants" : "auto"}
+      pointerEvents={flipped ? "none" : "auto"}
+      onLayout={(event) => setFrontHeight(Math.max(280, Math.ceil(event.nativeEvent.layout.height)))}
+      style={[styles.currentSetCard, styles.workoutSetFlipFace, { transform: [{ perspective: 1100 }, { rotateY: frontRotation }] }]}
+    >{front}</Animated.View>
+    <Animated.View
+      accessibilityElementsHidden={!flipped}
+      importantForAccessibility={flipped ? "auto" : "no-hide-descendants"}
+      pointerEvents={flipped ? "auto" : "none"}
+      onLayout={(event) => setBackHeight(Math.max(280, Math.ceil(event.nativeEvent.layout.height)))}
+      style={[styles.currentSetCard, styles.workoutSetFlipFace, { transform: [{ perspective: 1100 }, { rotateY: backRotation }] }]}
+    >{back}</Animated.View>
+  </Animated.View>;
+}
+
+function CompletedSetHistory({
+  outcomes,
+}: {
+  outcomes: Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>["setOutcomes"];
+}) {
+  return <View accessibilityLabel="已确认组历史" style={styles.completedHistory}>{outcomes.map((outcome, index) => {
+    const previous = outcomes[index - 1];
+    const loadChange = outcome.actualLoad && previous?.actualLoad && outcome.actualLoad.unit === previous.actualLoad.unit
+      ? outcome.actualLoad.value - previous.actualLoad.value
+      : undefined;
+    const repsChange = outcome.actualReps !== undefined && previous?.actualReps !== undefined
+      ? outcome.actualReps - previous.actualReps
+      : undefined;
+    return <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? "—"}</Text><Text style={styles.completedHistoryDelta}>{index === 0 ? "首组" : `${loadChange === undefined ? "负荷未知" : loadChange > 0 ? `加重 ${loadChange}` : loadChange < 0 ? `减重 ${Math.abs(loadChange)}` : "负荷持平"}${repsChange === undefined || repsChange === 0 ? "" : repsChange > 0 ? ` · +${repsChange} 次` : ` · ${repsChange} 次`}`}</Text></View>;
+  })}</View>;
+}
+
+function SwipeRevealWorkoutTaskRow({
+  removeEnabled,
+  canMoveUp,
+  canMoveDown,
+  onConfirmRemove,
+  onReorder,
+  children,
+}: {
+  removeEnabled: boolean;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onConfirmRemove: () => void;
+  onReorder: (direction: "up" | "down") => void;
+  children: React.ReactNode;
+}) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const [revealed, setRevealed] = useState(false);
+  const [reorderArmed, setReorderArmed] = useState(false);
+  const settle = useCallback((open: boolean) => {
+    setRevealed(open);
+    Animated.spring(translateX, {
+      toValue: open ? -96 : 0,
+      useNativeDriver: true,
+      speed: 24,
+      bounciness: 2,
+    }).start();
+  }, [translateX]);
+  const panResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_event, gesture) => workoutReorderIntent(gesture.dx, gesture.dy, reorderArmed, 10) !== "none",
+    onMoveShouldSetPanResponder: (_event, gesture) => removeEnabled
+      && !reorderArmed
+      && workoutHorizontalIntent(gesture.dx, gesture.dy, 18) === "left",
+    onPanResponderMove: (_event, gesture) => {
+      if (reorderArmed) {
+        translateY.setValue(Math.max(-64, Math.min(64, gesture.dy)));
+        return;
+      }
+      translateX.setValue(Math.max(-108, Math.min(0, (revealed ? -96 : 0) + gesture.dx)));
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      if (reorderArmed) {
+        const direction = workoutReorderIntent(gesture.dx, gesture.dy, true);
+        if (direction === "up" && canMoveUp) onReorder("up");
+        else if (direction === "down" && canMoveDown) onReorder("down");
+        setReorderArmed(false);
+        Animated.spring(translateY, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 2 }).start();
+        return;
+      }
+      settle(workoutHorizontalIntent(gesture.dx, gesture.dy, 48) === "left" || revealed && gesture.dx < 36);
+    },
+    onPanResponderTerminate: () => {
+      setReorderArmed(false);
+      Animated.spring(translateY, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 2 }).start();
+      settle(revealed);
+    },
+  }), [canMoveDown, canMoveUp, onReorder, removeEnabled, reorderArmed, revealed, settle, translateX, translateY]);
+  return <View style={{ position: "relative", overflow: "hidden", borderRadius: radius.row }} {...panResponder.panHandlers}>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="确认移除这个未开始动作"
+      accessibilityElementsHidden={!revealed}
+      disabled={!revealed || !removeEnabled}
+      onPress={onConfirmRemove}
+      style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 96, backgroundColor: colors.terra, alignItems: "center", justifyContent: "center" }}
+    ><Text style={{ color: colors.white, fontSize: 12, fontWeight: "900" }}>确认移除</Text></Pressable>
+    <Animated.View style={{ transform: [{ translateX }, { translateY }], opacity: reorderArmed ? 0.9 : 1 }}>{children}</Animated.View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="长按并上下拖动排序"
+      accessibilityHint="长按后向上或向下拖动"
+      delayLongPress={350}
+      disabled={revealed || !canMoveUp && !canMoveDown}
+      onLongPress={() => { settle(false); setReorderArmed(true); }}
+      style={{ position: "absolute", right: 8, top: 8, width: 44, height: 44, borderRadius: 14, backgroundColor: colors.paper2, alignItems: "center", justifyContent: "center", opacity: revealed ? 0 : 1 }}
+    ><Text style={{ color: colors.ink2, fontSize: 18, fontWeight: "900" }}>↕</Text></Pressable>
+  </View>;
 }
 
 function SkipCurrentSetSheet({
@@ -3515,13 +3729,15 @@ function WorkoutTaskEditor({
   workout,
   onDismiss,
   onChanged,
+  onRemoved,
 }: {
   application: CoachApplication;
   cloudConfirmed: ConfirmedProductBridge;
   userId: string;
   workout: Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>;
   onDismiss: () => void;
-  onChanged: () => void;
+  onChanged: () => Promise<void> | void;
+  onRemoved: (task: PlannedExerciseTask, index: number) => void;
 }) {
   const [query, setQuery] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
@@ -3579,13 +3795,15 @@ function WorkoutTaskEditor({
       });
       setError(undefined);
       setSaveState("idle");
-      onChanged();
+      await onChanged();
       onDismiss();
+      return true;
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : "无法更新尚未开始的动作";
       const conflict = /conflict|revision/i.test(detail);
       setSaveState(conflict ? "conflict" : "failed");
       setError(conflict ? "云端版本有冲突，路线没有保存。请刷新后再试。" : "云端尚未确认，路线没有保存。可以重试。");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -3650,6 +3868,13 @@ function WorkoutTaskEditor({
     }, "user_selected_temporary_substitution");
     setSelectedExerciseId(undefined);
   };
+  const remove = async (task: PlannedExerciseTask, index: number) => {
+    const removed = await commit(
+      { kind: "remove_task", taskId: task.id },
+      "user_removed_unstarted_task",
+    );
+    if (removed) onRemoved(task, index);
+  };
   return (
     <View style={styles.exerciseManagerScrim}>
       <View style={styles.exerciseManagerSheet}>
@@ -3663,14 +3888,22 @@ function WorkoutTaskEditor({
           {editableTasks.length ? editableTasks.map((task) => {
             const originalIndex = workout.frozenPrescription.tasks.findIndex((candidate) => candidate.id === task.id);
             const hasLockedSet = task.sets.some((set) => completed.has(set.id) || drafted.has(set.id));
-            return <View key={task.id} style={[styles.workoutTaskEditorRow, selectedTaskId === task.id && styles.workoutTaskEditorRowSelected]}>
-              <Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedTaskId === task.id }} onPress={() => setSelectedTaskId(task.id)} style={styles.workoutTaskEditorPrimary}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.exerciseManagerSub}>{task.sets.length} 组 · {hasLockedSet ? "已开始；只能替换剩余组" : "可替换、排序或移除"}</Text></Pressable>
-              <View style={styles.workoutTaskEditorActions}>
-                <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex <= 0} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex - 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>上移</Text></Pressable>
-                <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex >= workout.frozenPrescription.tasks.length - 1} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>下移</Text></Pressable>
-                <Pressable accessibilityRole="button" disabled={busy || hasLockedSet} onPress={() => void commit({ kind: "remove_task", taskId: task.id }, "user_removed_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.exerciseArchiveText}>移除</Text></Pressable>
+            return <SwipeRevealWorkoutTaskRow
+              key={task.id}
+              removeEnabled={!busy && !hasLockedSet}
+              canMoveUp={!busy && !hasLockedSet && originalIndex > 0}
+              canMoveDown={!busy && !hasLockedSet && originalIndex < workout.frozenPrescription.tasks.length - 1}
+              onConfirmRemove={() => void remove(task, originalIndex)}
+              onReorder={(direction) => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + (direction === "up" ? -1 : 1) }, "user_dragged_unstarted_task")}
+            >
+              <View style={[styles.workoutTaskEditorRow, selectedTaskId === task.id && styles.workoutTaskEditorRowSelected]}>
+                <Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedTaskId === task.id }} onPress={() => setSelectedTaskId(task.id)} style={styles.workoutTaskEditorPrimary}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.exerciseManagerSub}>{task.sets.length} 组 · {hasLockedSet ? "已开始；只能替换剩余组" : "左滑后确认移除；长按用上下按钮排序"}</Text></Pressable>
+                <View style={styles.workoutTaskEditorActions}>
+                  <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex <= 0} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex - 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>上移</Text></Pressable>
+                  <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex >= workout.frozenPrescription.tasks.length - 1} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>下移</Text></Pressable>
+                </View>
               </View>
-            </View>;
+            </SwipeRevealWorkoutTaskRow>;
           }) : <Text style={styles.exerciseEmpty}>当前没有可编辑的后续动作。已开始的训练内容会保持原样。</Text>}
           <View style={styles.workoutTaskPicker}>
             <Text style={styles.exerciseFieldLabel}>从动作库选择</Text>
@@ -4519,5 +4752,7 @@ const styles = StyleSheet.create({
   coachDockMeta: { color: "#92988D", fontSize: 9, marginTop: 3 },
   coachDockArrow: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, borderColor: "#3A3F37", alignItems: "center", justifyContent: "center" },
   coachDockArrowText: { color: colors.lime, fontSize: 17, fontWeight: "900" },
+  workoutSetFlipStage: { position: "relative" },
+  workoutSetFlipFace: { position: "absolute", top: 0, left: 0, right: 0, backfaceVisibility: "hidden" },
   tabbar: { height: 66, flexDirection: "row", paddingTop: 9, paddingBottom: 6 }, tab: { flex: 1, alignItems: "center", gap: 3 }, tabIcon: { color: colors.ink3, fontSize: 17, fontWeight: "700" }, tabLabel: { color: colors.ink3, fontSize: 9 }, tabOn: { color: colors.ink, fontWeight: "900" },
 });

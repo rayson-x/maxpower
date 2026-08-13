@@ -558,6 +558,24 @@ test("训练中后续动作编辑使用 typed command，平替不复制重量且
     idempotencyKey: "edit-remove-temporary-focus",
   });
   assert.equal(workout.state.currentSetId, "set-2", "removed focused task falls back to the next unresolved set");
+  workout = await app.editUpcomingWorkoutPlan({
+    userId: "u1",
+    workoutId: "workout-edit",
+    change: {
+      kind: "add_task",
+      index: 3,
+      task: {
+        id: "temporary-focus",
+        exerciseVariantId: "push_up.bodyweight.floor.standard.bilateral.full_rom",
+        mode: "bodyweight_reps",
+        sets: [{ id: "temporary-focus-1", targetReps: { min: 5, max: 5 } }],
+      },
+    },
+    reason: "user_undid_removed_unstarted_task",
+    idempotencyKey: "edit-undo-remove-temporary-focus",
+  });
+  assert.equal(workout.frozenPrescription.tasks[3]?.id, "temporary-focus");
+  assert.equal(workout.state.currentSetId, "set-2", "undo restores the route without stealing current focus");
 
   workout = await app.focusWorkoutTask({
     userId: "u1",
