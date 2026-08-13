@@ -204,6 +204,49 @@
     .transport.play { border-color: var(--acid); color: var(--ink); background: var(--acid); font-size: 18px; }
     .timecode { text-align: right; color: var(--paper); font: 800 12px/1 var(--mono); }
 
+    .coordinate-evidence-panel {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1px;
+      border-bottom: 1px solid var(--line);
+      background: var(--line);
+    }
+    .coordinate-evidence-card, .coordinate-evidence-empty {
+      min-width: 0;
+      padding: 13px 16px;
+      background: #080b09;
+    }
+    .coordinate-evidence-empty { grid-column: 1 / -1; display: flex; gap: 8px; align-items: baseline; }
+    .coordinate-evidence-empty strong { color: var(--amber); font-size: 12px; }
+    .coordinate-evidence-empty span { color: var(--muted); font: 600 9px/1.4 var(--mono); }
+    .coordinate-evidence-kicker {
+      margin-bottom: 9px;
+      color: var(--paper);
+      font: 800 10px/1.35 var(--mono);
+    }
+    .coordinate-evidence-kicker span { color: var(--muted); font-weight: 600; }
+    .coordinate-evidence-value { color: var(--amber); font: 900 22px/1 var(--mono); }
+    .coordinate-evidence-card dl { display: grid; gap: 7px; margin: 9px 0 0; }
+    .coordinate-evidence-card dl div { min-width: 0; }
+    .coordinate-evidence-card dt, .coordinate-evidence-metrics span {
+      color: var(--muted);
+      font: 700 8px/1.35 var(--mono);
+    }
+    .coordinate-evidence-card dd { margin: 3px 0 0; color: var(--paper); font: 700 10px/1.45 var(--mono); overflow-wrap: anywhere; }
+    .coordinate-evidence-card dd span, .coordinate-state-line span { display: block; color: var(--muted); font-weight: 600; }
+    .coordinate-state-line { display: flex; gap: 8px; align-items: baseline; color: var(--cyan); font: 800 13px/1.3 var(--mono); }
+    .coordinate-evidence-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    .coordinate-evidence-metrics > div { min-width: 0; padding: 8px; border: 1px solid var(--line); background: var(--panel); }
+    .coordinate-evidence-metrics span, .coordinate-evidence-metrics small { display: block; }
+    .coordinate-evidence-metrics small { margin-top: 3px; color: var(--muted); font-weight: 500; }
+    .coordinate-evidence-metrics strong { display: block; margin-top: 8px; color: var(--acid); font: 900 14px/1 var(--mono); }
+    .channel-quality-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 7px; }
+    .endpoint-mapping { margin-bottom: 8px; color: var(--amber); font: 700 9px/1.4 var(--mono); }
+    .endpoint-mapping strong, .endpoint-mapping span { display: block; }
+    .endpoint-mapping span { color: var(--muted); font-weight: 600; }
+    .endpoint-coordinate-evidence p { margin: 9px 0 0; color: var(--paper); font-size: 9px; line-height: 1.45; }
+    .endpoint-coordinate-evidence p span { display: block; color: var(--muted); font: 600 8px/1.45 var(--mono); }
+
     .timeline-panel { padding: 17px 18px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
     .timeline-legend { display: flex; gap: 18px; margin-bottom: 12px; color: var(--muted); font: 700 9px/1 var(--mono); }
     .timeline-legend i { display: inline-block; width: 9px; height: 9px; margin-right: 6px; vertical-align: -1px; }
@@ -325,6 +368,7 @@
       }
       .queue-item { min-width: 230px; min-height: 62px; }
       .evidence-column { border-right: 0; }
+      .coordinate-evidence-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .review-rail {
         position: relative;
         top: auto;
@@ -349,6 +393,9 @@
       .player-controls { grid-template-columns: auto auto auto; }
       .timecode { grid-column: 1 / -1; text-align: left; }
       .timeline-panel { padding-inline: 12px; }
+      .coordinate-evidence-panel { grid-template-columns: minmax(0, 1fr); }
+      .coordinate-evidence-metrics { grid-template-columns: repeat(3, minmax(82px, 1fr)); overflow-x: auto; }
+      .channel-quality-metrics { grid-template-columns: repeat(4, minmax(105px, 1fr)); }
     }
 
     @media (max-height: 760px) {
@@ -427,6 +474,10 @@
               <div id="qualityTimecode" class="timecode">00:00.000 / 00:00.000</div>
             </div>
           </div>
+
+          <section id="coordinateEvidencePanel" class="coordinate-evidence-panel" aria-live="polite" aria-label="局部动作坐标证据 / Local motion coordinate evidence">
+            <div class="coordinate-evidence-empty"><strong>暂无局部坐标证据</strong><span>Local-coordinate evidence unavailable · 原始斜视角器械轴 / Raw oblique equipment axis · 规范局部轨迹 / Canonical local-frame trajectory</span></div>
+          </section>
 
           <section class="timeline-panel">
             <div class="timeline-legend"><span><i class="truth"></i>人工起止范围</span><span><i class="start"></i>Rust 起点</span><span><i class="turn"></i>Rust 换向</span><span><i class="end"></i>Rust 返回</span></div>

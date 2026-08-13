@@ -9,6 +9,8 @@ const QualityReviewI18n = require("./qualityReviewI18n.js");
 const {
   benchmarkEvidenceForItem,
   clearLocalDraft,
+  coordinateEvidenceHtml,
+  coordinateEvidenceSummary,
   coordinateStatusSummary,
   coordinateStatusText,
   createWorkspace,
@@ -28,6 +30,18 @@ const {
   saveLocalDraft,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
+
+test("review page reserves a visible evidence strip for raw and local-frame facts", () => {
+  const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
+
+  assert.match(html, /id="coordinateEvidencePanel"/u);
+  assert.match(html, /class="coordinate-evidence-panel"/u);
+  assert.match(html, /\.coordinate-evidence-panel\s*\{/u);
+  assert.match(html, /原始斜视角器械轴/u);
+  assert.match(html, /Raw oblique equipment axis/u);
+  assert.match(html, /规范局部轨迹/u);
+  assert.match(html, /Canonical local-frame trajectory/u);
+});
 
 test("evidence mode controls remain visible in the sticky audit header", () => {
   const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
@@ -509,6 +523,115 @@ test("coordinate status readout keeps state scale confidence reason and fusion v
   }, false), "COORD #12 · FROZEN · SCALE projected_bar_length 0.200 · CONF 86% · REASON none");
 });
 
+test("coordinate evidence names screen-ordered endpoints without inventing anatomy", () => {
+  const summary = coordinateEvidenceSummary({
+    coordinateFrameId: 12,
+    state: "degraded",
+    reason: "observation_gap",
+    scale: 0.257,
+    scaleSource: "projected_bar_length",
+    confidence: 0.63,
+    channelAgreement: "equipment_only",
+    rawBarAxis: [0.12, 0.31, 0.88, 0.47],
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    rawBarAngleRadians: 0.2075,
+    baselineCorrectedBarAngleRadians: -0.0349,
+    endpointOneProgress: 0.42,
+    endpointTwoProgress: 0.31,
+    equipment: {
+      alongAxisProgress: 0.37,
+      crossAxisDisplacement: -0.08,
+      confidence: 0.91,
+      coverage: 0.84,
+      uncertainty: 0.12,
+      provenance: "equipment_measured",
+    },
+    pose: {
+      alongAxisProgress: 0.33,
+      crossAxisDisplacement: -0.04,
+      confidence: 0.74,
+      coverage: 0.68,
+      uncertainty: 0.29,
+      provenance: "pose_measured",
+    },
+  });
+
+  assert.deepEqual(summary, {
+    available: true,
+    coordinateFrameId: 12,
+    state: "degraded",
+    reason: "observation_gap",
+    scale: 0.257,
+    scaleSource: "projected_bar_length",
+    confidence: 0.63,
+    fusionStatus: "equipment_only",
+    rawBarAxis: [0.12, 0.31, 0.88, 0.47],
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    rawAngleDegrees: 11.89,
+    correctedAngleDegrees: -2,
+    equipmentProgress: 0.37,
+    equipmentCrossAxisDisplacement: -0.08,
+    equipmentCoverage: 0.84,
+    equipmentUncertainty: 0.12,
+    poseCoverage: 0.68,
+    poseUncertainty: 0.29,
+    endpointOneProgress: 0.42,
+    endpointTwoProgress: 0.31,
+    endpointResidual: -0.11,
+  });
+
+  const rendered = coordinateEvidenceHtml(summary);
+  assert.match(rendered, /原始斜视角器械轴/u);
+  assert.match(rendered, /Raw oblique equipment axis/u);
+  assert.match(rendered, /11\.89°/u);
+  assert.match(rendered, /规范局部轨迹/u);
+  assert.match(rendered, /Canonical local-frame trajectory/u);
+  assert.match(rendered, /屏幕有序端点 1/u);
+  assert.match(rendered, /Screen-ordered endpoint 1/u);
+  assert.match(rendered, /屏幕有序端点 2/u);
+  assert.match(rendered, /P2 − P1/u);
+  assert.match(rendered, /-0\.110/u);
+  assert.match(rendered, /映射未知/u);
+  assert.match(rendered, /Anatomical mapping unknown/u);
+  assert.match(rendered, /器械覆盖率/u);
+  assert.match(rendered, /Equipment coverage/u);
+  assert.match(rendered, /84%/u);
+  assert.match(rendered, /骨架不确定度/u);
+  assert.match(rendered, /Pose uncertainty/u);
+  assert.match(rendered, /29%/u);
+  assert.doesNotMatch(rendered, /左端点|右端点|left endpoint|right endpoint/iu);
+});
+
+test("coordinate evidence localizes calibration state and abstention reason", () => {
+  const rendered = coordinateEvidenceHtml(coordinateEvidenceSummary({
+    coordinateFrameId: 8,
+    state: "learning",
+    reason: "insufficient_preparation",
+    scale: null,
+    scaleSource: null,
+    confidence: 0.28,
+    channelAgreement: "cannot_judge",
+  }));
+
+  assert.match(rendered, /学习中/u);
+  assert.match(rendered, /Learning/u);
+  assert.match(rendered, /准备阶段可靠观测不足/u);
+  assert.match(rendered, /Insufficient reliable preparation observations/u);
+  assert.match(rendered, /无法判断/u);
+  assert.match(rendered, /Cannot judge/u);
+});
+
+test("missing coordinate evidence abstains visibly instead of fabricating values", () => {
+  assert.deepEqual(coordinateEvidenceSummary(null), {
+    available: false,
+    reason: "no_coordinate_evidence",
+  });
+  const rendered = coordinateEvidenceHtml(coordinateEvidenceSummary(null));
+  assert.match(rendered, /暂无局部坐标证据/u);
+  assert.match(rendered, /Local-coordinate evidence unavailable/u);
+  assert.doesNotMatch(rendered, /0\.000/u);
+});
+
 test("review projection accepts Rust snake-case local coordinate fields", () => {
   const layers = frameEvidenceLayers({
     timestampMs: 500,
@@ -520,10 +643,13 @@ test("review projection accepts Rust snake-case local coordinate fields", () => 
       channel_agreement: "pose_only",
       confidence: 0.72,
       equipment: null,
+      endpoint_order_mapping: "screen_ordered_anatomy_unknown",
       pose: {
         along_axis_progress: 0.25,
         cross_axis_displacement: -0.5,
         confidence: 0.7,
+        coverage: 0.65,
+        uncertainty: 0.3,
         provenance: "pose_measured",
       },
     },
@@ -532,6 +658,9 @@ test("review projection accepts Rust snake-case local coordinate fields", () => 
   assert.deepEqual(layers.normalizedPose.point, { x: 0.4, y: 0.55 });
   assert.equal(layers.fusionStatus.status, "pose_only");
   assert.equal(coordinateStatusSummary(layers.coordinate).coordinateFrameId, 8);
+  assert.equal(layers.normalizedPose.coverage, 0.65);
+  assert.equal(layers.normalizedPose.uncertainty, 0.3);
+  assert.equal(coordinateEvidenceSummary(layers.coordinate).endpointOrderMapping, "screen_ordered_anatomy_unknown");
 });
 
 function localCoordinateFrame(timestampMs, poseProgress, equipmentProgress) {
@@ -547,16 +676,21 @@ function localCoordinateFrame(timestampMs, poseProgress, equipmentProgress) {
       origin: [0.5, 0.5],
       scale: 0.2,
       scaleSource: "projected_bar_length",
+      endpointOrderMapping: "screen_ordered_anatomy_unknown",
       pose: {
         alongAxisProgress: poseProgress,
         crossAxisDisplacement: 0,
         confidence: 0.8,
+        coverage: 0.75,
+        uncertainty: 0.2,
         provenance: "pose_measured",
       },
       equipment: {
         alongAxisProgress: equipmentProgress,
         crossAxisDisplacement: 0,
         confidence: 0.9,
+        coverage: 0.9,
+        uncertainty: 0.1,
         provenance: "equipment_measured",
       },
       channelAgreement: "agreement",

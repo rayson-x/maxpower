@@ -310,6 +310,8 @@
       alongAxisProgress: channel.alongAxisProgress ?? channel.along_axis_progress,
       crossAxisDisplacement: channel.crossAxisDisplacement ?? channel.cross_axis_displacement,
       confidence: Number.isFinite(channel.confidence) ? channel.confidence : null,
+      coverage: finiteOrNull(channel.coverage),
+      uncertainty: finiteOrNull(channel.uncertainty),
       provenance: channel.provenance ?? "unknown",
       predicted: isPredictedEvidence(channel),
     });
@@ -349,6 +351,199 @@
     const reason = ` · REASON ${status.reason ?? "none"}`;
     const fusion = includeFusion ? ` · FUSION ${status.fusionStatus ?? "cannot_judge"}` : "";
     return `COORD${frame} · ${String(status.state ?? "uninitialized").toUpperCase()}${scale}${confidence}${reason}${fusion}`;
+  }
+
+  const COORDINATE_STATE_COPY = Object.freeze({
+    uninitialized: Object.freeze({ zh: "未初始化", en: "Uninitialized" }),
+    provisional: Object.freeze({ zh: "初步校准", en: "Provisional" }),
+    learning: Object.freeze({ zh: "学习中", en: "Learning" }),
+    frozen: Object.freeze({ zh: "已冻结", en: "Frozen" }),
+    degraded: Object.freeze({ zh: "已降级", en: "Degraded" }),
+  });
+  const COORDINATE_REASON_COPY = Object.freeze({
+    no_set: Object.freeze({ zh: "尚未开始训练组", en: "Set has not started" }),
+    no_locked_subject: Object.freeze({ zh: "未锁定前景主体", en: "Foreground subject is not locked" }),
+    no_measured_bar_axis: Object.freeze({ zh: "没有可靠实测杠轴", en: "No reliable measured bar axis" }),
+    insufficient_preparation: Object.freeze({ zh: "准备阶段可靠观测不足", en: "Insufficient reliable preparation observations" }),
+    subject_changed: Object.freeze({ zh: "检测到主体切换", en: "Subject changed" }),
+    observation_gap: Object.freeze({ zh: "观测中断时间过长", en: "Observation gap exceeded the limit" }),
+    invalid_geometry: Object.freeze({ zh: "器械几何无效", en: "Equipment geometry is invalid" }),
+    no_coordinate_evidence: Object.freeze({ zh: "暂无局部坐标证据", en: "Local-coordinate evidence unavailable" }),
+    none: Object.freeze({ zh: "无", en: "None" }),
+  });
+  const FUSION_STATUS_COPY = Object.freeze({
+    agreement: Object.freeze({ zh: "骨架与器械一致", en: "Pose and equipment agree" }),
+    equipment_only: Object.freeze({ zh: "仅器械通道", en: "Equipment channel only" }),
+    pose_only: Object.freeze({ zh: "仅骨架通道", en: "Pose channel only" }),
+    conflict: Object.freeze({ zh: "通道冲突", en: "Channel conflict" }),
+    cannot_judge: Object.freeze({ zh: "无法判断", en: "Cannot judge" }),
+  });
+
+  function coordinateEvidenceSummary(coordinate) {
+    if (!coordinate) return Object.freeze({ available: false, reason: "no_coordinate_evidence" });
+    const rawBarAxis = coordinate.rawBarAxis ?? coordinate.raw_bar_axis ?? null;
+    const validRawBarAxis = Array.isArray(rawBarAxis)
+      && rawBarAxis.length === 4
+      && rawBarAxis.every(Number.isFinite)
+      ? Object.freeze(rawBarAxis.slice())
+      : null;
+    const rawAngleRadians = finiteOrNull(
+      coordinate.rawBarAngleRadians ?? coordinate.raw_bar_angle_radians,
+    ) ?? (validRawBarAxis
+      ? Math.atan2(validRawBarAxis[3] - validRawBarAxis[1], validRawBarAxis[2] - validRawBarAxis[0])
+      : null);
+    const correctedAngleRadians = finiteOrNull(
+      coordinate.baselineCorrectedBarAngleRadians
+        ?? coordinate.baseline_corrected_bar_angle_radians,
+    );
+    const endpointOneProgress = finiteOrNull(
+      coordinate.endpointOneProgress ?? coordinate.endpoint_one_progress,
+    );
+    const endpointTwoProgress = finiteOrNull(
+      coordinate.endpointTwoProgress ?? coordinate.endpoint_two_progress,
+    );
+    const equipment = coordinate.equipment || {};
+    const pose = coordinate.pose || {};
+    return Object.freeze({
+      available: true,
+      coordinateFrameId: coordinate.coordinateFrameId ?? coordinate.coordinate_frame_id ?? null,
+      state: coordinate.state ?? "uninitialized",
+      reason: coordinate.reason ?? null,
+      scale: finiteOrNull(coordinate.scale),
+      scaleSource: coordinate.scaleSource ?? coordinate.scale_source ?? null,
+      confidence: finiteOrNull(coordinate.confidence),
+      fusionStatus: coordinate.channelAgreement ?? coordinate.channel_agreement ?? "cannot_judge",
+      rawBarAxis: validRawBarAxis,
+      endpointOrderMapping: coordinate.endpointOrderMapping
+        ?? coordinate.endpoint_order_mapping
+        ?? null,
+      rawAngleDegrees: radiansToRoundedDegrees(rawAngleRadians),
+      correctedAngleDegrees: radiansToRoundedDegrees(correctedAngleRadians),
+      equipmentProgress: finiteOrNull(equipment.alongAxisProgress ?? equipment.along_axis_progress),
+      equipmentCrossAxisDisplacement: finiteOrNull(
+        equipment.crossAxisDisplacement ?? equipment.cross_axis_displacement,
+      ),
+      equipmentCoverage: finiteOrNull(equipment.coverage),
+      equipmentUncertainty: finiteOrNull(equipment.uncertainty),
+      poseCoverage: finiteOrNull(pose.coverage),
+      poseUncertainty: finiteOrNull(pose.uncertainty),
+      endpointOneProgress,
+      endpointTwoProgress,
+      endpointResidual: endpointOneProgress == null || endpointTwoProgress == null
+        ? null
+        : roundNumber(endpointTwoProgress - endpointOneProgress, 6),
+    });
+  }
+
+  function coordinateEvidenceHtml(summary) {
+    const value = summary?.available === false || !summary
+      ? { available: false, reason: summary?.reason ?? "no_coordinate_evidence" }
+      : summary;
+    if (!value.available) {
+      const reason = bilingualCopy(COORDINATE_REASON_COPY, value.reason, "暂无局部坐标证据", "Local-coordinate evidence unavailable");
+      return `<div class="coordinate-evidence-empty"><strong>${escapeHtml(reason.zh)}</strong><span>${escapeHtml(reason.en)}</span></div>`;
+    }
+    const state = bilingualCopy(COORDINATE_STATE_COPY, value.state, String(value.state), String(value.state));
+    const reason = bilingualCopy(
+      COORDINATE_REASON_COPY,
+      value.reason ?? "none",
+      String(value.reason ?? "无"),
+      String(value.reason ?? "None"),
+    );
+    const fusion = bilingualCopy(
+      FUSION_STATUS_COPY,
+      value.fusionStatus,
+      String(value.fusionStatus),
+      String(value.fusionStatus),
+    );
+    const endpointMapping = value.endpointOrderMapping === "screen_ordered_anatomy_unknown"
+      ? Object.freeze({
+        zh: "屏幕有序；解剖侧映射未知",
+        en: "Screen-ordered; Anatomical mapping unknown",
+      })
+      : Object.freeze({
+        zh: "端点映射未声明",
+        en: "Endpoint mapping not declared",
+      });
+    const rawAxis = value.rawBarAxis
+      ? value.rawBarAxis.map((entry) => formatEvidenceNumber(entry, 3)).join(" / ")
+      : "—";
+    return `<div class="coordinate-evidence-card raw-coordinate-evidence">
+      <div class="coordinate-evidence-kicker">原始斜视角器械轴 <span>/ Raw oblique equipment axis</span></div>
+      <div class="coordinate-evidence-value">${formatEvidenceAngle(value.rawAngleDegrees)}</div>
+      <dl><div><dt>图像端点 / Image endpoints</dt><dd>${rawAxis}</dd></div></dl>
+    </div>
+    <div class="coordinate-evidence-card canonical-coordinate-evidence">
+      <div class="coordinate-evidence-kicker">规范局部轨迹 <span>/ Canonical local-frame trajectory</span></div>
+      <div class="coordinate-evidence-metrics">
+        ${evidenceMetric("沿轴进度", "Along-axis progress", value.equipmentProgress)}
+        ${evidenceMetric("横轴偏移", "Cross-axis displacement", value.equipmentCrossAxisDisplacement)}
+        ${evidenceMetric("动态轴角", "Baseline-corrected angle", value.correctedAngleDegrees, "angle")}
+      </div>
+      <div class="coordinate-evidence-metrics channel-quality-metrics">
+        ${evidenceMetric("器械覆盖率", "Equipment coverage", value.equipmentCoverage, "percent")}
+        ${evidenceMetric("器械不确定度", "Equipment uncertainty", value.equipmentUncertainty, "percent")}
+        ${evidenceMetric("骨架覆盖率", "Pose coverage", value.poseCoverage, "percent")}
+        ${evidenceMetric("骨架不确定度", "Pose uncertainty", value.poseUncertainty, "percent")}
+      </div>
+    </div>
+    <div class="coordinate-evidence-card calibration-coordinate-evidence">
+      <div class="coordinate-evidence-kicker">校准状态 <span>/ Calibration</span></div>
+      <div class="coordinate-state-line"><strong>${escapeHtml(state.zh)}</strong><span>${escapeHtml(state.en)}</span></div>
+      <dl>
+        <div><dt>原因 / Reason</dt><dd>${escapeHtml(reason.zh)}<span>${escapeHtml(reason.en)}</span></dd></div>
+        <div><dt>融合 / Fusion</dt><dd>${escapeHtml(fusion.zh)}<span>${escapeHtml(fusion.en)}</span></dd></div>
+        <div><dt>坐标 / Scale / Confidence</dt><dd>#${escapeHtml(value.coordinateFrameId ?? "—")} · ${escapeHtml(value.scaleSource ?? "—")} ${formatEvidenceNumber(value.scale, 3)} · ${formatEvidencePercent(value.confidence)}</dd></div>
+      </dl>
+    </div>
+    <div class="coordinate-evidence-card endpoint-coordinate-evidence">
+      <div class="coordinate-evidence-kicker">端点进度与残差 <span>/ Endpoint progress and residual</span></div>
+      <div class="endpoint-mapping"><strong>${escapeHtml(endpointMapping.zh)}</strong><span>${escapeHtml(endpointMapping.en)}</span></div>
+      <div class="coordinate-evidence-metrics endpoint-metrics">
+        ${evidenceMetric("屏幕有序端点 1", "Screen-ordered endpoint 1", value.endpointOneProgress)}
+        ${evidenceMetric("屏幕有序端点 2", "Screen-ordered endpoint 2", value.endpointTwoProgress)}
+        ${evidenceMetric("端点残差 P2 − P1", "Endpoint residual P2 − P1", value.endpointResidual)}
+      </div>
+      <p>端点顺序来自屏幕轴几何，不代表人体解剖左右。<span>Endpoint order follows image geometry; it does not mean anatomical left/right.</span></p>
+    </div>`;
+  }
+
+  function evidenceMetric(zh, en, value, kind = "number") {
+    const formatted = kind === "angle"
+      ? formatEvidenceAngle(value)
+      : (kind === "percent" ? formatEvidencePercent(value) : formatEvidenceNumber(value, 3));
+    return `<div><span>${escapeHtml(zh)}<small>${escapeHtml(en)}</small></span><strong>${formatted}</strong></div>`;
+  }
+
+  function bilingualCopy(dictionary, key, fallbackZh, fallbackEn) {
+    return dictionary[String(key)] || Object.freeze({ zh: fallbackZh, en: fallbackEn });
+  }
+
+  function finiteOrNull(value) {
+    return Number.isFinite(value) ? Number(value) : null;
+  }
+
+  function roundNumber(value, digits) {
+    if (!Number.isFinite(value)) return null;
+    const scale = 10 ** digits;
+    const rounded = Math.round((Number(value) + Number.EPSILON) * scale) / scale;
+    return Object.is(rounded, -0) ? 0 : rounded;
+  }
+
+  function radiansToRoundedDegrees(value) {
+    return Number.isFinite(value) ? roundNumber(Number(value) * 180 / Math.PI, 2) : null;
+  }
+
+  function formatEvidenceNumber(value, digits) {
+    return Number.isFinite(value) ? Number(value).toFixed(digits) : "—";
+  }
+
+  function formatEvidenceAngle(value) {
+    return Number.isFinite(value) ? `${Number(value).toFixed(2)}°` : "—";
+  }
+
+  function formatEvidencePercent(value) {
+    return Number.isFinite(value) ? `${Math.round(Number(value) * 100)}%` : "—";
   }
 
   function evidenceLayerControlsHtml() {
@@ -899,6 +1094,9 @@
       byId("observationReadout").textContent = frame
         ? `OBS ${formatMs(frame.timestampMs)} · POSE INPUT ${inputVisible} / RUST ${canonicalVisible} · EQUIPMENT ${equipmentCount}${coordinateReadout}`
         : "OBSERVATION UNKNOWN · no frame within 150 ms";
+      byId("coordinateEvidencePanel").innerHTML = coordinateEvidenceHtml(
+        coordinateEvidenceSummary(layers.coordinate),
+      );
     }
 
     function drawSkeleton(points, transform, mode) {
@@ -1232,6 +1430,8 @@
   return {
     benchmarkEvidenceForItem,
     clearLocalDraft,
+    coordinateEvidenceHtml,
+    coordinateEvidenceSummary,
     coordinateStatusSummary,
     coordinateStatusText,
     EXPORT_SCHEMA,
