@@ -28,4 +28,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return context.resolveRequest(context, moduleName, platform);
 };
 
+// expo-sqlite's Web worker imports wa-sqlite.wasm directly. Metro's default
+// asset list does not include WASM, so production Web bundles otherwise fail
+// before the camera/angle overlay can load.
+if (!config.resolver.assetExts.includes("wasm")) {
+  config.resolver.assetExts.push("wasm");
+}
+
 module.exports = config;
