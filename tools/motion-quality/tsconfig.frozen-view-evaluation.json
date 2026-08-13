@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "../../.frozen-view-evaluation-test-build",
+    "rootDir": "../..",
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "./frozenViewNormalizationEvaluation.ts",
+    "./frozenViewNormalizationEvaluation.test.ts"
+  ]
+}
