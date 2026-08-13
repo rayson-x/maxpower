@@ -808,8 +808,14 @@ function validateFrozenBenchAblationPolicyReport(
 ): Readonly<FrozenBenchAblationPolicyReport> {
   const report = requireRecord(raw, "bench ablation report");
   if (report.schemaVersion !== "maxpower-real-pose-equipment-ablation/v1"
-      || report.action !== "barbell_bench_press") {
+      || report.action !== "barbell_bench_press"
+      || report.runKind !== "touched_benchmark") {
     throw new Error("bench ablation report schema/action mismatch");
+  }
+  const claimBoundary = requireRecord(report.claimBoundary, "bench ablation claim boundary");
+  if (claimBoundary.benchmarkClass !== "touched_benchmark"
+      || JSON.stringify(report).match(/blind|generalization/iu)) {
+    throw new Error("bench ablation report overstates touched-benchmark evidence");
   }
   const reportDigest = requireSha256(report.reportDigest, "bench ablation reportDigest");
   const sourceFrozenDigest = requireSha256(
@@ -1068,7 +1074,7 @@ async function main(): Promise<void> {
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
     rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
     benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
-    benchAblationReportPath: "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
+    benchAblationReportPath: "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-v1.json",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
     sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",

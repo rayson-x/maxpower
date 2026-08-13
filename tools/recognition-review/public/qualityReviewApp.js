@@ -143,7 +143,7 @@
       const evidenceRuns = requireRecord(release.evidenceRuns, "evidence runs");
       const benchmark = requireRecord(evidenceRuns.benchmark, "benchmark evidence run");
       const frozen = requireRecord(benchmark.frozenPredictions, "frozen benchmark predictions");
-      if (frozen.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
+      if (!["maxpower-motion-quality-frozen-predictions/v1", "maxpower-motion-quality-touched-benchmark-predictions/v1"].includes(frozen.schemaVersion)
           || frozen.state !== "frozen_before_truth"
           || !Array.isArray(frozen.contexts)) {
         throw new Error("frozen benchmark predictions are invalid");

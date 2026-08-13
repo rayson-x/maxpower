@@ -75,7 +75,7 @@ test("review release keeps human start/end separate from immutable Rust proposal
 
 function frozenEvaluationRun() {
   const semantic = {
-    schemaVersion: "maxpower-motion-quality-frozen-predictions/v1" as const,
+    schemaVersion: "maxpower-motion-quality-touched-benchmark-predictions/v1" as const,
     state: "frozen_before_truth" as const,
     runId: "benchmark-a",
     runKind: "touched_benchmark",

@@ -61,7 +61,9 @@ interface FrozenEvaluationContext extends Readonly<Record<string, unknown>> {
 }
 
 interface FrozenEvaluationRun extends Readonly<Record<string, unknown>> {
-  readonly schemaVersion: "maxpower-motion-quality-frozen-predictions/v1";
+  readonly schemaVersion:
+    | "maxpower-motion-quality-frozen-predictions/v1"
+    | "maxpower-motion-quality-touched-benchmark-predictions/v1";
   readonly state: "frozen_before_truth";
   readonly runId: string;
   readonly runKind: string;
@@ -253,7 +255,8 @@ function sha256(value: string): string {
 }
 
 function assertFrozenEvaluationRun(run: FrozenEvaluationRun): void {
-  if (run.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
+  if ((run.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
+      && run.schemaVersion !== "maxpower-motion-quality-touched-benchmark-predictions/v1")
       || run.state !== "frozen_before_truth"
       || !Array.isArray(run.contexts)) {
     throw new Error("benchmark evidence is not a frozen prediction run");
@@ -279,7 +282,7 @@ function deepFreeze<T>(value: T): T {
 async function main(): Promise<void> {
   await buildQualityReviewRelease({
     fullDataRunPath: "data/workflows/motion-quality-review/full-data-proposals-v1.json",
-    frozenEvaluationRunPath: "data/workflows/motion-quality-review/blind-predictions-before-truth-v1.json",
+    frozenEvaluationRunPath: "data/workflows/motion-quality-review/touched-benchmark-predictions-before-truth-v1.json",
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     outputPath: "data/workflows/motion-quality/full-personal-corpus-v1/frozen-quality-review-release.json",

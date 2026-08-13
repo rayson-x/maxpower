@@ -432,7 +432,10 @@ async function readQualityReviewRelease(
     const benchmark = requireJsonRecord(evidenceRuns.benchmark, "quality review benchmark evidence");
     const frozen = requireJsonRecord(benchmark.frozenPredictions, "quality review benchmark frozen predictions");
     if (frozen.schemaVersion !== "maxpower-motion-quality-frozen-predictions/v1"
-        || frozen.state !== "frozen_before_truth") {
+        && frozen.schemaVersion !== "maxpower-motion-quality-touched-benchmark-predictions/v1") {
+      throw new Error("quality review benchmark frozen predictions are invalid");
+    }
+    if (frozen.state !== "frozen_before_truth") {
       throw new Error("quality review benchmark frozen predictions are invalid");
     }
     const frozenDigest = requireJsonString(frozen.frozenDigest, "quality review benchmark frozen prediction hash");

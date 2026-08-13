@@ -197,7 +197,7 @@ function frozenRelease(videoPath: string) {
         acceptanceEligible: false,
         truthStatus: "withheld_from_inference",
         frozenPredictions: {
-          schemaVersion: "maxpower-motion-quality-frozen-predictions/v1",
+          schemaVersion: "maxpower-motion-quality-touched-benchmark-predictions/v1",
           state: "frozen_before_truth",
           runId: "benchmark-a",
           runKind: "touched_benchmark",
