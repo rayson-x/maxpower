@@ -41,7 +41,7 @@ export function resolveSimulatedRecognitionProfile(
     maturity: "provisional",
     schema: "blazepose33",
     coordinateUnit: signals.coordinateUnit,
-    stateMachineId: "ready-effort-peak-return/v1",
+    stateMachineId: template.initializerStateMachineId ?? "ready-effort-peak-return/v1",
     requiredCapabilities: ["canonical-landmarks", "subject-lock"],
     direction,
     primarySignal: signals.primary,
@@ -67,6 +67,8 @@ function signalsFor(feature: PriorFeature): {
   if (feature === "heelHeightRelativeAnkleY") return ySignals([29], [30]);
   if (feature === "wristDistanceToShoulder") return distanceSignals([15, 11], [16, 12]);
   if (feature === "wristLateralSpread") return distanceSignals([15, 16], [15, 16]);
+  if (feature === "ankleLateralSpread") return distanceSignals([27, 28], [27, 28]);
+  if (feature === "wristLateralRelativeElbow") return distanceSignals([15, 13], [16, 14]);
   return null;
 }
 

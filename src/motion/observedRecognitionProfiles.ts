@@ -17,7 +17,7 @@ interface ObservedProfileEntry {
 }
 
 interface ObservedProfileArtifact {
-  schemaVersion: "form-coach-observed-recognition-profiles/v1";
+  schemaVersion: "maxpower-observed-recognition-profiles/v1";
   profiles: ObservedProfileEntry[];
 }
 
@@ -32,9 +32,17 @@ export async function loadObservedRecognitionProfiles(
 ): Promise<void> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Observed recognition profiles unavailable (${response.status})`);
-  const artifact = JSON.parse(await response.text()) as ObservedProfileArtifact;
-  if (artifact.schemaVersion !== "form-coach-observed-recognition-profiles/v1") {
+  installObservedRecognitionProfiles(JSON.parse(await response.text()));
+}
+
+/** Installs an already-bundled artifact for offline/native hosts. */
+export function installObservedRecognitionProfiles(input: unknown): void {
+  const artifact = input as Partial<ObservedProfileArtifact>;
+  if (artifact.schemaVersion !== "maxpower-observed-recognition-profiles/v1") {
     throw new Error("Observed recognition profile schema is unsupported");
+  }
+  if (!Array.isArray(artifact.profiles)) {
+    throw new Error("Observed recognition profile list is missing");
   }
   loadedProfiles = artifact.profiles.map((entry) => ({
     ...entry,

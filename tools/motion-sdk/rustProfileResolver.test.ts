@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveRustExerciseProfile } from "../../src/motion/rustProfileResolver";
+import { normalizeCoarseMotionView, resolveRustExerciseProfile } from "../../src/motion/rustProfileResolver";
 
 test("Rust profile selection requires exact action, camera position, side, and variation", () => {
   assert.equal(resolveRustExerciseProfile({
@@ -78,4 +78,72 @@ test("Rust profile selection requires exact action, camera position, side, and v
       variation: "",
     }), null);
   }
+});
+
+test("local-coordinate candidates are explicit, equipment-exact, and preserve oblique handedness", () => {
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "barbell_bench_press",
+    capturePosition: "frontLeft45",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "barbell",
+    experiment: "local-motion-coordinate-v1",
+  }), "barbell_bench_press_local_front_left");
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "seated_shoulder_press",
+    capturePosition: "frontRight45",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "barbell",
+    experiment: "local-motion-coordinate-v1",
+  }), "seated_barbell_shoulder_press_local_front_right");
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "seated_shoulder_press",
+    capturePosition: "rear",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "barbell",
+    experiment: "local-motion-coordinate-v1",
+  }), null);
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "seated_shoulder_press",
+    capturePosition: "front",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "dumbbell",
+    experiment: "local-motion-coordinate-v1",
+  }), "seated_shoulder_press_front");
+  assert.equal(normalizeCoarseMotionView("frontLeft45"), "front_oblique_left");
+  assert.equal(normalizeCoarseMotionView("frontRight45"), "front_oblique_right");
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "barbell_bench_press",
+    capturePosition: "front_oblique_left",
+    trainingSide: "bilateral",
+    variation: "standard_variant",
+    equipment: "barbell",
+    experiment: "local-motion-coordinate-v1",
+  }), "barbell_bench_press_local_front_left");
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "barbell_bench_press",
+    capturePosition: "front",
+    trainingSide: "bilateral",
+    variation: "close_grip",
+    equipment: "barbell",
+    experiment: "local-motion-coordinate-v1",
+  }), null, "an uncalibrated variation must fail closed");
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "seated_shoulder_press",
+    capturePosition: "frontLeft45",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "barbell",
+  }), null, "candidate code must not auto-promote without the explicit experiment");
+  assert.equal(resolveRustExerciseProfile({
+    exerciseId: "dumbbell_shoulder_press",
+    capturePosition: "frontLeft45",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "dumbbell",
+    experiment: "local-motion-coordinate-v1",
+  }), null, "dumbbell context must not inherit the barbell oblique profile");
 });

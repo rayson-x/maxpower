@@ -59,7 +59,7 @@ export function buildSimulatedTrajectoryBaseline(
   });
   return {
     baseline: {
-      schemaVersion: "form-coach-simulated-trajectory-baseline/v1" as const,
+      schemaVersion: "maxpower-simulated-trajectory-baseline/v1" as const,
       source: "simulated_kinematic_prior" as const,
       evidenceStatus: "uncalibrated" as const,
       calibrationStatus: "uncalibrated" as const,

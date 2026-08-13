@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "skipLibCheck": true,
+    "rootDir": "../..",
+    "outDir": "../../.motion-profile-workflow-build",
+    "types": ["node"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["workflow.ts", "cli.ts", "../../src/motion/rustCanonicalWasm.ts"]
+}
