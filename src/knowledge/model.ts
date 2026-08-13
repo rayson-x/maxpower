@@ -305,6 +305,10 @@ export interface SplitRotationTemplate {
       directMuscles?: readonly string[];
       priority: "primary" | "maintenance" | "optional";
       fatigueIntent: "low" | "medium" | "high";
+      /** 同肌群辅助动作的力学偏好，避免用别的肌群凑动作数。 */
+      preferMechanic?: "compound" | "isolation";
+      /** 同肌群辅助动作的角度偏好，例如平板推后的上斜推。 */
+      preferAngle?: string;
     }[];
   }[];
   /** 该轮转一圈每个肌群的暴露次数（用于周量换算）。 */

@@ -1425,15 +1425,14 @@ const SESSION_FUELING_POLICIES: readonly SessionFuelingPolicy[] = [
     minMinutesAfterFullMeal: 60,
     minMinutesAfterSnack: 30,
     rationaleZh:
-      "低强度有氧主要靠脂肪供能，不依赖糖原——所以放在空腹或力量训练后（糖原已部分消耗）都不会损失表现。这不是妥协，是按需供能：不需要糖原的工作放在糖原低的时候，需要糖原的工作留在糖原足的时候，两边都不打折。",
+      "减脂结果主要由长期能量缺口、训练总量和依从性决定。低至中等强度有氧放在力量后，优点是不会抢占力量训练质量；放在独立时段也同样可行。空腹可作为个人耐受与日程偏好，但在摄入和工作量相同的条件下，没有可靠证据表明它会带来额外脂肪减失。",
     advantagesZh: [
-      "空腹或练后做都不损失表现（它本来不需要糖原）",
       "放在力量训练后可避免干扰力量表现",
-      "时间灵活，容易长期坚持",
+      "独立时段或练后均可按日程与恢复选择，重在能长期坚持",
     ],
     risksZh: [
-      "空腹时长过长（超过 60 分钟）会提高低血糖与表现下降风险",
-      "空腹本身不带来额外减脂——它是时间与依从性的选择，不是代谢杠杆",
+      "空腹时出现头晕、乏力或既往低血糖风险时，不应自行硬撑；需按既有临床运动与监测方案处理",
+      "空腹本身不带来额外减脂；它只是时间与依从性的选择，不是代谢杠杆",
     ],
     evidenceRefs: ["impey_2018_fuel_for_the_work_required", "schoenfeld_2014_fasted_vs_fed"],
     tier: "B",
@@ -1600,7 +1599,9 @@ const PROGRAM_STRATEGIES: ProgramStrategies = {
           focusZh: "胸 + 三头",
           slots: [
             { movementPattern: "horizontal_push", muscleGroups: ["chest"], directMuscles: ["chest"], priority: "primary", fatigueIntent: "medium" },
-            { movementPattern: "vertical_push", muscleGroups: ["chest", "deltoids"], directMuscles: ["chest"], priority: "primary", fatigueIntent: "medium" },
+            // 卧推后的肩推会重复消耗前三角与三头，并压低肩日的推举质量。
+            // 胸日用不同角度的水平推补胸部刺激；垂直推只留给肩日。
+            { movementPattern: "horizontal_push", muscleGroups: ["chest"], directMuscles: ["chest"], priority: "maintenance", fatigueIntent: "medium", preferAngle: "incline" },
             { movementPattern: "elbow_extension", muscleGroups: ["triceps"], directMuscles: ["triceps"], priority: "maintenance", fatigueIntent: "low" },
           ],
         },
@@ -1610,7 +1611,9 @@ const PROGRAM_STRATEGIES: ProgramStrategies = {
           slots: [
             { movementPattern: "vertical_pull", muscleGroups: ["back"], directMuscles: ["back"], priority: "primary", fatigueIntent: "medium" },
             { movementPattern: "horizontal_pull", muscleGroups: ["back"], directMuscles: ["back"], priority: "primary", fatigueIntent: "medium" },
-            { movementPattern: "hip_hinge", muscleGroups: ["back", "hamstrings"], directMuscles: ["back"], priority: "maintenance", fatigueIntent: "medium" },
+            // 髋铰链只放在腿日：硬拉会同时占用后链/背部恢复；把它塞入背日会让下一次腿课
+            // 在未恢复时重复高疲劳模式。背日用另一条拉的角度补充，不偷用腿日的恢复预算。
+            { movementPattern: "vertical_pull", muscleGroups: ["back"], directMuscles: ["back"], priority: "maintenance", fatigueIntent: "low" },
             { movementPattern: "elbow_flexion", muscleGroups: ["biceps"], directMuscles: ["biceps"], priority: "maintenance", fatigueIntent: "low" },
           ],
         },
@@ -1635,6 +1638,7 @@ const PROGRAM_STRATEGIES: ProgramStrategies = {
           ],
         },
       ],
+      exposuresPerCycle: 1,
     },
     {
       id: "push_pull_legs",
