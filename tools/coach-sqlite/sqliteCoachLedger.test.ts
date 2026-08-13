@@ -9,8 +9,10 @@ import {
   InMemoryCoachLedger,
   type AtomicCommit,
   type CoachLedger,
+  EMPTY_LEDGER_SNAPSHOT,
 } from "../../src/coach/ledger";
 import type { LedgerSnapshot } from "../../src/coach/model";
+import { stableHash } from "../../src/coach/stable";
 import {
   RecoverableCoachLedgerMigrationError,
   SQLITE_COACH_LEDGER_SCHEMA_VERSION,
@@ -19,20 +21,10 @@ import {
   type SQLiteDatabaseLike,
 } from "../../src/coach/sqlite";
 
-const EMPTY: LedgerSnapshot = {
-  sessions: [],
-  users: [],
-  artifacts: [],
-  presentations: [],
-  runEvents: [],
-  actionTokens: [],
-  actionEvents: [],
-  idempotency: [],
-  pendingHumanActions: [],
-  workingMemory: [],
-};
+const EMPTY: LedgerSnapshot = EMPTY_LEDGER_SNAPSHOT;
 
 const SNAPSHOT: LedgerSnapshot = {
+  ...EMPTY,
   sessions: [
     {
       id: "session-active",
@@ -117,7 +109,6 @@ const SNAPSHOT: LedgerSnapshot = {
   ],
   actionTokens: [],
   actionEvents: [],
-  idempotency: [],
   pendingHumanActions: [],
   workingMemory: [],
 };
@@ -200,11 +191,22 @@ const ATOMIC_COMMIT: AtomicCommit = {
     action: "plan.change.applied",
     targetType: "plan",
     targetId: "user-1",
+    scope: "plan_revision",
+    intent: "increase load",
     beforeRevision: 1,
     afterRevision: 2,
     before: { loadKg: 60 },
     after: { loadKg: 62.5 },
     evidenceRefs: [{ aggregate: "plan", id: "user-1", revision: 1 }],
+    beforeRefs: [{ aggregate: "plan", id: "user-1", revision: 1 }],
+    afterRefs: [{ aggregate: "plan", id: "user-1", revision: 2 }],
+    ruleVersions: {},
+    mandateRevision: 1,
+    result: "applied",
+    undoBoundary: "compensating_revision",
+    sessionId: "session-active",
+    runId: "run-1",
+    toolCallId: "tool-1",
     policyDecision: "require_confirmation",
     humanDecision: "confirmed",
     causationId: "proposal-1",
@@ -294,6 +296,26 @@ function registerLedgerConformance(
       await fixture.dispose();
     }
   });
+
+  test(`${name}: restore staging 只在来源快照未变化时原子切换`, async () => {
+    const fixture = await createLedger();
+    try {
+      const before = await fixture.ledger.read();
+      const next = { ...before, sessions: SNAPSHOT.sessions };
+      await fixture.ledger.swapRestoredSnapshot({
+        expectedSnapshotHash: stableHash(before),
+        nextSnapshot: next,
+      });
+      assert.equal((await fixture.ledger.read()).sessions.length, SNAPSHOT.sessions.length);
+      await assert.rejects(
+        fixture.ledger.swapRestoredSnapshot({ expectedSnapshotHash: stableHash(before), nextSnapshot: before }),
+        /stale_snapshot/,
+      );
+      assert.equal((await fixture.ledger.read()).sessions.length, SNAPSHOT.sessions.length);
+    } finally {
+      await fixture.dispose();
+    }
+  });
 }
 
 registerLedgerConformance("InMemoryCoachLedger", async () => ({
@@ -312,7 +334,7 @@ registerLedgerConformance("SQLiteCoachLedger", async () => {
 });
 
 test("SQLiteCoachLedger: 应用重启后恢复本地 Session 与待展示状态", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "form-coach-ledger-"));
+  const directory = await mkdtemp(join(tmpdir(), "maxpower-ledger-"));
   const path = join(directory, "coach.db");
   try {
     const beforeRestart = new DatabaseSync(path);
