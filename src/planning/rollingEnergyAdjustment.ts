@@ -53,6 +53,8 @@ export function rollingEnergyAdjustmentFor(input: {
   timeline: readonly TimelineProjectionEvent[];
   targetDailyDeficitKcal?: number;
   futureDates: readonly string[];
+  /** Remaining minutes in an existing after-strength low-impact block. */
+  futureCardioCapacityMinutes?: Readonly<Record<string, number>>;
 }): RollingEnergyAdjustment {
   const weightKg = input.profile.demographics?.currentWeight?.value;
   const targetDeficit = input.targetDailyDeficitKcal;
@@ -130,15 +132,27 @@ export function rollingEnergyAdjustmentFor(input: {
   const dates = [...new Set(input.futureDates)].slice(0, horizonDays);
   const scheduledHorizonDays = dates.length;
   const perDay = Math.min(dailyCap, Math.ceil(unrecoveredSurplusKcal / Math.max(1, scheduledHorizonDays)));
-  const cardioMinutes = Math.min(15, Math.floor(perDay / Math.max(1, activityNetKcal({ kind: "walk_brisk", minutes: 1, weightKg }))));
-  const cardioKcal = activityNetKcal({ kind: "walk_brisk", minutes: cardioMinutes, weightKg });
-  const remainingKcal = Math.max(0, perDay - cardioKcal);
-  const extraSteps = Math.min(2_000, Math.ceil(remainingKcal / (weightKg * STEP_KCAL_PER_KG) / 100) * 100);
-  const stepKcal = Math.round(extraSteps * weightKg * STEP_KCAL_PER_KG);
-  const actions = dates.map((date) => ({
-    date, extraSteps, extraLowImpactCardioMinutes: cardioMinutes,
-    estimatedExtraExpenditureKcal: cardioKcal + stepKcal, gate: "only_if_recovery_normal" as const,
-  }));
+  const cardioMinutesFor = (date: string) => Math.min(
+    15,
+    Math.max(0, input.futureCardioCapacityMinutes
+      ? input.futureCardioCapacityMinutes[date] ?? 0
+      : 15),
+    Math.floor(perDay / Math.max(1, activityNetKcal({ kind: "walk_brisk", minutes: 1, weightKg }))),
+  );
+  const actions = dates.map((date) => {
+    const cardioMinutes = cardioMinutesFor(date);
+    const cardioKcal = activityNetKcal({ kind: "walk_brisk", minutes: cardioMinutes, weightKg });
+    const remainingKcal = Math.max(0, perDay - cardioKcal);
+    const extraSteps = Math.min(2_000, Math.ceil(remainingKcal / (weightKg * STEP_KCAL_PER_KG) / 100) * 100);
+    const stepKcal = Math.round(extraSteps * weightKg * STEP_KCAL_PER_KG);
+    return {
+      date,
+      extraSteps,
+      extraLowImpactCardioMinutes: cardioMinutes,
+      estimatedExtraExpenditureKcal: cardioKcal + stepKcal,
+      gate: "only_if_recovery_normal" as const,
+    };
+  });
   const plannedAdditionalExpenditureKcal = actions.reduce((sum, action) => sum + action.estimatedExtraExpenditureKcal, 0);
   return {
     lookbackDays: LOOKBACK_DAYS, loggedDays: byDate.size, estimatedDays: descriptionEstimates.length, unrecoveredSurplusKcal, loggedThermicEffectKcal, surplusSource,

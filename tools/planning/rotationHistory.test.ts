@@ -299,14 +299,28 @@ test("已量化聚餐会把温和回调同步写入既有力量后有氧和每�
       },
       timeline: [{
         eventId: "party", revision: 1, occurredAt: "2026-08-11T11:00:00.000Z", recordedAt: "2026-08-11T11:05:00.000Z", timezoneOffsetMinutes: 480,
-        fact: { kind: "nutrition", observationId: "party-dinner", energy: { value: 2700, unit: "kcal" }, proteinGrams: 120, carbohydrateGrams: 250, fatGrams: 80, confidence: "confirmed" },
+        fact: { kind: "nutrition", observationId: "party-dinner", energy: { value: 2700, unit: "kcal" }, proteinGrams: 120, carbohydrateGrams: 250, fatGrams: 80, reportedEnergyDeviationKcal: 700, confidence: "confirmed" },
       }] as PlannerFacts["timeline"],
+      nutritionStrategies: [{
+        revision: 1,
+        value: {
+          id: "nutrition-fat-loss",
+          goalContractRef: { kind: "goal_contract", id: "g", revision: 1 },
+          status: "active",
+          phase: "fat_loss_preserve_lean_mass",
+          calorieRange: {
+            min: { value: 2011, unit: "kcal" },
+            max: { value: 2222, unit: "kcal" },
+          },
+        },
+      }],
     },
   });
   assert.equal(decision.kind, "plan_proposal");
   if (decision.kind !== "plan_proposal") return;
   const adjustment = decision.planRevision.rollingEnergyAdjustment;
   assert.equal(adjustment?.status, "gentle_rebalance");
+  assert.equal(adjustment?.unrecoveredSurplusKcal, 700, "用户确认的差额优先于训练阶段标签和全天热量反推");
   assert.equal(adjustment?.loggedThermicEffectKcal, 259, "宏量营养素应参与 TEF，而非统一按 10% 猜测");
   const adjusted = (decision.planRevision.upcomingSevenDays ?? []).find((session) =>
     session.aerobicBlock?.reasonCodes.includes("rolling_energy_rebalance"),
@@ -316,6 +330,102 @@ test("已量化聚餐会把温和回调同步写入既有力量后有氧和每�
   const budget = adjusted ? decision.planRevision.dailyEnergyBudgets?.[adjusted.scheduledFor] : undefined;
   assert.ok((budget?.plannedExtraActivityKcal ?? 0) > 0, "增加的步数也必须进入该日能量账本");
   assert.ok(decision.reasonCodes.includes("rolling_energy_adjustment_applied_to_existing_low_impact_cardio"));
+});
+
+test("已有计划后上报 700 kcal 差额，future_plan 必须产生可确认 diff 而不是 typed_diff_empty", () => {
+  const base = factsWith([]);
+  const profile = {
+    ...base.profile,
+    value: {
+      ...base.profile.value,
+      trainingExperience: "advanced" as const,
+      schedule: { weeklyFrequency: 4, sessionDurationMinutes: 75 },
+      bodyDirection: "decrease_body_fat" as const,
+      nutritionPreferences: ["饮食严格控制；居家办公，非训练日活动较低"],
+      historyModifiers: {
+        priorStrategies: ["四分化，每周4天"],
+        plateau: {
+          durationWeeks: 0,
+          priorStrategies: ["四分化，每周4天"],
+          executionAdherence: "high" as const,
+          recoveryChange: "stable" as const,
+          suspectedReasons: [],
+        },
+      },
+      strengthBaseline: {
+        squat: { value: 100, unit: "kg" as const },
+        benchPress: { value: 80, unit: "kg" as const },
+        deadlift: { value: 110, unit: "kg" as const },
+        measuredAt: "2026-08-13T12:00:00.000Z",
+        source: "user_confirmed" as const,
+      },
+    },
+  };
+  const goalContract = {
+    ...base.goalContract,
+    value: {
+      ...base.goalContract.value,
+      primaryGoal: "fat_loss_preserve_lean_mass" as const,
+      goalType: "fat_loss" as const,
+    },
+  };
+  const nutritionStrategies: PlannerFacts["nutritionStrategies"] = [{
+    revision: 1,
+    value: {
+      id: "nutrition-fat-loss-existing",
+      goalContractRef: { kind: "goal_contract", id: "g", revision: 1 },
+      status: "active",
+      phase: "fat_loss_preserve_lean_mass",
+      calorieRange: { min: { value: 2011, unit: "kcal" }, max: { value: 2222, unit: "kcal" } },
+    },
+  }];
+  const initial = planner.plan({
+    trigger: "initial_plan",
+    currentDate: "2026-08-13",
+    facts: { ...base, profile, goalContract, nutritionStrategies },
+  });
+  assert.equal(initial.kind, "plan_proposal");
+  if (initial.kind !== "plan_proposal") return;
+  const adjusted = planner.plan({
+    trigger: "user_requested",
+    requestedScope: "future_plan",
+    currentDate: "2026-08-13",
+    facts: {
+      ...base,
+      profile,
+      goalContract,
+      nutritionStrategies,
+      priorPlan: { revision: 1, value: initial.planRevision },
+      timeline: [{
+        eventId: "party-existing",
+        revision: 1,
+        occurredAt: "2026-08-12T20:58:00.000Z",
+        recordedAt: "2026-08-12T20:58:01.000Z",
+        timezoneOffsetMinutes: 480,
+        fact: {
+          kind: "nutrition",
+          observationId: "party-existing",
+          mealDescription: "今天聚餐吃多了",
+          reportedEnergyDeviationKcal: 700,
+          confidence: "confirmed",
+        },
+      }] as PlannerFacts["timeline"],
+    },
+  });
+  assert.equal(
+    adjusted.kind,
+    "plan_proposal",
+    adjusted.kind === "no_change" ? adjusted.reasonCodes.join(",") : `unexpected_kind:${adjusted.kind}`,
+  );
+  if (adjusted.kind !== "plan_proposal") return;
+  assert.equal(adjusted.planRevision.rollingEnergyAdjustment?.status, "gentle_rebalance");
+  assert.equal(adjusted.planRevision.rollingEnergyAdjustment?.unrecoveredSurplusKcal, 700);
+  assert.ok(adjusted.planRevision.rollingEnergyAdjustment?.actions.some((action) => action.extraSteps > 0));
+  assert.ok(
+    adjusted.planRevision.rollingEnergyAdjustment?.actions.every((action) => action.extraLowImpactCardioMinutes === 0),
+    "75 分钟课程已占满时不能强塞练后有氧，只保留恢复门控的额外步数",
+  );
+  assert.ok(adjusted.diff.length > 0);
 });
 
 test("昨天完成高冲击高强度有氧后，今天候选腿课先保持并等待恢复确认，且不消耗四分化轮转", () => {
