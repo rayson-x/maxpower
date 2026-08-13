@@ -1,15 +1,22 @@
 # 06 — Barbell row quality proposal slice
 
-**What to build:** Make every annotated barbell row view complete the full blind-run-to-review path with Rust-generated endpoints, visible movement-strategy findings and view-bounded quality proposals.
+**What to build:** Produce row-specific Rust endpoints, visible movement-strategy findings and view-bounded quality proposals without reusing bench semantics.
 
-**Blocked by:** 03 — Manual per-conclusion review and export; 04 — Freeze pose/equipment fusion by ablation.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable row evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] The row action contract defines its actual task extreme, return and phase names without reusing bench-specific thresholds.
-- [ ] The selected per-context equipment/pose policy is used only for views where its frozen evidence applies.
-- [ ] Rust exposes observable torso/support drift, ROM, phase control, bar path, bilateral timing and confidence without claiming measured muscle recruitment or force.
-- [ ] Front, front-oblique and rear-oblique contexts use explicit capability and observability states; unavailable dimensions remain visible as abstentions.
-- [ ] Persistent possible compensation requires multiple independent observable feature groups and is phrased conditionally; otherwise only the direct movement facts are proposed.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published by view, including the known row count mismatch without silent correction.
-- [ ] Real row proposals can be reviewed and manually exported using the shared per-conclusion contract.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] A row action contract defines row-specific task extreme, return and phase names.
+- [x] Front, front-oblique and rear-oblique contexts carry explicit capability/observability states.
+- [x] The shared Rust path can emit direct ROM, phase, torso/support, bilateral/path facts and explicit abstentions without claiming force or muscle recruitment.
+- [x] Any equipment policy is scoped by exact context; missing row equipment evidence can remain `no_winner`/unobserved.
+
+Evidence still required:
+
+- [ ] Regenerate full-data row proposals and expose each endpoint/conclusion for Audit A, preserving the known annotation mismatch without silent repair.
+- [ ] Provide a source-independent executable row Profile/RulePack and untouched/new source set.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics by view before Audit B can start.

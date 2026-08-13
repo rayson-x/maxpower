@@ -1,4 +1,4 @@
-Status: implementation-in-progress
+Status: calibration-audit-open / model-acceptance-data-gated
 
 # Rust 单次因果动作理解与人工质量审核 MVP
 
@@ -10,14 +10,17 @@ Status: implementation-in-progress
 
 用户不希望重新标注已有动作、方向、Rep 或开始/结束时间，也不希望系统自动保存、自动训练或自动修改 Profile。用户只需要在页面逐条判断 Rust 结论是否正确，可选填写正确答案，最后手动导出审核 JSON，供后续离线校准和新版本盲测使用。
 
+实现过程中已经确认一个必须写入验收语义的约束：现有 6 条卧推视频参与过阈值选择，因此它们属于 `touched_benchmark`，不能再证明未见数据泛化；其余大多数精确 action × view 上下文尚无可在排除目标来源后执行的 source-independent Profile/RulePack。现有语料仍然适合生成 Rust 首轮提案并由用户逐项校准，但不能凭这批语料启动模型通过/不通过的正式验收。
+
 ## Solution
 
 建立一个以 Rust 为唯一动作理解权威的 MVP：所有已有视频进入同一个客户端可运行视觉输入契约，Rust 通过现有 `begin_set → causal observations → finish_set` 生命周期产生不可变 MotionPacket，并以 additive `QLT1` 扩展携带 Rep 端点、轨迹事实、八个质量维度、证据、置信度和弃权理由。TypeScript、Kotlin、Swift 与 Web 页面只解码、展示和导出，不重算第二套 Rep、端点或质量结论。
 
-评估分成两个严格隔离的阶段：
+评估分成三个严格隔离、不能互相替代的证据阶段：
 
-1. **Blind evaluation**：推理时只提供动作和机位上下文，不提供人工 Rep 时间线。Rust 完成一次因果识别并冻结输出后，才揭示人工 `start/end`，用于计算 Rep 和时间轴对齐。目标视频及其衍生数据不得进入该视频的 Profile/RulePack 拟合。
-2. **Full-data proposal**：盲测完成后，允许使用全部已审核数据构建新的版本化 Profile/RulePack，再对全部视频生成更高效的审核提案。它不能作为盲测准确率，也不能与 blind evaluation 混报。
+1. **Untouched model-acceptance evaluation**：推理时只提供动作和机位上下文，不提供人工 Rep 时间线。Rust 完成一次因果识别并冻结输出后，才揭示人工 `start/end`。目标视频、同一 source/session 及其全部衍生数据都不得参与该运行所用 Profile/RulePack 的拟合或阈值选择。只有从未参与训练、调参、规则选择或人工结果检查的新来源集合才能开启这一验收。
+2. **Touched benchmark diagnostics**：已经参与阈值或策略选择的视频仍可用于回归、消融和错误定位，但产物必须标记 `touched_benchmark`、`acceptanceEligible=false`，不得使用 `blind`、`held-out` 或“泛化准确率”等表述。
+3. **Full-data calibration proposal**：允许使用全部现有已标注数据，对 50 个视频、54 个上下文生成 Rust 首轮端点与逐项质量提案，供用户校准。它是人工审核队列，不是模型准确率，也不能满足 model-acceptance gate。
 
 Rust 对每个 Rep 输出统一的 `start_anchor / primary_turnaround / end_return`。动作契约负责把两段运动命名为向心或离心，因此卧推、侧平举、划船、深蹲等可以共享端点结构，而不会被强行套用同一种阶段顺序。单侧与交替动作按每一侧的完整周期分别计 Rep，保存解剖侧；用户不需要左右交替。
 
@@ -34,13 +37,33 @@ Rust 对每个 Rep 输出统一的 `start_anchor / primary_turnaround / end_retu
 
 Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械轨迹、三个端点和每条质量结论。审核以“每条结论”为最小单位，用户选择 `correct`、`incorrect` 或 `cannot_judge`；`corrected_value` 和备注均为可选。页面不在后台写入训练集、不自动更新 Profile，只在用户点击导出时生成带提案哈希和版本 lineage 的审核 JSON。
 
+## Audit Start Gates
+
+本项目有两个不同的“审核开始”，后续文档、页面和票据不得只写“正式审核”而不说明是哪一类：
+
+### A. Human calibration audit
+
+目的：审核 full-data Rust proposals，形成每个 Rep 端点与每条质量结论的纠正数据。它可以在以下条件全部满足后开始：
+
+- 当前代码重新生成一份冻结 full-data release；
+- release 覆盖 50 个唯一视频、54 个上下文和既有 464 个人工 start/end 区间，不要求重标；
+- 页面加载的 proposal bytes、hash、lineage 与该 release 一致，视频/帧/骨架/器械/时间线同步；
+- review document、UI、只读媒体服务和导出 round-trip 测试对该 fresh release 通过；
+- 生成数量和测试结果从 fresh artifacts 写回交接文档，而不是沿用旧对话中的数字。
+
+这一审核只回答“Rust 首轮理解哪里对、哪里错、正确值是什么”，不回答模型是否泛化。
+
+### B. Model-acceptance audit
+
+目的：验收训练后客户端可运行链路对陌生来源的 Rep、时间轴、端点与质量理解能力。当前状态为 `data-gated`，直到存在从未参与训练、调参、规则/策略选择或结果检查的新用户或新 source/session 集合。现有 6 条卧推只能作为 touched benchmark；其余缺少 source-independent executable Profile 的上下文必须 fail closed，不得用 full-data proposal 或 unsupported 结果替代盲测通过。
+
 ## User Stories
 
 1. As a reviewer, I want all previously annotated personal videos to retain their existing exercise, view, Rep count and Rep start/end labels, so that I do not repeat completed annotation work.
 2. As a reviewer, I want the Rust run to be unable to read human Rep time labels before inference finishes, so that the result measures recognition rather than same-video replay.
 3. As a reviewer, I want each video to be processed once in chronological order, so that the test represents a live camera stream rather than repeated offline interpretation.
 4. As a reviewer, I want the Rust output frozen before truth is revealed, so that scoring cannot alter the prediction being scored.
-5. As a reviewer, I want blind-evaluation results separated from full-data proposal results, so that a high replay match cannot be presented as generalization.
+5. As a reviewer, I want untouched model-acceptance, touched-benchmark and full-data calibration results separated, so that a high replay match cannot be presented as generalization.
 6. As a reviewer, I want every detected Rep to show start, primary turnaround and end return, so that I can inspect both segmentation and phase timing.
 7. As a reviewer, I want existing human start/end labels overlaid only after the Rust run, so that I can see the exact timing difference without leaking truth into inference.
 8. As a reviewer, I want Rust to propose the turnaround before I label it, so that my work is correction and verification rather than manual annotation from scratch.
@@ -91,7 +114,7 @@ Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械
 - A standard reference, personal trajectory corridor and current-set trend are separate comparison sources. The MVP may emit facts and current-set comparisons without a validated standard reference, but standard-variant compatibility must abstain when its exact-context reference is absent.
 - Load, RPE/RIR and automatic PersonalEndpointProfile construction are not required for this MVP. Review exports may support later calibration, but clicking a review option does not update any Profile.
 - Equipment is part of action interpretation where the selected action declares it. Barbell is represented as a rigid axis with ordered endpoints; future dumbbell support uses independent side-associated tracks. Equipment evidence supports phase and external-load path, while pose evidence describes joint and body strategy.
-- Fusion is not hard-coded as pose-first, equipment-first or a simple average. A frozen experiment compares pose-only, equipment-only and candidate fused policies on the same blind inputs. The selected policy and its evidence lineage are versioned per exact action context.
+- Fusion is not hard-coded as pose-first, equipment-first or a simple average. A frozen experiment compares pose-only, equipment-only and candidate fused policies on the same inputs and records the evidence class. A touched benchmark may guide calibration diagnostics but cannot establish a model-acceptance winner; any accepted policy and its evidence lineage are versioned per exact action context.
 - Equipment-constrained landmark continuation remains `predicted`, never `measured`, and cannot be reused as independent corroboration for the equipment observation that created it.
 - View geometry is visual-only. The MVP assumes the user-selected action and view are correct; it does not implement view mismatch detection. Rules use the selected view's observability matrix and may abstain when the needed geometry is not visible.
 - Existing annotated action, view, expected count and Rep start/end data are imported without re-review. Historical peak candidates are not treated as human turnaround truth; Rust proposes turnaround and the reviewer evaluates it in this MVP.
@@ -99,7 +122,7 @@ Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械
 - TypeScript, Kotlin and Swift decode and project QLT1 but do not recalculate a quality conclusion, endpoint or Rep boundary. Unknown additive fields are ignored according to minor-version compatibility rules.
 - A review decision is scoped to one proposal conclusion or endpoint and stores `correct`, `incorrect` or `cannot_judge`. `corrected_value` and note are optional. `incorrect` with no corrected value remains valid negative supervision.
 - The review surface does not automatically persist or train. User actions remain page state until the user explicitly exports a versioned JSON artifact containing original proposal hashes, per-conclusion decisions, optional corrections and export metadata.
-- Blind evaluation and full-data proposal artifacts use distinct run kinds, directories/identities and report headings. A full-data result cannot satisfy a blind acceptance criterion.
+- Untouched model-acceptance, touched-benchmark diagnostic and full-data calibration artifacts use distinct run kinds, directories/identities and report headings. Neither a touched result nor a full-data result can satisfy a blind acceptance criterion.
 - Capability level is part of each exact action context. Unsupported quality claims count as abstentions or unsupported scope; they are never silently dropped from score denominators.
 - New lower-body videos are outside the already-complete personal annotation set and require their own action/view and Rep truth before they can contribute to accuracy metrics.
 - No production promotion, runtime Profile mutation or client integration is authorized by this specification. Exported reviews become inputs to a later explicit calibration/versioning workflow.
@@ -113,6 +136,7 @@ Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械
 - Causality tests mutate or remove future frames and assert that earlier emitted state is unchanged. They also verify `occurred_at` and `confirmed_at` remain distinct and confirmation never precedes occurrence.
 - Truth-leakage tests inspect the generated inference pack and fail if human Rep timestamps, historical peaks, review decisions or same-source derived templates are present before the frozen prediction artifact exists.
 - Blind scoring tests group all derivatives of one source video together and exclude the target source from any fitted Profile/RulePack. Reports label participant, source, session and run-kind limitations explicitly.
+- A run becomes `touched_benchmark` if any evaluated source influenced training, threshold selection, policy selection or result-driven parameter changes. Tests must reject `acceptanceEligible=true` for such a run.
 - Rep tests report precision, recall, exact-set rate and start/end timing error. Turnaround tests use only newly reviewed turnaround truth and report error at declared tolerances; historical midpoint/unknown-source peaks cannot satisfy the gate.
 - Quality tests score each concrete conclusion separately, including precision, recall where corrected truth exists, reviewer agreement, false findings on clean Reps, `cannot_judge` coverage and invalid-confidence calibration. A single blended quality accuracy is forbidden.
 - Capability tests verify that observation-only and phase-supported contexts still expose useful facts while unsupported quality dimensions contain explicit abstain reasons.
@@ -147,7 +171,8 @@ Web 审核页在 Rust 输出已经冻结后显示视频、骨架、动作/器械
 
 - Current inventory contains 50 unique personal videos represented by 54 exact-context records, 12 exercise classes, 464 complete Rep intervals and an expected total of 465. The context split records are intentional timeline splits, not missing annotation.
 - All 54 records already contain exercise, capture position and expected count. All 464 intervals contain start, peak and end in valid order. Historical governance excludes peak as formal phase truth because the old UI did not preserve whether it came from an algorithm, midpoint or human adjustment; 193 peaks are exact interval midpoints.
-- Current Rust implementation has real canonical packet, Rep lifecycle, joint-angle and equipment extensions, plus bench-specific barbell phase logic, but sealed Rep quality verdicts are not yet produced by Rust. Existing five-layer quality reporting in TypeScript is diagnostic debt and must not remain a second authority after QLT1 exists.
-- Current evidence supports bench phase recognition most strongly; it does not establish cross-user quality accuracy. Other actions range from phase-capable initializers to observation-only. Capability labels must describe actual verified behavior, not design intent.
+- Current Rust implementation produces canonical set/Rep state, three endpoint snapshots, joint-angle and equipment evidence, plus QLT1 quality proposals. Fresh release `personal-motion-quality-review-v1` (`sha256:69d5efa85a161a875671d0e4fa26cec10c7440cc97385dffe8a9e83c053ce464`) passed the Audit A launch gates and is open for human calibration. This implementation and review readiness are not accuracy evidence. TypeScript five-layer reporting remains diagnostic debt and must not become a second authority.
+- Current touched-benchmark diagnostics support bench phase calibration most strongly; they do not establish cross-user quality accuracy. Other actions range from phase-capable initializers to observation-only. Capability labels must describe actual verified behavior, not design intent.
+- The six current bench videos are a touched benchmark because they influenced threshold tuning. Most other exact contexts cannot yet run a source-independent executable Profile after source exclusion. These are evidence constraints, not missing user annotations.
 - The review export is training material only after a later process imports, validates and versions it. The exported file itself never changes the running SDK.
-- This specification intentionally stops product expansion. Its purpose is to produce one trustworthy Rust proposal, one blind score, and one human-exported correction artifact across the existing action inventory.
+- This specification intentionally stops product expansion. Its immediate purpose is to produce one trustworthy full-data Rust calibration proposal and one human-exported correction artifact across the existing action inventory. A model-acceptance score is a later deliverable that begins only after untouched/new-source evidence exists.

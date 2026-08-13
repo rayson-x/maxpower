@@ -1,14 +1,21 @@
 # 09 — Push-up quality proposal slice
 
-**What to build:** Make the annotated push-up context complete the blind-run-to-review path with bodyweight-specific endpoints and observable quality proposals.
+**What to build:** Produce bodyweight-specific Rust endpoints and observable quality proposals for the annotated push-up context.
 
-**Blocked by:** 03 — Manual per-conclusion review and export.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] The action contract defines push-up task extremes and phase order using body landmarks rather than requiring equipment.
-- [ ] Rust emits observable task completion, ROM, phase control, trunk/support stability, bilateral coordination, body path control and confidence per Rep.
-- [ ] The rear-right-45 view's unavailable dimensions are explicit; the engine does not manufacture front-view or hidden-joint conclusions.
-- [ ] Set-level persistence is computed only from already sealed Reps and never rewrites earlier Rep proposals.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published for the annotated context.
-- [ ] Real proposals are reviewable and manually exportable through the shared page.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] The action contract defines push-up extremes and phase order from body landmarks without requiring equipment.
+- [x] Shared Rust dimensions cover task/ROM/phase/support/bilateral/path/confidence with explicit capability limits.
+- [x] Unavailable rear-right-45 evidence can abstain, and set-level persistence uses sealed Reps without rewriting earlier proposals.
+
+Evidence still required:
+
+- [ ] Regenerate full-data proposals and expose every target for Audit A.
+- [ ] Provide source-independent executable evidence plus untouched/new sources.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics before Audit B.

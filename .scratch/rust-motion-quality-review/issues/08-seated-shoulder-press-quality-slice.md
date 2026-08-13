@@ -1,14 +1,21 @@
 # 08 — Seated shoulder press quality proposal slice
 
-**What to build:** Make annotated front-view seated shoulder press videos complete the blind-run-to-review path with Rust endpoints and view-bounded quality proposals.
+**What to build:** Produce view-bounded Rust endpoints and quality proposals for annotated front-view seated shoulder press without reusing bench geometry.
 
-**Blocked by:** 03 — Manual per-conclusion review and export.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] The action contract maps the shared endpoints to the correct press phase order and does not reuse bench-specific geometry.
-- [ ] Rust proposes observable task completion, ROM, phase control, support/trunk stability, bilateral coordination, path control and confidence for each Rep.
-- [ ] Missing dedicated load/equipment tracking is explicit and does not prevent pose-supported facts from being reviewed.
-- [ ] Unreliable or occluded upper-limb evidence produces a reasoned abstention rather than interpolated measured truth.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published for the annotated context.
-- [ ] Real proposals are reviewable and manually exportable through the shared page.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] The action contract maps shared endpoints to the correct press phase order independently from bench.
+- [x] Task/ROM/phase/support/bilateral/path/confidence facts and abstention states are available through the shared Rust contract.
+- [x] Missing load tracking and unreliable/occluded upper-limb evidence remain explicit rather than being interpolated into measured truth.
+
+Evidence still required:
+
+- [ ] Regenerate full-data proposals and expose every target for Audit A.
+- [ ] Provide a source-independent executable profile plus untouched/new sources.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics before Audit B.

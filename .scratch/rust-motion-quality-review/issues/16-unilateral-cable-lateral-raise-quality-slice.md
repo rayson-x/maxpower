@@ -1,15 +1,22 @@
 # 16 — Unilateral cable lateral raise quality proposal slice
 
-**What to build:** Make the four split-context unilateral cable lateral raise videos complete the blind-run-to-review path with each side's full cycle counted independently and preserved under its exact view window.
+**What to build:** Preserve the four split contexts, count each side's complete cycle independently, and produce side-aware Rust endpoints and proposals under each exact view window.
 
-**Blocked by:** 03 — Manual per-conclusion review and export.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] Existing front-left and rear-right timeline windows remain intentional context splits for the same immutable source videos.
-- [ ] Each unilateral cycle is one Rep with anatomical side; the engine never requires or invents left-right alternation.
-- [ ] The action contract maps side-specific endpoints and phase semantics without merging both sides into a bilateral cycle.
-- [ ] Missing cable-handle tracking is explicit, while pose-supported ROM, phase, trunk/support, path and confidence remain available.
-- [ ] View- or side-ambiguous evidence produces reasoned abstention instead of swapping anatomical labels.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published by exact context window.
-- [ ] Real proposals are reviewable and manually exportable through the shared page.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] Front-left and rear-right timeline windows remain intentional context splits for immutable source videos.
+- [x] Each unilateral cycle is one Rep with anatomical side; left-right alternation is not required or invented.
+- [x] Side-specific endpoints, phase semantics, capability and abstention states are represented by the shared Rust contract.
+- [x] Missing cable-handle tracking and view/side ambiguity stay explicit rather than swapping anatomical labels.
+
+Evidence still required:
+
+- [ ] Regenerate each split-context full-data proposal for Audit A.
+- [ ] Provide source-independent executable profiles plus untouched/new sources.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics by exact context window before Audit B.

@@ -1,14 +1,21 @@
 # 13 — Straight-arm pulldown quality proposal slice
 
-**What to build:** Make annotated straight-arm pulldown views complete the blind-run-to-review path with exercise-specific endpoints and direct quality proposals.
+**What to build:** Produce exercise-specific Rust endpoints and direct quality proposals for annotated straight-arm pulldown views.
 
-**Blocked by:** 03 — Manual per-conclusion review and export.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] The action contract distinguishes straight-arm pulldown from lat pulldown and row in phase, active joints and stable support features.
-- [ ] Front-left-45 and front-right-45 views use one semantic family with handedness-preserving projection and separate reported evidence buckets.
-- [ ] Rust proposes observable task completion, ROM, phase control, trunk/support stability, path control and confidence without fabricating handle tracking.
-- [ ] Unsupported bilateral or standard-reference conclusions remain explicit abstentions.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published by view.
-- [ ] Real proposals are reviewable and manually exportable through the shared page.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] The action contract distinguishes straight-arm pulldown from lat pulldown and row.
+- [x] Front-left-45 and front-right-45 share a handedness-preserving semantic family while retaining separate evidence buckets.
+- [x] Task/ROM/phase/support/path/confidence facts remain capability-bounded; unsupported bilateral/reference conclusions and missing handle tracking abstain.
+
+Evidence still required:
+
+- [ ] Regenerate both oblique-view full-data proposals for Audit A.
+- [ ] Provide source-independent executable profiles plus untouched/new sources.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics by view before Audit B.

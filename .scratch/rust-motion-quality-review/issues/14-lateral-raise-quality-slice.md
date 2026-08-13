@@ -1,14 +1,21 @@
 # 14 — Lateral raise quality proposal slice
 
-**What to build:** Make annotated front-view lateral raise videos complete the blind-run-to-review path with bottom-start phase semantics and observable shoulder-raise quality proposals.
+**What to build:** Produce bottom-start Rust phase semantics and observable shoulder-raise proposals for annotated front-view lateral raise.
 
-**Blocked by:** 03 — Manual per-conclusion review and export.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] The action contract starts with the correct concentric/eccentric order while retaining the shared three-endpoint structure.
-- [ ] Rust proposes observable task completion, ROM, phase control, trunk/support stability, bilateral timing/path and confidence per Rep.
-- [ ] Absence of a verified dumbbell producer is explicit and wrist trajectories remain pose evidence rather than mislabeled equipment tracks.
-- [ ] Possible momentum assistance is not emitted from one noisy frame or one feature; otherwise direct torso/path facts remain reviewable.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published for the annotated context.
-- [ ] Real proposals are reviewable and manually exportable through the shared page.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] The action contract starts with the correct concentric/eccentric order while retaining the common three-endpoint structure.
+- [x] Shared Rust facts cover task/ROM/phase/support/bilateral/path/confidence with explicit abstentions.
+- [x] Wrist trajectories remain pose evidence when no verified dumbbell producer exists, and a possible momentum cue requires more than one noisy frame/feature.
+
+Evidence still required:
+
+- [ ] Regenerate front-view full-data proposals for Audit A.
+- [ ] Provide source-independent executable profiles plus untouched/new sources.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics before Audit B.

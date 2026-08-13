@@ -1,14 +1,21 @@
 # 11 — Pull-up quality proposal slice
 
-**What to build:** Make the annotated pull-up context complete the blind-run-to-review path, preserving useful body-motion facts even when the current view only supports observation-level conclusions.
+**What to build:** Preserve useful body-motion facts and explicit abstentions for the annotated pull-up context without installing a mismatched generic profile.
 
-**Blocked by:** 03 — Manual per-conclusion review and export.
+**Blocked by:** 03 for fresh Audit A release; 02 and source-independent executable evidence for Audit B.
 
-**Status:** review-ready
+**Status:** needs-info
 
-- [ ] The exact action/view context declares its actual capability instead of installing a mismatched generic profile.
-- [ ] Rust emits visible body and endpoint facts when possible and explicit abstentions when Rep, phase or quality evidence is insufficient.
-- [ ] No equipment observation is fabricated from hand position or the fixed pull-up structure.
-- [ ] A transition from observation-only to phase- or quality-supported requires this ticket's declared blind evidence rather than a configuration flag alone.
-- [ ] Blind Rep/start/end metrics and proposal/abstention coverage are published for the annotated context.
-- [ ] Real proposals, including cannot-judge reasons, are reviewable and manually exportable through the shared page.
+**Evidence state:** evidence-gated for blind-run/model acceptance.
+
+Delivered implementation, not an accuracy claim:
+
+- [x] The exact context declares capability instead of treating configuration presence as validated support.
+- [x] Visible body/endpoint facts and `cannot_judge` reasons can be emitted through Rust where evidence exists.
+- [x] Equipment is not fabricated from hand position or the fixed pull-up structure.
+
+Evidence still required:
+
+- [ ] Regenerate the full-data observation/proposal record for Audit A.
+- [ ] Provide source-independent executable phase support plus untouched/new sources before any capability promotion.
+- [ ] Publish fresh blind Rep/start/end and proposal/abstention metrics before Audit B.
