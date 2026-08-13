@@ -740,6 +740,19 @@ public class PoseCameraModule: Module {
   public func definition() -> ModuleDefinition {
     Name("PoseCamera")
 
+    AsyncFunction("runtimeHealth") { () -> [String: Any] in
+      let contractMajor = MPMotionBridge.runtimeContractMajor()
+      let runtimeReady = contractMajor > 0
+      let canonicalBridgeReady = runtimeReady && contractMajor == 1
+      return [
+        "canonicalBridgeReady": canonicalBridgeReady,
+        "runtimeReady": runtimeReady,
+        "reason": canonicalBridgeReady
+          ? "ready"
+          : runtimeReady ? "unsupported_packet_contract" : "native_runtime_unavailable",
+      ]
+    }
+
     AsyncFunction("listReplayVideos") { () -> [String] in
       guard let directory = maxPowerMoviesDirectory(create: false) else { return [] }
       let entries = (try? FileManager.default.contentsOfDirectory(

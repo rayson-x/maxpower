@@ -5,6 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 /** Thin Apple Adapter around the platform-neutral Rust Motion SDK C ABI. */
 @interface MPMotionBridge : NSObject
 
++ (uint32_t)runtimeContractMajor;
+
 - (int32_t)configureWidth:(uint32_t)width
                    height:(uint32_t)height
               profileJSON:(nullable NSString *)profileJSON

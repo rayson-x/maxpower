@@ -251,7 +251,7 @@ test("Web submits the research geometry bar observation and consumes Rust-associ
       worldLandmarks: [],
     })), frame.timestampMs, mapEquipment(frame));
 
-    assert.equal(session.lastDecodedPacket?.lineage.contract.minor, 8);
+    assert.equal(session.lastDecodedPacket?.lineage.contract.minor, 10);
     assert.ok(session.lastDecodedPacket?.qualityProposals);
     assert.equal(session.lastDecodedPacket?.equipment.status.kind, "observed");
     assert.equal(session.lastDecodedPacket?.equipment.subjectCandidateId, 0n);

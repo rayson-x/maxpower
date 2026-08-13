@@ -14,6 +14,13 @@ enum MotionSdkProfileCode {
   MOTION_SDK_PROFILE_SIDE_STEP_TOUCH = 6,
   MOTION_SDK_PROFILE_ALTERNATING_KNEE_RAISE = 7,
   MOTION_SDK_PROFILE_STEP_JACK = 8,
+  MOTION_SDK_PROFILE_BARBELL_BENCH_PRESS_LOCAL_FRONT = 109,
+  MOTION_SDK_PROFILE_BARBELL_BENCH_PRESS_LOCAL_FRONT_LEFT = 110,
+  MOTION_SDK_PROFILE_BARBELL_BENCH_PRESS_LOCAL_FRONT_RIGHT = 111,
+  MOTION_SDK_PROFILE_SEATED_BARBELL_SHOULDER_PRESS_LOCAL_FRONT = 112,
+  MOTION_SDK_PROFILE_SEATED_BARBELL_SHOULDER_PRESS_LOCAL_FRONT_LEFT = 113,
+  MOTION_SDK_PROFILE_SEATED_BARBELL_SHOULDER_PRESS_LOCAL_FRONT_RIGHT = 114,
+  MOTION_SDK_PROFILE_DUMBBELL_SHOULDER_PRESS_FRONT = 115,
 };
 
 int32_t motion_sdk_begin_sequence(uint32_t length);
@@ -51,6 +58,8 @@ int32_t motion_sdk_install_profile(
     uint32_t max_rep_duration_ms);
 int32_t motion_sdk_begin_set(void);
 int32_t motion_sdk_finish_set(void);
+int32_t motion_sdk_pause_set(void);
+int32_t motion_sdk_resume_set(void);
 int32_t motion_sdk_begin_frame(uint32_t timestamp_low, uint32_t timestamp_high, uint32_t landmark_count);
 int32_t motion_sdk_set_landmark(uint32_t index, float x, float y, float z, float visibility);
 int32_t motion_sdk_process_frame(void);
@@ -75,6 +84,22 @@ int32_t motion_sdk_add_equipment_observation(
     float y,
     float width,
     float height,
+    float score,
+    float uncertainty_px,
+    uint32_t source,
+    uint32_t flags);
+int32_t motion_sdk_add_equipment_axis_observation(
+    uint32_t id_low,
+    uint32_t id_high,
+    uint32_t kind,
+    float x,
+    float y,
+    float width,
+    float height,
+    float x1,
+    float y1,
+    float x2,
+    float y2,
     float score,
     float uncertainty_px,
     uint32_t source,

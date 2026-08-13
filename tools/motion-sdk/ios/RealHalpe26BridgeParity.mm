@@ -21,6 +21,29 @@ static NSData *DecodeHex(NSString *value) {
   return data;
 }
 
+static bool HasRustQualityEnvelope(NSData *packet) {
+  if (packet.length < 20) return false;
+  const uint8_t *bytes = static_cast<const uint8_t *>(packet.bytes);
+  if (memcmp(bytes, "MOTN", 4) != 0) return false;
+  const uint16_t major = static_cast<uint16_t>(bytes[4] | (bytes[5] << 8));
+  const uint16_t minor = static_cast<uint16_t>(bytes[6] | (bytes[7] << 8));
+  const uint32_t declaredLength = static_cast<uint32_t>(bytes[8])
+      | (static_cast<uint32_t>(bytes[9]) << 8)
+      | (static_cast<uint32_t>(bytes[10]) << 16)
+      | (static_cast<uint32_t>(bytes[11]) << 24);
+  if (major != 1 || minor < 8 || declaredLength != packet.length) return false;
+  for (NSUInteger offset = 12; offset + 8 <= packet.length; ++offset) {
+    if (memcmp(bytes + offset, "QLT1", 4) != 0) continue;
+    const uint32_t payloadLength = static_cast<uint32_t>(bytes[offset + 4])
+        | (static_cast<uint32_t>(bytes[offset + 5]) << 8)
+        | (static_cast<uint32_t>(bytes[offset + 6]) << 16)
+        | (static_cast<uint32_t>(bytes[offset + 7]) << 24);
+    if (payloadLength <= packet.length - offset - 8
+        && offset + 8 + payloadLength == packet.length) return true;
+  }
+  return false;
+}
+
 static int Run(NSString *fixturePath, NSString *oraclePath) {
   NSError *error = nil;
   NSDictionary *fixture = ReadJSON(fixturePath, &error);
@@ -63,6 +86,9 @@ static int Run(NSString *fixturePath, NSString *oraclePath) {
     }
     NSData *packet = [bridge processObservations:frame[@"candidates"]
                           equipmentObservations:frame[@"equipmentObservations"]
+                                     visualLuma:nil
+                                    visualWidth:0
+                                   visualHeight:0
                                      timestampMs:timestampMs];
     NSData *expectedPacket = DecodeHex(expected[@"packetHex"]);
     if (!packet || !expectedPacket || ![packet isEqualToData:expectedPacket]) {
@@ -85,9 +111,14 @@ static int Run(NSString *fixturePath, NSString *oraclePath) {
           (long)firstDifference);
       return 7;
     }
+    if (!HasRustQualityEnvelope(packet)) {
+      fprintf(stderr, "missing terminal Rust QLT1 envelope at fixture index %lu\n",
+              (unsigned long)index);
+      return 8;
+    }
     if (bridge.isCurrentFrameValid != [expected[@"currentFrameValid"] boolValue]) {
       fprintf(stderr, "frame-valid drift at fixture index %lu\n", (unsigned long)index);
-      return 8;
+      return 9;
     }
   }
   [bridge close];

@@ -839,7 +839,7 @@ private sealed class NativeRecognitionProfile(
         "none" -> None
         "built_in" -> {
           val code = envelope.getInt("profileCode")
-          require(code in 1..8 || code in 101..108) { "invalid built-in profile code" }
+          require(code in 1..8 || code in 101..115) { "invalid built-in profile code" }
           BuiltIn(code, equipmentVision)
         }
         "data" -> {

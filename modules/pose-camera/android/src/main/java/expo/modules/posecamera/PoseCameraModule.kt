@@ -9,6 +9,29 @@ class PoseCameraModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("PoseCamera")
 
+    AsyncFunction("runtimeHealth") { ->
+      try {
+        val contractMajor = MotionNative.nativeContractMajor()
+        val runtimeReady = contractMajor > 0
+        val canonicalBridgeReady = runtimeReady && contractMajor == 1
+        mapOf(
+          "canonicalBridgeReady" to canonicalBridgeReady,
+          "runtimeReady" to runtimeReady,
+          "reason" to when {
+            canonicalBridgeReady -> "ready"
+            !runtimeReady -> "native_runtime_unavailable"
+            else -> "unsupported_packet_contract"
+          },
+        )
+      } catch (_: Throwable) {
+        mapOf(
+          "canonicalBridgeReady" to false,
+          "runtimeReady" to false,
+          "reason" to "native_runtime_unavailable",
+        )
+      }
+    }
+
     // 扫描应用私有 Movies 目录（getExternalFilesDir）下的可回放视频
     AsyncFunction("listReplayVideos") { ->
       val context = appContext.reactContext ?: return@AsyncFunction emptyList<String>()

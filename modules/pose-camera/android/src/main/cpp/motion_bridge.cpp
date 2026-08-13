@@ -54,6 +54,12 @@ jbyteArray copy_packet(JNIEnv *env) {
 }  // namespace
 
 extern "C" JNIEXPORT jint JNICALL
+Java_expo_modules_posecamera_MotionNative_nativeContractMajor(
+    JNIEnv *, jobject) {
+  return static_cast<jint>(motion_sdk_contract_major());
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_expo_modules_posecamera_MotionNative_nativeConfigure(
     JNIEnv *, jobject, jint width, jint height, jint profile_code, jint pose_schema,
     jboolean active) {
@@ -176,14 +182,24 @@ Java_expo_modules_posecamera_MotionNative_nativeProcessObservations(
   const int64_t expected_metadata = static_cast<int64_t>(candidate_count) * 7;
   const int64_t expected_landmarks = static_cast<int64_t>(candidate_count)
       * static_cast<int64_t>(landmark_count) * 4;
-  const int64_t expected_equipment_metadata = static_cast<int64_t>(equipment_count) * 9;
+  const int64_t legacy_equipment_metadata = static_cast<int64_t>(equipment_count) * 9;
+  const int64_t axis_equipment_metadata = static_cast<int64_t>(equipment_count) * 14;
+  const jsize equipment_metadata_length = env->GetArrayLength(equipment_metadata);
+  size_t equipment_metadata_stride = 9;
+  int64_t expected_equipment_metadata = legacy_equipment_metadata;
+  if (equipment_count > 0
+      && axis_equipment_metadata <= std::numeric_limits<jsize>::max()
+      && equipment_metadata_length == static_cast<jsize>(axis_equipment_metadata)) {
+    equipment_metadata_stride = 14;
+    expected_equipment_metadata = axis_equipment_metadata;
+  }
   if (expected_metadata > std::numeric_limits<jsize>::max()
       || expected_landmarks > std::numeric_limits<jsize>::max()
-      || expected_equipment_metadata > std::numeric_limits<jsize>::max()
+      || legacy_equipment_metadata > std::numeric_limits<jsize>::max()
+      || axis_equipment_metadata > std::numeric_limits<jsize>::max()
       || env->GetArrayLength(candidate_metadata) != static_cast<jsize>(expected_metadata)
       || env->GetArrayLength(flat_landmarks) != static_cast<jsize>(expected_landmarks)
-      || env->GetArrayLength(equipment_metadata)
-          != static_cast<jsize>(expected_equipment_metadata)) {
+      || equipment_metadata_length != static_cast<jsize>(expected_equipment_metadata)) {
     return nullptr;
   }
 
@@ -267,8 +283,8 @@ Java_expo_modules_posecamera_MotionNative_nativeProcessObservations(
     }
   }
   for (jsize equipment = 0; equipment < equipment_count; ++equipment) {
-    const size_t offset = static_cast<size_t>(equipment) * 9;
-    for (size_t component = 0; component < 9; ++component) {
+    const size_t offset = static_cast<size_t>(equipment) * equipment_metadata_stride;
+    for (size_t component = 0; component < equipment_metadata_stride; ++component) {
       if (!std::isfinite(equipment_metadata_buffer[offset + component])) return nullptr;
     }
     uint32_t kind = 0;
@@ -279,9 +295,32 @@ Java_expo_modules_posecamera_MotionNative_nativeProcessObservations(
         || !as_u32(equipment_metadata_buffer[offset + 8], &flags)) {
       return nullptr;
     }
+    uint32_t axis_present = 0;
+    if (equipment_metadata_stride == 14
+        && (!as_u32(equipment_metadata_buffer[offset + 9], &axis_present)
+            || axis_present > 1)) {
+      return nullptr;
+    }
     const uint64_t id = static_cast<uint64_t>(
         equipment_ids_buffer[static_cast<size_t>(equipment)]);
-    if (motion_sdk_add_equipment_observation(
+    const int32_t equipment_status = axis_present == 1
+        ? motion_sdk_add_equipment_axis_observation(
+            static_cast<uint32_t>(id),
+            static_cast<uint32_t>(id >> 32),
+            kind,
+            static_cast<float>(equipment_metadata_buffer[offset + 1]),
+            static_cast<float>(equipment_metadata_buffer[offset + 2]),
+            static_cast<float>(equipment_metadata_buffer[offset + 3]),
+            static_cast<float>(equipment_metadata_buffer[offset + 4]),
+            static_cast<float>(equipment_metadata_buffer[offset + 10]),
+            static_cast<float>(equipment_metadata_buffer[offset + 11]),
+            static_cast<float>(equipment_metadata_buffer[offset + 12]),
+            static_cast<float>(equipment_metadata_buffer[offset + 13]),
+            static_cast<float>(equipment_metadata_buffer[offset + 5]),
+            static_cast<float>(equipment_metadata_buffer[offset + 6]),
+            source,
+            flags)
+        : motion_sdk_add_equipment_observation(
             static_cast<uint32_t>(id),
             static_cast<uint32_t>(id >> 32),
             kind,
@@ -292,7 +331,8 @@ Java_expo_modules_posecamera_MotionNative_nativeProcessObservations(
             static_cast<float>(equipment_metadata_buffer[offset + 5]),
             static_cast<float>(equipment_metadata_buffer[offset + 6]),
             source,
-            flags) != 0) {
+            flags);
+    if (equipment_status != 0) {
       return nullptr;
     }
   }

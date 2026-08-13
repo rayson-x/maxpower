@@ -12,5 +12,8 @@
     "noEmitOnError": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["realHalpe26BridgeParity.test.ts"]
+  "include": [
+    "realHalpe26BridgeParity.test.ts",
+    "nativePoseCameraReadiness.test.ts"
+  ]
 }

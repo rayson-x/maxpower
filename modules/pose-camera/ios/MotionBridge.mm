@@ -45,7 +45,7 @@ int32_t InstallProfile(NSDictionary<NSString *, id> *profile) {
   NSNumber *profileCode = profile[@"profileCode"];
   if ([mode isEqualToString:@"none"] || [mode isEqualToString:@"built_in"]) {
     uint32_t code = 0;
-    if (!profileCode || !AsU32(profileCode, &code) || code > 108
+    if (!profileCode || !AsU32(profileCode, &code) || code > 115
         || (code > 8 && code < 101)) return -10;
     return motion_sdk_set_profile(code);
   }
@@ -90,6 +90,10 @@ NSData *CopyPacket() {
 }  // namespace
 
 @implementation MPMotionBridge
+
++ (uint32_t)runtimeContractMajor {
+  return motion_sdk_contract_major();
+}
 
 - (int32_t)configureWidth:(uint32_t)width
                    height:(uint32_t)height
@@ -181,12 +185,23 @@ NSData *CopyPacket() {
     id uncertaintyValue = observation[@"uncertaintyPx"];
     NSNumber *source = sourceCodes[observation[@"source"]];
     NSDictionary<NSString *, id> *attributes = observation[@"attributes"];
+    id axisValue = observation[@"axis"];
+    NSArray<NSNumber *> *axis = nil;
     if (![proposalId isKindOfClass:NSNumber.class]
         || ![kind isKindOfClass:NSNumber.class]
         || ![bbox isKindOfClass:NSArray.class] || bbox.count != 4
         || ![score isKindOfClass:NSNumber.class]
         || ![source isKindOfClass:NSNumber.class]
         || ![attributes isKindOfClass:NSDictionary.class]) return nil;
+    if (axisValue != nil && axisValue != NSNull.null) {
+      if (![axisValue isKindOfClass:NSArray.class]
+          || [axisValue count] != 4) return nil;
+      axis = axisValue;
+      for (NSNumber *component in axis) {
+        if (![component isKindOfClass:NSNumber.class]
+            || !std::isfinite(component.doubleValue)) return nil;
+      }
+    }
     for (NSNumber *component in bbox) {
       if (![component isKindOfClass:NSNumber.class] || !std::isfinite(component.doubleValue)) {
         return nil;
@@ -212,12 +227,22 @@ NSData *CopyPacket() {
     }
     if ([attributes[@"truncated"] boolValue]) flags |= 1 << 4;
     const uint64_t identifier = proposalId.unsignedLongLongValue;
-    if (motion_sdk_add_equipment_observation(
+    const int32_t equipmentStatus = axis
+        ? motion_sdk_add_equipment_axis_observation(
             static_cast<uint32_t>(identifier), static_cast<uint32_t>(identifier >> 32),
             kind.unsignedIntValue,
             bbox[0].floatValue, bbox[1].floatValue,
             bbox[2].floatValue, bbox[3].floatValue,
-            score.floatValue, uncertainty, source.unsignedIntValue, flags) != 0) return nil;
+            axis[0].floatValue, axis[1].floatValue,
+            axis[2].floatValue, axis[3].floatValue,
+            score.floatValue, uncertainty, source.unsignedIntValue, flags)
+        : motion_sdk_add_equipment_observation(
+            static_cast<uint32_t>(identifier), static_cast<uint32_t>(identifier >> 32),
+            kind.unsignedIntValue,
+            bbox[0].floatValue, bbox[1].floatValue,
+            bbox[2].floatValue, bbox[3].floatValue,
+            score.floatValue, uncertainty, source.unsignedIntValue, flags);
+    if (equipmentStatus != 0) return nil;
   }
   if (motion_sdk_process_multi() != 0) return nil;
   return CopyPacket();
