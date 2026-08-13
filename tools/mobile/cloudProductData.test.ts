@@ -13,6 +13,7 @@ import {
   InMemoryCloudProductDataCache,
   createCloudPlanRecoverySnapshot,
   createCloudProfileRecoverySnapshot,
+  createCloudWorkoutExecutionSnapshot,
   hydrateCloudCanonicalProjection,
   projectCloudProductDataForProductShell,
   type CloudCanonicalProjection,
@@ -618,6 +619,20 @@ test("a new device hydrates cloud canonical facts into the main Coach and Produc
   assert.ok(session);
   const prescribedSet = session.tasks[0]?.sets[0];
   assert.ok(prescribedSet);
+  const replacementExerciseVariantId = "push_up.bodyweight.floor.standard.bilateral.full_rom";
+  const effectiveSession = {
+    ...session,
+    tasks: session.tasks.map((task, taskIndex) => taskIndex === 0
+      ? {
+          ...task,
+          exerciseVariantId: replacementExerciseVariantId,
+          sets: task.sets.map((set) => {
+            const { targetLoad: _targetLoad, targetLoadStatus: _targetLoadStatus, targetLoadBasis: _targetLoadBasis, ...withoutLoad } = set;
+            return withoutLoad;
+          }),
+        }
+      : task),
+  };
   const recoverySnapshot = createCloudPlanRecoverySnapshot({
     artifactId: "preview-source",
     planningPreview: {
@@ -709,6 +724,7 @@ test("a new device hydrates cloud canonical facts into the main Coach and Produc
       localWorkoutId: "local-workout-recovery",
       sessionPrescriptionId: session.id,
       mode: "record_only",
+      workoutExecution: createCloudWorkoutExecutionSnapshot(effectiveSession),
     },
     summary: { status: "completed" },
     startedAt: "2026-08-10T09:00:00.000Z",
@@ -722,7 +738,8 @@ test("a new device hydrates cloud canonical facts into the main Coach and Produc
     payload: {
       localResultId: prescribedSet.id,
       prescriptionSetId: prescribedSet.id,
-      confirmAsPlanned: true,
+      actualReps: 11,
+      actualLoad: { value: 45, unit: "lb" },
     },
     occurredAt: "2026-08-10T09:30:00.000Z",
   };
@@ -766,6 +783,9 @@ test("a new device hydrates cloud canonical facts into the main Coach and Produc
   ]);
   assert.equal(domain.workouts[0]?.setOutcomes[0]?.prescriptionSetId, historicalSession.tasks[0]!.sets[0]!.id);
   assert.equal(domain.workouts[1]?.setOutcomes[0]?.prescriptionSetId, prescribedSet.id);
+  assert.equal(domain.workouts[1]?.frozenPrescription.tasks[0]?.exerciseVariantId, replacementExerciseVariantId);
+  assert.equal(domain.workouts[1]?.setOutcomes[0]?.exerciseVariantId, replacementExerciseVariantId);
+  assert.deepEqual(domain.workouts[1]?.setOutcomes[0]?.actualLoad, { value: 45, unit: "lb" });
   assert.ok(domain.workouts.every((workout) => workout.status === "completed"));
   const screen = await restored.readProductProjection({
     userId: PROFILE.accountId,

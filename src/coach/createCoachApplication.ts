@@ -6511,6 +6511,57 @@ export class CoachApplication {
     });
   }
 
+  /** Records the user's explicit disposition without mutating the prescription. */
+  async dismissNextWorkoutSetRecommendation(input: {
+    recommendation: import("../workout").WorkoutNextSetRecommendation;
+    disposition: "rejected" | "ignored";
+    idempotencyKey: string;
+  }): Promise<void> {
+    const projection = await this.readDomainProjection({ userId: input.recommendation.userId });
+    const workout = projection.workouts.find((candidate) => candidate.id === input.recommendation.workoutId);
+    if (!workout) throw new Error("workout_session_not_found");
+    const occurredAt = this.runtime.now();
+    await this.ledger.commit({
+      kind: "domain",
+      userId: input.recommendation.userId,
+      actorId: input.recommendation.userId,
+      intent: `workout.next_set_recommendation.${input.disposition}`,
+      expectedRevisions: [],
+      domainEvents: [],
+      actionEvents: [{
+        id: this.runtime.nextId("action"),
+        userId: input.recommendation.userId,
+        occurredAt,
+        actor: "user",
+        action: input.disposition === "rejected" ? "plan.change.rejected" : "plan.change.ignored",
+        targetType: "workout",
+        targetId: input.recommendation.workoutId,
+        scope: "next_unstarted_set",
+        intent: `workout.next_set_recommendation.${input.disposition}`,
+        beforeRevision: workout.revision,
+        afterRevision: workout.revision,
+        before: { sourceOutcomeId: input.recommendation.sourceOutcomeId, status: "proposal" },
+        after: { disposition: input.disposition, prescriptionChanged: false },
+        evidenceRefs: input.recommendation.decision.evidenceRefs,
+        beforeRefs: input.recommendation.decision.evidenceRefs,
+        afterRefs: input.recommendation.decision.evidenceRefs,
+        ruleVersions: {
+          training_rule: `${input.recommendation.decision.rule.id}@${input.recommendation.decision.rule.semanticVersion}#${input.recommendation.decision.rule.contentHash}`,
+        },
+        mandateRevision: projection.mandate?.revision ?? 0,
+        result: input.disposition === "rejected" ? "rejected" : "allowed",
+        undoBoundary: "not_applicable",
+        policyDecision: "require_confirmation",
+        ...(input.disposition === "rejected" ? { humanDecision: "rejected" as const } : {}),
+        causationId: input.recommendation.sourceOutcomeId,
+        correlationId: `next-set:${input.recommendation.workoutId}:${input.recommendation.sourceOutcomeId}`,
+        reversible: false,
+      }],
+      idempotencyKey: input.idempotencyKey,
+      recordedAt: occurredAt,
+    });
+  }
+
   async startRestTimer(input: {
     userId: string;
     workoutId: string;

@@ -2005,10 +2005,24 @@ export function projectDomainEvents(
     } else if (event.name === "workout.prescription_revised") {
       const current = workouts.get(event.aggregate.id);
       if (current) {
+        const resolvedSetIds = [
+          ...current.setOutcomes.map((outcome) => outcome.prescriptionSetId),
+          ...(current.skippedSets ?? []).map((skipped) => skipped.prescriptionSetId),
+        ];
+        const currentSet = event.payload.frozenPrescription.tasks
+          .flatMap((task) => task.sets.map((set) => ({ taskId: task.id, setId: set.id })))
+          .find((set) => set.setId === current.state.currentSetId && !resolvedSetIds.includes(set.setId));
+        const next = currentSet ?? nextWorkoutPrescriptionSet(event.payload.frozenPrescription, resolvedSetIds);
         workouts.set(event.aggregate.id, {
           ...current,
           revision: event.aggregate.revision,
           frozenPrescription: event.payload.frozenPrescription,
+          state: {
+            ...current.state,
+            ...(next
+              ? { currentTaskId: next.taskId, currentSetId: next.setId }
+              : { currentTaskId: undefined, currentSetId: undefined }),
+          },
         });
       }
     } else if (event.name === "workout.set_recorded") {

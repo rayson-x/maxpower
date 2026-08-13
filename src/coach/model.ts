@@ -741,6 +741,7 @@ export interface ActionEvent {
     | "proposal.created"
     | "plan.change.applied"
     | "plan.change.rejected"
+    | "plan.change.ignored"
     | "plan.change.undone"
     | "profile.corrected"
     | "timeline.corrected"

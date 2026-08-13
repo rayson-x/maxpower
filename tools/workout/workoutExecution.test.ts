@@ -528,6 +528,37 @@ test("训练中后续动作编辑使用 typed command，平替不复制重量且
   assert.equal(replacement?.exerciseVariantId, "push_up.bodyweight.floor.standard.bilateral.full_rom");
   assert.equal(replacement?.sets[0]?.targetLoad, undefined);
 
+  workout = await app.editUpcomingWorkoutPlan({
+    userId: "u1",
+    workoutId: "workout-edit",
+    change: {
+      kind: "add_task",
+      task: {
+        id: "temporary-focus",
+        exerciseVariantId: "push_up.bodyweight.floor.standard.bilateral.full_rom",
+        mode: "bodyweight_reps",
+        sets: [{ id: "temporary-focus-1", targetReps: { min: 5, max: 5 } }],
+      },
+    },
+    reason: "test_removed_focused_task_cursor",
+    idempotencyKey: "edit-add-temporary-focus",
+  });
+  workout = await app.focusWorkoutTask({
+    userId: "u1",
+    workoutId: "workout-edit",
+    taskId: "temporary-focus",
+    idempotencyKey: "edit-focus-temporary",
+  });
+  assert.equal(workout.state.currentSetId, "temporary-focus-1");
+  workout = await app.editUpcomingWorkoutPlan({
+    userId: "u1",
+    workoutId: "workout-edit",
+    change: { kind: "remove_task", taskId: "temporary-focus" },
+    reason: "test_removed_focused_task_cursor",
+    idempotencyKey: "edit-remove-temporary-focus",
+  });
+  assert.equal(workout.state.currentSetId, "set-2", "removed focused task falls back to the next unresolved set");
+
   workout = await app.focusWorkoutTask({
     userId: "u1",
     workoutId: "workout-edit",
@@ -723,6 +754,16 @@ test("已确认的吃力表现只在真实器材档位和同动作下一组形�
   });
   assert.deepEqual(replayedRecommendation.change, recommendation.change);
   assert.equal((await app.listActionLog("u1")).filter((event) => event.intent === "workout.next_set_rule_assessment").length, 1);
+  await app.dismissNextWorkoutSetRecommendation({
+    recommendation,
+    disposition: "ignored",
+    idempotencyKey: "progression-ignore-once",
+  });
+  assert.ok((await app.listActionLog("u1")).some((event) =>
+    event.intent === "workout.next_set_recommendation.ignored"
+    && event.after.disposition === "ignored"
+    && event.after.prescriptionChanged === false
+  ));
   const applied = await app.applyNextWorkoutSetRecommendation({
     recommendation,
     idempotencyKey: "progression-apply",

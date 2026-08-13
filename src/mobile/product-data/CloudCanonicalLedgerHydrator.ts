@@ -20,6 +20,7 @@ import type { EvidenceBriefArtifact, LedgerSnapshot } from "../../coach/model";
 import { stableHash } from "../../coach/stable";
 
 import { CLOUD_PLAN_RECOVERY_SCHEMA_VERSION } from "./CloudPlanRecovery";
+import { readCloudWorkoutExecutionSnapshot } from "./CloudWorkoutExecutionSnapshot";
 import type {
   CloudCanonicalProjection,
   CloudJsonObject,
@@ -405,8 +406,10 @@ function createWorkoutEvents(input: {
   recordedAt: string;
 }): { events: DomainEvent[]; resultCount: number } {
   const sessionId = textProperty(input.workout.data, "sessionPrescriptionId");
-  const session = input.planRevision.sessions.find((candidate) => candidate.id === sessionId);
-  if (!session) return { events: [], resultCount: 0 };
+  const plannedSession = input.planRevision.sessions.find((candidate) => candidate.id === sessionId);
+  if (!plannedSession) return { events: [], resultCount: 0 };
+  const session = readCloudWorkoutExecutionSnapshot(input.workout.data.workoutExecution) ?? plannedSession;
+  if (session.id !== plannedSession.id) return { events: [], resultCount: 0 };
   const workoutId = textProperty(input.workout.data, "localWorkoutId") ?? input.workout.id;
   const mode = workoutMode(input.workout.data.mode);
   const events: DomainEvent[] = [recoveryEvent(
@@ -420,7 +423,7 @@ function createWorkoutEvents(input: {
         planRevision: input.planAggregateRevision,
         sessionPrescriptionId: session.id,
       },
-      frozenPrescription: session,
+      frozenPrescription: plannedSession,
       state: activeWorkoutState(mode, input.workout.startedAt),
     },
     input.recordedAt,
@@ -428,6 +431,23 @@ function createWorkoutEvents(input: {
     1,
   )];
   let revision = 1;
+  if (stableHash(session) !== stableHash(plannedSession)) {
+    revision += 1;
+    events.push(recoveryEvent(
+      input.accountId,
+      "workout.prescription_revised",
+      "workout_session",
+      workoutId,
+      {
+        frozenPrescription: session,
+        reason: "cloud_recovered_effective_workout_prescription",
+        scope: "future_tasks",
+      },
+      input.recordedAt,
+      input.workout.updatedAt,
+      revision,
+    ));
+  }
   let resultCount = 0;
   const completedSetIds = new Set<string>();
   const skippedSetIds = new Set<string>();
@@ -515,11 +535,11 @@ function setOutcome(
   const actualDuration = asPlanned ? set.targetDuration : duration(result.payload.actualDuration);
   const actualDistance = asPlanned ? set.targetDistance : distance(result.payload.actualDistance);
   if (actualReps === undefined && actualDuration === undefined && actualDistance === undefined) return undefined;
-  const loadValue = asPlanned ? set.targetLoad?.value : finiteNumber(result.payload.actualLoad);
-  const actualLoad = loadValue === undefined || !set.targetLoad
-    ? undefined
-    : { value: loadValue, unit: set.targetLoad.unit };
+  const actualLoad = asPlanned ? set.targetLoad : mass(result.payload.actualLoad, set.targetLoad?.unit);
   const actualRir = asPlanned ? set.targetRir : finiteNumber(result.payload.actualRir);
+  const noviceFeedback = result.payload.noviceFeedback === "easy" || result.payload.noviceFeedback === "appropriate" || result.payload.noviceFeedback === "hard"
+    ? result.payload.noviceFeedback
+    : undefined;
   return {
     id: result.id,
     prescriptionSetId: set.id,
@@ -529,9 +549,22 @@ function setOutcome(
     ...(actualDuration ? { actualDuration } : {}),
     ...(actualDistance ? { actualDistance } : {}),
     ...(actualRir !== undefined ? { actualRir } : {}),
+    ...(noviceFeedback ? { noviceFeedback, noviceFeedbackMappingVersion: "set-review-v1" } : {}),
     completedAs: asPlanned ? "confirmed_as_planned" : "user_edited",
     source: "user_confirmed",
   };
+}
+
+function mass(value: unknown, legacyUnit?: "kg" | "lb"): { value: number; unit: "kg" | "lb" } | undefined {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    const amount = finiteNumber(record.value);
+    const unit = record.unit;
+    if (amount !== undefined && (unit === "kg" || unit === "lb")) return { value: amount, unit };
+    return undefined;
+  }
+  const amount = finiteNumber(value);
+  return amount === undefined || !legacyUnit ? undefined : { value: amount, unit: legacyUnit };
 }
 
 async function commitRecoveryBatch(

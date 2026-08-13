@@ -29,7 +29,7 @@ export interface AppliedUpcomingWorkoutPlanChange {
 export function applyUpcomingWorkoutPlanChange(
   input: ApplyUpcomingWorkoutPlanChangeInput,
 ): AppliedUpcomingWorkoutPlanChange {
-  assertPrescriptionShape(input.before);
+  assertPlannedSessionShape(input.before);
   const lockedSetIds = new Set([
     ...input.completedPrescriptionSetIds,
     ...(input.draftedPrescriptionSetId ? [input.draftedPrescriptionSetId] : []),
@@ -169,7 +169,7 @@ export function applyUpcomingWorkoutPlanChange(
   }
 
   const frozenPrescription = { ...input.before, tasks } satisfies PlannedSessionData;
-  assertPrescriptionShape(frozenPrescription);
+  assertPlannedSessionShape(frozenPrescription);
   assertOnlyUpcomingPlannedSessionChanged({
     before: input.before,
     after: frozenPrescription,
@@ -201,7 +201,11 @@ function clearTargetLoad(set: PlannedExerciseSet): PlannedExerciseSet {
   return rest;
 }
 
-function assertPrescriptionShape(prescription: PlannedSessionData): void {
+/** Runtime guard used at cloud recovery boundaries before a plan snapshot is trusted. */
+export function assertPlannedSessionShape(prescription: PlannedSessionData): void {
+  if (!prescription || typeof prescription !== "object" || !prescription.id?.trim() || !prescription.title?.trim() || !Array.isArray(prescription.tasks)) {
+    throw new Error("invalid_workout_session");
+  }
   const taskIds = new Set<string>();
   const setIds = new Set<string>();
   for (const task of prescription.tasks) {

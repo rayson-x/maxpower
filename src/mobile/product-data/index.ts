@@ -6,3 +6,4 @@ export * from "./ProductShellCloudProjection";
 export * from "./CloudConfirmedProductBridge";
 export * from "./CloudPlanRecovery";
 export * from "./CloudCanonicalLedgerHydrator";
+export * from "./CloudWorkoutExecutionSnapshot";
