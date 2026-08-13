@@ -221,7 +221,7 @@ test("review release rejects a Rust proposal changed after its review projection
 test("Rust proposal content hash matches the serde-order FNV-1a contract", () => {
   const proposal = rustQualityProposalFixture("phase_supported");
 
-  assert.equal(proposal.contentHash, "d1af311466e6937d");
+  assert.equal(proposal.contentHash, "b86e249d1f490185");
   assert.equal(computeRustQualityProposalContentHash(proposal), proposal.contentHash);
 });
 
@@ -287,7 +287,7 @@ function rustQualityProposalFixture(
     ].map((dimension) => ({
       conclusionId: `rep:1:${dimension}`,
       dimension,
-      state: "observed_fact",
+      state: "observed_acceptable",
       summary: "fact",
       evidence: [],
       reason: null,

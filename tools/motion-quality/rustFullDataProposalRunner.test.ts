@@ -175,7 +175,7 @@ test("review proposal preserves immutable Rust endpoints and eight conclusions",
       ].map((dimension) => ({
         conclusionId: `rep:1:${dimension}`,
         dimension,
-        state: "observed_fact",
+        state: "observed_acceptable",
         summary: "fact",
         evidence: [],
         reason: null,
