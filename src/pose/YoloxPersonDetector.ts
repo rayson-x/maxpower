@@ -11,6 +11,92 @@ export interface PersonDetection {
   score: number;
 }
 
+export interface PinnedBinaryArtifact {
+  readonly id: string;
+  readonly publicPath: string;
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+export interface VerifiedBinaryIdentity extends PinnedBinaryArtifact {}
+
+export type BinaryArtifactFetcher = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>;
+
+/**
+ * Opaque bytes that passed the pinned size and SHA-256 checks. Keeping the
+ * constructor private prevents an ONNX session caller from accidentally
+ * treating an arbitrary response body as verified model input.
+ */
+export class VerifiedBinaryArtifact {
+  private constructor(
+    readonly identity: Readonly<VerifiedBinaryIdentity>,
+    private readonly verifiedBytes: Uint8Array<ArrayBuffer>,
+  ) {}
+
+  copyBytes(): Uint8Array<ArrayBuffer> {
+    return this.verifiedBytes.slice();
+  }
+
+  static async fetch(
+    pinned: PinnedBinaryArtifact,
+    fetcher: BinaryArtifactFetcher,
+  ): Promise<VerifiedBinaryArtifact> {
+    assertPinnedBinaryArtifact(pinned);
+    const response = await fetcher(pinned.publicPath, {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      throw new Error(`${pinned.id} fetch failed: ${response.status}`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength !== pinned.bytes) {
+      throw new Error(
+        `${pinned.id} byte size mismatch: expected ${pinned.bytes}, received ${bytes.byteLength}`,
+      );
+    }
+    const sha256 = await sha256Hex(bytes);
+    if (sha256 !== pinned.sha256) {
+      throw new Error(`${pinned.id} SHA-256 mismatch: expected ${pinned.sha256}, received ${sha256}`);
+    }
+    return new VerifiedBinaryArtifact(Object.freeze({ ...pinned, sha256 }), bytes.slice());
+  }
+}
+
+export async function fetchAndVerifyBinaryArtifact(
+  pinned: PinnedBinaryArtifact,
+  fetcher: BinaryArtifactFetcher = globalThis.fetch.bind(globalThis),
+): Promise<VerifiedBinaryArtifact> {
+  return VerifiedBinaryArtifact.fetch(pinned, fetcher);
+}
+
+export async function createVerifiedOnnxSession(
+  ort: OrtModule,
+  model: VerifiedBinaryArtifact,
+): Promise<{ readonly session: OrtSession; readonly executionProvider: "webgpu" | "wasm" }> {
+  if (!(model instanceof VerifiedBinaryArtifact)) {
+    throw new Error("ONNX session creation requires verified model bytes");
+  }
+  const createSession = ort.InferenceSession.create as unknown as (
+    bytes: Uint8Array<ArrayBuffer>,
+    options: { executionProviders: readonly string[] },
+  ) => Promise<OrtSession>;
+  try {
+    const session = await createSession(model.copyBytes(), {
+      executionProviders: ["webgpu"],
+    });
+    return { session, executionProvider: "webgpu" };
+  } catch {
+    const session = await createSession(model.copyBytes(), {
+      executionProviders: ["wasm"],
+    });
+    return { session, executionProvider: "wasm" };
+  }
+}
+
 /** Person-detection Adapter for the official end-to-end HumanArt YOLOX nano. */
 export class YoloxPersonDetector {
   private readonly canvas: HTMLCanvasElement;
@@ -20,6 +106,7 @@ export class YoloxPersonDetector {
   private constructor(
     private readonly ort: OrtModule,
     private readonly session: OrtSession,
+    readonly executionProvider: "webgpu" | "wasm",
   ) {
     this.canvas = document.createElement("canvas");
     this.canvas.width = INPUT_SIZE;
@@ -29,14 +116,12 @@ export class YoloxPersonDetector {
     this.context = context;
   }
 
-  static async create(ort: OrtModule, modelPath: string): Promise<YoloxPersonDetector> {
-    let session: OrtSession;
-    try {
-      session = await ort.InferenceSession.create(modelPath, { executionProviders: ["webgpu"] });
-    } catch {
-      session = await ort.InferenceSession.create(modelPath, { executionProviders: ["wasm"] });
-    }
-    return new YoloxPersonDetector(ort, session);
+  static async create(
+    ort: OrtModule,
+    model: VerifiedBinaryArtifact,
+  ): Promise<YoloxPersonDetector> {
+    const created = await createVerifiedOnnxSession(ort, model);
+    return new YoloxPersonDetector(ort, created.session, created.executionProvider);
   }
 
   async detect(
@@ -104,4 +189,22 @@ export function writeRgbaPixelsAsBgrChw(
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function assertPinnedBinaryArtifact(pinned: PinnedBinaryArtifact): void {
+  if (!pinned.id || !pinned.publicPath) throw new Error("pinned binary identity is incomplete");
+  if (!Number.isSafeInteger(pinned.bytes) || pinned.bytes <= 0) {
+    throw new Error(`${pinned.id} pinned byte size is invalid`);
+  }
+  if (!/^[a-f0-9]{64}$/.test(pinned.sha256)) {
+    throw new Error(`${pinned.id} pinned SHA-256 is invalid`);
+  }
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error("Web Crypto SHA-256 is unavailable");
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes.slice().buffer);
+  return [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
 }

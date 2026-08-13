@@ -23,6 +23,13 @@
       "sha256": "26f3a19e61304a600dfb82d1001d41d24343b89fc70a33ffc84657e0b0bf2ecf"
     }
   ],
+  "rustWasm": {
+    "id": "maxpower-motion-sdk-wasm",
+    "publicPath": "/motion-sdk/maxpower_motion_sdk.wasm",
+    "destination": "public/motion-sdk/maxpower_motion_sdk.wasm",
+    "bytes": 495415,
+    "sha256": "176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6"
+  },
   "boundary": {
     "yoloxClassesUsed": ["person"],
     "equipmentClassesAvailable": [],

@@ -1,9 +1,15 @@
 import { loadOrt, type OrtModule, type OrtSession } from "../shims/onnxRuntime";
 import type { PoseCandidateEstimate, PoseEstimate, PoseLandmark } from "./PoseEngine";
 import {
+  createVerifiedOnnxSession,
+  fetchAndVerifyBinaryArtifact,
   YoloxPersonDetector,
   writeRgbaPixelsAsBgrChw,
+  type BinaryArtifactFetcher,
   type PersonDetection,
+  type PinnedBinaryArtifact,
+  type VerifiedBinaryArtifact,
+  type VerifiedBinaryIdentity,
 } from "./YoloxPersonDetector";
 
 const INPUT_WIDTH = 192;
@@ -16,6 +22,42 @@ const MAX_PERSON_CANDIDATES = 4;
 const CANDIDATE_IDENTITY_MEMORY_MS = 1_500;
 const MEAN = [123.675, 116.28, 103.53] as const;
 const STD = [58.395, 57.12, 57.375] as const;
+
+export const WEB_VISION_MODEL_MANIFEST = Object.freeze({
+  schemaVersion: "maxpower-web-vision-model-manifest/v1",
+  runtime: "onnxruntime-web@1.22.0",
+  models: Object.freeze({
+    yolox: Object.freeze({
+      id: "yolox-nano-humanart-416x416",
+      publicPath: "/models/yolox-nano-humanart-416x416.onnx",
+      bytes: 3_722_395,
+      sha256: "1450966de24902b18aada1a78913d7efd8fc8dcd51bd4d0d5591476bd4a38821",
+    }),
+    rtmpose: Object.freeze({
+      id: "rtmpose-m-halpe26-256x192",
+      publicPath: "/models/rtmpose-m-halpe26-256x192.onnx",
+      bytes: 55_685_444,
+      sha256: "26f3a19e61304a600dfb82d1001d41d24343b89fc70a33ffc84657e0b0bf2ecf",
+    }),
+  }),
+  rustWasm: Object.freeze({
+    id: "maxpower-motion-sdk-wasm",
+    publicPath: "/motion-sdk/maxpower_motion_sdk.wasm",
+    bytes: 495_415,
+    sha256: "176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6",
+  }),
+});
+
+export interface WebVisionModelIdentity {
+  readonly yolox: Readonly<VerifiedBinaryIdentity>;
+  readonly rtmpose: Readonly<VerifiedBinaryIdentity>;
+}
+
+export interface WebVisionRuntimeIdentity {
+  readonly onnxRuntime: string;
+  readonly yoloxExecutionProvider: "webgpu" | "wasm";
+  readonly rtmposeExecutionProvider: "webgpu" | "wasm";
+}
 
 interface TrackedDetection extends PersonDetection {
   candidateId: number;
@@ -51,6 +93,8 @@ export class RtmposeEngine {
     private readonly ort: OrtModule,
     private readonly session: OrtSession,
     private readonly detector: YoloxPersonDetector,
+    readonly modelIdentity: Readonly<WebVisionModelIdentity>,
+    readonly runtimeIdentity: Readonly<WebVisionRuntimeIdentity>,
   ) {
     const frameContext = this.frameCanvas.getContext("2d", { willReadFrequently: true });
     if (!frameContext) throw new Error("无法创建 RTMPose frame canvas context");
@@ -66,15 +110,33 @@ export class RtmposeEngine {
   }
 
   static async create(
-    poseModelPath: string,
-    detectorModelPath: string,
+    poseModel: string | VerifiedBinaryArtifact,
+    detectorModel: string | VerifiedBinaryArtifact,
+    fetcher: BinaryArtifactFetcher = globalThis.fetch.bind(globalThis),
   ): Promise<RtmposeEngine> {
-    const ort = await loadOrt();
-    const [detector, session] = await Promise.all([
-      YoloxPersonDetector.create(ort, detectorModelPath),
-      createSession(ort, poseModelPath),
+    const [ort, verifiedPose, verifiedDetector] = await Promise.all([
+      loadOrt(),
+      resolveVerifiedModel(poseModel, WEB_VISION_MODEL_MANIFEST.models.rtmpose, fetcher),
+      resolveVerifiedModel(detectorModel, WEB_VISION_MODEL_MANIFEST.models.yolox, fetcher),
     ]);
-    return new RtmposeEngine(ort, session, detector);
+    const [detector, poseSession] = await Promise.all([
+      YoloxPersonDetector.create(ort, verifiedDetector),
+      createVerifiedOnnxSession(ort, verifiedPose),
+    ]);
+    return new RtmposeEngine(
+      ort,
+      poseSession.session,
+      detector,
+      Object.freeze({
+        yolox: verifiedDetector.identity,
+        rtmpose: verifiedPose.identity,
+      }),
+      Object.freeze({
+        onnxRuntime: WEB_VISION_MODEL_MANIFEST.runtime,
+        yoloxExecutionProvider: detector.executionProvider,
+        rtmposeExecutionProvider: poseSession.executionProvider,
+      }),
+    );
   }
 
   get latestInferenceMs(): number {
@@ -348,14 +410,6 @@ export function associatePersonCandidateIds(
   return { detections, nextCandidateId };
 }
 
-async function createSession(ort: OrtModule, modelPath: string): Promise<OrtSession> {
-  try {
-    return await ort.InferenceSession.create(modelPath, { executionProviders: ["webgpu"] });
-  } catch {
-    return ort.InferenceSession.create(modelPath, { executionProviders: ["wasm"] });
-  }
-}
-
 function paddedCrop(bbox: readonly [number, number, number, number]) {
   const centerX = (bbox[0] + bbox[2]) / 2;
   const centerY = (bbox[1] + bbox[3]) / 2;
@@ -509,4 +563,27 @@ function sampleTorsoColor(
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+async function resolveVerifiedModel(
+  input: string | VerifiedBinaryArtifact,
+  pinned: PinnedBinaryArtifact,
+  fetcher: BinaryArtifactFetcher,
+): Promise<VerifiedBinaryArtifact> {
+  if (typeof input === "string") {
+    if (input !== pinned.publicPath) {
+      throw new Error(`${input} is not the pinned ${pinned.id} model path`);
+    }
+    return fetchAndVerifyBinaryArtifact(pinned, fetcher);
+  }
+  const identity = input.identity;
+  if (
+    identity.id !== pinned.id
+    || identity.publicPath !== pinned.publicPath
+    || identity.bytes !== pinned.bytes
+    || identity.sha256 !== pinned.sha256
+  ) {
+    throw new Error(`${pinned.id} verified identity does not match the pinned Web manifest`);
+  }
+  return input;
 }

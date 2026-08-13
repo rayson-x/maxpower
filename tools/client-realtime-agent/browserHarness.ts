@@ -1,6 +1,18 @@
-import { RustCanonicalWasmSession, type RustExerciseProfileData } from "../../src/motion/rustCanonicalWasm";
-import { RtmposeEngine } from "../../src/pose/RtmposeEngine";
-import { buildClientExecutionAssessment } from "./clientExecutionReport";
+import {
+  instantiateRustMotionWasm,
+  RustCanonicalWasmSession,
+  type MotionWasmExports,
+  type RustExerciseProfileData,
+} from "../../src/motion/rustCanonicalWasm";
+import {
+  RtmposeEngine,
+  WEB_VISION_MODEL_MANIFEST,
+  type WebVisionModelIdentity,
+} from "../../src/pose/RtmposeEngine";
+import {
+  fetchAndVerifyBinaryArtifact,
+  type VerifiedBinaryIdentity,
+} from "../../src/pose/YoloxPersonDetector";
 
 interface ClientTestCase {
   captureId: string;
@@ -18,8 +30,48 @@ interface ClientTestPack {
   schemaVersion: string;
   seed: string;
   packSha256: string;
+  sourceProfilesSha256: string;
   protocol: { sampleIntervalMs: number };
   cases: ClientTestCase[];
+}
+
+interface FrozenClientPrediction {
+  schemaVersion?: string;
+  packSha256?: string;
+  predictionIdentity?: unknown;
+  predictionIdentitySha256?: string;
+}
+
+export interface PredictionProfileIdentity {
+  readonly captureId: string;
+  readonly profileIdentity: string;
+  readonly contentHash: string;
+}
+
+export interface PredictionRuntimeIdentity {
+  readonly onnxRuntime: string;
+  readonly yoloxExecutionProvider: "webgpu" | "wasm";
+  readonly rtmposeExecutionProvider: "webgpu" | "wasm";
+  readonly motionPacketContract: "MOTN/1.8+QLT1";
+  readonly pass: "causal-chronological-single-pass";
+  readonly harness: "maxpower-client-single-pass/v2";
+  readonly userAgent: string;
+}
+
+export interface PredictionIdentityInput {
+  readonly packSha256: string;
+  readonly profileArchiveSha256: string;
+  readonly models: Readonly<WebVisionModelIdentity>;
+  readonly rustWasm: Readonly<VerifiedBinaryIdentity>;
+  readonly profiles: readonly PredictionProfileIdentity[];
+  readonly runtime: Readonly<PredictionRuntimeIdentity>;
+}
+
+export interface FrozenPredictionIdentity {
+  readonly identity: Readonly<PredictionIdentityInput & {
+    readonly schemaVersion: "maxpower-client-prediction-identity/v1";
+  }>;
+  readonly sha256: string;
 }
 
 declare global {
@@ -28,53 +80,88 @@ declare global {
   }
 }
 
-const status = requireElement<HTMLElement>("#status");
-const progress = requireElement<HTMLElement>("#progress");
-const output = requireElement<HTMLElement>("#output");
-const video = requireElement<HTMLVideoElement>("#runtime-video");
 const CLIENT_MINIMUM_SAMPLE_INTERVAL_MS = 1_000 / 15;
 
-void run().catch((error) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
-  status.textContent = `FAILED: ${message}`;
-  document.body.dataset.testState = "failed";
-});
+if (typeof document !== "undefined") {
+  const status = requireElement<HTMLElement>("#status");
+  const progress = requireElement<HTMLElement>("#progress");
+  const output = requireElement<HTMLElement>("#output");
+  const video = requireElement<HTMLVideoElement>("#runtime-video");
+  void run({ status, progress, output, video }).catch((error) => {
+    const message = error instanceof Error ? error.stack ?? error.message : String(error);
+    status.textContent = `FAILED: ${message}`;
+    document.body.dataset.testState = "failed";
+  });
+}
 
-async function run(): Promise<void> {
+async function run(ui: {
+  status: HTMLElement;
+  progress: HTMLElement;
+  output: HTMLElement;
+  video: HTMLVideoElement;
+}): Promise<void> {
+  const { status, progress, output, video } = ui;
   document.body.dataset.testState = "loading";
   status.textContent = "Loading truth-free pack and client ONNX models…";
-  const pack = await fetchJson<ClientTestPack>("/api/client-realtime-agent/pack");
-  const frozen = await fetchOptionalJson<{ packSha256?: string }>("/api/client-realtime-agent/prediction");
-  if (frozen?.packSha256 === pack.packSha256) {
+  const [pack, frozen, verifiedRustWasm] = await Promise.all([
+    fetchJson<ClientTestPack>("/api/client-realtime-agent/pack"),
+    fetchOptionalJson<FrozenClientPrediction>("/api/client-realtime-agent/prediction"),
+    fetchAndVerifyBinaryArtifact(WEB_VISION_MODEL_MANIFEST.rustWasm),
+  ]);
+  const engine = await RtmposeEngine.create(
+    WEB_VISION_MODEL_MANIFEST.models.rtmpose.publicPath,
+    WEB_VISION_MODEL_MANIFEST.models.yolox.publicPath,
+  );
+  const predictionIdentity = await buildPredictionIdentity({
+    packSha256: pack.packSha256,
+    profileArchiveSha256: pack.sourceProfilesSha256,
+    models: engine.modelIdentity,
+    rustWasm: verifiedRustWasm.identity,
+    profiles: pack.cases.map((testCase) => ({
+      captureId: testCase.captureId,
+      profileIdentity: testCase.profileIdentity,
+      contentHash: String(testCase.profile.contentHash),
+    })),
+    runtime: {
+      ...engine.runtimeIdentity,
+      motionPacketContract: "MOTN/1.8+QLT1",
+      pass: "causal-chronological-single-pass",
+      harness: "maxpower-client-single-pass/v2",
+      userAgent: navigator.userAgent,
+    },
+  });
+  if (canReuseFrozenPrediction(frozen, predictionIdentity)) {
+    engine.close();
     window.__MAXPOWER_CLIENT_TEST_RESULT__ = frozen;
     output.textContent = JSON.stringify(frozen, jsonReplacer, 2);
-    status.textContent = "Existing one-pass prediction is frozen; inference was not repeated";
+    status.textContent = "Existing byte-identical one-pass prediction is frozen; inference was not repeated";
     document.body.dataset.testState = "complete";
     return;
   }
-  const engine = await RtmposeEngine.create(
-    "/models/rtmpose-m-halpe26-256x192.onnx",
-    "/models/yolox-nano-humanart-416x416.onnx",
-  );
+  const rustWasm = await instantiateRustMotionWasm(verifiedRustWasm.copyBytes().buffer);
   const cases = [];
   try {
     for (let index = 0; index < pack.cases.length; index += 1) {
       const testCase = pack.cases[index];
       progress.textContent = `${index + 1}/${pack.cases.length} · ${testCase.exerciseId} · ${testCase.capturePosition}`;
-      cases.push(await runCase(engine, video, testCase));
+      cases.push(await runCase(engine, rustWasm, video, testCase));
     }
   } finally {
     engine.close();
   }
   const result = {
-    schemaVersion: "maxpower-client-single-pass-prediction/v1",
+    schemaVersion: "maxpower-client-single-pass-prediction/v2",
     generatedAt: new Date().toISOString(),
     packSha256: pack.packSha256,
     seed: pack.seed,
+    predictionIdentity: predictionIdentity.identity,
+    predictionIdentitySha256: predictionIdentity.sha256,
     runtime: {
       visual: "onnxruntime-web/yolox-nano-humanart/rtmpose-m-halpe26+rust-wasm/causal-barbell-axis",
       motion: "rust-wasm/maxpower-motion-sdk",
       pass: "causal-chronological-single-pass",
+      packetContract: "MOTN/1.8+QLT1",
+      byteIdentity: predictionIdentity.identity,
       pythonVisionUsed: false,
       userAgent: navigator.userAgent,
     },
@@ -89,12 +176,13 @@ async function run(): Promise<void> {
 
 async function runCase(
   engine: RtmposeEngine,
+  rustWasm: MotionWasmExports,
   runtimeVideo: HTMLVideoElement,
   testCase: ClientTestCase,
 ) {
   engine.resetTracking();
   await loadVideo(runtimeVideo, testCase.videoUrl);
-  const motion = await RustCanonicalWasmSession.create({
+  const motion = new RustCanonicalWasmSession({
     sequenceId: `client-single-pass:${testCase.captureId}`,
     schema: "halpe26",
     image: {
@@ -105,7 +193,7 @@ async function runCase(
     },
     stabilization: "fusion",
     setLifecycleMode: "preview",
-  });
+  }, rustWasm);
   const profile = {
     ...testCase.profile,
     contentHash: BigInt(testCase.profile.contentHash),
@@ -260,7 +348,12 @@ async function runCase(
     reps,
     frames,
   };
-  const executionAssessment = buildClientExecutionAssessment(caseResult);
+  const qualityPacket = motion.lastDecodedPacket;
+  if (!qualityPacket) throw new Error(`${testCase.captureId}: Rust did not emit a final MotionPacket`);
+  const executionAssessment = projectRustQualityProposals({
+    lineage: qualityPacket.lineage,
+    qualityProposals: motion.lastQualityProposals,
+  });
   motion.close();
   return { ...caseResult, executionAssessment };
 }
@@ -298,6 +391,83 @@ function nextVideoFrame(runtimeVideo: HTMLVideoElement): Promise<number | null> 
     runtimeVideo.addEventListener("ended", settle, { once: true });
     requestAnimationFrame(settle);
   });
+}
+
+export async function buildPredictionIdentity(
+  input: PredictionIdentityInput,
+): Promise<FrozenPredictionIdentity> {
+  const identity = Object.freeze({
+    schemaVersion: "maxpower-client-prediction-identity/v1" as const,
+    packSha256: input.packSha256,
+    profileArchiveSha256: input.profileArchiveSha256,
+    models: Object.freeze({
+      yolox: Object.freeze({ ...input.models.yolox }),
+      rtmpose: Object.freeze({ ...input.models.rtmpose }),
+    }),
+    rustWasm: Object.freeze({ ...input.rustWasm }),
+    profiles: Object.freeze([...input.profiles]
+      .map((profile) => Object.freeze({ ...profile, contentHash: String(profile.contentHash) }))
+      .sort((left, right) => {
+        const capture = left.captureId.localeCompare(right.captureId);
+        return capture || left.profileIdentity.localeCompare(right.profileIdentity);
+      })),
+    runtime: Object.freeze({ ...input.runtime }),
+  });
+  return Object.freeze({
+    identity,
+    sha256: await sha256Text(canonicalJson(identity)),
+  });
+}
+
+export function canReuseFrozenPrediction(
+  frozen: FrozenClientPrediction | null,
+  expected: FrozenPredictionIdentity,
+): boolean {
+  return frozen?.schemaVersion === "maxpower-client-single-pass-prediction/v2"
+    && frozen.packSha256 === expected.identity.packSha256
+    && frozen.predictionIdentitySha256 === expected.sha256
+    && canonicalJson(frozen.predictionIdentity) === canonicalJson(expected.identity);
+}
+
+/**
+ * Projects the immutable Rust QLT1 envelope only. No host-side quality rule,
+ * aggregation, score, or conclusion is allowed at this boundary.
+ */
+export function projectRustQualityProposals<T extends readonly unknown[]>(packet: {
+  readonly lineage: { readonly contract: { readonly major: number; readonly minor: number } };
+  readonly qualityProposals: T;
+}) {
+  const { major, minor } = packet.lineage.contract;
+  if (major !== 1 || minor < 8) {
+    throw new Error(`Rust quality output requires MOTN/1.8+QLT1; received MOTN/${major}.${minor}`);
+  }
+  return Object.freeze({
+    schemaVersion: "maxpower-rust-quality-proposal-projection/v1",
+    owner: "rust-motion-sdk" as const,
+    packetContract: `MOTN/${major}.${minor}+QLT1`,
+    proposals: packet.qualityProposals,
+  });
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([, child]) => child !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+    .join(",")}}`;
+}
+
+async function sha256Text(value: string): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error("Web Crypto SHA-256 is unavailable");
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function loadVideo(runtimeVideo: HTMLVideoElement, url: string): Promise<void> {
