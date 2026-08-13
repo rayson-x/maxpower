@@ -592,7 +592,7 @@ test("校准阶梯：试做 RIR≥6 上调一档、4–5 接受为首负荷、�
   assert.ok(exhausted.reasonCodes.includes("calibration_attempt_limit_reached_load_remains_unknown"));
 });
 
-test("校准阶梯不接管：已有稳定历史或处方已有负荷时走常规进阶逻辑", () => {
+test("校准阶梯不接管：已有稳定历史或计划已有负荷时走常规进阶逻辑", () => {
   const established = registry.evaluate(
     context({
       recentSessions: [
