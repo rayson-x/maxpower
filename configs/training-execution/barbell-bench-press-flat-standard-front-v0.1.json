@@ -1,0 +1,156 @@
+{
+  "schemaVersion": "maxpower-training-execution-contract/v0.1",
+  "contractId": "barbell-bench-press.flat.standard.bilateral.full-rom.front-foot-end/v0.1",
+  "status": "research_not_validated",
+  "productionEnabled": false,
+  "identity": {
+    "exerciseId": "barbell_bench_press",
+    "variation": "flat_standard",
+    "equipment": "barbell_and_flat_bench",
+    "sideMode": "bilateral",
+    "plannedRom": "full_available",
+    "cameraView": "front_foot_end",
+    "exerciseSelectedBeforeSet": true
+  },
+  "defaultIntent": {
+    "goal": "hypertrophy_or_technique",
+    "eccentricIntent": "controlled",
+    "bottomIntent": "controlled_reversal_without_bounce",
+    "concentricIntent": "complete_with_stable_bilateral_path",
+    "specialVariantsRequireOverride": [
+      "powerlifting_pause",
+      "intentional_partial_rom",
+      "tempo_bench",
+      "touch_and_go",
+      "close_grip",
+      "wide_grip",
+      "incline_or_decline"
+    ]
+  },
+  "phaseSemantics": [
+    {
+      "phase": "ready_lockout",
+      "observedTask": "bar stable at the returned endpoint before descent"
+    },
+    {
+      "phase": "expected_eccentric_descent",
+      "observedTask": "bar descends while both elbows flex and the bilateral path remains coordinated"
+    },
+    {
+      "phase": "bottom_transition",
+      "observedTask": "actual lowest visible bar point followed by a causal direction reversal"
+    },
+    {
+      "phase": "expected_concentric_ascent",
+      "observedTask": "bar ascends while both elbows extend and the bilateral path remains coordinated"
+    },
+    {
+      "phase": "returned_lockout",
+      "observedTask": "bar returns to the selected endpoint and the rep is sealed"
+    }
+  ],
+  "evidenceRoles": {
+    "definingActive": [
+      "bar_center_vertical_trajectory",
+      "left_right_elbow_flexion_extension",
+      "left_right_wrist_trajectory"
+    ],
+    "endpointRom": [
+      "causal_bottom_turnaround",
+      "returned_top_endpoint",
+      "per_rep_bar_rom"
+    ],
+    "phaseControl": [
+      "descent_duration",
+      "bottom_confirmation_delay",
+      "ascent_duration",
+      "bottom_dwell_or_bounce_proxy"
+    ],
+    "bilateralCoordination": [
+      "bar_endpoint_turnaround_gap",
+      "wrist_turnaround_gap",
+      "elbow_rom_gap",
+      "dynamic_bar_tilt_change"
+    ],
+    "support": [
+      "visible_shoulder_line_drift",
+      "visible_hip_or_torso_shift"
+    ],
+    "equipmentPath": [
+      "bar_axis_center",
+      "bar_axis_endpoints",
+      "bar_axis_slope",
+      "future_plate_center_tracks"
+    ]
+  },
+  "allowedClaimsAtCurrentView": [
+    "rep_completion",
+    "causal_bottom_turnaround",
+    "descent_and_ascent_timing",
+    "visible_bilateral_coordination",
+    "dynamic_bar_tilt_change",
+    "rep_to_rep_path_and_tempo_drift"
+  ],
+  "cannotJudgeAtCurrentView": [
+    "actual_left_right_force",
+    "muscle_activation",
+    "scapular_retraction_or_depression",
+    "true_3d_bar_path",
+    "chest_contact_without_reliable_body_and_bar_contact_evidence",
+    "joint_torque_or_injury_risk"
+  ],
+  "candidatePatterns": [
+    "ROM_DEFICIT",
+    "BILATERAL_ENDPOINT_GAP",
+    "BILATERAL_TIMING_GAP",
+    "RETURN_CONTROL_LOSS",
+    "REVERSAL_BOUNCE",
+    "EQUIPMENT_PATH_DRIFT",
+    "SET_EXECUTION_DRIFT"
+  ],
+  "referenceModel": {
+    "comparisonIsFeatureEnvelopeNotFramewiseSkeletonDistance": true,
+    "reviewedStandardEnvelope": "required_not_available",
+    "personalStableBaseline": "allowed_for_consistency_not_standardness",
+    "currentSetBaseline": "allowed_for_rep_to_rep_drift",
+    "theoryPrior": "allowed_for_feature_selection_not_numeric_thresholds",
+    "requiredStrata": [
+      "reviewed_standard_multiple_coaches_and_body_types",
+      "normal_user_variation",
+      "isolated_deviation",
+      "combined_deviation",
+      "intentional_variant",
+      "hard_negative",
+      "cannot_judge",
+      "fatigue_or_set_drift"
+    ]
+  },
+  "forecastContract": {
+    "input": "current_and_past_canonical_frames_only",
+    "outputs": [
+      "next_phase_probability",
+      "predicted_turnaround_time_window",
+      "predicted_path_corridor",
+      "persistent_deviation_risk"
+    ],
+    "measuredAndPredictedRemainSeparate": true,
+    "predictionMayNotOverwriteCanonicalEvidence": true,
+    "cueRequiresPersistentObservableDeviation": true
+  },
+  "liveOutput": {
+    "maximumSimultaneousCues": 1,
+    "storeEveryCanonicalTrajectorySample": true,
+    "storePredictionProvenance": true,
+    "storeCannotJudgeReasons": true,
+    "poseEquipmentConflictForcesReviewOrCannotJudge": true
+  },
+  "releaseGates": [
+    "subject_session_device_disjoint_evaluation",
+    "per_claim_precision_recall_and_clean_set_false_cues",
+    "phase_boundary_and_turnaround_error",
+    "pose_and_equipment_observability",
+    "target_device_latency_drop_backpressure_and_thermal_measurement",
+    "expert_review_and_adjudication",
+    "no_prohibited_force_muscle_or_injury_claims"
+  ]
+}

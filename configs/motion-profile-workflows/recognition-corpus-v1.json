@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "maxpower-motion-profile-workflow/v1",
+  "workflowId": "recognition-corpus-v1",
+  "claim": {
+    "exerciseId": "*",
+    "variation": "*",
+    "equipment": "*",
+    "capturePosition": "*",
+    "trainingSide": "bilateral",
+    "intendedUse": ["action_evidence", "phase", "rep_count", "anti_interference"]
+  },
+  "observationDomains": [
+    { "poseModel": "mediapipe-pose-landmarker-heavy", "assetHash": "recorded-per-capture", "delegate": "recorded-per-capture", "landmarkSchema": "blazepose33" },
+    { "poseModel": "mmfit-openpose18-mapped", "assetHash": "source-dataset", "delegate": "offline", "landmarkSchema": "blazepose33-adapted" }
+  ],
+  "sources": [
+    { "kind": "approved_capture", "dataset": "data/training/approved-segmentation-v1.json" },
+    { "kind": "mmfit", "dataset": "data/external/mm-fit/normalized", "allowedSplits": ["train", "validation", "test", "unseen_test"] }
+  ],
+  "splitPolicyId": "subject-session-source-video/v1",
+  "featureContractId": "motion-profile-corpus/features/v1",
+  "candidateSearchPolicyId": "rust-profile-conservative-grid/v1",
+  "promotionPolicyId": "recognition-profile-evidence-gate/v1",
+  "seed": 20260809
+}
