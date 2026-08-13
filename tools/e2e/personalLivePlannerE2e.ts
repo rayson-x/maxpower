@@ -3,11 +3,17 @@ import { CoachApplication } from "../../src/coach/createCoachApplication";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import { MaxPowerPiCoachProviderResolver } from "../../src/mobile/cloud/MaxPowerPiCoachProvider";
 import { writeFile } from "node:fs/promises";
+import {
+  PERSONAL_PLANNER_GOAL,
+  PERSONAL_PLANNER_MANDATE,
+  PERSONAL_PLANNER_PROFILE,
+} from "./personalPlannerFixture";
 
 const baseUrl = process.env.MAXPOWER_E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const email = process.env.MAXPOWER_E2E_EMAIL ?? "";
 const password = process.env.MAXPOWER_E2E_PASSWORD ?? "";
 const now = "2026-08-12T10:00:00.000Z";
+const runNamespace = process.env.MAXPOWER_E2E_RUN_ID ?? `${Date.now().toString(36)}-${process.pid}`;
 
 async function main() {
   if (!email || !password) throw new Error("MAXPOWER_E2E_EMAIL_and_PASSWORD_required");
@@ -21,9 +27,9 @@ async function main() {
   const ledger = new InMemoryCoachLedger();
   const app = new CoachApplication({
     ledger,
-    runtime: { now: () => now, nextId: (prefix: string) => `personal-live:${prefix}-${++sequence}` },
+    runtime: { now: () => now, nextId: (prefix: string) => `personal-live:${runNamespace}:${prefix}-${++sequence}` },
     llmProviderResolver: new MaxPowerPiCoachProviderResolver({
-      apiBaseUrl: baseUrl, allowInsecureHttp: baseUrl.startsWith("http://127.0.0.1"), accountId: auth.accountId,
+      apiBaseUrl: baseUrl, allowInsecureHttp: baseUrl.startsWith("http://"), accountId: auth.accountId,
       accessTokens: { accessTokenFor: () => auth.accessToken },
     }),
     knowledgeToolsEnabled: true,
@@ -31,36 +37,9 @@ async function main() {
   });
   await app.executeDomainCommand({
     type: "user.bootstrap",
-    profile: {
-      id: "personal-profile", locale: "zh-CN", adultConfirmed: true, trainingExperience: "intermediate", returningStatus: "consistent", dailyActivityLevel: "sedentary",
-      demographics: { ageYears: 30, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 75, unit: "kg" } },
-      schedule: { weeklyFrequency: 4, sessionDurationMinutes: 90 },
-      locations: [{ id: "personal-gym", kind: "gym", environment: { space: "large", noise: "any" }, availableEquipment: ["full_gym"] }],
-      bodyDirection: "decrease_body_fat",
-      trainingHistorySummary: { recentSplit: ["chest", "back", "legs", "shoulders"], weeklyVolume: [{ muscleGroup: "chest", sets: 10 }, { muscleGroup: "back", sets: 12 }, { muscleGroup: "quadriceps", sets: 10 }, { muscleGroup: "shoulders", sets: 12 }] },
-      strengthBaseline: {
-        squat: { value: 100, unit: "kg" }, squatReps: 3,
-        benchPress: { value: 80, unit: "kg" }, benchPressReps: 5,
-        deadlift: { value: 110, unit: "kg" }, deadliftReps: 4,
-        measuredAt: "2026-08-01", source: "user_confirmed",
-      },
-      nutritionPreferences: ["严格控制饮食"],
-    },
-    goalContract: {
-      id: "personal-goal", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss", status: "active",
-      horizon: { startDate: "2026-08-12" }, targetWeeks: 12, pace: "standard", missedSessionPolicy: "shift",
-      successMetrics: ["body_composition_trend", "strength_maintenance", "weekly_training_adherence"],
-      targets: {
-        // User estimate, not a measurement: product should retain it as the stated starting hypothesis.
-        currentBodyFat: { value: 16.5, unit: "percent" }, targetBodyFat: { value: 12, unit: "percent" },
-        targetWaist: { value: 78, unit: "cm" }, targetShoulderWaistRatio: 1.5,
-        circumferences: { waist: { value: 86, unit: "cm" }, chest: { value: 101, unit: "cm" }, shoulders: { value: 113, unit: "cm" }, neck: { value: 44, unit: "cm" } },
-      },
-      emphasisMuscles: ["lateral_deltoid", "rear_deltoid"],
-      aerobicPreference: { role: "fat_loss_acceleration", timingPreference: "after_strength", intensityPreference: "easy_moderate" },
-      commitmentPreferences: { training: "high", nutrition: "strict", recovery: "standard" },
-    },
-    mandate: { id: "personal-mandate", mode: "collaborative" },
+    profile: PERSONAL_PLANNER_PROFILE,
+    goalContract: PERSONAL_PLANNER_GOAL,
+    mandate: PERSONAL_PLANNER_MANDATE,
     meta: { userId: auth.accountId, actor: { kind: "user", id: auth.accountId }, deviceId: "personal-live-e2e", occurredAt: now, timezoneOffsetMinutes: 480, idempotencyKey: "personal-bootstrap" },
   });
   const session = await app.startSession({ userId: auth.accountId, context: { kind: "today", ref: now.slice(0, 10) }, title: "个人实时规划评估" });

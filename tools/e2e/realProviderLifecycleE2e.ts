@@ -16,7 +16,8 @@ const BASE_URL = process.env.MAXPOWER_E2E_BASE_URL ?? "http://127.0.0.1:3000";
 const EMAIL = process.env.MAXPOWER_E2E_EMAIL ?? "";
 const PASSWORD = process.env.MAXPOWER_E2E_PASSWORD ?? "";
 const CURRENT_DATE = "2026-08-12";
-const ONLY = new Set((process.env.MAXPOWER_E2E_SCENARIOS ?? "").split(",").map((item) => item.trim()).filter(Boolean));
+const RUN_NAMESPACE = process.env.MAXPOWER_E2E_RUN_ID ?? `${Date.now().toString(36)}-${process.pid}`;
+const ONLY = new Set((process.env.MAXPOWER_E2E_SCENARIOS ?? "").split(",").map((item: string) => item.trim()).filter(Boolean));
 const REPORT_PATH = process.env.MAXPOWER_E2E_REPORT_PATH;
 
 type ScenarioId = "strict" | "recovery" | "schedule" | "indulgence";
@@ -112,10 +113,10 @@ async function runScenario(id: ScenarioId, auth: { accountId: string; accessToke
   const ledger = new InMemoryCoachLedger();
   const app = new CoachApplication({
     ledger,
-    runtime: { now: () => `${CURRENT_DATE}T10:00:00.000Z`, nextId: (prefix: string) => `live:${id}:${prefix}-${++sequence}` },
+    runtime: { now: () => `${CURRENT_DATE}T10:00:00.000Z`, nextId: (prefix: string) => `live:${RUN_NAMESPACE}:${id}:${prefix}-${++sequence}` },
     llmProviderResolver: new MaxPowerPiCoachProviderResolver({
       apiBaseUrl: BASE_URL,
-      allowInsecureHttp: BASE_URL.startsWith("http://127.0.0.1"),
+      allowInsecureHttp: BASE_URL.startsWith("http://"),
       accountId: auth.accountId,
       accessTokens: { accessTokenFor: () => auth.accessToken },
     }),
