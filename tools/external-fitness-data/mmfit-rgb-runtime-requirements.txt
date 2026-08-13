@@ -1,0 +1,12 @@
+# Minimal runtime for RGB -> MediaPipe Tasks Vision extraction.
+#
+# MediaPipe's wheel declares optional legacy Solutions/Model Maker dependencies
+# (OpenCV, Matplotlib, JAX, and others). The extractor deliberately loads the
+# Tasks Vision subpackage directly and decodes RGB with system FFmpeg, so those
+# unrelated packages are not installed.
+mediapipe==0.10.21
+numpy==1.26.4
+protobuf==4.25.9
+absl-py==2.5.0
+attrs==26.1.0
+flatbuffers==25.12.19

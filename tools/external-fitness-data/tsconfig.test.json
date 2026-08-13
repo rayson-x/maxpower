@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "outDir": "../../.external-fitness-data-test-build",
+    "rootDir": "../..",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "externalFitnessData.test.ts",
+    "rollingProfileTrainer.test.ts",
+    "unifiedRecognitionCorpusGate.test.ts",
+    "../exercise-registry/exerciseRegistry.test.ts",
+    "../mobile-mvp/mobileDataLayer.test.ts",
+    "../muscle-association/muscleAssociationDatabase.test.ts",
+    "../simulated-kinematic-prior/simulatedKinematicPrior.test.ts"
+  ]
+}
