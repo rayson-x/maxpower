@@ -225,7 +225,7 @@ test("measured axis becomes a geometry barbell observation submitted with raw ca
 
 test("selected equipment-only policy preserves subject identity while withholding all 26 joints", async () => {
   const report = await loadFrozenBenchAblationPolicyReport(
-    "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
+    "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-v1.json",
   );
   const applied = resolveAppliedBenchPolicy(
     report,
@@ -271,7 +271,7 @@ test("selected equipment-only policy preserves subject identity while withholdin
 
 test("front no-winner runs only an explicitly unselected fused diagnostic", async () => {
   const report = await loadFrozenBenchAblationPolicyReport(
-    "data/workflows/motion-quality-review/bench-pose-equipment-ablation-v1.json",
+    "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-v1.json",
   );
   const applied = resolveAppliedBenchPolicy(report, "barbell_bench_press", "front");
   assert.equal(applied.status, "no_winner");
