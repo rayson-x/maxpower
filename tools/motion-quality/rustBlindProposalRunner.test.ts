@@ -27,7 +27,7 @@ const TOUCHED_SOURCES = [
 test("all six touched bench captures fail closed at source exclusion", async () => {
   const catalog = await loadInputCatalog("tools/motion-quality/data-governance-inputs.json");
   const loaded = await loadTouchedBenchmarkBenchProfiles(
-    "tools/motion-quality/source-independent-bench-profiles.json",
+    "tools/motion-quality/touched-benchmark-bench-profiles.json",
     catalog.value,
   );
   assert.equal(loaded.value.length, 3);
@@ -47,7 +47,7 @@ test("all six touched bench captures fail closed at source exclusion", async () 
   const plan = await writeTouchedBenchmarkPlan({
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-    touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    touchedBenchmarkBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     outputPath: join(directory, "plan.json"),
     seed: "touched-benchmark-source-exclusion-test",

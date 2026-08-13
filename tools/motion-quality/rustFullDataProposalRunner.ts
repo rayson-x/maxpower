@@ -394,7 +394,7 @@ export interface FullDataProposalRunnerOptions {
   readonly benchEquipmentObservationRoot: string;
   readonly benchAblationReportPath: string;
   readonly profileArtifactPath: string;
-  readonly sourceIndependentBenchProfilePath: string;
+  readonly touchedBenchmarkBenchProfilePath: string;
   readonly governanceInputCatalogPath: string;
   readonly wasmPath: string;
   readonly outputPath: string;
@@ -414,7 +414,7 @@ export async function runFullDataProposal(
     readFile(options.datasetPath),
     readFile(options.profileArtifactPath),
     readFile(options.wasmPath),
-    loadFullDataBenchProfiles(options.sourceIndependentBenchProfilePath, catalog),
+    loadFullDataBenchProfiles(options.touchedBenchmarkBenchProfilePath, catalog),
     loadFrozenBenchAblationPolicyReport(options.benchAblationReportPath),
   ]);
   const dataset = JSON.parse(datasetBytes.toString("utf8")) as GoldenDataset;
@@ -826,7 +826,7 @@ async function loadFullDataBenchProfiles(
   return Object.freeze({
     value: Object.freeze(profiles),
     bytes,
-    pin: pinInputBytes(catalog, "sourceIndependentBenchProfile", absolute, bytes),
+    pin: pinInputBytes(catalog, "touchedBenchmarkBenchProfile", absolute, bytes),
   });
 }
 
@@ -1113,7 +1113,7 @@ async function main(): Promise<void> {
     benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
     benchAblationReportPath: "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-v1.json",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-    sourceIndependentBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    touchedBenchmarkBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
     outputPath,

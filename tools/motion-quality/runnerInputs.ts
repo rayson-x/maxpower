@@ -22,7 +22,7 @@ export type GovernanceInputRole =
   | "blindPlan"
   | "frozenPredictions"
   | "rustWasm"
-  | "sourceIndependentBenchProfile"
+  | "touchedBenchmarkBenchProfile"
   | "fullDataRun";
 
 type GovernanceAssetRole =
@@ -179,29 +179,15 @@ export interface LoadedPinned<T> {
   readonly pin: InputAssetPin;
 }
 
-export interface SourceIndependentBenchProfileEntry {
+export interface BenchProfileEntry {
   readonly exerciseId: "barbell_bench_press";
   readonly capturePosition: "front" | "frontLeft45" | "frontRight45";
   readonly profile: RustExerciseProfileData;
 }
 
-interface SerializedSourceIndependentBenchProfiles {
-  readonly schemaVersion: "maxpower-source-independent-bench-profiles/v1";
-  readonly evidence: Readonly<{
-    source: "builtin_source_independent_provisional";
-    fittedSourceIds: readonly [];
-    fittedDerivativeSourceIds: readonly [];
-  }>;
-  readonly profiles: readonly Readonly<{
-    exerciseId: "barbell_bench_press";
-    capturePosition: "front" | "frontLeft45" | "frontRight45";
-    profile: Omit<RustExerciseProfileData, "contentHash">;
-  }>[];
-}
-
 const GOVERNANCE_INPUT_ROLES: readonly GovernanceInputRole[] = Object.freeze([
   "humanRanges", "rawHalpe26", "benchBarbellAxis", "profileArtifact",
-  "blindPlan", "frozenPredictions", "rustWasm", "sourceIndependentBenchProfile", "fullDataRun",
+  "blindPlan", "frozenPredictions", "rustWasm", "touchedBenchmarkBenchProfile", "fullDataRun",
 ]);
 
 const ROLE_POLICIES: Readonly<Record<GovernanceInputRole, Readonly<{
@@ -252,8 +238,8 @@ const ROLE_POLICIES: Readonly<Record<GovernanceInputRole, Readonly<{
     admission: "protected",
     groupKey: "not_applicable",
   }),
-  sourceIndependentBenchProfile: Object.freeze({
-    assetId: "source-independent-bench-profile-config",
+  touchedBenchmarkBenchProfile: Object.freeze({
+    assetId: "touched-benchmark-bench-profile-config",
     role: "evaluation_artifact",
     admission: "evaluation_only",
     groupKey: "not_applicable",
@@ -401,51 +387,6 @@ export async function loadBenchEquipmentSidecar(
     value,
     bytes,
     pin: pinInputBytes(catalog, "benchBarbellAxis", path, bytes, normalized),
-  });
-}
-
-export async function loadSourceIndependentBenchProfiles(
-  path: string,
-  catalog: MotionQualityInputCatalog,
-): Promise<LoadedPinned<readonly SourceIndependentBenchProfileEntry[]>> {
-  const absolute = resolve(path);
-  const bytes = await readFile(absolute);
-  const serialized = JSON.parse(bytes.toString("utf8")) as SerializedSourceIndependentBenchProfiles;
-  if (serialized.schemaVersion !== "maxpower-source-independent-bench-profiles/v1"
-      || serialized.evidence.source !== "builtin_source_independent_provisional"
-      || serialized.evidence.fittedSourceIds.length !== 0
-      || serialized.evidence.fittedDerivativeSourceIds.length !== 0) {
-    throw new Error("source-independent bench profile contains fitted-source evidence");
-  }
-  const entries = serialized.profiles.map((entry) => {
-    const identityParts = entry.profile.identity.split("/");
-    if (entry.exerciseId !== "barbell_bench_press"
-        || entry.profile.stateMachineId !== "barbell-axis-primary-ready-effort-return/v1"
-        || identityParts[0] !== "barbell_bench_press"
-        || identityParts[1] !== entry.capturePosition
-        || identityParts[2] !== "bilateral"
-        || identityParts[3] !== "barbell"
-        || identityParts[4] !== "builtin-source-independent-provisional-v1"
-        || identityParts.length !== 5) {
-      throw new Error(`${entry.capturePosition}: invalid source-independent bench profile`);
-    }
-    const withoutHash = { ...entry.profile } as Omit<RustExerciseProfileData, "contentHash">;
-    return Object.freeze({
-      exerciseId: entry.exerciseId,
-      capturePosition: entry.capturePosition,
-      profile: Object.freeze({
-        ...withoutHash,
-        contentHash: computeRustExerciseProfileHash(withoutHash),
-      }),
-    });
-  });
-  if (new Set(entries.map((entry) => entry.capturePosition)).size !== 3) {
-    throw new Error("source-independent bench profile must declare exactly three views");
-  }
-  return Object.freeze({
-    value: Object.freeze(entries),
-    bytes,
-    pin: pinInputBytes(catalog, "sourceIndependentBenchProfile", absolute, bytes),
   });
 }
 

@@ -1024,7 +1024,7 @@ const DEFAULTS = Object.freeze({
   planPath: "data/workflows/motion-quality-review/touched-benchmark-inference-pack-v1.json",
   rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
   benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
-  touchedBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+  touchedBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
   governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
   wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
   frozenPredictionPath: "data/workflows/motion-quality-review/bench-pose-equipment-touched-benchmark-predictions-before-truth-v1.json",

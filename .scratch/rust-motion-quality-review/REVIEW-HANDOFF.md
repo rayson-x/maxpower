@@ -43,8 +43,8 @@ Status: `data-gated`
 
 | 字段 | Fresh value |
 | --- | --- |
-| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:3730a5a7974863b8e7bdd7074144707f7bd80b49c830448e26108ba557a76f2e` |
-| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `33a486af354203f7e670987e9fffc5fab15da92292f8ebfa442e2fc0188182da` |
+| full-data release ID / digest | `personal-motion-quality-review-v1` / `sha256:0ce72d674cbc6dd51384f7dad12b6612a88d654a88365771b47db67921f3aff4` |
+| source full-data run / digest | `personal-full-data-proposal-rust-qlt1-v1` / `ed85b0e723df6e954b2222cc58c410062032d790a69e6120f521f89c45aeda44` |
 | touched benchmark run / digest | `personal-touched-benchmark-rust-qlt1-v1` / `151d1c1740c49eb7ae8467e4bc1c92aedb662246e47613b12efc1427ef3aba92` |
 | Rust proposal count | `501` Reps / `5511` independent endpoint-or-conclusion review targets |
 | capability counts | `quality_supported=0`, `phase_supported=53`, `observation_only=1`, `unsupported=0` exact contexts |
@@ -53,7 +53,7 @@ Status: `data-gated`
 | equipment evidence | `2625` submitted equipment frames, `2357` Rust-observed frames, `135` equipment-measured endpoints |
 | review document/UI/server/export tests | public review document/UI `11/11`; review data/media/server `37/37`; fresh browser load/playback/toggle smoke passed |
 | runtime/contract tests | Rust `135/135`; Web ONNX→Rust causal chain `12/12`; QLT1 native projection `5/5`; native Halpe-26/equipment contract `7/7`; iOS Rust-byte parity `14/14` frames; Android Rust/CMake `4/4` ABI; full proposal/release `17/17`; quality contracts `16/16`; ablation `6/6`; governance `3/3`; full release contract `8/8` |
-| governed input catalog | `maxpower-motion-training-data-v1`; local runner catalog SHA-256 `7eefac253483bedc21bd3e2a85bffa7d9a8087a218c4fa0b911ff367f5b2eff1`; Rust WASM SHA-256 `176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6` |
+| governed input catalog | `maxpower-motion-training-data-v1`; local runner catalog SHA-256 `7c6f86d7ced060c6e15abb9459303b1f44bb184052ad5734cde3b7b16b35da51`; Rust WASM SHA-256 `176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6` |
 | model-acceptance metrics | data-gated |
 
 Native 验证边界：Android Rust/CMake 已覆盖 4 个 ABI，但本机剩余磁盘空间不足且没有连接真机，因此完整 Kotlin instrumentation/真机相机流不在本轮通过声明内。源码链与跨端契约已经交付；真机运行仍是客户端验收项，不得由编译通过替代。

@@ -35,9 +35,9 @@
       "assetId": "maxpower-motion-sdk-wasm",
       "definitionSha256": "1ef9b34b5b856d6325aece413d553c964d4bafb605e11b9b05acae9c1a10ab2b"
     },
-    "sourceIndependentBenchProfile": {
-      "assetId": "source-independent-bench-profile-config",
-      "definitionSha256": "92109da6898c8b43c022bdd2efa2398a5da762729ecfea199e210f7efe2087a1"
+    "touchedBenchmarkBenchProfile": {
+      "assetId": "touched-benchmark-bench-profile-config",
+      "definitionSha256": "deb7c14e81d4cfd133978c85357cc6ab754bb85cf11e20b78694132711521129"
     },
     "fullDataRun": {
       "assetId": "motion-quality-review-evaluation-artifacts",

@@ -48,7 +48,7 @@ test("motion-quality roles resolve through the authoritative governance catalog"
     profileArtifact: "evaluation_only",
     blindPlan: "evaluation_only",
     rustWasm: "protected",
-    sourceIndependentBenchProfile: "evaluation_only",
+    touchedBenchmarkBenchProfile: "evaluation_only",
     fullDataRun: "evaluation_only",
   } as const;
   for (const [role, admission] of Object.entries(expectedAdmissions)) {
@@ -403,7 +403,7 @@ test("touched bench threshold lineage excludes all six target captures", async (
   ];
   const catalog = await loadInputCatalog("tools/motion-quality/data-governance-inputs.json");
   const loaded = await loadTouchedBenchmarkBenchProfiles(
-    "tools/motion-quality/source-independent-bench-profiles.json",
+    "tools/motion-quality/touched-benchmark-bench-profiles.json",
     catalog.value,
   );
   assert.equal(loaded.value.length, 3);
@@ -431,7 +431,7 @@ test("touched bench threshold lineage excludes all six target captures", async (
   const plan = await writeTouchedBenchmarkPlan({
     datasetPath: "data/training/personal-golden-segmentation-v2.json",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-    touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    touchedBenchmarkBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     outputPath: join(directory, "plan.json"),
     seed: "touched-benchmark-source-exclusion-test",
@@ -503,7 +503,7 @@ test("unsupported touched-benchmark context still runs current Rust WASM over ev
     rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
     benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
     profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-    touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+    touchedBenchmarkBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
     governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
     wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
     outputPath,

@@ -40,7 +40,7 @@ import {
   type InputAssetPin,
   type LoadedPinned,
   type MotionQualityInputCatalog,
-  type SourceIndependentBenchProfileEntry,
+  type BenchProfileEntry,
 } from "./runnerInputs";
 
 export const TOUCHED_BENCHMARK_RUN_KIND = "touched_benchmark" as const;
@@ -61,7 +61,7 @@ export const TOUCHED_BENCHMARK_CLAIM_BOUNDARY = Object.freeze({
   ]),
 });
 
-export interface TouchedBenchmarkBenchProfileEntry extends SourceIndependentBenchProfileEntry {
+export interface TouchedBenchmarkBenchProfileEntry extends BenchProfileEntry {
   readonly fittedSourceIds: readonly string[];
   readonly fittedDerivativeSourceIds: readonly string[];
 }
@@ -179,7 +179,7 @@ export async function loadTouchedBenchmarkBenchProfiles(
   return Object.freeze({
     value: Object.freeze(entries),
     bytes,
-    pin: pinInputBytes(catalog, "sourceIndependentBenchProfile", absolute, bytes),
+    pin: pinInputBytes(catalog, "touchedBenchmarkBenchProfile", absolute, bytes),
   });
 }
 
@@ -703,7 +703,7 @@ async function main(): Promise<void> {
     await writeTouchedBenchmarkPlan({
       datasetPath: "data/training/personal-golden-segmentation-v2.json",
       profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-      touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+      touchedBenchmarkBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
       governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
       outputPath: "data/workflows/motion-quality-review/touched-benchmark-inference-pack-v1.json",
       seed: "personal-motion-quality-touched-benchmark-v1-fixed-seed",
@@ -717,7 +717,7 @@ async function main(): Promise<void> {
       rawObservationRoot: "data/workflows/action-trajectory-database/halpe26-v1/personal-observations",
       benchEquipmentObservationRoot: "data/workflows/equipment-pose-alignment-prototype/front-bench-v1/run-2026-08-12/observations",
       profileArtifactPath: "data/workflows/client-realtime-agent/client-single-pass-v1/client-halpe26-cycle-aligned-profiles.json",
-      touchedBenchmarkBenchProfilePath: "tools/motion-quality/source-independent-bench-profiles.json",
+      touchedBenchmarkBenchProfilePath: "tools/motion-quality/touched-benchmark-bench-profiles.json",
       governanceInputCatalogPath: "tools/motion-quality/data-governance-inputs.json",
       wasmPath: "public/motion-sdk/maxpower_motion_sdk.wasm",
       outputPath: "data/workflows/motion-quality-review/touched-benchmark-predictions-before-truth-v1.json",
