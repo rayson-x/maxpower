@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "outDir": "../../.client-realtime-agent-build",
+    "rootDir": "../..",
+    "types": ["node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "./runRealtimeAgentHarness.ts",
+    "./subjectSelectionParity.test.ts",
+    "./replayFrozenClientStream.ts",
+    "./replayFrozenBarbellBenchRust.ts",
+    "./browserHarness.ts",
+    "./clientExecutionReport.ts",
+    "./clientExecutionReport.test.ts",
+    "./qualityAgentAbExperiment.ts",
+    "./qualityAgentAbExperiment.test.ts",
+    "./qualityAgentAbCompare.ts",
+    "./qualityAgentAbCompare.test.ts",
+    "./buildClientHalpe26Profiles.ts",
+    "./tuneClientHalpe26Profiles.ts"
+  ]
+}

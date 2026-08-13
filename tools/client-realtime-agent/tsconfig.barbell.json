@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../../.client-realtime-agent-barbell-build"
+  },
+  "include": [
+    "./replayFrozenBarbellBenchRust.ts",
+    "./replayFrozenClientStream.ts",
+    "./clientExecutionReport.ts"
+  ]
+}
