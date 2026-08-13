@@ -24,7 +24,7 @@ test("evidence mode controls remain visible in the sticky audit header", () => {
   assert.match(html, /\.brand-copy\s*\{[^}]*min-width:\s*0/iu);
 });
 
-test("review release exposes untouched frozen benchmark evidence beside calibration proposals", () => {
+test("review release exposes touched frozen benchmark evidence beside calibration proposals", () => {
   const release = fixtureRelease();
   const evidence = benchmarkEvidenceForItem(release, release.items[0]);
   assert.equal(evidence.contextId, "capture-a");
