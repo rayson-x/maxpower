@@ -53,6 +53,7 @@ tools/harness/out/
 .simulated-reference-report-build/
 .simulated-prior-build/
 .motion-sdk-eval-build/
+.local-motion-runtime-contract-build/
 .client-realtime-agent-web-build/
 .home-workout-validation-build/
 /target/
