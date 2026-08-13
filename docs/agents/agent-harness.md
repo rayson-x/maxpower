@@ -9,9 +9,23 @@
 
 ## Product facts
 
-- The Home Coach is the user's only conversational Agent. It owns the visible
-  conversation, asks for missing information, explains results and presents
-  confirmations.
+- The Home Coach is the user's only persistent conversational Agent. Dedicated
+  onboarding and workout surfaces may present the same Agent in a task-scoped
+  interaction, but they do not create another identity, conversation owner or
+  long-term memory. The Home Coach owns ordinary visible conversation,
+  explains results and presents confirmations.
+- All language-enabled scenarios share one versioned product Soul. Onboarding,
+  Home conversation, planning, workout observation and risk review obtain
+  different capabilities from their scenario Prompt and local Harness rather
+  than from separate personalities. The target contracts and transitions are
+  defined in [`../design/agent-scenario-harness-v0.1.md`](../design/agent-scenario-harness-v0.1.md).
+- Scenario selection is grounded in a trusted product trigger: onboarding
+  lifecycle, Home message, active WorkoutSession, Timeline change or scheduled
+  tick. User wording may select a visible tool inside the active scenario, but
+  does not grant another scenario's capabilities.
+- Scheduled checks and ordinary motion observations are deterministic-first.
+  They invoke a language model only when a material typed outcome needs a
+  question, explanation or user-visible proposal.
 - A Planner is a professional planning work mode, analogous to a coding
   agent's plan mode. It reasons about goals, constraints, alternatives,
   trade-offs and the next validation point. It is not a keyword router and it
