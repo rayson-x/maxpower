@@ -27,7 +27,7 @@ const ACTION_CONTRACTS: [ExpectedActionContract; 12] = [
         first_phase: "eccentric",
         second_phase: "concentric",
         equipment_role: "barbell_axis_phase_and_path",
-        capability: AssessmentCapability::QualitySupported,
+        capability: AssessmentCapability::PhaseSupported,
     },
     ExpectedActionContract {
         action_id: "barbell_row",
@@ -113,19 +113,19 @@ const PERSONAL_EXACT_CONTEXTS: [ExpectedContext; 26] = [
         "barbell_bench_press",
         "front",
         "bilateral",
-        AssessmentCapability::QualitySupported,
+        AssessmentCapability::PhaseSupported,
     ),
     context(
         "barbell_bench_press",
         "frontLeft45",
         "bilateral",
-        AssessmentCapability::QualitySupported,
+        AssessmentCapability::PhaseSupported,
     ),
     context(
         "barbell_bench_press",
         "frontRight45",
         "bilateral",
-        AssessmentCapability::QualitySupported,
+        AssessmentCapability::PhaseSupported,
     ),
     context(
         "barbell_row",
@@ -502,7 +502,7 @@ fn built_in_profile_with_mismatched_equipment_is_unsupported() {
 }
 
 #[test]
-fn source_independent_bench_profiles_accept_the_declared_barbell_equipment() {
+fn source_independent_bench_profiles_are_phase_supported_and_publish_fail_closed_drafts() {
     for view in ["front", "frontLeft45", "frontRight45"] {
         let proposal = proposal_for_identity(
             &format!(
@@ -514,7 +514,18 @@ fn source_independent_bench_profiles_accept_the_declared_barbell_equipment() {
         assert_eq!(proposal.action_id, "barbell_bench_press");
         assert_eq!(proposal.capture_position, view);
         assert_eq!(proposal.equipment_role, "barbell_axis_phase_and_path");
-        assert_eq!(proposal.capability, AssessmentCapability::QualitySupported);
+        assert_eq!(proposal.capability, AssessmentCapability::PhaseSupported);
+        assert_eq!(proposal.conclusions.len(), AssessmentDimension::ALL.len());
+        for dimension in [
+            AssessmentDimension::SupportStability,
+            AssessmentDimension::BilateralCoordination,
+            AssessmentDimension::StandardVariantCompatibility,
+        ] {
+            let draft = conclusion(&proposal, dimension);
+            assert_eq!(draft.state, AssessmentConclusionState::CannotJudge);
+            assert_eq!(draft.confidence, 0.0);
+            assert!(draft.reason.is_some());
+        }
     }
 }
 

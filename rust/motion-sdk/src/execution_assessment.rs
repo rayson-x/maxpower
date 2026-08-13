@@ -159,7 +159,7 @@ const ACTION_CONTRACTS: [ActionAssessmentContract; 12] = [
         second_phase: "concentric",
         equipment_role: "barbell_axis_phase_and_path",
         accepted_equipment: &["barbell"],
-        default_capability: AssessmentCapability::QualitySupported,
+        default_capability: AssessmentCapability::PhaseSupported,
         capture_positions: &["front", "frontLeft45", "frontRight45"],
         requires_anatomical_side: false,
     },
