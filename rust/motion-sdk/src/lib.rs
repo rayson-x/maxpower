@@ -4779,6 +4779,8 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         self.subject_epoch = self.subject_epoch.saturating_add(1);
         self.continuity.reset();
         self.equipment_pose_constraint.reset();
+        self.local_motion_coordinate
+            .reset_for_discontinuity(LocalCoordinateReason::SubjectChanged);
         if let Some(rep_engine) = self.rep_engine.as_mut() {
             self.pending_outcomes
                 .extend(rep_engine.reject_for_subject_change());

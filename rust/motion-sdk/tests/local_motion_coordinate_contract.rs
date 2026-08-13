@@ -221,7 +221,7 @@ fn run_coordinate_sequence(
 fn per_set_coordinate_is_causal_and_invariant_to_camera_plane_transform() {
     let progress = vec![0.0, 0.005, 0.025, 0.050, 0.080];
     let baseline = run_coordinate_sequence(0.10, [0.0, 0.0], 1.0, progress.clone());
-    let transformed = run_coordinate_sequence(0.55, [0.08, -0.05], 0.75, progress);
+    let transformed = run_coordinate_sequence(0.55, [0.08, -0.05], 0.20, progress);
     assert_eq!(baseline.len(), transformed.len());
     let baseline_last = baseline.last().unwrap();
     let transformed_last = transformed.last().unwrap();
@@ -236,6 +236,68 @@ fn per_set_coordinate_is_causal_and_invariant_to_camera_plane_transform() {
     assert_ne!(
         baseline_last.raw_bar_angle_radians,
         transformed_last.raw_bar_angle_radians
+    );
+}
+
+#[test]
+fn frozen_coordinate_fails_closed_after_a_camera_geometry_break() {
+    let frames = [
+        (0.0, 0.10),
+        (0.005, 0.10),
+        (0.025, 0.10),
+        (0.050, 0.10),
+        (0.080, 0.10),
+        (0.090, 1.45),
+        (0.100, 0.10),
+    ];
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:local-coordinate:camera-break".into(),
+            contract: ContractVersion { major: 1, minor: 10 },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: 720,
+            image_height_px: 1_280,
+            continuity: ContinuityMode::Raw,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        LocalProfileFixture {
+            frames: frames
+                .iter()
+                .map(|(progress, angle)| local_bar_frame(*progress, *angle))
+                .collect(),
+        },
+        output.clone(),
+    )
+    .unwrap();
+    session.begin_set();
+    for frame_id in 0..frames.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                frame_id * 50,
+                Arc::new(AtomicUsize::new(0)),
+            ))
+            .unwrap();
+    }
+    let packets = output.packets();
+    assert_eq!(
+        packets[4].local_motion_coordinate.state,
+        maxpower_motion_sdk::LocalCoordinateState::Frozen,
+    );
+    assert_eq!(
+        packets[5].local_motion_coordinate.state,
+        maxpower_motion_sdk::LocalCoordinateState::Degraded,
+    );
+    assert_eq!(
+        packets[5].local_motion_coordinate.reason,
+        Some(maxpower_motion_sdk::LocalCoordinateReason::InvalidGeometry),
+    );
+    assert_eq!(
+        packets[6].local_motion_coordinate.state,
+        maxpower_motion_sdk::LocalCoordinateState::Degraded,
+        "a degraded coordinate never silently reinitializes during the same set",
     );
 }
 

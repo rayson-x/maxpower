@@ -12,9 +12,12 @@ use crate::{
 };
 
 const FREEZE_MINIMUM_SAMPLES: usize = 3;
-const FREEZE_MINIMUM_PROGRESS: f32 = 0.012;
+const FREEZE_MINIMUM_NORMALIZED_PROGRESS: f32 = 0.024;
 const LONG_GAP_MS: u64 = 1_000;
 const CHANNEL_AGREEMENT_TOLERANCE: f32 = 0.20;
+const GEOMETRY_SCALE_RATIO_MINIMUM: f32 = 0.55;
+const GEOMETRY_SCALE_RATIO_MAXIMUM: f32 = 1.80;
+const GEOMETRY_AXIS_ALIGNMENT_MINIMUM: f32 = 0.70;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -226,6 +229,13 @@ impl LocalMotionCoordinateEstimator {
         if self.paused {
             return self.latest.clone();
         }
+        // A coordinate frame cannot silently recover after its camera/subject
+        // geometry is invalidated. The remainder of this set stays
+        // fail-closed; an explicit next begin_set establishes a new identity.
+        if self.state == LocalCoordinateState::Degraded {
+            self.latest.source_timestamp_ms = Some(timestamp_ms);
+            return self.latest.clone();
+        }
         if self
             .last_timestamp_ms
             .is_some_and(|previous| timestamp_ms.saturating_sub(previous) > LONG_GAP_MS)
@@ -282,6 +292,16 @@ impl LocalMotionCoordinateEstimator {
         }
         let center = [(axis.x1 + axis.x2) * 0.5, (axis.y1 + axis.y2) * 0.5];
         let cross = [(axis.x2 - axis.x1) / length, (axis.y2 - axis.y1) / length];
+        if self.frozen_cross.zip(self.frozen_scale).is_some_and(|(baseline_cross, baseline_scale)| {
+            let scale_ratio = length / baseline_scale;
+            let axis_alignment = dot(cross, baseline_cross).abs();
+            scale_ratio < GEOMETRY_SCALE_RATIO_MINIMUM
+                || scale_ratio > GEOMETRY_SCALE_RATIO_MAXIMUM
+                || axis_alignment < GEOMETRY_AXIS_ALIGNMENT_MINIMUM
+        }) {
+            self.reset_for_discontinuity(LocalCoordinateReason::InvalidGeometry);
+            return self.latest.clone();
+        }
         let mut primary = [-cross[1], cross[0]];
         if primary[1] < 0.0 {
             primary = [-primary[0], -primary[1]];
@@ -300,8 +320,18 @@ impl LocalMotionCoordinateEstimator {
             };
             let preparation_origin =
                 median_point(&self.centers[..self.centers.len() - 1]).unwrap_or(self.centers[0]);
-            let progress = dot(sub(center, preparation_origin), primary).abs();
-            if self.axes.len() >= FREEZE_MINIMUM_SAMPLES && progress >= FREEZE_MINIMUM_PROGRESS {
+            let preparation_scale = median(
+                &self.axes[..self.axes.len().saturating_sub(1)]
+                    .iter()
+                    .map(|sample| sample.projected_length())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or(length);
+            let normalized_progress =
+                dot(sub(center, preparation_origin), primary).abs() / preparation_scale;
+            if self.axes.len() >= FREEZE_MINIMUM_SAMPLES
+                && normalized_progress >= FREEZE_MINIMUM_NORMALIZED_PROGRESS
+            {
                 let baseline_axes = &self.axes[..self.axes.len() - 1];
                 let baseline_axis = median_axis(baseline_axes);
                 let scale = median(
