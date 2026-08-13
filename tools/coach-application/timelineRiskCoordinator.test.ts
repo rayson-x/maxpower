@@ -209,6 +209,42 @@ test("Timeline fact 的连续变动合并为一次最新快照检查，且保留
   assert.deepEqual(assessedRevisions, [2]);
 });
 
+test("客户端生命周期只结算当前已排队的 Timeline 检查，不为没有新事实的启动制造记录", async () => {
+  const { app } = createApp({
+    assessment: {
+      async assess() {
+        return { status: "review_due", reasonCodes: ["lifecycle_check"] };
+      },
+    },
+  });
+  await bootstrap(app);
+
+  assert.equal(
+    await app.runPendingTimelineRiskEvaluation({ userId: "u1", idempotencyKey: "foreground-empty" }),
+    undefined,
+  );
+  assert.equal((await app.readTimelineRiskEvaluations({ userId: "u1" })).length, 0);
+
+  await app.recordTimelineFact({
+    userId: "u1",
+    idempotencyKey: "foreground-record",
+    fact: { kind: "nutrition", observationId: "meal-foreground", reportedEnergyDeviationKcal: 650, confidence: "confirmed" },
+    envelope: manualEnvelope("2026-08-12T20:00:00.000+08:00", "capture:foreground:meal"),
+  });
+  const settled = await app.runPendingTimelineRiskEvaluation({
+    userId: "u1",
+    idempotencyKey: "foreground-queued",
+  });
+  assert.equal(settled?.outcome, "review_due");
+  assert.equal(settled?.timelineRevision, 1);
+
+  // The evaluated record is no longer queued, so foreground resume is quiet.
+  assert.equal(
+    await app.runPendingTimelineRiskEvaluation({ userId: "u1", idempotencyKey: "foreground-repeat" }),
+    undefined,
+  );
+});
+
 test("定时检查只读取最新 Timeline 快照；过期快照和空 Timeline 都不制造失败事实", async () => {
   const { app } = createApp();
   await bootstrap(app);
