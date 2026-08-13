@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import { assembleQualityReviewRelease } from "./buildQualityReviewRelease.js";
+import {
+  assembleQualityReviewRelease,
+  computeRustQualityProposalContentHash,
+} from "./buildQualityReviewRelease.js";
 import { buildReviewProposal } from "./rustFullDataProposalRunner.js";
 
 test("review release keeps human start/end separate from immutable Rust proposal", () => {
@@ -164,9 +167,14 @@ test("review release rejects a Rust proposal changed after its review projection
     capability: "phase_supported",
     rustProposals: [originalProposal],
   });
-  const changedProposal = {
+  const changedProposalWithoutHash = {
     ...originalProposal,
     capability: "quality_supported" as const,
+    contentHash: "",
+  };
+  const changedProposal = {
+    ...changedProposalWithoutHash,
+    contentHash: computeRustQualityProposalContentHash(changedProposalWithoutHash),
   };
   const evidence = {
     schemaVersion: "maxpower-current-rust-context-evidence/v1" as const,
@@ -210,10 +218,46 @@ test("review release rejects a Rust proposal changed after its review projection
   }), /context-proposal-integrity: Rust proposal content mismatch/u);
 });
 
+test("Rust proposal content hash matches the serde-order FNV-1a contract", () => {
+  const proposal = rustQualityProposalFixture("phase_supported");
+
+  assert.equal(proposal.contentHash, "d1af311466e6937d");
+  assert.equal(computeRustQualityProposalContentHash(proposal), proposal.contentHash);
+});
+
+test("review release rejects a format-valid but incorrect Rust content hash", () => {
+  const originalProposal = rustQualityProposalFixture("phase_supported");
+  const wrongHashProposal = {
+    ...originalProposal,
+    contentHash: "0123456789abcdef",
+  };
+  const reviewProposal = buildReviewProposal({
+    captureId: "context-wrong-rust-hash",
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    sourceCaptureId: "source-wrong-rust-hash",
+    videoRef: null,
+    profileIdentity: wrongHashProposal.profileIdentity,
+    profileHash: wrongHashProposal.profileHash,
+    capability: "phase_supported",
+    rustProposals: [wrongHashProposal],
+  });
+
+  assert.throws(
+    () => assembleQualityReviewRelease(proposalIntegrityReleaseInput(
+      wrongHashProposal,
+      reviewProposal,
+      "wrong-rust-hash",
+    )),
+    /context-wrong-rust-hash: Rust proposal content hash mismatch/u,
+  );
+});
+
 function rustQualityProposalFixture(
   capability: "quality_supported" | "phase_supported" | "observation_only" | "unsupported",
 ) {
-  return {
+  const proposal = {
     schemaVersion: "maxpower.motion-quality-proposal/v1",
     proposalId: "rust-proposal-fixture",
     repId: 1,
@@ -249,7 +293,59 @@ function rustQualityProposalFixture(
       reason: null,
       confidence: 0.8,
     })),
-    contentHash: "0123456789abcdef",
+    contentHash: "",
+  };
+  return {
+    ...proposal,
+    contentHash: computeRustQualityProposalContentHash(proposal),
+  };
+}
+
+function proposalIntegrityReleaseInput(
+  proposal: Readonly<Record<string, unknown>>,
+  reviewProposal: ReturnType<typeof buildReviewProposal>,
+  suffix: string,
+): Parameters<typeof assembleQualityReviewRelease>[0] {
+  const contextId = `context-${suffix}`;
+  const sourceId = `source-${suffix}`;
+  const evidence = {
+    schemaVersion: "maxpower-current-rust-context-evidence/v1" as const,
+    packetSchema: "MOTN/1.8+QLT1",
+    producer: "current_rust_single_pass" as const,
+    frames: [],
+  };
+  return {
+    releaseId: `release-${suffix}`,
+    frozenAt: "2026-08-13T10:30:00.000Z",
+    fullDataRun: {
+      runId: `full-${suffix}`,
+      runKind: "full_data_proposal",
+      frozenDigest: "a".repeat(64),
+      sources: [{
+        sourceCaptureId: sourceId,
+        videoRef: null,
+        contexts: [{
+          captureId: contextId,
+          actionId: "barbell_bench_press",
+          capturePosition: "front",
+          capability: "phase_supported",
+          qualityProposals: [proposal],
+          reviewProposal,
+          currentRustEvidence: {
+            ...evidence,
+            evidenceHash: sha256(stableStringify(evidence)),
+          },
+        }],
+      }],
+    },
+    frozenEvaluationRun: frozenEvaluationRun(),
+    records: [{
+      captureId: contextId,
+      sourceCaptureId: sourceId,
+      exerciseId: "barbell_bench_press",
+      capturePosition: "front",
+      source: { durationMs: 2_000 },
+    }],
   };
 }
 

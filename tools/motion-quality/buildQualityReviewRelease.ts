@@ -286,6 +286,9 @@ function assertContextRustProposalIntegrity(context: FullContext): void {
     if (!/^[a-f0-9]{16}$/u.test(contentHash)) {
       throw new Error(`${context.captureId}: invalid Rust proposal content hash`);
     }
+    if (computeRustQualityProposalContentHash(proposal) !== contentHash) {
+      throw new Error(`${context.captureId}: Rust proposal content hash mismatch`);
+    }
     const rustCapability = requireReviewCapability(proposal.capability, context.captureId);
     const reviewRep = reviewReps.get(proposalId);
     if (!reviewRep
@@ -297,11 +300,71 @@ function assertContextRustProposalIntegrity(context: FullContext): void {
   }
 }
 
+export function computeRustQualityProposalContentHash(
+  raw: Readonly<Record<string, unknown>>,
+): string {
+  const proposal = requireRecord(raw, "Rust quality proposal");
+  const canonical = {
+    schemaVersion: proposal.schemaVersion,
+    proposalId: proposal.proposalId,
+    repId: proposal.repId,
+    actionId: proposal.actionId,
+    capturePosition: proposal.capturePosition,
+    anatomicalSide: proposal.anatomicalSide,
+    equipmentRole: proposal.equipmentRole,
+    capability: proposal.capability,
+    ruleBundleVersion: proposal.ruleBundleVersion,
+    profileIdentity: proposal.profileIdentity,
+    profileHash: proposal.profileHash,
+    canonicalSliceHash: proposal.canonicalSliceHash,
+    endpoints: requireArray(proposal.endpoints, "Rust quality proposal endpoints").map((rawEndpoint) => {
+      const endpoint = requireRecord(rawEndpoint, "Rust quality proposal endpoint");
+      return {
+        kind: endpoint.kind,
+        occurredFrameId: endpoint.occurredFrameId,
+        occurredTimestampMs: endpoint.occurredTimestampMs,
+        causalConfirmedTimestampMs: endpoint.causalConfirmedTimestampMs,
+        phaseBefore: endpoint.phaseBefore,
+        phaseAfter: endpoint.phaseAfter,
+        confidence: endpoint.confidence,
+        evidenceChannels: endpoint.evidenceChannels,
+      };
+    }),
+    conclusions: requireArray(
+      proposal.conclusions,
+      "Rust quality proposal conclusions",
+    ).map((rawConclusion) => {
+      const conclusion = requireRecord(rawConclusion, "Rust quality proposal conclusion");
+      return {
+        conclusionId: conclusion.conclusionId,
+        dimension: conclusion.dimension,
+        state: conclusion.state,
+        summary: conclusion.summary,
+        evidence: conclusion.evidence,
+        reason: conclusion.reason,
+        confidence: conclusion.confidence,
+      };
+    }),
+    contentHash: "",
+  };
+  let hash = 0xcbf2_9ce4_8422_2325n;
+  for (const byte of Buffer.from(JSON.stringify(canonical), "utf8")) {
+    hash ^= BigInt(byte);
+    hash = BigInt.asUintN(64, hash * 0x0000_0100_0000_01b3n);
+  }
+  return hash.toString(16).padStart(16, "0");
+}
+
 function requireRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
   }
   return value as Readonly<Record<string, unknown>>;
+}
+
+function requireArray(value: unknown, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array`);
+  return value;
 }
 
 function requireString(value: unknown, label: string): string {
