@@ -14,6 +14,7 @@ export interface HumanRepBoundary {
   peakMs: number;
   endMs: number;
   note?: string;
+  peakSource?: "human_adjusted" | "algorithm_candidate" | "range_midpoint" | "legacy_unattributed";
 }
 
 export interface SegmentationTrainingCapture {

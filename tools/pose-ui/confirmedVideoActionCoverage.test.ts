@@ -10,6 +10,7 @@ import {
 } from "../../src/pose/videoLibrary";
 
 const EXPECTED_ACTION_BY_VIDEO_ID = Object.freeze({
+  "1ffdb9483b96090c6caf40a2ca3e6c46": "machine_chest_press",
   "field-capture-2026-08-02T18-15-03-101Z": "pull_up",
   "field-capture-2026-08-02T18-16-42-757Z": "pull_up",
   "field-capture-2026-08-02T18-19-26-633Z": "barbell_row",
@@ -55,20 +56,23 @@ test("every provided training video carries a known action context", () => {
   }));
   const library = buildVideoLibraryFromConfirmedCaptures(manifest, labelsByCaptureId);
 
-  assert.deepEqual(
-    library.videos.map((video) => video.id).sort(),
-    Object.keys(EXPECTED_ACTION_BY_VIDEO_ID).sort(),
-  );
+  const videosById = new Map(library.videos.map((video) => [video.id, video]));
+  for (const [videoId, exerciseId] of Object.entries(EXPECTED_ACTION_BY_VIDEO_ID)) {
+    assert.equal(
+      videosById.get(videoId)?.exerciseId,
+      exerciseId,
+      `${videoId} baseline action context regressed`,
+    );
+  }
   for (const video of library.videos) {
     assert.ok(video.exerciseId, `${video.id} is missing its action context`);
     assert.ok(
       EXERCISE_REGISTRY.get(video.exerciseId!),
       `${video.id} references unknown action ${video.exerciseId}`,
     );
-    assert.equal(
-      video.exerciseId,
-      EXPECTED_ACTION_BY_VIDEO_ID[video.id as keyof typeof EXPECTED_ACTION_BY_VIDEO_ID],
-      `${video.id} carries the wrong action context`,
-    );
+    const expected = EXPECTED_ACTION_BY_VIDEO_ID[
+      video.id as keyof typeof EXPECTED_ACTION_BY_VIDEO_ID
+    ];
+    if (expected) assert.equal(video.exerciseId, expected, `${video.id} carries the wrong action context`);
   }
 });

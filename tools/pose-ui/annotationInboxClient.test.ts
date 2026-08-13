@@ -8,7 +8,7 @@ import {
 
 test("annotation page accepts only safe local inbox entries", () => {
   assert.deepEqual(parseAnnotationInboxManifest({
-    version: "form-coach-annotation-inbox/v1",
+    version: "maxpower-annotation-inbox/v1",
     items: [{ id: "bench", filename: "bench.mp4", sizeBytes: 12, videoUrl: "/videos/bench.mp4" }],
   }).items[0], {
     id: "bench",
@@ -17,7 +17,7 @@ test("annotation page accepts only safe local inbox entries", () => {
     videoUrl: "/videos/bench.mp4",
   });
   assert.throws(() => parseAnnotationInboxManifest({
-    version: "form-coach-annotation-inbox/v1",
+    version: "maxpower-annotation-inbox/v1",
     items: [{ id: "escape", filename: "../escape.mp4", sizeBytes: 1, videoUrl: "/videos/../escape.mp4" }],
   }), /安全/);
 });
@@ -27,7 +27,7 @@ test("approved inbox video becomes an auditable archive triplet", () => {
     filename: "bench.mp4",
     fixture: { video: "bench.mp4", durationSec: 2, stepMs: 40, model: "pose_landmarker_lite", poses: [] },
     approval: {
-      exerciseId: "barbell_bench_press",
+      exerciseId: "dumbbell_bench_press",
       cameraView: "side",
       capturePosition: "left",
       expectedCount: "1",
@@ -47,7 +47,7 @@ test("approved inbox video becomes an auditable archive triplet", () => {
     endMs: 900,
     note: "rack occlusion",
   }]);
-  assert.equal(artifacts.labels.exerciseId, "barbell_bench_press");
+  assert.equal(artifacts.labels.exerciseId, "dumbbell_bench_press");
   assert.equal(artifacts.metadata.annotationStatus, "human_approved");
 
   assert.throws(() => buildReviewedInboxArtifacts({

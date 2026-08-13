@@ -1,4 +1,4 @@
-export const ANNOTATION_INBOX_MANIFEST_VERSION = "form-coach-annotation-inbox/v1" as const;
+export const ANNOTATION_INBOX_MANIFEST_VERSION = "maxpower-annotation-inbox/v1" as const;
 export const ANNOTATION_INBOX_VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
 export interface AnnotationInboxItem {

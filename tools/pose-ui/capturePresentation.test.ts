@@ -40,7 +40,7 @@ test("recording fixture remains importable when no pose was detected", () => {
   ]);
 });
 
-test("recording fixture rebases pose timestamps and retains its existing cadence", () => {
+test("recording fixture retains the full media duration when pose coverage is shorter", () => {
   const poses = [
     { timestampMs: 100, landmarks: [], worldLandmarks: [] },
     { timestampMs: 350, landmarks: [], worldLandmarks: [] },
@@ -53,7 +53,7 @@ test("recording fixture rebases pose timestamps and retains its existing cadence
     poses,
   });
 
-  assert.equal(fixture.durationSec, 0.25);
+  assert.equal(fixture.durationSec, 5);
   assert.equal(fixture.stepMs, 250);
   assert.deepEqual(
     fixture.poses.map((pose) => pose.timestampMs),

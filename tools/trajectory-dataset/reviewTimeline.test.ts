@@ -7,6 +7,7 @@ import {
   reviewRangeGeometryEquals,
   restoreReviewRangeSnapshot,
   timelineTimeAt,
+  unreviewedPeakRepIndexes,
 } from "../../src/pose/reviewTimeline";
 
 test("dragging a range creates a sorted rep and snaps its phase point to a candidate peak", () => {
@@ -22,8 +23,20 @@ test("dragging a range creates a sorted rep and snaps its phase point to a candi
   if (result.status !== "added") return;
   assert.deepEqual(result.segments, [
     { repIndex: 1, startMs: 1000, peakMs: 1500, endMs: 2000 },
-    { repIndex: 2, startMs: 3000, peakMs: 3650, endMs: 4500 },
+    { repIndex: 2, startMs: 3000, peakMs: 3650, endMs: 4500, peakSource: "algorithm_candidate" },
   ]);
+});
+
+test("ranges without a candidate expose midpoint provenance instead of claiming a human peak", () => {
+  const result = addReviewRange({
+    existing: [], candidateSegments: [], anchorMs: 1000, focusMs: 3000, durationMs: 5000,
+  });
+
+  assert.equal(result.status, "added");
+  if (result.status !== "added") return;
+  assert.deepEqual(result.added, {
+    repIndex: 1, startMs: 1000, peakMs: 2000, endMs: 3000, peakSource: "range_midpoint",
+  });
 });
 
 test("short clicks seek without adding and overlapping drags are rejected", () => {
@@ -54,11 +67,24 @@ test("selected ranges move and resize without crossing adjacent reps", () => {
   assert.deepEqual(editReviewRange({
     segment, mode: "resize-start", pointerOriginMs: 2000, pointerMs: 2800,
     previousEndMs: 1500, nextStartMs: 4200,
-  }), { repIndex: 2, startMs: 2750, peakMs: 2750, endMs: 3000, note: "力竭" });
+  }), {
+    repIndex: 2, startMs: 2750, peakMs: 2750, endMs: 3000, note: "力竭",
+    peakSource: "human_adjusted",
+  });
   assert.deepEqual(editReviewRange({
     segment, mode: "resize-end", pointerOriginMs: 3000, pointerMs: 2200,
     previousEndMs: 1500, nextStartMs: 4200,
-  }), { repIndex: 2, startMs: 2000, peakMs: 2250, endMs: 2250, note: "力竭" });
+  }), {
+    repIndex: 2, startMs: 2000, peakMs: 2250, endMs: 2250, note: "力竭",
+    peakSource: "human_adjusted",
+  });
+  assert.deepEqual(editReviewRange({
+    segment, mode: "move-peak", pointerOriginMs: 2500, pointerMs: 2875,
+    previousEndMs: 1500, nextStartMs: 4200,
+  }), {
+    repIndex: 2, startMs: 2000, peakMs: 2875, endMs: 3000, note: "力竭",
+    peakSource: "human_adjusted",
+  });
 });
 
 test("undoing a geometry edit preserves a note typed after that edit", () => {
@@ -79,4 +105,12 @@ test("numeric edit sessions detect geometry changes but ignore note-only changes
     { repIndex: 1, startMs: 1000, peakMs: 1600, endMs: 2000, note: "原备注" },
   ]), false);
   assert.equal(reviewRangeGeometryEquals(snapshot, []), false);
+});
+
+test("approval can identify every rep whose phase peak is not human-confirmed", () => {
+  assert.deepEqual(unreviewedPeakRepIndexes([
+    { repIndex: 1, startMs: 0, peakMs: 500, endMs: 1000, peakSource: "human_adjusted" },
+    { repIndex: 2, startMs: 1000, peakMs: 1500, endMs: 2000, peakSource: "range_midpoint" },
+    { repIndex: 3, startMs: 2000, peakMs: 2500, endMs: 3000 },
+  ]), [2, 3]);
 });

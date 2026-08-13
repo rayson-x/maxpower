@@ -25,7 +25,7 @@ export interface LocalCaptureWrite extends LocalCaptureSummary {
 
 export interface LocalCapture extends LocalCaptureWrite {}
 
-const DATABASE_NAME = "form-coach-local-captures";
+const DATABASE_NAME = "maxpower-local-captures";
 const DATABASE_VERSION = 1;
 const CAPTURES_STORE = "captures";
 

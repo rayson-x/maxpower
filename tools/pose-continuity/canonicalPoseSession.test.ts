@@ -146,6 +146,46 @@ test("weak elbow fusion stays on the historical two-circle branch", () => {
   );
 });
 
+test("sustained weak arm coordinates remain kinematically tracked", () => {
+  const session = createPoseContinuitySession({
+    sequenceId: "synthetic:sustained-weak-arm",
+    schema: "blazepose33",
+    image: {
+      widthPx: 1000,
+      heightPx: 1000,
+      rotationDegrees: 0,
+      mirrored: false,
+    },
+    stabilization: "fusion",
+  });
+  const pose = (timestampMs: number, armVisibility: number): PoseEstimate => {
+    const landmarks = Array.from({ length: 17 }, () => ({
+      x: 0.5,
+      y: 0.5,
+      z: 0,
+      visibility: 0.95,
+    }));
+    landmarks[11] = { x: 0.4, y: 0.4, z: 0, visibility: 0.95 };
+    landmarks[13] = { x: 0.5, y: 0.55, z: 0, visibility: armVisibility };
+    landmarks[15] = { x: 0.6, y: 0.4, z: 0, visibility: armVisibility };
+    return { timestampMs, landmarks, worldLandmarks: [] };
+  };
+
+  for (let frame = 0; frame < 5; frame += 1) {
+    session.process(pose(frame * 50, 0.95));
+  }
+  let result = session.process(pose(250, 0.01));
+  for (let frame = 6; frame < 13; frame += 1) {
+    result = session.process(pose(frame * 50, 0.01));
+  }
+
+  assert.equal(result.landmarks[11].source, "measured");
+  assert.equal(result.landmarks[13].source, "fused");
+  assert.equal(result.landmarks[15].source, "fused");
+  assert.equal(result.landmarks[13].renderable, true);
+  assert.equal(result.landmarks[15].renderable, true);
+});
+
 test("gap repair uses elapsed milliseconds instead of frame count", () => {
   for (const fps of [20, 30, 60]) {
     const frameMs = 1000 / fps;

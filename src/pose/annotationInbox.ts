@@ -110,7 +110,7 @@ export function buildReviewedInboxArtifacts(input: {
     archiveGroup: exercise.muscleGroup,
     keypoints: [{ ...input.fixture, video: input.filename }],
     labels: {
-      schemaVersion: "form-coach-reviewed-rep-labels/v1",
+      schemaVersion: "maxpower-reviewed-rep-labels/v1",
       videoId: input.filename,
       keypointsFile: `${id}.json`,
       exerciseId: input.approval.exerciseId,
@@ -123,7 +123,7 @@ export function buildReviewedInboxArtifacts(input: {
       note: input.approval.note ?? "",
     },
     metadata: {
-      schemaVersion: "form-coach-inbox-review/v1",
+      schemaVersion: "maxpower-inbox-review/v1",
       annotationStatus: "human_approved",
       source: "annotation_inbox",
       videoId: input.filename,

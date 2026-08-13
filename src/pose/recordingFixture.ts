@@ -44,9 +44,16 @@ export function buildRecordingFixture({
   const lastTimestampMs = poses[poses.length - 1]?.timestampMs;
   const hasPoseDuration =
     firstTimestampMs !== undefined && lastTimestampMs !== undefined && poses.length > 1;
-  const durationSec = hasPoseDuration
+  const poseDurationSec = hasPoseDuration
     ? (lastTimestampMs - firstTimestampMs) / 1000
-    : Math.max(0, fallbackDurationSec);
+    : 0;
+  const mediaDurationSec = Number.isFinite(fallbackDurationSec)
+    ? Math.max(0, fallbackDurationSec)
+    : 0;
+  // The pose span describes analysis coverage, not the source media length.
+  // Keeping the larger bound prevents a throttled/backgrounded extractor from
+  // collapsing a full recording into only the frames it managed to process.
+  const durationSec = Math.max(mediaDurationSec, poseDurationSec);
   const rebasedPoses =
     firstTimestampMs === undefined
       ? []
@@ -56,7 +63,7 @@ export function buildRecordingFixture({
     {
       video,
       durationSec: Number(durationSec.toFixed(3)),
-      stepMs: poses.length > 1 ? Number((durationSec * 1000 / (poses.length - 1)).toFixed(1)) : 0,
+      stepMs: poses.length > 1 ? Number((poseDurationSec * 1000 / (poses.length - 1)).toFixed(1)) : 0,
       model,
       poses: rebasedPoses,
       ...(diagnostics.length > 0

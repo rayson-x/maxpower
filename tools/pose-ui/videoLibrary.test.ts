@@ -9,7 +9,7 @@ import {
 
 test("training video library accepts only explicit, safe entries", () => {
   const manifest = parseVideoLibraryManifest({
-    version: "form-coach-video-library/v1",
+    version: "maxpower-video-library/v1",
     videos: [{
       id: "lat-pulldown",
       label: "高位下拉 · 测试素材",

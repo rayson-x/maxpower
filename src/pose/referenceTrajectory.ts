@@ -2,9 +2,9 @@ import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
 import type { CapturePosition } from "./viewGating";
 
 export const PROVISIONAL_REFERENCE_REP_SCHEMA =
-  "form-coach-provisional-reference-rep/v1" as const;
+  "maxpower-provisional-reference-rep/v1" as const;
 export const PROVISIONAL_REFERENCE_PROFILE_SCHEMA =
-  "form-coach-provisional-reference-profile/v1" as const;
+  "maxpower-provisional-reference-profile/v1" as const;
 
 export const LAT_PULLDOWN_REFERENCE_FEATURES = [
   "leftWristHeight",

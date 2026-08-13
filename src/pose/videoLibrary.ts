@@ -171,7 +171,7 @@ export function buildVideoLibraryFromConfirmedCaptures(
     })];
   });
   return Object.freeze({
-    version: "form-coach-confirmed-capture-library/v1",
+    version: "maxpower-confirmed-capture-library/v1",
     videos: Object.freeze(videos),
   });
 }

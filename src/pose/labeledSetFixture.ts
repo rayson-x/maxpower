@@ -9,7 +9,7 @@ import {
 } from "./kinematicsProfile";
 import type { RepSegment } from "./repSegmenter";
 
-export const LABELED_SET_FIXTURE_SCHEMA = "form-coach-labeled-set/v1" as const;
+export const LABELED_SET_FIXTURE_SCHEMA = "maxpower-labeled-set/v1" as const;
 
 export type RepLabel<TPositive extends string, TNegative extends string> =
   | TPositive

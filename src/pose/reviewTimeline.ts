@@ -4,7 +4,10 @@ export interface ReviewTimelineSegment {
   peakMs: number;
   endMs: number;
   note?: string;
+  peakSource?: ReviewPeakSource;
 }
+
+export type ReviewPeakSource = "human_adjusted" | "algorithm_candidate" | "range_midpoint" | "legacy_unattributed";
 
 export type AddReviewRangeResult =
   | { status: "added"; segments: ReviewTimelineSegment[]; added: ReviewTimelineSegment }
@@ -12,7 +15,7 @@ export type AddReviewRangeResult =
   | { status: "rejected"; reason: string };
 
 const MIN_RANGE_MS = 250;
-export type ReviewRangeEditMode = "move" | "resize-start" | "resize-end";
+export type ReviewRangeEditMode = "move" | "resize-start" | "move-peak" | "resize-end";
 
 /**
  * Builds one human rep annotation from a drag range. The phase point snaps to
@@ -41,11 +44,12 @@ export function addReviewRange(input: {
     .map((segment) => segment.peakMs)
     .filter((peakMs) => peakMs >= startMs && peakMs <= endMs)
     .sort((left, right) => Math.abs(left - midpointMs) - Math.abs(right - midpointMs))[0];
-  const pending = {
+  const pending: ReviewTimelineSegment = {
     repIndex: 0,
     startMs,
     peakMs: Math.round(candidatePeak ?? midpointMs),
     endMs,
+    peakSource: candidatePeak === undefined ? "range_midpoint" : "algorithm_candidate",
   };
   const segments = [...input.existing.map((segment) => ({ ...segment })), pending]
     .sort((left, right) => left.startMs - right.startMs)
@@ -90,6 +94,14 @@ export function reviewRangeGeometryEquals(
   });
 }
 
+export function unreviewedPeakRepIndexes(
+  segments: readonly ReviewTimelineSegment[],
+): number[] {
+  return segments
+    .filter((segment) => segment.peakSource !== "human_adjusted")
+    .map((segment) => segment.repIndex);
+}
+
 /** Moves or resizes one range while keeping it between adjacent annotations. */
 export function editReviewRange(input: {
   segment: ReviewTimelineSegment;
@@ -107,12 +119,31 @@ export function editReviewRange(input: {
     const delta = startMs - original.startMs;
     return { ...original, startMs, peakMs: original.peakMs + delta, endMs: original.endMs + delta };
   }
+  if (input.mode === "move-peak") {
+    return {
+      ...original,
+      peakMs: Math.round(clamp(input.pointerMs, original.startMs, original.endMs)),
+      peakSource: "human_adjusted",
+    };
+  }
   if (input.mode === "resize-start") {
     const startMs = Math.round(clamp(input.pointerMs, input.previousEndMs, original.endMs - MIN_RANGE_MS));
-    return { ...original, startMs, peakMs: Math.max(startMs, original.peakMs) };
+    const peakMs = Math.max(startMs, original.peakMs);
+    return {
+      ...original,
+      startMs,
+      peakMs,
+      ...(peakMs === original.peakMs ? {} : { peakSource: "human_adjusted" as const }),
+    };
   }
   const endMs = Math.round(clamp(input.pointerMs, original.startMs + MIN_RANGE_MS, input.nextStartMs));
-  return { ...original, peakMs: Math.min(endMs, original.peakMs), endMs };
+  const peakMs = Math.min(endMs, original.peakMs);
+  return {
+    ...original,
+    peakMs,
+    endMs,
+    ...(peakMs === original.peakMs ? {} : { peakSource: "human_adjusted" as const }),
+  };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

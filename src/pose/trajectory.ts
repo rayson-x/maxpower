@@ -7,12 +7,12 @@ import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
  * 描述不了路径形状。这里给出主轴方向、直线度、路径长度、逐 rep 一致性、
  * 左右路径分离度、周期性,以及"身体动还是手臂动"这类只有轨迹才能回答的问题。
  *
- * 坐标为图像归一化坐标(y 向下)。拓扑自适应 BlazePose-33 与 COCO-17。
+ * 坐标为图像归一化坐标(y 向下)。拓扑自适应 BlazePose-33、COCO-17 与 Halpe-26。
  */
 
 // ---------- 拓扑 ----------
 
-export type Topology = "blazepose33" | "coco17";
+export type Topology = "blazepose33" | "coco17" | "halpe26";
 
 export interface JointIndex {
   shoulderL: number; shoulderR: number;
@@ -32,12 +32,17 @@ export const JOINT_INDEX: Record<Topology, JointIndex> = {
     shoulderL: 5, shoulderR: 6, elbowL: 7, elbowR: 8, wristL: 9, wristR: 10,
     hipL: 11, hipR: 12, kneeL: 13, kneeR: 14, ankleL: 15, ankleR: 16,
   },
+  halpe26: {
+    shoulderL: 5, shoulderR: 6, elbowL: 7, elbowR: 8, wristL: 9, wristR: 10,
+    hipL: 11, hipR: 12, kneeL: 13, kneeR: 14, ankleL: 15, ankleR: 16,
+  },
 };
 
 export function detectTopology(poses: PoseEstimate[]): Topology | null {
   const sample = poses.find((p) => p.landmarks.length > 0);
   if (!sample) return null;
   if (sample.landmarks.length >= 33) return "blazepose33";
+  if (sample.landmarks.length === 26) return "halpe26";
   if (sample.landmarks.length >= 17) return "coco17";
   return null;
 }

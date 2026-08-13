@@ -2,7 +2,7 @@ import type { CameraView } from "./formRuleEngine";
 import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
 import { CAPTURE_POSITIONS, type CapturePosition } from "./viewGating";
 
-export const LAT_PULLDOWN_TRAJECTORY_SCHEMA = "form-coach-trajectory-sample/v1" as const;
+export const LAT_PULLDOWN_TRAJECTORY_SCHEMA = "maxpower-trajectory-sample/v1" as const;
 const FRAMES_PER_REP = 32;
 const MIN_FEATURE_COVERAGE = 0.8;
 const MAX_CONSECUTIVE_MISSING_FRAMES = 4;

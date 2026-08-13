@@ -41,12 +41,25 @@ export async function extractInboxVideoPoseFixture(input: {
 
   try {
     await new Promise<void>((resolve, reject) => {
-      const processFrame = (mediaTime: number) => {
-        if (mediaTime <= lastMediaTime) return;
+      const resumePlayback = () => {
+        void video.play().catch((error: unknown) => {
+          // Pausing inside a frame callback intentionally interrupts the
+          // outstanding play request in some browsers. That interruption is
+          // part of controlled extraction, not a decode failure.
+          if (error instanceof DOMException && error.name === "AbortError") return;
+          reject(error);
+        });
+      };
+      const processFrame = (mediaTime: number): boolean => {
+        if (mediaTime <= lastMediaTime) return false;
         lastMediaTime = mediaTime;
         const timestampMs = Math.max(0, Math.round(mediaTime * 1000));
         try {
-          if (session.schedule(timestampMs) === "skip-frame") return;
+          if (session.schedule(timestampMs) === "skip-frame") return false;
+          // Inference is synchronous and can be much slower than playback.
+          // Freeze media time while it runs so background throttling or a busy
+          // main thread cannot let the video finish with most frames unvisited.
+          video.pause();
           const inferenceTimestampMs = Math.max(Math.round(performance.now()), lastInferenceTimestampMs + 1);
           lastInferenceTimestampMs = inferenceTimestampMs;
           const candidates = engine.estimateCandidates(video, inferenceTimestampMs) ?? [];
@@ -55,8 +68,10 @@ export async function extractInboxVideoPoseFixture(input: {
           // stale person lock across rack or bar occlusion.
           poses.push(session.processCandidates(candidates, timestampMs));
           input.onProgress?.(video.duration > 0 ? Math.min(1, mediaTime / video.duration) : 0);
+          return true;
         } catch (error) {
           reject(error);
+          return false;
         }
       };
       const schedule = () => {
@@ -64,14 +79,16 @@ export async function extractInboxVideoPoseFixture(input: {
         if (typeof video.requestVideoFrameCallback === "function") {
           frameHandle = video.requestVideoFrameCallback((_now, metadata) => {
             frameHandle = null;
-            processFrame(metadata.mediaTime);
+            const pausedForInference = processFrame(metadata.mediaTime);
             schedule();
+            if (pausedForInference && !video.ended) resumePlayback();
           });
           return;
         }
         rafHandle = requestAnimationFrame(() => {
-          processFrame(video.currentTime);
+          const pausedForInference = processFrame(video.currentTime);
           schedule();
+          if (pausedForInference && !video.ended) resumePlayback();
         });
       };
       video.addEventListener("ended", () => {
@@ -80,7 +97,7 @@ export async function extractInboxVideoPoseFixture(input: {
       }, { once: true });
       video.addEventListener("error", () => reject(new Error("待标注视频无法解码。")), { once: true });
       schedule();
-      void video.play().catch(reject);
+      resumePlayback();
     });
     if (poses.length < 2) throw new Error("整段视频没有形成可标注的 canonical 骨架序列。");
     return buildRecordingFixture({
