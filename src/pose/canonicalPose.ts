@@ -1,6 +1,7 @@
 import type { PoseEstimate, PoseLandmark } from "./PoseEngine";
 import {
   BONES_COCO17,
+  BONES_HALPE26,
   LandmarkTracker,
   type TrackedLandmark,
 } from "./landmarkTracker";
@@ -23,7 +24,7 @@ export const RUST_CANONICAL_ALGORITHM_VERSION =
 const RAW_PASS_THROUGH_MIN_VISIBILITY = 0.5;
 const MAX_CONTINUITY_DT_MS = 1000;
 
-export type PoseSchema = "blazepose33" | "coco17";
+export type PoseSchema = "blazepose33" | "coco17" | "halpe26";
 export type CanonicalLandmarkSource =
   | "measured"
   | "fused"
@@ -41,6 +42,7 @@ export type CanonicalContinuityReason =
   | "outlier-rejected-unknown"
   | "prediction-timeout"
   | "no-measurement-baseline"
+  | "equipment-path-constraint"
   | "legacy-tracker-prediction"
   | null;
 
@@ -112,7 +114,11 @@ class TypeScriptPoseContinuitySession implements PoseContinuitySession {
     const stabilized = config.stabilization === "legacy";
     this.tracker = stabilized
       ? new LandmarkTracker(
-          config.schema === "coco17" ? BONES_COCO17 : undefined,
+          config.schema === "blazepose33"
+            ? undefined
+            : config.schema === "halpe26"
+              ? BONES_HALPE26
+              : BONES_COCO17,
         )
       : null;
     this.smoother = stabilized ? new PoseSmoother() : null;

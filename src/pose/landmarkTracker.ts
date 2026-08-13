@@ -55,6 +55,19 @@ export const BONES_COCO17: Array<{ name: string; from: number; to: number }> = [
   { name: "thigh_r", from: 12, to: 14 },
 ];
 
+/** Halpe-26 keeps the COCO-17 body indices and adds explicit foot segments. */
+export const BONES_HALPE26: Array<{ name: string; from: number; to: number }> = [
+  ...BONES_COCO17,
+  { name: "shin_l", from: 13, to: 15 },
+  { name: "shin_r", from: 14, to: 16 },
+  { name: "foot_big_toe_l", from: 15, to: 20 },
+  { name: "foot_big_toe_r", from: 16, to: 21 },
+  { name: "foot_small_toe_l", from: 15, to: 22 },
+  { name: "foot_small_toe_r", from: 16, to: 23 },
+  { name: "heel_l", from: 15, to: 24 },
+  { name: "heel_r", from: 16, to: 25 },
+];
+
 interface Landmark {
   x: number;
   y: number;

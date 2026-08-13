@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import {
   loadInputCatalog,
   pinInputBytes,
@@ -52,11 +53,23 @@ interface FullContext {
 }
 
 interface FullDataRun {
+  readonly schemaVersion: "maxpower-motion-quality-rust-full-data-proposals/v1";
   readonly runId: string;
   readonly runKind: "full_data_proposal";
+  readonly frozen: true;
+  readonly acceptanceEligible: false;
   readonly frozenDigest: string;
+  readonly runtime: Readonly<{
+    visualInferenceRuntime: "offline_python_onnx_reference_only";
+    pythonVisionUsed: true;
+    clientVisualAcceptanceEligible: false;
+    [key: string]: unknown;
+  }>;
+  readonly limitations: readonly string[];
+  readonly reproducibility: Readonly<Record<string, unknown>>;
   readonly sources: readonly Readonly<{
     sourceCaptureId: string;
+    sourceVideoSha256: string;
     videoRef: string | null;
     contexts: readonly FullContext[];
   }>[];
@@ -88,15 +101,14 @@ export interface QualityReviewReleaseInput {
 }
 
 export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
-  if (input.fullDataRun.runKind !== "full_data_proposal") {
-    throw new Error("quality review queue must use a full_data_proposal run");
-  }
+  assertFullDataRun(input.fullDataRun);
   assertFrozenEvaluationRun(input.frozenEvaluationRun);
   const benchmarkContexts = new Map(input.frozenEvaluationRun.contexts.map((context) => [
     `${context.sourceCaptureId}\u0000${context.contextId}`,
     context,
   ]));
   const records = new Map(input.records.map((record) => [record.captureId, record]));
+  if (records.size !== input.records.length) throw new Error("review truth contains duplicate context ids");
   const items = input.fullDataRun.sources.flatMap((source) => source.contexts.map((context) => {
     const capability = requireReviewCapability(context.capability, context.captureId);
     assertContextRustProposalIntegrity(context);
@@ -149,6 +161,7 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
         view: context.capturePosition,
       },
       videoPath: record.source?.video ?? source.videoRef,
+      videoSha256: requireSha256(source.sourceVideoSha256, `${context.captureId}: source video`),
       durationMs: record.source?.durationMs ?? until,
       humanSegments: (record.segments ?? []).map((segment) => ({
         startMs: segment.startMs,
@@ -168,6 +181,12 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
       proposal: context.reviewProposal,
     });
   }));
+  const itemIds = new Set(items.map((item) => item.itemId));
+  if (items.length !== input.records.length
+      || itemIds.size !== items.length
+      || [...records.keys()].some((captureId) => !itemIds.has(captureId))) {
+    throw new Error("full-data review contexts do not exactly cover the human record inventory");
+  }
   const semantic = {
     schemaVersion: "maxpower-motion-quality-review-release/v1" as const,
     releaseId: input.releaseId,
@@ -175,6 +194,8 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
     runKind: "full_data_proposal" as const,
     sourceRunId: input.fullDataRun.runId,
     sourceFrozenDigest: input.fullDataRun.frozenDigest,
+    visualObservationProvenance: cloneJson(input.fullDataRun.runtime),
+    limitations: cloneJson(input.fullDataRun.limitations),
     defaultReviewer: { reviewerId: "owner", reviewerRole: "owner_observation" },
     inventory: {
       uniqueVideoCount: new Set(input.records.map((record) => record.sourceCaptureId ?? record.captureId)).size,
@@ -205,6 +226,7 @@ export function assembleQualityReviewRelease(input: QualityReviewReleaseInput) {
         acceptanceEligible: false,
         sourceRunId: input.fullDataRun.runId,
         sourceFrozenDigest: input.fullDataRun.frozenDigest,
+        visualObservationProvenance: cloneJson(input.fullDataRun.runtime),
       },
     },
     reproducibility: {
@@ -252,6 +274,16 @@ function assertContextRustProposalIntegrity(context: FullContext): void {
   if (!/^[a-f0-9]{64}$/u.test(proposalHash)
       || sha256(stableStringify(reviewSemantic)) !== proposalHash) {
     throw new Error(`${context.captureId}: review proposal hash mismatch`);
+  }
+  const lineage = requireRecord(
+    context.reviewProposal.lineage,
+    `${context.captureId}: review proposal lineage`,
+  );
+  if (lineage.capability !== context.capability) {
+    throw new Error(`${context.captureId}: review lineage capability mismatch`);
+  }
+  if (lineage.visualInput !== "offline_python_onnx_reference_observations") {
+    throw new Error(`${context.captureId}: review visual provenance mismatch`);
   }
   const reviewReps = new Map<string, Readonly<Record<string, unknown>>>();
   for (const raw of context.reviewProposal.reps) {
@@ -380,6 +412,12 @@ function requireString(value: unknown, label: string): string {
   return value;
 }
 
+function requireSha256(value: unknown, label: string): string {
+  const digest = requireString(value, `${label} SHA-256`);
+  if (!/^[a-f0-9]{64}$/u.test(digest)) throw new Error(`${label} SHA-256 is invalid`);
+  return digest;
+}
+
 export async function buildQualityReviewRelease(input: Readonly<{
   fullDataRunPath: string;
   frozenEvaluationRunPath: string;
@@ -387,6 +425,7 @@ export async function buildQualityReviewRelease(input: Readonly<{
   governanceInputCatalogPath: string;
   outputPath: string;
   frozenAt: string;
+  qualityReviewVideoRoot?: string;
 }>): Promise<void> {
   const catalogLoaded = await loadInputCatalog(input.governanceInputCatalogPath);
   const [runBytes, frozenEvaluationBytes, datasetBytes] = await Promise.all([
@@ -410,6 +449,10 @@ export async function buildQualityReviewRelease(input: Readonly<{
       pinInputBytes(catalogLoaded.value, "humanRanges", input.datasetPath, datasetBytes),
     ],
   });
+  await assertReleaseVideoBytes(
+    release.items,
+    resolve(input.qualityReviewVideoRoot ?? "public/archives/confirmed-captures"),
+  );
   const outputPath = resolve(input.outputPath);
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(release)}\n`, "utf8");
@@ -439,6 +482,57 @@ function assertFrozenEvaluationRun(run: FrozenEvaluationRun): void {
   if (sha256(stableStringify(semantic)) !== frozenDigest) {
     throw new Error("benchmark frozen prediction digest mismatch");
   }
+}
+
+function assertFullDataRun(run: FullDataRun): void {
+  if (run.schemaVersion !== "maxpower-motion-quality-rust-full-data-proposals/v1"
+      || run.runKind !== "full_data_proposal"
+      || run.frozen !== true
+      || run.acceptanceEligible !== false
+      || !Array.isArray(run.sources)) {
+    throw new Error("quality review queue must use a frozen full_data_proposal run");
+  }
+  if (run.runtime?.visualInferenceRuntime !== "offline_python_onnx_reference_only"
+      || run.runtime.pythonVisionUsed !== true
+      || run.runtime.clientVisualAcceptanceEligible !== false) {
+    throw new Error("full-data visual provenance is not offline calibration-only");
+  }
+  const { frozenDigest, ...semantic } = run;
+  if (!/^[a-f0-9]{64}$/u.test(frozenDigest)
+      || sha256(stableStringify(semantic)) !== frozenDigest) {
+    throw new Error("full-data frozen digest mismatch");
+  }
+}
+
+async function assertReleaseVideoBytes(
+  items: readonly Readonly<Record<string, unknown>>[],
+  root: string,
+): Promise<void> {
+  const checked = new Map<string, string>();
+  for (const item of items) {
+    const relativePath = requireString(item.videoPath, "quality review video path");
+    const expected = requireSha256(item.videoSha256, "quality review video");
+    if (isAbsolute(relativePath)) throw new Error("quality review video path is invalid");
+    const path = resolve(root, relativePath);
+    if (!path.startsWith(`${root}${sep}`)) throw new Error("quality review video path is invalid");
+    const prior = checked.get(path);
+    if (prior && prior !== expected) throw new Error("quality review video hash identity mismatch");
+    if (!prior && await sha256File(path) !== expected) {
+      throw new Error(`${relativePath}: quality review video SHA-256 mismatch`);
+    }
+    checked.set(path, expected);
+  }
+}
+
+async function sha256File(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  await new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.once("error", reject);
+    stream.once("end", resolvePromise);
+  });
+  return hash.digest("hex");
 }
 
 function cloneJson<T>(value: T): T {

@@ -165,6 +165,11 @@ async function run(ui: {
       pythonVisionUsed: false,
       userAgent: navigator.userAgent,
     },
+    boundaries: {
+      acceptanceEligible: false,
+      originAttestation: "self_reported_local_browser_runtime_not_cryptographic",
+      intendedUse: "client_runtime_diagnostic_only",
+    },
     cases,
   };
   window.__MAXPOWER_CLIENT_TEST_RESULT__ = result;

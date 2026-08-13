@@ -282,27 +282,27 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   }
   if (request.method === "POST" && url.pathname === "/api/client-realtime-agent/prediction") {
     if (!options.clientRealtimeAgentPredictionPath) throw new Error("client prediction output not found");
-    const prediction = await readJsonBody(request, 32 * 1024 * 1024) as {
-      schemaVersion?: unknown;
-      packSha256?: unknown;
-      runtime?: { pythonVisionUsed?: unknown };
-    };
-    if (prediction.schemaVersion !== "maxpower-client-single-pass-prediction/v1") {
-      throw new Error("invalid client prediction schema");
-    }
-    if (prediction.runtime?.pythonVisionUsed !== false) {
-      throw new Error("client prediction must prove Python vision was not used");
-    }
-    const pack = JSON.parse(await readFile(options.clientRealtimeAgentPackPath!, "utf8")) as { packSha256?: unknown };
-    if (prediction.packSha256 !== pack.packSha256) throw new Error("stale client prediction pack hash");
+    const prediction = await readJsonBody(request, 32 * 1024 * 1024);
+    const pack = JSON.parse(await readFile(options.clientRealtimeAgentPackPath!, "utf8")) as unknown;
+    const frozenPrediction = validateClientPredictionForFreeze(prediction, pack);
     try {
-      await writeFile(options.clientRealtimeAgentPredictionPath, `${JSON.stringify(prediction, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+      await writeFile(
+        options.clientRealtimeAgentPredictionPath,
+        `${JSON.stringify(frozenPrediction, null, 2)}\n`,
+        { encoding: "utf8", flag: "wx" },
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const existing = JSON.parse(await readFile(options.clientRealtimeAgentPredictionPath, "utf8")) as { packSha256?: unknown };
-      if (existing.packSha256 !== prediction.packSha256) throw new Error("stale frozen client prediction already exists");
+      const existing = JSON.parse(await readFile(options.clientRealtimeAgentPredictionPath, "utf8")) as unknown;
+      if (stableStringify(existing) !== stableStringify(frozenPrediction)) {
+        throw new Error("different frozen client prediction already exists");
+      }
     }
-    sendJson(response, 201, { frozen: true, path: options.clientRealtimeAgentPredictionPath });
+    sendJson(response, 201, {
+      frozen: true,
+      acceptanceEligible: false,
+      path: options.clientRealtimeAgentPredictionPath,
+    });
     return;
   }
   if (request.method === "GET" && url.pathname === "/media/video") {
@@ -342,7 +342,9 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     const release = await readQualityReviewRelease(options);
     const item = release.items.find((candidate) => candidate.itemId === id);
     if (!item) throw new Error("quality review video not found");
-    await serveVideoPath(request, response, resolveQualityReviewVideoPath(options, item.videoPath));
+    const videoPath = resolveQualityReviewVideoPath(options, item.videoPath);
+    await assertFileSha256(videoPath, item.videoSha256, "quality review video");
+    await serveVideoPath(request, response, videoPath);
     return;
   }
   if (request.method === "GET" && url.pathname === "/media/client-realtime-agent") {
@@ -381,6 +383,7 @@ async function route(request: IncomingMessage, response: ServerResponse, options
 interface QualityReviewReleaseItem extends Record<string, unknown> {
   readonly itemId: string;
   readonly videoPath: string;
+  readonly videoSha256: string;
   readonly proposal: Record<string, unknown>;
 }
 
@@ -460,12 +463,19 @@ async function readQualityReviewRelease(
     itemIds.add(itemId);
     const videoPath = requireJsonString(item.videoPath, `quality review item ${itemId} video path`);
     resolveQualityReviewVideoPath(options, videoPath);
+    const videoSha256 = requireJsonString(
+      item.videoSha256,
+      `quality review item ${itemId} video SHA-256`,
+    );
+    if (!/^[a-f0-9]{64}$/u.test(videoSha256)) {
+      throw new Error(`quality review item ${itemId} video SHA-256 is invalid`);
+    }
     const proposal = requireJsonRecord(item.proposal, `quality review item ${itemId} proposal`);
     const proposalHash = requireJsonString(proposal.proposalHash, `quality review item ${itemId} proposal hash`);
     requireStableHash(proposal, "proposalHash", proposalHash, `quality review item ${itemId} proposal`);
     requireJsonRecord(proposal.lineage, `quality review item ${itemId} proposal lineage`);
     if (!Array.isArray(proposal.reps)) throw new Error(`quality review item ${itemId} proposal reps are invalid`);
-    return { ...item, itemId, videoPath, proposal };
+    return { ...item, itemId, videoPath, videoSha256, proposal };
   });
 
   return {
@@ -514,6 +524,17 @@ function resolveQualityReviewVideoPath(
   const path = resolve(root, relativePath);
   if (!path.startsWith(`${root}${sep}`)) throw new Error("quality review video path is invalid");
   return path;
+}
+
+async function assertFileSha256(path: string, expected: string, label: string): Promise<void> {
+  const hash = createHash("sha256");
+  await new Promise<void>((resolvePromise, reject) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.once("error", reject);
+    stream.once("end", resolvePromise);
+  });
+  if (hash.digest("hex") !== expected) throw new Error(`${label} SHA-256 mismatch`);
 }
 
 function requireJsonRecord(value: unknown, label: string): Record<string, unknown> {
@@ -602,6 +623,151 @@ function assertClientPackTruthFree(value: unknown): void {
     }
   };
   visit(value);
+}
+
+const PINNED_CLIENT_RUNTIME = Object.freeze({
+  onnxRuntime: "onnxruntime-web@1.22.0",
+  yolox: Object.freeze({
+    id: "yolox-nano-humanart-416x416",
+    publicPath: "/models/yolox-nano-humanart-416x416.onnx",
+    bytes: 3_722_395,
+    sha256: "1450966de24902b18aada1a78913d7efd8fc8dcd51bd4d0d5591476bd4a38821",
+  }),
+  rtmpose: Object.freeze({
+    id: "rtmpose-m-halpe26-256x192",
+    publicPath: "/models/rtmpose-m-halpe26-256x192.onnx",
+    bytes: 55_685_444,
+    sha256: "26f3a19e61304a600dfb82d1001d41d24343b89fc70a33ffc84657e0b0bf2ecf",
+  }),
+  rustWasm: Object.freeze({
+    id: "maxpower-motion-sdk-wasm",
+    publicPath: "/motion-sdk/maxpower_motion_sdk.wasm",
+    bytes: 495_415,
+    sha256: "176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6",
+  }),
+});
+
+export function validateClientPredictionForFreeze(
+  rawPrediction: unknown,
+  rawPack: unknown,
+): Record<string, unknown> {
+  const prediction = requireJsonRecord(rawPrediction, "client prediction");
+  const pack = requireJsonRecord(rawPack, "client test pack");
+  assertClientPackTruthFree(pack);
+  const packSha256 = requireJsonString(pack.packSha256, "client test pack SHA-256");
+  const { packSha256: _packDigest, ...packSemantic } = pack;
+  if (!/^[a-f0-9]{64}$/u.test(packSha256)
+      || createHash("sha256").update(JSON.stringify(packSemantic)).digest("hex") !== packSha256) {
+    throw new Error("client test pack SHA-256 mismatch");
+  }
+  if (prediction.schemaVersion !== "maxpower-client-single-pass-prediction/v2"
+      || prediction.packSha256 !== packSha256) {
+    throw new Error("invalid or stale client prediction");
+  }
+  const identity = requireJsonRecord(prediction.predictionIdentity, "client prediction identity");
+  const identitySha256 = requireJsonString(
+    prediction.predictionIdentitySha256,
+    "client prediction identity SHA-256",
+  );
+  if (identity.schemaVersion !== "maxpower-client-prediction-identity/v1"
+      || identity.packSha256 !== packSha256
+      || createHash("sha256").update(stableStringify(identity)).digest("hex") !== identitySha256) {
+    throw new Error("client prediction identity hash mismatch");
+  }
+  if (identity.profileArchiveSha256 !== pack.sourceProfilesSha256) {
+    throw new Error("client prediction profile archive mismatch");
+  }
+  const models = requireJsonRecord(identity.models, "client prediction models");
+  requireExactJson(models.yolox, PINNED_CLIENT_RUNTIME.yolox, "YOLOX identity");
+  requireExactJson(models.rtmpose, PINNED_CLIENT_RUNTIME.rtmpose, "RTMPose identity");
+  requireExactJson(identity.rustWasm, PINNED_CLIENT_RUNTIME.rustWasm, "Rust WASM identity");
+  const identityRuntime = requireJsonRecord(identity.runtime, "client prediction runtime identity");
+  if (identityRuntime.onnxRuntime !== PINNED_CLIENT_RUNTIME.onnxRuntime
+      || (identityRuntime.yoloxExecutionProvider !== "webgpu"
+        && identityRuntime.yoloxExecutionProvider !== "wasm")
+      || (identityRuntime.rtmposeExecutionProvider !== "webgpu"
+        && identityRuntime.rtmposeExecutionProvider !== "wasm")
+      || identityRuntime.motionPacketContract !== "MOTN/1.8+QLT1"
+      || identityRuntime.pass !== "causal-chronological-single-pass"
+      || identityRuntime.harness !== "maxpower-client-single-pass/v2") {
+    throw new Error("client prediction runtime identity is invalid");
+  }
+  const packCases = requireJsonArray(pack.cases, "client test pack cases");
+  const expectedProfiles = packCases.map((rawCase) => {
+    const testCase = requireJsonRecord(rawCase, "client test case");
+    const profile = requireJsonRecord(testCase.profile, "client test profile");
+    return {
+      captureId: requireJsonString(testCase.captureId, "client test capture id"),
+      profileIdentity: requireJsonString(testCase.profileIdentity, "client test profile identity"),
+      contentHash: String(profile.contentHash),
+    };
+  }).sort(profileIdentityOrder);
+  const submittedProfiles = requireJsonArray(identity.profiles, "client prediction profiles")
+    .map((rawProfile) => {
+      const profile = requireJsonRecord(rawProfile, "client prediction profile");
+      return {
+        captureId: requireJsonString(profile.captureId, "client prediction capture id"),
+        profileIdentity: requireJsonString(profile.profileIdentity, "client prediction profile identity"),
+        contentHash: requireJsonString(profile.contentHash, "client prediction profile hash"),
+      };
+    }).sort(profileIdentityOrder);
+  if (stableStringify(submittedProfiles) !== stableStringify(expectedProfiles)) {
+    throw new Error("client prediction profile identities do not match the frozen pack");
+  }
+  const runtime = requireJsonRecord(prediction.runtime, "client prediction runtime");
+  if (runtime.pythonVisionUsed !== false
+      || runtime.packetContract !== "MOTN/1.8+QLT1"
+      || runtime.pass !== "causal-chronological-single-pass"
+      || stableStringify(runtime.byteIdentity) !== stableStringify(identity)) {
+    throw new Error("client prediction runtime provenance is invalid");
+  }
+  const expectedCaptureIds = expectedProfiles.map((profile) => profile.captureId).sort();
+  const cases = requireJsonArray(prediction.cases, "client prediction cases");
+  const submittedCaptureIds = cases.map((rawCase) => {
+    const testCase = requireJsonRecord(rawCase, "client prediction case");
+    const captureId = requireJsonString(testCase.captureId, "client prediction case capture id");
+    const assessment = requireJsonRecord(testCase.executionAssessment, "Rust execution assessment");
+    if (assessment.owner !== "rust-motion-sdk"
+        || assessment.packetContract !== "MOTN/1.8+QLT1"
+        || !Array.isArray(assessment.proposals)) {
+      throw new Error(`${captureId}: client result is not a Rust QLT1 projection`);
+    }
+    return captureId;
+  }).sort();
+  if (stableStringify(submittedCaptureIds) !== stableStringify(expectedCaptureIds)) {
+    throw new Error("client prediction cases do not exactly cover the frozen pack");
+  }
+  return {
+    ...prediction,
+    boundaries: {
+      acceptanceEligible: false,
+      originAttestation: "self_reported_local_browser_runtime_not_cryptographic",
+      intendedUse: "client_runtime_diagnostic_only",
+    },
+    serverVerification: {
+      packDigestVerified: true,
+      predictionIdentityDigestVerified: true,
+      pinnedRuntimeIdentityVerified: true,
+      exactCaseCoverageVerified: true,
+    },
+  };
+}
+
+function requireJsonArray(value: unknown, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function requireExactJson(actual: unknown, expected: unknown, label: string): void {
+  if (stableStringify(actual) !== stableStringify(expected)) throw new Error(`${label} mismatch`);
+}
+
+function profileIdentityOrder(
+  left: Readonly<{ captureId: string; profileIdentity: string }>,
+  right: Readonly<{ captureId: string; profileIdentity: string }>,
+): number {
+  return left.captureId.localeCompare(right.captureId)
+    || left.profileIdentity.localeCompare(right.profileIdentity);
 }
 
 async function serveEquipmentAsset(

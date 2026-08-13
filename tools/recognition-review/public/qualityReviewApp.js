@@ -132,6 +132,21 @@
     });
   }
 
+  function syncExistingDecisionDraft(review, target, rawDraft) {
+    const existing = review.getDecision(target);
+    if (!existing) return null;
+    const draft = requireRecord(rawDraft, "review decision draft");
+    if (!Object.prototype.hasOwnProperty.call(draft, "correctedValue")) {
+      throw new Error("correctedValue must be explicitly provided as a value or null");
+    }
+    return review.setDecision({
+      target: existing.target,
+      verdict: existing.verdict,
+      correctedValue: draft.correctedValue,
+      note: draft.note ?? null,
+    });
+  }
+
   function normalizeRelease(value) {
     const release = requireRecord(value, "quality review release");
     if (release.schemaVersion !== RELEASE_SCHEMA) throw new Error("unsupported quality review release schema");
@@ -481,23 +496,17 @@
     function bindReviewControls() {
       document.querySelectorAll(".review-card").forEach((card) => {
         card.querySelectorAll("[data-verdict]").forEach((button) => button.addEventListener("click", () => {
-          const target = card.dataset.kind === "endpoint"
-            ? { kind: "endpoint", repId: card.dataset.repId, endpoint: card.dataset.endpoint }
-            : { kind: "conclusion", repId: card.dataset.repId, conclusionId: card.dataset.conclusionId };
-          const correctionInput = card.querySelector(".correction-input");
-          const noteInput = card.querySelector(".note-input");
-          const correctedValue = card.dataset.kind === "endpoint"
-            ? (correctionInput.value.trim() ? { occurredAtMs: Math.round(Number(correctionInput.value)) } : null)
-            : parseCorrection(correctionInput.value);
-          if (card.dataset.kind === "endpoint" && correctedValue && !Number.isFinite(correctedValue.occurredAtMs)) {
+          const target = reviewTargetForCard(card);
+          const draft = reviewDraftForCard(card);
+          if (draft.error) {
             setNotice("端点修正必须是毫秒数", "error");
             return;
           }
           state.activeReview.setDecision({
             target,
             verdict: button.dataset.verdict,
-            correctedValue,
-            note: noteInput.value || null,
+            correctedValue: draft.correctedValue,
+            note: draft.note,
           });
           setNotice("已保留在当前页面内存；尚未导出。", "ok");
           renderQueue();
@@ -505,6 +514,21 @@
           renderReviewPanel();
           renderProgress();
         }));
+        card.querySelectorAll(".correction-input, .note-input").forEach((input) => {
+          const syncDraft = () => {
+            const target = reviewTargetForCard(card);
+            if (!state.activeReview.getDecision(target)) return;
+            const draft = reviewDraftForCard(card);
+            if (draft.error) {
+              setNotice("端点修正必须是毫秒数", "error");
+              return;
+            }
+            syncExistingDecisionDraft(state.activeReview, target, draft);
+            setNotice("修改已更新到当前页面内存；尚未导出。", "ok");
+          };
+          input.addEventListener("input", syncDraft);
+          input.addEventListener("change", syncDraft);
+        });
         const seek = card.querySelector("[data-seek-ms]");
         if (seek) seek.addEventListener("click", () => {
           video.pause();
@@ -512,6 +536,27 @@
           updatePlayback();
         });
       });
+    }
+
+    function reviewTargetForCard(card) {
+      return card.dataset.kind === "endpoint"
+        ? { kind: "endpoint", repId: card.dataset.repId, endpoint: card.dataset.endpoint }
+        : { kind: "conclusion", repId: card.dataset.repId, conclusionId: card.dataset.conclusionId };
+    }
+
+    function reviewDraftForCard(card) {
+      const correctionInput = card.querySelector(".correction-input");
+      const noteInput = card.querySelector(".note-input");
+      const correctedValue = card.dataset.kind === "endpoint"
+        ? (correctionInput.value.trim() ? { occurredAtMs: Math.round(Number(correctionInput.value)) } : null)
+        : parseCorrection(correctionInput.value);
+      return {
+        correctedValue,
+        note: noteInput.value || null,
+        error: card.dataset.kind === "endpoint"
+          && correctedValue
+          && !Number.isFinite(correctedValue.occurredAtMs),
+      };
     }
 
     function renderProgress() {
@@ -836,6 +881,7 @@
     frameAt,
     lineageSummary,
     mount,
+    syncExistingDecisionDraft,
     trajectoryUntil,
   };
 });

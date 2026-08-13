@@ -99,6 +99,9 @@ interface ReviewProposalInput {
   readonly profileIdentity: string;
   readonly profileHash: string;
   readonly capability: MotionAssessmentCapability;
+  readonly visualInput?:
+    | "offline_python_onnx_reference_observations"
+    | "client_onnxruntime_yolox_rtmpose_halpe26_observations";
   readonly appliedPolicy?: Readonly<Record<string, unknown>>;
   readonly rustProposals: readonly Readonly<Record<string, unknown>>[];
 }
@@ -152,13 +155,16 @@ export function buildReviewProposal(input: ReviewProposalInput): Readonly<Frozen
       conclusions,
     };
   });
+  if (reps.some((rep) => rep.rustCapability !== input.capability)) {
+    throw new Error("review context capability must match every Rust proposal capability");
+  }
   const semantic = {
     schemaVersion: "maxpower.motion-quality-proposal/v1" as const,
     lineage: {
       schemaVersion: "maxpower-motion-quality-review-proposal/v1",
       runKind: "full_data_proposal",
       producer: "rust_motion_sdk_motn_1_8_qlt1",
-      visualInput: "client_deployable_yolox_rtmpose_halpe26_canonical_observations",
+      visualInput: input.visualInput ?? "offline_python_onnx_reference_observations",
       profileIdentity: input.profileIdentity,
       profileHash: input.profileHash,
       capability: input.capability,
@@ -574,7 +580,7 @@ export async function runFullDataProposal(
         },
       });
       const profileHash = installed.contentHash.toString(16).padStart(16, "0");
-      const contextCapability = reviewCapabilityForContext({
+      const configuredCapability = reviewCapabilityForContext({
         actionId: record.exerciseId,
         capturePosition: record.capturePosition,
         anatomicalSide: side,
@@ -584,6 +590,18 @@ export async function runFullDataProposal(
         [...rustProposals.values()],
         appliedPolicy,
       );
+      const rustCapabilities = new Set(releaseQualityProposals.map((proposal) => (
+        requireMotionAssessmentCapability(proposal.capability, "Rust proposal capability")
+      )));
+      if (rustCapabilities.size !== 1) {
+        throw new Error(`${record.captureId}: Rust proposals must expose one context capability`);
+      }
+      const contextCapability = [...rustCapabilities][0]!;
+      if (contextCapability !== configuredCapability) {
+        throw new Error(
+          `${record.captureId}: configured capability ${configuredCapability} does not match Rust ${contextCapability}`,
+        );
+      }
       const reviewProposal = buildReviewProposal({
         captureId: record.captureId,
         actionId: record.exerciseId,
@@ -594,6 +612,7 @@ export async function runFullDataProposal(
         profileIdentity: installed.identity,
         profileHash,
         capability: contextCapability,
+        visualInput: "offline_python_onnx_reference_observations",
         appliedPolicy,
         rustProposals: releaseQualityProposals,
       });

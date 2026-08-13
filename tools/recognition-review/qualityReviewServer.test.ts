@@ -8,10 +8,110 @@ import { afterEach, test } from "node:test";
 
 import {
   createRecognitionReviewServer,
+  validateClientPredictionForFreeze,
   type RecognitionReviewServerOptions,
 } from "./server";
 
 const temporaryRoots: string[] = [];
+
+test("client prediction freeze verifies byte identity and remains diagnostic-only", () => {
+  const semanticPack = {
+    schemaVersion: "maxpower-client-single-pass-test-pack/v1",
+    protocol: { inference: "client_onnx_yolox_rtmpose_halpe26_to_rust_sdk" },
+    seed: "fixture-seed",
+    sourceProfilesSha256: "4".repeat(64),
+    cases: [{
+      captureId: "capture-a",
+      profileIdentity: "barbell_bench_press/front/bilateral/barbell/fixture-v1",
+      profile: { contentHash: "0000000000000001" },
+    }],
+  };
+  const pack = {
+    ...semanticPack,
+    packSha256: createHash("sha256").update(JSON.stringify(semanticPack)).digest("hex"),
+  };
+  const identity = {
+    schemaVersion: "maxpower-client-prediction-identity/v1",
+    packSha256: pack.packSha256,
+    profileArchiveSha256: semanticPack.sourceProfilesSha256,
+    models: {
+      yolox: {
+        id: "yolox-nano-humanart-416x416",
+        publicPath: "/models/yolox-nano-humanart-416x416.onnx",
+        bytes: 3_722_395,
+        sha256: "1450966de24902b18aada1a78913d7efd8fc8dcd51bd4d0d5591476bd4a38821",
+      },
+      rtmpose: {
+        id: "rtmpose-m-halpe26-256x192",
+        publicPath: "/models/rtmpose-m-halpe26-256x192.onnx",
+        bytes: 55_685_444,
+        sha256: "26f3a19e61304a600dfb82d1001d41d24343b89fc70a33ffc84657e0b0bf2ecf",
+      },
+    },
+    rustWasm: {
+      id: "maxpower-motion-sdk-wasm",
+      publicPath: "/motion-sdk/maxpower_motion_sdk.wasm",
+      bytes: 495_415,
+      sha256: "176da2451d029e170243cac4f2df6a92aeb9464c901bef75586066fa93a7c8b6",
+    },
+    profiles: [{
+      captureId: "capture-a",
+      profileIdentity: semanticPack.cases[0]!.profileIdentity,
+      contentHash: "0000000000000001",
+    }],
+    runtime: {
+      onnxRuntime: "onnxruntime-web@1.22.0",
+      yoloxExecutionProvider: "webgpu",
+      rtmposeExecutionProvider: "wasm",
+      motionPacketContract: "MOTN/1.8+QLT1",
+      pass: "causal-chronological-single-pass",
+      harness: "maxpower-client-single-pass/v2",
+      userAgent: "fixture-browser/1",
+    },
+  };
+  const prediction = {
+    schemaVersion: "maxpower-client-single-pass-prediction/v2",
+    packSha256: pack.packSha256,
+    predictionIdentity: identity,
+    predictionIdentitySha256: createHash("sha256").update(stableStringify(identity)).digest("hex"),
+    runtime: {
+      pythonVisionUsed: false,
+      packetContract: "MOTN/1.8+QLT1",
+      pass: "causal-chronological-single-pass",
+      byteIdentity: identity,
+    },
+    cases: [{
+      captureId: "capture-a",
+      executionAssessment: {
+        owner: "rust-motion-sdk",
+        packetContract: "MOTN/1.8+QLT1",
+        proposals: [],
+      },
+    }],
+  };
+
+  const frozen = validateClientPredictionForFreeze(prediction, pack);
+  assert.equal((frozen.boundaries as { acceptanceEligible: boolean }).acceptanceEligible, false);
+  assert.equal(
+    (frozen.serverVerification as { predictionIdentityDigestVerified: boolean })
+      .predictionIdentityDigestVerified,
+    true,
+  );
+  assert.throws(
+    () => validateClientPredictionForFreeze({
+      ...prediction,
+      cases: [],
+    }, pack),
+    /exactly cover/u,
+  );
+  assert.throws(
+    () => validateClientPredictionForFreeze({
+      ...prediction,
+      predictionIdentity: { ...identity, rustWasm: { ...identity.rustWasm, sha256: "0".repeat(64) } },
+    }, pack),
+    /identity hash mismatch/u,
+  );
+});
 
 afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
@@ -76,6 +176,11 @@ test("quality review exposes only frozen GET evidence and range-addressable vide
     assert.equal(rangeResponse.status, 206);
     assert.equal(rangeResponse.headers.get("content-range"), "bytes 2-5/8");
     assert.deepEqual(Buffer.from(await rangeResponse.arrayBuffer()), Buffer.from([2, 3, 4, 5]));
+
+    await writeFile(videoPath, Buffer.from([9, 1, 2, 3, 4, 5, 6, 7]));
+    const changedVideoResponse = await fetch(`${baseUrl}/media/quality-review?id=item-a`);
+    assert.equal(changedVideoResponse.status, 500);
+    assert.match(await changedVideoResponse.text(), /video SHA-256 mismatch/u);
 
     const postResponse = await fetch(`${baseUrl}/api/review/quality-release`, {
       method: "POST",
@@ -225,6 +330,7 @@ function frozenRelease(videoPath: string) {
       title: "Barbell bench · front",
       capability: "quality_supported",
       videoPath,
+      videoSha256: createHash("sha256").update(Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])).digest("hex"),
       durationMs: 4_000,
       humanSegments: [{ startMs: 900, endMs: 3_100 }],
       evidence: {

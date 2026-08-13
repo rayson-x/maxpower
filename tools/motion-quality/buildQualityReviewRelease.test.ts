@@ -3,10 +3,46 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
-  assembleQualityReviewRelease,
+  assembleQualityReviewRelease as assembleQualityReviewReleaseImpl,
   computeRustQualityProposalContentHash,
 } from "./buildQualityReviewRelease.js";
 import { buildReviewProposal } from "./rustFullDataProposalRunner.js";
+
+type ReviewReleaseInput = Parameters<typeof assembleQualityReviewReleaseImpl>[0];
+
+function withFrozenFullDataRun(input: ReviewReleaseInput): ReviewReleaseInput {
+  const provided = input.fullDataRun as unknown as Record<string, unknown>;
+  const sources = (provided.sources as Array<Record<string, unknown>>).map((source) => ({
+    sourceVideoSha256: sha256("fixture-video"),
+    ...source,
+  }));
+  const semantic = {
+    schemaVersion: "maxpower-motion-quality-rust-full-data-proposals/v1" as const,
+    frozen: true as const,
+    acceptanceEligible: false as const,
+    runtime: {
+      visualInferenceRuntime: "offline_python_onnx_reference_only" as const,
+      pythonVisionUsed: true as const,
+      clientVisualAcceptanceEligible: false as const,
+    },
+    limitations: [] as string[],
+    reproducibility: {},
+    ...provided,
+    sources,
+  };
+  delete (semantic as Record<string, unknown>).frozenDigest;
+  return {
+    ...input,
+    fullDataRun: {
+      ...semantic,
+      frozenDigest: sha256(stableStringify(semantic)),
+    },
+  } as unknown as ReviewReleaseInput;
+}
+
+function assembleQualityReviewRelease(input: unknown): ReturnType<typeof assembleQualityReviewReleaseImpl> {
+  return assembleQualityReviewReleaseImpl(withFrozenFullDataRun(input as ReviewReleaseInput));
+}
 
 test("review release keeps human start/end separate from immutable Rust proposal", () => {
   const rustProposal = rustQualityProposalFixture("phase_supported");
@@ -73,6 +109,16 @@ test("review release keeps human start/end separate from immutable Rust proposal
   assert.deepEqual(release.items[0].humanSegments, [{ startMs: 500, endMs: 1_500 }]);
   assert.equal("peakMs" in release.items[0].humanSegments[0], false);
   assert.equal(release.items[0].proposal.proposalHash, reviewProposal.proposalHash);
+  assert.equal(
+    release.items[0].proposal.lineage.visualInput,
+    "offline_python_onnx_reference_observations",
+  );
+  assert.equal(
+    release.visualObservationProvenance.visualInferenceRuntime,
+    "offline_python_onnx_reference_only",
+  );
+  assert.equal(release.visualObservationProvenance.clientVisualAcceptanceEligible, false);
+  assert.equal(release.items[0].videoSha256, sha256("fixture-video"));
   assert.equal(release.items[0].evidence.source, "current_rust_single_pass");
   assert.equal(release.items[0].evidence.equipmentTrajectories[0].points[0].y, 0.4);
   const reviewEvidence = release.items[0].evidence as typeof release.items[0]["evidence"] & {
@@ -99,6 +145,69 @@ test("review release keeps human start/end separate from immutable Rust proposal
   assert.equal(release.evidenceRuns.calibration.runKind, "full_data_proposal");
   assert.equal(release.items[0].evidenceLinks.benchmarkContextId, "context-a");
   assert.equal(Object.isFrozen(release), true);
+});
+
+test("review release rejects a changed full-data run with a stale frozen digest", () => {
+  const rustProposal = rustQualityProposalFixture("phase_supported");
+  const reviewProposal = buildReviewProposal({
+    captureId: "context-stale-full-digest",
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    sourceCaptureId: "source-stale-full-digest",
+    videoRef: null,
+    profileIdentity: rustProposal.profileIdentity,
+    profileHash: rustProposal.profileHash,
+    capability: "phase_supported",
+    rustProposals: [rustProposal],
+  });
+  const valid = withFrozenFullDataRun(proposalIntegrityReleaseInput(
+    rustProposal,
+    reviewProposal,
+    "stale-full-digest",
+  ));
+  const tampered = {
+    ...valid,
+    fullDataRun: { ...valid.fullDataRun, runId: "changed-after-freeze" },
+  };
+  assert.throws(
+    () => assembleQualityReviewReleaseImpl(tampered),
+    /full-data frozen digest mismatch/u,
+  );
+});
+
+test("review release rejects a digest-valid full-data run that omits human contexts", () => {
+  const rustProposal = rustQualityProposalFixture("phase_supported");
+  const reviewProposal = buildReviewProposal({
+    captureId: "context-truncated-run",
+    actionId: "barbell_bench_press",
+    capturePosition: "front",
+    anatomicalSide: null,
+    sourceCaptureId: "source-truncated-run",
+    videoRef: null,
+    profileIdentity: rustProposal.profileIdentity,
+    profileHash: rustProposal.profileHash,
+    capability: "phase_supported",
+    rustProposals: [rustProposal],
+  });
+  const valid = withFrozenFullDataRun(proposalIntegrityReleaseInput(
+    rustProposal,
+    reviewProposal,
+    "truncated-run",
+  ));
+  const { frozenDigest: _digest, ...fullSemantic } = valid.fullDataRun;
+  const truncatedSemantic = { ...fullSemantic, sources: [] };
+  const truncated = {
+    ...valid,
+    fullDataRun: {
+      ...truncatedSemantic,
+      frozenDigest: sha256(stableStringify(truncatedSemantic)),
+    },
+  };
+  assert.throws(
+    () => assembleQualityReviewReleaseImpl(truncated),
+    /do not exactly cover/u,
+  );
 });
 
 test("review release rejects a context capability outside the public contract", () => {
@@ -305,7 +414,7 @@ function proposalIntegrityReleaseInput(
   proposal: Readonly<Record<string, unknown>>,
   reviewProposal: ReturnType<typeof buildReviewProposal>,
   suffix: string,
-): Parameters<typeof assembleQualityReviewRelease>[0] {
+): ReviewReleaseInput {
   const contextId = `context-${suffix}`;
   const sourceId = `source-${suffix}`;
   const evidence = {
@@ -318,11 +427,22 @@ function proposalIntegrityReleaseInput(
     releaseId: `release-${suffix}`,
     frozenAt: "2026-08-13T10:30:00.000Z",
     fullDataRun: {
+      schemaVersion: "maxpower-motion-quality-rust-full-data-proposals/v1",
       runId: `full-${suffix}`,
       runKind: "full_data_proposal",
+      frozen: true,
+      acceptanceEligible: false,
       frozenDigest: "a".repeat(64),
+      runtime: {
+        visualInferenceRuntime: "offline_python_onnx_reference_only",
+        pythonVisionUsed: true,
+        clientVisualAcceptanceEligible: false,
+      },
+      limitations: [],
+      reproducibility: {},
       sources: [{
         sourceCaptureId: sourceId,
+        sourceVideoSha256: sha256("fixture-video"),
         videoRef: null,
         contexts: [{
           captureId: contextId,

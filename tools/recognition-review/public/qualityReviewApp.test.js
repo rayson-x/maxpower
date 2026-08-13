@@ -10,6 +10,7 @@ const {
   dimensionLabel,
   frameAt,
   lineageSummary,
+  syncExistingDecisionDraft,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
 
@@ -119,6 +120,47 @@ test("workspace round trip preserves explicit incorrect null corrections", () =>
   restored.importJson(exported);
   assert.equal(restored.exportJson(metadata), exported);
   assert.equal(restored.review("item-a").listDecisions()[0].correctedValue, null);
+});
+
+test("verdict-then-edit updates the exported decision without changing its verdict", () => {
+  const workspace = createWorkspace(fixtureRelease(), {
+    reviewerId: "owner",
+    reviewerRole: "owner_observation",
+  });
+  const review = workspace.review("item-a");
+  const target = { kind: "endpoint", repId: "rep-1", endpoint: "primary_turnaround" };
+
+  review.setDecision({
+    target,
+    verdict: "incorrect",
+    correctedValue: null,
+    note: null,
+  });
+  syncExistingDecisionDraft(review, target, {
+    correctedValue: { occurredAtMs: 1_875 },
+    note: "换向点应更早",
+  });
+  const metadata = {
+    exportId: "export-after-edit",
+    exportedAt: "2026-08-13T23:46:00.000Z",
+    applicationVersion: "quality-review/v1",
+  };
+  const edited = JSON.parse(workspace.exportJson(metadata))
+    .proposalReviews[0].review.decisions[0];
+  assert.equal(edited.verdict, "incorrect");
+  assert.deepEqual(edited.correctedValue, { occurredAtMs: 1_875 });
+  assert.equal(edited.note, "换向点应更早");
+
+  syncExistingDecisionDraft(review, target, {
+    correctedValue: null,
+    note: "保留错误结论，但暂时没有答案",
+  });
+
+  const exported = JSON.parse(workspace.exportJson(metadata));
+  const decision = exported.proposalReviews[0].review.decisions[0];
+  assert.equal(decision.verdict, "incorrect");
+  assert.equal(decision.correctedValue, null);
+  assert.equal(decision.note, "保留错误结论，但暂时没有答案");
 });
 
 test("evidence helpers synchronize observations and equipment trails to the video clock", () => {
