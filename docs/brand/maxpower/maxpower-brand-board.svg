@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">MaxPower brand direction</title>
+  <desc id="desc">App icon, wordmark, slogan and core palette for MaxPower.</desc>
+  <defs>
+    <radialGradient id="iconField" cx="34%" cy="22%" r="92%">
+      <stop offset="0" stop-color="#1A1E18"/>
+      <stop offset="0.58" stop-color="#0E100E"/>
+      <stop offset="1" stop-color="#080A08"/>
+    </radialGradient>
+  </defs>
+  <rect width="1600" height="1000" fill="#F7F6F2"/>
+  <text x="96" y="96" fill="#9A9EA6" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="5">BRAND DIRECTION / 01</text>
+
+  <g transform="translate(96 150)">
+    <rect width="600" height="600" rx="136" fill="url(#iconField)"/>
+    <path d="M115 418 L200 191 L296 370 L412 125 L490 418" fill="none" stroke="#C6F135" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g transform="translate(786 204)">
+    <text x="0" y="90" fill="#16181D" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="116" font-weight="900" letter-spacing="-5">MAX</text>
+    <text x="0" y="196" fill="#16181D" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="116" font-weight="900" letter-spacing="-5">POWER</text>
+    <rect x="0" y="237" width="112" height="12" rx="6" fill="#C6F135"/>
+    <text x="0" y="320" fill="#5A5E66" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" letter-spacing="0.5">Power, planned.</text>
+    <text x="0" y="375" fill="#16181D" font-family="Arial, Helvetica, sans-serif" font-size="40" font-weight="800">让进步有计划。</text>
+
+    <text x="0" y="490" fill="#9A9EA6" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="700" letter-spacing="4">THE MARK</text>
+    <text x="0" y="535" fill="#5A5E66" font-family="Arial, Helvetica, sans-serif" font-size="24">训练轨迹 · 上升趋势 · 字母 M</text>
+    <text x="0" y="575" fill="#5A5E66" font-family="Arial, Helvetica, sans-serif" font-size="24">不使用哑铃、肌肉或通用闪电符号</text>
+  </g>
+
+  <g transform="translate(96 826)">
+    <circle cx="44" cy="44" r="44" fill="#0E100E"/>
+    <text x="105" y="37" fill="#16181D" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800">POWER BLACK</text>
+    <text x="105" y="67" fill="#9A9EA6" font-family="monospace" font-size="18">#0E100E</text>
+
+    <circle cx="400" cy="44" r="44" fill="#C6F135"/>
+    <text x="461" y="37" fill="#16181D" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800">MOTION LIME</text>
+    <text x="461" y="67" fill="#9A9EA6" font-family="monospace" font-size="18">#C6F135</text>
+
+    <circle cx="756" cy="44" r="44" fill="#F7F6F2" stroke="#D8D6CE" stroke-width="2"/>
+    <text x="817" y="37" fill="#16181D" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800">TRAINING PAPER</text>
+    <text x="817" y="67" fill="#9A9EA6" font-family="monospace" font-size="18">#F7F6F2</text>
+
+    <circle cx="1160" cy="44" r="44" fill="#E85C3A"/>
+    <text x="1221" y="37" fill="#16181D" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="800">SAFETY TERRA</text>
+    <text x="1221" y="67" fill="#9A9EA6" font-family="monospace" font-size="18">#E85C3A</text>
+  </g>
+</svg>
