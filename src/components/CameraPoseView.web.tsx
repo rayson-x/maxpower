@@ -1,21 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import {
-  explainFormScore,
-  ZHIPU_DEFAULTS,
-  type AgentSettings,
-  type FormScoreExplanation,
-  type OpenRecognition,
-} from "../agent/coach";
 import { computeExerciseFeatures } from "../pose/exerciseFeatures";
 import {
   EXERCISE_REGISTRY,
   MUSCLE_GROUPS,
   type ExerciseMaturity,
 } from "../pose/exerciseRegistry";
-import { RULE_METRIC } from "../pose/formRuleEngine";
+import { RULE_METRIC, type SetScore } from "../pose/formRuleEngine";
 import { createWebMotionPacket, routeWebMotionPacket } from "../motion/webMotionPacket";
 import { CanonicalActiveDurationAccumulator } from "../motion/canonicalActiveDuration";
+import { buildJointAngleArc } from "../motion/jointAngleOverlay";
+import type { DecodedJointAngle } from "../motion/motionPacket";
 import {
   InferenceCompletionGate,
   type InferenceCompletionDropReason,
@@ -66,6 +61,7 @@ import {
 } from "../pose/repSegmenter";
 import { computeTrajectoryFeatures, type TrajectoryFeatures } from "../pose/trajectory";
 import { RtmposeEngine } from "../pose/RtmposeEngine";
+import { HALPE26_CONNECTIONS } from "../pose/halpe26";
 import {
   CAPTURE_POSITIONS,
   recommendCapturePosition,
@@ -154,29 +150,11 @@ const POSE_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
   [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32],
 ];
 
-// COCO-17 拓扑(RTMPose):鼻/眼/耳/肩/肘/腕/髋/膝/踝
-const COCO17_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
-  [0, 1], [0, 2], [1, 3], [2, 4], [0, 5], [0, 6],
-  [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
-  [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
-];
-
 // 肘角信号用的关节索引(肩/肘/腕),随拓扑切换
 const ELBOW_TRIPLETS = {
   mediapipe: { left: [11, 13, 15], right: [12, 14, 16] },
   rtmpose: { left: [5, 7, 9], right: [6, 8, 10] },
 } as const;
-
-const PROVIDER_DEFAULTS: Record<string, string> = {
-  zhipu: ZHIPU_DEFAULTS.modelId,
-  anthropic: "claude-3-5-haiku-20241022",
-  openai: "gpt-4.1-mini",
-  google: "gemini-2.0-flash",
-  deepseek: "deepseek-v4-flash",
-  openrouter: "openai/gpt-4.1-mini",
-};
-
-const STORAGE_KEY = "form-coach-agent-settings-v2";
 
 /** 单次分析的采集窗口上限。要装得下至少两个完整循环,分期才能切出 rep。 */
 const COLLECT_MAX_MS = 30_000;
@@ -239,9 +217,10 @@ const HOME_REP_PHASE_LABEL: Record<RustRepState["phase"], string> = {
 };
 const ENGINE_KINDS: Array<{ id: EngineKind; label: string }> = [
   { id: "mediapipe", label: "MediaPipe" },
-  { id: "rtmpose", label: "RTMPose-m" },
+  { id: "rtmpose", label: "YOLOX + RTMPose Halpe-26" },
 ];
-const RTMPOSE_MODEL_PATH = "/models/rtmpose-m-simcc-256x192.onnx";
+const RTMPOSE_MODEL_PATH = "/models/rtmpose-m-halpe26-256x192.onnx";
+const YOLOX_MODEL_PATH = "/models/yolox-nano-humanart-416x416.onnx";
 const STAGE_ASPECT = 16 / 9;
 
 function readWorkspacePage(): WorkspacePage {
@@ -253,7 +232,7 @@ function readWorkspacePage(): WorkspacePage {
 }
 
 function poseSchemaForEngine(kind: EngineKind): PoseSchema {
-  return kind === "rtmpose" ? "coco17" : "blazepose33";
+  return kind === "rtmpose" ? "halpe26" : "blazepose33";
 }
 
 function rustProfileForContext(
@@ -323,15 +302,19 @@ function configureRustExerciseProfile(
     ? observedProfile
     : simulatedProfile;
   if (dataProfile) {
-    session.installExerciseProfileData(dataProfile);
+    const installedProfile = session.installExerciseProfileData(dataProfile);
     // Recognition profiles, whether sourced from reviewed observations or a
     // simulated prior, may receive the same broad descriptive corridor. The
     // baseline never participates in cycle sealing; it only explains a
     // sealed motion's phase path to the user.
     const baseline = buildSimulatedTrajectoryBaseline(
       context,
-      dataProfile,
-      modelPath.includes("heavy") ? "mediapipe-pose-heavy" : "mediapipe-pose-provisional",
+      installedProfile,
+      installedProfile.schema === "halpe26"
+        ? "rtmpose-m-halpe26"
+        : modelPath.includes("heavy")
+          ? "mediapipe-pose-heavy"
+          : "mediapipe-pose-provisional",
     );
     if (baseline) session.installSimulatedTrajectoryBaseline(baseline);
   } else {
@@ -500,26 +483,41 @@ function summarizeMotionPerformance(
   return { normal: summarize("normal"), full: summarize("full") };
 }
 
-function loadSettings(): AgentSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw) as AgentSettings;
-      // 早前默认凭据是空字符串,当时保存过设置的浏览器会把这个空值存进 localStorage
-      // 并从此沿用下去——即使后来在 defaultCredentials.ts 里补上了真实 key 也不会生效,
-      // 因为这里只在"localStorage 里什么都没有"时才会去读默认值。只要保存的是空 key
-      // 就当作没配置,回退到当前默认值,不让一次性的空值被永久记住。
-      if (saved.apiKey) return saved;
-      return { ...saved, apiKey: ZHIPU_DEFAULTS.apiKey };
-    }
-  } catch {
-    /* ignore */
-  }
+interface FormScoreExplanation {
+  summary: string;
+  perRep: Array<{ repIndex: number; note: string }>;
+}
+
+/** Legacy comparison projection kept for archived capture rendering only. */
+interface OpenRecognition {
+  name: string;
+  nameEn: string;
+  equipment: string;
+  bodyPosition: string;
+  confidence: "high" | "medium" | "low";
+  uncertain: boolean;
+  reasoning: string;
+  evidence: string[];
+  alternatives: Array<{ name: string; whyNot: string }>;
+  cannotTell: string[];
+}
+
+/** Deterministic wording for the already-authoritative local rule score. */
+function explainFormScoreLocally(input: {
+  exerciseLabel: string;
+  score: SetScore;
+}): FormScoreExplanation {
+  const result = input.score.score === null
+    ? input.score.label
+    : `${input.score.score} 分（${input.score.label}）`;
   return {
-    provider: ZHIPU_DEFAULTS.provider,
-    modelId: ZHIPU_DEFAULTS.modelId,
-    baseUrl: ZHIPU_DEFAULTS.baseUrl,
-    apiKey: ZHIPU_DEFAULTS.apiKey,
+    summary: `${input.exerciseLabel}：${result}`,
+    perRep: input.score.reps.map((rep) => ({
+      repIndex: rep.repIndex,
+      note: rep.deductions.length
+        ? rep.deductions.map((deduction) => deduction.message).join("；")
+        : rep.status === "scored" ? "本次规则检查未发现需要提示的问题" : rep.label,
+    })),
   };
 }
 
@@ -726,11 +724,10 @@ export function CameraPoseView() {
   const [filterEnabled, setFilterEnabled] = useState(false);
   const [torsoLean, setTorsoLean] = useState<number | null>(null);
   const [pose, setPose] = useState<CanonicalPoseFrame | null>(null);
+  const [jointAngles, setJointAngles] = useState<readonly DecodedJointAngle[]>([]);
   const [fps, setFps] = useState(0);
   const [signalCurve, setSignalCurve] = useState<SignalSample[]>([]);
   const [segments, setSegments] = useState<RepSegment[]>([]);
-  const [settings, setSettings] = useState<AgentSettings>(loadSettings);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [analysisStage, setAnalysisStage] = useState<string | null>(null);
   const [classified, setClassified] = useState<string | null>(null);
   const [stageTimes, setStageTimes] = useState<Record<string, number>>({});
@@ -1029,7 +1026,7 @@ export function CameraPoseView() {
     const modelPathAtDispatch = modelPathRef.current;
     setModelLoading(true);
     const pending = engineKindAtDispatch === "rtmpose"
-      ? RtmposeEngine.create(RTMPOSE_MODEL_PATH)
+      ? RtmposeEngine.create(RTMPOSE_MODEL_PATH, YOLOX_MODEL_PATH)
       : PoseEngine.create(modelPathAtDispatch);
     engineLoadPromiseRef.current = pending;
     try {
@@ -1180,10 +1177,7 @@ export function CameraPoseView() {
     async (kind: EngineKind) => {
       if (kind === engineKindRef.current) return;
       if (recordingActiveRef.current) return;
-      if (kind !== "mediapipe") {
-        setError("Rust 正式识别链当前只接受 MediaPipe BlazePose33；RTMPose/COCO17 尚未完成索引映射，已拒绝切换。");
-        return;
-      }
+      setError(null);
       engineKindRef.current = kind;
       engineLoadEpochRef.current += 1;
       engineLoadPromiseRef.current = null;
@@ -1296,17 +1290,13 @@ export function CameraPoseView() {
           }
           const inferenceStartedAt = performance.now();
           const inferenceToken = inferenceCompletionGateRef.current.begin();
-          const candidates = engine instanceof PoseEngine
-            ? engine.estimateCandidates(currentVideo, inferenceTimestampMs)
-            : null;
-          const estimate = candidates
-            ? candidates[0] ?? {
-                timestampMs: inferenceTimestampMs,
-                landmarks: [],
-                worldLandmarks: [],
-              }
-            : engine.estimate(currentVideo, inferenceTimestampMs);
-          const inferenceMs = performance.now() - inferenceStartedAt;
+          const candidates = engine.estimateCandidates(
+            currentVideo,
+            engine instanceof RtmposeEngine ? mediaTimestampMs : inferenceTimestampMs,
+          );
+          const inferenceMs = engine instanceof RtmposeEngine
+            ? engine.latestInferenceMs
+            : performance.now() - inferenceStartedAt;
           const completion = inferenceCompletionGateRef.current.accept(inferenceToken);
           if (!completion.accepted) {
             recordDroppedFrame();
@@ -1328,13 +1318,42 @@ export function CameraPoseView() {
             }
             return;
           }
-          if (estimate) {
-            estimate.timestampMs = mediaTimestampMs;
+          // RTMPose runs asynchronously and deliberately keeps only the latest
+          // frame. A null result means this decoded camera frame produced no
+          // canonical observation; count it as backpressure loss instead of
+          // inflating the displayed/recorded processing FPS with camera ticks.
+          if (candidates === null) {
+            recordDroppedFrame();
+            if (recordingActiveRef.current) {
+              captureDiagnosticsRef.current.push({
+                timestampMs: mediaTimestampMs,
+                hasPose: false,
+                inferenceMs: Number(inferenceMs.toFixed(2)),
+                schedulerDecision,
+                dataGap: true,
+                processingError: "inference: no completed observation (latest-frame backpressure)",
+              });
+            }
+            return;
+          }
+          if (candidates !== null) {
+            const canonicalTimestampMs = engine instanceof RtmposeEngine
+              ? candidates[0]?.timestampMs ?? mediaTimestampMs
+              : mediaTimestampMs;
+            const estimate = candidates[0] ?? {
+              timestampMs: canonicalTimestampMs,
+              landmarks: [],
+              worldLandmarks: [],
+            };
+            estimate.timestampMs = canonicalTimestampMs;
+            if (!(engine instanceof RtmposeEngine)) {
+              candidates.forEach((candidate) => { candidate.timestampMs = canonicalTimestampMs; });
+            }
             processingStage = "rust-core";
             const rustStartedAt = performance.now();
             const canonicalFrame =
-              canonicalSessionRef.current instanceof RustCanonicalWasmSession && candidates
-                ? canonicalSessionRef.current.processCandidates(candidates, mediaTimestampMs)
+              canonicalSessionRef.current instanceof RustCanonicalWasmSession
+                ? canonicalSessionRef.current.processCandidates(candidates, canonicalTimestampMs)
                 : canonicalSessionRef.current!.process(estimate);
             const rustTotalMs = performance.now() - rustStartedAt;
             const rustTiming = canonicalSessionRef.current instanceof RustCanonicalWasmSession
@@ -1513,6 +1532,7 @@ export function CameraPoseView() {
               render: (packet) => {
                 const frame = packet.canonical;
                 setPose(usableLandmarkCount > 0 ? frame : null);
+                setJointAngles(packet.rustPacket?.jointAngles ?? []);
               },
               count: (packet) => {
                 const frame = packet.canonical;
@@ -1741,9 +1761,8 @@ export function CameraPoseView() {
       const exerciseLabel = EXERCISE_REGISTRY.get(analysis.profile?.exerciseId ?? "")?.nameZh ?? "力量训练动作";
       try {
         setFormExplanation(
-          await explainFormScore(settings, {
+          explainFormScoreLocally({
             exerciseLabel,
-            cameraView: cameraViewForRecording,
             score: analysis.score,
           }),
         );
@@ -1752,7 +1771,7 @@ export function CameraPoseView() {
       }
       setAnalysisStage("done");
     },
-    [settings],
+    [],
   );
 
   /** 录制结束后把视频和关键点 fixture 固化到本机采集库，并暴露导出链接。 */
@@ -1976,7 +1995,7 @@ export function CameraPoseView() {
     // This sidecar exists even for catalog-only exercises, unlike the labelled
     // rep template which correctly requires a validated-by-sampling profile.
     const captureMetadata = {
-      schemaVersion: "form-coach-capture-metadata/v1",
+      schemaVersion: "maxpower-capture-metadata/v1",
       videoId: fixture[0].video,
       keypointsFile: `${baseName}.json`,
       exerciseId: selectedExercise?.id ?? null,
@@ -2350,18 +2369,6 @@ export function CameraPoseView() {
     };
   }, []);
 
-  const updateSettings = (patch: Partial<AgentSettings>) => {
-    setSettings((previous) => {
-      const next = { ...previous, ...patch };
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  };
-
   /** 一键完整分析:采集 → 本地分期 → 逐 rep 指标 → 确定性规则评分。 */
   const runFullAnalysis = async () => {
     setAnalysisStage("collecting");
@@ -2490,9 +2497,8 @@ export function CameraPoseView() {
           "力量训练动作";
         try {
           const explanationStart = performance.now();
-          const explanation = await explainFormScore(settings, {
+          const explanation = explainFormScoreLocally({
             exerciseLabel,
-            cameraView,
             score: computedScore,
           });
           setFormExplanation(explanation);
@@ -2510,8 +2516,8 @@ export function CameraPoseView() {
     }
   };
 
-  const poseConnections = engineKind === "rtmpose" ? COCO17_CONNECTIONS : POSE_CONNECTIONS;
-  const landmarkTotal = engineKind === "rtmpose" ? 17 : 33;
+  const poseConnections = engineKind === "rtmpose" ? HALPE26_CONNECTIONS : POSE_CONNECTIONS;
+  const landmarkTotal = engineKind === "rtmpose" ? 26 : 33;
   const posePresentation = buildCanonicalPosePresentation(pose, poseConnections);
   const {
     renderableLandmarks,
@@ -2519,6 +2525,17 @@ export function CameraPoseView() {
     repairedLandmarks,
     usableLandmarks,
   } = posePresentation;
+  const anglePresentations = jointAngles.flatMap((angle) => {
+    const presentation = buildJointAngleArc(
+      angle,
+      (index) => {
+        const landmark = renderableLandmarks.get(index);
+        return landmark ? { x: landmark.x * 100, y: landmark.y * 100 } : null;
+      },
+      5,
+    );
+    return presentation ? [presentation] : [];
+  });
 
   const trackingOk = usableLandmarks.size >= landmarkTotal * 0.6;
   const analyzing = analysisStage !== null && analysisStage !== "done";
@@ -2736,6 +2753,17 @@ export function CameraPoseView() {
                     />
                   );
                 })}
+                {anglePresentations.map((angle) => (
+                  <path
+                    key={`angle:${angle.key}`}
+                    data-joint-angle={angle.key}
+                    d={angle.path}
+                    fill={`${HUD.primary}24`}
+                    stroke={HUD.primary}
+                    strokeWidth="0.42"
+                    opacity="0.95"
+                  />
+                ))}
                 {[...measuredLandmarks.entries()].map(([index, landmark]) => (
                   <circle
                     key={index}
@@ -2757,6 +2785,21 @@ export function CameraPoseView() {
                   />
                 ))}
               </svg>
+              <div style={{ ...styles.angleLabelLayer, ...videoViewport }} aria-hidden="true">
+                {anglePresentations.map((angle) => (
+                  <span
+                    key={`angle-label:${angle.key}`}
+                    title={angle.accessibleLabel}
+                    style={{
+                      ...styles.angleLabel,
+                      left: `${mode === "camera" ? 100 - angle.label.x : angle.label.x}%`,
+                      top: `${angle.label.y}%`,
+                    }}
+                  >
+                    {angle.valueText}
+                  </span>
+                ))}
+              </div>
               {status !== "running" && (
                 <div style={styles.stagePlaceholder}>
                   <div style={styles.placeholderReticle}>◎</div>
@@ -3547,14 +3590,11 @@ export function CameraPoseView() {
               {ENGINE_KINDS.map((engine) => (
                 <button
                   key={engine.id}
-                  disabled={isRecording || engine.id !== "mediapipe"}
-                  title={engine.id !== "mediapipe"
-                    ? "Rust 正式链尚未支持 COCO17 索引，避免静默误识别"
-                    : undefined}
+                  disabled={isRecording || modelLoading}
                   style={{
                     ...styles.btnSmall,
                     ...(engineKind === engine.id ? styles.btnSmallActive : null),
-                    opacity: isRecording || engine.id !== "mediapipe" ? 0.3 : 1,
+                    opacity: isRecording || modelLoading ? 0.3 : 1,
                   }}
                   onClick={() => void switchEngine(engine.id)}
                 >
@@ -3731,7 +3771,7 @@ export function CameraPoseView() {
                   style={styles.btnSmall}
                   onClick={() => {
                     const blob = new Blob([JSON.stringify({
-                      schemaVersion: "form-coach-motion-diagnostics/v1",
+                      schemaVersion: "maxpower-motion-diagnostics/v1",
                       exportedAt: new Date().toISOString(),
                       performance: summarizeMotionPerformance(motionDiagnosticsRef.current),
                       staleInferenceCompletions: staleCompletionDiagnosticsRef.current,
@@ -3764,72 +3804,6 @@ export function CameraPoseView() {
 
           {error && <p style={styles.errorText}>{error}</p>}
 
-          {isConsole && (
-          <div style={styles.sideSection}>
-            <button
-              style={styles.settingsToggle}
-              onClick={() => setSettingsOpen((open) => !open)}
-            >
-              05 · LLM 设置 {settingsOpen ? "▲" : "▼"}
-              <span style={styles.settingsHint}>
-                {settings.provider}/{settings.modelId.slice(0, 16)}
-              </span>
-            </button>
-            {settingsOpen && (
-              <div style={{ marginTop: 8 }}>
-                <label style={styles.field}>
-                  PROVIDER
-                  <select
-                    value={settings.provider}
-                    onChange={(event) => {
-                      const provider = event.target.value;
-                      updateSettings({
-                        provider,
-                        modelId: PROVIDER_DEFAULTS[provider] ?? "",
-                        ...(provider === "zhipu"
-                          ? {
-                              baseUrl: ZHIPU_DEFAULTS.baseUrl,
-                              apiKey: settings.apiKey || ZHIPU_DEFAULTS.apiKey,
-                            }
-                          : { baseUrl: undefined }),
-                      });
-                    }}
-                  >
-                    {Object.keys(PROVIDER_DEFAULTS).map((provider) => (
-                      <option key={provider} value={provider}>
-                        {provider}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label style={styles.field}>
-                  MODEL
-                  <input
-                    value={settings.modelId}
-                    onChange={(event) => updateSettings({ modelId: event.target.value })}
-                  />
-                </label>
-                {settings.provider === "zhipu" && (
-                  <label style={styles.field}>
-                    BASE URL
-                    <input
-                      value={settings.baseUrl ?? ""}
-                      onChange={(event) => updateSettings({ baseUrl: event.target.value })}
-                    />
-                  </label>
-                )}
-                <label style={styles.field}>
-                  API KEY
-                  <input
-                    type="password"
-                    value={settings.apiKey}
-                    onChange={(event) => updateSettings({ apiKey: event.target.value })}
-                  />
-                </label>
-              </div>
-            )}
-          </div>
-          )}
         </aside>
       </div>
         </>
@@ -4639,6 +4613,28 @@ const styles: Record<string, React.CSSProperties> = {
   overlay: {
     width: "100%",
     height: "100%",
+  },
+  angleLabelLayer: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    overflow: "hidden",
+    pointerEvents: "none",
+    zIndex: 3,
+  },
+  angleLabel: {
+    position: "absolute",
+    transform: "translate(-50%, -50%)",
+    padding: "2px 5px",
+    border: `1px solid ${HUD.primaryDim}`,
+    borderRadius: 6,
+    background: "rgba(5, 12, 8, .78)",
+    color: HUD.primary,
+    fontFamily: HUD.mono,
+    fontSize: 10,
+    fontWeight: 800,
+    lineHeight: 1,
+    textShadow: `0 0 8px ${HUD.primary}66`,
   },
   hud: {
     position: "absolute",

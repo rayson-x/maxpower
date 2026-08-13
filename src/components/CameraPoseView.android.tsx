@@ -1,1 +1,1 @@
-export { CameraPoseView } from "./CameraPoseView.mobile";
+export { MobileApp as CameraPoseView } from "../mobile/ui/MobileApp";

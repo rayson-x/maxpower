@@ -8,10 +8,13 @@ import {
 } from "../pose/annotationInbox";
 import { EXERCISE_REGISTRY, MUSCLE_GROUPS } from "../pose/exerciseRegistry";
 import type { CameraView } from "../pose/formRuleEngine";
-import { analyzePoseSet } from "../pose/poseSetAnalysis";
-import type { PoseEstimate } from "../pose/PoseEngine";
-import { segmentRepsAuto } from "../pose/repSegmenter";
-import { reviewDraftAfterContextChange } from "../pose/reviewCaptureState";
+import { getKinematicsProfile } from "../pose/kinematicsProfile";
+import {
+  adjacentReviewItem,
+  buildManualReviewFixture,
+  manualReviewValidationError,
+  reviewDraftAfterContextChange,
+} from "../pose/reviewCaptureState";
 import { reviewKeyboardShortcut } from "../pose/reviewKeyboardShortcut";
 import {
   addReviewRange,
@@ -19,21 +22,15 @@ import {
   reviewRangeGeometryEquals,
   restoreReviewRangeSnapshot,
   timelineTimeAt,
+  unreviewedPeakRepIndexes,
+  type ReviewPeakSource,
   type ReviewRangeEditMode,
 } from "../pose/reviewTimeline";
-import { selectTrainingWindow } from "../pose/trainingWindow";
 import { reviewedNegativeWindows, type TimeWindow } from "../pose/segmentationTraining";
 import type { LatPulldownTrajectorySample } from "../pose/trajectoryDataset";
 import { CAPTURE_POSITIONS, type CapturePosition } from "../pose/viewGating";
-import { extractInboxVideoPoseFixture } from "../pose/inboxVideoPoseExtractor";
 
-interface ImportedFixture {
-  video: string;
-  durationSec: number;
-  stepMs?: number;
-  model?: string;
-  poses: PoseEstimate[];
-}
+type ImportedFixture = ReturnType<typeof buildManualReviewFixture>;
 
 interface ReviewCapture {
   id: string;
@@ -81,7 +78,7 @@ interface ReviewAnalysisVersion {
   approvedSegments: Candidate["segments"];
   weakNegativeWindows: TimeWindow[];
   note?: string;
-  algorithmVersion: "reviewed-canonical-replay/v1";
+  algorithmVersion: "reviewed-canonical-replay/v1" | "manual-video-review/v1";
 }
 
 interface ReviewDraft {
@@ -102,7 +99,14 @@ interface Candidate {
   count: number;
   score: string;
   reason: string;
-  segments: Array<{ repIndex: number; startMs: number; peakMs: number; endMs: number; note?: string }>;
+  segments: Array<{
+    repIndex: number;
+    startMs: number;
+    peakMs: number;
+    endMs: number;
+    note?: string;
+    peakSource?: ReviewPeakSource;
+  }>;
   tone: "current" | "caution";
 }
 
@@ -121,8 +125,8 @@ interface ReviewSegmentEdit {
   historyCaptured: boolean;
 }
 
-const APPROVAL_KEY = "form-coach-capture-approvals/v1";
-const DRAFT_KEY = "form-coach-capture-review-drafts/v1";
+const APPROVAL_KEY = "maxpower-capture-approvals/v1";
+const DRAFT_KEY = "maxpower-capture-review-drafts/v1";
 function analysisViewFor(position: CapturePosition | ""): CameraView | null {
   return CAPTURE_POSITIONS.find((item) => item.id === position)?.analysisView ?? null;
 }
@@ -131,47 +135,35 @@ function importedCapturePosition(value: unknown): CapturePosition | "" {
   return CAPTURE_POSITIONS.some((item) => item.id === value) ? value as CapturePosition : "";
 }
 
-function approvalValidationError(input: {
-  exerciseId: string;
-  capturePosition: CapturePosition | "";
-  expectedCount: string;
-  segments: readonly Candidate["segments"][number][];
-  poses: readonly PoseEstimate[];
-}): string | null {
-  if (!input.exerciseId) return "请先确认本组动作。";
-  if (!input.capturePosition) return "请确认实际八向机位。";
-  const actualCount = Number(input.expectedCount);
-  if (!Number.isInteger(actualCount) || actualCount <= 0) return "实际次数必须是大于 0 的整数。";
-  if (actualCount !== input.segments.length) return `实际次数 ${actualCount} 与逐 rep 边界数 ${input.segments.length} 不一致。`;
-  if (input.poses.length < 2) return "关键点帧不足，不能批准本组真值。";
-  const startBound = input.poses[0].timestampMs;
-  const endBound = input.poses[input.poses.length - 1].timestampMs;
-  let previousEnd = -Infinity;
-  let previousRepIndex = 0;
-  for (const segment of input.segments) {
-    if (
-      !Number.isInteger(segment.repIndex) ||
-      segment.repIndex <= previousRepIndex ||
-      ![segment.startMs, segment.peakMs, segment.endMs].every(Number.isFinite) ||
-      segment.startMs < startBound ||
-      segment.startMs > segment.peakMs ||
-      segment.peakMs > segment.endMs ||
-      segment.endMs > endBound ||
-      segment.startMs < previousEnd
-    ) {
-      return "逐 rep 边界必须按时间和 rep 编号严格递增，并落在录像范围内。";
-    }
-    previousEnd = segment.endMs;
-    previousRepIndex = segment.repIndex;
-  }
-  return null;
-}
-
 function formatTimelineTime(timestampMs: number): string {
   const totalSeconds = Math.max(0, timestampMs) / 1000;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = (totalSeconds % 60).toFixed(1).padStart(4, "0");
   return `${minutes}:${seconds}`;
+}
+
+function peakSourceLabel(source: ReviewPeakSource | undefined): string {
+  if (source === "human_adjusted") return "人工峰值";
+  if (source === "algorithm_candidate") return "算法候选峰值";
+  if (source === "range_midpoint") return "区间中点（待人工校正）";
+  return "旧数据：峰值来源未知";
+}
+
+function phaseCueForExercise(exerciseId: string): string {
+  const profile = getKinematicsProfile(exerciseId);
+  if (!profile) return "先选择动作，系统才会显示该动作的相位极值定义。";
+  const signal = profile.phaseSignal.kind === "wrist_height"
+    ? "手腕高度"
+    : profile.phaseSignal.kind === "elbow_angle"
+      ? "肘角"
+      : profile.phaseSignal.kind === "shoulder_angle"
+        ? "肩角"
+        : "膝角";
+  const extreme = profile.phaseSignal.effortExtreme === "min" ? "最小值" : "最大值";
+  const visual = profile.phaseSignal.kind === "wrist_height"
+    ? profile.phaseSignal.effortExtreme === "min" ? "（画面中手腕最高）" : "（画面中手腕最低）"
+    : "";
+  return `相位约定：start/end 必须回到同一端点；peak 标在${signal}${extreme}${visual}。`;
 }
 
 function downloadJson(value: unknown, filename: string): void {
@@ -211,69 +203,6 @@ function saveDrafts(drafts: Record<string, ReviewDraft>): void {
   }
 }
 
-function qualityOf(poses: PoseEstimate[]) {
-  const present = poses.filter((pose) => pose.landmarks.length > 0).length;
-  const torso = poses.filter((pose) =>
-    [11, 12, 23, 24].every((index) => (pose.landmarks[index]?.visibility ?? 0) >= 0.5),
-  ).length;
-  return {
-    frames: poses.length,
-    posePercent: poses.length ? Math.round((present / poses.length) * 100) : 0,
-    torsoPercent: poses.length ? Math.round((torso / poses.length) * 100) : 0,
-  };
-}
-
-function candidatesFor(capture: ReviewCapture, exerciseId: string, cameraView: CameraView): Candidate[] {
-  const raw = capture.fixture.poses;
-  const stable = selectTrainingWindow(raw);
-  const toCandidate = (id: string, label: string, poses: PoseEstimate[], tone: Candidate["tone"]): Candidate => {
-    if (!exerciseId) {
-      return { id, label, count: 0, score: "等待动作", reason: "请先确认本组动作", segments: [], tone };
-    }
-    const analysis = analyzePoseSet({
-      poses,
-      cameraView,
-      exercise: { mode: "user", exerciseId },
-    });
-    return {
-      id,
-      label,
-      count: analysis.segments.length,
-      score: analysis.score?.score === null || analysis.score?.score === undefined
-        ? analysis.score?.label ?? "无评分"
-        : `${analysis.score.score} 分`,
-      reason: analysis.reason ?? (analysis.segments.length ? "可进入逐 rep 审核" : "没有形成完整周期"),
-      segments: analysis.segments,
-      tone,
-    };
-  };
-  // Entry/exit trimming was calibrated for upright field captures. The inbox
-  // includes supine bench press and push-up footage, where that heuristic can
-  // discard the whole working set; keep the complete Rust-canonical replay as
-  // the action-agnostic annotation suggestion.
-  const automatic = segmentRepsAuto(raw);
-  return [
-    toCandidate("raw", "当前规则 · 全部帧", raw, "caution"),
-    toCandidate("stable", `当前规则 · 稳定段（排除 ${stable.excludedPoseCount} 帧）`, stable.poses, "current"),
-    {
-      id: "auto",
-      label: "动作无关 · 自动周期",
-      count: automatic.cycles.length,
-      score: automatic.signal ?? "没有信号",
-      reason: automatic.signal
-        ? `周期强度 ${automatic.periodStrength?.toFixed(2) ?? "—"}；只用于交叉核验，不决定动作名称。`
-        : "关键点不足，无法抽取稳定周期。",
-      segments: automatic.cycles.map((cycle) => ({
-        repIndex: cycle.index,
-        startMs: cycle.startMs,
-        peakMs: cycle.extremeMs,
-        endMs: cycle.endMs,
-      })),
-      tone: "caution",
-    },
-  ];
-}
-
 /**
  * Local-only evidence board. The athlete compares deterministic replays and
  * explicitly approves a ground-truth count; nothing is uploaded.
@@ -295,7 +224,6 @@ export function CaptureApprovalPanel({
   const approvalsRef = useRef<Record<string, Approval>>(loadApprovals());
   const draftsRef = useRef<Record<string, ReviewDraft>>(loadDrafts());
   const inboxItemsRef = useRef<readonly AnnotationInboxItem[]>([]);
-  const processingInboxIdsRef = useRef(new Set<string>());
   const inboxInitializedRef = useRef(false);
   const [captures, setCaptures] = useState<ReviewCapture[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -313,24 +241,20 @@ export function CaptureApprovalPanel({
   const [draftRevision, setDraftRevision] = useState(0);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [currentVideoTimeMs, setCurrentVideoTimeMs] = useState(0);
+  const [reviewMediaDuration, setReviewMediaDuration] = useState<{ captureId: string; durationMs: number } | null>(null);
   const [rangeDrag, setRangeDrag] = useState<ReviewRangeDrag | null>(null);
   const [selectedSegmentRepIndex, setSelectedSegmentRepIndex] = useState<number | null>(null);
   const [inboxItems, setInboxItems] = useState<readonly AnnotationInboxItem[]>([]);
-  const [inboxWork, setInboxWork] = useState<{ itemId: string; phase: "tracking" | "archiving"; progress: number } | null>(null);
+  const [inboxWork, setInboxWork] = useState<{ itemId: string; phase: "archiving" } | null>(null);
 
   const selected = captures.find((capture) => capture.id === selectedId) ?? null;
   const selectedDurationMs = selected
     ? Math.max(
         1,
         Math.round(selected.fixture.durationSec * 1000),
-        selected.fixture.poses.at(-1)?.timestampMs ?? 0,
+        reviewMediaDuration?.captureId === selected.id ? reviewMediaDuration.durationMs : 0,
       )
     : 1;
-  const quality = selected ? qualityOf(selected.fixture.poses) : null;
-  const candidates = useMemo(
-    () => selected ? candidatesFor(selected, exerciseId, cameraView) : [],
-    [selected, exerciseId, cameraView],
-  );
   // A trajectory is materialized while the athlete approves it. We never
   // rebuild an accepted record from a different import later, because that
   // would make the same approval mean different data.
@@ -370,53 +294,38 @@ export function CaptureApprovalPanel({
 
   const hasExportableLocalData = Object.keys(approvals).length > 0 || Object.keys(draftsRef.current).length > 0 || draftRevision > 0;
 
-  const processInboxItem = async (item: AnnotationInboxItem) => {
+  const processInboxItem = (item: AnnotationInboxItem) => {
     const existing = capturesRef.current.find((capture) => capture.inboxItem.id === item.id);
     if (existing) {
       chooseCapture(existing);
       return;
     }
-    if (processingInboxIdsRef.current.has(item.id)) return;
-    processingInboxIdsRef.current.add(item.id);
     setError(null);
     setExportNotice(null);
-    setInboxWork({ itemId: item.id, phase: "tracking", progress: 0 });
-    try {
-      const fixture = await extractInboxVideoPoseFixture({
-        item,
-        videoUrl: annotationInboxVideoUrl(item),
-        onProgress: (progress) => setInboxWork({ itemId: item.id, phase: "tracking", progress }),
-      });
-      const capture: ReviewCapture = {
-        id: item.id,
-        videoUrl: annotationInboxVideoUrl(item),
-        sourceSignature: `annotation-inbox:${item.filename}:${item.sizeBytes}`,
-        fixture,
-        inboxItem: item,
-      };
-      const nextCaptures = [
-        capture,
-        ...capturesRef.current.filter((current) => current.id !== capture.id),
-      ];
-      capturesRef.current = nextCaptures;
-      setCaptures(nextCaptures);
-      chooseCapture(capture);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      processingInboxIdsRef.current.delete(item.id);
-      setInboxWork(null);
-    }
+    const capture: ReviewCapture = {
+      id: item.id,
+      videoUrl: annotationInboxVideoUrl(item),
+      sourceSignature: `annotation-inbox:${item.filename}:${item.sizeBytes}`,
+      fixture: buildManualReviewFixture(item.filename),
+      inboxItem: item,
+    };
+    const nextCaptures = [
+      capture,
+      ...capturesRef.current.filter((current) => current.id !== capture.id),
+    ];
+    capturesRef.current = nextCaptures;
+    setCaptures(nextCaptures);
+    chooseCapture(capture);
   };
 
   useEffect(() => {
     if (!inboxInitializedRef.current) {
       inboxInitializedRef.current = true;
       void loadAnnotationInbox()
-        .then(async (manifest) => {
+        .then((manifest) => {
           inboxItemsRef.current = manifest.items;
           setInboxItems(manifest.items);
-          if (manifest.items[0]) await processInboxItem(manifest.items[0]);
+          if (manifest.items[0]) processInboxItem(manifest.items[0]);
         })
         .catch((caught) => {
           setInboxWarning(caught instanceof Error ? caught.message : String(caught));
@@ -448,18 +357,8 @@ export function CaptureApprovalPanel({
   };
 
   const chooseAdjacentCapture = (direction: -1 | 1) => {
-    if (!captures.length) return;
-    const currentIndex = Math.max(0, captures.findIndex((capture) => capture.id === selected?.id));
-    const nextIndex = Math.min(captures.length - 1, Math.max(0, currentIndex + direction));
-    chooseCapture(captures[nextIndex]);
-  };
-
-  const selectDraftSegments = (candidate: Candidate) => {
-    setError(null);
-    setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
-    setDraftCandidateId(candidate.id);
-    setDraftSegments(candidate.segments.map((segment) => ({ ...segment })));
-    setSelectedSegmentRepIndex(null);
+    const nextItem = adjacentReviewItem(inboxItemsRef.current, selected?.inboxItem.id, direction);
+    if (nextItem) void processInboxItem(nextItem);
   };
 
   const preserveDraftRangesForContextChange = () => {
@@ -477,7 +376,9 @@ export function CaptureApprovalPanel({
     value: number,
   ) => {
     setDraftSegments((current) => current.map((segment) =>
-      segment.repIndex === repIndex ? { ...segment, [field]: value } : segment,
+      segment.repIndex === repIndex
+        ? { ...segment, [field]: value, ...(field === "peakMs" ? { peakSource: "human_adjusted" as const } : {}) }
+        : segment,
     ));
   };
 
@@ -500,13 +401,14 @@ export function CaptureApprovalPanel({
 
   const addDraftSegment = () => {
     const last = draftSegments.at(-1);
-    const startMs = last ? last.endMs + 1 : selected?.fixture.poses[0]?.timestampMs ?? 0;
+    const startMs = last ? last.endMs + 1 : 0;
     setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
     setDraftSegments((current) => [...current, {
       repIndex: (last?.repIndex ?? 0) + 1,
       startMs,
       peakMs: startMs + 250,
       endMs: startMs + 500,
+      peakSource: "range_midpoint",
     }]);
     setDraftCandidateId("manual_range");
     setSelectedSegmentRepIndex((last?.repIndex ?? 0) + 1);
@@ -581,7 +483,7 @@ export function CaptureApprovalPanel({
   const finishRangeDrag = (drag: ReviewRangeDrag, focusMs: number) => {
     const result = addReviewRange({
       existing: draftSegments,
-      candidateSegments: candidates.flatMap((candidate) => candidate.segments),
+      candidateSegments: [],
       anchorMs: drag.anchorMs,
       focusMs,
       durationMs: selectedDurationMs,
@@ -640,7 +542,9 @@ export function CaptureApprovalPanel({
       previousEndMs: ordered[segmentIndex - 1]?.endMs ?? 0,
       nextStartMs: ordered[segmentIndex + 1]?.startMs ?? selectedDurationMs,
     });
-    const changed = updated.startMs !== edit.original.startMs || updated.endMs !== edit.original.endMs;
+    const changed = updated.startMs !== edit.original.startMs
+      || updated.peakMs !== edit.original.peakMs
+      || updated.endMs !== edit.original.endMs;
     if (!changed) return;
     if (!edit.historyCaptured) {
       setSegmentUndoStack((current) => [...current.slice(-19), draftSegments.map((segment) => ({ ...segment }))]);
@@ -649,21 +553,32 @@ export function CaptureApprovalPanel({
     setDraftSegments((current) => current.map((segment) =>
       segment.repIndex === updated.repIndex ? updated : segment,
     ));
-    seekReviewVideo(edit.mode === "resize-end" ? updated.endMs : updated.startMs);
+    seekReviewVideo(
+      edit.mode === "resize-end"
+        ? updated.endMs
+        : edit.mode === "move-peak"
+          ? updated.peakMs
+          : updated.startMs,
+    );
   };
 
   const approve = async () => {
     if (!selected) return;
     if (!draftCandidateId) {
-      setError("先选择一个候选分段，并逐 rep 检查或修正 start / peak / end 边界。");
+      setError("请先在视频时间轴上拖选每一次动作范围。");
       return;
     }
-    const validationError = approvalValidationError({
+    const unreviewedPeaks = unreviewedPeakRepIndexes(draftSegments);
+    if (unreviewedPeaks.length) {
+      setError(`请先人工拖动黄色 peak 线确认每个转折点；未确认 rep：${unreviewedPeaks.join("、")}`);
+      return;
+    }
+    const validationError = manualReviewValidationError({
       exerciseId,
       capturePosition,
       expectedCount,
       segments: draftSegments,
-      poses: selected.fixture.poses,
+      durationMs: selectedDurationMs,
     });
     if (validationError) {
       setError(validationError);
@@ -698,7 +613,7 @@ export function CaptureApprovalPanel({
         approvedSegments: draftSegments.map((segment) => ({ ...segment })),
         weakNegativeWindows: reviewedNegativeWindows(selectedDurationMs, draftSegments),
         note: note.trim(),
-        algorithmVersion: "reviewed-canonical-replay/v1",
+        algorithmVersion: "manual-video-review/v1",
       },
     ];
     const approvedRecord: Approval = {
@@ -717,18 +632,13 @@ export function CaptureApprovalPanel({
       capturePosition: confirmedPosition,
       analysisVersions,
     };
-    setInboxWork({ itemId: selected.inboxItem.id, phase: "archiving", progress: 1 });
+    setInboxWork({ itemId: selected.inboxItem.id, phase: "archiving" });
     try {
       await completeReviewedInboxItem({
         item: selected.inboxItem,
         fixture: {
           ...selected.fixture,
-          stepMs: selected.fixture.stepMs ?? (
-            selected.fixture.poses.length > 1
-              ? selected.fixture.durationSec * 1000 / (selected.fixture.poses.length - 1)
-              : 0
-          ),
-          model: selected.fixture.model ?? "unknown",
+          durationSec: selectedDurationMs / 1000,
         },
         approval: {
           exerciseId: approvedRecord.exerciseId,
@@ -755,6 +665,7 @@ export function CaptureApprovalPanel({
       setError("审批已归档，但浏览器未允许写入本机审批缓存。");
     }
     const completedId = selected.inboxItem.id;
+    const completedIndex = inboxItems.findIndex((item) => item.id === completedId);
     const remaining = inboxItems.filter((item) => item.id !== completedId);
     inboxItemsRef.current = remaining;
     setInboxItems(remaining);
@@ -769,7 +680,8 @@ export function CaptureApprovalPanel({
     saveDrafts(drafts);
     setInboxWork(null);
     setExportNotice(`✓ ${selected.inboxItem.filename} 已归档并从 new-video 移出。`);
-    if (remaining[0]) void processInboxItem(remaining[0]);
+    const nextItem = remaining[Math.min(Math.max(0, completedIndex), remaining.length - 1)];
+    if (nextItem) void processInboxItem(nextItem);
     else if (remainingCaptures[0]) chooseCapture(remainingCaptures[0]);
   };
 
@@ -799,7 +711,7 @@ export function CaptureApprovalPanel({
       return;
     }
     downloadJson({
-      schemaVersion: "form-coach-trajectory-dataset/v1",
+      schemaVersion: "maxpower-trajectory-dataset/v1",
       exerciseId: "lat_pulldown",
       intendedUse: "rep_segmentation_observation",
       formReference: "not_labeled",
@@ -818,7 +730,7 @@ export function CaptureApprovalPanel({
         <div>
           <div style={styles.kicker}>FIELD EVIDENCE / 本机审核</div>
           <h2 style={styles.title}>{compact ? "逐组视频审核标注" : "训练录像审批台"}</h2>
-          <p style={styles.subtitle}>new-video 是唯一标注输入；批准后自动迁入正式档案。审批只标注动作、次数与边界，不把你的训练动作当成标准姿势。</p>
+          <p style={styles.subtitle}>new-video 是唯一标注输入；直接查看原视频并手工标记动作、次数与边界，批准后自动迁入正式档案。</p>
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           <button style={styles.manualImport} disabled={!hasExportableLocalData} onClick={exportApprovals}>导出审批真值</button>
@@ -829,7 +741,7 @@ export function CaptureApprovalPanel({
         <div style={styles.inboxBar}>
           <div>
             <strong>NEW-VIDEO / 待标注收件箱</strong>
-            <span>{inboxItems.length} 个视频；选择后先生成 canonical 骨架，批准后自动迁入正式档案。</span>
+            <span>{inboxItems.length} 个视频；选择后立即打开原视频，批准后自动迁入正式档案。</span>
           </div>
           <select
             aria-label="待标注视频"
@@ -843,9 +755,6 @@ export function CaptureApprovalPanel({
             <option value="">选择待标注视频…</option>
             {inboxItems.map((item) => <option key={item.id} value={item.id}>{item.filename}</option>)}
           </select>
-          {inboxWork?.phase === "tracking" && (
-            <span style={styles.inboxProgress}>正在识别骨架 {Math.round(inboxWork.progress * 100)}%</span>
-          )}
           {inboxWork?.phase === "archiving" && <span style={styles.inboxProgress}>正在归档并迁移…</span>}
         </div>
       )}
@@ -853,24 +762,22 @@ export function CaptureApprovalPanel({
       {error && <p style={styles.error}>{error}</p>}
       {exportNotice && <p style={styles.exportNotice}>{exportNotice}</p>}
       {!captures.length ? (
-        <p style={styles.empty}>{inboxWork ? "正在从待标注视频生成 canonical 骨架…" : "new-video 待标注目录为空。"}</p>
+        <p style={styles.empty}>new-video 待标注目录为空。</p>
       ) : (
         <div style={compact ? styles.compactGrid : styles.grid}>
           {!compact && <nav style={styles.ledger} aria-label="采集组列表">
             {captures.map((capture) => {
-              const report = qualityOf(capture.fixture.poses);
               const approved = approvals[capture.id];
               return (
                 <button key={capture.id} onClick={() => chooseCapture(capture)} style={{ ...styles.capture, ...(capture.id === selected?.id ? styles.captureActive : {}) }}>
                   <strong>{capture.id.replace("field-capture-", "")}</strong>
-                  <span>{approved?.exerciseId ?? "未标动作"} · {capture.fixture.durationSec.toFixed(1)}s</span>
-                  <span style={{ color: report.posePercent >= 90 ? "#7cffbc" : "#ffbd6f" }}>骨架 {report.posePercent}%</span>
+                  <span>{approved?.exerciseId ?? "未标动作"} · 人工视频审核</span>
                   {approved && <em>已审批 · {approved.expectedCount || "未填次数"} 次</em>}
                 </button>
               );
             })}
           </nav>}
-          {selected && quality && (
+          {selected && (
             <div style={styles.detail}>
               <div style={styles.videoColumn}>
                 <video
@@ -881,13 +788,19 @@ export function CaptureApprovalPanel({
                   controls
                   preload="metadata"
                   style={styles.video}
+                  onLoadedMetadata={(event) => {
+                    const durationMs = Math.round(event.currentTarget.duration * 1000);
+                    if (Number.isFinite(durationMs) && durationMs > 0) {
+                      setReviewMediaDuration({ captureId: selected.id, durationMs });
+                    }
+                  }}
                   onTimeUpdate={(event) => setCurrentVideoTimeMs(event.currentTarget.currentTime * 1000)}
                 />
                 <div style={styles.timelineShell}>
                   <div style={styles.timelineHeader}>
                     <div>
                       <strong>REP RANGE / 拖选一次动作范围</strong>
-                      <span>空白处拖选新增；拖动色块移动；选中后拖两侧缩放；⌫ 删除所选</span>
+                      <span>空白处拖选新增；拖动色块移动；两侧调范围；黄色竖线必须拖到真实转折点；⌫ 删除</span>
                     </div>
                     <div style={styles.timelineHeaderActions}>
                       <div style={styles.timelineCounter}><b>{draftSegments.length}</b> / {expectedCount || "?"} REPS</div>
@@ -970,7 +883,12 @@ export function CaptureApprovalPanel({
                             />
                           )}
                           <span>#{segment.repIndex}</span>
-                          <i style={{ ...styles.timelinePeak, left: `${peak}%` }} />
+                          <span
+                            aria-label={`调整 rep 峰值；${peakSourceLabel(segment.peakSource)}`}
+                            title={peakSourceLabel(segment.peakSource)}
+                            style={{ ...styles.timelinePeak, left: `${peak}%` }}
+                            onPointerDown={(event) => beginSegmentEdit(event, segment, "move-peak")}
+                          />
                           {selectedSegmentRepIndex === segment.repIndex && (
                             <span
                               aria-label="调整 rep 结束"
@@ -996,42 +914,30 @@ export function CaptureApprovalPanel({
                     <span>{formatTimelineTime(selectedDurationMs)}</span>
                   </div>
                 </div>
-                <div style={styles.qualityStrip}>
-                  <span>POSE {quality.posePercent}%</span><span>躯干完整 {quality.torsoPercent}%</span><span>{quality.frames} 帧</span>
-                </div>
                 {compact && (
                   <div style={styles.reviewNavigation}>
-                    <button disabled={captures.findIndex((capture) => capture.id === selected.id) <= 0} onClick={() => chooseAdjacentCapture(-1)}>← 上一组</button>
-                    <span>{captures.findIndex((capture) => capture.id === selected.id) + 1} / {captures.length} · {selected.id.replace("field-capture-", "")}</span>
-                    <button disabled={captures.findIndex((capture) => capture.id === selected.id) >= captures.length - 1} onClick={() => chooseAdjacentCapture(1)}>下一组 →</button>
+                    <button disabled={inboxWork !== null || adjacentReviewItem(inboxItems, selected.inboxItem.id, -1) === null} onClick={() => chooseAdjacentCapture(-1)}>← 上一条</button>
+                    <span>{inboxItems.findIndex((item) => item.id === selected.inboxItem.id) + 1} / {inboxItems.length} · {selected.id.replace("field-capture-", "")}</span>
+                    <button disabled={inboxWork !== null || adjacentReviewItem(inboxItems, selected.inboxItem.id, 1) === null} onClick={() => chooseAdjacentCapture(1)}>下一条 →</button>
                   </div>
                 )}
               </div>
               <div style={styles.reviewColumn}>
                 <div style={styles.controls}>
-                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); preserveDraftRangesForContextChange(); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && exercise.maturity === "catalog_only").map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · 仅采集</option>)}</optgroup>)}</select><small>待标注收件箱只建立尚无 Rust profile 的动作真值，不在 TypeScript 中替代正式计数。</small></label>
+                  <label>动作<select value={exerciseId} onChange={(event) => { setExerciseId(event.target.value); preserveDraftRangesForContextChange(); }}><option value="">请确认动作</option>{MUSCLE_GROUPS.map((group) => <optgroup key={group.id} label={`${group.labelZh}部`}>{EXERCISE_REGISTRY.exercises.filter((exercise) => exercise.muscleGroup === group.id && exercise.maturity === "catalog_only").map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.nameZh} · 仅采集</option>)}</optgroup>)}</select><small>人工确认动作身份；标注页不运行骨架识别或自动计数。</small></label>
                   <label>实际机位<select value={capturePosition} onChange={(event) => { const position = event.target.value as CapturePosition | ""; setCapturePosition(position); const view = analysisViewFor(position); if (view) setCameraView(view); preserveDraftRangesForContextChange(); }}><option value="">请确认实际机位</option>{CAPTURE_POSITIONS.map((position) => <option key={position.id} value={position.id}>{position.label}</option>)}</select><small>分析视角：{analysisViewFor(capturePosition) ?? "未确认"}</small></label>
                   <label>你实际做了<input inputMode="numeric" value={expectedCount} onChange={(event) => setExpectedCount(event.target.value)} placeholder="次数" /> 次</label>
                   <label style={{ gridColumn: "1 / -1" }}>备注<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：底部有停顿、左臂被器械遮挡、这一组不作为动作质量标准" rows={2} /></label>
                 </div>
-                <div style={styles.candidates}>
-                  {candidates.map((candidate) => (
-                    <article key={candidate.id} style={{ ...styles.candidate, ...(candidate.tone === "current" ? styles.current : candidate.tone === "caution" ? styles.caution : {}) }}>
-                      <div><small>{candidate.label}</small><strong>{candidate.count} REPS</strong></div>
-                      <p>{candidate.score} · {candidate.reason}</p>
-                      <div style={styles.repButtons}>{candidate.segments.map((segment) => <button key={segment.repIndex} onClick={() => seekReviewVideo(segment.startMs)}>#{segment.repIndex}</button>)}</div>
-                      <button style={styles.approve} onClick={() => selectDraftSegments(candidate)}>{draftCandidateId === candidate.id ? "当前待审核分段" : "选择此分段进行逐 rep 审核"}</button>
-                    </article>
-                  ))}
-                </div>
                 {draftCandidateId && (
                   <div style={styles.segmentEditor}>
                     <strong>逐 rep 审核 · {draftSegments.length} 段</strong>
-                    <p>绿色范围已经自动保存。优先在视频下方时间轴拖选；只有需要逐毫秒修正时再展开下面的高级编辑。</p>
+                    <p>绿色范围已经自动保存。黄色竖线是动作转折点；只有拖动它或修改 peak 数值后，才会记为人工 peak 真值。</p>
+                    <p style={styles.phaseCue}>{phaseCueForExercise(exerciseId)}</p>
                     <div style={styles.segmentNotes}>
                       {draftSegments.map((segment) => (
                         <label key={`note-${segment.repIndex}`} style={styles.segmentNoteRow}>
-                          <span>#{segment.repIndex} · {formatTimelineTime(segment.startMs)}–{formatTimelineTime(segment.endMs)}</span>
+                          <span>#{segment.repIndex} · {formatTimelineTime(segment.startMs)}–{formatTimelineTime(segment.endMs)} · {peakSourceLabel(segment.peakSource)}</span>
                           <input
                             value={segment.note ?? ""}
                             onChange={(event) => updateDraftSegmentNote(segment.repIndex, event.target.value)}
@@ -1099,7 +1005,7 @@ const styles: Record<string, React.CSSProperties> = {
   timelineRep: { position: "absolute", top: 10, bottom: 10, minWidth: 5, overflow: "hidden", border: "1px solid #75e2aa", background: "linear-gradient(90deg,rgba(31,142,92,.78),rgba(89,211,148,.58))", color: "#effff6", font: "700 9px ui-monospace,monospace", cursor: "pointer", zIndex: 3, boxShadow: "0 0 12px rgba(85,225,153,.18)" },
   timelineRepSelected: { top: 6, bottom: 6, overflow: "visible", border: "1px solid #ffe09a", cursor: "grab", zIndex: 6, boxShadow: "0 0 0 1px rgba(255,224,154,.55),0 0 18px rgba(255,189,111,.28)" },
   timelineHandle: { position: "absolute", top: -5, bottom: -5, width: 12, background: "#ffcf83", border: "1px solid #fff0c7", cursor: "ew-resize", zIndex: 7, boxShadow: "0 0 7px rgba(255,189,111,.5)" },
-  timelinePeak: { position: "absolute", top: 0, bottom: 0, width: 2, background: "#ffe099", boxShadow: "0 0 6px #ffbd6f", pointerEvents: "none" },
+  timelinePeak: { position: "absolute", top: -5, bottom: -5, width: 10, marginLeft: -5, borderLeft: "2px solid #ffe099", borderRight: "2px solid transparent", boxShadow: "-2px 0 6px #ffbd6f", cursor: "ew-resize", zIndex: 8 },
   timelineSelection: { position: "absolute", top: 5, bottom: 5, minWidth: 2, border: "1px solid #ffca83", background: "rgba(255,177,76,.28)", boxShadow: "0 0 16px rgba(255,177,76,.25)", pointerEvents: "none", zIndex: 4 },
   timelinePlayhead: { position: "absolute", top: 0, bottom: 0, width: 2, marginLeft: -1, background: "#f3f6f4", boxShadow: "0 0 7px rgba(255,255,255,.8)", pointerEvents: "none", zIndex: 5 },
   timelineFooter: { display: "flex", justifyContent: "space-between", marginTop: 6, color: "#729287", fontSize: 9, fontVariantNumeric: "tabular-nums" },
@@ -1112,6 +1018,7 @@ const styles: Record<string, React.CSSProperties> = {
   current: { borderColor: "#61cd99", background: "#0c261e" },
   caution: { borderColor: "#87623b", background: "#211a11" },
   segmentEditor: { marginTop: 11, border: "1px solid #4a806a", background: "#0a211a", padding: 10, color: "#cce8dc", fontSize: 11 },
+  phaseCue: { margin: "8px 0 12px", padding: "9px 11px", borderLeft: "3px solid #ffe099", background: "rgba(255,224,153,.08)", color: "#ffe7ad", fontSize: 11, lineHeight: 1.5 },
   segmentNotes: { display: "grid", gap: 5, maxHeight: 210, overflowY: "auto", paddingRight: 3 },
   segmentNoteRow: { display: "grid", gridTemplateColumns: "130px minmax(0,1fr)", alignItems: "center", gap: 7, color: "#89aaa1", fontSize: 10 },
   segmentSummary: { margin: "8px 0", color: "#89aaa1", cursor: "pointer" },

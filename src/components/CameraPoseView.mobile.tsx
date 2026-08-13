@@ -16,6 +16,8 @@ import {
 } from "../../modules/pose-camera/src/PoseCameraView";
 import { decodeMotionPacket, type DecodedMotionPacket } from "../motion/motionPacket";
 import { CanonicalActiveDurationAccumulator } from "../motion/canonicalActiveDuration";
+import { resolveRecognitionCapability } from "../mobile/exerciseRecognition";
+import { HALPE26_CONNECTIONS, HALPE26_KEYPOINT_COUNT } from "../pose/halpe26";
 
 const ACTIONS = [
   { id: "march_in_place", label: "原地踏步" },
@@ -24,19 +26,7 @@ const ACTIONS = [
   { id: "step_jack", label: "低冲击开合" },
 ] as const;
 
-const POSE_MODELS = [
-  { id: "lite", label: "lite（默认）" },
-  { id: "full", label: "full" },
-  { id: "heavy", label: "heavy" },
-] as const;
-
-const POSE_CONNECTIONS: ReadonlyArray<readonly [number, number]> = [
-  [0, 1], [1, 2], [2, 3], [3, 7], [0, 4], [4, 5], [5, 6], [6, 8], [9, 10],
-  [11, 12], [11, 13], [13, 15], [15, 17], [15, 19], [15, 21], [17, 19],
-  [12, 14], [14, 16], [16, 18], [16, 20], [16, 22], [18, 20],
-  [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28],
-  [27, 29], [28, 30], [29, 31], [30, 32], [27, 31], [28, 32],
-];
+const RTMPOSE_MODEL = "rtmpose-m-halpe26";
 
 interface Size {
   width: number;
@@ -50,7 +40,6 @@ export function CameraPoseView() {
     Platform.OS === "android" ? "unknown" : "granted",
   );
   const [exerciseId, setExerciseId] = useState<(typeof ACTIONS)[number]["id"]>("march_in_place");
-  const [modelId, setModelId] = useState<(typeof POSE_MODELS)[number]["id"]>("lite");
   const [recognitionActive, setRecognitionActive] = useState(false);
   const [event, setEvent] = useState<PoseEvent | null>(null);
   const [packet, setPacket] = useState<DecodedMotionPacket | null>(null);
@@ -58,6 +47,10 @@ export function CameraPoseView() {
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [activeDurationMs, setActiveDurationMs] = useState(0);
   const [nativeError, setNativeError] = useState<string | null>(null);
+  const recognition = useMemo(
+    () => resolveRecognitionCapability(exerciseId, "front"),
+    [exerciseId],
+  );
 
   const requestPermission = useCallback(async () => {
     if (Platform.OS !== "android") return;
@@ -165,13 +158,24 @@ export function CameraPoseView() {
       <View style={styles.stage} onLayout={onLayout}>
         <NativePoseCameraView
           style={StyleSheet.absoluteFill}
-          model={modelId}
-          exerciseId={exerciseId}
+          model={RTMPOSE_MODEL}
+          recognitionProfile={recognition.nativeProfileJson}
           recognitionActive={recognitionActive}
           onPose={onPose}
         />
         <Svg style={StyleSheet.absoluteFill} viewBox={`0 0 ${viewSize.width} ${viewSize.height}`}>
-          {mapping && POSE_CONNECTIONS.map(([from, to]) => {
+          {mapping && event?.equipmentAxis && (
+            <Line
+              x1={mapping.offsetX + (event.previewMirrored ? 1 - event.equipmentAxis.x1 : event.equipmentAxis.x1) * mapping.drawnWidth}
+              y1={mapping.offsetY + event.equipmentAxis.y1 * mapping.drawnHeight}
+              x2={mapping.offsetX + (event.previewMirrored ? 1 - event.equipmentAxis.x2 : event.equipmentAxis.x2) * mapping.drawnWidth}
+              y2={mapping.offsetY + event.equipmentAxis.y2 * mapping.drawnHeight}
+              stroke={event.equipmentAxis.source === "measured" ? "#FFD23F" : "#FF8A3D"}
+              strokeWidth="4"
+              strokeLinecap="round"
+            />
+          )}
+          {mapping && HALPE26_CONNECTIONS.map(([from, to]) => {
             const start = pointOf(from);
             const end = pointOf(to);
             if (!start || !end) return null;
@@ -184,24 +188,12 @@ export function CameraPoseView() {
         </Svg>
         <View style={styles.hud}>
           <Text style={styles.hudText}>
-            {(event?.processedFps ?? 0).toFixed(1)} FPS · {visibleLandmarks.length}/33 · {packet?.setState.lifecycle ?? "idle"} · {packet?.repState.phase ?? "ready"}
+            {(event?.processedFps ?? 0).toFixed(1)} FPS · {event?.delegate ?? "…"} · infer {(event?.inferenceMs ?? 0).toFixed(0)}ms · prep {(event?.preprocessMs ?? 0).toFixed(0)}ms · {visibleLandmarks.length}/{HALPE26_KEYPOINT_COUNT} · {packet?.repState.phase ?? "ready"}
           </Text>
         </View>
       </View>
 
       <View style={styles.controls}>
-        <View style={styles.actionRow}>
-          {POSE_MODELS.map((model) => (
-            <TouchableOpacity
-              key={model.id}
-              disabled={recognitionActive}
-              style={[styles.actionButton, modelId === model.id && styles.actionButtonActive]}
-              onPress={() => setModelId(model.id)}
-            >
-              <Text style={styles.buttonText}>{model.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
         <View style={styles.actionRow}>
           {ACTIONS.map((action) => (
             <TouchableOpacity
