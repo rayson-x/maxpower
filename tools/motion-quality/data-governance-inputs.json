@@ -27,6 +27,10 @@
       "assetId": "motion-quality-review-evaluation-artifacts",
       "definitionSha256": "4bbf4f780d9afa257225edde19cf8065ff7405d0a4372c32ad647ebfade18916"
     },
+    "frozenPredictions": {
+      "assetId": "motion-quality-review-evaluation-artifacts",
+      "definitionSha256": "4bbf4f780d9afa257225edde19cf8065ff7405d0a4372c32ad647ebfade18916"
+    },
     "rustWasm": {
       "assetId": "maxpower-motion-sdk-wasm",
       "definitionSha256": "9fad0bc0f5bc2aec412f9f1bc490e36bb8b0ca1fa4227e3cdf18d304e5b12d13"
