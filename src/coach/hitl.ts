@@ -361,7 +361,7 @@ function resolveRuntimeFrontier(
         : legacy
           ? [{ aggregate: "plan" as const, id: userId, revision: legacy.plan.revision }]
           : []),
-      { aggregate: "timeline", id: `timeline:${userId}`, revision: domain.timeline.revision || legacy?.timelineRevision || 0 },
+      { aggregate: "timeline", id: `timeline.${userId}`, revision: domain.timeline.revision || legacy?.timelineRevision || 0 },
       ...(domain.mandate
         ? [{ aggregate: "mandate" as const, id: domain.mandate.value.id, revision: domain.mandate.revision }]
         : legacy
