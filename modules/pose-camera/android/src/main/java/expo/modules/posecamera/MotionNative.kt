@@ -12,6 +12,7 @@ internal object MotionNative {
     profileCode: Int,
     poseSchemaCode: Int,
     active: Boolean,
+    canonicalFeedMirroring: Int,
   ): Int
   external fun nativeSetProfile(profileCode: Int): Int
   external fun nativeInstallProfile(identity: String, abiArguments: DoubleArray): Int

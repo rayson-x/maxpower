@@ -130,6 +130,13 @@ test("平台 canonical bridge 是独立能力，iOS 接通后仍不能被 profil
   assert.equal(ios.evidenceLinkedTechniqueCue, "unavailable");
   assert.equal(ios.fallback, "count_tempo_only");
   assert.equal(ios.reasonCodes.includes("validated_analysis_record_missing"), true);
+
+  const web = resolver.resolve({ ...input, poseModel: "rtmpose-m-halpe26", platform: "web" });
+  assert.equal(web.localRecording, "available");
+  assert.equal(web.repCounting, "available");
+  assert.equal(web.phaseTempo, "available");
+  assert.equal(web.evidenceLinkedTechniqueCue, "unavailable");
+  assert.equal(web.reasonCodes.includes("validated_analysis_record_missing"), true);
 });
 
 test("可执行 profile 必须显式支持当前 pose model，不能把同一动作模型静默复用", () => {

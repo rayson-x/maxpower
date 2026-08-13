@@ -98,7 +98,8 @@ NSData *CopyPacket() {
 - (int32_t)configureWidth:(uint32_t)width
                    height:(uint32_t)height
               profileJSON:(nullable NSString *)profileJSON
-                   active:(BOOL)active {
+                   active:(BOOL)active
+ canonicalFeedMirroring:(uint32_t)canonicalFeedMirroring {
   if (motion_sdk_reset(width, height, 1) != 0) return -1;
   if (motion_sdk_set_pose_schema(1) != 0) return -2;
   const int32_t sequenceStatus = SetSequence();
@@ -107,7 +108,10 @@ NSData *CopyPacket() {
   if (!profile) return -6;
   const int32_t profileStatus = InstallProfile(profile);
   if (profileStatus != 0) return profileStatus;
-  return active && motion_sdk_begin_set() != 0 ? -7 : 0;
+  // AVFoundation camera buffers are unmirrored. Imported replay files may
+  // already contain a horizontal flip, so callers pass unknown unless known.
+  if (motion_sdk_set_canonical_feed_mirroring(canonicalFeedMirroring) != 0) return -7;
+  return active && motion_sdk_begin_set() != 0 ? -8 : 0;
 }
 
 - (int32_t)setProfileJSON:(nullable NSString *)profileJSON {

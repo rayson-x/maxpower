@@ -135,21 +135,14 @@ export function LiveScreen(props: {
         return;
       }
       if (!nativeEvent.packetBase64) {
+        setPacket(null);
         setEvent(nativeEvent);
         return;
       }
       try {
         const decoded = decodeMotionPacket(decodeBase64(nativeEvent.packetBase64));
         setPacket(decoded);
-        setEvent({
-          ...nativeEvent,
-          landmarks: decoded.canonical.map((landmark) => [
-            landmark.x ?? Number.NaN,
-            landmark.y ?? Number.NaN,
-            landmark.z ?? Number.NaN,
-            landmark.canonicalConfidence,
-          ] as [number, number, number, number]),
-        });
+        setEvent(nativeEvent);
         if (active) {
           packetsRef.current.push(decoded);
           capture.ingestPoseEvent(nativeEvent);
@@ -195,6 +188,7 @@ export function LiveScreen(props: {
           setElapsedSec(Math.round((Date.now() - startedAtRef.current) / 1000));
         }
       } catch (error) {
+        setPacket(null);
         setNativeError(error instanceof Error ? error.message : String(error));
       }
     },
@@ -368,11 +362,16 @@ export function LiveScreen(props: {
   }, [event, viewSize]);
 
   const visibleLandmarks = useMemo(() => {
-    if (!event) return [];
-    return event.landmarks
-      .map(([x, y, , visibility], index) => ({ index, x, y, visibility }))
+    if (!packet) return [];
+    return packet.canonical
+      .map((landmark, index) => ({
+        index,
+        x: landmark.x ?? Number.NaN,
+        y: landmark.y ?? Number.NaN,
+        visibility: landmark.canonicalConfidence,
+      }))
       .filter((l) => Number.isFinite(l.x) && Number.isFinite(l.y) && l.visibility >= 0.3);
-  }, [event]);
+  }, [packet]);
 
   const pointOf = (index: number) => {
     const landmark = visibleLandmarks.find((entry) => entry.index === index);

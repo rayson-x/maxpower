@@ -73,21 +73,14 @@ export function CameraPoseView() {
       return;
     }
     if (!nativeEvent.packetBase64) {
+      setPacket(null);
       setEvent(nativeEvent);
       return;
     }
     try {
       const decoded = decodeMotionPacket(decodeBase64(nativeEvent.packetBase64));
       setPacket(decoded);
-      setEvent({
-        ...nativeEvent,
-        landmarks: decoded.canonical.map((landmark) => [
-          landmark.x ?? Number.NaN,
-          landmark.y ?? Number.NaN,
-          landmark.z ?? Number.NaN,
-          landmark.canonicalConfidence,
-        ] as [number, number, number, number]),
-      });
+      setEvent(nativeEvent);
       for (const rep of decoded.completedReps) {
         if (rep.disposition !== "confirmed") continue;
         const key = `${decoded.subjectEpoch}:${rep.repId}:${rep.revision}`;
@@ -101,6 +94,7 @@ export function CameraPoseView() {
         decoded.setState.lifecycle,
       ));
     } catch (error) {
+      setPacket(null);
       setNativeError(error instanceof Error ? error.message : String(error));
     }
   }, []);
@@ -124,11 +118,16 @@ export function CameraPoseView() {
   }, [event, viewSize]);
 
   const visibleLandmarks = useMemo(() => {
-    if (!event) return [];
-    return event.landmarks
-      .map(([x, y, , visibility], index) => ({ index, x, y, visibility }))
+    if (!packet) return [];
+    return packet.canonical
+      .map((landmark, index) => ({
+        index,
+        x: landmark.x ?? Number.NaN,
+        y: landmark.y ?? Number.NaN,
+        visibility: landmark.canonicalConfidence,
+      }))
       .filter((landmark) => Number.isFinite(landmark.x) && Number.isFinite(landmark.y) && landmark.visibility >= 0.3);
-  }, [event]);
+  }, [packet]);
 
   const pointOf = (index: number) => {
     const landmark = visibleLandmarks.find((entry) => entry.index === index);

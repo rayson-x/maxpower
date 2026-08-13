@@ -23,6 +23,74 @@ export type BenchPromotionBucket =
 
 export type BenchRuntimePlatform = "web_wasm" | "android_native" | "ios_native";
 
+type ComparisonMetricCode =
+  | "rep_precision"
+  | "rep_recall"
+  | "full_endpoint_alignment"
+  | "exact_set_rate";
+type CoreComparisonBucket = "aggregate" | "front_oblique_left" | "front_oblique_right";
+
+/** Stable machine-readable reasons; spelling changes are contract changes. */
+export type BenchPromotionBlockerCode =
+  | `evidence_missing:${Sha256}`
+  | "promotion_gate_policy_mismatch"
+  | "promotion_gate_required_bucket_missing"
+  | "promotion_gate_required_runtime_missing"
+  | "preregistration_candidate_profile_mismatch"
+  | "preregistration_coordinate_contract_mismatch"
+  | "preregistration_gate_mismatch"
+  | "preregistration_evidence_invalid"
+  | "untouched_acceptance_run_kind_invalid"
+  | "untouched_acceptance_source_influenced"
+  | "untouched_acceptance_preregistration_mismatch"
+  | "untouched_acceptance_candidate_profile_mismatch"
+  | "untouched_acceptance_stable_profile_mismatch"
+  | "untouched_acceptance_coordinate_contract_mismatch"
+  | "untouched_acceptance_not_frozen_before_truth"
+  | "untouched_acceptance_thresholds_changed_after_truth"
+  | "untouched_acceptance_endpoint_tolerance_mismatch"
+  | "untouched_aggregate_rep_precision_below_gate"
+  | "untouched_aggregate_rep_recall_below_gate"
+  | "untouched_aggregate_full_endpoint_alignment_below_gate"
+  | `untouched_${CoreComparisonBucket}_${"metrics_missing" | "candidate_metrics_invalid" | "stable_metrics_invalid"}`
+  | `untouched_${CoreComparisonBucket}_${ComparisonMetricCode}_regressed`
+  | "coverage_denominator_excludes_abstentions_or_rejections"
+  | `coverage_bucket_${"missing" | "empty"}:${BenchPromotionBucket}`
+  | "untouched_acceptance_evidence_invalid"
+  | "touched_regression_run_kind_invalid"
+  | "touched_regression_candidate_profile_mismatch"
+  | "touched_regression_stable_profile_mismatch"
+  | "touched_regression_coordinate_contract_mismatch"
+  | "touched_regression_preregistration_mismatch"
+  | `touched_${CoreComparisonBucket}_${"metrics_missing" | "metrics_invalid"}`
+  | `touched_${CoreComparisonBucket}_${ComparisonMetricCode}_regressed`
+  | "touched_regression_evidence_invalid"
+  | "cross_view_run_kind_invalid"
+  | "cross_view_candidate_profile_mismatch"
+  | "cross_view_coordinate_contract_mismatch"
+  | "cross_view_preregistration_mismatch"
+  | "cross_view_not_frozen_before_truth"
+  | "normalized_aggregate_not_strictly_improved"
+  | "cross_view_worst_oblique_bucket_mismatch"
+  | "normalized_worst_oblique_not_strictly_improved"
+  | "cross_view_evidence_invalid"
+  | "runtime_parity_candidate_profile_mismatch"
+  | "runtime_parity_coordinate_contract_mismatch"
+  | "runtime_parity_not_passed"
+  | `runtime_parity_platform_not_passed:${BenchRuntimePlatform}`
+  | "runtime_parity_discrete_semantics_mismatch"
+  | "runtime_parity_timestamp_mismatch"
+  | "runtime_parity_provenance_or_reason_mismatch"
+  | "runtime_parity_float_tolerance_failed"
+  | "runtime_parity_evidence_invalid"
+  | "runtime_performance_candidate_profile_mismatch"
+  | "runtime_performance_coordinate_contract_mismatch"
+  | "runtime_performance_not_passed"
+  | `runtime_performance_platform_not_passed:${BenchRuntimePlatform}`
+  | `runtime_performance_not_single_pass_causal:${BenchRuntimePlatform}`
+  | `runtime_performance_unbounded_backlog:${BenchRuntimePlatform}`
+  | "runtime_performance_evidence_invalid";
+
 export interface BenchPromotionGate {
   readonly schemaVersion: "maxpower-bench-promotion-gate/v1";
   readonly repPrecisionMinimum: number;
@@ -163,7 +231,7 @@ export interface BenchPromotionEvidenceStore {
 export interface BenchPromotionEvaluation {
   readonly status: "eligible_for_manual_promotion" | "shadow_only";
   readonly candidateProfile: ImmutableRecognitionProfileRef;
-  readonly blockerCodes: readonly string[];
+  readonly blockerCodes: readonly BenchPromotionBlockerCode[];
   readonly evidenceRefs: readonly Sha256[];
 }
 
@@ -179,7 +247,7 @@ export function evaluateBenchProfilePromotion(
     manifest.evidence.runtimeParity,
     manifest.evidence.runtimePerformance,
   ];
-  const blockers = refs.flatMap((ref) => {
+  const blockers: BenchPromotionBlockerCode[] = refs.flatMap((ref): BenchPromotionBlockerCode[] => {
     const evidence = evidenceStore[ref.sha256];
     return evidence?.sha256 === ref.sha256 ? [] : [`evidence_missing:${ref.sha256}`];
   });

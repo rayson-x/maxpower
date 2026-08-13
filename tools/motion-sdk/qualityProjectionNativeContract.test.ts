@@ -12,7 +12,7 @@ const encoder = new TextEncoder();
 function packet(
   minor: number,
   payload?: Record<string, unknown>,
-  futureTail = new Uint8Array(),
+  futureTail: ArrayLike<number> = new Uint8Array(),
 ): Uint8Array {
   const payloadBytes =
     payload === undefined
@@ -34,9 +34,40 @@ function packet(
   return bytes;
 }
 
+function extension(
+  marker: "AXI1" | "LMC1",
+  payload: ArrayLike<number>,
+): Uint8Array {
+  const bytes = new Uint8Array(8 + payload.length);
+  const view = new DataView(bytes.buffer);
+  bytes.set(encoder.encode(marker), 0);
+  view.setUint32(4, payload.length, true);
+  bytes.set(payload, 8);
+  return bytes;
+}
+
+function axisExtension(trackCount = 0): Uint8Array {
+  const bytes = new Uint8Array(6 + trackCount * 32);
+  const view = new DataView(bytes.buffer);
+  bytes.set(encoder.encode("AXI1"), 0);
+  view.setUint16(4, trackCount, true);
+  return bytes;
+}
+
+function concat(...parts: readonly ArrayLike<number>[]): Uint8Array {
+  const bytes = new Uint8Array(
+    parts.reduce((total, part) => total + part.length, 0),
+  );
+  let offset = 0;
+  for (const part of parts) {
+    bytes.set(part, offset);
+    offset += part.length;
+  }
+  return bytes;
+}
+
 function poseEvent(packetBase64: string): PoseEvent {
   return {
-    landmarks: [],
     width: 1920,
     height: 1080,
     timestampMs: 1_000,
@@ -115,7 +146,7 @@ test("native event projection adds only the Rust envelope and does not derive qu
   assert.equal("qualityScore" in projected, false);
 });
 
-test("legacy MOTN packets remain unchanged and QLT1 must terminate the declared packet", () => {
+test("legacy packets remain unchanged and MOTN/1.8 keeps terminal QLT1 support", () => {
   const legacy = poseEvent(Buffer.from(packet(7)).toString("base64"));
   assert.equal(projectRustQualityFromPacket(packet(7)), null);
   assert.equal(projectPoseEventQuality(legacy), legacy);
@@ -135,6 +166,85 @@ test("legacy MOTN packets remain unchanged and QLT1 must terminate the declared 
     }),
   );
   assert.deepEqual(empty?.proposalHashes, []);
+});
+
+test("MOTN/1.10 projects QLT1 before the legal AXI1 and LMC1 extensions", () => {
+  const payload = {
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [
+      { proposalId: "v1.10", contentHash: "1010101010101010" },
+    ],
+  };
+  const tail = concat(
+    axisExtension(),
+    extension("LMC1", encoder.encode('{"state":"frozen"}')),
+  );
+
+  assert.deepEqual(
+    projectRustQualityFromPacket(packet(10, payload, tail))?.proposalIds,
+    ["v1.10"],
+  );
+});
+
+test("MOTN/1.10 fails closed when AXI1 or LMC1 framing is malformed", () => {
+  const payload = {
+    schemaVersion: "maxpower.motion-quality-proposal/v1",
+    proposals: [
+      { proposalId: "v1.10", contentHash: "1010101010101010" },
+    ],
+  };
+
+  const wrongAxisMarker = concat(
+    axisExtension(),
+    extension("LMC1", encoder.encode("{}")),
+  );
+  wrongAxisMarker[0] = "Z".charCodeAt(0);
+  assert.equal(
+    projectRustQualityFromPacket(packet(10, payload, wrongAxisMarker)),
+    null,
+  );
+
+  const truncatedAxisRecord = axisExtension();
+  new DataView(truncatedAxisRecord.buffer).setUint16(4, 1, true);
+  assert.equal(
+    projectRustQualityFromPacket(
+      packet(
+        10,
+        payload,
+        concat(truncatedAxisRecord, extension("LMC1", encoder.encode("{}"))),
+      ),
+    ),
+    null,
+  );
+
+  const malformedLocal = extension("LMC1", encoder.encode("{}"));
+  new DataView(malformedLocal.buffer).setUint32(4, 3, true);
+  assert.equal(
+    projectRustQualityFromPacket(
+      packet(10, payload, concat(axisExtension(), malformedLocal)),
+    ),
+    null,
+  );
+
+  const wrongLocalMarker = extension("LMC1", encoder.encode("{}"));
+  wrongLocalMarker[0] = "Z".charCodeAt(0);
+  assert.equal(
+    projectRustQualityFromPacket(
+      packet(10, payload, concat(axisExtension(), wrongLocalMarker)),
+    ),
+    null,
+  );
+
+  assert.equal(
+    projectRustQualityFromPacket(
+      packet(
+        10,
+        payload,
+        concat(axisExtension(), extension("LMC1", encoder.encode("not-json"))),
+      ),
+    ),
+    null,
+  );
 });
 
 test("native projection ignores pseudo QLT1 markers outside a legal tail envelope", () => {

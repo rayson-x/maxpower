@@ -38,6 +38,7 @@ class MotionNativeRealHalpe26ParityTest {
         config.getInt("profileCode"),
         config.getInt("poseSchemaCode"),
         false,
+        0,
       ),
     )
 

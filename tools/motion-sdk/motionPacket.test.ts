@@ -479,12 +479,17 @@ test("v1.10 preserves oblique shaft endpoints and local coordinate provenance", 
     scaleSource: "projected_bar_length",
     equipmentTrackId: 5,
     rawBarAxis: [0.2, 0.35, 0.8, 0.47],
+    coarseView: "front_oblique_left",
+    canonicalFeedMirrored: false,
     endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "endpoint_one_anatomical_right",
     equipment: { alongAxisProgress: 0.4, crossAxisDisplacement: 0.01, confidence: 0.92, coverage: 0.8, uncertainty: 0.08, provenance: "equipment_measured" },
     pose: null,
     channelAgreement: "equipment_only",
     endpointOneProgress: 0.39,
     endpointTwoProgress: 0.41,
+    anatomicalLeftEndpointProgress: 0.41,
+    anatomicalRightEndpointProgress: 0.39,
     rawBarAngleRadians: Math.atan2(0.12, 0.6),
     baselineCorrectedBarAngleRadians: 0.01,
     confidence: 0.92,
@@ -537,6 +542,9 @@ test("v1.10 preserves oblique shaft endpoints and local coordinate provenance", 
   assert.ok((packet.equipment.tracks[0].axis?.imageAngleRadians ?? 0) > 0.1);
   assert.deepEqual(packet.localMotionCoordinate?.rawBarAxis, axis);
   assert.equal(packet.localMotionCoordinate?.endpointOrderMapping, "screen_ordered_anatomy_unknown");
+  assert.equal(packet.localMotionCoordinate?.anatomicalSideMapping, "endpoint_one_anatomical_right");
+  assert.equal(packet.localMotionCoordinate?.anatomicalLeftEndpointProgress, 0.41);
+  assert.equal(packet.localMotionCoordinate?.anatomicalRightEndpointProgress, 0.39);
   assert.equal(packet.localMotionCoordinate?.equipment?.provenance, "equipment_measured");
   assert.equal(packet.localMotionCoordinate?.equipment?.coverage, 0.8);
   assert.equal(packet.localMotionCoordinate?.equipment?.uncertainty, 0.08);

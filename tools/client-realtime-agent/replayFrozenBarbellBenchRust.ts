@@ -154,6 +154,8 @@ async function main(): Promise<void> {
       for (const rep of motion.lastCompletedReps) sealed.set(rep.repId.toString(), rep);
     }
     motion.finishSet();
+    for (const rep of motion.lastCompletedReps) sealed.set(rep.repId.toString(), rep);
+    const qualityProposals = motion.lastQualityProposals;
     const reps = [...sealed.values()].map((rep) => ({
       repId: rep.repId,
       startMs: rep.startTimestampMs,
@@ -177,6 +179,7 @@ async function main(): Promise<void> {
       runtime,
       reps,
       frames,
+      qualityProposals,
     };
     cases.push({
       ...caseResult,

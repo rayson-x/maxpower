@@ -75,12 +75,9 @@ export class ExactMotionCapabilityResolver implements MotionCapabilityResolver {
   ) {}
 
   resolve(input: MotionCapabilityInput): MotionCapabilityDecision {
-    if (input.platform === "web") {
-      return unavailable("web_runtime_has_no_native_camera_bridge");
-    }
     const profile = this.profiles.resolve(input);
-    const bridge = nativeMotionBridgeContract(input.platform);
-    if (!bridge.canEmitCanonicalPackets) {
+    const runtime = canonicalMotionRuntimeContract(input.platform);
+    if (!runtime.canEmitCanonicalPackets) {
       return {
         localRecording: profile.canRecord ? "available" : "unavailable",
         repCounting: "unavailable",
@@ -88,7 +85,7 @@ export class ExactMotionCapabilityResolver implements MotionCapabilityResolver {
         trajectoryComparison: "unavailable",
         evidenceLinkedTechniqueCue: "unavailable",
         fallback: profile.canRecord ? "video_only" : "manual_recording",
-        reasonCodes: [bridge.reasonCode, ...(profile.reasonCodes ?? [])],
+        reasonCodes: [runtime.reasonCode, ...(profile.reasonCodes ?? [])],
         evidenceRefs: [],
         validationStatus: "not_validated",
       };
@@ -147,13 +144,12 @@ export class ExactMotionCapabilityResolver implements MotionCapabilityResolver {
 }
 
 /**
- * The shared resolver must not infer native readiness from a catalog profile.
- * Android and iOS own the same Rust canonical-packet contract; the fixture
- * retains its deterministic test implementation. A profile alone still never
- * enables trajectory comparison or technique cues without an approved exact-
- * context validation record.
+ * Runtime readiness is independent from catalog/profile maturity. Android and
+ * iOS use native Rust bridges, Web uses the same Rust contract through WASM,
+ * and fixtures retain a deterministic test implementation. None of these
+ * runtimes enables comparison or technique cues without exact-context approval.
  */
-export function nativeMotionBridgeContract(platform: MotionRuntimePlatform): {
+export function canonicalMotionRuntimeContract(platform: MotionRuntimePlatform): {
   readonly canEmitCanonicalPackets: boolean;
   readonly reasonCode: string;
 } {
@@ -165,9 +161,12 @@ export function nativeMotionBridgeContract(platform: MotionRuntimePlatform): {
     case "ios":
       return { canEmitCanonicalPackets: true, reasonCode: "ios_canonical_packet_bridge_ready" };
     case "web":
-      return { canEmitCanonicalPackets: false, reasonCode: "web_runtime_has_no_native_camera_bridge" };
+      return { canEmitCanonicalPackets: true, reasonCode: "web_wasm_canonical_packet_runtime_ready" };
   }
 }
+
+/** @deprecated Use canonicalMotionRuntimeContract; kept as a source-compatible alias. */
+export const nativeMotionBridgeContract = canonicalMotionRuntimeContract;
 
 /**
  * A native bridge must not treat a profile name as sufficient identity. The

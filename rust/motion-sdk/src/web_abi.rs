@@ -1008,7 +1008,14 @@ pub extern "C" fn motion_sdk_current_frame_valid() -> i32 {
         .as_ref()
         .is_some_and(|target| target.state == TargetState::Locked);
     let observable = runtime.rep_engine.as_ref().is_some_and(|engine| {
-        if engine.profile.uses_barbell_axis_state_graph() {
+        if engine.profile.uses_local_signals() {
+            super::profile_signal_with_local(
+                &engine.profile,
+                &runtime.output,
+                Some(&runtime.local_motion_coordinate.snapshot()),
+            )
+            .is_some()
+        } else if engine.profile.uses_barbell_axis_state_graph() {
             runtime.equipment_output.as_ref().is_some_and(|equipment| {
                 equipment.tracks.iter().any(|track| {
                     track.kind == super::EquipmentKind::BarbellShaft && track.judgeable_path
@@ -1349,11 +1356,34 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     {
         return -3;
     }
+    runtime
+        .local_motion_coordinate
+        .set_profile_identity(profile.as_ref().map(|value| value.identity.as_str()));
     runtime.rep_engine = profile.map(super::RepEngine::new);
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
     runtime.pending_outcomes.clear();
     clear_reference(&mut runtime);
+    0
+}
+
+/// Declares mirroring of the canonical coordinate feed, not the preview.
+/// `2` clears the declaration so side-dependent evidence fails closed.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_set_canonical_feed_mirroring(value: u32) -> i32 {
+    let Ok(mut runtime) = runtime().lock() else {
+        return -1;
+    };
+    let mirrored = match value {
+        0 => Some(false),
+        1 => Some(true),
+        2 => None,
+        _ => return -2,
+    };
+    runtime
+        .local_motion_coordinate
+        .set_canonical_feed_mirroring(mirrored);
+    encode_current_packet(&mut runtime);
     0
 }
 
@@ -1519,6 +1549,9 @@ pub extern "C" fn motion_sdk_install_profile(
     if profile.validate().is_err() {
         return -6;
     }
+    runtime
+        .local_motion_coordinate
+        .set_profile_identity(Some(&profile.identity));
     runtime.rep_engine = Some(super::RepEngine::new(profile));
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();

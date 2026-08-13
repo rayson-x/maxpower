@@ -73,7 +73,8 @@ static int Run(NSString *fixturePath, NSString *oraclePath) {
   const int32_t configureStatus = [bridge configureWidth:[source[@"widthPx"] unsignedIntValue]
                                                    height:[source[@"heightPx"] unsignedIntValue]
                                               profileJSON:@""
-                                                   active:NO];
+                                                   active:NO
+                                  canonicalFeedMirroring:0];
   if (configureStatus != 0) {
     fprintf(stderr, "configure failed: %d\n", configureStatus);
     return 5;

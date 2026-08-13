@@ -8,6 +8,11 @@ const MOTN_HEADER_BYTES = 12;
 const MAX_QUALITY_PAYLOAD_BYTES = 1024 * 1024;
 const textDecoder = new TextDecoder("utf-8", { fatal: true });
 const QLT1 = [0x51, 0x4c, 0x54, 0x31] as const;
+const AXI1 = [0x41, 0x58, 0x49, 0x31] as const;
+const LMC1 = [0x4c, 0x4d, 0x43, 0x31] as const;
+const AXIS_HEADER_BYTES = 6;
+const AXIS_RECORD_BYTES = 32;
+const LENGTH_PREFIXED_EXTENSION_HEADER_BYTES = 8;
 
 type JsonObject = Record<string, unknown>;
 
@@ -29,16 +34,20 @@ export function projectRustQualityFromPacket(
   if (major !== 1 || minor < 8 || declaredLength !== bytes.byteLength)
     return null;
 
-  // QLT1 is an additive terminal envelope. Search only for candidates whose
-  // declared payload ends exactly at the MOTN boundary; markers embedded in
-  // core fields or followed by another extension are not quality envelopes.
+  // Locate QLT1 without assuming it is terminal. A candidate is accepted only
+  // when every extension required by this contract minor consumes the exact
+  // remainder of the declared MOTN packet.
   for (let offset = bytes.byteLength - 8; offset >= MOTN_HEADER_BYTES; offset -= 1) {
-    if (!isQltMarker(bytes, offset)) continue;
+    if (!hasMarker(bytes, offset, QLT1)) continue;
     const payloadLength = view.getUint32(offset + 4, true);
     if (payloadLength > MAX_QUALITY_PAYLOAD_BYTES) continue;
     const payloadStart = offset + 8;
     const payloadEnd = payloadStart + payloadLength;
-    if (!Number.isSafeInteger(payloadEnd) || payloadEnd !== bytes.byteLength)
+    if (
+      !Number.isSafeInteger(payloadEnd) ||
+      payloadEnd > bytes.byteLength ||
+      !hasValidExtensionTail(bytes, view, minor, payloadEnd)
+    )
       continue;
 
     const projection = decodeQualityEnvelope(
@@ -127,8 +136,73 @@ function hasMotionHeader(bytes: Uint8Array): boolean {
   );
 }
 
-function isQltMarker(bytes: Uint8Array, offset: number): boolean {
-  return QLT1.every((value, index) => bytes[offset + index] === value);
+function hasValidExtensionTail(
+  bytes: Uint8Array,
+  view: DataView,
+  minor: number,
+  offset: number,
+): boolean {
+  if (minor === 8) return offset === bytes.byteLength;
+  if (minor < 9 || minor > 10) return false;
+
+  if (
+    offset + AXIS_HEADER_BYTES > bytes.byteLength ||
+    !hasMarker(bytes, offset, AXI1)
+  ) {
+    return false;
+  }
+  const axisCount = view.getUint16(offset + 4, true);
+  const axisBytes = axisCount * AXIS_RECORD_BYTES;
+  const axisEnd = offset + AXIS_HEADER_BYTES + axisBytes;
+  if (!Number.isSafeInteger(axisEnd) || axisEnd > bytes.byteLength) return false;
+
+  for (
+    let recordOffset = offset + AXIS_HEADER_BYTES;
+    recordOffset < axisEnd;
+    recordOffset += AXIS_RECORD_BYTES
+  ) {
+    for (let valueOffset = recordOffset + 8; valueOffset < recordOffset + 32; valueOffset += 4) {
+      if (!Number.isFinite(view.getFloat32(valueOffset, true))) return false;
+    }
+  }
+  if (minor === 9) return axisEnd === bytes.byteLength;
+
+  if (
+    axisEnd + LENGTH_PREFIXED_EXTENSION_HEADER_BYTES > bytes.byteLength ||
+    !hasMarker(bytes, axisEnd, LMC1)
+  ) {
+    return false;
+  }
+  const localPayloadLength = view.getUint32(axisEnd + 4, true);
+  const localPayloadStart = axisEnd + LENGTH_PREFIXED_EXTENSION_HEADER_BYTES;
+  const localPayloadEnd =
+    localPayloadStart + localPayloadLength;
+  if (
+    !Number.isSafeInteger(localPayloadEnd) ||
+    localPayloadEnd !== bytes.byteLength
+  ) {
+    return false;
+  }
+  try {
+    const decoded = JSON.parse(
+      textDecoder.decode(bytes.subarray(localPayloadStart, localPayloadEnd)),
+    );
+    return isObject(decoded);
+  } catch {
+    return false;
+  }
+}
+
+function hasMarker(
+  bytes: Uint8Array,
+  offset: number,
+  marker: readonly number[],
+): boolean {
+  return (
+    offset >= 0 &&
+    offset + marker.length <= bytes.byteLength &&
+    marker.every((value, index) => bytes[offset + index] === value)
+  );
 }
 
 function isObject(value: unknown): value is JsonObject {

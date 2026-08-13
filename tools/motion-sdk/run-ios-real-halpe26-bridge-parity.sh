@@ -7,6 +7,18 @@ export DEVELOPER_DIR="$developer_dir"
 sdk=$(/usr/bin/xcrun --sdk iphonesimulator --show-sdk-path)
 build_dir=$(mktemp -d /tmp/maxpower-ios-halpe-parity.XXXXXX)
 trap 'rm -rf "$build_dir"' EXIT
+fixture_path="$repo_root/tools/motion-sdk/fixtures/front-bench-mirror-halpe26-multi-candidate-v1.json"
+oracle_path=${RUST_ORACLE_PATH:-}
+if [ -z "$oracle_path" ]; then
+  oracle_path="$build_dir/current-host-rust-oracle.json"
+  cargo run \
+    --manifest-path "$repo_root/rust/motion-sdk/Cargo.toml" \
+    --release \
+    --bin real_halpe26_bridge_oracle \
+    -- \
+    --fixture "$fixture_path" \
+    --output "$oracle_path"
+fi
 
 # Rebuild the same Rust static library used by the client before compiling the
 # bridge harness. This keeps parity reproducible from a clean checkout instead
@@ -57,5 +69,5 @@ esac
 
 /usr/bin/xcrun simctl spawn "$simulator_id" \
   "$build_dir/RealHalpe26BridgeParity" \
-  "$repo_root/tools/motion-sdk/fixtures/front-bench-mirror-halpe26-multi-candidate-v1.json" \
-  "$repo_root/tools/motion-sdk/fixtures/front-bench-mirror-halpe26-multi-candidate-v1.rust-oracle.json"
+  "$fixture_path" \
+  "$oracle_path"

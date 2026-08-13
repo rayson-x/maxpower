@@ -47,9 +47,19 @@ test("native camera hosts return the Rust packet without owning QLT1 semantics",
   );
   const iosView = source("modules/pose-camera/ios/PoseCameraModule.swift");
   const projection = source("modules/pose-camera/src/qualityProjection.ts");
+  const publicTypes = source("modules/pose-camera/src/types.ts");
+  const liveScreen = source("src/mobile/ui/LiveScreen.tsx");
+  const replayScreen = source("src/mobile/ui/ReplayScreen.tsx");
 
   assert.match(androidView, /MotionNative\.processObservations\([\s\S]*packetBase64/);
   assert.match(iosView, /motionBridge\.processObservations\([\s\S]*packetBase64/);
+  assert.doesNotMatch(androidView, /"landmarks"\s+to/);
+  assert.doesNotMatch(iosView, /"landmarks"\s*:/);
+  assert.doesNotMatch(publicTypes, /^\s*landmarks\??:/m);
+  assert.match(liveScreen, /packet\.canonical/);
+  assert.match(replayScreen, /packet\.canonical/);
+  assert.doesNotMatch(liveScreen, /nativeEvent\.landmarks/);
+  assert.doesNotMatch(replayScreen, /nativeEvent\.landmarks/);
   assert.doesNotMatch(androidView, /QLT1|qualityProjection/);
   assert.doesNotMatch(iosView, /QLT1|qualityProjection/);
   assert.match(projection, /Projects the Rust-owned QLT1 envelope without interpreting/);
@@ -61,6 +71,8 @@ test("Apple bridge parity rebuilds client Rust artifacts and excludes generated 
   const podspec = source("modules/pose-camera/ios/PoseCamera.podspec");
 
   assert.match(script, /build-native\.sh" apple/);
+  assert.match(script, /real_halpe26_bridge_oracle/);
+  assert.match(script, /RUST_ORACLE_PATH/);
   assert.match(script, /ios-simulator-universal\/libmaxpower_motion_sdk\.a/);
   assert.match(harness, /visualLuma:nil/);
   assert.match(harness, /HasRustQualityEnvelope/);
@@ -79,4 +91,22 @@ test("Android and iOS project every Rust visual barbell source including fused",
   assert.match(androidBridge, /if \(source > 3\) return nullptr/);
   assert.match(androidAdapter, /3 -> "fused"/);
   assert.match(iosBridge, /source == 3 \? @"fused"/);
+});
+
+test("native hosts declare canonical-feed mirroring separately from preview mirroring", () => {
+  const header = source("modules/pose-camera/common/motion_sdk.h");
+  const androidBridge = source("modules/pose-camera/android/src/main/cpp/motion_bridge.cpp");
+  const androidView = source(
+    "modules/pose-camera/android/src/main/java/expo/modules/posecamera/PoseCameraView.kt",
+  );
+  const iosBridge = source("modules/pose-camera/ios/MotionBridge.mm");
+  const iosView = source("modules/pose-camera/ios/PoseCameraModule.swift");
+
+  assert.match(header, /motion_sdk_set_canonical_feed_mirroring\(uint32_t mirrored\)/);
+  assert.match(androidBridge, /motion_sdk_set_canonical_feed_mirroring\(canonical_feed_mirroring\)/);
+  assert.match(iosBridge, /motion_sdk_set_canonical_feed_mirroring\(canonicalFeedMirroring\)/);
+  assert.match(androidView, /if \(isReplay\) 2 else 0/);
+  assert.match(iosView, /replayDurationMs == nil \? 0 : 2/);
+  assert.match(androidView, /drawPreviewFrame\(bitmap, !isReplay && lensFacing == "front"\)/);
+  assert.match(iosView, /previewConnection\.isVideoMirrored = lensFacing == \.front/);
 });

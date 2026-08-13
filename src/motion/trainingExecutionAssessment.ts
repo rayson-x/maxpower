@@ -36,7 +36,7 @@ export interface TrainingExecutionLineage {
   observationPipeline: "yolox-nano-humanart+rtmpose-m-halpe26";
   poseSchema: "halpe26";
   canonicalOwner: "rust-motion-sdk";
-  packetContract: "MOTN/1.7";
+  packetContract: "MOTN/1.10";
   runtimeValidation: {
     status: "validated" | "partially_validated" | "unvalidated" | "failed";
     platform: "web" | "android" | "ios";
@@ -302,7 +302,7 @@ export function assertAgentConsumableAssessment(
     assessment.lineage.observationPipeline !== "yolox-nano-humanart+rtmpose-m-halpe26"
     || assessment.lineage.poseSchema !== "halpe26"
     || assessment.lineage.canonicalOwner !== "rust-motion-sdk"
-    || assessment.lineage.packetContract !== "MOTN/1.7"
+    || assessment.lineage.packetContract !== "MOTN/1.10"
   ) {
     throw new Error("Assessment runtime lineage is not the supported Halpe-26 Rust contract");
   }

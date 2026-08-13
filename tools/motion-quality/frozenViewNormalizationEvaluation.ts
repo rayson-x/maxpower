@@ -29,6 +29,17 @@ export type EvaluationBucketKey =
   | `condition:${EvaluationCondition}`
   | `confidence:${"high" | "medium" | "low" | "unavailable"}`;
 
+export type ObliqueCrossViewBucketKey =
+  | "view:front_oblique_left"
+  | "view:front_oblique_right";
+
+export type WorstObliqueCrossViewReason =
+  | "required_oblique_bucket_missing"
+  | "oblique_bucket_has_no_synchronized_pairs"
+  | "raw_screen_y_fields_unavailable"
+  | "normalized_fields_unavailable"
+  | "normalized_does_not_strictly_improve_raw_screen_y";
+
 export interface FrozenEvaluationInferencePack {
   readonly schemaVersion: "maxpower-view-normalization-inference-pack/v1";
   readonly runId: string;
@@ -480,6 +491,16 @@ export interface FrozenViewNormalizationEvaluationReport {
     baseline: EndpointAlignmentMetrics;
   }>;
   readonly crossView: CrossViewMetrics;
+  readonly worstObliqueCrossView: Readonly<{
+    status: "available" | "unavailable";
+    bucket: ObliqueCrossViewBucketKey | null;
+    missingBuckets: readonly ObliqueCrossViewBucketKey[];
+    pairedRepCount: number;
+    rawScreenYRomMeanAbsoluteDisagreement: number | null;
+    normalizedRomMeanAbsoluteDisagreement: number | null;
+    strictlyImproves: boolean;
+    reason: WorstObliqueCrossViewReason | null;
+  }>;
   readonly buckets: readonly Readonly<{
     key: EvaluationBucketKey;
     candidate: EndpointAlignmentMetrics;
@@ -500,6 +521,7 @@ export interface FrozenViewNormalizationEvaluationReport {
       candidateNonInferiorToBaseline: boolean;
       candidateNonInferiorInEveryBucket: boolean;
       normalizedCrossViewImprovesOnRawScreenY: boolean;
+      normalizedCrossViewImprovesOnRawScreenYInWorstObliqueBucket: boolean;
     }>;
   }>;
   readonly reportHash: string;
@@ -657,6 +679,10 @@ export function revealFrozenEvaluationTruth(
     baseline: MetricAccumulator;
   }>>();
   const crossViewAccumulator = emptyCrossViewAccumulator();
+  const obliqueCrossViewAccumulators = new Map<
+    ObliqueCrossViewBucketKey,
+    CrossViewAccumulator
+  >();
   for (const context of validatedFrozen.contexts) {
     const contextTruth = truthByContext.get(context.contextId);
     if (!contextTruth) throw new Error(`missing revealed truth for ${context.contextId}`);
@@ -710,6 +736,18 @@ export function revealFrozenEvaluationTruth(
         pack.preregistration.matchingToleranceMs,
       );
     }
+    const obliqueBucket = obliqueBucketKey(context.view);
+    if (obliqueBucket) {
+      const metrics = obliqueCrossViewAccumulators.get(obliqueBucket)
+        ?? emptyCrossViewAccumulator();
+      accumulateCrossView(
+        metrics,
+        contextTruth.reps,
+        lastFrame.candidate.sealedReps,
+        pack.preregistration.matchingToleranceMs,
+      );
+      obliqueCrossViewAccumulators.set(obliqueBucket, metrics);
+    }
   }
   const buckets = [...bucketAccumulators.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
@@ -724,6 +762,9 @@ export function revealFrozenEvaluationTruth(
   const crossView = crossViewAccumulator.pairedRepCount > 0
     ? finalizeCrossView(crossViewAccumulator)
     : { status: "not_applicable" as const };
+  const worstObliqueCrossView = evaluateWorstObliqueCrossView(
+    obliqueCrossViewAccumulators,
+  );
   const gates = {
     precisionAtLeast95: atLeast(candidateMetrics.precision, 0.95),
     recallAtLeast95: atLeast(candidateMetrics.recall, 0.95),
@@ -737,8 +778,14 @@ export function revealFrozenEvaluationTruth(
       && crossView.rawScreenYRomMeanAbsoluteDisagreement !== null
       && crossView.normalizedRomMeanAbsoluteDisagreement
         < crossView.rawScreenYRomMeanAbsoluteDisagreement,
+    normalizedCrossViewImprovesOnRawScreenYInWorstObliqueBucket:
+      worstObliqueCrossView.strictlyImproves,
   };
-  const promotionReasons = promotionReasonsFor(pack.runKind, gates);
+  const promotionReasons = promotionReasonsFor(
+    pack.runKind,
+    gates,
+    worstObliqueCrossView.reason,
+  );
   const semantic = {
     schemaVersion: "maxpower-view-normalization-evaluation-report/v1" as const,
     runId: frozen.runId,
@@ -750,6 +797,7 @@ export function revealFrozenEvaluationTruth(
       baseline: baselineMetrics,
     },
     crossView,
+    worstObliqueCrossView,
     buckets,
     worstBucket,
     promotion: {
@@ -929,7 +977,9 @@ function accumulateCrossView(
   }
 }
 
-function finalizeCrossView(metrics: CrossViewAccumulator): CrossViewMetrics {
+function finalizeCrossView(
+  metrics: CrossViewAccumulator,
+): Exclude<CrossViewMetrics, Readonly<{ status: "not_applicable" }>> {
   if (metrics.normalizedCount === 0) {
     return {
       status: "unavailable",
@@ -951,6 +1001,135 @@ function finalizeCrossView(metrics: CrossViewAccumulator): CrossViewMetrics {
     ),
     normalizedCoverage: ratio(metrics.normalizedCount, metrics.pairedRepCount) ?? 0,
     abstentionCount: metrics.abstentionCount,
+  };
+}
+
+const REQUIRED_OBLIQUE_CROSS_VIEW_BUCKETS = [
+  "view:front_oblique_left",
+  "view:front_oblique_right",
+] as const satisfies readonly ObliqueCrossViewBucketKey[];
+
+function obliqueBucketKey(view: FrozenEvaluationView): ObliqueCrossViewBucketKey | null {
+  if (view === "front_oblique_left") return "view:front_oblique_left";
+  if (view === "front_oblique_right") return "view:front_oblique_right";
+  return null;
+}
+
+function evaluateWorstObliqueCrossView(
+  accumulators: ReadonlyMap<ObliqueCrossViewBucketKey, CrossViewAccumulator>,
+): FrozenViewNormalizationEvaluationReport["worstObliqueCrossView"] {
+  const missingBuckets = REQUIRED_OBLIQUE_CROSS_VIEW_BUCKETS.filter(
+    (bucket) => !accumulators.has(bucket),
+  );
+  if (missingBuckets.length > 0) {
+    return {
+      status: "unavailable",
+      bucket: null,
+      missingBuckets,
+      pairedRepCount: 0,
+      rawScreenYRomMeanAbsoluteDisagreement: null,
+      normalizedRomMeanAbsoluteDisagreement: null,
+      strictlyImproves: false,
+      reason: "required_oblique_bucket_missing",
+    };
+  }
+
+  const noPairBucket = REQUIRED_OBLIQUE_CROSS_VIEW_BUCKETS.find(
+    (bucket) => accumulators.get(bucket)!.pairedRepCount === 0,
+  );
+  if (noPairBucket) {
+    return {
+      status: "unavailable",
+      bucket: noPairBucket,
+      missingBuckets: [],
+      pairedRepCount: 0,
+      rawScreenYRomMeanAbsoluteDisagreement: null,
+      normalizedRomMeanAbsoluteDisagreement: null,
+      strictlyImproves: false,
+      reason: "oblique_bucket_has_no_synchronized_pairs",
+    };
+  }
+
+  const buckets = REQUIRED_OBLIQUE_CROSS_VIEW_BUCKETS.map((bucket) => ({
+    bucket,
+    metrics: finalizeCrossView(accumulators.get(bucket)!),
+  }));
+  const rawUnavailable = buckets.find(({ metrics }) => (
+    metrics.status !== "available"
+      || metrics.rawScreenYRomMeanAbsoluteDisagreement === null
+  ));
+  if (rawUnavailable) {
+    return {
+      status: "unavailable",
+      bucket: rawUnavailable.bucket,
+      missingBuckets: [],
+      pairedRepCount: rawUnavailable.metrics.pairedRepCount,
+      rawScreenYRomMeanAbsoluteDisagreement: rawUnavailable.metrics.status === "available"
+        ? rawUnavailable.metrics.rawScreenYRomMeanAbsoluteDisagreement
+        : null,
+      normalizedRomMeanAbsoluteDisagreement: rawUnavailable.metrics.status === "available"
+        ? rawUnavailable.metrics.normalizedRomMeanAbsoluteDisagreement
+        : null,
+      strictlyImproves: false,
+      reason: rawUnavailable.metrics.status === "available"
+        ? "raw_screen_y_fields_unavailable"
+        : "normalized_fields_unavailable",
+    };
+  }
+  const normalizedUnavailable = buckets.find(({ metrics }) => (
+    metrics.status !== "available"
+      || metrics.normalizedRomMeanAbsoluteDisagreement === null
+  ));
+  if (normalizedUnavailable) {
+    return {
+      status: "unavailable",
+      bucket: normalizedUnavailable.bucket,
+      missingBuckets: [],
+      pairedRepCount: normalizedUnavailable.metrics.pairedRepCount,
+      rawScreenYRomMeanAbsoluteDisagreement:
+        normalizedUnavailable.metrics.status === "available"
+          ? normalizedUnavailable.metrics.rawScreenYRomMeanAbsoluteDisagreement
+          : null,
+      normalizedRomMeanAbsoluteDisagreement: null,
+      strictlyImproves: false,
+      reason: "normalized_fields_unavailable",
+    };
+  }
+
+  const comparableBuckets = buckets.map(({ bucket, metrics }) => {
+    if (metrics.status !== "available"
+        || metrics.rawScreenYRomMeanAbsoluteDisagreement === null
+        || metrics.normalizedRomMeanAbsoluteDisagreement === null) {
+      throw new Error("cross-view bucket became unavailable after validation");
+    }
+    return {
+      bucket,
+      pairedRepCount: metrics.pairedRepCount,
+      rawScreenYRomMeanAbsoluteDisagreement:
+        metrics.rawScreenYRomMeanAbsoluteDisagreement,
+      normalizedRomMeanAbsoluteDisagreement:
+        metrics.normalizedRomMeanAbsoluteDisagreement,
+    };
+  });
+  const worst = [...comparableBuckets].sort((left, right) => {
+    const disagreement = right.normalizedRomMeanAbsoluteDisagreement
+      - left.normalizedRomMeanAbsoluteDisagreement;
+    return disagreement !== 0 ? disagreement : left.bucket.localeCompare(right.bucket);
+  })[0]!;
+  const raw = worst.rawScreenYRomMeanAbsoluteDisagreement;
+  const normalized = worst.normalizedRomMeanAbsoluteDisagreement;
+  const strictlyImproves = normalized < raw;
+  return {
+    status: "available",
+    bucket: worst.bucket,
+    missingBuckets: [],
+    pairedRepCount: worst.pairedRepCount,
+    rawScreenYRomMeanAbsoluteDisagreement: raw,
+    normalizedRomMeanAbsoluteDisagreement: normalized,
+    strictlyImproves,
+    reason: strictlyImproves
+      ? null
+      : "normalized_does_not_strictly_improve_raw_screen_y",
   };
 }
 
@@ -1023,6 +1202,7 @@ function selectWorstBucket(
 function promotionReasonsFor(
   runKind: FrozenEvaluationRunKind,
   gates: FrozenViewNormalizationEvaluationReport["promotion"]["gates"],
+  worstObliqueReason: WorstObliqueCrossViewReason | null,
 ): string[] {
   if (runKind === "touched_benchmark") {
     return ["touched_benchmark_is_never_acceptance_eligible"];
@@ -1043,7 +1223,28 @@ function promotionReasonsFor(
   if (!gates.normalizedCrossViewImprovesOnRawScreenY) {
     reasons.push("normalized_cross_view_does_not_improve_raw_screen_y");
   }
+  if (!gates.normalizedCrossViewImprovesOnRawScreenYInWorstObliqueBucket) {
+    reasons.push(worstObliquePromotionReason(worstObliqueReason));
+  }
   return reasons;
+}
+
+function worstObliquePromotionReason(
+  reason: WorstObliqueCrossViewReason | null,
+): string {
+  switch (reason) {
+    case "required_oblique_bucket_missing":
+      return "normalized_cross_view_required_oblique_bucket_missing";
+    case "oblique_bucket_has_no_synchronized_pairs":
+      return "normalized_cross_view_oblique_bucket_has_no_synchronized_pairs";
+    case "raw_screen_y_fields_unavailable":
+      return "normalized_cross_view_raw_screen_y_unavailable_in_oblique_bucket";
+    case "normalized_fields_unavailable":
+      return "normalized_cross_view_normalized_fields_unavailable_in_oblique_bucket";
+    case "normalized_does_not_strictly_improve_raw_screen_y":
+    case null:
+      return "normalized_cross_view_does_not_improve_raw_screen_y_in_worst_oblique_bucket";
+  }
 }
 
 function atLeast(value: number | null, threshold: number): boolean {

@@ -1,6 +1,11 @@
-/** Landmarks in `poseSchema` order as [x, y, z, score], normalized to the analysis frame. */
+/**
+ * Native camera metadata paired with one Rust canonical packet.
+ *
+ * Skeleton landmarks intentionally are not a field on this event. Consumers
+ * render and persist landmarks decoded from `packetBase64`, so detector input
+ * can never become a second public skeleton truth.
+ */
 export interface PoseEvent {
-  landmarks: Array<[number, number, number, number]>;
   width: number;
   height: number;
   timestampMs: number;

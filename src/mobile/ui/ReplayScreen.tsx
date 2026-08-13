@@ -59,6 +59,7 @@ export function ReplayScreen(props: {
     [props.exerciseId, props.capturePosition],
   );
   const [event, setEvent] = useState<PoseEvent | null>(null);
+  const [packet, setPacket] = useState<DecodedMotionPacket | null>(null);
   const [viewSize, setViewSize] = useState<Size>({ width: 1, height: 1 });
   const [paused, setPaused] = useState(false);
   const [nativeError, setNativeError] = useState<string | null>(null);
@@ -100,20 +101,14 @@ export function ReplayScreen(props: {
         return;
       }
       if (!nativeEvent.packetBase64) {
+        setPacket(null);
         setEvent(nativeEvent);
         return;
       }
       try {
         const decoded = decodeMotionPacket(decodeBase64(nativeEvent.packetBase64));
-        setEvent({
-          ...nativeEvent,
-          landmarks: decoded.canonical.map((landmark) => [
-            landmark.x ?? Number.NaN,
-            landmark.y ?? Number.NaN,
-            landmark.z ?? Number.NaN,
-            landmark.canonicalConfidence,
-          ] as [number, number, number, number]),
-        });
+        setPacket(decoded);
+        setEvent(nativeEvent);
         packetsRef.current.push(decoded);
         setPhase(phaseLabel(decoded.repState.phase, locale) ?? decoded.repState.phase);
         for (const rep of decoded.completedReps) {
@@ -126,6 +121,7 @@ export function ReplayScreen(props: {
           }
         }
       } catch (error) {
+        setPacket(null);
         setNativeError(error instanceof Error ? error.message : String(error));
       }
     },
@@ -141,6 +137,7 @@ export function ReplayScreen(props: {
     setProgress({ positionMs: 0, durationMs: 0 });
     setLatestFindings(t("live.waitingForVideo"));
     setEvent(null);
+    setPacket(null);
     setSessionKey((key) => key + 1);
   }, [t]);
 
@@ -162,11 +159,16 @@ export function ReplayScreen(props: {
   }, [event, viewSize]);
 
   const visibleLandmarks = useMemo(() => {
-    if (!event) return [];
-    return event.landmarks
-      .map(([x, y, , visibility], index) => ({ index, x, y, visibility }))
+    if (!packet) return [];
+    return packet.canonical
+      .map((landmark, index) => ({
+        index,
+        x: landmark.x ?? Number.NaN,
+        y: landmark.y ?? Number.NaN,
+        visibility: landmark.canonicalConfidence,
+      }))
       .filter((l) => Number.isFinite(l.x) && Number.isFinite(l.y) && l.visibility >= 0.3);
-  }, [event]);
+  }, [packet]);
 
   const pointOf = (index: number) => {
     const landmark = visibleLandmarks.find((entry) => entry.index === index);

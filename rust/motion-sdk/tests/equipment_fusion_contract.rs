@@ -151,6 +151,135 @@ fn a_missing_equipment_frame_publishes_cannot_judge_but_keeps_private_track_cont
 }
 
 #[test]
+fn predicted_shaft_is_retained_only_as_non_judgeable_continuity_on_a_measured_track() {
+    let subject = subject();
+    let canonical = unknown_canonical();
+    let mut engine = EquipmentFusionEngine::new();
+    let mut measured = observation(
+        10,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.22, 0.42, 0.56, 0.035),
+    );
+    measured.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+        x1: 0.22,
+        y1: 0.42,
+        x2: 0.78,
+        y2: 0.455,
+    });
+    let first = engine.process(EquipmentFrameInput {
+        timestamp_ms: 1_000,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[measured],
+    });
+    let measured_track_id = first.tracks[0].track_id;
+
+    let mut predicted = measured;
+    predicted.proposal_id = 11;
+    predicted.bbox = NormalizedRect::new(0.23, 0.44, 0.56, 0.035);
+    predicted.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+        x1: 0.23,
+        y1: 0.44,
+        x2: 0.79,
+        y2: 0.475,
+    });
+    predicted.score = 0.36;
+    predicted.uncertainty_px = Some(7.5);
+    predicted.source = EquipmentSource::Predicted;
+
+    let continuity = engine.process(EquipmentFrameInput {
+        timestamp_ms: 1_100,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[predicted],
+    });
+
+    assert_eq!(
+        continuity.status,
+        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::NoEquipmentObservation),
+        "predicted-only equipment must never make the frame independently judgeable",
+    );
+    assert_eq!(continuity.tracks.len(), 1);
+    let track = continuity.tracks[0];
+    assert_eq!(track.track_id, measured_track_id);
+    assert_eq!(track.proposal_id, 11);
+    assert_eq!(track.source, EquipmentSource::Predicted);
+    assert_eq!(track.axis, predicted.axis);
+    assert_eq!(track.observation_score, 0.36);
+    assert_eq!(track.uncertainty_px, Some(7.5));
+    assert!(!track.judgeable_path);
+}
+
+#[test]
+fn predicted_shaft_cannot_create_an_independent_equipment_track() {
+    let subject = subject();
+    let canonical = unknown_canonical();
+    let mut engine = EquipmentFusionEngine::new();
+    let mut predicted = observation(
+        12,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.22, 0.42, 0.56, 0.035),
+    );
+    predicted.source = EquipmentSource::Predicted;
+    predicted.score = 0.36;
+
+    let output = engine.process(EquipmentFrameInput {
+        timestamp_ms: 1_000,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[predicted],
+    });
+
+    assert_eq!(
+        output.status,
+        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::LowConfidenceOrInvalid),
+    );
+    assert!(output.tracks.is_empty());
+}
+
+#[test]
+fn predicted_continuity_does_not_extend_the_measured_track_lifetime() {
+    let subject = subject();
+    let canonical = unknown_canonical();
+    let mut engine = EquipmentFusionEngine::new();
+    let measured = observation(
+        20,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.22, 0.42, 0.56, 0.035),
+    );
+    engine.process(EquipmentFrameInput {
+        timestamp_ms: 1_000,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[measured],
+    });
+
+    let mut predicted = measured;
+    predicted.source = EquipmentSource::Predicted;
+    predicted.score = 0.36;
+    let within_measured_gap = engine.process(EquipmentFrameInput {
+        timestamp_ms: 1_400,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[predicted],
+    });
+    assert_eq!(within_measured_gap.tracks.len(), 1);
+    assert!(!within_measured_gap.tracks[0].judgeable_path);
+
+    let after_measured_gap = engine.process(EquipmentFrameInput {
+        timestamp_ms: 1_501,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[predicted],
+    });
+    assert!(
+        after_measured_gap.tracks.is_empty(),
+        "predictions must not keep their own identity alive after measured evidence expires",
+    );
+    assert_ne!(after_measured_gap.status, EquipmentFrameStatus::Observed);
+}
+
+#[test]
 fn two_dumbbell_tracks_survive_detector_proposal_reordering() {
     let subject = subject();
     let canonical = unknown_canonical();
@@ -245,6 +374,95 @@ impl InferenceAdapter for EquipmentFixtureAdapter {
             )],
         })
     }
+}
+
+struct MeasuredThenPredictedEquipmentAdapter {
+    frame_index: usize,
+}
+
+impl InferenceAdapter for MeasuredThenPredictedEquipmentAdapter {
+    fn infer(&mut self, _frame: &FrameLease) -> Result<InferenceResult, MotionError> {
+        let mut shaft = observation(
+            80 + self.frame_index as u64,
+            EquipmentKind::BarbellShaft,
+            NormalizedRect::new(0.22, 0.42 + self.frame_index as f32 * 0.02, 0.56, 0.035),
+        );
+        shaft.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+            x1: 0.22,
+            y1: 0.42 + self.frame_index as f32 * 0.02,
+            x2: 0.78,
+            y2: 0.455 + self.frame_index as f32 * 0.02,
+        });
+        if self.frame_index > 0 {
+            shaft.source = EquipmentSource::Predicted;
+            shaft.score = 0.36;
+            shaft.uncertainty_px = Some(7.5);
+        }
+        self.frame_index += 1;
+        Ok(FrameObservations {
+            pose_candidates: vec![subject()],
+            equipment: vec![shaft],
+        })
+    }
+}
+
+#[test]
+fn canonical_packet_retains_predicted_axis_without_making_it_observed() {
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:equipment:predicted-provenance:v1.10".into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: 720,
+            image_height_px: 1_280,
+            continuity: ContinuityMode::Raw,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        MeasuredThenPredictedEquipmentAdapter { frame_index: 0 },
+        output.clone(),
+    )
+    .unwrap();
+
+    for (frame_id, timestamp_ms) in [(1, 1_000), (2, 1_100)] {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                timestamp_ms,
+                Arc::new(AtomicUsize::new(0)),
+            ))
+            .unwrap();
+    }
+
+    let packets = output.packets();
+    let measured_track_id = packets[0].equipment.tracks[0].track_id;
+    let predicted_packet = &packets[1];
+    assert_eq!(
+        predicted_packet.equipment.status,
+        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::NoEquipmentObservation),
+    );
+    assert_eq!(predicted_packet.equipment.tracks.len(), 1);
+    let predicted = predicted_packet.equipment.tracks[0];
+    assert_eq!(predicted.track_id, measured_track_id);
+    assert_eq!(predicted.source, EquipmentSource::Predicted);
+    let axis = predicted.axis.expect("predicted ordered axis");
+    assert!((axis.x1 - 0.22).abs() < f32::EPSILON);
+    assert!((axis.y1 - 0.44).abs() < f32::EPSILON);
+    assert!((axis.x2 - 0.78).abs() < f32::EPSILON);
+    assert!((axis.y2 - 0.475).abs() < 1e-6);
+    assert_eq!(predicted.observation_score, 0.36);
+    assert_eq!(predicted.uncertainty_px, Some(7.5));
+    assert!(!predicted.judgeable_path);
+    let encoded = encode_motion_packet(predicted_packet).unwrap();
+    assert!(encoded.windows(4).any(|window| window == b"EQP1"));
+    assert!(
+        encoded.windows(4).any(|window| window == b"AXI1"),
+        "predicted ordered endpoints must survive the canonical axis extension",
+    );
 }
 
 #[test]

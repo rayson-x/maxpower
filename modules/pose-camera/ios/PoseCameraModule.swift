@@ -298,7 +298,8 @@ public final class PoseCameraView: ExpoView,
           UInt32(width),
           height: UInt32(height),
           profileJSON: recognitionProfileJSON,
-          active: recognitionActive
+          active: recognitionActive,
+          canonicalFeedMirroring: replayDurationMs == nil ? 0 : 2
         )
         guard status == 0 else {
           emitPoseError("rust-configure", status: status)
@@ -333,9 +334,7 @@ public final class PoseCameraView: ExpoView,
       averageInferenceMs = rollingAverage(averageInferenceMs, inferenceMs, processedFrames)
       averageEquipmentMs = rollingAverage(averageEquipmentMs, equipmentMs, processedFrames)
       averageRustMs = rollingAverage(averageRustMs, rustMs, processedFrames)
-      let landmarks = (candidates.first?["landmarks"] as? [[NSNumber]]) ?? []
       let payload: [String: Any] = [
-        "landmarks": landmarks,
         "width": width,
         "height": height,
         "timestampMs": Double(timestampMs),
@@ -636,7 +635,6 @@ public final class PoseCameraView: ExpoView,
     inferenceQueue.async { [weak self] in
       guard let self, self.replayGeneration == generation else { return }
       let payload: [String: Any] = [
-        "landmarks": [],
         "width": 0,
         "height": 0,
         "timestampMs": durationMs,

@@ -3,8 +3,9 @@ use maxpower_motion_sdk::web_abi::{
     motion_sdk_begin_candidate, motion_sdk_begin_multi, motion_sdk_begin_sequence,
     motion_sdk_begin_set, motion_sdk_close, motion_sdk_commit_candidate,
     motion_sdk_commit_sequence, motion_sdk_copy_packet, motion_sdk_current_frame_valid,
-    motion_sdk_packet_len, motion_sdk_process_multi, motion_sdk_reset, motion_sdk_set_landmark,
-    motion_sdk_set_pose_schema, motion_sdk_set_profile, motion_sdk_set_sequence_byte,
+    motion_sdk_packet_len, motion_sdk_process_multi, motion_sdk_reset,
+    motion_sdk_set_canonical_feed_mirroring, motion_sdk_set_landmark, motion_sdk_set_pose_schema,
+    motion_sdk_set_profile, motion_sdk_set_sequence_byte,
 };
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -159,6 +160,10 @@ fn configure(fixture: &Fixture) -> Result<(), String> {
     }
     require_status("commit sequence", motion_sdk_commit_sequence())?;
     require_status("profile", motion_sdk_set_profile(config.profile_code))?;
+    require_status(
+        "canonical feed mirroring",
+        motion_sdk_set_canonical_feed_mirroring(0),
+    )?;
     if config.active {
         require_status("begin set", motion_sdk_begin_set())?;
     }

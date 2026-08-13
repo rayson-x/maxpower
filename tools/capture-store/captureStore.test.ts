@@ -26,7 +26,6 @@ const SESSION: CaptureSessionMeta = {
 const FRAME_1: CaptureFrame = {
   timestampMs: 1000,
   packetBase64: "UEFDS0VULTE=",
-  landmarks: [[0.1, 0.2, 0.3, 0.9]],
 };
 const FRAME_2: CaptureFrame = { timestampMs: 1100, packetBase64: "UEFDS0VULTI=" };
 const FRAME_3: CaptureFrame = { timestampMs: 1300, packetBase64: "UEFDS0VULTM=" };
@@ -97,7 +96,7 @@ test("InMemoryCaptureStore：记录完整写入序列，finalize 返回内存 ur
   }
 });
 
-test("InMemoryCaptureStore：landmarks 可选，缺省时文档里不补字段", async () => {
+test("InMemoryCaptureStore：只持久化 canonical packet，不创建第二份骨架字段", async () => {
   const store = new InMemoryCaptureStore();
   store.begin(SESSION);
   store.append(FRAME_2);

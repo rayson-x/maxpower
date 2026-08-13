@@ -14,7 +14,8 @@ jint configure(
     uint32_t height,
     uint32_t profile_code,
     uint32_t pose_schema,
-    bool active) {
+    bool active,
+    uint32_t canonical_feed_mirroring) {
   if (motion_sdk_reset(width, height, 1) != 0) return -1;
   if (motion_sdk_set_pose_schema(pose_schema) != 0) return -2;
   const std::string sequence = "mobile-native";
@@ -26,7 +27,10 @@ jint configure(
   }
   if (motion_sdk_commit_sequence() != 0) return -5;
   if (motion_sdk_set_profile(profile_code) != 0) return -6;
-  return active && motion_sdk_begin_set() != 0 ? -7 : 0;
+  // CameraX analysis buffers are unmirrored. Imported replay files may already
+  // contain a horizontal flip, so callers pass unknown unless metadata says.
+  if (motion_sdk_set_canonical_feed_mirroring(canonical_feed_mirroring) != 0) return -7;
+  return active && motion_sdk_begin_set() != 0 ? -8 : 0;
 }
 
 bool as_u32(double value, uint32_t *output) {
@@ -62,10 +66,10 @@ Java_expo_modules_posecamera_MotionNative_nativeContractMajor(
 extern "C" JNIEXPORT jint JNICALL
 Java_expo_modules_posecamera_MotionNative_nativeConfigure(
     JNIEnv *, jobject, jint width, jint height, jint profile_code, jint pose_schema,
-    jboolean active) {
+    jboolean active, jint canonical_feed_mirroring) {
   return configure(static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                    static_cast<uint32_t>(profile_code), static_cast<uint32_t>(pose_schema),
-                   active == JNI_TRUE);
+                   active == JNI_TRUE, static_cast<uint32_t>(canonical_feed_mirroring));
 }
 
 extern "C" JNIEXPORT jint JNICALL

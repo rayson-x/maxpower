@@ -3,7 +3,6 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   FileSystemCaptureStore,
   type CaptureFileRef,
-  type CaptureFrame,
   type CaptureSessionMeta,
   type CaptureStore,
 } from "./captureStore";
@@ -24,7 +23,6 @@ export type {
 export interface CapturePoseEvent {
   timestampMs: number;
   packetBase64?: string;
-  landmarks?: CaptureFrame["landmarks"];
   error?: string;
 }
 
@@ -33,7 +31,7 @@ export interface UseCaptureSession {
   recording: boolean;
   /** 开始录制；已有进行中的会话时由 store 抛错。 */
   startRecording: (meta: CaptureSessionMeta) => void;
-  /** 从 onPose 事件提取 packetBase64 / timestampMs / landmarks 追加一帧；未录制或空帧时静默忽略。 */
+  /** 从 onPose 事件提取 canonical packet 与时间戳；未录制或空帧时静默忽略。 */
   ingestPoseEvent: (nativeEvent: CapturePoseEvent) => void;
   /** 结束并落盘；未在录制时返回 null。落盘失败时会话已被清空，错误原样抛给调用方。 */
   stopRecording: () => Promise<CaptureFileRef | null>;
@@ -69,7 +67,6 @@ export function useCaptureSession(store?: CaptureStore): UseCaptureSession {
     storeRef.current!.append({
       timestampMs: nativeEvent.timestampMs,
       packetBase64: nativeEvent.packetBase64,
-      landmarks: nativeEvent.landmarks,
     });
   }, []);
 

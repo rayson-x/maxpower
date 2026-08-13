@@ -157,6 +157,9 @@ test("host-native Rust and Web/WASM preserve one active oblique shaft coordinate
     assert.ok(frozen, "active oblique stream must freeze a causal local frame");
     assert.ok(Math.abs((frozen.rawBarAngleRadians ?? 0) - angle) < 1e-4);
     assert.equal(frozen.endpointOrderMapping, "screen_ordered_anatomy_unknown");
+    assert.equal(frozen.anatomicalSideMapping, "endpoint_one_anatomical_right");
+    assert.equal(frozen.anatomicalLeftEndpointProgress, frozen.endpointTwoProgress);
+    assert.equal(frozen.anatomicalRightEndpointProgress, frozen.endpointOneProgress);
     assert.equal(frozen.equipment?.provenance, "equipment_measured");
   } finally {
     fs.rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -177,12 +180,17 @@ test("uninitialized local coordinate remains valid fail-closed evidence", () => 
     scaleSource: null,
     equipmentTrackId: null,
     rawBarAxis: null,
+    coarseView: null,
+    canonicalFeedMirrored: null,
     endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "unknown",
     equipment: null,
     pose: null,
     channelAgreement: "cannot_judge",
     endpointOneProgress: null,
     endpointTwoProgress: null,
+    anatomicalLeftEndpointProgress: null,
+    anatomicalRightEndpointProgress: null,
     rawBarAngleRadians: null,
     baselineCorrectedBarAngleRadians: null,
     confidence: 0,

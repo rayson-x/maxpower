@@ -566,7 +566,10 @@ test("coordinate evidence names screen-ordered endpoints without inventing anato
     confidence: 0.63,
     fusionStatus: "equipment_only",
     rawBarAxis: [0.12, 0.31, 0.88, 0.47],
+    coarseView: null,
+    canonicalFeedMirrored: null,
     endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "unknown",
     rawAngleDegrees: 11.89,
     correctedAngleDegrees: -2,
     equipmentProgress: 0.37,
@@ -577,6 +580,8 @@ test("coordinate evidence names screen-ordered endpoints without inventing anato
     poseUncertainty: 0.29,
     endpointOneProgress: 0.42,
     endpointTwoProgress: 0.31,
+    anatomicalLeftEndpointProgress: null,
+    anatomicalRightEndpointProgress: null,
     endpointResidual: -0.11,
   });
 
@@ -619,6 +624,39 @@ test("coordinate evidence localizes calibration state and abstention reason", ()
   assert.match(rendered, /Insufficient reliable preparation observations/u);
   assert.match(rendered, /无法判断/u);
   assert.match(rendered, /Cannot judge/u);
+});
+
+test("coordinate evidence renders Rust-owned anatomical endpoint semantics", () => {
+  const summary = coordinateEvidenceSummary({
+    coordinateFrameId: 14,
+    state: "frozen",
+    reason: null,
+    scale: 0.6,
+    scaleSource: "projected_bar_length",
+    confidence: 0.92,
+    channelAgreement: "agreement",
+    coarseView: "front_oblique_right",
+    canonicalFeedMirrored: false,
+    endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "endpoint_one_anatomical_right",
+    endpointOneProgress: 0.31,
+    endpointTwoProgress: 0.42,
+    anatomicalLeftEndpointProgress: 0.42,
+    anatomicalRightEndpointProgress: 0.31,
+  });
+
+  assert.equal(summary.endpointOrderMapping, "screen_ordered_anatomy_unknown");
+  assert.equal(summary.anatomicalSideMapping, "endpoint_one_anatomical_right");
+  assert.equal(summary.anatomicalLeftEndpointProgress, 0.42);
+  assert.equal(summary.anatomicalRightEndpointProgress, 0.31);
+  const rendered = coordinateEvidenceHtml(summary);
+  assert.match(rendered, /解剖左侧端点/u);
+  assert.match(rendered, /Anatomical left endpoint/u);
+  assert.match(rendered, /解剖右侧端点/u);
+  assert.match(rendered, /Anatomical right endpoint/u);
+  assert.match(rendered, /front_oblique_right/u);
+  assert.match(rendered, /canonical feed unmirrored/u);
+  assert.doesNotMatch(rendered, /解剖侧映射未知|Anatomical mapping unknown/u);
 });
 
 test("missing coordinate evidence abstains visibly instead of fabricating values", () => {

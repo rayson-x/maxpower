@@ -105,12 +105,17 @@ const REQUIRED_LOCAL_MOTION_PATHS = [
   "scaleSource",
   "equipmentTrackId",
   "rawBarAxis",
+  "coarseView",
+  "canonicalFeedMirrored",
   "endpointOrderMapping",
+  "anatomicalSideMapping",
   "equipment",
   "pose",
   "channelAgreement",
   "endpointOneProgress",
   "endpointTwoProgress",
+  "anatomicalLeftEndpointProgress",
+  "anatomicalRightEndpointProgress",
   "rawBarAngleRadians",
   "baselineCorrectedBarAngleRadians",
   "confidence",
@@ -144,6 +149,7 @@ export function sessionConfig(
     },
     stabilization: "fusion",
     setLifecycleMode: "preview",
+    canonicalFeedMirrored: false,
   };
 }
 

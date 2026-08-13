@@ -111,13 +111,19 @@ pub enum EquipmentCannotJudgeReason {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EquipmentFrameStatus {
+    /// At least one current, independently observed equipment track is usable.
     Observed,
+    /// No current independent equipment observation is usable. `tracks` may
+    /// still retain explicitly predicted continuity evidence for rendering or
+    /// diagnostics; such tracks always have `judgeable_path == false`.
     CannotJudge(EquipmentCannotJudgeReason),
 }
 
 /// Canonical equipment evidence associated with the currently locked subject.
 /// Coordinates remain normalized image coordinates; downstream action profiles
-/// must still declare the supported view and equipment semantics.
+/// must still declare the supported view and equipment semantics. Predicted
+/// tracks preserve provenance and geometry but never establish identity or a
+/// judgeable equipment path.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EquipmentTrackEvidence {
     pub track_id: u64,
@@ -255,6 +261,7 @@ impl EquipmentFusionEngine {
         let mut rejected_low_confidence_or_invalid_count = 0;
         let mut rejected_outside_subject_count = 0;
         let mut accepted: Vec<(EquipmentObservation, f32, EquipmentHand)> = Vec::new();
+        let mut predicted_continuity = Vec::new();
 
         for observation in input.equipment.iter().copied() {
             if observation.attributes.is_reflection_candidate {
@@ -265,7 +272,15 @@ impl EquipmentFusionEngine {
                 rejected_static_count += 1;
                 continue;
             }
-            if !valid_observation(observation) || observation.source == EquipmentSource::Predicted {
+            if observation.source == EquipmentSource::Predicted {
+                if valid_predicted_observation(observation) {
+                    predicted_continuity.push(observation);
+                } else {
+                    rejected_low_confidence_or_invalid_count += 1;
+                }
+                continue;
+            }
+            if !valid_observation(observation) {
                 rejected_low_confidence_or_invalid_count += 1;
                 continue;
             }
@@ -279,33 +294,6 @@ impl EquipmentFusionEngine {
                 association_confidence,
                 hand_association(observation, input.canonical),
             ));
-        }
-
-        if accepted.is_empty() {
-            let reason = if rejected_reflection_count + rejected_static_count
-                == input.equipment.len() as u32
-            {
-                EquipmentCannotJudgeReason::ReflectionOrStaticOnly
-            } else if rejected_outside_subject_count > 0
-                && rejected_outside_subject_count
-                    + rejected_reflection_count
-                    + rejected_static_count
-                    == input.equipment.len() as u32
-            {
-                EquipmentCannotJudgeReason::OutsideLockedSubject
-            } else {
-                EquipmentCannotJudgeReason::LowConfidenceOrInvalid
-            };
-            return EquipmentFrameEvidence {
-                timestamp_ms: input.timestamp_ms,
-                subject_candidate_id: Some(subject.id),
-                status: EquipmentFrameStatus::CannotJudge(reason),
-                tracks: Vec::new(),
-                rejected_reflection_count,
-                rejected_static_count,
-                rejected_low_confidence_or_invalid_count,
-                rejected_outside_subject_count,
-            };
         }
 
         // Stronger observations claim old tracks first. Proposal ordering and
@@ -365,11 +353,93 @@ impl EquipmentFusionEngine {
                 judgeable_path: true,
             });
         }
+
+        let measured_track_count = output.len();
+        predicted_continuity.sort_by(|left, right| right.score.total_cmp(&left.score));
+        for observation in predicted_continuity {
+            let Some(association_confidence) = subject_association_confidence(subject, observation)
+            else {
+                rejected_outside_subject_count += 1;
+                continue;
+            };
+            let (center_x, center_y) = observation.bbox.center();
+            let track_index = self
+                .tracks
+                .iter()
+                .enumerate()
+                .filter(|(index, track)| {
+                    !claimed_tracks.contains(index) && track.kind == observation.kind
+                })
+                .filter_map(|(index, track)| {
+                    let distance = (track.center_x - center_x).hypot(track.center_y - center_y);
+                    (distance <= MAXIMUM_TRACK_CENTER_DISTANCE).then_some((index, distance))
+                })
+                .min_by(|left, right| left.1.total_cmp(&right.1))
+                .map(|(index, _)| index);
+            let Some(track_index) = track_index else {
+                // A prediction cannot establish identity. It is retained only
+                // when an independent measured track already owns that identity.
+                rejected_low_confidence_or_invalid_count += 1;
+                continue;
+            };
+            claimed_tracks.insert(track_index);
+            let track_id = self.tracks[track_index].track_id;
+            output.push(EquipmentTrackEvidence {
+                track_id,
+                proposal_id: observation.proposal_id,
+                subject_candidate_id: subject.id,
+                kind: observation.kind,
+                bbox: observation.bbox,
+                axis: observation.axis,
+                center_x,
+                center_y,
+                observation_score: observation.score,
+                association_confidence,
+                uncertainty_px: observation.uncertainty_px,
+                source: EquipmentSource::Predicted,
+                held_by: EquipmentHand::Unknown,
+                judgeable_path: false,
+            });
+        }
+
+        if output.is_empty() {
+            let reason = if rejected_reflection_count + rejected_static_count
+                == input.equipment.len() as u32
+            {
+                EquipmentCannotJudgeReason::ReflectionOrStaticOnly
+            } else if rejected_outside_subject_count > 0
+                && rejected_outside_subject_count
+                    + rejected_reflection_count
+                    + rejected_static_count
+                    == input.equipment.len() as u32
+            {
+                EquipmentCannotJudgeReason::OutsideLockedSubject
+            } else {
+                EquipmentCannotJudgeReason::LowConfidenceOrInvalid
+            };
+            return EquipmentFrameEvidence {
+                timestamp_ms: input.timestamp_ms,
+                subject_candidate_id: Some(subject.id),
+                status: EquipmentFrameStatus::CannotJudge(reason),
+                tracks: Vec::new(),
+                rejected_reflection_count,
+                rejected_static_count,
+                rejected_low_confidence_or_invalid_count,
+                rejected_outside_subject_count,
+            };
+        }
+
         output.sort_by_key(|track| track.track_id);
         EquipmentFrameEvidence {
             timestamp_ms: input.timestamp_ms,
             subject_candidate_id: Some(subject.id),
-            status: EquipmentFrameStatus::Observed,
+            status: if measured_track_count > 0 {
+                EquipmentFrameStatus::Observed
+            } else {
+                EquipmentFrameStatus::CannotJudge(
+                    EquipmentCannotJudgeReason::NoEquipmentObservation,
+                )
+            },
             tracks: output,
             rejected_reflection_count,
             rejected_static_count,
@@ -390,6 +460,17 @@ fn cannot_judge(
 fn valid_observation(observation: EquipmentObservation) -> bool {
     observation.score.is_finite()
         && observation.score >= MINIMUM_OBSERVATION_SCORE
+        && observation
+            .uncertainty_px
+            .is_none_or(|value| value.is_finite() && value >= 0.0)
+        && valid_rect(observation.bbox)
+        && observation.axis.is_none_or(EquipmentAxis2d::is_valid)
+}
+
+fn valid_predicted_observation(observation: EquipmentObservation) -> bool {
+    observation.score.is_finite()
+        && observation.score > 0.0
+        && observation.score <= 1.0
         && observation
             .uncertainty_px
             .is_none_or(|value| value.is_finite() && value >= 0.0)

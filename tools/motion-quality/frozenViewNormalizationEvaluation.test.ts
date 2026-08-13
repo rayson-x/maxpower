@@ -39,7 +39,10 @@ function localCoordinate(
     scaleSource: "projected_bar_length",
     equipmentTrackId: 11,
     rawBarAxis,
+    coarseView: null,
+    canonicalFeedMirrored: null,
     endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "unknown",
     equipment: {
       alongAxisProgress,
       crossAxisDisplacement,
@@ -52,6 +55,8 @@ function localCoordinate(
     channelAgreement: "equipment_only",
     endpointOneProgress: alongAxisProgress,
     endpointTwoProgress: alongAxisProgress,
+    anatomicalLeftEndpointProgress: null,
+    anatomicalRightEndpointProgress: null,
     rawBarAngleRadians: 0,
     baselineCorrectedBarAngleRadians: 0,
     confidence,
@@ -92,6 +97,100 @@ function inferencePack(
       conditions: ["mirror", "bar_occlusion"],
     }],
   };
+}
+
+function evaluateObliqueGateFixture(
+  views: readonly ("front_oblique_left" | "front_oblique_right")[],
+  synchronizedViews: readonly ("front_oblique_left" | "front_oblique_right")[] = views,
+) {
+  const base = inferencePack("untouched_model_acceptance");
+  const contexts = views.map((view, index) => ({
+    contextId: `untouched-${index}::${view}`,
+    sourceCaptureId: `untouched-${index}`,
+    actionId: "barbell_bench_press",
+    view,
+    conditions: [],
+  }));
+  const pack: FrozenEvaluationInferencePack = {
+    ...base,
+    sourceLineage: {
+      targetSourceIds: contexts.map((context) => context.sourceCaptureId),
+      profileFitSourceIds: ["fit-other"],
+      thresholdSelectionSourceIds: ["tune-other"],
+      manuallyInspectedSourceIds: [],
+    },
+    contexts,
+  };
+  const session = new FrozenViewNormalizationEvaluationSession(pack);
+  for (const [index, context] of contexts.entries()) {
+    session.submit(context.contextId, {
+      frameId: 1,
+      sourceTimestampMs: 0,
+      inputObservationHash: HASH_A,
+      candidate: { packetHash: HASH_A, phase: "ready", sealedReps: [] },
+      baseline: { packetHash: HASH_B, phase: "ready", sealedReps: [] },
+    });
+    session.submit(context.contextId, {
+      frameId: 2,
+      sourceTimestampMs: 1_000,
+      inputObservationHash: HASH_B,
+      candidate: {
+        packetHash: HASH_B,
+        phase: "return",
+        sealedReps: [{
+          repId: `candidate-${index}`,
+          startMs: 100,
+          turnaroundMs: 500,
+          endMs: 900,
+          disposition: "confirmed",
+          rawScreenYRom: 0.3,
+          normalizedFacts: {
+            coordinateVersion: "local-motion-coordinate/v1",
+            normalizedRom: 0.8,
+            crossPath: 0.01,
+            endpointResidual: 0.01,
+            confidence: 0.9,
+          },
+        }],
+      },
+      baseline: {
+        packetHash: HASH_A,
+        phase: "return",
+        sealedReps: [{
+          repId: `baseline-${index}`,
+          startMs: 100,
+          turnaroundMs: 500,
+          endMs: 900,
+          disposition: "confirmed",
+          rawScreenYRom: 0.3,
+        }],
+      },
+    });
+  }
+  return revealFrozenEvaluationTruth(session.freeze(), pack, {
+    schemaVersion: "maxpower-view-normalization-revealed-truth/v1",
+    contexts: contexts.map((context, index) => ({
+      contextId: context.contextId,
+      sourceCaptureId: context.sourceCaptureId,
+      actionId: context.actionId,
+      view: context.view,
+      reps: [{
+        repId: `truth-${index}`,
+        startMs: 100,
+        turnaroundMs: 500,
+        endMs: 900,
+        ...(synchronizedViews.includes(context.view) ? {
+          synchronizedFrontReference: {
+            turnaroundMs: 500,
+            rawScreenYRom: 0.45,
+            normalizedRom: 0.8,
+            crossPath: 0.01,
+            endpointResidual: 0.01,
+          },
+        } : {}),
+      }],
+    })),
+  });
 }
 
 test("inference pack rejects truth leakage and source-derived untouched acceptance", () => {
@@ -250,6 +349,7 @@ test("normalized facts adapter consumes the canonical MotionPacket v1.10 coordin
       provenance: "equipment_measured",
     },
     endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "unknown",
   }), {
     status: "available",
     coordinateVersion: "maxpower-local-motion-coordinate/v1",
@@ -267,6 +367,7 @@ test("normalized facts adapter preserves a decoded pose-only channel", () => {
     state: "degraded",
     confidence: 0.71,
     endpointOrderMapping: "screen_ordered_anatomy_unknown",
+    anatomicalSideMapping: "unknown",
     equipment: null,
     pose: {
       alongAxisProgress: 0.39,
@@ -831,20 +932,72 @@ test("untouched promotion eligibility requires frozen 95 percent gates and norma
   const pack: FrozenEvaluationInferencePack = {
     ...base,
     sourceLineage: {
-      targetSourceIds: ["untouched-a"],
+      targetSourceIds: ["untouched-a", "untouched-left"],
       profileFitSourceIds: ["fit-other"],
       thresholdSelectionSourceIds: ["tune-other"],
       manuallyInspectedSourceIds: [],
     },
-    contexts: [{
-      contextId: "untouched-a::right",
-      sourceCaptureId: "untouched-a",
-      actionId: "barbell_bench_press",
-      view: "front_oblique_right",
-      conditions: [],
-    }],
+    contexts: [
+      {
+        contextId: "untouched-a::right",
+        sourceCaptureId: "untouched-a",
+        actionId: "barbell_bench_press",
+        view: "front_oblique_right",
+        conditions: [],
+      },
+      {
+        contextId: "untouched-left::left",
+        sourceCaptureId: "untouched-left",
+        actionId: "barbell_bench_press",
+        view: "front_oblique_left",
+        conditions: [],
+      },
+    ],
   };
   const session = new FrozenViewNormalizationEvaluationSession(pack);
+  session.submit("untouched-left::left", {
+    frameId: 1,
+    sourceTimestampMs: 0,
+    inputObservationHash: HASH_A,
+    candidate: { packetHash: HASH_A, phase: "ready", sealedReps: [] },
+    baseline: { packetHash: HASH_B, phase: "ready", sealedReps: [] },
+  });
+  session.submit("untouched-left::left", {
+    frameId: 2,
+    sourceTimestampMs: 1_000,
+    inputObservationHash: HASH_B,
+    candidate: {
+      packetHash: HASH_B,
+      phase: "return",
+      sealedReps: [{
+        repId: "candidate-left-1",
+        startMs: 100,
+        turnaroundMs: 500,
+        endMs: 900,
+        disposition: "confirmed",
+        rawScreenYRom: 0.3,
+        normalizedFacts: {
+          coordinateVersion: "local-motion-coordinate/v1",
+          normalizedRom: 0.8,
+          crossPath: 0.01,
+          endpointResidual: 0.01,
+          confidence: 0.9,
+        },
+      }],
+    },
+    baseline: {
+      packetHash: HASH_A,
+      phase: "return",
+      sealedReps: [{
+        repId: "baseline-left-1",
+        startMs: 100,
+        turnaroundMs: 500,
+        endMs: 900,
+        disposition: "confirmed",
+        rawScreenYRom: 0.3,
+      }],
+    },
+  });
   session.submit("untouched-a::right", {
     frameId: 1,
     sourceTimestampMs: 0,
@@ -890,25 +1043,46 @@ test("untouched promotion eligibility requires frozen 95 percent gates and norma
   });
   const report = revealFrozenEvaluationTruth(session.freeze(), pack, {
     schemaVersion: "maxpower-view-normalization-revealed-truth/v1",
-    contexts: [{
-      contextId: "untouched-a::right",
-      sourceCaptureId: "untouched-a",
-      actionId: "barbell_bench_press",
-      view: "front_oblique_right",
-      reps: [{
-        repId: "truth-1",
-        startMs: 100,
-        turnaroundMs: 500,
-        endMs: 900,
-        synchronizedFrontReference: {
+    contexts: [
+      {
+        contextId: "untouched-a::right",
+        sourceCaptureId: "untouched-a",
+        actionId: "barbell_bench_press",
+        view: "front_oblique_right",
+        reps: [{
+          repId: "truth-1",
+          startMs: 100,
           turnaroundMs: 500,
-          rawScreenYRom: 0.45,
-          normalizedRom: 0.8,
-          crossPath: 0.01,
-          endpointResidual: 0.01,
-        },
-      }],
-    }],
+          endMs: 900,
+          synchronizedFrontReference: {
+            turnaroundMs: 500,
+            rawScreenYRom: 0.45,
+            normalizedRom: 0.8,
+            crossPath: 0.01,
+            endpointResidual: 0.01,
+          },
+        }],
+      },
+      {
+        contextId: "untouched-left::left",
+        sourceCaptureId: "untouched-left",
+        actionId: "barbell_bench_press",
+        view: "front_oblique_left",
+        reps: [{
+          repId: "truth-left-1",
+          startMs: 100,
+          turnaroundMs: 500,
+          endMs: 900,
+          synchronizedFrontReference: {
+            turnaroundMs: 500,
+            rawScreenYRom: 0.45,
+            normalizedRom: 0.8,
+            crossPath: 0.01,
+            endpointResidual: 0.01,
+          },
+        }],
+      },
+    ],
   });
 
   assert.equal(report.promotion.eligible, true);
@@ -918,4 +1092,161 @@ test("untouched promotion eligibility requires frozen 95 percent gates and norma
   assert.equal(report.promotion.gates.fullEndpointAlignmentAtLeast95, true);
   assert.equal(report.promotion.gates.candidateNonInferiorInEveryBucket, true);
   assert.equal(report.promotion.gates.normalizedCrossViewImprovesOnRawScreenY, true);
+});
+
+test("promotion fails when aggregate cross-view improves but the actual worst oblique bucket does not", () => {
+  const base = inferencePack("untouched_model_acceptance");
+  const contexts = [
+    {
+      contextId: "untouched-left::oblique",
+      sourceCaptureId: "untouched-left",
+      actionId: "barbell_bench_press",
+      view: "front_oblique_left" as const,
+      conditions: [],
+    },
+    {
+      contextId: "untouched-right::oblique",
+      sourceCaptureId: "untouched-right",
+      actionId: "barbell_bench_press",
+      view: "front_oblique_right" as const,
+      conditions: [],
+    },
+  ];
+  const pack: FrozenEvaluationInferencePack = {
+    ...base,
+    sourceLineage: {
+      targetSourceIds: contexts.map((context) => context.sourceCaptureId),
+      profileFitSourceIds: ["fit-other"],
+      thresholdSelectionSourceIds: ["tune-other"],
+      manuallyInspectedSourceIds: [],
+    },
+    contexts,
+  };
+  const session = new FrozenViewNormalizationEvaluationSession(pack);
+  for (const [index, context] of contexts.entries()) {
+    session.submit(context.contextId, {
+      frameId: 1,
+      sourceTimestampMs: 0,
+      inputObservationHash: HASH_A,
+      candidate: { packetHash: HASH_A, phase: "ready", sealedReps: [] },
+      baseline: { packetHash: HASH_B, phase: "ready", sealedReps: [] },
+    });
+    session.submit(context.contextId, {
+      frameId: 2,
+      sourceTimestampMs: 1_000,
+      inputObservationHash: HASH_B,
+      candidate: {
+        packetHash: HASH_B,
+        phase: "return",
+        sealedReps: [{
+          repId: `candidate-${index}`,
+          startMs: 100,
+          turnaroundMs: 500,
+          endMs: 900,
+          disposition: "confirmed",
+          rawScreenYRom: index === 0 ? 0.1 : 0.4,
+          normalizedFacts: {
+            coordinateVersion: "local-motion-coordinate/v1",
+            normalizedRom: index === 0 ? 0.2 : 0.4,
+            crossPath: 0.01,
+            endpointResidual: 0.01,
+            confidence: 0.9,
+          },
+        }],
+      },
+      baseline: {
+        packetHash: HASH_A,
+        phase: "return",
+        sealedReps: [{
+          repId: `baseline-${index}`,
+          startMs: 100,
+          turnaroundMs: 500,
+          endMs: 900,
+          disposition: "confirmed",
+          rawScreenYRom: index === 0 ? 0.1 : 0.4,
+        }],
+      },
+    });
+  }
+
+  const report = revealFrozenEvaluationTruth(session.freeze(), pack, {
+    schemaVersion: "maxpower-view-normalization-revealed-truth/v1",
+    contexts: contexts.map((context, index) => ({
+      contextId: context.contextId,
+      sourceCaptureId: context.sourceCaptureId,
+      actionId: context.actionId,
+      view: context.view,
+      reps: [{
+        repId: `truth-${index}`,
+        startMs: 100,
+        turnaroundMs: 500,
+        endMs: 900,
+        synchronizedFrontReference: {
+          turnaroundMs: 500,
+          rawScreenYRom: 0.5,
+          normalizedRom: index === 0 ? 0.2 : 0.3,
+          crossPath: 0.01,
+          endpointResidual: 0.01,
+        },
+      }],
+    })),
+  });
+
+  assert.equal(report.promotion.gates.normalizedCrossViewImprovesOnRawScreenY, true);
+  assert.equal(
+    report.promotion.gates.normalizedCrossViewImprovesOnRawScreenYInWorstObliqueBucket,
+    false,
+  );
+  assert.deepEqual(report.worstObliqueCrossView, {
+    status: "available",
+    bucket: "view:front_oblique_right",
+    missingBuckets: [],
+    pairedRepCount: 1,
+    rawScreenYRomMeanAbsoluteDisagreement: 0.09999999999999998,
+    normalizedRomMeanAbsoluteDisagreement: 0.10000000000000003,
+    strictlyImproves: false,
+    reason: "normalized_does_not_strictly_improve_raw_screen_y",
+  });
+  assert.equal(report.promotion.eligible, false);
+  assert.ok(report.promotion.reasons.includes(
+    "normalized_cross_view_does_not_improve_raw_screen_y_in_worst_oblique_bucket",
+  ));
+});
+
+test("promotion fails closed when either required oblique bucket is missing", () => {
+  const report = evaluateObliqueGateFixture(["front_oblique_left"]);
+
+  assert.equal(
+    report.promotion.gates.normalizedCrossViewImprovesOnRawScreenYInWorstObliqueBucket,
+    false,
+  );
+  assert.equal(report.worstObliqueCrossView.status, "unavailable");
+  assert.equal(report.worstObliqueCrossView.reason, "required_oblique_bucket_missing");
+  assert.deepEqual(report.worstObliqueCrossView.missingBuckets, [
+    "view:front_oblique_right",
+  ]);
+  assert.ok(report.promotion.reasons.includes(
+    "normalized_cross_view_required_oblique_bucket_missing",
+  ));
+});
+
+test("promotion fails closed when an oblique bucket has no synchronized rep pairs", () => {
+  const report = evaluateObliqueGateFixture(
+    ["front_oblique_left", "front_oblique_right"],
+    ["front_oblique_left"],
+  );
+
+  assert.equal(
+    report.promotion.gates.normalizedCrossViewImprovesOnRawScreenYInWorstObliqueBucket,
+    false,
+  );
+  assert.equal(report.worstObliqueCrossView.status, "unavailable");
+  assert.equal(
+    report.worstObliqueCrossView.reason,
+    "oblique_bucket_has_no_synchronized_pairs",
+  );
+  assert.equal(report.worstObliqueCrossView.bucket, "view:front_oblique_right");
+  assert.ok(report.promotion.reasons.includes(
+    "normalized_cross_view_oblique_bucket_has_no_synchronized_pairs",
+  ));
 });

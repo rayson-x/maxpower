@@ -1047,6 +1047,10 @@ impl ExerciseProfile {
             || self.state_machine_id == "local-barbell-shoulder-press-ready-effort-return/v1"
     }
 
+    fn uses_local_signals(&self) -> bool {
+        self.primary_signal.kind.is_local() || self.secondary_signal.kind.is_local()
+    }
+
     fn uses_local_shoulder_press_state_graph(&self) -> bool {
         self.state_machine_id == "local-barbell-shoulder-press-ready-effort-return/v1"
     }
@@ -1296,10 +1300,9 @@ impl SetGate {
         rep_phase: RepPhase,
     ) -> bool {
         let primary = profile.and_then(|profile| {
-            if profile.uses_local_barbell_state_graph() {
-                local_coordinate
-                    .and_then(|coordinate| coordinate.equipment)
-                    .map(|channel| channel.along_axis_progress)
+            if profile.uses_local_signals() {
+                resolved_profile_primary(profile, canonical, local_coordinate)
+                    .map(|measurement| measurement.value)
             } else if profile.uses_barbell_axis_state_graph() {
                 equipment.and_then(|frame| {
                     frame
@@ -1316,7 +1319,8 @@ impl SetGate {
                         .map(|track| track.center_y)
                 })
             } else {
-                profile_signal(profile, canonical).map(|(primary, _, _, _)| primary)
+                profile_signal_with_local(profile, canonical, local_coordinate)
+                    .map(|(primary, _, _, _)| primary)
             }
         });
         let observable =
@@ -2725,6 +2729,7 @@ impl RepEngine {
         timestamp_ms: u64,
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) {
         if self.barbell_phase.is_some() {
             return;
@@ -2732,10 +2737,11 @@ impl RepEngine {
         if target_state != TargetState::Locked || self.state.phase != RepPhase::Ready {
             return;
         }
-        if !profile_signal_transition_eligible(&self.profile, canonical) {
+        if !profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
             return;
         }
-        let Some((primary, secondary, torso, _repaired)) = profile_signal(&self.profile, canonical)
+        let Some((primary, secondary, torso, _repaired)) =
+            profile_signal_with_local(&self.profile, canonical, local_coordinate)
         else {
             return;
         };
@@ -2764,12 +2770,14 @@ impl RepEngine {
             return;
         }
         let pose_signal = barbell_pose_signal(&self.profile, canonical);
+        let primary_signal = resolved_profile_primary(&self.profile, canonical, local_coordinate);
         if let Some(engine) = self.barbell_phase.as_mut() {
             engine.prime_boundary(
                 frame_id,
                 timestamp_ms,
                 equipment,
                 pose_signal,
+                primary_signal,
                 local_coordinate,
             );
             self.sync_barbell_phase_state();
@@ -2930,7 +2938,7 @@ impl RepEngine {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
     ) -> Vec<SealedRep> {
-        self.process_pose(frame_id, timestamp_ms, target_state, canonical)
+        self.process_pose(frame_id, timestamp_ms, target_state, canonical, None)
     }
 
     fn process_with_equipment(
@@ -2944,7 +2952,13 @@ impl RepEngine {
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<SealedRep> {
         if self.barbell_phase.is_none() {
-            return self.process_pose(frame_id, timestamp_ms, target_state, canonical);
+            return self.process_pose(
+                frame_id,
+                timestamp_ms,
+                target_state,
+                canonical,
+                local_coordinate,
+            );
         }
         let active_barbell_rep = self
             .barbell_phase
@@ -2956,6 +2970,7 @@ impl RepEngine {
         let pose_signal = (target_state == TargetState::Locked)
             .then(|| barbell_pose_signal(&self.profile, canonical))
             .flatten();
+        let primary_signal = resolved_profile_primary(&self.profile, canonical, local_coordinate);
         let candidates = self
             .barbell_phase
             .as_mut()
@@ -2967,6 +2982,7 @@ impl RepEngine {
                 raw_equipment,
                 pose_signal,
                 MovementDirection::Decreasing,
+                primary_signal,
                 local_coordinate,
             );
         self.sync_barbell_phase_state();
@@ -3044,11 +3060,13 @@ impl RepEngine {
         timestamp_ms: u64,
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
+        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<SealedRep> {
         if target_state != TargetState::Locked {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::LongContinuityLoss);
         }
-        let Some((primary, secondary, torso, _repaired)) = profile_signal(&self.profile, canonical)
+        let Some((primary, secondary, torso, _repaired)) =
+            profile_signal_with_local(&self.profile, canonical, local_coordinate)
         else {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::RequiredJointLoss);
         };
@@ -3058,7 +3076,7 @@ impl RepEngine {
         // an anatomically impossible joint-angle extremum. Freeze the rep
         // engine until measured or topology-fused signal evidence returns;
         // predicted/weak samples must never create start/peak/end events.
-        if !profile_signal_transition_eligible(&self.profile, canonical) {
+        if !profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::RequiredJointLoss);
         }
         let sample = self.signal_sample(frame_id, timestamp_ms, primary, secondary, torso);
@@ -3757,6 +3775,14 @@ fn profile_signal(
     profile: &ExerciseProfile,
     canonical: &[CanonicalLandmark],
 ) -> Option<(f32, f32, f32, bool)> {
+    profile_signal_with_local(profile, canonical, None)
+}
+
+fn profile_signal_with_local(
+    profile: &ExerciseProfile,
+    canonical: &[CanonicalLandmark],
+    local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+) -> Option<(f32, f32, f32, bool)> {
     let torso_origin_y = if profile.primary_signal.kind == ExerciseSignalKind::LandmarkY
         && profile.secondary_signal.kind == ExerciseSignalKind::LandmarkY
     {
@@ -3765,8 +3791,20 @@ fn profile_signal(
         0.0
     };
     Some((
-        measure_signal(profile.schema, &profile.primary_signal, canonical)?,
-        measure_signal(profile.schema, &profile.secondary_signal, canonical)?,
+        measure_signal(
+            profile.schema,
+            &profile.primary_signal,
+            canonical,
+            local_coordinate,
+        )?
+        .value,
+        measure_signal(
+            profile.schema,
+            &profile.secondary_signal,
+            canonical,
+            local_coordinate,
+        )?
+        .value,
         torso_origin_y,
         profile
             .primary_signal
@@ -3782,6 +3820,29 @@ fn profile_signal(
                 })
             }),
     ))
+}
+
+fn profile_signal_measurement(
+    profile: &ExerciseProfile,
+    signal: &ExerciseSignal,
+    canonical: &[CanonicalLandmark],
+    local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+) -> Option<SignalMeasurement> {
+    measure_signal(profile.schema, signal, canonical, local_coordinate)
+}
+
+fn resolved_profile_primary(
+    profile: &ExerciseProfile,
+    canonical: &[CanonicalLandmark],
+    local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+) -> Option<SignalMeasurement> {
+    profile_signal_transition_eligible(profile, canonical, local_coordinate).then_some(())?;
+    profile_signal_measurement(
+        profile,
+        &profile.primary_signal,
+        canonical,
+        local_coordinate,
+    )
 }
 
 /// Independent pose corroboration for a barbell-bench turnaround. Both arms
@@ -3830,22 +3891,28 @@ const PHASE_SIGNAL_MIN_CONFIDENCE: f32 = 0.5;
 fn profile_signal_transition_eligible(
     profile: &ExerciseProfile,
     canonical: &[CanonicalLandmark],
+    local_coordinate: Option<&LocalMotionCoordinateEvidence>,
 ) -> bool {
-    profile
-        .primary_signal
-        .landmarks
-        .iter()
-        .chain(&profile.secondary_signal.landmarks)
-        .all(|&index| {
-            canonical.get(index).is_some_and(|landmark| {
-                matches!(
-                    landmark.source,
-                    LandmarkSource::Measured | LandmarkSource::Fused
-                ) && landmark.renderable
-                    && landmark.canonical_confidence.is_finite()
-                    && landmark.canonical_confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
-                    && landmark.x.is_some_and(f32::is_finite)
-                    && landmark.y.is_some_and(f32::is_finite)
+    [&profile.primary_signal, &profile.secondary_signal]
+        .into_iter()
+        .all(|signal| {
+            if signal.kind.is_local() {
+                return measure_signal(profile.schema, signal, canonical, local_coordinate)
+                    .is_some_and(|measurement| {
+                        measurement.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+                    });
+            }
+            signal.landmarks.iter().all(|&index| {
+                canonical.get(index).is_some_and(|landmark| {
+                    matches!(
+                        landmark.source,
+                        LandmarkSource::Measured | LandmarkSource::Fused
+                    ) && landmark.renderable
+                        && landmark.canonical_confidence.is_finite()
+                        && landmark.canonical_confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+                        && landmark.x.is_some_and(f32::is_finite)
+                        && landmark.y.is_some_and(f32::is_finite)
+                })
             })
         })
 }
@@ -3969,12 +4036,31 @@ mod rep_signal_observation_trust_tests {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SignalMeasurement {
+    pub(crate) value: f32,
+    pub(crate) confidence: f32,
+}
+
+impl SignalMeasurement {
+    fn new(value: f32, confidence: f32) -> Option<Self> {
+        (value.is_finite() && confidence.is_finite()).then_some(Self {
+            value,
+            confidence: confidence.clamp(0.0, 1.0),
+        })
+    }
+}
+
 fn measure_signal(
     schema: PoseSchemaId,
     signal: &ExerciseSignal,
     canonical: &[CanonicalLandmark],
-) -> Option<f32> {
-    match signal.kind {
+    local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+) -> Option<SignalMeasurement> {
+    if signal.kind.is_local() {
+        return measure_local_signal(signal.kind, local_coordinate?);
+    }
+    let value = match signal.kind {
         ExerciseSignalKind::LandmarkY => mean_landmark_y(&signal.landmarks, canonical),
         ExerciseSignalKind::JointAngle => {
             let [first, joint, third]: [usize; 3] = signal.landmarks.as_slice().try_into().ok()?;
@@ -4022,6 +4108,76 @@ fn measure_signal(
         | ExerciseSignalKind::LocalDynamicBarAngle
         | ExerciseSignalKind::LocalChannelAgreement
         | ExerciseSignalKind::LocalObservability => None,
+    }?;
+    SignalMeasurement::new(value, signal_confidence(signal, canonical))
+}
+
+fn measure_local_signal(
+    kind: ExerciseSignalKind,
+    local: &LocalMotionCoordinateEvidence,
+) -> Option<SignalMeasurement> {
+    if local.state == LocalCoordinateState::Degraded
+        || local.source_timestamp_ms.is_none()
+        || local.confidence <= 0.0
+    {
+        return None;
+    }
+    match kind {
+        ExerciseSignalKind::LocalAlongAxisProgress => {
+            let channel = local.equipment?;
+            SignalMeasurement::new(channel.along_axis_progress, channel.confidence)
+        }
+        ExerciseSignalKind::LocalCrossAxisDisplacement => {
+            let channel = local.equipment?;
+            SignalMeasurement::new(channel.cross_axis_displacement, channel.confidence)
+        }
+        ExerciseSignalKind::LocalEndpointRelativeProgress => {
+            let endpoint_one = local.endpoint_one_progress?;
+            let endpoint_two = local.endpoint_two_progress?;
+            SignalMeasurement::new(
+                (endpoint_one + endpoint_two) * 0.5,
+                local.equipment?.confidence,
+            )
+        }
+        ExerciseSignalKind::LocalDynamicBarAngle => SignalMeasurement::new(
+            local.baseline_corrected_bar_angle_radians?,
+            local.equipment?.confidence,
+        ),
+        ExerciseSignalKind::LocalChannelAgreement => {
+            let (value, confidence) = match local.channel_agreement {
+                LocalChannelAgreement::Agreement => (
+                    1.0,
+                    local
+                        .equipment
+                        .zip(local.pose)
+                        .map_or(0.0, |(equipment, pose)| {
+                            equipment.confidence.min(pose.confidence)
+                        }),
+                ),
+                LocalChannelAgreement::EquipmentOnly => (
+                    0.5,
+                    local.equipment.map_or(0.0, |channel| channel.confidence),
+                ),
+                LocalChannelAgreement::PoseOnly => {
+                    (0.5, local.pose.map_or(0.0, |channel| channel.confidence))
+                }
+                LocalChannelAgreement::Conflict => (
+                    0.0,
+                    local
+                        .equipment
+                        .zip(local.pose)
+                        .map_or(0.0, |(equipment, pose)| {
+                            equipment.confidence.min(pose.confidence)
+                        }),
+                ),
+                LocalChannelAgreement::CannotJudge => return None,
+            };
+            SignalMeasurement::new(value, confidence)
+        }
+        ExerciseSignalKind::LocalObservability => {
+            SignalMeasurement::new(local.confidence, local.confidence)
+        }
+        _ => None,
     }
 }
 
@@ -4035,6 +4191,178 @@ fn signal_confidence(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -
         .filter(|confidence| confidence.is_finite())
         .fold(1.0_f32, f32::min)
         .clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod local_profile_signal_consumption_tests {
+    use super::*;
+
+    fn local_evidence(
+        kind: ExerciseSignalKind,
+        progress: f32,
+        timestamp_ms: u64,
+    ) -> LocalMotionCoordinateEvidence {
+        let channel = LocalTrajectoryChannel {
+            along_axis_progress: progress,
+            cross_axis_displacement: progress,
+            confidence: 0.95,
+            coverage: 1.0,
+            uncertainty: 0.05,
+            provenance: LocalChannelProvenance::EquipmentMeasured,
+        };
+        let channel_agreement = if kind == ExerciseSignalKind::LocalChannelAgreement {
+            if progress >= 0.75 {
+                LocalChannelAgreement::Agreement
+            } else if progress >= 0.25 {
+                LocalChannelAgreement::EquipmentOnly
+            } else {
+                LocalChannelAgreement::Conflict
+            }
+        } else {
+            LocalChannelAgreement::EquipmentOnly
+        };
+        LocalMotionCoordinateEvidence {
+            coordinate_frame_id: 1,
+            source_timestamp_ms: Some(timestamp_ms),
+            state: LocalCoordinateState::Frozen,
+            reason: None,
+            equipment: Some(channel),
+            pose: (kind == ExerciseSignalKind::LocalChannelAgreement).then_some(channel),
+            endpoint_one_progress: Some(progress),
+            endpoint_two_progress: Some(progress),
+            baseline_corrected_bar_angle_radians: Some(progress),
+            channel_agreement,
+            confidence: if kind == ExerciseSignalKind::LocalObservability {
+                0.60 + progress * 0.40
+            } else {
+                0.95
+            },
+            ..LocalMotionCoordinateEvidence::default()
+        }
+    }
+
+    fn local_profile(kind: ExerciseSignalKind) -> ExerciseProfile {
+        let mut profile = ExerciseProfile::barbell_bench_press_local_front_provisional();
+        profile.primary_signal = ExerciseSignal {
+            kind,
+            landmarks: Vec::new(),
+        };
+        profile.secondary_signal = ExerciseSignal {
+            kind,
+            landmarks: Vec::new(),
+        };
+        profile.min_primary_amplitude = 0.20;
+        profile.content_hash = profile.computed_content_hash();
+        profile
+    }
+
+    fn observed_barbell_frame(timestamp_ms: u64) -> EquipmentFrameEvidence {
+        EquipmentFrameEvidence {
+            timestamp_ms,
+            subject_candidate_id: Some(7),
+            status: EquipmentFrameStatus::Observed,
+            tracks: vec![EquipmentTrackEvidence {
+                track_id: 1,
+                proposal_id: 1,
+                subject_candidate_id: 7,
+                kind: EquipmentKind::BarbellShaft,
+                bbox: NormalizedRect::new(0.20, 0.20, 0.60, 0.02),
+                axis: None,
+                center_x: 0.50,
+                center_y: 0.20,
+                observation_score: 0.95,
+                association_confidence: 0.95,
+                uncertainty_px: Some(1.0),
+                source: EquipmentSource::Geometry,
+                held_by: EquipmentHand::Both,
+                judgeable_path: true,
+            }],
+            rejected_reflection_count: 0,
+            rejected_static_count: 0,
+            rejected_low_confidence_or_invalid_count: 0,
+            rejected_outside_subject_count: 0,
+        }
+    }
+
+    fn run_local_profile(kind: ExerciseSignalKind, provide_local_evidence: bool) -> Vec<SealedRep> {
+        let mut engine = RepEngine::new(local_profile(kind));
+        engine.begin_set();
+        let canonical = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        let mut missing_evidence_frame = observed_barbell_frame(0);
+        if !provide_local_evidence {
+            missing_evidence_frame.tracks[0].center_y = 0.20;
+        }
+        let progress = [0.0; 10]
+            .into_iter()
+            .chain([0.10, 0.30, 0.60, 1.0, 0.80, 0.40, 0.10, 0.0])
+            .chain([0.0; 5]);
+        let mut sealed = Vec::new();
+        for (frame_id, progress) in progress.enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            let evidence = local_evidence(kind, progress, timestamp_ms);
+            let equipment = if provide_local_evidence {
+                observed_barbell_frame(timestamp_ms)
+            } else {
+                let mut equipment = missing_evidence_frame.clone();
+                equipment.timestamp_ms = timestamp_ms;
+                equipment.tracks[0].center_y = 0.20 + progress * 0.40;
+                equipment
+            };
+            sealed.extend(engine.process_with_equipment(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+                &equipment,
+                &[],
+                provide_local_evidence.then_some(&evidence),
+            ));
+        }
+        sealed.extend(engine.finish_set());
+        sealed
+    }
+
+    #[test]
+    fn every_named_local_signal_can_drive_the_real_rep_engine() {
+        for kind in [
+            ExerciseSignalKind::LocalAlongAxisProgress,
+            ExerciseSignalKind::LocalCrossAxisDisplacement,
+            ExerciseSignalKind::LocalEndpointRelativeProgress,
+            ExerciseSignalKind::LocalDynamicBarAngle,
+            ExerciseSignalKind::LocalChannelAgreement,
+            ExerciseSignalKind::LocalObservability,
+        ] {
+            let sealed = run_local_profile(kind, true);
+            assert!(
+                sealed
+                    .iter()
+                    .any(|rep| rep.disposition != RepDisposition::Rejected),
+                "{kind:?} did not drive a reviewable Rep: {sealed:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn local_profile_fails_closed_without_local_evidence_instead_of_using_screen_bar_y() {
+        assert!(
+            run_local_profile(ExerciseSignalKind::LocalAlongAxisProgress, false).is_empty(),
+            "a local Profile must not fall back to the available screen-space bar center",
+        );
+    }
+
+    #[test]
+    fn legacy_landmark_signal_still_measures_without_local_evidence() {
+        let canonical = vec![CanonicalLandmark::measured(0.4, 0.25, 0.0, 0.95)];
+        let signal = ExerciseSignal {
+            kind: ExerciseSignalKind::LandmarkY,
+            landmarks: vec![0],
+        };
+        assert_eq!(
+            measure_signal(PoseSchemaId::Halpe26, &signal, &canonical, None)
+                .map(|measurement| measurement.value),
+            Some(0.25),
+        );
+    }
 }
 
 fn landmark_xy(index: usize, canonical: &[CanonicalLandmark]) -> Option<(f32, f32)> {
@@ -4511,8 +4839,18 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             return Err(MotionError::ProfileAlreadyActive);
         }
         profile.validate()?;
+        self.local_motion_coordinate
+            .set_profile_identity(Some(&profile.identity));
         self.rep_engine = Some(RepEngine::new(profile));
         Ok(())
+    }
+
+    /// Declares whether submitted canonical coordinates themselves have been
+    /// horizontally mirrored. Preview mirroring is a renderer concern and
+    /// must not call this method.
+    pub fn set_canonical_feed_mirroring(&mut self, mirrored: Option<bool>) {
+        self.local_motion_coordinate
+            .set_canonical_feed_mirroring(mirrored);
     }
 
     pub fn revise_sealed_rep(
@@ -4677,6 +5015,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     source_timestamp_ms,
                     target.state,
                     &phase_pose_canonical,
+                    Some(&local_motion_coordinate),
                 );
             }
         }

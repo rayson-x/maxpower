@@ -414,7 +414,6 @@ class PoseCameraView(context: Context, appContext: AppContext) :
     val equipmentMs = elapsedMs(equipmentStartedAt)
     val orientedWidth = bitmap.width
     val orientedHeight = bitmap.height
-    val landmarks = candidates.firstOrNull()?.landmarks?.map(DoubleArray::toList) ?: emptyList()
     if (!rustConfigured) {
       val desiredProfile = recognitionProfile
       val desiredRecognitionActive = recognitionActive
@@ -423,7 +422,8 @@ class PoseCameraView(context: Context, appContext: AppContext) :
         orientedHeight,
         desiredProfile.profileCode,
         1,
-        false
+        false,
+        if (isReplay) 2 else 0
       )
       if (status != 0) throw IllegalStateException("Rust configure failed ($status)")
       if (desiredProfile is NativeRecognitionProfile.Data) {
@@ -497,7 +497,6 @@ class PoseCameraView(context: Context, appContext: AppContext) :
     averageEquipmentMs = smoothed(averageEquipmentMs, equipmentMs)
     averageRustMs = smoothed(averageRustMs, rustMs)
     val payload = mutableMapOf<String, Any>(
-      "landmarks" to landmarks,
       "width" to orientedWidth,
       "height" to orientedHeight,
       "timestampMs" to timestampMs.toDouble(),
@@ -676,7 +675,6 @@ class PoseCameraView(context: Context, appContext: AppContext) :
   private fun emitReplayEnded(durationMs: Long) {
     onPose(
       mapOf(
-        "landmarks" to emptyList<List<Double>>(),
         "width" to 0,
         "height" to 0,
         "timestampMs" to durationMs.toDouble(),

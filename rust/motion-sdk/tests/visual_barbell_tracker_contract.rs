@@ -1,6 +1,6 @@
 use maxpower_motion_sdk::{
-    BarbellAxisSource, BarbellAxisVisualTracker, NormalizedRect, PoseCandidate, PoseObservation,
-    PoseSchemaId, VisualEquipmentError,
+    BarbellAxisSource, BarbellAxisVisualTracker, EquipmentSource, NormalizedRect, PoseCandidate,
+    PoseObservation, PoseSchemaId, VisualEquipmentError,
 };
 
 const WIDTH: usize = 640;
@@ -40,7 +40,15 @@ fn shared_rust_tracker_measures_a_long_shaft_and_bounds_prediction() {
     let predicted = process_halpe26(&mut tracker, &blank_frame(), 1_100, &[subject])
         .expect("one missing frame should retain private continuity");
     assert_eq!(predicted.source, BarbellAxisSource::Predicted);
-    assert!(predicted.equipment_observation().is_none());
+    let predicted_equipment = predicted
+        .equipment_observation()
+        .expect("predicted shaft geometry must survive into canonical provenance");
+    assert_eq!(predicted_equipment.source, EquipmentSource::Predicted);
+    assert_eq!(predicted_equipment.axis.unwrap().x1, predicted.x1);
+    assert_eq!(predicted_equipment.axis.unwrap().y1, predicted.y1);
+    assert_eq!(predicted_equipment.axis.unwrap().x2, predicted.x2);
+    assert_eq!(predicted_equipment.axis.unwrap().y2, predicted.y2);
+    assert_eq!(predicted_equipment.score, predicted.confidence);
 }
 
 #[test]

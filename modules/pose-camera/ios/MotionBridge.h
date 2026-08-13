@@ -10,7 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (int32_t)configureWidth:(uint32_t)width
                    height:(uint32_t)height
               profileJSON:(nullable NSString *)profileJSON
-                   active:(BOOL)active;
+                   active:(BOOL)active
+ canonicalFeedMirroring:(uint32_t)canonicalFeedMirroring;
 
 - (int32_t)setProfileJSON:(nullable NSString *)profileJSON;
 - (int32_t)setActive:(BOOL)active;

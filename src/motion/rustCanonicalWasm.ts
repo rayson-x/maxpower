@@ -335,6 +335,7 @@ export interface MotionWasmExports extends WebAssembly.Exports {
   motion_sdk_close(): number;
   motion_sdk_reset(width: number, height: number, fusion: number): number;
   motion_sdk_set_pose_schema(schema: number): number;
+  motion_sdk_set_canonical_feed_mirroring(mirrored: number): number;
   motion_sdk_begin_set(): number;
   motion_sdk_begin_replay_set(): number;
   motion_sdk_finish_set(): number;
@@ -488,6 +489,8 @@ export async function instantiateRustMotionWasm(
 export interface RustCanonicalWasmSessionConfig extends PoseContinuitySessionConfig {
   /** Camera preview is idle until the user records; fixture/replay callers are active. */
   setLifecycleMode?: "preview" | "replay";
+  /** Mirroring applied to canonical coordinates themselves; preview CSS/video mirroring is separate. */
+  canonicalFeedMirrored?: boolean;
 }
 
 export class RustCanonicalWasmSession implements PoseContinuitySession {
@@ -552,6 +555,12 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     ensureOk(
       wasm.motion_sdk_set_pose_schema(config.schema === "halpe26" ? 1 : 0),
       "set_pose_schema",
+    );
+    ensureOk(
+      wasm.motion_sdk_set_canonical_feed_mirroring(
+        config.canonicalFeedMirrored === undefined ? 2 : config.canonicalFeedMirrored ? 1 : 0,
+      ),
+      "set_canonical_feed_mirroring",
     );
     if (config.setLifecycleMode !== "preview") {
       ensureOk(wasm.motion_sdk_begin_replay_set(), "begin_replay_set");

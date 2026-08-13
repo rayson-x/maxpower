@@ -3,8 +3,8 @@
  * 落盘到应用文档目录 captures/（文件名 = yyyymmdd_hhmmss_<exerciseId>.json），
  * 可经 adb pull / 系统文件管理器导出，供离线工具链复盘。
  *
- * 字段命名尽量对齐 public/archives/confirmed-captures 既有采集档案的习惯
- * （model / timestampMs / landmarks 等），但文件格式是本模块自有的
+ * 字段命名尽量对齐 public/archives/confirmed-captures 既有采集档案的习惯，
+ * 但文件格式是本模块自有的
  * "capture-store/v1"，不与 field-capture 档案互相兼容。
  *
  * expo-file-system 选型说明：SDK 57 默认导出的是新 API（File / Directory / Paths 类，
@@ -28,9 +28,6 @@ function loadFileSystem(): ExpoFileSystem {
 /** 落盘 JSON 的格式版本，沿用 manifest 的 "<名字>/v<序号>" 风格。 */
 export const CAPTURE_FILE_VERSION = "capture-store/v1";
 
-/** 单帧关键点的四元组：[x, y, z, visibility]，与原生 onPose 事件的 landmarks 对齐。 */
-export type CaptureLandmark = [x: number, y: number, z: number, visibility: number];
-
 /** 开始录制时的会话元数据（动作 / 机位 / 镜头朝向 / 模型 / 开始时间）。 */
 export interface CaptureSessionMeta {
   exerciseId: string;
@@ -43,11 +40,10 @@ export interface CaptureSessionMeta {
   startedAtMs: number;
 }
 
-/** 录制的一帧：canonical packet 的 base64 原文 + 可选关键点。 */
+/** 录制的一帧；骨架、器械和轨迹只能从 canonical packet 解码。 */
 export interface CaptureFrame {
   timestampMs: number;
   packetBase64: string;
-  landmarks?: CaptureLandmark[];
 }
 
 /** 落盘 JSON 的顶层结构。 */

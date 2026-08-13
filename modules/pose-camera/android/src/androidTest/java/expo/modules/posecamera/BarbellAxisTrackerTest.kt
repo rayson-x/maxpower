@@ -45,7 +45,7 @@ class BarbellAxisTrackerTest {
       assertNotNull(shaft)
       assertTrue(shaft!!.measured)
 
-      assertEquals(0, MotionNative.nativeConfigure(WIDTH, HEIGHT, 0, 1, false))
+      assertEquals(0, MotionNative.nativeConfigure(WIDTH, HEIGHT, 0, 1, false, 0))
       val withEquipment = MotionNative.processObservations(
         1_000,
         longArrayOf(subject.candidateId),
@@ -58,7 +58,7 @@ class BarbellAxisTrackerTest {
       assertNotNull(withEquipment)
 
       MotionNative.nativeClose()
-      assertEquals(0, MotionNative.nativeConfigure(WIDTH, HEIGHT, 0, 1, false))
+      assertEquals(0, MotionNative.nativeConfigure(WIDTH, HEIGHT, 0, 1, false, 0))
       val poseOnly = MotionNative.processObservations(
         1_000,
         longArrayOf(subject.candidateId),

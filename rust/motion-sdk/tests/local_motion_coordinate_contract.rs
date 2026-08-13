@@ -46,6 +46,18 @@ fn local_bar_frame(progress: f32, angle: f32) -> FrameObservations {
     }
 }
 
+fn local_bar_frame_with_reversed_endpoints(progress: f32, angle: f32) -> FrameObservations {
+    let mut frame = local_bar_frame(progress, angle);
+    let axis = frame.equipment[0].axis.expect("local bar axis");
+    frame.equipment[0].axis = Some(EquipmentAxis2d {
+        x1: axis.x2,
+        y1: axis.y2,
+        x2: axis.x1,
+        y2: axis.y1,
+    });
+    frame
+}
+
 #[derive(Clone)]
 struct LocalProfileFixture {
     frames: VecDeque<FrameObservations>,
@@ -254,7 +266,10 @@ fn frozen_coordinate_fails_closed_after_a_camera_geometry_break() {
     let mut session = MotionSession::open(
         SessionConfig {
             sequence_id: "fixture:local-coordinate:camera-break".into(),
-            contract: ContractVersion { major: 1, minor: 10 },
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: 720,
             image_height_px: 1_280,
@@ -434,7 +449,7 @@ fn seated_barbell_shoulder_press_runs_its_own_causal_local_profile() {
     let progress = [0.0; 12]
         .into_iter()
         .chain([
-            0.03, 0.08, 0.15, 0.24, 0.33, 0.38, 0.37, 0.33, 0.24, 0.14, 0.05, 0.01,
+            -0.03, -0.08, -0.15, -0.24, -0.33, -0.38, -0.37, -0.33, -0.24, -0.14, -0.05, -0.01,
         ])
         .chain([0.0; 6])
         .collect::<Vec<_>>();
@@ -519,6 +534,160 @@ fn predicted_or_weak_wrists_do_not_double_count_equipment_as_pose_corroboration(
     );
 }
 
+fn endpoint_mapping_for_context(
+    profile: ExerciseProfile,
+    feed_mirrored: Option<bool>,
+    reverse_endpoints: bool,
+) -> maxpower_motion_sdk::LocalMotionCoordinateEvidence {
+    let progress = [0.0, 0.005, 0.025, 0.050, 0.080];
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:endpoint-anatomy-context".into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: 720,
+            image_height_px: 1_280,
+            continuity: ContinuityMode::Raw,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        LocalProfileFixture {
+            frames: progress
+                .iter()
+                .copied()
+                .map(|value| {
+                    if reverse_endpoints {
+                        local_bar_frame_with_reversed_endpoints(value, 0.18)
+                    } else {
+                        local_bar_frame(value, 0.18)
+                    }
+                })
+                .collect(),
+        },
+        output.clone(),
+    )
+    .unwrap();
+    session.install_exercise_profile(profile).unwrap();
+    session.set_canonical_feed_mirroring(feed_mirrored);
+    session.begin_set();
+    for frame_id in 0..progress.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                1_000 + frame_id * 50,
+                Arc::new(AtomicUsize::new(0)),
+            ))
+            .unwrap();
+    }
+    output
+        .packets()
+        .last()
+        .expect("endpoint mapping packet")
+        .local_motion_coordinate
+        .clone()
+}
+
+#[test]
+fn endpoint_order_view_and_unmirrored_feed_map_to_anatomical_sides() {
+    let front = endpoint_mapping_for_context(
+        ExerciseProfile::barbell_bench_press_local_front_provisional(),
+        Some(false),
+        false,
+    );
+    assert_eq!(
+        front.anatomical_side_mapping,
+        maxpower_motion_sdk::AnatomicalSideMapping::EndpointOneAnatomicalRight,
+    );
+    assert_eq!(
+        front.coarse_view,
+        Some(maxpower_motion_sdk::LocalCoarseView::Front),
+    );
+    assert_eq!(front.canonical_feed_mirrored, Some(false));
+    assert_eq!(
+        front.anatomical_left_endpoint_progress,
+        front.endpoint_two_progress,
+    );
+    assert_eq!(
+        front.anatomical_right_endpoint_progress,
+        front.endpoint_one_progress,
+    );
+
+    let right_oblique_reversed = endpoint_mapping_for_context(
+        ExerciseProfile::barbell_bench_press_local_front_right_provisional(),
+        Some(false),
+        true,
+    );
+    assert_eq!(
+        right_oblique_reversed.anatomical_side_mapping,
+        maxpower_motion_sdk::AnatomicalSideMapping::EndpointOneAnatomicalLeft,
+        "mapping must consume stable endpoint order instead of assuming endpoint one is screen-left",
+    );
+    assert_eq!(
+        right_oblique_reversed.coarse_view,
+        Some(maxpower_motion_sdk::LocalCoarseView::FrontObliqueRight),
+    );
+    assert_eq!(
+        right_oblique_reversed.anatomical_left_endpoint_progress,
+        right_oblique_reversed.endpoint_one_progress,
+    );
+}
+
+#[test]
+fn explicit_feed_mirroring_flips_the_anatomical_endpoint_mapping() {
+    let mirrored = endpoint_mapping_for_context(
+        ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
+        Some(true),
+        false,
+    );
+    assert_eq!(
+        mirrored.anatomical_side_mapping,
+        maxpower_motion_sdk::AnatomicalSideMapping::EndpointOneAnatomicalLeft,
+    );
+    assert_eq!(mirrored.canonical_feed_mirrored, Some(true));
+    assert_eq!(
+        mirrored.anatomical_left_endpoint_progress,
+        mirrored.endpoint_one_progress,
+    );
+    assert_eq!(
+        mirrored.anatomical_right_endpoint_progress,
+        mirrored.endpoint_two_progress,
+    );
+}
+
+#[test]
+fn missing_feed_mirroring_keeps_anatomical_mapping_unknown() {
+    let unknown = endpoint_mapping_for_context(
+        ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
+        None,
+        false,
+    );
+    assert_eq!(
+        unknown.anatomical_side_mapping,
+        maxpower_motion_sdk::AnatomicalSideMapping::Unknown,
+    );
+    assert!(unknown.anatomical_left_endpoint_progress.is_none());
+    assert!(unknown.anatomical_right_endpoint_progress.is_none());
+}
+
+#[test]
+fn unsupported_coarse_view_keeps_anatomical_mapping_unknown() {
+    let mut unsupported = ExerciseProfile::barbell_bench_press_local_front_provisional();
+    unsupported.identity = "barbell-bench-press/rear/bilateral/barbell/local-v1".into();
+    unsupported.content_hash = unsupported.computed_content_hash();
+    let unknown = endpoint_mapping_for_context(unsupported, Some(false), false);
+    assert_eq!(unknown.coarse_view, None);
+    assert_eq!(
+        unknown.anatomical_side_mapping,
+        maxpower_motion_sdk::AnatomicalSideMapping::Unknown,
+    );
+    assert!(unknown.anatomical_left_endpoint_progress.is_none());
+    assert!(unknown.anatomical_right_endpoint_progress.is_none());
+}
+
 #[test]
 fn a_missing_shaft_clears_frame_local_trajectory_instead_of_reusing_stale_progress() {
     let mut frames = [0.0, 0.005, 0.025, 0.050, 0.080]
@@ -584,6 +753,11 @@ fn a_missing_shaft_clears_frame_local_trajectory_instead_of_reusing_stale_progre
     );
     assert!(coordinate.equipment.is_none());
     assert!(coordinate.raw_bar_axis.is_none());
+    assert_eq!(
+        coordinate.anatomical_side_mapping,
+        maxpower_motion_sdk::AnatomicalSideMapping::Unknown,
+        "a frame without a current shaft must not retain the previous anatomical mapping",
+    );
     assert_eq!(
         coordinate.channel_agreement,
         maxpower_motion_sdk::LocalChannelAgreement::PoseOnly,

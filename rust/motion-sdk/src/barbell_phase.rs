@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use crate::{
     EquipmentFrameEvidence, EquipmentKind, EquipmentObservation, EquipmentSource,
     LocalMotionCoordinateEvidence, MovementDirection, NormalizedRepEndpointEvidence,
-    RepDisposition, RepPhase,
+    RepDisposition, RepPhase, SignalMeasurement,
 };
 
 const ENTER_DELTA: f32 = 32.0 / 640.0;
@@ -238,16 +238,20 @@ impl BarbellBenchPhaseEngine {
         minimum_effort_duration_ms: u64,
         maximum_effort_duration_ms: u64,
     ) -> Self {
-        // Both profiles consume positive progress away from their own setup
-        // origin. Shoulder press owns distinct Profile gates and identity;
-        // it does not inherit a biomechanical conclusion from bench press.
-        Self::local_bench(
-            enter_delta,
-            minimum_amplitude,
-            return_delta,
-            maximum_endpoint_drift,
-            minimum_effort_duration_ms,
-            maximum_effort_duration_ms,
+        // The coordinate estimator gives shoulder press its own upward
+        // preparation-to-effort prior. This graph owns separate thresholds
+        // while consuming the resulting positive local progress.
+        Self::with_local_coordinate(
+            true,
+            MovementDirection::Increasing,
+            BarbellPhaseThresholds::local(
+                enter_delta,
+                minimum_amplitude,
+                return_delta,
+                maximum_endpoint_drift,
+                minimum_effort_duration_ms,
+                maximum_effort_duration_ms,
+            ),
         )
     }
 
@@ -329,10 +333,10 @@ impl BarbellBenchPhaseEngine {
         timestamp_ms: u64,
         equipment: &EquipmentFrameEvidence,
         pose_signal: Option<f32>,
+        profile_signal: Option<SignalMeasurement>,
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) {
-        let Some((position, confidence)) = self.selected_position(equipment, local_coordinate)
-        else {
+        let Some((position, confidence)) = self.selected_position(equipment, profile_signal) else {
             return;
         };
         let sample = BarbellFrameSample {
@@ -360,13 +364,21 @@ impl BarbellBenchPhaseEngine {
         raw_equipment: &[EquipmentObservation],
         pose_signal: Option<f32>,
         pose_direction: MovementDirection,
+        profile_signal: Option<SignalMeasurement>,
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<BarbellRepCandidate> {
         let mut emitted = Vec::new();
-        let associated = self.selected_position(equipment, local_coordinate);
-        let active_fallback = self.active.as_ref().and_then(|active| {
-            selected_active_unassociated_bar_position(raw_equipment, active.previous_position)
-        });
+        let associated = self.selected_position(equipment, profile_signal);
+        let active_fallback = (!self.use_local_coordinate)
+            .then(|| {
+                self.active.as_ref().and_then(|active| {
+                    selected_active_unassociated_bar_position(
+                        raw_equipment,
+                        active.previous_position,
+                    )
+                })
+            })
+            .flatten();
         let selected = associated.or(active_fallback);
         if let Some(active) = self.active.as_mut() {
             active.total_samples = active.total_samples.saturating_add(1);
@@ -667,18 +679,17 @@ impl BarbellBenchPhaseEngine {
     fn selected_position(
         &self,
         equipment: &EquipmentFrameEvidence,
-        local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+        profile_signal: Option<SignalMeasurement>,
     ) -> Option<(f32, f32)> {
         if !self.use_local_coordinate {
             return selected_bar_position(equipment);
         }
-        let coordinate = local_coordinate?;
-        let channel = coordinate.equipment?;
-        let mut position = channel.along_axis_progress;
+        let measurement = profile_signal?;
+        let mut position = measurement.value;
         if self.local_direction == MovementDirection::Decreasing {
             position = -position;
         }
-        Some((position, channel.confidence))
+        Some((position, measurement.confidence))
     }
 
     fn accept_candidate(

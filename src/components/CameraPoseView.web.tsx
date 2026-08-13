@@ -1127,6 +1127,9 @@ export function CameraPoseView() {
         {
           ...config,
           setLifecycleMode: modeRef.current === "camera" ? "preview" : "replay",
+          // Live camera inference consumes unmirrored source frames. Imported
+          // replay files can be pre-mirrored and carry no trusted metadata.
+          canonicalFeedMirrored: modeRef.current === "camera" ? false : undefined,
         },
         rustWasmRef.current,
       );

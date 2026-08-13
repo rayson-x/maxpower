@@ -12,7 +12,7 @@ function lineage(status: "validated" | "failed" = "validated"): TrainingExecutio
     observationPipeline: "yolox-nano-humanart+rtmpose-m-halpe26",
     poseSchema: "halpe26",
     canonicalOwner: "rust-motion-sdk",
-    packetContract: "MOTN/1.7",
+    packetContract: "MOTN/1.10",
     runtimeValidation: {
       status,
       platform: "web",

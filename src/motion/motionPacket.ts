@@ -187,6 +187,14 @@ export type MotionLocalCoordinateReason =
   | "insufficient_preparation" | "subject_changed" | "observation_gap" | "invalid_geometry";
 export type MotionLocalChannelAgreement =
   | "agreement" | "equipment_only" | "pose_only" | "conflict" | "cannot_judge";
+export type MotionLocalCoarseView =
+  | "front" | "front_oblique_left" | "front_oblique_right";
+export type MotionEndpointOrderMapping =
+  "screen_ordered_anatomy_unknown";
+export type MotionAnatomicalSideMapping =
+  | "unknown"
+  | "endpoint_one_anatomical_left"
+  | "endpoint_one_anatomical_right";
 export interface DecodedLocalTrajectoryChannel {
   readonly alongAxisProgress: number;
   readonly crossAxisDisplacement: number;
@@ -208,7 +216,10 @@ export interface DecodedLocalMotionCoordinate {
   readonly scaleSource: "projected_bar_length" | null;
   readonly equipmentTrackId: number | null;
   readonly rawBarAxis: readonly [number, number, number, number] | null;
-  readonly endpointOrderMapping: "screen_ordered_anatomy_unknown";
+  readonly coarseView: MotionLocalCoarseView | null;
+  readonly canonicalFeedMirrored: boolean | null;
+  readonly endpointOrderMapping: MotionEndpointOrderMapping;
+  readonly anatomicalSideMapping: MotionAnatomicalSideMapping;
   readonly equipment: Readonly<DecodedLocalTrajectoryChannel> | null;
   readonly pose: Readonly<DecodedLocalTrajectoryChannel> | null;
   readonly channelAgreement: MotionLocalChannelAgreement;
@@ -216,6 +227,8 @@ export interface DecodedLocalMotionCoordinate {
   readonly endpointOneProgress: number | null;
   /** Ordered raw shaft endpoint 2; not anatomical left/right. */
   readonly endpointTwoProgress: number | null;
+  readonly anatomicalLeftEndpointProgress: number | null;
+  readonly anatomicalRightEndpointProgress: number | null;
   readonly rawBarAngleRadians: number | null;
   readonly baselineCorrectedBarAngleRadians: number | null;
   readonly confidence: number;
@@ -858,11 +871,30 @@ function decodeLocalMotionCoordinate(value: unknown): Readonly<DecodedLocalMotio
       }
       return Object.freeze(coordinate.rawBarAxis.slice()) as readonly [number, number, number, number];
     })(),
+    coarseView: coordinate.coarseView == null ? null : requireEnum(
+      coordinate.coarseView,
+      ["front", "front_oblique_left", "front_oblique_right"] as const,
+      "local coordinate coarse view",
+    ),
+    canonicalFeedMirrored: (() => {
+      if (coordinate.canonicalFeedMirrored == null) return null;
+      if (typeof coordinate.canonicalFeedMirrored !== "boolean") {
+        throw new Error("MotionPacket local coordinate feed mirroring must be boolean or null");
+      }
+      return coordinate.canonicalFeedMirrored;
+    })(),
     endpointOrderMapping: requireEnum(
       coordinate.endpointOrderMapping,
       ["screen_ordered_anatomy_unknown"] as const,
       "local coordinate endpoint order mapping",
     ),
+    anatomicalSideMapping: coordinate.anatomicalSideMapping == null
+      ? "unknown"
+      : requireEnum(
+        coordinate.anatomicalSideMapping,
+        ["unknown", "endpoint_one_anatomical_left", "endpoint_one_anatomical_right"] as const,
+        "local coordinate anatomical side mapping",
+      ),
     equipment: channel(coordinate.equipment, "local coordinate equipment"),
     pose: channel(coordinate.pose, "local coordinate pose"),
     channelAgreement: requireEnum(
@@ -872,6 +904,14 @@ function decodeLocalMotionCoordinate(value: unknown): Readonly<DecodedLocalMotio
     ),
     endpointOneProgress: nullableNumber(coordinate.endpointOneProgress, "local coordinate endpoint one"),
     endpointTwoProgress: nullableNumber(coordinate.endpointTwoProgress, "local coordinate endpoint two"),
+    anatomicalLeftEndpointProgress: nullableNumber(
+      coordinate.anatomicalLeftEndpointProgress,
+      "local coordinate anatomical left endpoint",
+    ),
+    anatomicalRightEndpointProgress: nullableNumber(
+      coordinate.anatomicalRightEndpointProgress,
+      "local coordinate anatomical right endpoint",
+    ),
     rawBarAngleRadians: nullableNumber(coordinate.rawBarAngleRadians, "local coordinate raw bar angle"),
     baselineCorrectedBarAngleRadians: nullableNumber(
       coordinate.baselineCorrectedBarAngleRadians,

@@ -38,11 +38,18 @@ pub struct BarbellAxisObservation {
 }
 
 impl BarbellAxisObservation {
-    /// Only image-measured geometry is an independent equipment observation.
-    /// Pose-derived fusion and prediction remain private continuity/display
-    /// state so one pose source cannot be counted twice as pose + equipment.
+    /// Image measurements and bounded temporal predictions both remain visible
+    /// in canonical equipment provenance. Pose-derived fusion stays private so
+    /// one pose source cannot be counted twice as pose + equipment. Downstream
+    /// fusion must keep `Predicted` non-judgeable and may only attach it to a
+    /// track that was previously established by an independent measurement.
     pub fn equipment_observation(self) -> Option<EquipmentObservation> {
-        (self.source == BarbellAxisSource::Measured).then(|| EquipmentObservation {
+        let source = match self.source {
+            BarbellAxisSource::Measured => EquipmentSource::Geometry,
+            BarbellAxisSource::Predicted => EquipmentSource::Predicted,
+            BarbellAxisSource::Fused => return None,
+        };
+        Some(EquipmentObservation {
             proposal_id: self.proposal_id,
             kind: EquipmentKind::BarbellShaft,
             bbox: NormalizedRect::new(
@@ -59,7 +66,7 @@ impl BarbellAxisObservation {
             }),
             score: self.confidence,
             uncertainty_px: Some(self.uncertainty_px),
-            source: EquipmentSource::Geometry,
+            source,
             attributes: EquipmentAttributes {
                 is_reflection_candidate: false,
                 is_static_rack_candidate: false,

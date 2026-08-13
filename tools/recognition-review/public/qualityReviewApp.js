@@ -402,6 +402,14 @@
     const endpointTwoProgress = finiteOrNull(
       coordinate.endpointTwoProgress ?? coordinate.endpoint_two_progress,
     );
+    const anatomicalLeftEndpointProgress = finiteOrNull(
+      coordinate.anatomicalLeftEndpointProgress
+        ?? coordinate.anatomical_left_endpoint_progress,
+    );
+    const anatomicalRightEndpointProgress = finiteOrNull(
+      coordinate.anatomicalRightEndpointProgress
+        ?? coordinate.anatomical_right_endpoint_progress,
+    );
     const equipment = coordinate.equipment || {};
     const pose = coordinate.pose || {};
     return Object.freeze({
@@ -414,9 +422,16 @@
       confidence: finiteOrNull(coordinate.confidence),
       fusionStatus: coordinate.channelAgreement ?? coordinate.channel_agreement ?? "cannot_judge",
       rawBarAxis: validRawBarAxis,
+      coarseView: coordinate.coarseView ?? coordinate.coarse_view ?? null,
+      canonicalFeedMirrored: coordinate.canonicalFeedMirrored
+        ?? coordinate.canonical_feed_mirrored
+        ?? null,
       endpointOrderMapping: coordinate.endpointOrderMapping
         ?? coordinate.endpoint_order_mapping
         ?? null,
+      anatomicalSideMapping: coordinate.anatomicalSideMapping
+        ?? coordinate.anatomical_side_mapping
+        ?? "unknown",
       rawAngleDegrees: radiansToRoundedDegrees(rawAngleRadians),
       correctedAngleDegrees: radiansToRoundedDegrees(correctedAngleRadians),
       equipmentProgress: finiteOrNull(equipment.alongAxisProgress ?? equipment.along_axis_progress),
@@ -429,6 +444,8 @@
       poseUncertainty: finiteOrNull(pose.uncertainty),
       endpointOneProgress,
       endpointTwoProgress,
+      anatomicalLeftEndpointProgress,
+      anatomicalRightEndpointProgress,
       endpointResidual: endpointOneProgress == null || endpointTwoProgress == null
         ? null
         : roundNumber(endpointTwoProgress - endpointOneProgress, 6),
@@ -456,15 +473,29 @@
       String(value.fusionStatus),
       String(value.fusionStatus),
     );
-    const endpointMapping = value.endpointOrderMapping === "screen_ordered_anatomy_unknown"
+    const endpointMapping = value.anatomicalSideMapping === "endpoint_one_anatomical_left"
       ? Object.freeze({
-        zh: "屏幕有序；解剖侧映射未知",
-        en: "Screen-ordered; Anatomical mapping unknown",
+        zh: "端点 1 = 解剖左侧；端点 2 = 解剖右侧",
+        en: "Endpoint 1 = anatomical left; Endpoint 2 = anatomical right",
       })
-      : Object.freeze({
-        zh: "端点映射未声明",
-        en: "Endpoint mapping not declared",
-      });
+      : value.anatomicalSideMapping === "endpoint_one_anatomical_right"
+        ? Object.freeze({
+          zh: "端点 1 = 解剖右侧；端点 2 = 解剖左侧",
+          en: "Endpoint 1 = anatomical right; Endpoint 2 = anatomical left",
+        })
+        : Object.freeze({
+          zh: "屏幕有序；解剖侧映射未知",
+          en: "Screen-ordered; Anatomical mapping unknown",
+        });
+    const hasAnatomicalMapping = value.anatomicalSideMapping !== "unknown"
+      && value.anatomicalLeftEndpointProgress != null
+      && value.anatomicalRightEndpointProgress != null;
+    const feedGeometry = value.canonicalFeedMirrored === true
+      ? Object.freeze({ zh: "canonical 输入已镜像", en: "canonical feed mirrored" })
+      : value.canonicalFeedMirrored === false
+        ? Object.freeze({ zh: "canonical 输入未镜像", en: "canonical feed unmirrored" })
+        : Object.freeze({ zh: "canonical 镜像状态未知", en: "canonical feed mirroring unknown" });
+    const coarseView = value.coarseView ?? "unknown";
     const rawAxis = value.rawBarAxis
       ? value.rawBarAxis.map((entry) => formatEvidenceNumber(entry, 3)).join(" / ")
       : "—";
@@ -499,12 +530,18 @@
     <div class="coordinate-evidence-card endpoint-coordinate-evidence">
       <div class="coordinate-evidence-kicker">端点进度与残差 <span>/ Endpoint progress and residual</span></div>
       <div class="endpoint-mapping"><strong>${escapeHtml(endpointMapping.zh)}</strong><span>${escapeHtml(endpointMapping.en)}</span></div>
+      <dl><div><dt>机位与输入 / View and feed</dt><dd>${escapeHtml(coarseView)} · ${escapeHtml(feedGeometry.zh)}<span>${escapeHtml(feedGeometry.en)}</span></dd></div></dl>
       <div class="coordinate-evidence-metrics endpoint-metrics">
-        ${evidenceMetric("屏幕有序端点 1", "Screen-ordered endpoint 1", value.endpointOneProgress)}
-        ${evidenceMetric("屏幕有序端点 2", "Screen-ordered endpoint 2", value.endpointTwoProgress)}
-        ${evidenceMetric("端点残差 P2 − P1", "Endpoint residual P2 − P1", value.endpointResidual)}
+        ${hasAnatomicalMapping
+          ? `${evidenceMetric("解剖左侧端点", "Anatomical left endpoint", value.anatomicalLeftEndpointProgress)}
+             ${evidenceMetric("解剖右侧端点", "Anatomical right endpoint", value.anatomicalRightEndpointProgress)}`
+          : `${evidenceMetric("屏幕有序端点 1", "Screen-ordered endpoint 1", value.endpointOneProgress)}
+             ${evidenceMetric("屏幕有序端点 2", "Screen-ordered endpoint 2", value.endpointTwoProgress)}`}
+        ${evidenceMetric("原始端点残差 P2 − P1", "Raw endpoint residual P2 − P1", value.endpointResidual)}
       </div>
-      <p>端点顺序来自屏幕轴几何，不代表人体解剖左右。<span>Endpoint order follows image geometry; it does not mean anatomical left/right.</span></p>
+      <p>${hasAnatomicalMapping
+        ? "解剖侧由 Rust 使用端点顺序、粗机位与 canonical feed 镜像声明共同确定。<span>Anatomical side is determined in Rust from endpoint order, coarse view and canonical-feed mirroring.</span>"
+        : "上下文不足，端点只保留屏幕轴顺序，不推测人体左右。<span>Context is insufficient; endpoints remain screen-ordered without guessing anatomical side.</span>"}</p>
     </div>`;
   }
 
