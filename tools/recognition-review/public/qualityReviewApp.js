@@ -350,6 +350,7 @@
       state.activeItem = item;
       state.activeReview = state.workspace.review(itemId);
       state.activeRepId = activeModeReps()[0]?.repId || null;
+      byId("qualityStage").style.removeProperty("--media-aspect");
       video.src = item.videoUrl;
       video.load();
       renderQueue();
@@ -617,6 +618,12 @@
       drawOverlay();
     }
 
+    function updateMediaAspect() {
+      if (!video.videoWidth || !video.videoHeight) return;
+      byId("qualityStage").style.setProperty("--media-aspect", `${video.videoWidth} / ${video.videoHeight}`);
+      requestAnimationFrame(resizeOverlay);
+    }
+
     function drawOverlay() {
       if (!state.activeItem || !video.videoWidth || !video.videoHeight) return;
       const width = canvas.clientWidth;
@@ -787,7 +794,12 @@
     video.addEventListener("timeupdate", updatePlayback);
     video.addEventListener("play", updatePlayback);
     video.addEventListener("pause", updatePlayback);
-    video.addEventListener("loadedmetadata", () => { renderTimeline(); resizeOverlay(); updatePlayback(); });
+    video.addEventListener("loadedmetadata", () => {
+      updateMediaAspect();
+      renderTimeline();
+      resizeOverlay();
+      updatePlayback();
+    });
     window.addEventListener("resize", resizeOverlay);
     if ("requestVideoFrameCallback" in video) {
       const onFrame = () => { updatePlayback(); video.requestVideoFrameCallback(onFrame); };

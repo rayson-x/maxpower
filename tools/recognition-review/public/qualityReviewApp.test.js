@@ -24,6 +24,23 @@ test("evidence mode controls remain visible in the sticky audit header", () => {
   assert.match(html, /\.brand-copy\s*\{[^}]*min-width:\s*0/iu);
 });
 
+test("portrait review video is constrained to a media-aware evidence stage", () => {
+  const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
+  const app = readFileSync("tools/recognition-review/public/qualityReviewApp.js", "utf8");
+
+  assert.match(html, /\.video-stage\s*\{[^}]*aspect-ratio:\s*var\(--media-aspect/iu);
+  assert.match(html, /\.video-stage\s+video\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0[^}]*width:\s*100%[^}]*height:\s*100%[^}]*object-fit:\s*contain/iu);
+  assert.match(app, /--media-aspect/iu);
+});
+
+test("narrow review windows stack the audit rails instead of clipping the video", () => {
+  const html = readFileSync("tools/recognition-review/public/quality-review.html", "utf8");
+
+  assert.match(html, /body\s*\{[^}]*min-width:\s*0/iu);
+  assert.match(html, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu);
+  assert.match(html, /@media\s*\(max-width:\s*1100px\)[\s\S]*?\.queue-list\s*\{[^}]*overflow-x:\s*auto/iu);
+});
+
 test("review release exposes touched frozen benchmark evidence beside calibration proposals", () => {
   const release = fixtureRelease();
   const evidence = benchmarkEvidenceForItem(release, release.items[0]);
