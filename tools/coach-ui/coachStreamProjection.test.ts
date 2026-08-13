@@ -65,8 +65,39 @@ test("闭合 Registry 覆盖平替、周期回顾和依据 Artifact，不接受�
     },
   ];
   assert.deepEqual(artifacts.map((artifact) => registry.render(artifact, "ready").renderer), [
-    "exercise-substitution/v1", "mesocycle-review/v1", "evidence-brief/v1",
+    "exercise-substitution/v1", "mesocycle-review/v1", "evidence_brief/1",
   ]);
+});
+
+test("EvidenceBrief 的持久化 renderer 契约可直接渲染，不降级为不支持卡片", () => {
+  const brief: EvidenceBriefArtifact = {
+    ...artifactBase,
+    id: "brief-render-contract",
+    hash: "brief-render-contract-hash",
+    kind: "evidence_brief",
+    userId: "u1",
+    title: "聚餐后的温和回调待确认",
+    summary: ["仅调整未来安排"],
+  };
+  const stream = new CoachStreamProjection([brief]);
+  stream.accept({
+    type: "artifact-ready",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "tool-brief",
+    artifactRef: { id: brief.id, kind: brief.kind, schemaVersion: brief.schemaVersion, hash: brief.hash },
+    presentation: {
+      id: "presentation-brief",
+      artifactId: brief.id,
+      renderer: "evidence_brief/1",
+      status: "awaiting_user",
+    },
+    occurredAt: "2026-08-08T08:00:01.000Z",
+  });
+  const part = stream.snapshot().parts.find((candidate) => candidate.type === "data-artifact-card");
+  assert.ok(part && part.type === "data-artifact-card");
+  assert.equal(part.data.card?.renderer, "evidence_brief/1");
+  assert.notEqual(part.data.card?.title, "暂不支持的卡片");
 });
 
 test("TodayPlan stream 在同一 presentation 原位从 loading 更新为 ready", () => {
@@ -175,6 +206,40 @@ test("AI SDK 风格 tool state 与 HITL 在同一 part 原位暂停和恢复", (
     stream.snapshot().parts.find((part) => part.id === "human-action:pending-1")?.state,
     "resolved",
   );
+});
+
+test("恢复会话时 resolved PendingHumanAction 不会被历史 suspended 事件复活", () => {
+  const pending = {
+    id: "pending-resolved",
+    sessionId: "session-1",
+    runId: "run-1",
+    userId: "u1",
+    toolCallId: "choice-resolved",
+    kind: "choose_option" as const,
+    prompt: "是否确认？",
+    options: [{ id: "confirm", label: "确认" }],
+    risk: "review" as const,
+    presentationId: "presentation-resolved",
+    expectedPlanRevision: 1,
+    expectedMandateRevision: 1,
+    resumeToken: "resume-token",
+    status: "resolved" as const,
+    createdAt: "2026-08-08T08:00:00.000Z",
+    expiresAt: "2026-08-08T09:00:00.000Z",
+    resolvedAt: "2026-08-08T08:01:00.000Z",
+    output: { kind: "selected" as const, optionId: "confirm" },
+  };
+  const stream = new CoachStreamProjection([], undefined, [], [pending]);
+  stream.accept({
+    type: "hitl-suspended",
+    sessionId: "session-1",
+    runId: "run-1",
+    toolCallId: "choice-resolved",
+    pendingActionId: pending.id,
+    presentationId: pending.presentationId,
+    occurredAt: pending.createdAt,
+  });
+  assert.equal(stream.snapshot().parts.find((part) => part.id === `human-action:${pending.id}`)?.state, "resolved");
 });
 
 test("恢复会话时使用当前 presentation 状态，并将 ActionReceipt 渲染为独立稳定卡片", () => {

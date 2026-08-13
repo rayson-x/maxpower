@@ -357,7 +357,7 @@ function evidenceBriefCard(artifact: Artifact, status: PresentationStatus): Arti
   const recoveryFirstSet = recoverySession?.tasks.flatMap((task) => task.sets)[0];
   const recoveryRir = recoveryFirstSet?.targetRirRange;
   return {
-    renderer: "evidence-brief/v1",
+    renderer: "evidence_brief/1",
     eyebrow: energyAdjustment?.status === "gentle_rebalance" || recoveryAdjustment ? "未来计划调整" : "依据",
     artifactId: brief.id,
     title: energyAdjustment?.status === "gentle_rebalance"

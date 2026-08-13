@@ -148,7 +148,12 @@ export class CoachStreamProjection {
       this.upsert({
         type: "data-human-action",
         id,
-        state: event.type === "hitl-suspended" ? "awaiting_user" : "resolved",
+        // The event log contains the original suspension forever. On resume,
+        // the durable PendingHumanAction is the current-state authority; an
+        // old suspended event must not resurrect already-consumed buttons.
+        state: event.type === "hitl-suspended" && (!pending || pending.status === "pending")
+          ? "awaiting_user"
+          : "resolved",
         data: {
           pendingActionId: event.pendingActionId,
           presentationId: event.presentationId,
