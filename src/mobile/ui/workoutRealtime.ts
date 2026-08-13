@@ -8,6 +8,7 @@ import {
 import { recommendCapturePosition, type CapturePosition } from "../../pose/viewGating";
 import type { CoachApplication } from "../../coach";
 import type { DecodedMotionPacket } from "../../motion/motionPacket";
+import type { MotionRepDisposition, MotionRepObservationFinding } from "../../motion/motionPacket";
 import {
   buildCanonicalSetObservation,
   type CanonicalCaptureTelemetry,
@@ -103,6 +104,54 @@ export interface WorkoutSetObservation {
   observation: SetObservationData;
   canonicalPackets: readonly DecodedMotionPacket[];
   captureTelemetry: CanonicalCaptureTelemetry;
+}
+
+export interface CanonicalRepRevisionPacket {
+  subjectEpoch: bigint;
+  completedReps: readonly {
+    repId: bigint;
+    revision: number;
+    disposition: MotionRepDisposition;
+    observationFindings: readonly MotionRepObservationFinding[];
+  }[];
+}
+
+/**
+ * Projects the latest sealed Rust revision for each logical rep. A later
+ * rejected/needs-review revision replaces an earlier confirmed revision,
+ * rather than creating a second UI count.
+ */
+export function projectLatestCanonicalRepRevisions(
+  packets: readonly CanonicalRepRevisionPacket[],
+): { confirmedCount: number; latestConfirmedFindings: readonly MotionRepObservationFinding[] } {
+  const latest = new Map<string, {
+    revision: number;
+    disposition: MotionRepDisposition;
+    observationFindings: readonly MotionRepObservationFinding[];
+    order: number;
+  }>();
+  let order = 0;
+  for (const packet of packets) {
+    for (const rep of packet.completedReps) {
+      order += 1;
+      const key = `${packet.subjectEpoch}:${rep.repId}`;
+      const current = latest.get(key);
+      if (current && current.revision > rep.revision) continue;
+      latest.set(key, {
+        revision: rep.revision,
+        disposition: rep.disposition,
+        observationFindings: rep.observationFindings,
+        order,
+      });
+    }
+  }
+  const confirmed = [...latest.values()]
+    .filter((rep) => rep.disposition === "confirmed")
+    .sort((left, right) => left.order - right.order);
+  return {
+    confirmedCount: confirmed.length,
+    latestConfirmedFindings: confirmed.at(-1)?.observationFindings ?? [],
+  };
 }
 
 /** Projects sealed Rust reps without creating another phase/rep counter. */

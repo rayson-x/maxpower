@@ -93,9 +93,12 @@ import type { ProductShellStateStore } from "./ProductShellStateStore";
 import {
   createCloudPlanRecoverySnapshot,
   createCloudProfileRecoverySnapshot,
+  createCloudWorkoutExecutionSnapshot,
+  type CloudJsonObject,
   type ConfirmedProductBridge,
   type ProductShellCloudProjection,
 } from "../product-data";
+import { applyUpcomingWorkoutPlanChange } from "../../workout/UpcomingWorkoutPlanEditor";
 import { ProfessionalTermText } from "../ui-kit";
 import {
   applyInboundNavigationIntent,
@@ -324,18 +327,24 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
             });
           },
         });
-      } else if (today.activeWorkout?.status === "paused") {
-        const localWorkoutId = id;
-        await cloudConfirmed.updateWorkoutThen({
-          localWorkoutId,
-          patch: { data: { lifecycle: "resumed" } },
-          idempotencyKey: `mobile-workout:${localWorkoutId}:resume:cloud`,
-          commitLocal: () => application.resumeWorkoutSession({
-            userId,
-            workoutId: localWorkoutId,
-            idempotencyKey: `mobile-workout:${localWorkoutId}:resume`,
-          }),
-        });
+      } else {
+        const existing = await application.readWorkoutSession({ userId, workoutId: id });
+        if (existing.state.mode === "coach_monitor") {
+          const localWorkoutId = id;
+          await cloudConfirmed.updateWorkoutThen({
+            localWorkoutId,
+            patch: { data: { mode: "record_only" } },
+            idempotencyKey: `mobile-workout:${localWorkoutId}:legacy-monitor-off:cloud`,
+            commitLocal: () => application.setWorkoutMonitoringMode({
+              userId,
+              workoutId: localWorkoutId,
+              enabled: false,
+              idempotencyKey: `mobile-workout:${localWorkoutId}:legacy-monitor-off`,
+            }),
+          });
+        }
+        // Paused sessions are routed to PausedWorkoutScreen. That screen owns
+        // safety acknowledgement and expired-window partial proposals.
       }
       setWorkoutId(id);
       setCoachExpanded(false);
@@ -2905,7 +2914,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const [editingTarget, setEditingTarget] = useState(false);
   const [actualReps, setActualReps] = useState("");
   const [actualLoad, setActualLoad] = useState("");
+  const [actualLoadUnit, setActualLoadUnit] = useState<"kg" | "lb" | undefined>();
   const [actualRir, setActualRir] = useState("");
+  const [noviceFeedback, setNoviceFeedback] = useState<"easy" | "appropriate" | "hard" | undefined>();
   const [targetReps, setTargetReps] = useState("");
   const [targetLoad, setTargetLoad] = useState("");
   const [targetRir, setTargetRir] = useState("");
@@ -2971,7 +2982,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       ? String(draft.actualReps)
       : observation.judgement === "observed" ? String(observation.counts.confirmed) : current.set.targetReps ? String(current.set.targetReps.max) : "");
     setActualLoad(draft?.actualLoad ? String(draft.actualLoad.value) : current.set.targetLoad ? String(current.set.targetLoad.value) : "");
+    setActualLoadUnit(draft?.actualLoad?.unit ?? current.set.targetLoad?.unit);
     setActualRir(draft?.actualRir !== undefined ? String(draft.actualRir) : current.set.targetRir === undefined ? "" : String(current.set.targetRir));
+    setNoviceFeedback(draft?.noviceFeedback);
     setEditingActual(true);
   }, [workout]);
   if (!workout) return error
@@ -2983,9 +2996,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const completed = new Set(workout.setOutcomes.map((outcome) => outcome.prescriptionSetId));
   const skipped = new Set((workout.skippedSets ?? []).map((set) => set.prescriptionSetId));
   const resolved = new Set([...completed, ...skipped]);
-  const pending = workout.state.currentSetId
-    ? workout.frozenPrescription.tasks.flatMap((task) => task.sets.map((set) => ({ task, set }))).find(({ set }) => set.id === workout.state.currentSetId && !resolved.has(set.id))
-    : workout.frozenPrescription.tasks.flatMap((task) => task.sets.map((set) => ({ task, set }))).find(({ set }) => !resolved.has(set.id));
+  const pendingSets = workout.frozenPrescription.tasks.flatMap((task) => task.sets.map((set) => ({ task, set })));
+  const pending = pendingSets.find(({ set }) => set.id === workout.state.currentSetId && !resolved.has(set.id))
+    ?? pendingSets.find(({ set }) => !resolved.has(set.id));
   const pendingDraft = pending ? workout.drafts.find((draft) => draft.prescriptionSetId === pending.set.id) : undefined;
   const persistedObservation = pending
     ? [...(workout.setObservations ?? [])].reverse().find((item) => item.prescriptionSetId === pending.set.id)
@@ -3026,7 +3039,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         onObservationReady={(observation) => {
           setActualReps(String(observation.report.confirmedCount));
           setActualLoad(pendingDraft?.actualLoad ? String(pendingDraft.actualLoad.value) : pending.set.targetLoad ? String(pending.set.targetLoad.value) : "");
+          setActualLoadUnit(pendingDraft?.actualLoad?.unit ?? pending.set.targetLoad?.unit);
           setActualRir(pendingDraft?.actualRir === undefined ? "" : String(pendingDraft.actualRir));
+          setNoviceFeedback(pendingDraft?.noviceFeedback);
           setEditingActual(true);
           void load();
         }}
@@ -3087,7 +3102,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         ? String(persistedObservation.counts.confirmed)
         : pending.set.targetReps ? String(pending.set.targetReps.max) : "");
     setActualLoad(pendingDraft?.actualLoad ? String(pendingDraft.actualLoad.value) : pending.set.targetLoad ? String(pending.set.targetLoad.value) : "");
+    setActualLoadUnit(pendingDraft?.actualLoad?.unit ?? pending.set.targetLoad?.unit);
     setActualRir(pendingDraft?.actualRir !== undefined ? String(pendingDraft.actualRir) : pending.set.targetRir === undefined ? "" : String(pending.set.targetRir));
+    setNoviceFeedback(pendingDraft?.noviceFeedback);
     setEditingActual(true);
   };
   const openTarget = () => {
@@ -3107,6 +3124,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       return;
     }
     if (actualLoadValue !== undefined && actualLoadValue < 0) { setError("重量不能小于 0。"); return; }
+    if (actualLoadValue !== undefined && actualLoadUnit === undefined) { setError("请选择实际重量单位 kg 或 lb。"); return; }
     if (rir !== undefined && (rir < 0 || rir > 10)) { setError("RIR 需要在 0 到 10 之间。"); return; }
     const draft = await application.saveCurrentSetDraft({
         userId,
@@ -3114,8 +3132,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         idempotencyKey: `mobile-workout:${workoutId}:draft:${pending.set.id}`,
         draft: {
           ...(reps !== undefined ? { actualReps: reps } : {}),
-          ...(actualLoadValue !== undefined ? { actualLoad: { value: actualLoadValue, unit: pendingDraft?.actualLoad?.unit ?? pending.set.targetLoad?.unit ?? "kg" } } : {}),
+          ...(actualLoadValue !== undefined && actualLoadUnit ? { actualLoad: { value: actualLoadValue, unit: actualLoadUnit } } : {}),
           ...(rir !== undefined ? { actualRir: rir } : {}),
+          ...(noviceFeedback ? { noviceFeedback, noviceFeedbackMappingVersion: "set-review-v1" } : {}),
         },
       });
     return { draft, reps, actualLoadValue, rir };
@@ -3140,8 +3159,9 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         payload: {
           prescriptionSetId: pending.set.id,
           ...(reps !== undefined ? { actualReps: reps } : {}),
-          ...(actualLoadValue !== undefined ? { actualLoad: actualLoadValue } : {}),
+          ...(actualLoadValue !== undefined && actualLoadUnit ? { actualLoad: { value: actualLoadValue, unit: actualLoadUnit } } : {}),
           ...(rir !== undefined ? { actualRir: rir } : {}),
+          ...(noviceFeedback ? { noviceFeedback } : {}),
         },
         provenance: { source: "confirmed_user_input" },
         occurredAt: new Date().toISOString(),
@@ -3173,29 +3193,30 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     if (targetLoadValue !== undefined && targetLoadValue < 0) { setError("目标重量不能小于 0。"); return; }
     if (rir !== undefined && (rir < 0 || rir > 10)) { setError("目标 RIR 需要在 0 到 10 之间。"); return; }
     try {
-      const cloudPatch = {
-        prescriptionSetId: pending.set.id,
-        ...(reps !== undefined ? { targetReps: reps } : {}),
-        ...(targetLoadValue !== undefined ? { targetLoad: targetLoadValue } : {}),
-        ...(rir !== undefined ? { targetRir: rir } : {}),
+      const change = {
+        kind: "adjust_set" as const,
+        taskId: pending.task.id,
+        setId: pending.set.id,
+        patch: {
+          ...(pending.set.targetReps && reps !== undefined ? { targetReps: { min: reps, max: reps } } : {}),
+          ...(pending.set.targetLoad && targetLoadValue !== undefined ? { targetLoad: { value: targetLoadValue, unit: pending.set.targetLoad.unit } } : {}),
+          ...(rir !== undefined ? { targetRir: rir } : {}),
+        },
       };
+      const applied = applyUpcomingWorkoutPlanChange({
+        before: workout.frozenPrescription,
+        change,
+        completedPrescriptionSetIds: [...resolved],
+        ...(pendingDraft ? { draftedPrescriptionSetId: pendingDraft.prescriptionSetId } : {}),
+      });
       await cloudConfirmed.updateWorkoutThen({
         localWorkoutId: workoutId,
-        patch: { data: { latestPrescriptionChange: cloudPatch } },
+        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
         idempotencyKey: `mobile-workout:${workoutId}:revise:${pending.set.id}:cloud`,
         commitLocal: () => application.editUpcomingWorkoutPlan({
           userId,
           workoutId,
-          change: {
-            kind: "adjust_set",
-            taskId: pending.task.id,
-            setId: pending.set.id,
-            patch: {
-              ...(pending.set.targetReps && reps !== undefined ? { targetReps: { min: reps, max: reps } } : {}),
-              ...(pending.set.targetLoad && targetLoadValue !== undefined ? { targetLoad: { value: targetLoadValue, unit: pending.set.targetLoad.unit } } : {}),
-              ...(rir !== undefined ? { targetRir: rir } : {}),
-            },
-          },
+          change,
           reason: "user_adjusted_unstarted_set",
           idempotencyKey: `mobile-workout:${workoutId}:revise:${pending.set.id}`,
         }),
@@ -3211,7 +3232,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       const completedAt = new Date().toISOString();
       await cloudConfirmed.completeWorkoutThen({
         localWorkoutId: workoutId,
-        summary: { status: pending ? "partial" : "completed" },
+        summary: workoutCompletionCloudSummary(workout, pending ? "partial" : "completed"),
         completedAt,
         idempotencyKey: `mobile-workout:${workoutId}:finish:cloud`,
         commitLocal: () => application.completeWorkoutSession({
@@ -3287,17 +3308,43 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     } catch (cause) { setError(cause instanceof Error ? cause.message : "暂时无法暂停训练"); }
   };
   const applyNextSetRecommendation = async () => {
-    if (!nextSetRecommendation) return;
+    if (!nextSetRecommendation?.change) return;
     try {
-      await application.applyNextWorkoutSetRecommendation({
-        recommendation: nextSetRecommendation,
-        idempotencyKey: `mobile-workout:${workoutId}:apply-next-set:${nextSetRecommendation.sourceOutcomeId}`,
+      if (workout.revision !== nextSetRecommendation.baseWorkoutRevision) throw new Error("stale_next_set_recommendation");
+      const currentDraft = workout.drafts.find((draft) => draft.prescriptionSetId === workout.state.currentSetId);
+      const applied = applyUpcomingWorkoutPlanChange({
+        before: workout.frozenPrescription,
+        change: nextSetRecommendation.change,
+        completedPrescriptionSetIds: [...resolved],
+        ...(currentDraft ? { draftedPrescriptionSetId: currentDraft.prescriptionSetId } : {}),
+      });
+      await cloudConfirmed.updateWorkoutThen({
+        localWorkoutId: workoutId,
+        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
+        idempotencyKey: `mobile-workout:${workoutId}:apply-next-set:${nextSetRecommendation.sourceOutcomeId}:cloud`,
+        commitLocal: () => application.applyNextWorkoutSetRecommendation({
+          recommendation: nextSetRecommendation,
+          idempotencyKey: `mobile-workout:${workoutId}:apply-next-set:${nextSetRecommendation.sourceOutcomeId}`,
+        }),
       });
       setNextSetRecommendation(undefined);
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "下一组建议已过期，请重新查看当前记录。");
       setNextSetRecommendation(undefined);
+    }
+  };
+  const dismissNextSetRecommendation = async (disposition: "rejected" | "ignored") => {
+    if (!nextSetRecommendation) return;
+    try {
+      await application.dismissNextWorkoutSetRecommendation({
+        recommendation: nextSetRecommendation,
+        disposition,
+        idempotencyKey: `mobile-workout:${workoutId}:next-set:${nextSetRecommendation.sourceOutcomeId}:${disposition}`,
+      });
+      setNextSetRecommendation(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "未能保存这次选择，请重试。");
     }
   };
   const focusTask = async (taskId: string) => {
@@ -3323,7 +3370,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={styles.workoutTop}><View><Text style={styles.screenTitle}>{readablePlanSessionTitle(workout.frozenPrescription.title)}</Text><Text style={styles.screenSub}>统一训练执行</Text></View><View style={styles.workoutTopActions}>{skipped.size ? <Text style={{ color: colors.terra, fontSize: 11, fontWeight: "800" }}>已跳过 {skipped.size} 组</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel="打开训练中的 Coach" onPress={onOpenCoach} style={styles.workoutCoachButton}><Text style={styles.workoutCoachButtonText}>Coach</Text></Pressable></View></View>
       {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>组间休息</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <ProfessionalTermText text={`下一组：${exerciseDisplayName(pending.task.exerciseVariantId)} · ${setDose(pending.set)}`} style={styles.workoutTaskBoundary} /> : <Text style={styles.workoutTaskBoundary}>已没有待完成组</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel="减少三十秒休息" onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>−30 秒</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="增加三十秒休息" onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>+30 秒</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>结束</Text></Pressable></View></View> : null}
-      {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setNextSetRecommendation(undefined)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
+      {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => void dismissNextSetRecommendation("rejected")} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void dismissNextSetRecommendation("ignored")} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
       {pending ? (
         <View style={styles.currentSetCard}>
           <View style={styles.currentSetHeader}><Text style={styles.cardEyebrow}>当前组 · 第 {pendingSetIndex} 组</Text>{currentExerciseOutcomes.length ? <Pressable accessibilityRole="button" accessibilityLabel={`${historyExpanded ? "收起" : "查看"}${currentExerciseOutcomes.length}组完成历史`} accessibilityState={{ expanded: historyExpanded }} onPress={() => setHistoryExpanded((value) => !value)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>已完成 {currentExerciseOutcomes.length} 组 ↻</Text></Pressable> : <Text style={styles.notRecordedText}>尚未记录</Text>}</View>
@@ -3343,7 +3390,11 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
               {persistedObservation ? <View style={styles.observationSummary}><Text style={styles.observationSummaryTitle}>Canonical observation · 本机留存</Text><Text style={styles.observationSummaryText}>已确认 {persistedObservation.counts.confirmed} · 待复核 {persistedObservation.counts.needsReview} · 已拒绝 {persistedObservation.counts.rejected}</Text><Text style={styles.observationSummaryBoundary}>{persistedObservation.judgement === "cannot_judge" ? "当前相机证据无法判断；请手动确认。" : "只有已确认次数用于预填；原观察不会被你的修正覆盖。"} 此观察尚不是云端 confirmed Result。</Text></View> : <Text style={styles.setReviewSnapshot}>观察：手动记录（无相机证据）</Text>}
               <ActualInput label="次数" value={actualReps} onChange={setActualReps} />
               <ActualInput label="重量" value={actualLoad} onChange={setActualLoad} />
+              <View accessibilityRole="radiogroup" style={styles.setActions}><Pressable accessibilityRole="radio" accessibilityState={{ checked: actualLoadUnit === "kg" }} onPress={() => setActualLoadUnit("kg")} style={[styles.actualButton, actualLoadUnit === "kg" && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>kg</Text></Pressable><Pressable accessibilityRole="radio" accessibilityState={{ checked: actualLoadUnit === "lb" }} onPress={() => setActualLoadUnit("lb")} style={[styles.actualButton, actualLoadUnit === "lb" && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>lb</Text></Pressable></View>
               <ActualInput label="RIR" value={actualRir} onChange={setActualRir} />
+              <Text style={styles.setReviewSnapshot}>主观感受（可选）</Text>
+              <View accessibilityRole="radiogroup" style={styles.setActions}>{([['easy', '轻松'], ['appropriate', '合适'], ['hard', '吃力']] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: noviceFeedback === value }} onPress={() => setNoviceFeedback((current) => current === value ? undefined : value)} style={[styles.actualButton, noviceFeedback === value && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>{label}</Text></Pressable>)}</View>
+              {persistedObservation?.counts.needsReview ? <View style={styles.setActions}><Pressable accessibilityRole="button" onPress={() => setActualReps(String(persistedObservation.counts.confirmed + persistedObservation.counts.needsReview))} style={styles.actualButton}><Text style={styles.actualButtonText}>计入 {persistedObservation.counts.needsReview} 次待复核</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setActualReps(String(persistedObservation.counts.confirmed))} style={styles.actualButton}><Text style={styles.actualButtonText}>保持不计入</Text></Pressable></View> : null}
               <Pressable accessibilityRole="button" onPress={() => void confirmActual()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>确认实际完成</Text></Pressable>
               <Pressable accessibilityRole="button" onPress={() => void saveActualDraft()} style={styles.actualButton}><Text style={styles.actualButtonText}>保存本组输入，稍后完成</Text></Pressable>
             </View>
@@ -3377,7 +3428,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       {error ? <Text style={styles.formError}>{error}</Text> : null}
       <Pressable accessibilityRole="button" onPress={() => void pause()} style={styles.pauseButton}><Text style={styles.pauseButtonText}>暂停训练</Text></Pressable>
       <Pressable accessibilityRole="button" onPress={() => setShowSafetyPauseChoices(true)} style={styles.safetyPauseButton}><Text style={styles.safetyPauseButtonText}>安全暂停</Text></Pressable>
-      {finishReviewOpen ? <View style={styles.workoutTaskPicker}><Text style={styles.logTitle}>训练实际总结</Text><Text style={styles.workoutTaskBoundary}>已确认 {workout.setOutcomes.length} 组 · 已跳过 {skipped.size} 组 · canonical observation 覆盖 {(workout.setObservations ?? []).length} 组 · 用户修正 {workout.setOutcomes.filter((item) => item.performedRepsProvenance?.userAdjusted).length} 组</Text><Text style={styles.workoutTaskBoundary}>保存状态：{finishSaveState === "saving" ? "等待云端确认" : finishSaveState === "conflict" ? "云端冲突，未保存" : finishSaveState === "failed" ? "未获云端确认，可重试" : "尚未提交"}</Text><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => setFinishReviewOpen(false)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>返回训练</Text></Pressable><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => void finish()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>{finishSaveState === "failed" || finishSaveState === "conflict" ? "重试确认" : pending ? "确认部分完成" : "确认完成"}</Text></Pressable></View></View> : <Pressable accessibilityRole="button" onPress={() => setFinishReviewOpen(true)} style={styles.finishButton}><Text style={styles.finishButtonText}>{pending ? "查看部分完成总结" : "查看训练总结"}</Text></Pressable>}
+      {finishReviewOpen ? <View style={styles.workoutTaskPicker}><Text style={styles.logTitle}>训练实际总结</Text><Text style={styles.workoutTaskBoundary}>已确认 {workout.setOutcomes.length} 组 · 已跳过 {skipped.size} 组 · canonical observation 覆盖 {(workout.setObservations ?? []).length} 组 · 用户修正 {workout.setOutcomes.filter((item) => item.performedRepsProvenance?.userAdjusted).length} 组</Text>{workout.setOutcomes.map((outcome, index) => <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{exerciseDisplayName(outcome.exerciseVariantId)}</Text><Text style={styles.completedHistoryDelta}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? outcome.actualDuration?.value ?? outcome.actualDistance?.value ?? "—"}{outcome.actualRir === undefined ? "" : ` · RIR ${outcome.actualRir}`}</Text></View>)}{(workout.skippedSets ?? []).map((item) => <Text key={item.id} style={styles.workoutTaskBoundary}>跳过：{exerciseDisplayName(item.exerciseVariantId)} · {item.reason}</Text>)}{workout.frozenPrescription.tasks.filter((task) => task.id.includes(":replacement:")).map((task) => <Text key={task.id} style={styles.workoutTaskBoundary}>替换剩余组：{exerciseDisplayName(task.exerciseVariantId)}</Text>)}<Text style={styles.workoutTaskBoundary}>保存状态：{finishSaveState === "saving" ? "等待云端确认" : finishSaveState === "conflict" ? "云端冲突，未保存" : finishSaveState === "failed" ? "未获云端确认，可重试" : "尚未提交"}</Text><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => setFinishReviewOpen(false)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>返回训练</Text></Pressable><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => void finish()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>{finishSaveState === "failed" || finishSaveState === "conflict" ? "重试确认" : pending ? "确认部分完成" : "确认完成"}</Text></Pressable></View></View> : <Pressable accessibilityRole="button" onPress={() => setFinishReviewOpen(true)} style={styles.finishButton}><Text style={styles.finishButtonText}>{pending ? "查看部分完成总结" : "查看训练总结"}</Text></Pressable>}
       {managingUpcomingTasks ? <WorkoutTaskEditor application={application} cloudConfirmed={cloudConfirmed} userId={userId} workout={workout} onDismiss={() => setManagingUpcomingTasks(false)} onChanged={() => { setNextSetRecommendation(undefined); void load(); }} /> : null}
       {showSafetyPauseChoices ? <SafetyPauseChoices onDismiss={() => setShowSafetyPauseChoices(false)} onSelect={(signal) => void pauseForSafety(signal)} /> : null}
       {showSkipSet && pending ? <SkipCurrentSetSheet exerciseVariantId={pending.task.exerciseVariantId} onDismiss={() => setShowSkipSet(false)} onConfirm={(reason) => void skipCurrentSet(reason)} /> : null}
@@ -3492,7 +3543,7 @@ function WorkoutTaskEditor({
     [workout.drafts],
   );
   const editableTasks = workout.frozenPrescription.tasks.filter(
-    (task) => task.sets.some((set) => !completed.has(set.id) && !drafted.has(set.id)),
+    (task) => task.sets.some((set) => !completed.has(set.id)),
   );
   const candidates = application.searchExerciseCatalog({ query, limit: 6 });
   const selectedExercise = selectedExerciseId
@@ -3507,9 +3558,16 @@ function WorkoutTaskEditor({
     setSaveState("saving");
     try {
       const key = `mobile-workout:${workout.id}:task-edit:${workout.revision}:${change.kind}:${selectedTaskId ?? selectedExerciseId ?? "none"}`;
+      const currentDraft = workout.drafts.find((draft) => draft.prescriptionSetId === workout.state.currentSetId);
+      const applied = applyUpcomingWorkoutPlanChange({
+        before: workout.frozenPrescription,
+        change,
+        completedPrescriptionSetIds: [...completed],
+        ...(currentDraft ? { draftedPrescriptionSetId: currentDraft.prescriptionSetId } : {}),
+      });
       await cloudConfirmed.updateWorkoutThen({
         localWorkoutId: workout.id,
-        patch: { data: { latestRouteChange: { change, reason, expectedLocalRevision: workout.revision } } },
+        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
         idempotencyKey: `${key}:cloud`,
         commitLocal: () => application.editUpcomingWorkoutPlan({
           userId,
@@ -3604,12 +3662,13 @@ function WorkoutTaskEditor({
           <Text style={styles.exerciseFieldLabel}>尚未开始</Text>
           {editableTasks.length ? editableTasks.map((task) => {
             const originalIndex = workout.frozenPrescription.tasks.findIndex((candidate) => candidate.id === task.id);
+            const hasLockedSet = task.sets.some((set) => completed.has(set.id) || drafted.has(set.id));
             return <View key={task.id} style={[styles.workoutTaskEditorRow, selectedTaskId === task.id && styles.workoutTaskEditorRowSelected]}>
-              <Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedTaskId === task.id }} onPress={() => setSelectedTaskId(task.id)} style={styles.workoutTaskEditorPrimary}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.exerciseManagerSub}>{task.sets.length} 组 · 可替换、排序或移除</Text></Pressable>
+              <Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedTaskId === task.id }} onPress={() => setSelectedTaskId(task.id)} style={styles.workoutTaskEditorPrimary}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.exerciseManagerSub}>{task.sets.length} 组 · {hasLockedSet ? "已开始；只能替换剩余组" : "可替换、排序或移除"}</Text></Pressable>
               <View style={styles.workoutTaskEditorActions}>
-                <Pressable accessibilityRole="button" disabled={busy || originalIndex <= 0} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex - 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>上移</Text></Pressable>
-                <Pressable accessibilityRole="button" disabled={busy || originalIndex >= workout.frozenPrescription.tasks.length - 1} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>下移</Text></Pressable>
-                <Pressable accessibilityRole="button" disabled={busy} onPress={() => void commit({ kind: "remove_task", taskId: task.id }, "user_removed_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.exerciseArchiveText}>移除</Text></Pressable>
+                <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex <= 0} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex - 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>上移</Text></Pressable>
+                <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex >= workout.frozenPrescription.tasks.length - 1} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>下移</Text></Pressable>
+                <Pressable accessibilityRole="button" disabled={busy || hasLockedSet} onPress={() => void commit({ kind: "remove_task", taskId: task.id }, "user_removed_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.exerciseArchiveText}>移除</Text></Pressable>
               </View>
             </View>;
           }) : <Text style={styles.exerciseEmpty}>当前没有可编辑的后续动作。已开始的训练内容会保持原样。</Text>}
@@ -4020,12 +4079,46 @@ function healthConnectionStatus(availability: import("../../coach/model").Health
   if (availability === "temporarily_unavailable") return "暂时无法连接；已有记录会保留";
   return "暂时无法读取；已有记录会保留";
 }
-function actionLabel(action: CoachProductProjection["profile"]["actionLog"]["recent"][number]["action"]): string { return action === "plan.change.applied" ? "已更新计划" : action === "plan.change.undone" ? "已撤销调整" : action === "plan.change.rejected" ? "保留原计划" : action === "proposal.created" ? "已生成建议" : action === "assessment.created" ? "已完成复核" : action === "fact.written" ? "已写入记录" : action === "timeline.corrected" ? "已更正记录" : action === "workout.corrected" ? "已更正训练记录" : action === "workout.set_skipped" ? "已跳过训练组" : action === "memory.changed" ? "已更新 Coach 记忆" : action === "permission.changed" ? "已更新授权" : "Coach 操作"; }
+function actionLabel(action: CoachProductProjection["profile"]["actionLog"]["recent"][number]["action"]): string { return action === "plan.change.applied" ? "已更新计划" : action === "plan.change.undone" ? "已撤销调整" : action === "plan.change.rejected" ? "保留原计划" : action === "plan.change.ignored" ? "暂不调整" : action === "proposal.created" ? "已生成建议" : action === "assessment.created" ? "已完成复核" : action === "fact.written" ? "已写入记录" : action === "timeline.corrected" ? "已更正记录" : action === "workout.corrected" ? "已更正训练记录" : action === "workout.set_skipped" ? "已跳过训练组" : action === "memory.changed" ? "已更新 Coach 记忆" : action === "permission.changed" ? "已更新授权" : "Coach 操作"; }
 function actionResultLabel(result: CoachProductProjection["profile"]["actionLog"]["recent"][number]["result"]): string { return result === "applied" ? "已执行" : result === "undone" ? "已撤销" : result === "rejected" ? "已拒绝" : result === "allowed" ? "已记录" : "未完成"; }
 function strategyLabel(strategy: string): string { return ({ fat_loss_recomposition: "减脂重组", preserve_lean_mass_cut: "保肌减脂", final_cut: "最后减脂", maintenance_recomposition: "维持重组", recovery_maintenance: "恢复维持", conservative_gain: "保守增肌", stable_strength_gain: "稳定增力", return_to_training: "停训回归", advanced_specialization_maintenance: "专项维持", post_loss_consolidation_gain: "减重后巩固", diet_break: "Diet break", deload_overlay: "Deload" } as Record<string, string>)[strategy] ?? strategy; }
 function forecastScenarioLabel(scenario: "strict_aggressive" | "balanced" | "flexible"): string { return scenario === "strict_aggressive" ? "严格进取" : scenario === "balanced" ? "平衡" : "灵活"; }
 function actorLabel(actor: "user" | "agent" | "rule_engine" | "sensor" | "sync"): string { return actor === "agent" ? "Coach" : actor === "rule_engine" ? "本地规则" : actor === "sensor" ? "设备" : actor === "sync" ? "同步" : "你"; }
 function optionalFiniteNumber(value: string): number | undefined { const parsed = Number(value.trim()); return value.trim() && Number.isFinite(parsed) ? parsed : undefined; }
+function workoutCompletionCloudSummary(
+  workout: Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>,
+  status: "completed" | "partial",
+): CloudJsonObject {
+  return JSON.parse(JSON.stringify({
+    status,
+    workoutRevision: workout.revision,
+    completedSets: workout.setOutcomes.map((outcome) => ({
+      resultId: outcome.id,
+      prescriptionSetId: outcome.prescriptionSetId,
+      exerciseVariantId: outcome.exerciseVariantId,
+      ...(outcome.actualLoad ? { actualLoad: outcome.actualLoad } : {}),
+      ...(outcome.actualReps !== undefined ? { actualReps: outcome.actualReps } : {}),
+      ...(outcome.actualDuration ? { actualDuration: outcome.actualDuration } : {}),
+      ...(outcome.actualDistance ? { actualDistance: outcome.actualDistance } : {}),
+      ...(outcome.actualRir !== undefined ? { actualRir: outcome.actualRir } : {}),
+      ...(outcome.noviceFeedback ? { noviceFeedback: outcome.noviceFeedback } : {}),
+      ...(outcome.observationRef ? { observationId: outcome.observationRef.id } : {}),
+      userAdjustedObservation: outcome.performedRepsProvenance?.userAdjusted === true,
+    })),
+    skippedSets: (workout.skippedSets ?? []).map((item) => ({
+      prescriptionSetId: item.prescriptionSetId,
+      exerciseVariantId: item.exerciseVariantId,
+      reason: item.reason,
+    })),
+    effectiveRoute: workout.frozenPrescription.tasks.map((task) => ({
+      taskId: task.id,
+      exerciseVariantId: task.exerciseVariantId,
+      prescriptionSetIds: task.sets.map((set) => set.id),
+      replacement: task.id.includes(":replacement:"),
+    })),
+    canonicalObservationCount: (workout.setObservations ?? []).length,
+  })) as CloudJsonObject;
+}
 
 /** Convert only UI typing drafts into the catalog's typed command values. */
 function dynamicFormValueToDomain(value: DynamicOnboardingFormValue): unknown {

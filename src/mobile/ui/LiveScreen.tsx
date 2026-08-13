@@ -30,7 +30,7 @@ import type { SessionConfig } from "./SetupScreen";
 import { ReportSheet } from "./ReportSheet";
 import { colors } from "./theme";
 import type { CoachStreamSnapshot } from "../../coach/ui";
-import { buildWorkoutSetObservation, type WorkoutSafetySignal, type WorkoutSetObservation, type WorkoutSetRealtimeContext } from "./workoutRealtime";
+import { buildWorkoutSetObservation, projectLatestCanonicalRepRevisions, type CanonicalRepRevisionPacket, type WorkoutSafetySignal, type WorkoutSetObservation, type WorkoutSetRealtimeContext } from "./workoutRealtime";
 import {
   projectCameraCoachPresentation,
   type CameraCoachAction,
@@ -104,7 +104,7 @@ export function LiveScreen(props: {
   const lensSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const packetsRef = useRef<DecodedMotionPacket[]>([]);
-  const seenRepIds = useRef(new Set<string>());
+  const latestRepRevisionsRef = useRef(new Map<string, CanonicalRepRevisionPacket>());
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [phase, setPhase] = useState<string>(() => phaseLabel("ready", locale));
   const [latestFindings, setLatestFindings] = useState<string>(() => getT(MOTION_COPY, locale)("live.waitingForMotion"));
@@ -155,14 +155,24 @@ export function LiveScreen(props: {
           capture.ingestPoseEvent(nativeEvent);
         }
         setPhase(phaseLabel(decoded.repState.phase, locale) ?? decoded.repState.phase);
-        for (const rep of decoded.completedReps) {
-          if (rep.disposition !== "confirmed") continue;
-          const key = `${decoded.subjectEpoch}:${rep.repId}:${rep.revision}`;
-          if (!seenRepIds.current.has(key)) {
-            seenRepIds.current.add(key);
-            setConfirmedCount(seenRepIds.current.size);
-            setLatestFindings(liveObservationLine(rep.observationFindings, locale));
+        if (active) {
+          for (const rep of decoded.completedReps) {
+            const key = `${decoded.subjectEpoch}:${rep.repId}`;
+            const previous = latestRepRevisionsRef.current.get(key)?.completedReps[0];
+            if (previous && previous.revision > rep.revision) continue;
+            // Refresh insertion order so the latest revised confirmed rep owns
+            // the one live observation line.
+            latestRepRevisionsRef.current.delete(key);
+            latestRepRevisionsRef.current.set(key, {
+              subjectEpoch: decoded.subjectEpoch,
+              completedReps: [rep],
+            });
           }
+          const reps = projectLatestCanonicalRepRevisions([...latestRepRevisionsRef.current.values()]);
+          setConfirmedCount(reps.confirmedCount);
+          setLatestFindings(reps.confirmedCount > 0
+            ? liveObservationLine(reps.latestConfirmedFindings, locale)
+            : t("live.waitingForMotion"));
         }
         // 入框校验：按 canonical 坐标，节流为状态变化时才 setState
         const assessment = assessFraming(
@@ -188,12 +198,12 @@ export function LiveScreen(props: {
         setNativeError(error instanceof Error ? error.message : String(error));
       }
     },
-    [active, capture],
+    [active, capture, locale, t],
   );
 
   const startSet = useCallback(() => {
     packetsRef.current = [];
-    seenRepIds.current = new Set();
+    latestRepRevisionsRef.current.clear();
     setConfirmedCount(0);
     setReport(null);
     setSavedFile(null);
@@ -231,12 +241,17 @@ export function LiveScreen(props: {
       setNativeError(cause instanceof Error ? cause.message : t("capture.error.skeletonNotSaved"));
     }
     if (props.onSetObservationReady && props.setContext && packetsRef.current.length) {
-      await props.onSetObservationReady(buildWorkoutSetObservation({
-        context: props.setContext,
-        packets: packetsRef.current,
-        report: assembled,
-        observedAt: new Date().toISOString(),
-      }));
+      try {
+        await props.onSetObservationReady(buildWorkoutSetObservation({
+          context: props.setContext,
+          packets: packetsRef.current,
+          report: assembled,
+          observedAt: new Date().toISOString(),
+        }));
+      } catch (cause) {
+        setNativeError(cause instanceof Error ? cause.message : "观察结果未能保存，已返回手动记录。");
+        props.onExit();
+      }
       return;
     }
     if (props.setContext && packetsRef.current.length === 0) {
@@ -255,9 +270,13 @@ export function LiveScreen(props: {
     setSavedVideo(nativeEvent);
     if (nativeEvent.status === "error") {
       setNativeError(nativeEvent.error ?? t("capture.error.videoNotSaved"));
+      if (nativeEvent.error === "camera_permission_denied") {
+        setPermission("denied");
+        void Promise.resolve(props.onPermissionDenied?.()).catch(() => props.onExit());
+      }
       return;
     }
-  }, []);
+  }, [props.onExit, props.onPermissionDenied, t]);
 
   const videoSaveState = trainingVideoSaveState(videoStopRequested, savedVideo);
   const exitCamera = useCallback(() => {
@@ -373,6 +392,10 @@ export function LiveScreen(props: {
     userMessage: lastUserMessage,
     ...(locale ? { locale } : {}),
   }), [lastUserMessage, latestFindings, locale, props.coachStream]);
+  const compactWorkoutView = props.setContext !== undefined;
+  const visibleCaptions = compactWorkoutView && active
+    ? coachPresentation.captions.filter((line) => line.state !== "previous").slice(-1)
+    : coachPresentation.captions;
 
   if (permission === "unknown") {
     return (
@@ -388,6 +411,9 @@ export function LiveScreen(props: {
     return (
       <View style={styles.center}>
         <Text style={styles.centerText}>{t("capture.permission.denied")}</Text>
+        <TouchableOpacity style={styles.permissionBtn} onPress={props.onExit}>
+          <Text style={styles.permissionBtnText}>返回手动记录</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -406,7 +432,7 @@ export function LiveScreen(props: {
           onVideo={onVideo}
         />
         <Svg style={StyleSheet.absoluteFill} viewBox={`0 0 ${viewSize.width} ${viewSize.height}`}>
-          {mapping && event?.equipmentAxis && (
+          {!compactWorkoutView && mapping && event?.equipmentAxis && (
             <Line
               x1={mapping.offsetX + (event.previewMirrored ? 1 - event.equipmentAxis.x1 : event.equipmentAxis.x1) * mapping.drawnWidth}
               y1={mapping.offsetY + event.equipmentAxis.y1 * mapping.drawnHeight}
@@ -417,7 +443,7 @@ export function LiveScreen(props: {
               strokeLinecap="round"
             />
           )}
-          {mapping && HALPE26_CONNECTIONS.map(([from, to]) => {
+          {!compactWorkoutView && mapping && HALPE26_CONNECTIONS.map(([from, to]) => {
             const start = pointOf(from);
             const end = pointOf(to);
             if (!start || !end) return null;
@@ -431,7 +457,7 @@ export function LiveScreen(props: {
               />
             );
           })}
-          {anglePresentations.map((angle) => (
+          {!compactWorkoutView && anglePresentations.map((angle) => (
             <Path
               key={`angle:${angle.key}`}
               d={angle.path}
@@ -440,13 +466,13 @@ export function LiveScreen(props: {
               strokeWidth="2"
             />
           ))}
-          {mapping && visibleLandmarks.map((landmark) => {
+          {!compactWorkoutView && mapping && visibleLandmarks.map((landmark) => {
             const point = pointOf(landmark.index);
             return point ? (
               <Circle key={landmark.index} cx={point.x} cy={point.y} r="4" fill={colors.jointDot} />
             ) : null;
           })}
-          {anglePresentations.map((angle) => (
+          {!compactWorkoutView && anglePresentations.map((angle) => (
             <SvgText
               key={`angle-label:${angle.key}`}
               x={angle.label.x}
@@ -498,7 +524,7 @@ export function LiveScreen(props: {
         {config.recognition.canCount && (
           <View style={styles.repCluster}>
             <Text style={styles.repNum}>{String(confirmedCount).padStart(2, "0")}{props.setContext?.targetReps !== undefined ? ` / ${props.setContext.targetReps}` : ""}</Text>
-            <Text style={styles.repLabel}>REPS · {config.recognition.canEmitPhase ? phase.toUpperCase() : "OBSERVING"}</Text>
+            <Text style={styles.repLabel}>{compactWorkoutView ? "REPS" : `REPS · ${config.recognition.canEmitPhase ? phase.toUpperCase() : "OBSERVING"}`}</Text>
           </View>
         )}
 
@@ -509,7 +535,7 @@ export function LiveScreen(props: {
               <Text numberOfLines={1} style={styles.coachStatusText}>{coachNotice ?? coachPresentation.statusLabel}</Text>
             </View>
           ) : null}
-          {coachPresentation.captions.map((line) => (
+          {visibleCaptions.map((line) => (
             <View key={line.id} style={[styles.captionRow, line.state === "previous" && styles.captionPrevious]}>
               <Text style={[styles.captionLabel, line.source === "coach" && styles.captionLabelCoach, line.source === "user" && styles.captionLabelUser, line.source === "system" && styles.captionLabelError]}>{line.label}</Text>
               <Text numberOfLines={line.state === "previous" ? 1 : 2} style={[styles.captionText, line.state === "streaming" && styles.captionTextStreaming]}>
@@ -517,8 +543,8 @@ export function LiveScreen(props: {
               </Text>
             </View>
           ))}
-          {coachPresentation.actionPrompt ? <Text numberOfLines={2} style={styles.actionPrompt}>{coachPresentation.actionPrompt}</Text> : null}
-          {coachPresentation.actions.length ? (
+          {!compactWorkoutView || !active ? coachPresentation.actionPrompt ? <Text numberOfLines={2} style={styles.actionPrompt}>{coachPresentation.actionPrompt}</Text> : null : null}
+          {(!compactWorkoutView || !active) && coachPresentation.actions.length ? (
             <View style={styles.captionActions}>
               {coachPresentation.actions.slice(0, 2).map((action) => {
                 const enabled = action.kind === "artifact" ? Boolean(props.onCoachCardAction) : Boolean(props.onCoachHumanAction);
@@ -530,7 +556,7 @@ export function LiveScreen(props: {
               })}
             </View>
           ) : null}
-          {coachPresentation.receipt ? (
+          {(!compactWorkoutView || !active) && coachPresentation.receipt ? (
             <View style={styles.receiptRow}><View style={styles.receiptDot} /><Text numberOfLines={1} style={styles.receiptText}>{t("capture.coach.receiptHint", { title: coachPresentation.receipt.title })}</Text></View>
           ) : null}
         </View>
