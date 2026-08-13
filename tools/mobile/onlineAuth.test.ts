@@ -54,7 +54,11 @@ const BOB: AuthenticatedIdentity = {
 test("custom auth client calls only stable HTTPS server routes", async () => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const responses = [
-    new Response(JSON.stringify({ status: "ready" }), { status: 200 }),
+    new Response(JSON.stringify({
+      realm: "global",
+      requiredTermsVersion: "terms-2026-08",
+      socialProviders: ["google", "apple"],
+    }), { status: 200 }),
     new Response(JSON.stringify({
       realm: "global",
       requiredTermsVersion: "terms-2026-08",
@@ -91,7 +95,7 @@ test("custom auth client calls only stable HTTPS server routes", async () => {
   await client.signOut("opaque-session-alice");
 
   assert.deepEqual(requests.map(({ url }) => url), [
-    "https://api.maxpower.example/readyz",
+    "https://api.maxpower.example/v1/auth/config",
     "https://api.maxpower.example/v1/auth/config",
     "https://api.maxpower.example/v1/auth/login/password",
     "https://api.maxpower.example/v1/auth/refresh",
@@ -113,6 +117,25 @@ test("custom auth client calls only stable HTTPS server routes", async () => {
     () => new ServerAuthClient({ baseUrl: "http://api.maxpower.example", fetch: async () => new Response() }),
     /https/i,
   );
+});
+
+test("custom auth client allows an HTTP origin only when debug transport is explicitly enabled", async () => {
+  const requests: string[] = [];
+  const client = new ServerAuthClient({
+    baseUrl: "http://54.151.241.139:3000",
+    allowInsecureHttp: true,
+    fetch: async (url) => {
+      requests.push(url);
+      return new Response(JSON.stringify({
+        realm: "global",
+        requiredTermsVersion: "terms-v1",
+        socialProviders: ["google", "apple"],
+      }), { status: 200 });
+    },
+  });
+
+  await client.assertReachable();
+  assert.deepEqual(requests, ["http://54.151.241.139:3000/v1/auth/config"]);
 });
 
 test("custom social auth exchanges a one-time code and never puts a reusable credential in the deep link", async () => {

@@ -1,7 +1,8 @@
 import { Platform } from "react-native";
 
-import { CoachApplication, InMemoryCoachLedger } from "../../coach";
+import { CoachApplication } from "../../coach";
 import {
+  BehaviorDecisionTraceRecorder,
   createTraceWriter,
   createExpoTraceFileSystem,
 } from "../../observability";
@@ -18,10 +19,8 @@ import {
   createCloudCoachServices,
 } from "../cloud";
 import {
-  CloudProductDataClient,
-  CloudProductDataCoordinator,
-  InMemoryCloudProductDataCache,
-  hydrateCloudCanonicalProjection,
+  LocalConfirmedProductBridge,
+  type ConfirmedProductBridge,
   type CloudProductDataFetch,
 } from "../product-data";
 import {
@@ -35,13 +34,16 @@ import {
   tryCreateExpoAndroidHealthConnectPort,
   tryCreateExpoAppleHealthKitPort,
 } from "../native";
-import { InMemoryProductShellStateStore, type ProductShellStateStore } from "../ui/ProductShellStateStore";
+import type { ProductShellStateStore } from "../ui/ProductShellStateStore";
 import type { ProductShellRecovery } from "../ui/productNavigation";
+import { openWebMaxPowerPersistence } from "./WebLocalPersistence";
 
 export interface MobileAccountRuntime extends AccountRuntime {
   application: CoachApplication;
-  /** Cloud-authoritative Profile/Plan/WorkoutSession/Result owner. */
-  cloudProductData: CloudProductDataCoordinator;
+  /** Finishes a queued Timeline evaluation after any client-originated write. */
+  settleTimelineRisk(): Promise<void>;
+  /** Local-authoritative confirmation boundary for Profile/Plan/Workout data. */
+  confirmedProduct: ConfirmedProductBridge;
   /** Optional, explicit-upload personal media library for this account. */
   cloudMediaLibrary: CloudMediaLibrary;
   productShellStateStore: ProductShellStateStore;
@@ -72,39 +74,12 @@ export async function createMobileAccountRuntime(
   const apiBaseUrl = options?.apiBaseUrl ?? process.env.EXPO_PUBLIC_MAXPOWER_API_BASE_URL?.trim();
   if (!apiBaseUrl) throw new Error("maxpower_api_base_url_required");
   const persistence = Platform.OS === "web"
-    ? {
-        ledger: new InMemoryCoachLedger(),
-        productShellStateStore: new InMemoryProductShellStateStore(),
-        cloudProductDataCache: new InMemoryCloudProductDataCache(),
-        dispose: async () => undefined,
-      }
+    ? await openWebMaxPowerPersistence(input.accountId)
     : await openExpoMaxPowerPersistence(input.accountId);
-  const cloudProductData = new CloudProductDataCoordinator({
-    accountId: input.accountId,
-    client: new CloudProductDataClient({
-      baseUrl: apiBaseUrl,
-      ...(options?.allowInsecureHttp === undefined
-        ? {}
-        : { allowInsecureHttp: options.allowInsecureHttp }),
-      accessToken: input.accessToken,
-      ...(options?.fetch ? { fetch: options.fetch } : {}),
-    }),
-    cache: persistence.cloudProductDataCache,
-    signal: input.signal,
-  });
   let application: CoachApplication | undefined;
   let disposed = false;
 
   try {
-    assertActive(input.signal);
-    // Product UI never opens from a stale-only local snapshot. Cloud rebuild
-    // succeeds and commits the account cache before local Coach services load.
-    const canonicalProjection = await cloudProductData.bootstrap(input.signal);
-    await hydrateCloudCanonicalProjection({
-      accountId: input.accountId,
-      ledger: persistence.ledger,
-      projection: canonicalProjection,
-    });
     assertActive(input.signal);
     let sequence = 0;
     const notifications = Platform.OS === "web" ? undefined : createExpoNotificationPort();
@@ -146,8 +121,29 @@ export async function createMobileAccountRuntime(
       accountSignal: input.signal,
     });
 
+    // The agent and Planner both write through this decorated local Ledger.
+    // Trace envelopes contain only opaque refs and closed reason codes; they
+    // never retain user text or provider reasoning. The device file is for
+    // local diagnostics only and is not uploaded by this composition.
+    const traceWriter = Platform.OS === "web"
+      ? undefined
+      : createTraceWriter({
+          ledger: persistence.ledger,
+          runtime: {
+            now: () => new Date().toISOString(),
+            nextId: (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(++sequence).toString(36)}`,
+          },
+          config: {
+            deviceId: `mobile:${input.accountId}`,
+            localFile: { directory: `maxpower/traces/${input.accountId}` },
+          },
+          files: createExpoTraceFileSystem(),
+        });
+    const appLedger = traceWriter?.ledger ?? persistence.ledger;
+    await traceWriter?.reconcile();
+
     application = new CoachApplication({
-      ledger: persistence.ledger,
+      ledger: appLedger,
       authenticatedAccountId: input.accountId,
       runtime: {
         now: () => new Date().toISOString(),
@@ -160,12 +156,21 @@ export async function createMobileAccountRuntime(
       media,
       llmProviderResolver: cloudCoach.llmProviderResolver,
       nutritionObservationResolver: cloudCoach.nutritionObservationResolver,
+      // The shipped Coach uses the same knowledge-aware tool manifest as the
+      // headless lifecycle harness. The model still chooses when to search;
+      // the registry validates every call against the current local facts.
+      knowledgeToolsEnabled: true,
       // MVP: a clear user-stated report may be written by Coach only through
       // the typed, mandate-gated record tools. Estimates still use a review.
       actionToolsEnabled: true,
+      ...(traceWriter ? { behaviorDecisionRecorder: new BehaviorDecisionTraceRecorder(traceWriter.recorder) } : {}),
       backupCrypto: new WebCryptoBackupCryptoPort(),
     });
 
+    await application.runPendingTimelineRiskEvaluation({
+      userId: input.accountId,
+      idempotencyKey: "foreground-timeline-risk",
+    });
     await application.catchUpRecipes(input.accountId);
     assertActive(input.signal);
     const domain = await application.readDomainProjection({ userId: input.accountId });
@@ -193,6 +198,13 @@ export async function createMobileAccountRuntime(
       });
       await application.catchUpRecipes(input.accountId);
     }
+    // Foreground Health import and the optional morning check-in can each add
+    // Timeline facts after the resume pass above. Settle their shared current
+    // frontier before rendering; unchanged starts remain a no-op.
+    await application.runPendingTimelineRiskEvaluation({
+      userId: input.accountId,
+      idempotencyKey: "foreground-timeline-risk",
+    });
     assertActive(input.signal);
     const initialProductShellRecovery = await persistence.productShellStateStore.restore({
       userId: input.accountId,
@@ -204,7 +216,13 @@ export async function createMobileAccountRuntime(
     return {
       accountId: input.accountId,
       application: createdApplication,
-      cloudProductData,
+      async settleTimelineRisk() {
+        await createdApplication.runPendingTimelineRiskEvaluation({
+          userId: input.accountId,
+          idempotencyKey: "client-timeline-risk",
+        });
+      },
+      confirmedProduct: new LocalConfirmedProductBridge(),
       cloudMediaLibrary,
       productShellStateStore: persistence.productShellStateStore,
       initialProductShellRecovery,
@@ -219,7 +237,6 @@ export async function createMobileAccountRuntime(
         await Promise.allSettled(sessions.map((session) =>
           createdApplication.cancelCoachRun({ sessionId: session.id })
         ));
-        cloudProductData.dispose();
         await persistence.dispose();
       },
     };
@@ -234,7 +251,6 @@ export async function createMobileAccountRuntime(
           application?.cancelCoachRun({ sessionId: session.id })
         ));
       }
-      cloudProductData.dispose();
       await persistence.dispose();
     }
     throw cause;

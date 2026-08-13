@@ -498,9 +498,13 @@ test("new-device bootstrap reaches the ProductShell-facing profile, plan, workou
   const runtimeSource = readFileSync(resolve(process.cwd(), "src/mobile/runtime/createMobileAccountRuntime.ts"), "utf8");
   const appSource = readFileSync(resolve(process.cwd(), "src/mobile/ui/MaxPowerApp.tsx"), "utf8");
   const shellSource = readFileSync(resolve(process.cwd(), "src/mobile/ui/ProductShell.tsx"), "utf8");
-  assert.ok(runtimeSource.indexOf("cloudProductData.bootstrap") < runtimeSource.indexOf("new CoachApplication"));
-  assert.match(appSource, /cloudProductData=\{runtime\.cloudProductData\}/);
-  assert.match(shellSource, /projectCloudProductDataForProductShell/);
+  assert.doesNotMatch(runtimeSource, /cloudProductData\.bootstrap/);
+  assert.match(runtimeSource, /openWebMaxPowerPersistence/);
+  assert.match(runtimeSource, /confirmedProduct: new LocalConfirmedProductBridge/);
+  assert.match(appSource, /confirmedProduct=\{runtime\.confirmedProduct\}/);
+  assert.doesNotMatch(shellSource, /projectCloudProductDataForProductShell/);
+  assert.match(shellSource, /isEnergyRebalanceChoice/);
+  assert.match(shellSource, /mobile-coach-preview:confirm/);
   for (const method of [
     "patchProfileThen",
     "publishPlanThen",

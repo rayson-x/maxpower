@@ -5,7 +5,7 @@ import test from "node:test";
 
 const root = process.cwd();
 
-test("发布客户端没有 Provider 配置、直连凭据或本地模型 bootstrap", () => {
+test("发布客户端没有 Provider 配置、直连凭据或本地模型 bootstrap，Pi 仅作为云协议 runtime", () => {
   for (const path of [
     "src/agent/defaultCredentials.ts",
     "src/agent/coach.ts",
@@ -22,8 +22,19 @@ test("发布客户端没有 Provider 配置、直连凭据或本地模型 bootst
   assert.doesNotMatch(joined, /localRemoteLlmProviderSettings|configureRemoteLlmProvider|readLocalRemoteLlmProviderSettings/);
   assert.doesNotMatch(joined, /DEFAULT_ZHIPU_API_KEY|provider:\s*ZHIPU|open\.bigmodel\.cn/);
 
-  const packageJson = readFileSync(join(root, "package.json"), "utf8");
-  assert.doesNotMatch(packageJson, /@mariozechner\/pi-(?:ai|agent-core)/);
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+  assert.equal(packageJson.dependencies?.["@mariozechner/pi-ai"], "0.73.1");
+  assert.equal(packageJson.dependencies?.["@mariozechner/pi-agent-core"], "0.73.1");
+
+  const piProvider = readFileSync(
+    join(root, "src/mobile/cloud/MaxPowerPiLlmProvider.ts"),
+    "utf8",
+  );
+  assert.match(piProvider, /maxpower\/coach-v1/);
+  assert.match(piProvider, /accessTokenFor\(this\.accountId\)/);
+  assert.doesNotMatch(piProvider, /OPENAI_API_KEY|ANTHROPIC_API_KEY|openai\.com|openrouter\.ai/);
 });
 
 test("云端 LLM 只暴露固定产品 alias，并从账号内存 token source 取 JWT", () => {

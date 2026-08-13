@@ -122,6 +122,8 @@ export interface DeleteCloudMediaAssetResult {
 
 export interface CloudMediaLibraryOptions {
   apiBaseUrl: string;
+  /** Debug-only escape hatch supplied by the mobile composition root. */
+  allowInsecureHttp?: boolean;
   accountId: string;
   accessTokens: CloudMediaAccessTokenSource;
   byteTransfer: MediaByteTransferPort;

@@ -23,10 +23,127 @@ export interface CloudCanonicalWriter {
 }
 
 /**
+ * Product UI confirmation boundary. The MVP implementation is local-first;
+ * cloud synchronization can later decorate the same boundary without making
+ * ProductShell or the Agent harness depend on a remote product-data schema.
+ */
+export interface ConfirmedProductBridge {
+  patchProfileThen<T>(input: {
+    patch: PatchCloudProfileInput["patch"];
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T>;
+  publishPlanThen<T>(input: {
+    localPlanId: string;
+    title: string;
+    snapshot: CloudJsonObject;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T>;
+  startWorkoutThen<T>(input: {
+    localWorkoutId: string;
+    localPlanId?: string;
+    title: string;
+    data?: CloudJsonObject;
+    startedAt: string;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T>;
+  updateWorkoutThen<T>(input: {
+    localWorkoutId: string;
+    patch: { title?: string; data?: CloudJsonObject; notes?: string | null; startedAt?: string };
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T>;
+  completeWorkoutThen<T>(input: {
+    localWorkoutId: string;
+    summary: CloudJsonObject;
+    completedAt: string;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T>;
+  confirmResultThen<T>(input: {
+    localWorkoutId?: string;
+    localResultId: string;
+    kind: string;
+    payload: CloudJsonObject;
+    provenance?: CloudJsonObject;
+    occurredAt: string;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T>;
+}
+
+/** Local-authoritative MVP bridge: confirmation commits exactly once locally. */
+export class LocalConfirmedProductBridge implements ConfirmedProductBridge {
+  patchProfileThen<T>(input: {
+    patch: PatchCloudProfileInput["patch"];
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T> {
+    return input.commitLocal();
+  }
+
+  publishPlanThen<T>(input: {
+    localPlanId: string;
+    title: string;
+    snapshot: CloudJsonObject;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T> {
+    return input.commitLocal();
+  }
+
+  startWorkoutThen<T>(input: {
+    localWorkoutId: string;
+    localPlanId?: string;
+    title: string;
+    data?: CloudJsonObject;
+    startedAt: string;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T> {
+    return input.commitLocal();
+  }
+
+  updateWorkoutThen<T>(input: {
+    localWorkoutId: string;
+    patch: { title?: string; data?: CloudJsonObject; notes?: string | null; startedAt?: string };
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T> {
+    return input.commitLocal();
+  }
+
+  completeWorkoutThen<T>(input: {
+    localWorkoutId: string;
+    summary: CloudJsonObject;
+    completedAt: string;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T> {
+    return input.commitLocal();
+  }
+
+  confirmResultThen<T>(input: {
+    localWorkoutId?: string;
+    localResultId: string;
+    kind: string;
+    payload: CloudJsonObject;
+    provenance?: CloudJsonObject;
+    occurredAt: string;
+    idempotencyKey: string;
+    commitLocal(): Promise<T>;
+  }): Promise<T> {
+    return input.commitLocal();
+  }
+}
+
+/**
  * Confirmation barrier between ProductShell and its local Coach Ledger.
  * Every callback runs only after the canonical server write and cache commit.
  */
-export class CloudConfirmedProductBridge {
+export class CloudConfirmedProductBridge implements ConfirmedProductBridge {
   constructor(private readonly cloud: CloudCanonicalWriter) {}
 
   async patchProfileThen<T>(input: {

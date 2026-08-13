@@ -110,7 +110,7 @@ function toPiContext(request: LLMProviderRequest | LLMProviderResumeRequest): Co
     messages: [{ role: "user", content: modelInput.userContent, timestamp: Date.now() }],
     tools: request.toolManifest.map((tool) => ({
       name: tool.name,
-      description: `MaxPower ${tool.accessClass} tool (${tool.name})`,
+      description: tool.description ?? `MaxPower ${tool.accessClass} tool (${tool.name})`,
       parameters: tool.inputSchema as never,
     })),
   };

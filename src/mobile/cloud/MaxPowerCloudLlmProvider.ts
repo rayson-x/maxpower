@@ -25,6 +25,7 @@ export interface CloudServiceAccessTokenSource {
 
 export interface MaxPowerCloudLlmProviderOptions {
   apiBaseUrl: string;
+  allowInsecureHttp?: boolean;
   accountId: string;
   accessTokens: CloudServiceAccessTokenSource;
   accountSignal?: AbortSignal;
@@ -51,7 +52,9 @@ export class MaxPowerCloudLlmProvider implements LLMProvider {
   private readonly delegate: OpenAICompatibleProvider;
 
   constructor(options: MaxPowerCloudLlmProviderOptions) {
-    const origin = maxPowerApiOrigin(options.apiBaseUrl);
+    const origin = maxPowerApiOrigin(options.apiBaseUrl, {
+      allowInsecureHttp: options.allowInsecureHttp,
+    });
     this.accountId = requiredCloudText(options.accountId, "cloud_llm_account_required");
     this.accountSignal = options.accountSignal;
     this.fetchImpl = options.fetch
@@ -59,6 +62,9 @@ export class MaxPowerCloudLlmProvider implements LLMProvider {
     if (!this.fetchImpl) throw new Error("cloud_llm_fetch_unavailable");
     this.cancellations = new CloudInvocationCancellationClient({
       apiBaseUrl: origin,
+      ...(options.allowInsecureHttp === undefined
+        ? {}
+        : { allowInsecureHttp: options.allowInsecureHttp }),
       accountId: this.accountId,
       accessTokens: options.accessTokens,
       fetch: (url, init) => this.fetchImpl(url, init),

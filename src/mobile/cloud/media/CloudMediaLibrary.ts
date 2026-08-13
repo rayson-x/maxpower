@@ -22,7 +22,7 @@ export class CloudMediaLibrary {
   private readonly fetch: NonNullable<CloudMediaLibraryOptions["fetch"]>;
 
   constructor(private readonly options: CloudMediaLibraryOptions) {
-    this.origin = apiOrigin(options.apiBaseUrl);
+    this.origin = apiOrigin(options.apiBaseUrl, options.allowInsecureHttp === true);
     this.accountId = requiredText(options.accountId, "cloud_media_account_required");
     this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   }
@@ -371,11 +371,20 @@ function completionIdempotencyKey(createKey: string): string {
   return `media-complete:${createKey}`;
 }
 
-function apiOrigin(value: string): string {
-  return requireHttpsUrl(value, "cloud_media_api_url_invalid", true);
+function apiOrigin(value: string, allowInsecureHttp: boolean): string {
+  return requireServiceUrl(value, "cloud_media_api_url_invalid", true, allowInsecureHttp);
 }
 
 function requireHttpsUrl(value: unknown, code: string, originOnly = false): string {
+  return requireServiceUrl(value, code, originOnly, false);
+}
+
+function requireServiceUrl(
+  value: unknown,
+  code: string,
+  originOnly: boolean,
+  allowInsecureHttp: boolean,
+): string {
   let parsed: URL;
   try {
     parsed = new URL(typeof value === "string" ? value : "");
@@ -383,7 +392,8 @@ function requireHttpsUrl(value: unknown, code: string, originOnly = false): stri
     throw new Error(code);
   }
   if (
-    parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password
+    (parsed.protocol !== "https:" && !(allowInsecureHttp && parsed.protocol === "http:"))
+    || !parsed.hostname || parsed.username || parsed.password
     || (originOnly && (parsed.search || parsed.hash))
   ) throw new Error(code);
   return originOnly ? parsed.origin : parsed.toString();
