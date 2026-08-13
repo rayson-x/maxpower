@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "../../.motion-quality-ablation-build",
+    "rootDir": "../..",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["node"],
+    "lib": ["ES2023", "DOM"],
+    "noEmitOnError": true,
+    "ignoreDeprecations": "6.0"
+  },
+  "include": [
+    "runPoseEquipmentAblation.ts",
+    "runPoseEquipmentAblation.test.ts",
+    "runnerInputs.ts",
+    "fusionAblation.ts",
+    "blindEvaluation.ts",
+    "rustFullDataProposalRunner.ts",
+    "../../src/motion/motionPacket.ts",
+    "../../src/motion/rustCanonicalWasm.ts",
+    "../../src/pose/PoseEngine.ts",
+    "../../src/pose/canonicalPose.ts"
+  ]
+}
