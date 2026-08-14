@@ -26,7 +26,7 @@ The only admitted frozen human-metric output currently available covers three so
 | Governed records replayed | 53 / 54 | One governance exclusion is honored |
 | Sealed set reports | 53 / 53 | Every replay reaches immutable set closure and report output |
 | Eight-dimension report shape | 53 / 53 | Every report exposes all contracted dimensions, including abstentions |
-| Conclusion-rooted trace present | 53 / 53 | Every report has versioned derivation roots |
+| Complete nine-stage trace | 53 / 53 | Every conclusion root reaches source → coordinate → fusion → Rep → Feature → Comparison → Rule → SetPattern → Conclusion |
 | At least one non-rejected Rep | 50 / 53 | Structural availability, not precision/recall |
 | At least one broadly aligned boundary | 50 / 53 | Uses the manifest's 3000 ms start / 1500 ms end structural gate; not an accuracy threshold |
 
@@ -45,7 +45,7 @@ Set-level dimension judgeability across the 53 reports was:
 | Trajectory control | 0 | 53 |
 | Standard-variant compatibility | 0 | 53 |
 
-Rep comparisons contained 557 self-geometry references, 203 set-prefix references and 7,174 explicit no-reference results; no same-workout prior-set reference is expected because each corpus video is replayed as an independent workout. All 53 reports had eight resolvable conclusion roots. Known-context typed refusals were 0/54; the one non-replayed record was a governance exclusion, not an SDK refusal.
+Rep comparisons contained 557 self-geometry references, 203 set-prefix references and 7,174 explicit no-reference results; no same-workout prior-set reference is expected because each corpus video is replayed as an independent workout. All 53 reports had eight complete nine-stage conclusion paths and a reproducible Trace content hash. Known-context typed refusals were 0/54; the one non-replayed record was a governance exclusion, not an SDK refusal.
 
 The three structural gaps are:
 
