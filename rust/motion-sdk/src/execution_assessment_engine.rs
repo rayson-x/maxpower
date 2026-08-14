@@ -467,6 +467,7 @@ pub struct SealedRepReference {
     pub disposition: String,
     pub start_timestamp_ms: u64,
     pub turnaround_timestamp_ms: u64,
+    pub turnaround_source: String,
     pub end_timestamp_ms: u64,
     pub canonical_slice_hash: String,
 }
@@ -1490,8 +1491,13 @@ impl ExecutionAssessmentEngine {
             node_id: rep_node.clone(),
             kind: TraceNodeKind::RepBoundary,
             summary: format!(
-                "RepEngine sealed Rep {} from {} to {} ms with {:?} disposition.",
-                rep.rep_id, rep.start_timestamp_ms, rep.end_timestamp_ms, rep.disposition
+                "RepEngine sealed Rep {} from {} to {} ms; turnaround {} ms came from {}; disposition {:?}.",
+                rep.rep_id,
+                rep.start_timestamp_ms,
+                rep.end_timestamp_ms,
+                rep.peak_timestamp_ms,
+                turnaround_source(&rep),
+                rep.disposition
             ),
             source_ids: source_ids.clone(),
             input_node_ids: active
@@ -4400,6 +4406,64 @@ pub fn current_rigid_bar_assessment_profiles_v1() -> Vec<RigidBarAssessmentProfi
     .collect()
 }
 
+/// Equipment-turnaround successor to the pose-only rigid-bar profiles. Pose
+/// retains the complete-cycle lifecycle so sparse visual equipment coverage
+/// cannot erase a Rep; when enough independent shaft samples exist, the
+/// action direction relocates the published turnaround to the equipment
+/// extremum and records pose/equipment agreement or conflict.
+pub fn equipment_fused_rigid_bar_assessment_profiles_v2() -> Vec<RigidBarAssessmentProfileBinding> {
+    use AssessmentCaptureView as View;
+
+    [
+        ("barbell_bench_press", View::Front),
+        ("barbell_bench_press", View::FrontObliqueLeft),
+        ("barbell_bench_press", View::FrontObliqueRight),
+        ("barbell_row", View::Front),
+        ("barbell_row", View::FrontObliqueLeft),
+        ("barbell_row", View::FrontObliqueRight),
+        ("barbell_row", View::RearObliqueLeft),
+        ("barbell_row", View::RearObliqueRight),
+        ("seated_shoulder_press", View::Front),
+    ]
+    .into_iter()
+    .map(|(action_id, capture_view)| {
+        let direction = if action_id == "barbell_bench_press" {
+            crate::LocalActionAxisDirection::PreparationToEffortDown
+        } else {
+            crate::LocalActionAxisDirection::PreparationToEffortUp
+        };
+        let state_machine_id =
+            if direction == crate::LocalActionAxisDirection::PreparationToEffortDown {
+                "cycle-aligned-equipment-turnaround-down-fusion/v1"
+            } else {
+                "cycle-aligned-equipment-turnaround-up-fusion/v1"
+            };
+        let identity = format!(
+            "{action_id}/{}/bilateral/rigid-bar/equipment-primary-pose-corroborated/v2",
+            capture_view.catalog_slug(),
+        );
+        let mut profile = crate::ExerciseProfile::rigid_bar_provisional(
+            &identity,
+            rigid_bar_profile_initializer(action_id, capture_view),
+        );
+        profile.state_machine_id = state_machine_id.into();
+        profile.content_hash = profile.computed_content_hash();
+        RigidBarAssessmentProfileBinding {
+            action_id: action_id.into(),
+            capture_view,
+            profile,
+            local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
+                capture_view: local_coarse_view(capture_view)
+                    .expect("rigid-bar views have local strategy support"),
+                preparation_to_effort: direction,
+                equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
+                pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
+            },
+        }
+    })
+    .collect()
+}
+
 fn rigid_bar_profile_initializer(
     action_id: &str,
     view: AssessmentCaptureView,
@@ -5326,6 +5390,125 @@ pub fn current_motion_assessment_catalog_v7() -> ExecutionAssessmentBundleCatalo
     )
 }
 
+/// Equipment-turnaround-fused rigid-bar recognition layered over complete v7
+/// action-family catalog. Only the four assets that own Rep boundary meaning
+/// are replaced; FeatureProgram, ReferencePolicy, RulePack, and Set aggregation
+/// remain byte-identical to their v7 lineage.
+pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v7();
+    catalog.catalog_id = "maxpower/current-equipment-fused-assessment/v8".into();
+    let delivery_stage = "ticket_08_equipment_primary_rep_boundaries";
+    for binding in equipment_fused_rigid_bar_assessment_profiles_v2() {
+        let bundle_id = format!(
+            "{}/{}/v1",
+            binding.action_id,
+            binding.capture_view.catalog_slug()
+        );
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("equipment-fused rigid-bar exact context is installed");
+        let (phase_order, task_endpoints): ([&str; 2], [&str; 3]) = match binding.action_id.as_str()
+        {
+            "barbell_bench_press" => (
+                ["lowering", "pressing"],
+                [
+                    "locked_out_start",
+                    "equipment_bottom_turnaround",
+                    "returned_lockout",
+                ],
+            ),
+            "barbell_row" => (
+                ["pulling", "return_to_reach"],
+                [
+                    "arms_extended_start",
+                    "equipment_near_torso_turnaround",
+                    "returned_reach",
+                ],
+            ),
+            "seated_shoulder_press" => (
+                ["pressing", "lowering"],
+                [
+                    "bar_at_shoulders_start",
+                    "equipment_overhead_turnaround",
+                    "returned_to_shoulders",
+                ],
+            ),
+            _ => unreachable!("equipment-fused rigid-bar action matrix is closed"),
+        };
+        let asset_prefix = format!("{bundle_id}/{delivery_stage}");
+        let definitions = [
+            (
+                AssessmentAssetKind::RecognitionProfile,
+                "recognition-profile",
+                serde_json::json!({
+                    "runtimeProfileIdentity": binding.profile.identity,
+                    "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
+                    "maturity": binding.profile.maturity.as_str(),
+                    "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
+                    "evidenceScope": "known_video_equipment_fusion_feasibility",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::ExecutionContract,
+                "execution-contract",
+                serde_json::json!({
+                    "phaseOrder": phase_order,
+                    "taskEndpoints": task_endpoints,
+                    "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
+                    "equipmentSemantics": "rigid_bar_axis",
+                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "repBoundaryAuthority": "pose_cycle_equipment_turnaround_fused",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::LocalCoordinateStrategy,
+                "local-coordinate-strategy",
+                serde_json::json!({
+                    "requireNormalizedEndpoints": true,
+                    "coordinateSpace": "causal_set_local_camera_plane",
+                    "captureView": binding.capture_view.catalog_slug(),
+                    "preparationToEffortDirection": direction_id(binding.local_coordinate_strategy.preparation_to_effort),
+                    "equipmentMode": "rigidbaraxis",
+                    "poseAnchor": "wristmidpoint",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::EquipmentAdapter,
+                "equipment-adapter",
+                serde_json::json!({
+                    "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "conflictPolicy": "abstain_fused_preserve_channels",
+                    "poseFallback": "preserve_as_independent_channel",
+                    "repBoundaryAuthority": "pose_cycle_equipment_turnaround_fused",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+        ];
+        let references = definitions
+            .into_iter()
+            .map(|(kind, slug, content)| {
+                let asset =
+                    executable_bundle_asset(kind, format!("{asset_prefix}/{slug}"), content);
+                let reference = asset.reference();
+                catalog.installed_assets.push(asset);
+                reference
+            })
+            .collect::<Vec<_>>();
+        bundle.lineage.recognition_profile = references[0].clone();
+        bundle.lineage.execution_contract = references[1].clone();
+        bundle.lineage.local_coordinate_strategy = references[2].clone();
+        bundle.lineage.equipment_adapter = references[3].clone();
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
 fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
     SealedRepReference {
         rep_id: rep.rep_id,
@@ -5338,8 +5521,20 @@ fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
         .into(),
         start_timestamp_ms: rep.start_timestamp_ms,
         turnaround_timestamp_ms: rep.peak_timestamp_ms,
+        turnaround_source: turnaround_source(rep).into(),
         end_timestamp_ms: rep.end_timestamp_ms,
         canonical_slice_hash: format!("{:016x}", rep.canonical_slice_hash),
+    }
+}
+
+fn turnaround_source(rep: &SealedRep) -> &'static str {
+    if rep
+        .observation_findings
+        .contains(&crate::RepObservationFinding::EquipmentPrimaryBoundary)
+    {
+        "equipment_fused"
+    } else {
+        "pose_primary"
     }
 }
 

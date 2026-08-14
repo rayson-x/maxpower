@@ -1045,6 +1045,8 @@ impl ExerciseProfile {
         }
         if self.state_machine_id != "ready-effort-peak-return/v1"
             && self.state_machine_id != "cycle-aligned-ready-effort-peak-return/v1"
+            && self.state_machine_id != "cycle-aligned-equipment-turnaround-down-fusion/v1"
+            && self.state_machine_id != "cycle-aligned-equipment-turnaround-up-fusion/v1"
             && self.state_machine_id != "median-100ms-ready-effort-peak-return/v1"
             && self.state_machine_id != "median-200ms-ready-effort-peak-return/v1"
             && self.state_machine_id != "median-300ms-ready-effort-peak-return/v1"
@@ -1140,8 +1142,26 @@ impl ExerciseProfile {
 
     fn uses_cycle_aligned_boundaries(&self) -> bool {
         self.state_machine_id == "cycle-aligned-ready-effort-peak-return/v1"
+            || self.uses_equipment_turnaround_fusion()
             || self.state_machine_id.starts_with("cycle-aligned-median-")
             || self.state_machine_id.starts_with("stable-cycle-")
+    }
+
+    fn uses_equipment_turnaround_fusion(&self) -> bool {
+        self.state_machine_id == "cycle-aligned-equipment-turnaround-down-fusion/v1"
+            || self.state_machine_id == "cycle-aligned-equipment-turnaround-up-fusion/v1"
+    }
+
+    fn equipment_effort_direction(&self) -> Option<MovementDirection> {
+        match self.state_machine_id.as_str() {
+            "cycle-aligned-equipment-turnaround-down-fusion/v1" => {
+                Some(MovementDirection::Increasing)
+            }
+            "cycle-aligned-equipment-turnaround-up-fusion/v1" => {
+                Some(MovementDirection::Decreasing)
+            }
+            _ => None,
+        }
     }
 
     fn stable_phase_dwell_ms(&self) -> Option<u64> {
@@ -1587,8 +1607,9 @@ pub enum RepObservationFinding {
     PrimaryRangeBelowExpectation,
     SecondaryRangeBelowExpectation,
     CycleFasterThanExpected,
-    /// Start/turnaround/end were established by the subject-associated shaft
-    /// trajectory. Pose remains an independent corroboration channel.
+    /// At least the turnaround boundary was established by the
+    /// subject-associated shaft trajectory. Pose remains an independent
+    /// channel and may still own the complete-cycle start/end lifecycle.
     EquipmentPrimaryBoundary,
     PoseEquipmentTurnaroundAligned,
     PoseUnavailableAtTurnaround,
@@ -2673,6 +2694,14 @@ struct RepSample {
     torso: f32,
 }
 
+#[derive(Clone, Copy)]
+struct EquipmentTurnaroundSample {
+    frame_id: u64,
+    timestamp_ms: u64,
+    center_y: f32,
+    confidence: f32,
+}
+
 struct ActiveRep {
     rep_id: u64,
     direction: MovementDirection,
@@ -2731,6 +2760,7 @@ struct RepEngine {
     pending_return_since_ms: Option<u64>,
     pending_ready: Option<PendingReady>,
     local_evidence_history: VecDeque<(u64, u64, LocalMotionCoordinateEvidence)>,
+    equipment_turnaround_history: VecDeque<EquipmentTurnaroundSample>,
     finalized_outcomes: Option<Vec<SealedRep>>,
 }
 
@@ -2779,6 +2809,7 @@ impl RepEngine {
             pending_return_since_ms: None,
             pending_ready: None,
             local_evidence_history: VecDeque::new(),
+            equipment_turnaround_history: VecDeque::new(),
             finalized_outcomes: None,
         }
     }
@@ -2812,6 +2843,7 @@ impl RepEngine {
         self.signal_window.clear();
         self.ready_history.clear();
         self.local_evidence_history.clear();
+        self.equipment_turnaround_history.clear();
         // Orientation is a set-level decision. A later set may legitimately
         // begin from the opposite physical extreme, so it must earn a fresh
         // auto-direction lock rather than inheriting the prior set's choice.
@@ -2906,16 +2938,101 @@ impl RepEngine {
         }
     }
 
+    fn observe_equipment_turnaround(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        equipment: &EquipmentFrameEvidence,
+    ) {
+        if !self.profile.uses_equipment_turnaround_fusion() {
+            return;
+        }
+        let Some(track) = equipment
+            .tracks
+            .iter()
+            .filter(|track| {
+                track.kind == EquipmentKind::BarbellShaft
+                    && track.judgeable_path
+                    && track.source != EquipmentSource::Predicted
+                    && track.center_y.is_finite()
+            })
+            .max_by(|left, right| {
+                (left.observation_score * left.association_confidence)
+                    .total_cmp(&(right.observation_score * right.association_confidence))
+            })
+        else {
+            return;
+        };
+        self.equipment_turnaround_history
+            .push_back(EquipmentTurnaroundSample {
+                frame_id,
+                timestamp_ms,
+                center_y: track.center_y,
+                confidence: (track.observation_score * track.association_confidence)
+                    .clamp(0.0, 1.0),
+            });
+        let oldest_retained =
+            timestamp_ms.saturating_sub(self.profile.max_rep_duration_ms + self.profile.max_gap_ms);
+        while self
+            .equipment_turnaround_history
+            .front()
+            .is_some_and(|sample| sample.timestamp_ms < oldest_retained)
+        {
+            self.equipment_turnaround_history.pop_front();
+        }
+    }
+
+    fn fused_equipment_turnaround(
+        &self,
+        start_timestamp_ms: u64,
+        pose_turnaround_ms: u64,
+        end_timestamp_ms: u64,
+    ) -> Option<EquipmentTurnaroundSample> {
+        let direction = self.profile.equipment_effort_direction()?;
+        let samples = self
+            .equipment_turnaround_history
+            .iter()
+            .copied()
+            .filter(|sample| {
+                sample.timestamp_ms >= start_timestamp_ms
+                    && sample.timestamp_ms <= end_timestamp_ms
+                    && sample.confidence >= 0.50
+            })
+            .collect::<Vec<_>>();
+        if samples.len() < 3 {
+            return None;
+        }
+        let extreme = samples.iter().copied().reduce(|selected, candidate| {
+            let candidate_is_more_extreme = match direction {
+                MovementDirection::Increasing => candidate.center_y > selected.center_y,
+                MovementDirection::Decreasing => candidate.center_y < selected.center_y,
+                MovementDirection::Auto => false,
+            };
+            if candidate_is_more_extreme {
+                candidate
+            } else {
+                selected
+            }
+        })?;
+        // A bench/row/press endpoint commonly dwells for several frames. Use
+        // the plateau sample nearest the independent pose extremum instead of
+        // letting one detector-pixel spike choose the published timestamp.
+        samples
+            .into_iter()
+            .filter(|sample| (sample.center_y - extreme.center_y).abs() <= 0.01)
+            .min_by_key(|sample| sample.timestamp_ms.abs_diff(pose_turnaround_ms))
+    }
+
     /// The external seam for closing an active attempt. Callers only choose
     /// whether the evidence is unusable; this module owns immutable
     /// boundaries, identifiers, reset semantics, and profile provenance.
     fn finish_active(
         &mut self,
-        active: ActiveRep,
+        mut active: ActiveRep,
         end: RepSample,
         disposition: RepDisposition,
         evidence_reason: Option<RepEvidenceReason>,
-        observation_findings: Vec<RepObservationFinding>,
+        mut observation_findings: Vec<RepObservationFinding>,
     ) -> SealedRep {
         // A continuity recovery may retain a pre-gap return candidate while a
         // later sample becomes the peak. A sealed causal interval can never
@@ -2938,6 +3055,27 @@ impl RepEngine {
         self.pending_activation = None;
         self.pending_return_since_ms = None;
         self.pending_ready = None;
+        let pose_turnaround_ms = active.peak.timestamp_ms;
+        if let Some(equipment_turnaround) = self.fused_equipment_turnaround(
+            active.start.timestamp_ms,
+            pose_turnaround_ms,
+            end.timestamp_ms,
+        ) {
+            observation_findings.push(RepObservationFinding::EquipmentPrimaryBoundary);
+            observation_findings.push(
+                if equipment_turnaround
+                    .timestamp_ms
+                    .abs_diff(pose_turnaround_ms)
+                    <= 250
+                {
+                    RepObservationFinding::PoseEquipmentTurnaroundAligned
+                } else {
+                    RepObservationFinding::PoseEquipmentTurnaroundConflict
+                },
+            );
+            active.peak.frame_id = equipment_turnaround.frame_id;
+            active.peak.timestamp_ms = equipment_turnaround.timestamp_ms;
+        }
         let normalized_endpoints = self.normalized_endpoints_for(&active, end);
         let sealed = SealedRep {
             rep_id: active.rep_id,
@@ -3085,6 +3223,7 @@ impl RepEngine {
         raw_equipment: &[EquipmentObservation],
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<SealedRep> {
+        self.observe_equipment_turnaround(frame_id, timestamp_ms, equipment);
         if self.barbell_phase.is_none() {
             return self.process_pose(
                 frame_id,

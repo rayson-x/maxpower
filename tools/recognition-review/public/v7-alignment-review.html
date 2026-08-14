@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rust v7 轨迹与标注对齐台</title>
+  <title>Rust v8 器械融合轨迹与标注对齐台</title>
   <style>
     :root {
       color-scheme: dark;
@@ -67,6 +67,7 @@
     .metric strong { display: block; margin-top: 6px; font: 900 18px/1 var(--mono); }
     .metric strong.acid { color: var(--acid); }
     .metric strong.cyan { color: var(--cyan); }
+    .metric strong.magenta { color: var(--magenta); }
 
     .workspace {
       min-height: calc(100vh - 86px); display: grid;
@@ -163,6 +164,8 @@
     .segment span { display: block; color: var(--ink); font: 900 7px/12px var(--mono); white-space: nowrap; }
     .turnaround-marker { position: absolute; z-index: 3; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 5px rgba(255,255,255,.9); pointer-events: none; }
     .turnaround-marker::before { content: ""; position: absolute; top: -3px; left: -2px; width: 6px; height: 6px; background: #fff; transform: rotate(45deg); }
+    .turnaround-marker.equipment { background: var(--magenta); box-shadow: 0 0 7px var(--magenta); }
+    .turnaround-marker.equipment::before { background: var(--magenta); }
     .playhead { position: absolute; z-index: 6; top: 0; bottom: 0; width: 1px; background: #fff; pointer-events: none; box-shadow: 0 0 8px #fff; }
 
     .right-rail { max-height: calc(100vh - 86px); overflow: auto; }
@@ -210,7 +213,7 @@
 <body>
   <section id="v7Loading" class="loading">
     <div class="loading-card">
-      <b>RUST V7 / GOVERNED ALIGNMENT</b>
+      <b>RUST V8 / EQUIPMENT-FUSED ALIGNMENT</b>
       <h1 id="v7LoadingTitle">正在读取冻结预测与人工标注</h1>
       <p id="v7LoadingDetail">预测、标注、视频与 Halpe-26 轨迹保持各自来源，不会在页面内重算 Rust 结论。</p>
     </div>
@@ -219,7 +222,7 @@
   <main id="v7App" class="app" data-v7-alignment-review hidden>
     <header class="masthead">
       <div class="brand">
-        <div class="brand-mark">V7</div>
+        <div class="brand-mark">V8</div>
         <div><small>KNOWN-VIDEO FORENSIC VIEW</small><h1>轨迹与 Rep 标注对齐台</h1></div>
       </div>
       <div class="header-metrics">
@@ -227,6 +230,7 @@
         <div class="metric"><span>CANDIDATE R</span><strong id="overallRecall" class="cyan">—</strong></div>
         <div class="metric"><span>STRICT BOUNDARY</span><strong id="overallStrict">—</strong></div>
         <div class="metric"><span>EXACT SET</span><strong id="overallExact">—</strong></div>
+        <div class="metric"><span>FUSED TURNAROUND</span><strong id="overallFused" class="magenta">—</strong></div>
       </div>
     </header>
 
@@ -254,7 +258,7 @@
           <canvas id="poseOverlay"></canvas>
           <div class="hud top-left">
             <span id="humanRepHud" class="hud-chip">HUMAN —</span>
-            <span id="v7RepHud" class="hud-chip live">V7 —</span>
+            <span id="v7RepHud" class="hud-chip live">V8 —</span>
             <span id="v7PhaseHud" class="hud-chip live">PHASE —</span>
           </div>
           <div class="hud top-right">
@@ -282,16 +286,17 @@
             <span><i style="background:var(--amber)"></i>RIGHT WRIST</span>
             <span><i style="background:var(--magenta)"></i>BAR AXIS CENTER Y</span>
             <span><i style="background:var(--acid)"></i>HUMAN REP</span>
-            <span><i style="background:var(--red)"></i>V7 UNMATCHED</span>
-            <span><i style="height:9px;width:2px;background:#fff;vertical-align:-1px"></i>V7 换向点</span>
+            <span><i style="background:var(--red)"></i>V8 UNMATCHED</span>
+            <span><i style="height:9px;width:2px;background:var(--magenta);vertical-align:-1px"></i>器械融合换向</span>
+            <span><i style="height:9px;width:2px;background:#fff;vertical-align:-1px"></i>姿态换向</span>
           </div>
         </section>
 
         <section class="timeline-panel">
-          <div class="panel-title"><strong>人工标注 × v7 预测</strong><span>Rep 内白色短线为 v7 离心/向心换向；贯穿白线为当前帧</span></div>
+          <div class="panel-title"><strong>人工标注 × v8 融合预测</strong><span>Rep 内紫红短线为器械融合换向，白色短线为姿态换向；贯穿白线为当前帧</span></div>
           <div id="alignmentTimeline" class="timeline">
             <div id="truthTrack" class="track" data-label="HUMAN"></div>
-            <div id="predictionTrack" class="track" data-label="RUST V7"></div>
+            <div id="predictionTrack" class="track" data-label="RUST V8"></div>
             <div id="timelinePlayhead" class="playhead"></div>
           </div>
         </section>
@@ -316,7 +321,7 @@
           <div id="matchList" class="match-list"></div>
         </section>
         <section class="inspector">
-          <h3>V7 SET FINDINGS</h3>
+          <h3>V8 SET FINDINGS</h3>
           <div id="qualityFindings"></div>
         </section>
         <section class="inspector">

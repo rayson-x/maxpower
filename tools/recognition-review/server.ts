@@ -124,7 +124,9 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     await serveStaticPath(response, options.qualityReviewPagePath, "text/html; charset=utf-8");
     return;
   }
-  if (request.method === "GET" && url.pathname === "/v7-alignment-review.html") {
+  if (request.method === "GET"
+    && (url.pathname === "/v7-alignment-review.html"
+      || url.pathname === "/v8-equipment-fusion-review.html")) {
     const review = requireV7AlignmentReviewOptions(options);
     await serveStaticPath(response, review.pagePath, "text/html; charset=utf-8");
     return;
@@ -449,7 +451,9 @@ interface V7EquipmentFrame extends Record<string, unknown> {
 }
 
 interface V7AlignmentReport extends Record<string, unknown> {
-  readonly schemaVersion: "maxpower-current-rust-known-video-alignment/v1";
+  readonly schemaVersion:
+    | "maxpower-current-rust-known-video-alignment/v1"
+    | "maxpower-current-rust-equipment-fused-known-video-alignment/v1";
   readonly reportDigest: string;
   readonly rows: readonly V7AlignmentReportRow[];
 }
@@ -487,9 +491,11 @@ async function readV7AlignmentSources(options: RecognitionReviewServerOptions): 
     readJsonFile(review.labelPath, "v7 alignment labels"),
   ]);
   const reportRecord = requireJsonRecord(reportValue, "v7 alignment report");
-  if (reportRecord.schemaVersion !== "maxpower-current-rust-known-video-alignment/v1") {
+  if (reportRecord.schemaVersion !== "maxpower-current-rust-known-video-alignment/v1"
+    && reportRecord.schemaVersion !== "maxpower-current-rust-equipment-fused-known-video-alignment/v1") {
     throw new Error("unsupported v7 alignment report schema");
   }
+  const schemaVersion = reportRecord.schemaVersion;
   const reportDigest = requireJsonString(reportRecord.reportDigest, "v7 alignment report digest");
   if (!/^[a-f0-9]{64}$/u.test(reportDigest)) throw new Error("v7 alignment report digest is invalid");
   if (!Array.isArray(reportRecord.rows) || reportRecord.rows.length === 0) {
@@ -531,7 +537,7 @@ async function readV7AlignmentSources(options: RecognitionReviewServerOptions): 
     review,
     report: {
       ...reportRecord,
-      schemaVersion: "maxpower-current-rust-known-video-alignment/v1",
+      schemaVersion,
       reportDigest,
       rows,
     },

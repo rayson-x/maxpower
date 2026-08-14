@@ -9,7 +9,10 @@
 })(typeof globalThis === "object" ? globalThis : this, function createV7AlignmentReview() {
   "use strict";
 
-  const REPORT_SCHEMA = "maxpower-current-rust-known-video-alignment/v1";
+  const REPORT_SCHEMAS = new Set([
+    "maxpower-current-rust-known-video-alignment/v1",
+    "maxpower-current-rust-equipment-fused-known-video-alignment/v1",
+  ]);
   const HALPE26_EDGES = [
     [0, 1], [0, 2], [1, 3], [2, 4],
     [5, 7], [7, 9], [6, 8], [8, 10], [5, 6], [5, 11], [6, 12], [11, 12],
@@ -21,7 +24,7 @@
 
   function normalizeReport(raw) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("v7 对齐报告无效");
-    if (raw.schemaVersion !== REPORT_SCHEMA) throw new Error("不支持的 v7 对齐报告版本");
+    if (!REPORT_SCHEMAS.has(raw.schemaVersion)) throw new Error("不支持的 Rust 对齐报告版本");
     if (!Array.isArray(raw.rows) || !raw.rows.length) throw new Error("v7 对齐报告没有记录");
     const seen = new Set();
     const rows = raw.rows.map((rawRow, index) => {
@@ -32,14 +35,21 @@
       const truthRanges = normalizeRanges(rawRow.truthRanges, "人工区间");
       const phaseOrder = normalizePhaseOrder(rawRow.phaseOrder);
       const predictedReps = Array.isArray(rawRow.predictedReps)
-        ? rawRow.predictedReps.map((rep, repIndex) => ({
-          ...rep,
-          repId: Number(rep.repId),
-          startMs: finite(rep.startMs, `预测 Rep ${repIndex + 1} startMs`),
-          endMs: finite(rep.endMs, `预测 Rep ${repIndex + 1} endMs`),
-          turnaroundMs: finite(rep.turnaroundMs, `预测 Rep ${repIndex + 1} turnaroundMs`),
-          disposition: requireString(rep.disposition, "预测 disposition"),
-        }))
+        ? rawRow.predictedReps.map((rep, repIndex) => {
+          const turnaroundSource = String(rep.turnaroundSource || "pose_primary");
+          if (!new Set(["pose_primary", "equipment_fused"]).has(turnaroundSource)) {
+            throw new Error(`预测 Rep ${repIndex + 1} 换向来源无效`);
+          }
+          return {
+            ...rep,
+            repId: Number(rep.repId),
+            startMs: finite(rep.startMs, `预测 Rep ${repIndex + 1} startMs`),
+            endMs: finite(rep.endMs, `预测 Rep ${repIndex + 1} endMs`),
+            turnaroundMs: finite(rep.turnaroundMs, `预测 Rep ${repIndex + 1} turnaroundMs`),
+            turnaroundSource,
+            disposition: requireString(rep.disposition, "预测 disposition"),
+          };
+        })
         : [];
       const matches = Array.isArray(rawRow.matches) ? rawRow.matches.map((match) => ({
         ...match,
@@ -255,6 +265,11 @@
       byId("overallRecall").textContent = formatPercent(aggregate.candidateRecall);
       byId("overallStrict").textContent = formatPercent(aggregate.strictBoundaryAlignedRate);
       byId("overallExact").textContent = formatPercent(aggregate.exactSetRate);
+      const turnaround = state.report.turnaroundEvaluation || {};
+      byId("overallFused").textContent = Number.isFinite(turnaround.equipmentFusedTurnaroundCount)
+        && Number.isFinite(turnaround.rigidBarPredictedRepCount)
+        ? `${turnaround.equipmentFusedTurnaroundCount}/${turnaround.rigidBarPredictedRepCount}`
+        : "—";
     }
 
     function visibleRows() {
@@ -318,7 +333,7 @@
     function renderCase() {
       const row = state.activeRow;
       byId("caseKicker").textContent = `${row.exerciseId.toUpperCase()} / ${row.capturePosition.toUpperCase()}`;
-      byId("caseTitle").textContent = `${row.truthCount} 次人工标注 · ${row.predictedCount} 次 v7 预测`;
+      byId("caseTitle").textContent = `${row.truthCount} 次人工标注 · ${row.predictedCount} 次 v8 融合预测`;
       byId("caseId").textContent = row.sourceCaptureId;
     }
 
@@ -340,6 +355,7 @@
           `prediction ${status}`,
           rep.turnaroundMs,
           row.phaseOrder,
+          rep.turnaroundSource,
         );
       }).join("");
       byId("alignmentTimeline").querySelectorAll("[data-seek-ms]").forEach((button) => {
@@ -351,16 +367,16 @@
       });
     }
 
-    function segmentHtml(startMs, endMs, duration, label, classes, turnaroundMs, phaseOrder) {
+    function segmentHtml(startMs, endMs, duration, label, classes, turnaroundMs, phaseOrder, turnaroundSource) {
       const left = startMs / duration * 100;
       const width = Math.max(.15, (endMs - startMs) / duration * 100);
       const hasTurnaround = Number.isFinite(turnaroundMs) && turnaroundMs >= startMs && turnaroundMs <= endMs;
       const markerLeft = hasTurnaround ? (turnaroundMs - startMs) / Math.max(1, endMs - startMs) * 100 : 0;
       const phaseTitle = phaseOrder
-        ? `${phaseLabel(phaseOrder[0])} → ${formatMs(turnaroundMs)} 换向 → ${phaseLabel(phaseOrder[1])}`
+        ? `${phaseLabel(phaseOrder[0])} → ${formatMs(turnaroundMs)} ${turnaroundSourceLabel(turnaroundSource)} → ${phaseLabel(phaseOrder[1])}`
         : "";
       const marker = hasTurnaround
-        ? `<i class="turnaround-marker" style="left:${markerLeft}%" aria-hidden="true"></i>`
+        ? `<i class="turnaround-marker ${turnaroundSource === "equipment_fused" ? "equipment" : ""}" style="left:${markerLeft}%" aria-hidden="true"></i>`
         : "";
       return `<button class="segment ${classes}" style="left:${left}%;width:${width}%" data-seek-ms="${startMs}" title="${formatMs(startMs)}–${formatMs(endMs)}${phaseTitle ? ` · ${phaseTitle}` : ""}"><span>${label}</span>${marker}</button>`;
     }
@@ -376,7 +392,7 @@
       const matchByPrediction = predictionMatchMap(row);
       const predictionRows = row.predictedReps.map((rep, index) => {
         const match = matchByPrediction.get(index);
-        const phaseSummary = `${phaseLabel(row.phaseOrder[0])} ${formatMs(rep.turnaroundMs - rep.startMs)} · 换向 ${formatMs(rep.turnaroundMs)} · ${phaseLabel(row.phaseOrder[1])} ${formatMs(rep.endMs - rep.turnaroundMs)}`;
+        const phaseSummary = `${phaseLabel(row.phaseOrder[0])} ${formatMs(rep.turnaroundMs - rep.startMs)} · ${turnaroundSourceLabel(rep.turnaroundSource)} ${formatMs(rep.turnaroundMs)} · ${phaseLabel(row.phaseOrder[1])} ${formatMs(rep.endMs - rep.turnaroundMs)}`;
         return match
           ? `<div class="match-row ${match.strictBoundaryAligned ? "strict" : ""}"><b>V${index + 1}</b><span>↔ H${match.truthIndex + 1}<br>${phaseSummary}<br>START ${signed(match.startErrorMs)} · END ${signed(match.endErrorMs)}</span><em>IoU ${(match.intervalIou * 100).toFixed(0)}%${match.strictBoundaryAligned ? " · STRICT" : ""}</em></div>`
           : `<div class="match-row"><b>V${index + 1}</b><span>${formatMs(rep.startMs)}–${formatMs(rep.endMs)}<br>${phaseSummary}</span><em style="color:var(--red)">UNMATCHED</em></div>`;
@@ -392,7 +408,8 @@
           : findingState === "ObservedDeviation" ? "deviation" : "unknown";
         return `<div class="finding ${status}">${escapeHtml(dimension)}<br>${escapeHtml(findingState || "Unknown")}</div>`;
       }).join("");
-      byId("lineage").innerHTML = `CATALOG maxpower/current-all-family-assessment/v7<br>PHASE CONTRACT ${escapeHtml(row.phaseContractSource)} · ${phaseLabel(row.phaseOrder[0])} → ${phaseLabel(row.phaseOrder[1])}<br>EQUIPMENT ${escapeHtml(row.equipmentProvider.recognitionMode)} · ${row.equipmentProvider.frames.length} TRACK FRAMES<br>BUNDLE ${escapeHtml(row.bundleId)}<br>BUNDLE HASH ${escapeHtml(row.bundleHash)}<br>TRACE ROOTS ${row.traceRootCount}<br>TRACE HASH ${escapeHtml(row.traceContentHash)}<br>REPORT ${escapeHtml(state.report.reportDigest)}<br>PREDICTION ${escapeHtml(state.report.predictionSha256)}`;
+      const catalogId = state.report.protocol?.modelConfiguration?.assessmentCatalogId || "UNKNOWN";
+      byId("lineage").innerHTML = `CATALOG ${escapeHtml(catalogId)}<br>PHASE CONTRACT ${escapeHtml(row.phaseContractSource)} · ${phaseLabel(row.phaseOrder[0])} → ${phaseLabel(row.phaseOrder[1])}<br>EQUIPMENT ${escapeHtml(row.equipmentProvider.recognitionMode)} · ${row.equipmentProvider.frames.length} TRACK FRAMES<br>BUNDLE ${escapeHtml(row.bundleId)}<br>BUNDLE HASH ${escapeHtml(row.bundleHash)}<br>TRACE ROOTS ${row.traceRootCount}<br>TRACE HASH ${escapeHtml(row.traceContentHash)}<br>REPORT ${escapeHtml(state.report.reportDigest)}<br>PREDICTION ${escapeHtml(state.report.predictionSha256)}`;
     }
 
     function renderActiveRep() {
@@ -405,10 +422,10 @@
       const activePhase = phaseAt(predictedRep, row.phaseOrder, currentMs);
       byId("activeRepSummary").innerHTML = `
         <div class="active-rep"><b>HUMAN ${human ? `REP ${human.index + 1}` : "非动作区间"}</b><p>${human ? `${formatMs(human.range.startMs)} → ${formatMs(human.range.endMs)}` : "当前时间不在人工作业 Rep 区间内。"}</p></div>
-        <div class="active-rep"><b style="color:var(--cyan)">RUST V7 ${predicted ? `REP ${predicted.index + 1}` : "无 Rep"}</b><p>${predictedRep ? `${phaseLabel(row.phaseOrder[0])} ${formatMs(predictedRep.turnaroundMs - predictedRep.startMs)} → 换向 ${formatMs(predictedRep.turnaroundMs)} → ${phaseLabel(row.phaseOrder[1])} ${formatMs(predictedRep.endMs - predictedRep.turnaroundMs)}` : "当前时间没有非 rejected 的 v7 Rep。"}</p></div>`;
+        <div class="active-rep"><b style="color:var(--cyan)">RUST V8 ${predicted ? `REP ${predicted.index + 1}` : "无 Rep"}</b><p>${predictedRep ? `${phaseLabel(row.phaseOrder[0])} ${formatMs(predictedRep.turnaroundMs - predictedRep.startMs)} → ${turnaroundSourceLabel(predictedRep.turnaroundSource)} ${formatMs(predictedRep.turnaroundMs)} → ${phaseLabel(row.phaseOrder[1])} ${formatMs(predictedRep.endMs - predictedRep.turnaroundMs)}` : "当前时间没有非 rejected 的 v8 Rep。"}</p></div>`;
       byId("humanRepHud").textContent = human ? `HUMAN REP ${human.index + 1}` : "HUMAN —";
-      byId("v7RepHud").textContent = predicted ? `V7 REP ${predicted.index + 1}` : "V7 —";
-      byId("v7PhaseHud").textContent = activePhase ? `${phaseLabel(activePhase.phase)} · V7` : "PHASE —";
+      byId("v7RepHud").textContent = predicted ? `V8 REP ${predicted.index + 1}` : "V8 —";
+      byId("v7PhaseHud").textContent = activePhase ? `${phaseLabel(activePhase.phase)} · V8` : "PHASE —";
     }
 
     function signed(value) {
@@ -581,7 +598,7 @@
       overlayContext.fillStyle = "#caff38";
       overlayContext.fillText(human ? `HUMAN REP ${human.index + 1}` : "HUMAN —", transform.offsetX + 22, transform.offsetY + transform.height - 25);
       overlayContext.fillStyle = "#4de4ee";
-      overlayContext.fillText(predicted ? `V7 REP ${predicted.index + 1}` : "V7 —", transform.offsetX + 132, transform.offsetY + transform.height - 25);
+      overlayContext.fillText(predicted ? `V8 REP ${predicted.index + 1}` : "V8 —", transform.offsetX + 132, transform.offsetY + transform.height - 25);
       overlayContext.restore();
     }
 
@@ -609,7 +626,9 @@
       });
       state.activeRow.predictedReps.forEach((rep) => {
         const x = rep.turnaroundMs / duration * width;
-        plotContext.strokeStyle = "rgba(255,255,255,.68)";
+        plotContext.strokeStyle = rep.turnaroundSource === "equipment_fused"
+          ? "rgba(255,77,206,.9)"
+          : "rgba(255,255,255,.68)";
         plotContext.lineWidth = 1;
         plotContext.setLineDash([3, 3]);
         plotContext.beginPath(); plotContext.moveTo(x, 0); plotContext.lineTo(x, height); plotContext.stroke();
@@ -715,6 +734,10 @@
 
   function phaseLabel(phase) {
     return phase === "concentric" ? "向心" : phase === "eccentric" ? "离心" : "阶段未知";
+  }
+
+  function turnaroundSourceLabel(source) {
+    return source === "equipment_fused" ? "器械融合换向" : "姿态换向";
   }
 
   return Object.freeze({

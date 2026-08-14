@@ -15,9 +15,10 @@ const {
 test("v7 alignment page is independent from the quality annotation desk", () => {
   const html = readFileSync("tools/recognition-review/public/v7-alignment-review.html", "utf8");
   assert.match(html, /data-v7-alignment-review/u);
-  assert.match(html, /人工标注 × v7 预测/u);
+  assert.match(html, /人工标注 × v8 融合预测/u);
   assert.match(html, /页面只渲染证据，不在浏览器内识别或重算/u);
-  assert.match(html, /V7 换向点/u);
+  assert.match(html, /器械融合换向/u);
+  assert.match(html, /FUSED TURNAROUND/u);
   assert.match(html, /data-layer="equipment"/u);
   assert.match(html, /BAR AXIS CENTER Y/u);
   assert.match(html, /v7AlignmentReviewApp\.js/u);
@@ -31,6 +32,7 @@ test("normalization preserves frozen matches and rejects duplicate contexts", ()
   assert.equal(report.rows[0].predictedReps.length, 2);
   assert.equal(report.rows[0].equipmentProvider.frames.length, 2);
   assert.equal(report.rows[0].equipmentProvider.frames[0].source, "Measured");
+  assert.equal(report.turnaroundEvaluation.equipmentFusedTurnaroundCount, 1);
   assert.equal(predictionMatchMap(report.rows[0]).get(0).strictBoundaryAligned, true);
   assert.equal(rowProblem(report.rows[0]), true);
   assert.equal(formatPercent(0.871264), "87.1%");
@@ -58,7 +60,7 @@ test("frame and Rep lookup use source timestamps without inventing observations"
 
 function fixtureReport() {
   return {
-    schemaVersion: "maxpower-current-rust-known-video-alignment/v1",
+    schemaVersion: "maxpower-current-rust-equipment-fused-known-video-alignment/v1",
     reportDigest: "a".repeat(64),
     predictionSha256: "b".repeat(64),
     aggregate: {
@@ -66,6 +68,10 @@ function fixtureReport() {
       candidateRecall: 0.5,
       strictBoundaryAlignedRate: 0.5,
       exactSetRate: 0,
+    },
+    turnaroundEvaluation: {
+      equipmentFusedTurnaroundCount: 1,
+      rigidBarPredictedRepCount: 2,
     },
     rows: [{
       sourceCaptureId: "capture-a",
@@ -82,8 +88,8 @@ function fixtureReport() {
         { startMs: 2_500, endMs: 3_500 },
       ],
       predictedReps: [
-        { repId: 1, startMs: 1_050, turnaroundMs: 1_500, endMs: 2_050, disposition: "confirmed" },
-        { repId: 2, startMs: 3_800, turnaroundMs: 4_000, endMs: 4_200, disposition: "needs_review" },
+        { repId: 1, startMs: 1_050, turnaroundMs: 1_500, turnaroundSource: "equipment_fused", endMs: 2_050, disposition: "confirmed" },
+        { repId: 2, startMs: 3_800, turnaroundMs: 4_000, turnaroundSource: "pose_primary", endMs: 4_200, disposition: "needs_review" },
       ],
       matches: [{
         truthIndex: 0,

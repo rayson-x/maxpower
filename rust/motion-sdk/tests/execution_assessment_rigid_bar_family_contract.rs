@@ -13,14 +13,15 @@ use maxpower_motion_sdk::{
     BarbellAxisVisualTracker, ContractVersion, DeclaredLoad, DeclaredLoadProvenance,
     DiagnosticLevel, EquipmentAttributes, EquipmentAxis2d, EquipmentKind, EquipmentObservation,
     EquipmentSource, ExecutionAssessmentEngine, FrameLease, FrameObservations, FrameRotation,
-    InferenceAdapter, LocalEquipmentMode, MotionError, MotionSession, NormalizedRect,
-    PoseCandidate, PoseObservation, PoseObservationContract, PoseSchemaId, RecordingOutputAdapter,
-    ReferenceComparisonKind, SessionConfig, SetExecutionContext, SetIntent, SubjectPolicy,
-    TimestampUnit, TraceNodeKind, VideoFrameContract, VideoRecognitionContext,
+    InferenceAdapter, LocalActionAxisDirection, LocalEquipmentMode, MotionError, MotionSession,
+    NormalizedRect, PoseCandidate, PoseObservation, PoseObservationContract, PoseSchemaId,
+    RecordingOutputAdapter, ReferenceComparisonKind, SessionConfig, SetExecutionContext, SetIntent,
+    SubjectPolicy, TimestampUnit, TraceNodeKind, VideoFrameContract, VideoRecognitionContext,
     WorkoutAssessmentContext, current_bodyweight_assessment_profiles_v1,
     current_cable_assessment_profiles_v1, current_dual_dumbbell_assessment_profiles_v1,
     current_machine_assessment_profiles_v1, current_motion_assessment_catalog_v3,
-    current_motion_assessment_catalog_v7, current_rigid_bar_assessment_profiles_v1,
+    current_motion_assessment_catalog_v7, current_motion_assessment_catalog_v8,
+    current_rigid_bar_assessment_profiles_v1, equipment_fused_rigid_bar_assessment_profiles_v2,
 };
 use serde::Serialize;
 
@@ -194,6 +195,20 @@ fn current_profile(
         .find(|(action, capture_view, _, _)| action == action_id && *capture_view == view)
         .map(|(_, _, profile, strategy)| (profile, strategy))
         .expect("exact current profile")
+}
+
+fn equipment_fused_profile(
+    action_id: &str,
+    view: AssessmentCaptureView,
+) -> (
+    maxpower_motion_sdk::ExerciseProfile,
+    maxpower_motion_sdk::LocalMotionCoordinateStrategy,
+) {
+    equipment_fused_rigid_bar_assessment_profiles_v2()
+        .into_iter()
+        .find(|binding| binding.action_id == action_id && binding.capture_view == view)
+        .map(|binding| (binding.profile, binding.local_coordinate_strategy))
+        .unwrap_or_else(|| current_profile(action_id, view))
 }
 
 fn video_context(action_id: &str, capture_position: &str) -> VideoRecognitionContext {
@@ -1018,6 +1033,87 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
     assert!(assembled["frozenResult"]["reviewedNegativeWindowFalseTriggerRate"].is_null());
 }
 
+#[test]
+fn frozen_v8_equipment_fusion_report_resolves_to_governed_immutable_evidence() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("MaxPower root")
+        .to_path_buf();
+    let governance_root = root
+        .parent()
+        .expect("power workspace")
+        .join("maxpower-training-data-governance");
+    let governance: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(governance_root.join("catalog/assets.json")).expect("governance catalog"),
+    )
+    .expect("governance JSON");
+    let asset = governance["assets"]
+        .as_array()
+        .expect("governance assets")
+        .iter()
+        .find(|asset| asset["id"] == "current-rust-v8-equipment-fused-known-video-alignment-report")
+        .expect("v8 report asset is governed");
+    assert_eq!(asset["admission"], "evaluation_only");
+    assert_eq!(asset["authority"], "frozen_prediction_or_report");
+    assert!(asset["forbiddenUses"].as_array().is_some_and(|uses| {
+        uses.iter()
+            .any(|use_id| use_id == "held_out_accuracy_claim")
+    }));
+
+    let report_bytes =
+        std::fs::read(root.join(asset["location"]["path"].as_str().expect("v8 report path")))
+            .expect("frozen v8 report");
+    assert_eq!(
+        sha256_bytes(&report_bytes),
+        asset["location"]["sha256"]
+            .as_str()
+            .expect("report SHA-256")
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&report_bytes).expect("frozen v8 report JSON");
+    assert_eq!(
+        report["schemaVersion"],
+        "maxpower-current-rust-equipment-fused-known-video-alignment/v1"
+    );
+    assert_eq!(
+        report["protocol"]["modelConfiguration"]["assessmentCatalogId"],
+        current_motion_assessment_catalog_v8().catalog_id
+    );
+    for key in [
+        "truthRepCount",
+        "predictedRepCount",
+        "matchedRepCount",
+        "candidatePrecision",
+        "candidateRecall",
+    ] {
+        assert_eq!(report["aggregate"][key], asset["snapshot"][key]);
+    }
+    let sources = report["rows"]
+        .as_array()
+        .expect("v8 rows")
+        .iter()
+        .flat_map(|row| row["predictedReps"].as_array().expect("predicted reps"))
+        .fold(BTreeMap::<&str, usize>::new(), |mut counts, rep| {
+            *counts
+                .entry(
+                    rep["turnaroundSource"]
+                        .as_str()
+                        .expect("typed turnaround source"),
+                )
+                .or_default() += 1;
+            counts
+        });
+    assert_eq!(sources.get("equipment_fused"), Some(&56));
+    assert_eq!(sources.get("pose_primary"), Some(&379));
+    assert_eq!(
+        sources.get("equipment_fused").copied(),
+        asset["snapshot"]["equipmentFusedTurnaroundCount"]
+            .as_u64()
+            .map(|count| count as usize)
+    );
+}
+
 const EVALUATION_CANDIDATE_MINIMUM_INTERVAL_IOU: f64 = 0.10;
 const EVALUATION_CANDIDATE_BOUNDARY_TOLERANCE_MS: i64 = 1_500;
 const EVALUATION_STRICT_MINIMUM_INTERVAL_IOU: f64 = 0.60;
@@ -1037,6 +1133,7 @@ struct EvaluationPredictionRep {
     disposition: String,
     start_ms: u64,
     turnaround_ms: u64,
+    turnaround_source: String,
     end_ms: u64,
     canonical_slice_hash: String,
 }
@@ -1511,10 +1608,25 @@ fn governed_real_replays_cover_every_current_action_view() {
         include_bytes!("fixtures/all_action_governed_replay_manifest_v1.json");
     let replay_manifest: serde_json::Value =
         serde_json::from_slice(replay_manifest_bytes).expect("versioned governed replay manifest");
-    let evaluation_protocol: serde_json::Value = serde_json::from_slice(include_bytes!(
+    let mut evaluation_protocol: serde_json::Value = serde_json::from_slice(include_bytes!(
         "fixtures/current_v7_known_video_alignment_protocol_v1.json"
     ))
     .expect("versioned known-video alignment protocol");
+    evaluation_protocol["evaluationId"] =
+        serde_json::json!("current-rust-v8-equipment-fused-known-video-alignment-2026-08-15");
+    evaluation_protocol["protocol"]["modelConfiguration"]["assessmentCatalogId"] =
+        serde_json::json!(current_motion_assessment_catalog_v8().catalog_id);
+    evaluation_protocol["protocol"]["modelConfiguration"]["repBoundaryAuthority"] =
+        serde_json::json!("pose_cycle_equipment_turnaround_fused");
+    evaluation_protocol["protocol"]["output"]["path"] = serde_json::json!(
+        "docs/reports/current-rust-v8-equipment-fused-known-video-alignment-2026-08-15.json"
+    );
+    evaluation_protocol["protocol"]["output"]["schemaVersion"] =
+        serde_json::json!("maxpower-current-rust-equipment-fused-known-video-alignment/v1");
+    evaluation_protocol["protocolSha256"] = serde_json::json!(sha256_bytes(
+        &serde_json::to_vec(&evaluation_protocol["protocol"])
+            .expect("stable equipment-fused evaluation protocol"),
+    ));
     let rigid_bar_video_manifest_bytes = include_bytes!("fixtures/rigid_bar_video_sources_v1.json");
     let rigid_bar_video_manifest: serde_json::Value =
         serde_json::from_slice(rigid_bar_video_manifest_bytes)
@@ -1567,7 +1679,7 @@ fn governed_real_replays_cover_every_current_action_view() {
     );
     assert_eq!(
         evaluation_rules["modelConfiguration"]["assessmentCatalogId"],
-        current_motion_assessment_catalog_v7().catalog_id
+        current_motion_assessment_catalog_v8().catalog_id
     );
     assert_eq!(
         evaluation_rules["matchingPolicy"]["minimumIntervalIoU"],
@@ -1892,7 +2004,7 @@ fn governed_real_replays_cover_every_current_action_view() {
             .any(|value| value == capture_id)
         {
             let mut resolver = ExecutionAssessmentEngine::configure(
-                current_motion_assessment_catalog_v7(),
+                current_motion_assessment_catalog_v8(),
                 WorkoutAssessmentContext {
                     workout_session_id: format!("excluded-context-{ordinal}"),
                 },
@@ -1922,7 +2034,7 @@ fn governed_real_replays_cover_every_current_action_view() {
         }
         replayed_records += 1;
         let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
-            current_motion_assessment_catalog_v7(),
+            current_motion_assessment_catalog_v8(),
             WorkoutAssessmentContext {
                 workout_session_id: format!("governed-rigid-bar-{ordinal}"),
             },
@@ -1984,7 +2096,7 @@ fn governed_real_replays_cover_every_current_action_view() {
                 "Rust equipment provider emitted no independent observation for {capture_id}"
             );
         }
-        let (profile, local_coordinate_strategy) = current_profile(action_id, capture_view);
+        let (profile, local_coordinate_strategy) = equipment_fused_profile(action_id, capture_view);
         assert!(
             !profile.identity.is_empty(),
             "empty profile binding for {action_id}/{capture_position}"
@@ -2161,6 +2273,7 @@ fn governed_real_replays_cover_every_current_action_view() {
                     disposition: rep.disposition.clone(),
                     start_ms: rep.start_timestamp_ms,
                     turnaround_ms: rep.turnaround_timestamp_ms,
+                    turnaround_source: rep.turnaround_source.clone(),
                     end_ms: rep.end_timestamp_ms,
                     canonical_slice_hash: rep.canonical_slice_hash.clone(),
                 })
@@ -2343,6 +2456,48 @@ fn governed_real_replays_cover_every_current_action_view() {
         .map(|row| row.source_capture_id.as_str())
         .collect::<HashSet<_>>()
         .len();
+    let rigid_bar_actions = [
+        "barbell_bench_press",
+        "barbell_row",
+        "seated_shoulder_press",
+    ];
+    let predicted_rep_count = evaluated_rows
+        .iter()
+        .map(|row| row.predicted_reps.len())
+        .sum::<usize>();
+    let rigid_bar_predicted_rep_count = evaluated_rows
+        .iter()
+        .filter(|row| rigid_bar_actions.contains(&row.exercise_id.as_str()))
+        .map(|row| row.predicted_reps.len())
+        .sum::<usize>();
+    let equipment_fused_turnaround_count = evaluated_rows
+        .iter()
+        .flat_map(|row| &row.predicted_reps)
+        .filter(|rep| rep.turnaround_source == "equipment_fused")
+        .count();
+    let pose_primary_turnaround_count = predicted_rep_count - equipment_fused_turnaround_count;
+    let turnaround_by_rigid_bar_action = rigid_bar_actions
+        .into_iter()
+        .map(|action_id| {
+            let reps = evaluated_rows
+                .iter()
+                .filter(|row| row.exercise_id == action_id)
+                .flat_map(|row| &row.predicted_reps)
+                .collect::<Vec<_>>();
+            let fused = reps
+                .iter()
+                .filter(|rep| rep.turnaround_source == "equipment_fused")
+                .count();
+            (
+                action_id,
+                serde_json::json!({
+                    "predictedRepCount": reps.len(),
+                    "equipmentFusedTurnaroundCount": fused,
+                    "posePrimaryTurnaroundCount": reps.len() - fused,
+                }),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let report_semantic = serde_json::json!({
         "schemaVersion": evaluation_rules["output"]["schemaVersion"],
         "generatedOn": "2026-08-15",
@@ -2394,8 +2549,19 @@ fn governed_real_replays_cover_every_current_action_view() {
             "poseFusedFrameCount": equipment_provider_pose_fused_frames,
             "accuracyStatus": "not_evaluable_no_human_equipment_track_truth",
         },
+        "turnaroundEvaluation": {
+            "boundaryAuthority": "pose_cycle_equipment_turnaround_fused",
+            "humanTurnaroundTruthCount": 0,
+            "accuracyStatus": "not_evaluable_no_human_turnaround_truth",
+            "predictedRepCount": predicted_rep_count,
+            "rigidBarPredictedRepCount": rigid_bar_predicted_rep_count,
+            "equipmentFusedTurnaroundCount": equipment_fused_turnaround_count,
+            "posePrimaryTurnaroundCount": pose_primary_turnaround_count,
+            "byRigidBarAction": turnaround_by_rigid_bar_action,
+        },
         "unsupportedAccuracyClaims": {
             "equipmentTrackAccuracy": "not_evaluable_no_human_equipment_track_truth",
+            "turnaroundAccuracy": "not_evaluable_no_human_turnaround_truth",
             "techniqueQualityAccuracy": "not_evaluable_no_human_quality_truth",
         },
         "rows": evaluated_rows,
@@ -2432,7 +2598,10 @@ fn governed_real_replays_cover_every_current_action_view() {
     eprintln!(
         "structural metrics: packets={packet_count} local_states={local_states:?} pose_channel_frames={pose_channel_frames} equipment_channel_frames={equipment_channel_frames} fusion_states={fusion_states:?} dimension_states={dimension_states:?} reference_kinds={reference_kinds:?} trace_complete_reports={trace_complete_reports} typed_refusals=0"
     );
-    let expected = &assembled_input["expectedStructuralResult"];
+    let expected: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "fixtures/equipment_fused_v8_expected_structural_result_v1.json"
+    ))
+    .expect("frozen equipment-fused v8 structural result");
     assert_eq!(replays.len() as u64, expected["resolvedRecordCount"]);
     assert_eq!(
         declared_excluded_groups.len() as u64,
@@ -2627,6 +2796,63 @@ fn every_current_rigid_bar_context_resolves_an_executable_action_specific_bundle
             expected_endpoints
         );
     }
+}
+
+#[test]
+fn v8_rigid_bar_contracts_fuse_equipment_turnaround_in_the_action_direction() {
+    let catalog = current_motion_assessment_catalog_v8();
+    let profiles = equipment_fused_rigid_bar_assessment_profiles_v2();
+    assert_eq!(profiles.len(), RIGID_BAR_CONTEXTS.len());
+    for binding in profiles {
+        assert!(
+            binding
+                .profile
+                .state_machine_id
+                .starts_with("cycle-aligned-equipment-turnaround-")
+        );
+        let expected_direction = if binding.action_id == "barbell_bench_press" {
+            LocalActionAxisDirection::PreparationToEffortDown
+        } else {
+            LocalActionAxisDirection::PreparationToEffortUp
+        };
+        assert_eq!(
+            binding.local_coordinate_strategy.preparation_to_effort,
+            expected_direction
+        );
+        let bundle = catalog
+            .bundles
+            .iter()
+            .find(|bundle| {
+                bundle.exact_context.action_id == binding.action_id
+                    && bundle.exact_context.capture_view == binding.capture_view
+            })
+            .expect("v8 exact rigid-bar bundle");
+        let execution = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == bundle.lineage.execution_contract.id)
+            .expect("v8 ExecutionContract");
+        assert_eq!(
+            execution.content["repBoundaryAuthority"],
+            "pose_cycle_equipment_turnaround_fused"
+        );
+        let recognition = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == bundle.lineage.recognition_profile.id)
+            .expect("v8 RecognitionProfile");
+        assert_eq!(
+            recognition.content["runtimeProfileHash"],
+            format!("{:016x}", binding.profile.content_hash)
+        );
+    }
+    ExecutionAssessmentEngine::configure(
+        catalog,
+        WorkoutAssessmentContext {
+            workout_session_id: "v8-equipment-turnaround-fusion".into(),
+        },
+    )
+    .expect("v8 catalog is executable");
 }
 
 #[test]
