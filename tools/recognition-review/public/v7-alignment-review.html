@@ -154,12 +154,14 @@
     .track { position: relative; height: 34px; }
     .track + .track { border-top: 1px solid var(--line); }
     .track::before { content: attr(data-label); position: absolute; z-index: 4; left: 7px; top: 5px; color: var(--muted); font: 800 7px/1 var(--mono); pointer-events: none; }
-    .segment { position: absolute; top: 15px; height: 12px; min-width: 2px; border: 0; cursor: pointer; overflow: hidden; }
+    .segment { position: absolute; top: 15px; height: 12px; min-width: 2px; border: 0; cursor: pointer; overflow: visible; }
     .segment.truth { background: var(--acid); }
     .segment.prediction { background: var(--cyan); }
     .segment.prediction.false { background: var(--red); }
     .segment.prediction.review { background: var(--amber); }
     .segment span { display: block; color: var(--ink); font: 900 7px/12px var(--mono); white-space: nowrap; }
+    .turnaround-marker { position: absolute; z-index: 3; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: #fff; box-shadow: 0 0 5px rgba(255,255,255,.9); pointer-events: none; }
+    .turnaround-marker::before { content: ""; position: absolute; top: -3px; left: -2px; width: 6px; height: 6px; background: #fff; transform: rotate(45deg); }
     .playhead { position: absolute; z-index: 6; top: 0; bottom: 0; width: 1px; background: #fff; pointer-events: none; box-shadow: 0 0 8px #fff; }
 
     .right-rail { max-height: calc(100vh - 86px); overflow: auto; }
@@ -252,11 +254,13 @@
           <div class="hud top-left">
             <span id="humanRepHud" class="hud-chip">HUMAN —</span>
             <span id="v7RepHud" class="hud-chip live">V7 —</span>
+            <span id="v7PhaseHud" class="hud-chip live">PHASE —</span>
           </div>
           <div class="hud top-right">
             <button class="layer-toggle active" data-layer="skeleton">骨架</button>
             <button class="layer-toggle active" data-layer="trail">腕点轨迹</button>
             <button class="layer-toggle active" data-layer="labels">REP 标签</button>
+            <button class="layer-toggle" disabled title="本次 v7 冻结评估没有输出逐帧器械观测">器械未输出</button>
           </div>
           <div id="frameReadout" class="frame-readout">POSE OBSERVATION —</div>
         </div>
@@ -277,11 +281,12 @@
             <span><i style="background:var(--amber)"></i>RIGHT WRIST</span>
             <span><i style="background:var(--acid)"></i>HUMAN REP</span>
             <span><i style="background:var(--red)"></i>V7 UNMATCHED</span>
+            <span><i style="height:9px;width:2px;background:#fff;vertical-align:-1px"></i>V7 换向点</span>
           </div>
         </section>
 
         <section class="timeline-panel">
-          <div class="panel-title"><strong>人工标注 × v7 预测</strong><span>点击任一区间可跳转；白线为当前帧</span></div>
+          <div class="panel-title"><strong>人工标注 × v7 预测</strong><span>Rep 内白色短线为 v7 离心/向心换向；贯穿白线为当前帧</span></div>
           <div id="alignmentTimeline" class="timeline">
             <div id="truthTrack" class="track" data-label="HUMAN"></div>
             <div id="predictionTrack" class="track" data-label="RUST V7"></div>
@@ -317,7 +322,7 @@
           <div id="lineage" class="lineage"></div>
         </section>
         <section class="inspector">
-          <div class="limit">本页展示原始视频、原始 Halpe-26 骨架/腕点轨迹，以及 Rust v7 已冻结的 Rep 与 Set 结论。当前评估产物没有保存逐帧 canonical local-coordinate samples，因此不会在浏览器内伪造或重算“归一化轨迹”。</div>
+          <div class="limit">本页展示原始视频、原始 Halpe-26 骨架/腕点轨迹，以及 Rust v7 已冻结的 Rep、换向点与 Set 结论。当前 v7 评估产物没有保存逐帧器械观测或 canonical local-coordinate samples；因此不会拿腕点冒充杠铃，也不会在浏览器内伪造或重算归一化轨迹。</div>
         </section>
       </aside>
     </div>

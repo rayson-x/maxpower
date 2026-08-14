@@ -357,6 +357,8 @@ test("v7 alignment review exposes immutable report, pose trajectory, and range v
     assert.equal(clientReport.rows[0]?.videoUrl, "/media/v7-alignment?id=capture-a%3Alateral_raise%3Afront");
     assert.equal(clientReport.rows[0]?.poseUrl, "/api/review/v7-pose?id=capture-a");
     assert.equal(clientReport.rows[0]?.durationMs, 4_000);
+    assert.deepEqual(clientReport.rows[0]?.phaseOrder, ["concentric", "eccentric"]);
+    assert.equal(clientReport.rows[0]?.phaseContractSource, "action-contract-catalog");
     assert.equal(clientReport.rows[0]?.videoPath, undefined);
 
     const poseResponse = await fetch(`${baseUrl}/api/review/v7-pose?id=capture-a`);

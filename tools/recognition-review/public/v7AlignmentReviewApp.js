@@ -30,6 +30,7 @@
       if (seen.has(contextId)) throw new Error(`重复 contextId: ${contextId}`);
       seen.add(contextId);
       const truthRanges = normalizeRanges(rawRow.truthRanges, "人工区间");
+      const phaseOrder = normalizePhaseOrder(rawRow.phaseOrder);
       const predictedReps = Array.isArray(rawRow.predictedReps)
         ? rawRow.predictedReps.map((rep, repIndex) => ({
           ...rep,
@@ -63,6 +64,7 @@
           1,
         ),
         truthRanges,
+        phaseOrder,
         predictedReps,
         matches,
         qualityFindingStates: Array.isArray(rawRow.qualityFindingStates)
@@ -71,6 +73,20 @@
       });
     });
     return Object.freeze({ ...raw, rows: Object.freeze(rows) });
+  }
+
+  function normalizePhaseOrder(value) {
+    if (!Array.isArray(value) || value.length !== 2
+      || value.some((phase) => phase !== "concentric" && phase !== "eccentric")) {
+      throw new Error("v7 动作契约没有有效的 phaseOrder");
+    }
+    return Object.freeze([value[0], value[1]]);
+  }
+
+  function phaseAt(rep, phaseOrder, timestampMs) {
+    if (!rep || timestampMs < rep.startMs || timestampMs > rep.endMs) return null;
+    const index = timestampMs <= rep.turnaroundMs ? 0 : 1;
+    return Object.freeze({ index, phase: phaseOrder[index] });
   }
 
   function normalizeRanges(rawRanges, label) {
@@ -272,7 +288,15 @@
       byId("predictionTrack").innerHTML = row.predictedReps.map((rep, index) => {
         const match = matched.get(index);
         const status = !match ? "false" : (rep.disposition === "needs_review" ? "review" : "");
-        return segmentHtml(rep.startMs, rep.endMs, duration, `V${index + 1}`, `prediction ${status}`);
+        return segmentHtml(
+          rep.startMs,
+          rep.endMs,
+          duration,
+          `V${index + 1}`,
+          `prediction ${status}`,
+          rep.turnaroundMs,
+          row.phaseOrder,
+        );
       }).join("");
       byId("alignmentTimeline").querySelectorAll("[data-seek-ms]").forEach((button) => {
         button.addEventListener("click", () => {
@@ -283,10 +307,18 @@
       });
     }
 
-    function segmentHtml(startMs, endMs, duration, label, classes) {
+    function segmentHtml(startMs, endMs, duration, label, classes, turnaroundMs, phaseOrder) {
       const left = startMs / duration * 100;
       const width = Math.max(.15, (endMs - startMs) / duration * 100);
-      return `<button class="segment ${classes}" style="left:${left}%;width:${width}%" data-seek-ms="${startMs}" title="${formatMs(startMs)}–${formatMs(endMs)}"><span>${label}</span></button>`;
+      const hasTurnaround = Number.isFinite(turnaroundMs) && turnaroundMs >= startMs && turnaroundMs <= endMs;
+      const markerLeft = hasTurnaround ? (turnaroundMs - startMs) / Math.max(1, endMs - startMs) * 100 : 0;
+      const phaseTitle = phaseOrder
+        ? `${phaseLabel(phaseOrder[0])} → ${formatMs(turnaroundMs)} 换向 → ${phaseLabel(phaseOrder[1])}`
+        : "";
+      const marker = hasTurnaround
+        ? `<i class="turnaround-marker" style="left:${markerLeft}%" aria-hidden="true"></i>`
+        : "";
+      return `<button class="segment ${classes}" style="left:${left}%;width:${width}%" data-seek-ms="${startMs}" title="${formatMs(startMs)}–${formatMs(endMs)}${phaseTitle ? ` · ${phaseTitle}` : ""}"><span>${label}</span>${marker}</button>`;
     }
 
     function renderInspector() {
@@ -300,9 +332,10 @@
       const matchByPrediction = predictionMatchMap(row);
       const predictionRows = row.predictedReps.map((rep, index) => {
         const match = matchByPrediction.get(index);
+        const phaseSummary = `${phaseLabel(row.phaseOrder[0])} ${formatMs(rep.turnaroundMs - rep.startMs)} · 换向 ${formatMs(rep.turnaroundMs)} · ${phaseLabel(row.phaseOrder[1])} ${formatMs(rep.endMs - rep.turnaroundMs)}`;
         return match
-          ? `<div class="match-row ${match.strictBoundaryAligned ? "strict" : ""}"><b>V${index + 1}</b><span>↔ H${match.truthIndex + 1}<br>START ${signed(match.startErrorMs)} · END ${signed(match.endErrorMs)}</span><em>IoU ${(match.intervalIou * 100).toFixed(0)}%${match.strictBoundaryAligned ? " · STRICT" : ""}</em></div>`
-          : `<div class="match-row"><b>V${index + 1}</b><span>${formatMs(rep.startMs)}–${formatMs(rep.endMs)}</span><em style="color:var(--red)">UNMATCHED</em></div>`;
+          ? `<div class="match-row ${match.strictBoundaryAligned ? "strict" : ""}"><b>V${index + 1}</b><span>↔ H${match.truthIndex + 1}<br>${phaseSummary}<br>START ${signed(match.startErrorMs)} · END ${signed(match.endErrorMs)}</span><em>IoU ${(match.intervalIou * 100).toFixed(0)}%${match.strictBoundaryAligned ? " · STRICT" : ""}</em></div>`
+          : `<div class="match-row"><b>V${index + 1}</b><span>${formatMs(rep.startMs)}–${formatMs(rep.endMs)}<br>${phaseSummary}</span><em style="color:var(--red)">UNMATCHED</em></div>`;
       });
       const matchedTruth = new Set(row.matches.map((match) => match.truthIndex));
       const missedRows = row.truthRanges.flatMap((range, index) => matchedTruth.has(index) ? [] : [
@@ -315,7 +348,7 @@
           : findingState === "ObservedDeviation" ? "deviation" : "unknown";
         return `<div class="finding ${status}">${escapeHtml(dimension)}<br>${escapeHtml(findingState || "Unknown")}</div>`;
       }).join("");
-      byId("lineage").innerHTML = `CATALOG maxpower/current-all-family-assessment/v7<br>BUNDLE ${escapeHtml(row.bundleId)}<br>BUNDLE HASH ${escapeHtml(row.bundleHash)}<br>TRACE ROOTS ${row.traceRootCount}<br>TRACE HASH ${escapeHtml(row.traceContentHash)}<br>REPORT ${escapeHtml(state.report.reportDigest)}<br>PREDICTION ${escapeHtml(state.report.predictionSha256)}`;
+      byId("lineage").innerHTML = `CATALOG maxpower/current-all-family-assessment/v7<br>PHASE CONTRACT ${escapeHtml(row.phaseContractSource)} · ${phaseLabel(row.phaseOrder[0])} → ${phaseLabel(row.phaseOrder[1])}<br>BUNDLE ${escapeHtml(row.bundleId)}<br>BUNDLE HASH ${escapeHtml(row.bundleHash)}<br>TRACE ROOTS ${row.traceRootCount}<br>TRACE HASH ${escapeHtml(row.traceContentHash)}<br>REPORT ${escapeHtml(state.report.reportDigest)}<br>PREDICTION ${escapeHtml(state.report.predictionSha256)}`;
     }
 
     function renderActiveRep() {
@@ -324,11 +357,14 @@
       const currentMs = video.currentTime * 1000;
       const human = rangeAt(row.truthRanges, currentMs);
       const predicted = rangeAt(row.predictedReps.map((rep) => ({ startMs: rep.startMs, endMs: rep.endMs })), currentMs);
+      const predictedRep = predicted ? row.predictedReps[predicted.index] : null;
+      const activePhase = phaseAt(predictedRep, row.phaseOrder, currentMs);
       byId("activeRepSummary").innerHTML = `
         <div class="active-rep"><b>HUMAN ${human ? `REP ${human.index + 1}` : "非动作区间"}</b><p>${human ? `${formatMs(human.range.startMs)} → ${formatMs(human.range.endMs)}` : "当前时间不在人工作业 Rep 区间内。"}</p></div>
-        <div class="active-rep"><b style="color:var(--cyan)">RUST V7 ${predicted ? `REP ${predicted.index + 1}` : "无 Rep"}</b><p>${predicted ? `${formatMs(predicted.range.startMs)} → ${formatMs(predicted.range.endMs)}` : "当前时间没有非 rejected 的 v7 Rep。"}</p></div>`;
+        <div class="active-rep"><b style="color:var(--cyan)">RUST V7 ${predicted ? `REP ${predicted.index + 1}` : "无 Rep"}</b><p>${predictedRep ? `${phaseLabel(row.phaseOrder[0])} ${formatMs(predictedRep.turnaroundMs - predictedRep.startMs)} → 换向 ${formatMs(predictedRep.turnaroundMs)} → ${phaseLabel(row.phaseOrder[1])} ${formatMs(predictedRep.endMs - predictedRep.turnaroundMs)}` : "当前时间没有非 rejected 的 v7 Rep。"}</p></div>`;
       byId("humanRepHud").textContent = human ? `HUMAN REP ${human.index + 1}` : "HUMAN —";
       byId("v7RepHud").textContent = predicted ? `V7 REP ${predicted.index + 1}` : "V7 —";
+      byId("v7PhaseHud").textContent = activePhase ? `${phaseLabel(activePhase.phase)} · V7` : "PHASE —";
     }
 
     function signed(value) {
@@ -477,6 +513,14 @@
         plotContext.fillStyle = "rgba(255,96,73,.12)";
         plotContext.fillRect(rep.startMs / duration * width, 0, (rep.endMs - rep.startMs) / duration * width, height);
       });
+      state.activeRow.predictedReps.forEach((rep) => {
+        const x = rep.turnaroundMs / duration * width;
+        plotContext.strokeStyle = "rgba(255,255,255,.68)";
+        plotContext.lineWidth = 1;
+        plotContext.setLineDash([3, 3]);
+        plotContext.beginPath(); plotContext.moveTo(x, 0); plotContext.lineTo(x, height); plotContext.stroke();
+      });
+      plotContext.setLineDash([]);
       drawSignal(9, "#4de4ee");
       drawSignal(10, "#ffd34e");
       const playheadX = video.currentTime * 1000 / duration * width;
@@ -501,7 +545,7 @@
       }
     }
 
-    function visiblePoint(point) {
+  function visiblePoint(point) {
       return Boolean(point) && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))
         && Number(point.visibility ?? 1) >= .15;
     }
@@ -554,11 +598,16 @@
     void init();
   }
 
+  function phaseLabel(phase) {
+    return phase === "concentric" ? "向心" : phase === "eccentric" ? "离心" : "阶段未知";
+  }
+
   return Object.freeze({
     mount,
     normalizeReport,
     frameAt,
     rangeAt,
+    phaseAt,
     predictionMatchMap,
     rowProblem,
     formatPercent,

@@ -6,6 +6,7 @@ const {
   normalizeReport,
   frameAt,
   rangeAt,
+  phaseAt,
   predictionMatchMap,
   rowProblem,
   formatPercent,
@@ -16,6 +17,8 @@ test("v7 alignment page is independent from the quality annotation desk", () => 
   assert.match(html, /data-v7-alignment-review/u);
   assert.match(html, /人工标注 × v7 预测/u);
   assert.match(html, /不会在浏览器内伪造或重算/u);
+  assert.match(html, /V7 换向点/u);
+  assert.match(html, /器械未输出/u);
   assert.match(html, /v7AlignmentReviewApp\.js/u);
   assert.doesNotMatch(html, /qualityReviewApp\.js/u);
 });
@@ -44,6 +47,10 @@ test("frame and Rep lookup use source timestamps without inventing observations"
   assert.equal(frameAt(frames, 500, 60), null);
   assert.equal(rangeAt([{ startMs: 1_000, endMs: 2_000 }], 1_500).index, 0);
   assert.equal(rangeAt([{ startMs: 1_000, endMs: 2_000 }], 900), null);
+  const rep = { startMs: 1_000, turnaroundMs: 1_500, endMs: 2_000 };
+  assert.equal(phaseAt(rep, ["concentric", "eccentric"], 1_400).phase, "concentric");
+  assert.equal(phaseAt(rep, ["concentric", "eccentric"], 1_600).phase, "eccentric");
+  assert.equal(phaseAt(rep, ["concentric", "eccentric"], 900), null);
 });
 
 function fixtureReport() {
@@ -62,6 +69,8 @@ function fixtureReport() {
       contextId: "capture-a:lateral_raise:front",
       exerciseId: "lateral_raise",
       capturePosition: "front",
+      phaseOrder: ["concentric", "eccentric"],
+      phaseContractSource: "action-contract-catalog",
       videoUrl: "/media/v7-alignment?id=capture-a",
       poseUrl: "/api/review/v7-pose?id=capture-a",
       durationMs: 5_000,

@@ -12,6 +12,7 @@ import { evaluatePoseKeypoints } from "./poseKeypointEvaluation";
 import { PoseKeypointReviewStore } from "./poseKeypointReview";
 import { RecognitionReviewRepository } from "./reviewData";
 import { TechniqueReviewStore } from "./techniqueReview";
+import { ACTION_CONTRACT_CATALOG } from "../motion-quality/actionContractCatalog";
 
 export interface RecognitionReviewServerOptions {
   readonly repository: RecognitionReviewRepository;
@@ -548,12 +549,20 @@ async function v7AlignmentReportForClient(
       const label = exactV7Label(labels, row);
       return {
         ...row,
+        phaseOrder: requireV7PhaseOrder(row.exerciseId),
+        phaseContractSource: "action-contract-catalog",
         durationMs: label.source.durationMs ?? null,
         videoUrl: `/media/v7-alignment?id=${encodeURIComponent(row.contextId)}`,
         poseUrl: `/api/review/v7-pose?id=${encodeURIComponent(row.sourceCaptureId)}`,
       };
     }),
   };
+}
+
+function requireV7PhaseOrder(exerciseId: string): readonly ["concentric" | "eccentric", "concentric" | "eccentric"] {
+  const contract = ACTION_CONTRACT_CATALOG.find((candidate) => candidate.exerciseId === exerciseId);
+  if (!contract) throw new Error(`v7 action contract not found for ${exerciseId}`);
+  return contract.phase.order;
 }
 
 function resolveV7Path(rootPath: string, relativePath: string, label: string): string {
