@@ -2,10 +2,14 @@ import React, { useEffect, useState, type ReactNode } from "react";
 import {
   AppState,
   Pressable,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
 
 import type {
   AccountRuntime,
@@ -17,6 +21,9 @@ import type {
   SocialProvider,
 } from "./model";
 import type { OnlineAuthController } from "./OnlineAuthController";
+import { userFacingError } from "../userFacingError";
+import { mobileT } from "../../i18n";
+
 
 export interface AuthRootProps<TRuntime extends AccountRuntime> {
   controller: OnlineAuthController<TRuntime>;
@@ -82,15 +89,15 @@ export function AuthRoot<TRuntime extends AccountRuntime>({
   }
 
   if (state.status === "checking" || state.status === "authenticating") {
-    return <GateMessage title={state.status === "checking" ? "正在验证登录" : "正在安全登录"} />;
+    return <GateMessage title={state.status === "checking" ? mobileT("mobile.auth.authroot.762fc2335c") : mobileT("mobile.auth.authroot.b3c8b0ef89")} />;
   }
 
   if (state.status === "offline") {
     return (
       <GateMessage
-        title="需要联网才能使用 MaxPower"
-        detail="恢复网络后重试；本地账号资料不会在离线状态下打开。"
-        actionLabel="重试"
+        title={mobileT("mobile.auth.authroot.fd469ca4ff")}
+        detail={mobileT("mobile.auth.authroot.0245591bc9")}
+        actionLabel={mobileT("mobile.auth.authroot.e2d53a6d3a")}
         onAction={() => void controller.bootstrap()}
       />
     );
@@ -99,9 +106,9 @@ export function AuthRoot<TRuntime extends AccountRuntime>({
   if (state.status === "error") {
     return (
       <GateMessage
-        title="暂时无法验证账号"
+        title={mobileT("mobile.auth.authroot.217225225e")}
         detail={friendlyError(state.error.code)}
-        actionLabel="重试"
+        actionLabel={mobileT("mobile.auth.authroot.e2d53a6d3a")}
         onAction={() => void controller.bootstrap()}
       />
     );
@@ -154,7 +161,7 @@ function AuthenticatedAccountControls<TRuntime extends AccountRuntime>({
   };
 
   const link = (provider: SocialProvider) => void run(async () => {
-    if (!socialAuthorization) throw new Error("当前设备不支持社交账号关联");
+    if (!socialAuthorization) throw new Error(mobileT("mobile.auth.authroot.9306944290"));
     const result = await controller.linkSocialIdentity(provider, socialAuthorization);
     if (result === "linked") await refreshIdentities();
   });
@@ -168,14 +175,14 @@ function AuthenticatedAccountControls<TRuntime extends AccountRuntime>({
   return (
     <View style={{ position: "absolute", inset: 0, backgroundColor: "rgba(23,22,19,0.45)", justifyContent: "center", padding: 24 }}>
       <View style={{ borderRadius: 18, padding: 20, backgroundColor: "#fffdf9" }}>
-        <Text style={{ color: "#171613", fontSize: 20, fontWeight: "900" }}>账号设置</Text>
-        <Text style={{ color: "#69635a", marginTop: 6 }}>已关联的登录方式</Text>
+        <Text style={{ color: "#171613", fontSize: 20, fontWeight: "900" }}>{mobileT("mobile.auth.authroot.7a66bc8dab")}</Text>
+        <Text style={{ color: "#69635a", marginTop: 6 }}>{mobileT("mobile.auth.authroot.151708c69c")}</Text>
         {identities.map((identity) => (
           <View key={identity.id} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 }}>
             <Text style={{ color: "#34312c", fontWeight: "700" }}>{identityLabel(identity.providerId)}</Text>
             {identities.length > 1 ? (
               <Pressable disabled={busy} onPress={() => unlink(identity)}>
-                <Text style={{ color: "#9b3b32", fontWeight: "700" }}>解除关联</Text>
+                <Text style={{ color: "#9b3b32", fontWeight: "700" }}>{mobileT("mobile.auth.authroot.25a139280f")}</Text>
               </Pressable>
             ) : null}
           </View>
@@ -185,30 +192,29 @@ function AuthenticatedAccountControls<TRuntime extends AccountRuntime>({
           .map((provider) => (
             <PrimaryButton
               key={provider}
-              label={`关联 ${providerLabel(provider)}`}
+              label={mobileT("mobile.auth.authroot.aa3ca8b7cb", { value0: providerLabel(provider) })}
               disabled={busy}
               onPress={() => link(provider)}
             />
           ))}
 
-        <Text style={{ color: "#9b3b32", fontWeight: "900", marginTop: 24 }}>删除账号与全部云端资料</Text>
+        <Text style={{ color: "#9b3b32", fontWeight: "900", marginTop: 24 }}>{mobileT("mobile.auth.authroot.326ee09bb9")}</Text>
         <Text style={{ color: "#69635a", marginTop: 5, marginBottom: 9 }}>
-          输入 DELETE 确认。删除开始后会立即退出并停止 Coach 服务。
-        </Text>
+          {mobileT("mobile.auth.authroot.739d319562")}</Text>
         <Field
           value={deleteConfirmation}
           onChangeText={setDeleteConfirmation}
-          placeholder="DELETE"
+          placeholder={mobileT("mobile.account.deleteConfirmationPlaceholder")}
           autoCapitalize="characters"
         />
         <PrimaryButton
-          label="永久删除账号"
+          label={mobileT("mobile.auth.authroot.867ee16597")}
           disabled={busy || deleteConfirmation !== "DELETE"}
           onPress={() => void run(() => controller.deleteAccount())}
         />
-        <PrimaryButton label="退出当前账号" disabled={busy} onPress={() => void controller.logout()} />
+        <PrimaryButton label={mobileT("mobile.auth.authroot.6a8052d6eb")} disabled={busy} onPress={() => void controller.logout()} />
         <Pressable disabled={busy} onPress={onClose} style={{ alignItems: "center", padding: 14 }}>
-          <Text style={{ color: "#4e4941", fontWeight: "800" }}>关闭</Text>
+          <Text style={{ color: "#4e4941", fontWeight: "800" }}>{mobileT("mobile.auth.authroot.6c14bd7f6f")}</Text>
         </Pressable>
         {error ? <Text style={{ color: "#a33c32", marginTop: 8 }}>{error}</Text> : null}
       </View>
@@ -234,9 +240,9 @@ function DeletingAccountGate<TRuntime extends AccountRuntime>({
   const completed = state.deletion.status === "completed";
   return (
     <GateMessage
-      title={completed ? "账号资料已删除" : "正在删除账号与云端资料"}
+      title={completed ? mobileT("mobile.auth.authroot.8c09721d17") : mobileT("mobile.auth.authroot.ca49f68c2f")}
       detail={error ?? deletionStatusCopy(state.deletion.status)}
-      actionLabel={completed ? "返回登录" : "刷新进度"}
+      actionLabel={completed ? mobileT("mobile.auth.authroot.f2fe4ecc0f") : mobileT("mobile.auth.authroot.8cf2c88f98")}
       onAction={() => void (completed
         ? controller.acknowledgeCompletedDeletion()
         : controller.refreshDeletionStatus().catch((cause) => setError(friendlyCause(cause))))}
@@ -253,6 +259,8 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
   socialAuthorization?: SocialAuthorizationPort;
   initialError?: string;
 }) {
+  const { height: viewportHeight } = useWindowDimensions();
+  const compactLayout = viewportHeight < 740;
   const [configuration, setConfiguration] = useState<IdentityPublicConfiguration>();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [method, setMethod] = useState<"password" | "otp">("password");
@@ -265,14 +273,17 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
   const [challengeId, setChallengeId] = useState<string>();
   const [registrationId, setRegistrationId] = useState<string>();
   const [socialSessionToken, setSocialSessionToken] = useState<string>();
+  const [configurationLoading, setConfigurationLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(initialError ? friendlyError(initialError) : undefined);
 
   const loadConfiguration = () => {
+    setConfigurationLoading(true);
     setError(undefined);
     void controller.getPublicConfiguration()
       .then(setConfiguration)
-      .catch((cause) => setError(friendlyCause(cause)));
+      .catch((cause) => setError(friendlyCause(cause)))
+      .finally(() => setConfigurationLoading(false));
   };
 
   useEffect(() => {
@@ -295,9 +306,9 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
   };
 
   const begin = () => void run(async () => {
-    if (!identifier.trim()) throw new Error(channel === "email" ? "请输入邮箱" : "请输入含国家区号的手机号");
+    if (!identifier.trim()) throw new Error(channel === "email" ? mobileT("mobile.auth.authroot.f2dc24deb8") : mobileT("mobile.auth.authroot.81e88c4256"));
     if (mode === "login" && method === "password") {
-      if (!password) throw new Error("请输入密码");
+      if (!password) throw new Error(mobileT("mobile.auth.authroot.713b738250"));
       await controller.loginWithPassword({ identifier: identity, password });
       return;
     }
@@ -308,7 +319,7 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
   });
 
   const verify = () => void run(async () => {
-    if (!challengeId || !code.trim()) throw new Error("请输入验证码");
+    if (!challengeId || !code.trim()) throw new Error(mobileT("mobile.auth.authroot.e5bd79ee38"));
     if (mode === "login") {
       await controller.verifyLoginOtp({ challengeId, code });
       return;
@@ -318,9 +329,9 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
   });
 
   const completeRegistration = () => void run(async () => {
-    if (!configuration) throw new Error("尚未取得注册条款版本");
-    if (!displayName.trim()) throw new Error("请输入昵称");
-    if (!termsAccepted) throw new Error("请先同意当前服务条款");
+    if (!configuration) throw new Error(mobileT("mobile.auth.authroot.a3c7ce6d4e"));
+    if (!displayName.trim()) throw new Error(mobileT("mobile.auth.authroot.5dbe6b07eb"));
+    if (!termsAccepted) throw new Error(mobileT("mobile.auth.authroot.061ef519ff"));
     if (socialSessionToken) {
       await controller.completeSocialOnboarding({
         sessionToken: socialSessionToken,
@@ -329,8 +340,8 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
       });
       return;
     }
-    if (!registrationId) throw new Error("注册验证已失效，请重新开始");
-    if (password.length < 8) throw new Error("密码至少 8 位");
+    if (!registrationId) throw new Error(mobileT("mobile.auth.authroot.90db67fff1"));
+    if (password.length < 8) throw new Error(mobileT("mobile.auth.authroot.67ac940574"));
     await controller.completeRegistration({
       registrationId,
       displayName,
@@ -340,7 +351,7 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
   });
 
   const signInWithSocial = (provider: SocialProvider) => void run(async () => {
-    if (!socialAuthorization) throw new Error("当前设备不支持社交登录");
+    if (!socialAuthorization) throw new Error(mobileT("mobile.auth.authroot.ced5d16716"));
     const result = await controller.signInWithSocial(provider, socialAuthorization);
     if (result.status === "onboarding_required") setSocialSessionToken(result.sessionToken);
   });
@@ -354,104 +365,310 @@ function CredentialScreen<TRuntime extends AccountRuntime>({
     setCode("");
     setError(undefined);
   };
-  const socialProviders = configuration && socialAuthorization
-    ? configuration.socialProviders.filter((provider) =>
-        socialAuthorization.availableProviders().includes(provider)
-      )
-    : [];
+  const selectLoginMethod = (nextMethod: "password" | "otp") => {
+    resetFlow("login");
+    setMethod(nextMethod);
+  };
+  const toggleChannel = () => {
+    setChannel((current) => current === "email" ? "phone" : "email");
+    setIdentifier("");
+    setError(undefined);
+  };
+  const deviceSocialProviders = socialAuthorization?.availableProviders() ?? [];
+  const eligibleSocialProviders = configuration
+    ? configuration.socialProviders.filter((provider) => deviceSocialProviders.includes(provider))
+    : deviceSocialProviders;
+  const socialProviders = (["apple", "google"] as const)
+    .filter((provider) => eligibleSocialProviders.includes(provider));
+
+  const initialStep = !challengeId && !registrationId && !socialSessionToken;
 
   return (
-    <View style={{ flex: 1, justifyContent: "center", paddingHorizontal: 28, backgroundColor: "#f7f3eb" }}>
-      <Text style={{ color: "#171613", fontSize: 30, fontWeight: "900", letterSpacing: -0.8 }}>MaxPower</Text>
-      <Text style={{ color: "#666158", fontSize: 15, marginTop: 8, marginBottom: 24 }}>
-        登录后才能打开你的训练、营养与 Coach 数据。
-      </Text>
-
-      <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
-        <Choice selected={mode === "login"} label="登录" onPress={() => resetFlow("login")} />
-        <Choice selected={mode === "register"} label="注册" onPress={() => resetFlow("register")} />
+    <ScrollView
+      style={credentialStyles.screen}
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={[credentialStyles.page, compactLayout && credentialStyles.pageCompact]}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={credentialStyles.brandRow}>
+        <MaxPowerMark size={30} />
+        <Text style={credentialStyles.brandName}>MAXPOWER</Text>
       </View>
 
-      {!challengeId && !registrationId && !socialSessionToken ? (
-        <>
-          <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-            <Choice selected={channel === "email"} label="邮箱" onPress={() => setChannel("email")} />
-            <Choice selected={channel === "phone"} label="手机号" onPress={() => setChannel("phone")} />
-          </View>
-          <Field
-            value={identifier}
-            onChangeText={setIdentifier}
-            placeholder={channel === "email" ? "name@example.com" : "+8613800138000"}
-            keyboardType={channel === "email" ? "email-address" : "phone-pad"}
-            autoCapitalize="none"
-          />
-          {mode === "login" ? (
-            <View style={{ flexDirection: "row", gap: 8, marginVertical: 12 }}>
-              <Choice selected={method === "password"} label="密码" onPress={() => setMethod("password")} />
-              <Choice selected={method === "otp"} label="验证码" onPress={() => setMethod("otp")} />
+      <View style={[credentialStyles.main, compactLayout && credentialStyles.mainCompact]}>
+        <View style={[credentialStyles.form, compactLayout && credentialStyles.formCompact]}>
+        {initialStep ? (
+          <>
+            <View style={credentialStyles.welcome}>
+              <Text style={credentialStyles.welcomeTitle}>
+                {mode === "login" ? mobileT("mobile.auth.welcomeBack") : mobileT("mobile.auth.createAccount")}
+              </Text>
+              <Text style={credentialStyles.welcomeSubtitle}>
+                {mode === "login" ? mobileT("mobile.auth.signInSubtitle") : mobileT("mobile.auth.registerSubtitle")}
+              </Text>
             </View>
-          ) : null}
-          {mode === "login" && method === "password" ? (
-            <Field value={password} onChangeText={setPassword} placeholder="密码" secureTextEntry />
-          ) : null}
-          <PrimaryButton
-            label={mode === "login" && method === "password" ? "登录" : "发送验证码"}
-            disabled={busy || (mode === "register" && !configuration)}
-            onPress={begin}
-          />
-          {socialProviders.map((provider) => (
-            <PrimaryButton
-              key={provider}
-              label={`使用 ${providerLabel(provider)} 继续`}
-              disabled={busy}
-              onPress={() => signInWithSocial(provider)}
-            />
-          ))}
-        </>
-      ) : registrationId || socialSessionToken ? (
-        <>
-          <Text style={{ color: "#3e3b35", fontWeight: "700", marginBottom: 10 }}>完成账号资料</Text>
-          <Field value={displayName} onChangeText={setDisplayName} placeholder="昵称" />
-          {registrationId ? (
-            <Field value={password} onChangeText={setPassword} placeholder="设置密码（至少 8 位）" secureTextEntry />
-          ) : null}
-          <Pressable
-            accessibilityRole="checkbox"
-            accessibilityState={{ checked: termsAccepted }}
-            onPress={() => setTermsAccepted((value) => !value)}
-            style={{ flexDirection: "row", alignItems: "center", marginVertical: 12 }}
-          >
-            <Text style={{ color: termsAccepted ? "#176748" : "#6c675e", fontSize: 15 }}>
-              {termsAccepted ? "☑" : "☐"} 我同意当前服务条款
-            </Text>
-          </Pressable>
-          <PrimaryButton
-            label={socialSessionToken ? "完成社交账号注册" : "完成注册"}
-            disabled={busy || !configuration}
-            onPress={completeRegistration}
-          />
-        </>
-      ) : (
-        <>
-          <Text style={{ color: "#3e3b35", marginBottom: 10 }}>验证码已发送</Text>
-          <Field value={code} onChangeText={setCode} placeholder="验证码" keyboardType="number-pad" />
-          <PrimaryButton label="验证" disabled={busy} onPress={verify} />
-        </>
-      )}
 
-      {configuration ? (
-        <Text style={{ color: "#8a8378", fontSize: 12, marginTop: 14 }}>
-          登录区域：全球
-        </Text>
-      ) : (
-        <Pressable onPress={loadConfiguration} style={{ marginTop: 14 }}>
-          <Text style={{ color: "#176748", fontWeight: "700" }}>重新读取登录配置</Text>
-        </Pressable>
-      )}
-      {error ? <Text style={{ color: "#a33c32", marginTop: 12 }}>{error}</Text> : null}
+            {socialProviders.length > 0 ? (
+              <>
+                <View style={credentialStyles.socialStack}>
+                  {socialProviders.map((provider) => (
+                    <LoginSocialButton
+                      key={provider}
+                      provider={provider}
+                      disabled={busy}
+                      onPress={() => signInWithSocial(provider)}
+                    />
+                  ))}
+                </View>
+                <View style={credentialStyles.divider}>
+                  <View style={credentialStyles.rule} />
+                  <Text style={credentialStyles.dividerLabel}>{mobileT("mobile.auth.separator.or")}</Text>
+                  <View style={credentialStyles.rule} />
+                </View>
+              </>
+            ) : null}
+
+            <LoginField
+              label={channel === "email" ? mobileT("mobile.auth.authroot.9ed627bcf6") : mobileT("mobile.auth.authroot.5a9cc5e891")}
+              action={mode === "login" && method === "otp" ? (
+                <LoginLink
+                  label={`${mobileT("mobile.auth.authroot.c839a8ff17")}${mobileT("mobile.auth.authroot.21f1e88275")}`}
+                  onPress={() => selectLoginMethod("password")}
+                  compact
+                />
+              ) : undefined}
+              value={identifier}
+              onChangeText={setIdentifier}
+              placeholder={channel === "email" ? mobileT("mobile.auth.identifier.emailPlaceholder") : mobileT("mobile.auth.identifier.phonePlaceholder")}
+              keyboardType={channel === "email" ? "email-address" : "phone-pad"}
+              autoCapitalize="none"
+            />
+            {mode === "login" && method === "password" ? (
+              <LoginField
+                label={mobileT("mobile.auth.authroot.c839a8ff17")}
+                action={(
+                  <LoginLink
+                    label={`${mobileT("mobile.auth.authroot.3e3d59a258")}${mobileT("mobile.auth.authroot.21f1e88275")}`}
+                    onPress={() => selectLoginMethod("otp")}
+                    compact
+                  />
+                )}
+                value={password}
+                onChangeText={setPassword}
+                placeholder={mobileT("mobile.auth.authroot.c839a8ff17")}
+                secureTextEntry
+              />
+            ) : null}
+            <LoginPrimaryButton
+              label={mode === "login" && method === "password" ? mobileT("mobile.auth.authroot.21f1e88275") : mobileT("mobile.auth.authroot.42e8edb226")}
+              disabled={busy || (mode === "register" && !configuration)}
+              onPress={begin}
+            />
+
+            <View style={credentialStyles.secondaryActions}>
+              {mode === "login" ? (
+                <>
+                  <LoginLink
+                    label={`${channel === "email" ? mobileT("mobile.auth.authroot.5a9cc5e891") : mobileT("mobile.auth.authroot.9ed627bcf6")}${mobileT("mobile.auth.authroot.21f1e88275")}`}
+                    onPress={toggleChannel}
+                  />
+                  <View style={credentialStyles.signupRow}>
+                    <Text style={credentialStyles.signupPrompt}>{mobileT("mobile.auth.noAccount")}</Text>
+                    <LoginLink label={mobileT("mobile.auth.authroot.da0e5f8dc9")} onPress={() => resetFlow("register")} emphasis />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <LoginLink
+                    label={`${channel === "email" ? mobileT("mobile.auth.authroot.5a9cc5e891") : mobileT("mobile.auth.authroot.9ed627bcf6")}${mobileT("mobile.auth.authroot.da0e5f8dc9")}`}
+                    onPress={toggleChannel}
+                  />
+                  <LoginLink label={mobileT("mobile.auth.authroot.f2fe4ecc0f")} onPress={() => resetFlow("login")} emphasis />
+                </>
+              )}
+            </View>
+          </>
+        ) : registrationId || socialSessionToken ? (
+          <>
+            <Text style={credentialStyles.stepTitle}>{mobileT("mobile.auth.authroot.f8a66a8828")}</Text>
+            <LoginField label={mobileT("mobile.auth.authroot.25124ed74c")} value={displayName} onChangeText={setDisplayName} placeholder={mobileT("mobile.auth.authroot.25124ed74c")} />
+            {registrationId ? (
+              <LoginField label={mobileT("mobile.auth.authroot.c839a8ff17")} value={password} onChangeText={setPassword} placeholder={mobileT("mobile.auth.authroot.ececf3b0e9")} secureTextEntry />
+            ) : null}
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: termsAccepted }}
+              onPress={() => setTermsAccepted((value) => !value)}
+              style={credentialStyles.termsRow}
+            >
+              <View style={[credentialStyles.checkbox, termsAccepted && credentialStyles.checkboxChecked]}>
+                <Text style={credentialStyles.checkmark}>{termsAccepted ? "✓" : ""}</Text>
+              </View>
+              <Text style={credentialStyles.termsText}>{mobileT("mobile.auth.authroot.e28298f99f")}</Text>
+            </Pressable>
+            <LoginPrimaryButton
+              label={socialSessionToken ? mobileT("mobile.auth.authroot.9f784ab3c4") : mobileT("mobile.auth.authroot.f3db8bcde1")}
+              disabled={busy || !configuration}
+              onPress={completeRegistration}
+            />
+          </>
+        ) : (
+          <>
+            <Text style={credentialStyles.stepTitle}>{mobileT("mobile.auth.authroot.4e09cf222e")}</Text>
+            <LoginField label={mobileT("mobile.auth.authroot.3e3d59a258")} value={code} onChangeText={setCode} placeholder={mobileT("mobile.auth.authroot.3e3d59a258")} keyboardType="number-pad" />
+            <LoginPrimaryButton label={mobileT("mobile.auth.authroot.80144e2e73")} disabled={busy} onPress={verify} />
+          </>
+        )}
+
+        {!configuration && !configurationLoading ? (
+          <Pressable onPress={loadConfiguration} style={credentialStyles.retry}>
+            <Text style={credentialStyles.retryText}>{mobileT("mobile.auth.authroot.d0b5fc4a94")}</Text>
+          </Pressable>
+        ) : null}
+          {error ? <Text style={credentialStyles.error}>{error}</Text> : null}
+        </View>
+      </View>
+    </ScrollView>
+  );
+}
+
+function MaxPowerMark({ size = 152 }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 1024 1024" accessibilityLabel="MaxPower">
+      <Path d="M196 714 L342 326 L506 632 L704 214 L838 714" fill="none" stroke="#C6F135" strokeWidth={116} strokeLinecap="round" strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
+function SocialProviderGlyph({ provider }: { provider: SocialProvider }) {
+  if (provider === "apple") return <Text style={credentialStyles.appleGlyph}></Text>;
+  return (
+    <Svg width={18} height={18} viewBox="0 0 24 24" accessibilityLabel="Google">
+      <Path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
+      <Path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+      <Path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+      <Path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+    </Svg>
+  );
+}
+
+function LoginField({
+  label,
+  action,
+  ...props
+}: React.ComponentProps<typeof TextInput> & { label: string; action?: ReactNode }) {
+  return (
+    <View style={credentialStyles.fieldGroup}>
+      <View style={credentialStyles.fieldHeader}>
+        <Text style={credentialStyles.fieldLabel}>{label}</Text>
+        {action}
+      </View>
+      <TextInput
+        {...props}
+        accessibilityLabel={props.accessibilityLabel ?? label}
+        placeholderTextColor="#9A9E96"
+        style={credentialStyles.input}
+      />
     </View>
   );
 }
+
+function LoginSocialButton({ provider, disabled, onPress }: { provider: SocialProvider; disabled: boolean; onPress(): void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [credentialStyles.socialButton, pressed && credentialStyles.pressed, disabled && credentialStyles.disabled]}
+    >
+      <View style={credentialStyles.socialIcon}>
+        <SocialProviderGlyph provider={provider} />
+      </View>
+      <Text style={credentialStyles.socialLabel}>
+        {mobileT("mobile.auth.authroot.13d1178fe4", { value0: providerLabel(provider) })}
+      </Text>
+    </Pressable>
+  );
+}
+
+function LoginPrimaryButton({ label, disabled, onPress }: { label: string; disabled?: boolean; onPress(): void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [credentialStyles.primaryButton, pressed && credentialStyles.pressed, disabled && credentialStyles.disabled]}
+    >
+      <Text style={credentialStyles.primaryLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function LoginLink({
+  label,
+  onPress,
+  compact = false,
+  emphasis = false,
+}: {
+  label: string;
+  onPress(): void;
+  compact?: boolean;
+  emphasis?: boolean;
+}) {
+  return (
+    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={compact ? 10 : 8}>
+      <Text style={[credentialStyles.link, compact && credentialStyles.compactLink, emphasis && credentialStyles.emphasisLink]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const credentialStyles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: "#F5F6F3" },
+  page: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 26, paddingBottom: 22, backgroundColor: "#F5F6F3" },
+  pageCompact: { paddingTop: 20, paddingBottom: 18 },
+  brandRow: { minHeight: 32, flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 8 },
+  brandName: { color: "#171A17", fontSize: 13, lineHeight: 16, fontWeight: "900", letterSpacing: 0.9 },
+  main: { flexGrow: 1, alignItems: "center", justifyContent: "center", paddingVertical: 38 },
+  mainCompact: { paddingVertical: 24 },
+  form: { width: "100%", maxWidth: 384, alignSelf: "center", gap: 18 },
+  formCompact: { gap: 15 },
+  welcome: { gap: 5, marginBottom: 7 },
+  welcomeTitle: { color: "#171A17", fontSize: 30, lineHeight: 36, fontWeight: "800", letterSpacing: -0.8 },
+  welcomeSubtitle: { color: "#757A72", fontSize: 14, lineHeight: 20, fontWeight: "500" },
+  socialStack: { gap: 10 },
+  socialButton: { minHeight: 52, position: "relative", flexDirection: "row", alignItems: "center", justifyContent: "center", borderRadius: 10, borderWidth: 1, borderColor: "#D7DBD3", backgroundColor: "#FFFFFF" },
+  socialIcon: { position: "absolute", left: 17, width: 22, alignItems: "center", justifyContent: "center" },
+  appleGlyph: { color: "#0E100E", fontSize: 20, lineHeight: 22, fontWeight: "700" },
+  socialLabel: { color: "#20231F", fontSize: 14, fontWeight: "700" },
+  divider: { minHeight: 20, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12 },
+  rule: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: "#D4D8D0" },
+  dividerLabel: { color: "#8A8F87", fontSize: 12, fontWeight: "600" },
+  fieldGroup: { gap: 7 },
+  fieldHeader: { minHeight: 20, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  fieldLabel: { color: "#383C36", fontSize: 13, fontWeight: "700" },
+  input: { minHeight: 52, paddingHorizontal: 15, borderRadius: 10, borderWidth: 1, borderColor: "#D7DBD3", backgroundColor: "#FFFFFF", color: "#171A17", fontSize: 15, fontWeight: "500" },
+  primaryButton: { minHeight: 54, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#171A17" },
+  primaryLabel: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+  pressed: { opacity: 0.68, transform: [{ scale: 0.985 }] },
+  disabled: { opacity: 0.42 },
+  secondaryActions: { alignItems: "center", gap: 14, paddingTop: 1 },
+  signupRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  signupPrompt: { color: "#7C8179", fontSize: 13, fontWeight: "500" },
+  link: { color: "#555B52", fontSize: 13, fontWeight: "700" },
+  compactLink: { color: "#4C5E22", fontSize: 13 },
+  emphasisLink: { color: "#242822", fontWeight: "800", textDecorationLine: "underline" },
+  stepTitle: { marginBottom: 5, color: "#171A17", fontSize: 26, lineHeight: 32, fontWeight: "800", letterSpacing: -0.5 },
+  termsRow: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 9 },
+  checkbox: { width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: 5, borderWidth: 1, borderColor: "#9A9E96" },
+  checkboxChecked: { borderColor: "#9BC918", backgroundColor: "#C6F135" },
+  checkmark: { color: "#0E100E", fontSize: 11, fontWeight: "900" },
+  termsText: { flex: 1, color: "#6C7168", fontSize: 11, lineHeight: 16 },
+  retry: { minHeight: 30, alignItems: "center", justifyContent: "center" },
+  retryText: { color: "#526600", fontSize: 11, fontWeight: "800" },
+  error: { color: "#A33C32", fontSize: 11, lineHeight: 16, textAlign: "center" },
+});
 
 function Field(props: React.ComponentProps<typeof TextInput>) {
   return (
@@ -470,24 +687,6 @@ function Field(props: React.ComponentProps<typeof TextInput>) {
         fontSize: 16,
       }}
     />
-  );
-}
-
-function Choice({ selected, label, onPress }: { selected: boolean; label: string; onPress(): void }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={{
-        paddingVertical: 8,
-        paddingHorizontal: 13,
-        borderRadius: 999,
-        backgroundColor: selected ? "#1f6b4d" : "#eae4d9",
-      }}
-    >
-      <Text style={{ color: selected ? "#ffffff" : "#49453e", fontWeight: "800" }}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -533,20 +732,19 @@ function GateMessage({
 }
 
 function friendlyCause(cause: unknown): string {
-  if (cause instanceof Error && !cause.message.startsWith("online_auth_")) return cause.message;
   const code = cause && typeof cause === "object" && "code" in cause && typeof cause.code === "string"
     ? cause.code
     : "request_failed";
-  return friendlyError(code);
+  return userFacingError(cause, friendlyError(code));
 }
 
 function friendlyError(code: string): string {
-  if (code === "network_unavailable") return "无法连接服务器，请检查网络后重试。";
-  if (code === "not_authenticated") return "登录已失效，请重新登录。";
-  if (code === "secure_storage_unavailable") return "设备安全存储不可用，无法安全保存登录。";
-  if (code === "configuration_error") return "客户端尚未配置有效的 HTTPS 服务地址。";
-  if (code === "account_mismatch") return "账号校验不一致，请重新登录。";
-  return "登录请求未完成，请检查信息后重试。";
+  if (code === "network_unavailable") return mobileT("mobile.auth.authroot.d820a2ba23");
+  if (code === "not_authenticated") return mobileT("mobile.auth.authroot.85b4aca4cc");
+  if (code === "secure_storage_unavailable") return mobileT("mobile.auth.authroot.bcaf612a85");
+  if (code === "configuration_error") return mobileT("mobile.auth.authroot.cb650519e5");
+  if (code === "account_mismatch") return mobileT("mobile.auth.authroot.98278cda57");
+  return mobileT("mobile.auth.authroot.0681cf2c60");
 }
 
 function providerLabel(provider: "google" | "apple"): string {
@@ -556,13 +754,13 @@ function providerLabel(provider: "google" | "apple"): string {
 function identityLabel(providerId: string): string {
   if (providerId === "google") return "Google";
   if (providerId === "apple") return "Apple";
-  if (providerId === "credential") return "邮箱或手机号密码";
+  if (providerId === "credential") return mobileT("mobile.auth.authroot.8a091f8cd6");
   return providerId;
 }
 
 function deletionStatusCopy(status: "pending" | "running" | "retryable" | "completed"): string {
-  if (status === "pending") return "删除请求已确认，正在等待后台处理。";
-  if (status === "running") return "正在清理账号、训练结果、计划、媒体和用量记录。";
-  if (status === "retryable") return "部分资料暂未清理完成，服务器会自动重试。";
-  return "账号与云端资料已完成删除。";
+  if (status === "pending") return mobileT("mobile.auth.authroot.74e5b5f777");
+  if (status === "running") return mobileT("mobile.auth.authroot.4417152905");
+  if (status === "retryable") return mobileT("mobile.auth.authroot.4f9186f1d9");
+  return mobileT("mobile.auth.authroot.130dbb066b");
 }
