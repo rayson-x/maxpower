@@ -1,10 +1,11 @@
 use maxpower_motion_sdk::{
     AssessmentAssetKind, AssessmentBundleCapability, AssessmentCaptureView,
-    AssessmentConfigurationError, AssessmentEmission, AssessmentEquipmentSemantics,
-    AssessmentEvent, AssessmentLateralityMode, AssessmentRefusalReason, DeclaredLoad,
-    ExecutionAssessmentEngine, FrameRotation, PoseObservationContract, SetExecutionContext,
-    SetIntent, TimestampUnit, VideoFrameContract, VideoRecognitionContext,
-    WorkoutAssessmentContext, current_motion_assessment_catalog_v1,
+    AssessmentConfigurationError, AssessmentEmission, AssessmentEquipmentRecognitionMode,
+    AssessmentEquipmentSemantics, AssessmentEvent, AssessmentLateralityMode,
+    AssessmentRefusalReason, DeclaredLoad, ExecutionAssessmentEngine, FrameRotation,
+    PoseObservationContract, SetExecutionContext, SetIntent, TimestampUnit, VideoFrameContract,
+    VideoRecognitionContext, WorkoutAssessmentContext, current_motion_assessment_catalog_v1,
+    current_motion_assessment_catalog_v7,
 };
 use serde::Deserialize;
 
@@ -38,6 +39,13 @@ fn annotated_video_context_derives_equipment_and_freezes_one_bundle_before_frame
         resolved.equipment_semantics,
         AssessmentEquipmentSemantics::RigidBarAxis
     );
+    assert_eq!(
+        resolved.equipment_recognition_mode,
+        AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis,
+        "the frozen ExecutionContract must activate the Rust bar-axis adapter"
+    );
+    assert!(resolved.equipment_recognition_mode.is_provider_available());
+    assert!(resolved.equipment_recognition_mode.requires_visual_frame());
     assert_eq!(resolved.variation_id, "standard_variant");
     assert_eq!(resolved.bundle_id, "barbell_bench_press/front/v1");
     assert_eq!(
@@ -52,6 +60,58 @@ fn annotated_video_context_derives_equipment_and_freezes_one_bundle_before_frame
         resolved.bundle_lineage.rule_pack.kind,
         AssessmentAssetKind::RulePack
     );
+}
+
+#[test]
+fn selected_action_contract_is_the_only_equipment_provider_capability_source() {
+    for (action_id, capture_position, expected_mode, provider_available) in [
+        (
+            "barbell_bench_press",
+            "front",
+            AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis,
+            true,
+        ),
+        (
+            "lateral_raise",
+            "front",
+            AssessmentEquipmentRecognitionMode::ProviderUnavailableTwoIndependentDumbbells,
+            false,
+        ),
+        (
+            "push_up",
+            "rearRight45",
+            AssessmentEquipmentRecognitionMode::DisabledBodyOnly,
+            false,
+        ),
+    ] {
+        let mut engine = ExecutionAssessmentEngine::configure(
+            current_motion_assessment_catalog_v7(),
+            WorkoutAssessmentContext {
+                workout_session_id: format!("equipment-plan-{action_id}"),
+            },
+        )
+        .expect("v7 catalog configures");
+        let AssessmentEmission::LiveMotionFacts(facts) = engine
+            .advance(AssessmentEvent::SetStarted(set_context(
+                "equipment-plan-source",
+                action_id,
+                capture_position,
+            )))
+            .expect("selected action resolves")
+        else {
+            panic!("selected action must resolve a live context")
+        };
+        let resolved = facts.resolved_context.expect("resolved equipment plan");
+        assert_eq!(resolved.equipment_recognition_mode, expected_mode);
+        assert_eq!(
+            resolved.equipment_recognition_mode.is_provider_available(),
+            provider_available
+        );
+        assert_eq!(
+            resolved.equipment_recognition_mode.requires_visual_frame(),
+            provider_available
+        );
+    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 {
   "schemaVersion": "maxpower-governed-replay-manifest/v1",
   "bundleId": "current-all-action-known-video-regression/v1",
-  "assembledInputSha256": "abe32d60911f83af6fb7214bd55a13b94f93e363db9bad6fe9122a7a0b91b72e",
+  "assembledInputSha256": "03c497531ed0f921b2d11779024419c5de1ffa7936a339b8bea8a7744a7cd126",
   "assembledInput": {
     "task": "known_video_rep_counting_regression",
     "sourceAssets": [
@@ -41,8 +41,24 @@
           "frames[].selectedBbox",
           "frames[].landmarks"
         ]
+      },
+      {
+        "assetId": "personal-raw-capture-archive",
+        "admission": "immutable_source",
+        "authority": "user_source",
+        "groupKey": "sourceCaptureId",
+        "consumedForTasks": [
+          "failure_review"
+        ],
+        "selectedFields": [
+          "video pixels for ExecutionContract-authorized rigid-bar contexts"
+        ]
       }
     ],
+    "equipmentVideoSourceManifest": {
+      "path": "rust/motion-sdk/tests/fixtures/rigid_bar_video_sources_v1.json",
+      "sha256": "4cfcb733c8f0c34bf8ebcdd2f13071db938742c20831cb8fb8f0b29d6b091f58"
+    },
     "exclusions": {
       "path": "catalog/exclusions.json",
       "sha256": "32861ac0aac92063bf073afff52ad365c4d2b23342009ea8179772a311730f90",
@@ -61,6 +77,8 @@
       "poseRuntimeId": "rtmpose-m",
       "poseSchema": "halpe26/v1",
       "packetContract": "1.10",
+      "equipmentProvider": "maxpower_motion_sdk::BarbellAxisVisualTracker",
+      "equipmentActivationAuthority": "ExecutionContract",
       "countedDispositions": [
         "confirmed",
         "needs_review"
@@ -75,37 +93,50 @@
       "recordsWithBoundaryAlignment": 50,
       "packetCount": 15879,
       "localStates": {
-        "Uninitialized": 6465,
-        "Provisional": 95,
-        "Learning": 86,
-        "Frozen": 5570,
+        "Uninitialized": 745,
+        "Provisional": 197,
+        "Learning": 320,
+        "Frozen": 10954,
         "Degraded": 3663
       },
-      "poseChannelFrames": 4835,
-      "equipmentChannelFrames": 0,
+      "poseChannelFrames": 8546,
+      "equipmentChannelFrames": 3305,
       "fusionStates": {
-        "PoseOnly": 4787,
-        "CannotJudge": 11092
+        "Agreement": 1362,
+        "CannotJudge": 7243,
+        "Conflict": 255,
+        "EquipmentOnly": 254,
+        "PoseOnly": 6765
       },
       "dimensionStates": {
         "TaskCompletion/ObservedAcceptable": 25,
         "TaskCompletion/ObservedDeviation": 26,
         "TaskCompletion/CannotJudge": 2,
-        "RangeOfMotion/ObservedAcceptable": 12,
-        "RangeOfMotion/ObservedDeviation": 6,
-        "RangeOfMotion/CannotJudge": 35,
+        "RangeOfMotion/ObservedAcceptable": 22,
+        "RangeOfMotion/ObservedDeviation": 7,
+        "RangeOfMotion/CannotJudge": 24,
         "PhaseControl/CannotJudge": 53,
         "SupportStability/CannotJudge": 53,
         "BilateralCoordination/CannotJudge": 53,
         "TrajectoryControl/CannotJudge": 53,
         "StandardVariantCompatibility/CannotJudge": 53,
-        "ObservationConfidence/ObservedAcceptable": 21,
-        "ObservationConfidence/CannotJudge": 32
+        "ObservationConfidence/ObservedAcceptable": 34,
+        "ObservationConfidence/CannotJudge": 19
       },
       "referenceKinds": {
         "SelfGeometry": 557,
-        "SetPrefix": 203,
-        "NoReference": 7174
+        "SetPrefix": 337,
+        "NoReference": 7040
+      },
+      "equipmentProvider": {
+        "requestedRecordCount": 18,
+        "availableRecordCount": 18,
+        "decodedFrameCount": 18410,
+        "trackerOutputFrameCount": 5665,
+        "canonicalObservationFrameCount": 4685,
+        "measuredFrameCount": 4605,
+        "predictedFrameCount": 80,
+        "poseFusedFrameCount": 980
       },
       "traceCompleteReportCount": 53,
       "typedRefusalCount": 0

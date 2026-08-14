@@ -74,6 +74,34 @@ pub enum AssessmentEquipmentSemantics {
     FixedSupport,
 }
 
+/// Frozen Rust-provider equipment capability compiled from the exact-context
+/// ExecutionContract and its EquipmentAdapter. Hosts submit context and raw
+/// frames; they must neither infer an activation plan from action names nor
+/// provide a second recognition implementation.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentEquipmentRecognitionMode {
+    RustVisualRigidBarAxis,
+    ProviderUnavailableCableOrMovingHandle,
+    ProviderUnavailableUnilateralCableHandle,
+    ProviderUnavailableConstrainedMachineLever,
+    ProviderUnavailableTwoIndependentDumbbells,
+    DisabledBodyOnly,
+    DisabledFixedSupport,
+}
+
+impl AssessmentEquipmentRecognitionMode {
+    /// Whether this SDK build owns an executable producer for the mode.
+    pub fn is_provider_available(self) -> bool {
+        matches!(self, Self::RustVisualRigidBarAxis)
+    }
+
+    /// Whether the Rust provider needs a luma plane in addition to pose input.
+    pub fn requires_visual_frame(self) -> bool {
+        matches!(self, Self::RustVisualRigidBarAxis)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssessmentLateralityMode {
@@ -370,6 +398,7 @@ pub struct ResolvedAssessmentContext {
     pub action_id: String,
     pub variation_id: String,
     pub equipment_semantics: AssessmentEquipmentSemantics,
+    pub equipment_recognition_mode: AssessmentEquipmentRecognitionMode,
     pub laterality_mode: AssessmentLateralityMode,
     pub observed_active_side: Option<AnatomicalSide>,
     pub capture_view: AssessmentCaptureView,
@@ -775,6 +804,7 @@ struct CompiledAssessmentProgram {
     phase_names: [String; 2],
     task_endpoints: [String; 3],
     local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
+    equipment_recognition_mode: AssessmentEquipmentRecognitionMode,
     reference_order: Vec<ReferenceComparisonKind>,
     range_deviation_ratio: f32,
     minimum_feature_confidence: f32,
@@ -1157,13 +1187,14 @@ impl ExecutionAssessmentEngine {
             .get(&binding.bundle_id)
             .cloned()
             .expect("validated ActionDefinition bundle binding");
-        let resolved_context = ResolvedAssessmentContext {
+        let mut resolved_context = ResolvedAssessmentContext {
             source_capture_id: context.video_context.source_capture_id.clone(),
             action_definition_id: definition.action_definition_id,
             action_definition_hash: definition.content_hash,
             action_id: definition.action_id,
             variation_id,
             equipment_semantics: definition.equipment_semantics,
+            equipment_recognition_mode: equipment_recognition_mode(definition.equipment_semantics),
             laterality_mode: definition.laterality_mode,
             observed_active_side: None,
             capture_view,
@@ -1189,6 +1220,9 @@ impl ExecutionAssessmentEngine {
                     equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
                     pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
                 },
+                equipment_recognition_mode: equipment_recognition_mode(
+                    definition.equipment_semantics,
+                ),
                 reference_order: vec![
                     ReferenceComparisonKind::SetPrefix,
                     ReferenceComparisonKind::SameWorkoutPriorSet,
@@ -1207,6 +1241,7 @@ impl ExecutionAssessmentEngine {
             .get(&bundle.bundle_id)
             .cloned()
             .unwrap_or_default();
+        resolved_context.equipment_recognition_mode = program.equipment_recognition_mode;
         self.active_set = Some(ActiveSet {
             context,
             resolved_context,
@@ -2223,6 +2258,10 @@ fn compile_catalog_programs(
         }
         let expected_evidence_policy =
             equipment_evidence_policy(bundle.exact_context.equipment_semantics);
+        let equipment_recognition_mode =
+            equipment_recognition_mode(bundle.exact_context.equipment_semantics);
+        let equipment_recognition_mode_id =
+            equipment_recognition_mode_id(equipment_recognition_mode);
         if local
             .content
             .get("coordinateSpace")
@@ -2233,6 +2272,16 @@ fn compile_catalog_programs(
                 .get("evidencePolicy")
                 .and_then(serde_json::Value::as_str)
                 != Some(expected_evidence_policy)
+            || execution
+                .content
+                .get("equipmentRecognitionMode")
+                .and_then(serde_json::Value::as_str)
+                != Some(equipment_recognition_mode_id)
+            || equipment
+                .content
+                .get("runtimeAdapter")
+                .and_then(serde_json::Value::as_str)
+                != Some(equipment_recognition_mode_id)
             || equipment
                 .content
                 .get("conflictPolicy")
@@ -2641,6 +2690,7 @@ fn compile_catalog_programs(
                 phase_names,
                 task_endpoints,
                 local_coordinate_strategy,
+                equipment_recognition_mode,
                 reference_order,
                 range_deviation_ratio,
                 minimum_feature_confidence,
@@ -2671,6 +2721,54 @@ fn equipment_semantics_id(value: AssessmentEquipmentSemantics) -> &'static str {
         AssessmentEquipmentSemantics::TwoIndependentDumbbells => "two_independent_dumbbells",
         AssessmentEquipmentSemantics::BodyOnly => "body_only",
         AssessmentEquipmentSemantics::FixedSupport => "fixed_support",
+    }
+}
+
+fn equipment_recognition_mode(
+    value: AssessmentEquipmentSemantics,
+) -> AssessmentEquipmentRecognitionMode {
+    match value {
+        AssessmentEquipmentSemantics::RigidBarAxis => {
+            AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis
+        }
+        AssessmentEquipmentSemantics::CableOrMovingHandle => {
+            AssessmentEquipmentRecognitionMode::ProviderUnavailableCableOrMovingHandle
+        }
+        AssessmentEquipmentSemantics::UnilateralCableHandle => {
+            AssessmentEquipmentRecognitionMode::ProviderUnavailableUnilateralCableHandle
+        }
+        AssessmentEquipmentSemantics::ConstrainedMachineLever => {
+            AssessmentEquipmentRecognitionMode::ProviderUnavailableConstrainedMachineLever
+        }
+        AssessmentEquipmentSemantics::TwoIndependentDumbbells => {
+            AssessmentEquipmentRecognitionMode::ProviderUnavailableTwoIndependentDumbbells
+        }
+        AssessmentEquipmentSemantics::BodyOnly => {
+            AssessmentEquipmentRecognitionMode::DisabledBodyOnly
+        }
+        AssessmentEquipmentSemantics::FixedSupport => {
+            AssessmentEquipmentRecognitionMode::DisabledFixedSupport
+        }
+    }
+}
+
+fn equipment_recognition_mode_id(value: AssessmentEquipmentRecognitionMode) -> &'static str {
+    match value {
+        AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis => "rust_visual_rigid_bar_axis",
+        AssessmentEquipmentRecognitionMode::ProviderUnavailableCableOrMovingHandle => {
+            "provider_unavailable_cable_or_moving_handle"
+        }
+        AssessmentEquipmentRecognitionMode::ProviderUnavailableUnilateralCableHandle => {
+            "provider_unavailable_unilateral_cable_handle"
+        }
+        AssessmentEquipmentRecognitionMode::ProviderUnavailableConstrainedMachineLever => {
+            "provider_unavailable_constrained_machine_lever"
+        }
+        AssessmentEquipmentRecognitionMode::ProviderUnavailableTwoIndependentDumbbells => {
+            "provider_unavailable_two_independent_dumbbells"
+        }
+        AssessmentEquipmentRecognitionMode::DisabledBodyOnly => "disabled_body_only",
+        AssessmentEquipmentRecognitionMode::DisabledFixedSupport => "disabled_fixed_support",
     }
 }
 
@@ -4109,6 +4207,7 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
                 "taskEndpoints": ["locked_out_start", "visible_bottom_turnaround", "returned_lockout"],
                 "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                 "equipmentSemantics": "rigid_bar_axis",
+                "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
                 "deliveryStage": "ticket_02_first_complete_tracer",
             }),
         ),
@@ -4128,6 +4227,7 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
             target.lineage.equipment_adapter.id.clone(),
             serde_json::json!({
                 "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                "runtimeAdapter": "rust_visual_rigid_bar_axis",
                 "conflictPolicy": "abstain_fused_preserve_channels",
                 "poseFallback": "preserve_as_independent_channel",
                 "deliveryStage": "ticket_02_first_complete_tracer",
@@ -4529,6 +4629,7 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
                     "taskEndpoints": task_endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": "rigid_bar_axis",
+                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
                     "deliveryStage": delivery_stage,
                 }),
             ),
@@ -4555,6 +4656,7 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
                 "equipment-adapter",
                 serde_json::json!({
                     "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel",
                     "deliveryStage": delivery_stage,
@@ -5091,6 +5193,7 @@ fn promote_action_family(
                     "phaseOrder": phases, "taskEndpoints": endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": equipment_semantics_id(semantics), "deliveryStage": delivery_stage,
+                    "equipmentRecognitionMode": equipment_recognition_mode_id(equipment_recognition_mode(semantics)),
                 }),
             ),
             (
@@ -5110,6 +5213,7 @@ fn promote_action_family(
                 "equipment-adapter",
                 serde_json::json!({
                     "evidencePolicy": equipment_evidence_policy(semantics),
+                    "runtimeAdapter": equipment_recognition_mode_id(equipment_recognition_mode(semantics)),
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel", "deliveryStage": delivery_stage,
                 }),

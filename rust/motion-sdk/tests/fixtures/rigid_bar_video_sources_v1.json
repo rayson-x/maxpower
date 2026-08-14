@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "maxpower-rigid-bar-video-source-manifest/v1",
+  "assetId": "personal-raw-capture-archive",
+  "admission": "immutable_source",
+  "authority": "user_source",
+  "groupKey": "sourceCaptureId",
+  "allowedTask": "failure_review",
+  "sources": [
+    {"sourceCaptureId":"839e233f09acd809593551b125645bf7","exerciseId":"barbell_bench_press","capturePosition":"frontRight45","path":"chest/839e233f09acd809593551b125645bf7.mp4","sha256":"c05053c21a8210b505661ad8266b51388d9ef049c7c643dabae5ba89a6cf7dd6"},
+    {"sourceCaptureId":"a44741cba03352f1e689fd51276dfec5","exerciseId":"barbell_bench_press","capturePosition":"frontRight45","path":"chest/a44741cba03352f1e689fd51276dfec5.mp4","sha256":"af6c21bd2b32aa4180e248166c644190f2c079ca4f523d512cfd0505f4e1290a"},
+    {"sourceCaptureId":"a51c8a692c2a5a5b40cda482065cc6d5","exerciseId":"barbell_bench_press","capturePosition":"front","path":"chest/a51c8a692c2a5a5b40cda482065cc6d5.mp4","sha256":"b3eac17e6ca95a6fc26df72a3faf757cf6459ad7b9c88b9b5e785d5e685ac5f3"},
+    {"sourceCaptureId":"b8af1ab860d6bbb43cd3f2cadc71506c","exerciseId":"barbell_bench_press","capturePosition":"front","path":"chest/b8af1ab860d6bbb43cd3f2cadc71506c.mp4","sha256":"61bbd730286bb7591ff03961cab6feeb40d4a1ef9a085f57da9849beaeb9d60e"},
+    {"sourceCaptureId":"bc29e11c23f97a4b1ccaf321ba1e9db7","exerciseId":"barbell_bench_press","capturePosition":"front","path":"chest/bc29e11c23f97a4b1ccaf321ba1e9db7.mp4","sha256":"fda20fc64990bd5a1a6e3405b1fd3052c0a95520bf4412be30a0a8f16487598c"},
+    {"sourceCaptureId":"e963bc2e0819f5ef528561cc1260b7ef","exerciseId":"barbell_bench_press","capturePosition":"frontLeft45","path":"chest/e963bc2e0819f5ef528561cc1260b7ef.mp4","sha256":"bcf4018d668661dfbfec9a5202d6a1959a07a546e82a8db4e276ce6562870633"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-16-42-757Z","exerciseId":"barbell_row","capturePosition":"rearRight45","path":"field-capture-2026-08-02T18-16-42-757Z.webm","sha256":"671bf391af04e3e462a6b186a2a0f18cf32937e55ab437ec0f3efdc8064a1b99"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-19-26-633Z","exerciseId":"barbell_row","capturePosition":"rearRight45","path":"field-capture-2026-08-02T18-19-26-633Z.webm","sha256":"e78ab81200f26d940e3f02dff2653e17141d0d728612e0f4a6159f20c1e22fd2"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-24-38-253Z","exerciseId":"barbell_row","capturePosition":"front","path":"field-capture-2026-08-02T18-24-38-253Z.webm","sha256":"c3c3d45766e6a1b943af2a303e06b8cc3819ba00e6d16c5f0fc5c5c836d41638"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-26-54-722Z","exerciseId":"barbell_row","capturePosition":"frontRight45","path":"field-capture-2026-08-02T18-26-54-722Z.webm","sha256":"419eca8387b0f2f8d9347fd484e05344a88b532ecdfe3173c4334843e6662fbd"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-30-30-478Z","exerciseId":"barbell_row","capturePosition":"rearLeft45","path":"field-capture-2026-08-02T18-30-30-478Z.webm","sha256":"81bfff60ae622d3989707af903a2c7f05b23a5e5afc1ce10ca93816494cc3907"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-34-19-006Z","exerciseId":"barbell_row","capturePosition":"frontLeft45","path":"field-capture-2026-08-02T18-34-19-006Z.webm","sha256":"0e159e41b23bde40ba8bdc8aac40b5a0a4d79fe00f7dd741e65bf6f35ed43acb"},
+    {"sourceCaptureId":"field-capture-2026-08-02T18-37-19-691Z","exerciseId":"barbell_row","capturePosition":"frontLeft45","path":"field-capture-2026-08-02T18-37-19-691Z.webm","sha256":"45cb582bbc429097b1889dec45881b24a12103476f3991099ce7ebc5fff40e4a"},
+    {"sourceCaptureId":"field-capture-2026-08-03T07-57-28-214Z","exerciseId":"seated_shoulder_press","capturePosition":"front","path":"shoulders/field-capture-2026-08-03T07-57-28-214Z.webm","sha256":"ea76a037fb13fceb689ca435be76281636907c57b96a7fdcf874c6e5f3d4961e"},
+    {"sourceCaptureId":"field-capture-2026-08-03T07-59-35-213Z","exerciseId":"seated_shoulder_press","capturePosition":"front","path":"shoulders/field-capture-2026-08-03T07-59-35-213Z.webm","sha256":"0c5335e129e51a5f468f56b6aab943f30c56499d6df088b477e6e7356bc76bcf"},
+    {"sourceCaptureId":"field-capture-2026-08-03T08-04-11-681Z","exerciseId":"seated_shoulder_press","capturePosition":"front","path":"shoulders/field-capture-2026-08-03T08-04-11-681Z.webm","sha256":"bec7b566000054c04040ad86032a31fc0ac2a42c2c438e4728f9738cdd0975c4"},
+    {"sourceCaptureId":"field-capture-2026-08-03T08-09-44-714Z","exerciseId":"seated_shoulder_press","capturePosition":"front","path":"shoulders/field-capture-2026-08-03T08-09-44-714Z.webm","sha256":"f2496bcaa6104e7be61b2dfdf4bb2ce96cb009c47db24b9a68c88460a42cbef6"},
+    {"sourceCaptureId":"field-capture-2026-08-03T08-15-35-147Z","exerciseId":"seated_shoulder_press","capturePosition":"front","path":"shoulders/field-capture-2026-08-03T08-15-35-147Z.webm","sha256":"ae28ec1b053623569857816580a411afd92f2bee1cc34633e7e8c042488a51c1"},
+    {"sourceCaptureId":"field-capture-2026-08-03T09-03-30-328Z","exerciseId":"seated_shoulder_press","capturePosition":"front","path":"shoulders/field-capture-2026-08-03T09-03-30-328Z.webm","sha256":"93f5f2020ac3d7fd6a657eecef6d02d5a04a8163565aaeac15d39fd85a28852e"}
+  ]
+}

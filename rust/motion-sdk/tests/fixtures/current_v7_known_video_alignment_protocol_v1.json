@@ -1,20 +1,22 @@
 {
   "schemaVersion": "maxpower-known-video-alignment-protocol/v1",
   "evaluationId": "current-rust-v7-known-video-alignment-2026-08-15",
-  "protocolSha256": "ab9a8c65836888d21e051885bce5c831488b661bd5b4c9ff8511bce5909fc1b7",
+  "protocolSha256": "02eab821ba1a54e66d2fbe70723c241b757c892fc3dd661e9fb5db155c1b7e74",
   "protocol": {
     "evaluationScope": "known_participant_known_video_regression",
     "generalizationClaimAllowed": false,
     "replayManifest": {
       "path": "rust/motion-sdk/tests/fixtures/all_action_governed_replay_manifest_v1.json",
-      "sha256": "26e37821a88ea8658fbc87f5856873e0adcf4e4cb8f3644abe68a87bf3a5b6bc",
-      "assembledInputSha256": "abe32d60911f83af6fb7214bd55a13b94f93e363db9bad6fe9122a7a0b91b72e"
+      "sha256": "a506eb7d07478e10fd8e643e450a599e018ed26aa35a0f492472e0ad748cacd1",
+      "assembledInputSha256": "03c497531ed0f921b2d11779024419c5de1ffa7936a339b8bea8a7744a7cd126"
     },
     "modelConfiguration": {
       "assessmentCatalogId": "maxpower/current-all-family-assessment/v7",
       "poseRuntimeId": "rtmpose-m",
       "poseSchema": "halpe26/v1",
       "packetContract": "1.10",
+      "equipmentProvider": "maxpower_motion_sdk::BarbellAxisVisualTracker",
+      "equipmentActivationAuthority": "ExecutionContract",
       "countedDispositions": [
         "confirmed",
         "needs_review"

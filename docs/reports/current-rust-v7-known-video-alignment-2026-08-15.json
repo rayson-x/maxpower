@@ -900,11 +900,24 @@
     "resolvedRecordCount": 54,
     "reviewedNegativeWindowCount": 237
   },
+  "equipmentProvider": {
+    "accuracyStatus": "not_evaluable_no_human_equipment_track_truth",
+    "availableRecordCount": 18,
+    "canonicalObservationFrameCount": 4685,
+    "decisionAuthority": "ExecutionContract",
+    "decodedFrameCount": 18410,
+    "measuredFrameCount": 4605,
+    "poseFusedFrameCount": 980,
+    "predictedFrameCount": 80,
+    "requestedRecordCount": 18,
+    "runtime": "maxpower_motion_sdk::BarbellAxisVisualTracker",
+    "trackerOutputFrameCount": 5665
+  },
   "evaluationId": "current-rust-v7-known-video-alignment-2026-08-15",
   "evaluationStatus": "known_participant_known_video_regression",
   "generalizationClaimAllowed": false,
   "generatedOn": "2026-08-15",
-  "predictionSha256": "744cb9dcc19215cceb0854380f82e2db92c46112f6af5e1838ac43b8570908b2",
+  "predictionSha256": "7f22ee365c0a91e8ec07ef77b729f650212e1f43494a3968b6f087a3824005c0",
   "protocol": {
     "evaluationScope": "known_participant_known_video_regression",
     "forbiddenClaims": [
@@ -949,6 +962,8 @@
         "confirmed",
         "needs_review"
       ],
+      "equipmentActivationAuthority": "ExecutionContract",
+      "equipmentProvider": "maxpower_motion_sdk::BarbellAxisVisualTracker",
       "packetContract": "1.10",
       "poseRuntimeId": "rtmpose-m",
       "poseSchema": "halpe26/v1"
@@ -958,20 +973,30 @@
       "schemaVersion": "maxpower-current-rust-known-video-alignment/v1"
     },
     "replayManifest": {
-      "assembledInputSha256": "abe32d60911f83af6fb7214bd55a13b94f93e363db9bad6fe9122a7a0b91b72e",
+      "assembledInputSha256": "03c497531ed0f921b2d11779024419c5de1ffa7936a339b8bea8a7744a7cd126",
       "path": "rust/motion-sdk/tests/fixtures/all_action_governed_replay_manifest_v1.json",
-      "sha256": "26e37821a88ea8658fbc87f5856873e0adcf4e4cb8f3644abe68a87bf3a5b6bc"
+      "sha256": "a506eb7d07478e10fd8e643e450a599e018ed26aa35a0f492472e0ad748cacd1"
     },
     "truthReveal": "all_predictions_hashed_before_human_ranges_are_loaded"
   },
-  "protocolSha256": "ab9a8c65836888d21e051885bce5c831488b661bd5b4c9ff8511bce5909fc1b7",
-  "reportDigest": "9d065089f7390f8908003715d9e72d78e2626521185a150168d676ba62836bac",
+  "protocolSha256": "02eab821ba1a54e66d2fbe70723c241b757c892fc3dd661e9fb5db155c1b7e74",
+  "reportDigest": "d4d2795e18c0cf8ab3288764691686a20aa3f3fc9b8649b16cee9b57cd9713bc",
   "rows": [
     {
-      "bundleHash": "46d405c93dbb9447",
+      "bundleHash": "65209015c56b3a91",
       "bundleId": "machine_chest_press/front/v1",
       "capturePosition": "front",
       "contextId": "1ffdb9483b96090c6caf40a2ca3e6c46:machine_chest_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "machine_chest_press",
@@ -1183,10 +1208,20 @@
       ]
     },
     {
-      "bundleHash": "28610fa1deac20e2",
+      "bundleHash": "a9ba168712091429",
       "bundleId": "barbell_bench_press/front-oblique-right/v1",
       "capturePosition": "frontRight45",
       "contextId": "839e233f09acd809593551b125645bf7:barbell_bench_press:frontRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 454,
+        "decodedFrameCount": 1420,
+        "measuredFrameCount": 443,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 11,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 454
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_bench_press",
@@ -1454,12 +1489,12 @@
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 1,
       "sourceCaptureId": "839e233f09acd809593551b125645bf7",
       "strictBoundaryAlignedCount": 13,
-      "traceContentHash": "4344ac4f4614885e",
+      "traceContentHash": "7c73ab2ac05db6fb",
       "traceRootCount": 8,
       "truthCount": 15,
       "truthRanges": [
@@ -1526,10 +1561,20 @@
       ]
     },
     {
-      "bundleHash": "81587bc06380547e",
+      "bundleHash": "847a15969cd3a42e",
       "bundleId": "machine_chest_press/front-oblique-right/v1",
       "capturePosition": "frontRight45",
       "contextId": "a3fc2037d42244565c2ffce9b2b0df24:machine_chest_press:frontRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "machine_chest_press",
@@ -1721,10 +1766,20 @@
       ]
     },
     {
-      "bundleHash": "28610fa1deac20e2",
+      "bundleHash": "a9ba168712091429",
       "bundleId": "barbell_bench_press/front-oblique-right/v1",
       "capturePosition": "frontRight45",
       "contextId": "a44741cba03352f1e689fd51276dfec5:barbell_bench_press:frontRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 422,
+        "decodedFrameCount": 1408,
+        "measuredFrameCount": 413,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 9,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 422
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_bench_press",
@@ -1906,18 +1961,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 1,
       "sourceCaptureId": "a44741cba03352f1e689fd51276dfec5",
       "strictBoundaryAlignedCount": 9,
-      "traceContentHash": "4a8acd84f429eeec",
+      "traceContentHash": "d62e26f4ad98a1b6",
       "traceRootCount": 8,
       "truthCount": 10,
       "truthRanges": [
@@ -1964,10 +2019,20 @@
       ]
     },
     {
-      "bundleHash": "ed6eeafd6fc2dcb8",
+      "bundleHash": "cfd7f20a5045ffae",
       "bundleId": "barbell_bench_press/front/v1",
       "capturePosition": "front",
       "contextId": "a51c8a692c2a5a5b40cda482065cc6d5:barbell_bench_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 407,
+        "decodedFrameCount": 1363,
+        "measuredFrameCount": 397,
+        "poseFusedFrameCount": 30,
+        "predictedFrameCount": 10,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 437
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_bench_press",
@@ -2028,18 +2093,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 3,
       "sourceCaptureId": "a51c8a692c2a5a5b40cda482065cc6d5",
       "strictBoundaryAlignedCount": 0,
-      "traceContentHash": "937aecb0aec1ce11",
+      "traceContentHash": "54c41239b04efd64",
       "traceRootCount": 8,
       "truthCount": 4,
       "truthRanges": [
@@ -2062,10 +2127,20 @@
       ]
     },
     {
-      "bundleHash": "46d405c93dbb9447",
+      "bundleHash": "65209015c56b3a91",
       "bundleId": "machine_chest_press/front/v1",
       "capturePosition": "front",
       "contextId": "b1af030833f8d7bfb61a55cfd76db4d8:machine_chest_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "machine_chest_press",
@@ -2225,10 +2300,20 @@
       ]
     },
     {
-      "bundleHash": "ed6eeafd6fc2dcb8",
+      "bundleHash": "cfd7f20a5045ffae",
       "bundleId": "barbell_bench_press/front/v1",
       "capturePosition": "front",
       "contextId": "b8af1ab860d6bbb43cd3f2cadc71506c:barbell_bench_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 432,
+        "decodedFrameCount": 1363,
+        "measuredFrameCount": 423,
+        "poseFusedFrameCount": 12,
+        "predictedFrameCount": 9,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 444
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_bench_press",
@@ -2346,18 +2431,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
       "strictBoundaryAlignedCount": 1,
-      "traceContentHash": "e40d275372fde38e",
+      "traceContentHash": "b5ebda76e2841632",
       "traceRootCount": 8,
       "truthCount": 8,
       "truthRanges": [
@@ -2396,10 +2481,20 @@
       ]
     },
     {
-      "bundleHash": "ed6eeafd6fc2dcb8",
+      "bundleHash": "cfd7f20a5045ffae",
       "bundleId": "barbell_bench_press/front/v1",
       "capturePosition": "front",
       "contextId": "bc29e11c23f97a4b1ccaf321ba1e9db7:barbell_bench_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 364,
+        "decodedFrameCount": 1153,
+        "measuredFrameCount": 357,
+        "poseFusedFrameCount": 13,
+        "predictedFrameCount": 7,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 377
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_bench_press",
@@ -2485,18 +2580,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 1,
       "sourceCaptureId": "bc29e11c23f97a4b1ccaf321ba1e9db7",
       "strictBoundaryAlignedCount": 2,
-      "traceContentHash": "b0ef40ecb33c0ad9",
+      "traceContentHash": "ec102b2e869908ed",
       "traceRootCount": 8,
       "truthCount": 4,
       "truthRanges": [
@@ -2519,10 +2614,20 @@
       ]
     },
     {
-      "bundleHash": "66e3c42ae27c1990",
+      "bundleHash": "ffde30115f5df479",
       "bundleId": "push_up/rear-oblique-right/v1",
       "capturePosition": "rearRight45",
       "contextId": "cb71ee6302a7a378d75d1dcdf30cee6a:push_up:rearRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "DisabledBodyOnly",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "push_up",
@@ -2818,10 +2923,20 @@
       ]
     },
     {
-      "bundleHash": "46d405c93dbb9447",
+      "bundleHash": "65209015c56b3a91",
       "bundleId": "machine_chest_press/front/v1",
       "capturePosition": "front",
       "contextId": "d8a6e62c017a63b0aa20493301147a47:machine_chest_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "machine_chest_press",
@@ -2973,10 +3088,20 @@
       ]
     },
     {
-      "bundleHash": "73f1787046aefdcc",
+      "bundleHash": "80a52ea8cc04b845",
       "bundleId": "barbell_bench_press/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "e963bc2e0819f5ef528561cc1260b7ef:barbell_bench_press:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 370,
+        "decodedFrameCount": 1213,
+        "measuredFrameCount": 362,
+        "poseFusedFrameCount": 1,
+        "predictedFrameCount": 8,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 371
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_bench_press",
@@ -3081,7 +3206,7 @@
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "e963bc2e0819f5ef528561cc1260b7ef",
       "strictBoundaryAlignedCount": 3,
-      "traceContentHash": "7da843f83d84dd8a",
+      "traceContentHash": "e3689c66ada4e5b1",
       "traceRootCount": 8,
       "truthCount": 5,
       "truthRanges": [
@@ -3108,10 +3233,20 @@
       ]
     },
     {
-      "bundleHash": "d5f08aa380c28194",
+      "bundleHash": "959c3c3d839e6d62",
       "bundleId": "pull_up/rear-oblique-left/v1",
       "capturePosition": "rearLeft45",
       "contextId": "field-capture-2026-08-02T18-15-03-101Z:pull_up:rearLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "DisabledFixedSupport",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "pull_up",
@@ -3243,10 +3378,20 @@
       ]
     },
     {
-      "bundleHash": "7fcf7d5dab279871",
+      "bundleHash": "c6775668cb446436",
       "bundleId": "barbell_row/rear-oblique-right/v1",
       "capturePosition": "rearRight45",
       "contextId": "field-capture-2026-08-02T18-16-42-757Z:barbell_row:rearRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 156,
+        "decodedFrameCount": 779,
+        "measuredFrameCount": 156,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 156
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_row",
@@ -3479,7 +3624,7 @@
       "reviewedNegativeWindowFalseTriggerCount": 4,
       "sourceCaptureId": "field-capture-2026-08-02T18-16-42-757Z",
       "strictBoundaryAlignedCount": 1,
-      "traceContentHash": "4eae30b84e26b846",
+      "traceContentHash": "410e10004e6d06c1",
       "traceRootCount": 8,
       "truthCount": 12,
       "truthRanges": [
@@ -3534,10 +3679,20 @@
       ]
     },
     {
-      "bundleHash": "3d2c0d019eac96fd",
+      "bundleHash": "478363206c5c20b6",
       "bundleId": "barbell_row/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-02T18-24-38-253Z:barbell_row:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 82,
+        "decodedFrameCount": 814,
+        "measuredFrameCount": 78,
+        "poseFusedFrameCount": 165,
+        "predictedFrameCount": 4,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 247
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_row",
@@ -3706,7 +3861,7 @@
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "field-capture-2026-08-02T18-24-38-253Z",
       "strictBoundaryAlignedCount": 3,
-      "traceContentHash": "e3bc596a60d4eacb",
+      "traceContentHash": "fbba1ff2431317bb",
       "traceRootCount": 8,
       "truthCount": 10,
       "truthRanges": [
@@ -3753,10 +3908,20 @@
       ]
     },
     {
-      "bundleHash": "6120b7f8bafc8106",
+      "bundleHash": "4c7cb5477706dca6",
       "bundleId": "barbell_row/front-oblique-right/v1",
       "capturePosition": "frontRight45",
       "contextId": "field-capture-2026-08-02T18-26-54-722Z:barbell_row:frontRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 274,
+        "decodedFrameCount": 909,
+        "measuredFrameCount": 273,
+        "poseFusedFrameCount": 1,
+        "predictedFrameCount": 1,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 275
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_row",
@@ -3941,7 +4106,7 @@
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "field-capture-2026-08-02T18-26-54-722Z",
       "strictBoundaryAlignedCount": 0,
-      "traceContentHash": "d2529b5c3c1f1902",
+      "traceContentHash": "8d1b2eb9a341137e",
       "traceRootCount": 8,
       "truthCount": 10,
       "truthRanges": [
@@ -3988,10 +4153,20 @@
       ]
     },
     {
-      "bundleHash": "04b830b57fe5661c",
+      "bundleHash": "1d140fea6f3549f3",
       "bundleId": "barbell_row/rear-oblique-left/v1",
       "capturePosition": "rearLeft45",
       "contextId": "field-capture-2026-08-02T18-30-30-478Z:barbell_row:rearLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 266,
+        "decodedFrameCount": 850,
+        "measuredFrameCount": 261,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 5,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 266
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_row",
@@ -4128,7 +4303,7 @@
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "field-capture-2026-08-02T18-30-30-478Z",
       "strictBoundaryAlignedCount": 4,
-      "traceContentHash": "8c2f3df2ec388048",
+      "traceContentHash": "6ce9d42ca5ebf841",
       "traceRootCount": 8,
       "truthCount": 10,
       "truthRanges": [
@@ -4175,10 +4350,20 @@
       ]
     },
     {
-      "bundleHash": "f9a8abd5b052ef43",
+      "bundleHash": "eda6f04648118789",
       "bundleId": "barbell_row/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-02T18-34-19-006Z:barbell_row:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 223,
+        "decodedFrameCount": 892,
+        "measuredFrameCount": 217,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 6,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 223
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_row",
@@ -4368,18 +4553,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedAcceptable",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedDeviation",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 2,
       "sourceCaptureId": "field-capture-2026-08-02T18-34-19-006Z",
       "strictBoundaryAlignedCount": 7,
-      "traceContentHash": "8b94d227d67b92b3",
+      "traceContentHash": "e93f0b93b63367b6",
       "traceRootCount": 8,
       "truthCount": 10,
       "truthRanges": [
@@ -4426,10 +4611,20 @@
       ]
     },
     {
-      "bundleHash": "f9a8abd5b052ef43",
+      "bundleHash": "eda6f04648118789",
       "bundleId": "barbell_row/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-02T18-37-19-691Z:barbell_row:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 229,
+        "decodedFrameCount": 836,
+        "measuredFrameCount": 224,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 5,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 229
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "barbell_row",
@@ -4553,12 +4748,12 @@
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 1,
       "sourceCaptureId": "field-capture-2026-08-02T18-37-19-691Z",
       "strictBoundaryAlignedCount": 3,
-      "traceContentHash": "ec89526cf30dd38c",
+      "traceContentHash": "7968d16172a2eb73",
       "traceRootCount": 8,
       "truthCount": 6,
       "truthRanges": [
@@ -4589,10 +4784,20 @@
       ]
     },
     {
-      "bundleHash": "aafbeb57012ba4b2",
+      "bundleHash": "70bab456e9c8bbd5",
       "bundleId": "lat_pulldown/rear/v1",
       "capturePosition": "rear",
       "contextId": "field-capture-2026-08-02T18-41-05-284Z:lat_pulldown:rear",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lat_pulldown",
@@ -4768,10 +4973,20 @@
       ]
     },
     {
-      "bundleHash": "a544f5fc398030a1",
+      "bundleHash": "3d180dd1d294888b",
       "bundleId": "lat_pulldown/rear-oblique-left/v1",
       "capturePosition": "rearLeft45",
       "contextId": "field-capture-2026-08-02T18-41-55-780Z:lat_pulldown:rearLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lat_pulldown",
@@ -4963,10 +5178,20 @@
       ]
     },
     {
-      "bundleHash": "a544f5fc398030a1",
+      "bundleHash": "3d180dd1d294888b",
       "bundleId": "lat_pulldown/rear-oblique-left/v1",
       "capturePosition": "rearLeft45",
       "contextId": "field-capture-2026-08-02T18-44-00-128Z:lat_pulldown:rearLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lat_pulldown",
@@ -5102,10 +5327,20 @@
       ]
     },
     {
-      "bundleHash": "a544f5fc398030a1",
+      "bundleHash": "3d180dd1d294888b",
       "bundleId": "lat_pulldown/rear-oblique-left/v1",
       "capturePosition": "rearLeft45",
       "contextId": "field-capture-2026-08-02T18-46-52-295Z:lat_pulldown:rearLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lat_pulldown",
@@ -5241,10 +5476,20 @@
       ]
     },
     {
-      "bundleHash": "00083fda48f482d9",
+      "bundleHash": "a70e46babca16258",
       "bundleId": "seated_row/right-side/v1",
       "capturePosition": "right",
       "contextId": "field-capture-2026-08-02T18-52-28-679Z:seated_row:right",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_row",
@@ -5444,10 +5689,20 @@
       ]
     },
     {
-      "bundleHash": "a3f52daed7aed96f",
+      "bundleHash": "26ad56e33cdf8590",
       "bundleId": "seated_row/rear-oblique-left/v1",
       "capturePosition": "rearLeft45",
       "contextId": "field-capture-2026-08-02T18-55-17-537Z:seated_row:rearLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_row",
@@ -5687,10 +5942,20 @@
       ]
     },
     {
-      "bundleHash": "ad2d6739c6e822b1",
+      "bundleHash": "bdcd09039ea5b61f",
       "bundleId": "seated_row/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-02T18-59-00-009Z:seated_row:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_row",
@@ -5834,10 +6099,20 @@
       ]
     },
     {
-      "bundleHash": "29069ae0d325f6d2",
+      "bundleHash": "14b73ce268e2a48d",
       "bundleId": "straight_arm_pulldown/front-oblique-right/v1",
       "capturePosition": "frontRight45",
       "contextId": "field-capture-2026-08-02T19-02-41-183Z:straight_arm_pulldown:frontRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "straight_arm_pulldown",
@@ -6037,10 +6312,20 @@
       ]
     },
     {
-      "bundleHash": "29069ae0d325f6d2",
+      "bundleHash": "14b73ce268e2a48d",
       "bundleId": "straight_arm_pulldown/front-oblique-right/v1",
       "capturePosition": "frontRight45",
       "contextId": "field-capture-2026-08-02T19-05-43-889Z:straight_arm_pulldown:frontRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "straight_arm_pulldown",
@@ -6102,10 +6387,20 @@
       ]
     },
     {
-      "bundleHash": "e1e5d1e7fe7232b4",
+      "bundleHash": "81bd208ae333f389",
       "bundleId": "straight_arm_pulldown/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-02T19-08-40-178Z:straight_arm_pulldown:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableCableOrMovingHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "straight_arm_pulldown",
@@ -6281,10 +6576,20 @@
       ]
     },
     {
-      "bundleHash": "2fb214f2c67ba857",
+      "bundleHash": "75076174f3b5bc4e",
       "bundleId": "seated_shoulder_press/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T07-57-28-214Z:seated_shoulder_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 131,
+        "decodedFrameCount": 904,
+        "measuredFrameCount": 131,
+        "poseFusedFrameCount": 161,
+        "predictedFrameCount": 0,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 292
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_shoulder_press",
@@ -6442,18 +6747,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "field-capture-2026-08-03T07-57-28-214Z",
       "strictBoundaryAlignedCount": 7,
-      "traceContentHash": "1a4b2ebd1289603f",
+      "traceContentHash": "e3204eb3926bcc89",
       "traceRootCount": 8,
       "truthCount": 12,
       "truthRanges": [
@@ -6508,10 +6813,20 @@
       ]
     },
     {
-      "bundleHash": "2fb214f2c67ba857",
+      "bundleHash": "75076174f3b5bc4e",
       "bundleId": "seated_shoulder_press/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T07-59-35-213Z:seated_shoulder_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 193,
+        "decodedFrameCount": 791,
+        "measuredFrameCount": 193,
+        "poseFusedFrameCount": 63,
+        "predictedFrameCount": 0,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 256
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_shoulder_press",
@@ -6637,18 +6952,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedAcceptable",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 2,
       "sourceCaptureId": "field-capture-2026-08-03T07-59-35-213Z",
       "strictBoundaryAlignedCount": 5,
-      "traceContentHash": "7c98192f987b0053",
+      "traceContentHash": "6a310aa4a3716883",
       "traceRootCount": 8,
       "truthCount": 6,
       "truthRanges": [
@@ -6679,10 +6994,20 @@
       ]
     },
     {
-      "bundleHash": "2fb214f2c67ba857",
+      "bundleHash": "75076174f3b5bc4e",
       "bundleId": "seated_shoulder_press/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-04-11-681Z:seated_shoulder_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 113,
+        "decodedFrameCount": 894,
+        "measuredFrameCount": 108,
+        "poseFusedFrameCount": 178,
+        "predictedFrameCount": 5,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 291
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_shoulder_press",
@@ -6744,18 +7069,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "field-capture-2026-08-03T08-04-11-681Z",
       "strictBoundaryAlignedCount": 1,
-      "traceContentHash": "cb5bfd7c973c9472",
+      "traceContentHash": "163340a1962d6a1c",
       "traceRootCount": 8,
       "truthCount": 5,
       "truthRanges": [
@@ -6782,10 +7107,20 @@
       ]
     },
     {
-      "bundleHash": "2fb214f2c67ba857",
+      "bundleHash": "75076174f3b5bc4e",
       "bundleId": "seated_shoulder_press/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-09-44-714Z:seated_shoulder_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 141,
+        "decodedFrameCount": 914,
+        "measuredFrameCount": 141,
+        "poseFusedFrameCount": 162,
+        "predictedFrameCount": 0,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 303
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_shoulder_press",
@@ -6839,18 +7174,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 1,
       "sourceCaptureId": "field-capture-2026-08-03T08-09-44-714Z",
       "strictBoundaryAlignedCount": 0,
-      "traceContentHash": "2e8835138f12a09d",
+      "traceContentHash": "1b935c8d67fb9a30",
       "traceRootCount": 8,
       "truthCount": 3,
       "truthRanges": [
@@ -6869,10 +7204,20 @@
       ]
     },
     {
-      "bundleHash": "2fb214f2c67ba857",
+      "bundleHash": "75076174f3b5bc4e",
       "bundleId": "seated_shoulder_press/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-15-35-147Z:seated_shoulder_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 169,
+        "decodedFrameCount": 976,
+        "measuredFrameCount": 169,
+        "poseFusedFrameCount": 147,
+        "predictedFrameCount": 0,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 316
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_shoulder_press",
@@ -7030,18 +7375,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 0,
       "sourceCaptureId": "field-capture-2026-08-03T08-15-35-147Z",
       "strictBoundaryAlignedCount": 4,
-      "traceContentHash": "44167297b98a6eab",
+      "traceContentHash": "2035cae308987fac",
       "traceRootCount": 8,
       "truthCount": 8,
       "truthRanges": [
@@ -7080,10 +7425,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-22-48-938Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lateral_raise",
@@ -7283,10 +7638,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-24-48-386Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lateral_raise",
@@ -7518,10 +7883,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-27-17-330Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lateral_raise",
@@ -7693,10 +8068,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-30-12-186Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lateral_raise",
@@ -7928,10 +8313,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-34-27-223Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lateral_raise",
@@ -8203,10 +8598,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-36-58-723Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "lateral_raise",
@@ -8438,10 +8843,20 @@
       ]
     },
     {
-      "bundleHash": "58482f24d2f0ee39",
+      "bundleHash": "a5c21f4962aafbf9",
       "bundleId": "lateral_raise/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-38-55-907Z:lateral_raise:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableTwoIndependentDumbbells",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": true,
       "exerciseId": "lateral_raise",
@@ -8633,10 +9048,20 @@
       ]
     },
     {
-      "bundleHash": "ba767b8af2f18f5f",
+      "bundleHash": "507d6b38542fa064",
       "bundleId": "rear_delt_fly/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-42-27-544Z:rear_delt_fly:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "rear_delt_fly",
@@ -8792,10 +9217,20 @@
       ]
     },
     {
-      "bundleHash": "ba767b8af2f18f5f",
+      "bundleHash": "507d6b38542fa064",
       "bundleId": "rear_delt_fly/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-45-04-435Z:rear_delt_fly:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "rear_delt_fly",
@@ -8951,10 +9386,20 @@
       ]
     },
     {
-      "bundleHash": "ba767b8af2f18f5f",
+      "bundleHash": "507d6b38542fa064",
       "bundleId": "rear_delt_fly/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-47-22-074Z:rear_delt_fly:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "rear_delt_fly",
@@ -9024,10 +9469,20 @@
       ]
     },
     {
-      "bundleHash": "ba767b8af2f18f5f",
+      "bundleHash": "507d6b38542fa064",
       "bundleId": "rear_delt_fly/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T08-49-51-012Z:rear_delt_fly:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableConstrainedMachineLever",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "rear_delt_fly",
@@ -9097,10 +9552,20 @@
       ]
     },
     {
-      "bundleHash": "4f01e6e08bfe62b7",
+      "bundleHash": "d406ccfc447f7917",
       "bundleId": "single_arm_cable_lateral_raise/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-03T08-51-49-681Z:single_arm_cable_lateral_raise:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -9300,10 +9765,20 @@
       ]
     },
     {
-      "bundleHash": "11e9cf4c2c5e39f2",
+      "bundleHash": "8aed87e04e834c25",
       "bundleId": "single_arm_cable_lateral_raise/rear-oblique-right/v1",
       "capturePosition": "rearRight45",
       "contextId": "field-capture-2026-08-03T08-51-49-681Z:single_arm_cable_lateral_raise:rearRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -9519,10 +9994,20 @@
       ]
     },
     {
-      "bundleHash": "4f01e6e08bfe62b7",
+      "bundleHash": "d406ccfc447f7917",
       "bundleId": "single_arm_cable_lateral_raise/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-03T08-54-25-014Z:single_arm_cable_lateral_raise:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -9722,10 +10207,20 @@
       ]
     },
     {
-      "bundleHash": "11e9cf4c2c5e39f2",
+      "bundleHash": "8aed87e04e834c25",
       "bundleId": "single_arm_cable_lateral_raise/rear-oblique-right/v1",
       "capturePosition": "rearRight45",
       "contextId": "field-capture-2026-08-03T08-54-25-014Z:single_arm_cable_lateral_raise:rearRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -9973,10 +10468,20 @@
       ]
     },
     {
-      "bundleHash": "4f01e6e08bfe62b7",
+      "bundleHash": "d406ccfc447f7917",
       "bundleId": "single_arm_cable_lateral_raise/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-03T08-57-26-212Z:single_arm_cable_lateral_raise:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -10176,10 +10681,20 @@
       ]
     },
     {
-      "bundleHash": "11e9cf4c2c5e39f2",
+      "bundleHash": "8aed87e04e834c25",
       "bundleId": "single_arm_cable_lateral_raise/rear-oblique-right/v1",
       "capturePosition": "rearRight45",
       "contextId": "field-capture-2026-08-03T08-57-26-212Z:single_arm_cable_lateral_raise:rearRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -10379,10 +10894,20 @@
       ]
     },
     {
-      "bundleHash": "4f01e6e08bfe62b7",
+      "bundleHash": "d406ccfc447f7917",
       "bundleId": "single_arm_cable_lateral_raise/front-oblique-left/v1",
       "capturePosition": "frontLeft45",
       "contextId": "field-capture-2026-08-03T09-00-01-198Z:single_arm_cable_lateral_raise:frontLeft45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -10622,10 +11147,20 @@
       ]
     },
     {
-      "bundleHash": "11e9cf4c2c5e39f2",
+      "bundleHash": "8aed87e04e834c25",
       "bundleId": "single_arm_cable_lateral_raise/rear-oblique-right/v1",
       "capturePosition": "rearRight45",
       "contextId": "field-capture-2026-08-03T09-00-01-198Z:single_arm_cable_lateral_raise:rearRight45",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 0,
+        "decodedFrameCount": 0,
+        "measuredFrameCount": 0,
+        "poseFusedFrameCount": 0,
+        "predictedFrameCount": 0,
+        "recognitionMode": "ProviderUnavailableUnilateralCableHandle",
+        "sourceAssetId": null,
+        "trackerOutputFrameCount": 0
+      },
       "exactSet": false,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "single_arm_cable_lateral_raise",
@@ -10937,10 +11472,20 @@
       ]
     },
     {
-      "bundleHash": "2fb214f2c67ba857",
+      "bundleHash": "75076174f3b5bc4e",
       "bundleId": "seated_shoulder_press/front/v1",
       "capturePosition": "front",
       "contextId": "field-capture-2026-08-03T09-03-30-328Z:seated_shoulder_press:front",
+      "equipmentProvider": {
+        "canonicalObservationFrameCount": 259,
+        "decodedFrameCount": 931,
+        "measuredFrameCount": 259,
+        "poseFusedFrameCount": 47,
+        "predictedFrameCount": 0,
+        "recognitionMode": "RustVisualRigidBarAxis",
+        "sourceAssetId": "personal-raw-capture-archive",
+        "trackerOutputFrameCount": 306
+      },
       "exactSet": true,
       "exactSetAndAllBoundariesAligned": false,
       "exerciseId": "seated_shoulder_press",
@@ -11090,18 +11635,18 @@
       ],
       "qualityFindingStates": [
         "TaskCompletion/ObservedDeviation",
-        "RangeOfMotion/CannotJudge",
+        "RangeOfMotion/ObservedAcceptable",
         "PhaseControl/CannotJudge",
         "SupportStability/CannotJudge",
         "BilateralCoordination/CannotJudge",
         "TrajectoryControl/CannotJudge",
         "StandardVariantCompatibility/CannotJudge",
-        "ObservationConfidence/CannotJudge"
+        "ObservationConfidence/ObservedAcceptable"
       ],
       "reviewedNegativeWindowFalseTriggerCount": 3,
       "sourceCaptureId": "field-capture-2026-08-03T09-03-30-328Z",
       "strictBoundaryAlignedCount": 0,
-      "traceContentHash": "32351b94121ee2e2",
+      "traceContentHash": "c7866a9dffd898ba",
       "traceRootCount": 8,
       "truthCount": 10,
       "truthRanges": [
@@ -11152,12 +11697,12 @@
   "structuralRuntime": {
     "dimensionStates": {
       "BilateralCoordination/CannotJudge": 53,
-      "ObservationConfidence/CannotJudge": 32,
-      "ObservationConfidence/ObservedAcceptable": 21,
+      "ObservationConfidence/CannotJudge": 19,
+      "ObservationConfidence/ObservedAcceptable": 34,
       "PhaseControl/CannotJudge": 53,
-      "RangeOfMotion/CannotJudge": 35,
-      "RangeOfMotion/ObservedAcceptable": 12,
-      "RangeOfMotion/ObservedDeviation": 6,
+      "RangeOfMotion/CannotJudge": 24,
+      "RangeOfMotion/ObservedAcceptable": 22,
+      "RangeOfMotion/ObservedDeviation": 7,
       "StandardVariantCompatibility/CannotJudge": 53,
       "SupportStability/CannotJudge": 53,
       "TaskCompletion/CannotJudge": 2,
@@ -11165,24 +11710,27 @@
       "TaskCompletion/ObservedDeviation": 26,
       "TrajectoryControl/CannotJudge": 53
     },
-    "equipmentChannelFrames": 0,
+    "equipmentChannelFrames": 3305,
     "fusionStates": {
-      "CannotJudge": 11092,
-      "PoseOnly": 4787
+      "Agreement": 1362,
+      "CannotJudge": 7243,
+      "Conflict": 255,
+      "EquipmentOnly": 254,
+      "PoseOnly": 6765
     },
     "localStates": {
       "Degraded": 3663,
-      "Frozen": 5570,
-      "Learning": 86,
-      "Provisional": 95,
-      "Uninitialized": 6465
+      "Frozen": 10954,
+      "Learning": 320,
+      "Provisional": 197,
+      "Uninitialized": 745
     },
     "packetCount": 15879,
-    "poseChannelFrames": 4835,
+    "poseChannelFrames": 8546,
     "referenceKinds": {
-      "NoReference": 7174,
+      "NoReference": 7040,
       "SelfGeometry": 557,
-      "SetPrefix": 203
+      "SetPrefix": 337
     },
     "traceCompleteReportCount": 53
   },
