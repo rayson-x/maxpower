@@ -21,6 +21,7 @@ use maxpower_motion_sdk::{
     current_motion_assessment_catalog_v3, current_motion_assessment_catalog_v7,
     current_rigid_bar_assessment_profiles_v1,
 };
+use serde::Serialize;
 
 const RIGID_BAR_CONTEXTS: &[(&str, &str, AssessmentCaptureView)] = &[
     ("barbell_bench_press", "front", AssessmentCaptureView::Front),
@@ -1016,6 +1017,281 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
     assert!(assembled["frozenResult"]["reviewedNegativeWindowFalseTriggerRate"].is_null());
 }
 
+const EVALUATION_CANDIDATE_MINIMUM_INTERVAL_IOU: f64 = 0.10;
+const EVALUATION_CANDIDATE_BOUNDARY_TOLERANCE_MS: i64 = 1_500;
+const EVALUATION_STRICT_MINIMUM_INTERVAL_IOU: f64 = 0.60;
+const EVALUATION_STRICT_BOUNDARY_TOLERANCE_MS: i64 = 500;
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvaluationRange {
+    start_ms: u64,
+    end_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvaluationPredictionRep {
+    rep_id: u64,
+    disposition: String,
+    start_ms: u64,
+    turnaround_ms: u64,
+    end_ms: u64,
+    canonical_slice_hash: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GovernedPredictionRow {
+    source_capture_id: String,
+    context_id: String,
+    exercise_id: String,
+    capture_position: String,
+    bundle_id: String,
+    bundle_hash: String,
+    trace_content_hash: String,
+    trace_root_count: usize,
+    reps: Vec<EvaluationPredictionRep>,
+    quality_finding_states: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvaluationMatch {
+    truth_index: usize,
+    predicted_index: usize,
+    start_error_ms: i64,
+    end_error_ms: i64,
+    interval_iou: f64,
+    strict_boundary_aligned: bool,
+}
+
+#[derive(Clone, Debug)]
+struct AlignmentSolution {
+    matches: Vec<EvaluationMatch>,
+    total_iou: f64,
+    total_boundary_error_ms: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvaluatedReplayRow {
+    source_capture_id: String,
+    context_id: String,
+    exercise_id: String,
+    capture_position: String,
+    bundle_id: String,
+    bundle_hash: String,
+    trace_content_hash: String,
+    trace_root_count: usize,
+    truth_ranges: Vec<EvaluationRange>,
+    predicted_reps: Vec<EvaluationPredictionRep>,
+    truth_count: usize,
+    predicted_count: usize,
+    matched_count: usize,
+    false_positive_count: usize,
+    missed_count: usize,
+    exact_set: bool,
+    strict_boundary_aligned_count: usize,
+    exact_set_and_all_boundaries_aligned: bool,
+    reviewed_negative_window_false_trigger_count: usize,
+    matches: Vec<EvaluationMatch>,
+    quality_finding_states: Vec<String>,
+}
+
+fn evaluation_interval_iou(left: &EvaluationRange, right: &EvaluationRange) -> f64 {
+    let intersection = left
+        .end_ms
+        .min(right.end_ms)
+        .saturating_sub(left.start_ms.max(right.start_ms));
+    let union = left.end_ms.max(right.end_ms) - left.start_ms.min(right.start_ms);
+    if union == 0 {
+        0.0
+    } else {
+        intersection as f64 / union as f64
+    }
+}
+
+fn better_alignment(left: AlignmentSolution, right: AlignmentSolution) -> AlignmentSolution {
+    if left.matches.len() != right.matches.len() {
+        return if left.matches.len() > right.matches.len() {
+            left
+        } else {
+            right
+        };
+    }
+    if (left.total_iou - right.total_iou).abs() > 1e-12 {
+        return if left.total_iou > right.total_iou {
+            left
+        } else {
+            right
+        };
+    }
+    if left.total_boundary_error_ms <= right.total_boundary_error_ms {
+        left
+    } else {
+        right
+    }
+}
+
+fn monotonic_evaluation_matches(
+    truth: &[EvaluationRange],
+    predicted: &[EvaluationRange],
+) -> Vec<EvaluationMatch> {
+    fn solve(
+        truth: &[EvaluationRange],
+        predicted: &[EvaluationRange],
+        truth_index: usize,
+        predicted_index: usize,
+        memo: &mut BTreeMap<(usize, usize), AlignmentSolution>,
+    ) -> AlignmentSolution {
+        if let Some(cached) = memo.get(&(truth_index, predicted_index)) {
+            return cached.clone();
+        }
+        if truth_index >= truth.len() || predicted_index >= predicted.len() {
+            return AlignmentSolution {
+                matches: Vec::new(),
+                total_iou: 0.0,
+                total_boundary_error_ms: 0,
+            };
+        }
+        let mut best = better_alignment(
+            solve(truth, predicted, truth_index + 1, predicted_index, memo),
+            solve(truth, predicted, truth_index, predicted_index + 1, memo),
+        );
+        let expected = &truth[truth_index];
+        let actual = &predicted[predicted_index];
+        let interval_iou = evaluation_interval_iou(expected, actual);
+        let start_error_ms = actual.start_ms as i64 - expected.start_ms as i64;
+        let end_error_ms = actual.end_ms as i64 - expected.end_ms as i64;
+        let within_candidate_boundary_tolerance = start_error_ms.abs()
+            <= EVALUATION_CANDIDATE_BOUNDARY_TOLERANCE_MS
+            && end_error_ms.abs() <= EVALUATION_CANDIDATE_BOUNDARY_TOLERANCE_MS;
+        if interval_iou >= EVALUATION_CANDIDATE_MINIMUM_INTERVAL_IOU
+            || within_candidate_boundary_tolerance
+        {
+            let remainder = solve(truth, predicted, truth_index + 1, predicted_index + 1, memo);
+            let strict_boundary_aligned = interval_iou >= EVALUATION_STRICT_MINIMUM_INTERVAL_IOU
+                && start_error_ms.abs() <= EVALUATION_STRICT_BOUNDARY_TOLERANCE_MS
+                && end_error_ms.abs() <= EVALUATION_STRICT_BOUNDARY_TOLERANCE_MS;
+            let boundary_error = start_error_ms.unsigned_abs() + end_error_ms.unsigned_abs();
+            let mut matches = Vec::with_capacity(remainder.matches.len() + 1);
+            matches.push(EvaluationMatch {
+                truth_index,
+                predicted_index,
+                start_error_ms,
+                end_error_ms,
+                interval_iou,
+                strict_boundary_aligned,
+            });
+            matches.extend(remainder.matches);
+            best = better_alignment(
+                best,
+                AlignmentSolution {
+                    matches,
+                    total_iou: interval_iou + remainder.total_iou,
+                    total_boundary_error_ms: boundary_error + remainder.total_boundary_error_ms,
+                },
+            );
+        }
+        memo.insert((truth_index, predicted_index), best.clone());
+        best
+    }
+
+    solve(truth, predicted, 0, 0, &mut BTreeMap::new()).matches
+}
+
+fn evaluation_summary(rows: &[EvaluatedReplayRow]) -> serde_json::Value {
+    let truth_count = rows.iter().map(|row| row.truth_count).sum::<usize>();
+    let predicted_count = rows.iter().map(|row| row.predicted_count).sum::<usize>();
+    let matched_count = rows.iter().map(|row| row.matched_count).sum::<usize>();
+    let strict_boundary_aligned_count = rows
+        .iter()
+        .map(|row| row.strict_boundary_aligned_count)
+        .sum::<usize>();
+    let negative_false_triggers = rows
+        .iter()
+        .map(|row| row.reviewed_negative_window_false_trigger_count)
+        .sum::<usize>();
+    let matches = rows
+        .iter()
+        .flat_map(|row| row.matches.iter())
+        .collect::<Vec<_>>();
+    let mean = |values: Vec<f64>| {
+        if values.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(values.iter().sum::<f64>() / values.len() as f64)
+        }
+    };
+    let ratio = |numerator: usize, denominator: usize| {
+        if denominator == 0 {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(numerator as f64 / denominator as f64)
+        }
+    };
+    serde_json::json!({
+        "recordCount": rows.len(),
+        "truthRepCount": truth_count,
+        "predictedRepCount": predicted_count,
+        "matchedRepCount": matched_count,
+        "falsePositiveCount": predicted_count.saturating_sub(matched_count),
+        "missedCount": truth_count.saturating_sub(matched_count),
+        "candidatePrecision": ratio(matched_count, predicted_count),
+        "candidateRecall": ratio(matched_count, truth_count),
+        "exactSetRecordCount": rows.iter().filter(|row| row.exact_set).count(),
+        "exactSetRate": ratio(rows.iter().filter(|row| row.exact_set).count(), rows.len()),
+        "strictBoundaryAlignedRepCount": strict_boundary_aligned_count,
+        "strictBoundaryAlignedRate": ratio(strict_boundary_aligned_count, truth_count),
+        "exactSetAndAllBoundariesAlignedRecordCount": rows.iter().filter(|row| row.exact_set_and_all_boundaries_aligned).count(),
+        "exactSetAndAllBoundariesAlignedRate": ratio(rows.iter().filter(|row| row.exact_set_and_all_boundaries_aligned).count(), rows.len()),
+        "matchedStartMaeMs": mean(matches.iter().map(|entry| entry.start_error_ms.unsigned_abs() as f64).collect()),
+        "matchedEndMaeMs": mean(matches.iter().map(|entry| entry.end_error_ms.unsigned_abs() as f64).collect()),
+        "matchedMeanIntervalIoU": mean(matches.iter().map(|entry| entry.interval_iou).collect()),
+        "reviewedNegativeWindowFalseTriggerCount": negative_false_triggers,
+    })
+}
+
+fn evaluation_buckets(
+    rows: &[EvaluatedReplayRow],
+    key_for: impl Fn(&EvaluatedReplayRow) -> String,
+) -> serde_json::Value {
+    let mut grouped = BTreeMap::<String, Vec<EvaluatedReplayRow>>::new();
+    for row in rows {
+        grouped.entry(key_for(row)).or_default().push(row.clone());
+    }
+    serde_json::Value::Object(
+        grouped
+            .into_iter()
+            .map(|(key, bucket_rows)| (key, evaluation_summary(&bucket_rows)))
+            .collect(),
+    )
+}
+
+#[test]
+fn known_video_alignment_keeps_candidate_and_strict_boundary_metrics_distinct() {
+    let truth = vec![EvaluationRange {
+        start_ms: 1_000,
+        end_ms: 3_000,
+    }];
+    let candidate_only = vec![EvaluationRange {
+        start_ms: 1_700,
+        end_ms: 3_700,
+    }];
+    let matches = monotonic_evaluation_matches(&truth, &candidate_only);
+    assert_eq!(matches.len(), 1);
+    assert!(!matches[0].strict_boundary_aligned);
+
+    let strictly_aligned = vec![EvaluationRange {
+        start_ms: 1_200,
+        end_ms: 3_200,
+    }];
+    let matches = monotonic_evaluation_matches(&truth, &strictly_aligned);
+    assert_eq!(matches.len(), 1);
+    assert!(matches[0].strict_boundary_aligned);
+}
+
 #[test]
 #[ignore = "requires governed local-private Halpe26 observation assets"]
 fn governed_real_replays_cover_every_current_action_view() {
@@ -1032,10 +1308,14 @@ fn governed_real_replays_cover_every_current_action_view() {
         &std::fs::read(governance_root.join("catalog/assets.json")).expect("governance catalog"),
     )
     .expect("governance JSON");
-    let replay_manifest: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "fixtures/all_action_governed_replay_manifest_v1.json"
+    let replay_manifest_bytes =
+        include_bytes!("fixtures/all_action_governed_replay_manifest_v1.json");
+    let replay_manifest: serde_json::Value =
+        serde_json::from_slice(replay_manifest_bytes).expect("versioned governed replay manifest");
+    let evaluation_protocol: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "fixtures/current_v7_known_video_alignment_protocol_v1.json"
     ))
-    .expect("versioned governed replay manifest");
+    .expect("versioned known-video alignment protocol");
     assert_eq!(
         replay_manifest["schemaVersion"],
         "maxpower-governed-replay-manifest/v1"
@@ -1050,6 +1330,47 @@ fn governed_real_replays_cover_every_current_action_view() {
     assert_eq!(
         assembled_input["modelConfiguration"]["assessmentCatalogId"],
         current_motion_assessment_catalog_v7().catalog_id
+    );
+    assert_eq!(
+        evaluation_protocol["schemaVersion"],
+        "maxpower-known-video-alignment-protocol/v1"
+    );
+    let evaluation_rules = &evaluation_protocol["protocol"];
+    assert_eq!(
+        sha256_bytes(&serde_json::to_vec(evaluation_rules).expect("stable evaluation protocol")),
+        evaluation_protocol["protocolSha256"]
+            .as_str()
+            .expect("evaluation protocol hash")
+    );
+    assert_eq!(
+        sha256_bytes(replay_manifest_bytes),
+        evaluation_rules["replayManifest"]["sha256"]
+            .as_str()
+            .expect("replay manifest hash")
+    );
+    assert_eq!(
+        evaluation_rules["replayManifest"]["assembledInputSha256"],
+        replay_manifest["assembledInputSha256"]
+    );
+    assert_eq!(
+        evaluation_rules["modelConfiguration"]["assessmentCatalogId"],
+        current_motion_assessment_catalog_v7().catalog_id
+    );
+    assert_eq!(
+        evaluation_rules["matchingPolicy"]["minimumIntervalIoU"],
+        EVALUATION_CANDIDATE_MINIMUM_INTERVAL_IOU
+    );
+    assert_eq!(
+        evaluation_rules["matchingPolicy"]["candidateBoundaryToleranceMs"],
+        EVALUATION_CANDIDATE_BOUNDARY_TOLERANCE_MS
+    );
+    assert_eq!(
+        evaluation_rules["matchingPolicy"]["strictMinimumIntervalIoU"],
+        EVALUATION_STRICT_MINIMUM_INTERVAL_IOU
+    );
+    assert_eq!(
+        evaluation_rules["matchingPolicy"]["strictStartEndToleranceMs"],
+        EVALUATION_STRICT_BOUNDARY_TOLERANCE_MS
     );
     let assets = governance["assets"].as_array().expect("assets");
     let governed_asset = |asset_id: &str| {
@@ -1103,6 +1424,28 @@ fn governed_real_replays_cover_every_current_action_view() {
                 .is_some_and(|fields| fields.iter().any(|value| value == field))
         );
     }
+    let evaluation_supervision = &evaluation_rules["humanSupervision"];
+    assert_eq!(evaluation_supervision["assetId"], label_asset["id"]);
+    assert!(
+        evaluation_supervision["consumedForTasks"]
+            .as_array()
+            .expect("evaluation tasks")
+            .iter()
+            .all(|task| allowed_label_tasks.contains(task))
+    );
+    for field in evaluation_supervision["selectedFields"]
+        .as_array()
+        .expect("evaluation selected fields")
+    {
+        let field = field.as_str().expect("evaluation field name");
+        assert!(
+            field == "sourceCaptureId"
+                || label_asset["allowedSupervision"]
+                    .as_array()
+                    .is_some_and(|fields| fields.iter().any(|value| value == field)),
+            "evaluation selected an unauthorized label field: {field}"
+        );
+    }
     let pose_asset = governed_asset("personal-native-rtmpose-halpe26-observations");
     let manifest_pose_asset = assembled_input["sourceAssets"]
         .as_array()
@@ -1152,9 +1495,6 @@ fn governed_real_replays_cover_every_current_action_view() {
             .as_str()
             .expect("immutable label hash")
     );
-    let labels: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(label_path).expect("admitted label asset"))
-            .expect("label JSON");
     let pose_root = root.join(
         pose_asset["location"]["path"]
             .as_str()
@@ -1190,10 +1530,6 @@ fn governed_real_replays_cover_every_current_action_view() {
         .as_array()
         .expect("frozen source groups");
     assert_eq!(replays.len(), 54, "every governed label record is frozen");
-    assert_eq!(
-        replays.len(),
-        labels["records"].as_array().expect("records").len()
-    );
     assert_eq!(
         replays
             .iter()
@@ -1245,6 +1581,7 @@ fn governed_real_replays_cover_every_current_action_view() {
     let mut dimension_states = BTreeMap::<String, usize>::new();
     let mut reference_kinds = BTreeMap::<String, usize>::new();
     let mut trace_complete_reports = 0_usize;
+    let mut frozen_prediction_rows = Vec::<GovernedPredictionRow>::new();
     for (ordinal, source_group) in replays.iter().enumerate() {
         let action_id = source_group["exerciseId"].as_str().expect("exercise ID");
         let capture_position = source_group["capturePosition"]
@@ -1293,16 +1630,6 @@ fn governed_real_replays_cover_every_current_action_view() {
             );
             continue;
         }
-        let label_record = labels["records"]
-            .as_array()
-            .expect("records")
-            .iter()
-            .find(|record| {
-                record["sourceCaptureId"] == capture_id
-                    && record["exerciseId"] == action_id
-                    && record["capturePosition"] == capture_position
-            })
-            .expect("governed exact-context label");
         replayed_records += 1;
         let raw = read_governed_gzip_json(&pose_root.join(format!("{capture_id}.halpe26.json.gz")));
         let mut frame_ids = Vec::new();
@@ -1437,9 +1764,6 @@ fn governed_real_replays_cover_every_current_action_view() {
         else {
             panic!("sealed report")
         };
-        let expected_count = label_record["expectedCount"]
-            .as_u64()
-            .expect("expected count") as usize;
         let recognized = report
             .reps
             .iter()
@@ -1447,35 +1771,6 @@ fn governed_real_replays_cover_every_current_action_view() {
             .collect::<Vec<_>>();
         if !recognized.is_empty() {
             records_with_non_rejected_rep += 1;
-        }
-        let mut used_predictions = HashSet::new();
-        let boundary_aligned = label_record["segments"]
-            .as_array()
-            .expect("human Rep ranges")
-            .iter()
-            .filter(|segment| {
-                let truth_start = segment["startMs"].as_u64().expect("truth start");
-                let truth_end = segment["endMs"].as_u64().expect("truth end");
-                recognized.iter().enumerate().any(|(index, predicted)| {
-                    if used_predictions.contains(&index) {
-                        return false;
-                    }
-                    let aligned = truth_start.abs_diff(predicted.start_timestamp_ms) <= 3_000
-                        && truth_end.abs_diff(predicted.end_timestamp_ms) <= 1_500;
-                    if aligned {
-                        used_predictions.insert(index);
-                    }
-                    aligned
-                })
-            })
-            .count();
-        if boundary_aligned > 0 {
-            records_with_boundary_alignment += 1;
-        } else {
-            structural_gaps.push(format!(
-                "{capture_id}:{action_id}/{capture_position}: non_rejected={}; expected={expected_count}",
-                recognized.len()
-            ));
         }
         assert_eq!(
             report.dimension_findings.len(),
@@ -1557,7 +1852,273 @@ fn governed_real_replays_cover_every_current_action_view() {
             }
         }
         trace_complete_reports += 1;
+        frozen_prediction_rows.push(GovernedPredictionRow {
+            source_capture_id: capture_id.into(),
+            context_id: format!("{capture_id}:{action_id}:{capture_position}"),
+            exercise_id: action_id.into(),
+            capture_position: capture_position.into(),
+            bundle_id: report.bundle_id.clone(),
+            bundle_hash: report.bundle_hash.clone(),
+            trace_content_hash: report.trace.content_hash.clone(),
+            trace_root_count: report.trace.conclusion_root_ids.len(),
+            reps: report
+                .reps
+                .iter()
+                .map(|rep| EvaluationPredictionRep {
+                    rep_id: rep.rep_id,
+                    disposition: rep.disposition.clone(),
+                    start_ms: rep.start_timestamp_ms,
+                    turnaround_ms: rep.turnaround_timestamp_ms,
+                    end_ms: rep.end_timestamp_ms,
+                    canonical_slice_hash: rep.canonical_slice_hash.clone(),
+                })
+                .collect(),
+            quality_finding_states: report
+                .dimension_findings
+                .iter()
+                .map(|finding| format!("{:?}/{:?}", finding.dimension, finding.state))
+                .collect(),
+        });
     }
+
+    // Freeze every runtime prediction before the human Rep ranges are loaded.
+    // This prevents expectedCount or boundary truth from influencing inference,
+    // while the protocol still classifies this corpus as known-video regression.
+    let frozen_prediction_semantic = serde_json::json!({
+        "schemaVersion": "maxpower-current-rust-known-video-predictions/v1",
+        "state": "frozen_before_truth",
+        "evaluationId": evaluation_protocol["evaluationId"],
+        "protocolSha256": evaluation_protocol["protocolSha256"],
+        "rows": &frozen_prediction_rows,
+    });
+    let prediction_sha256 = sha256_bytes(
+        &serde_json::to_vec(&frozen_prediction_semantic).expect("frozen prediction bytes"),
+    );
+
+    let labels: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&label_path).expect("admitted label asset"))
+            .expect("label JSON");
+    let label_records = labels["records"].as_array().expect("label records");
+    assert_eq!(replays.len(), label_records.len());
+    let mut exact_context_keys = HashSet::new();
+    for record in label_records {
+        assert!(exact_context_keys.insert(format!(
+            "{}:{}:{}",
+            record["sourceCaptureId"].as_str().expect("label source"),
+            record["exerciseId"].as_str().expect("label action"),
+            record["capturePosition"].as_str().expect("label view")
+        )));
+    }
+
+    let mut evaluated_rows = Vec::<EvaluatedReplayRow>::new();
+    let mut evaluated_expected_rep_count = 0_usize;
+    let mut reviewed_negative_window_count = 0_usize;
+    for prediction in &frozen_prediction_rows {
+        let label_record = label_records
+            .iter()
+            .find(|record| {
+                record["sourceCaptureId"] == prediction.source_capture_id
+                    && record["exerciseId"] == prediction.exercise_id
+                    && record["capturePosition"] == prediction.capture_position
+            })
+            .expect("governed exact-context label");
+        let truth_ranges = label_record["segments"]
+            .as_array()
+            .expect("human Rep ranges")
+            .iter()
+            .map(|segment| EvaluationRange {
+                start_ms: segment["startMs"].as_u64().expect("truth start"),
+                end_ms: segment["endMs"].as_u64().expect("truth end"),
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            truth_ranges
+                .windows(2)
+                .all(|pair| pair[0].start_ms < pair[1].start_ms)
+                && truth_ranges
+                    .iter()
+                    .all(|range| range.start_ms < range.end_ms),
+            "invalid truth ranges for {}",
+            prediction.context_id
+        );
+        let expected_count = label_record["expectedCount"]
+            .as_u64()
+            .expect("expected count") as usize;
+        assert_eq!(
+            expected_count,
+            truth_ranges.len(),
+            "admitted evaluation records must have complete Rep ranges"
+        );
+        evaluated_expected_rep_count += expected_count;
+        let counted_reps = prediction
+            .reps
+            .iter()
+            .filter(|rep| rep.disposition != "rejected")
+            .cloned()
+            .collect::<Vec<_>>();
+        let predicted_ranges = counted_reps
+            .iter()
+            .map(|rep| EvaluationRange {
+                start_ms: rep.start_ms,
+                end_ms: rep.end_ms,
+            })
+            .collect::<Vec<_>>();
+        let matches = monotonic_evaluation_matches(&truth_ranges, &predicted_ranges);
+        let strict_boundary_aligned_count = matches
+            .iter()
+            .filter(|entry| entry.strict_boundary_aligned)
+            .count();
+        let negative_windows = label_record["reviewedNegativeWindows"]
+            .as_array()
+            .expect("reviewed negative windows");
+        reviewed_negative_window_count += negative_windows.len();
+        let negative_false_triggers = predicted_ranges
+            .iter()
+            .filter(|range| {
+                let midpoint = range.start_ms + (range.end_ms - range.start_ms) / 2;
+                negative_windows.iter().any(|window| {
+                    let start = window["startMs"].as_u64().expect("negative start");
+                    let end = window["endMs"].as_u64().expect("negative end");
+                    assert!(start < end, "invalid reviewed negative window");
+                    midpoint >= start && midpoint < end
+                })
+            })
+            .count();
+
+        let mut used_predictions = HashSet::new();
+        let broad_boundary_aligned = truth_ranges
+            .iter()
+            .filter(|truth| {
+                predicted_ranges
+                    .iter()
+                    .enumerate()
+                    .any(|(index, predicted)| {
+                        if used_predictions.contains(&index) {
+                            return false;
+                        }
+                        let aligned = truth.start_ms.abs_diff(predicted.start_ms) <= 3_000
+                            && truth.end_ms.abs_diff(predicted.end_ms) <= 1_500;
+                        if aligned {
+                            used_predictions.insert(index);
+                        }
+                        aligned
+                    })
+            })
+            .count();
+        if broad_boundary_aligned > 0 {
+            records_with_boundary_alignment += 1;
+        } else {
+            structural_gaps.push(format!(
+                "{}:{}/{}: non_rejected={}; expected={expected_count}",
+                prediction.source_capture_id,
+                prediction.exercise_id,
+                prediction.capture_position,
+                counted_reps.len()
+            ));
+        }
+
+        let matched_count = matches.len();
+        let exact_set = truth_ranges.len() == predicted_ranges.len();
+        evaluated_rows.push(EvaluatedReplayRow {
+            source_capture_id: prediction.source_capture_id.clone(),
+            context_id: prediction.context_id.clone(),
+            exercise_id: prediction.exercise_id.clone(),
+            capture_position: prediction.capture_position.clone(),
+            bundle_id: prediction.bundle_id.clone(),
+            bundle_hash: prediction.bundle_hash.clone(),
+            trace_content_hash: prediction.trace_content_hash.clone(),
+            trace_root_count: prediction.trace_root_count,
+            truth_count: truth_ranges.len(),
+            predicted_count: predicted_ranges.len(),
+            matched_count,
+            false_positive_count: predicted_ranges.len().saturating_sub(matched_count),
+            missed_count: truth_ranges.len().saturating_sub(matched_count),
+            exact_set,
+            strict_boundary_aligned_count,
+            exact_set_and_all_boundaries_aligned: exact_set
+                && strict_boundary_aligned_count == truth_ranges.len(),
+            reviewed_negative_window_false_trigger_count: negative_false_triggers,
+            truth_ranges,
+            predicted_reps: counted_reps,
+            matches,
+            quality_finding_states: prediction.quality_finding_states.clone(),
+        });
+    }
+
+    let evaluated_unique_source_count = evaluated_rows
+        .iter()
+        .map(|row| row.source_capture_id.as_str())
+        .collect::<HashSet<_>>()
+        .len();
+    let report_semantic = serde_json::json!({
+        "schemaVersion": evaluation_rules["output"]["schemaVersion"],
+        "generatedOn": "2026-08-15",
+        "evaluationId": evaluation_protocol["evaluationId"],
+        "evaluationStatus": "known_participant_known_video_regression",
+        "generalizationClaimAllowed": false,
+        "protocolSha256": evaluation_protocol["protocolSha256"],
+        "predictionSha256": prediction_sha256,
+        "protocol": evaluation_rules,
+        "dataQuality": {
+            "assetContractChecks": "passed",
+            "labelRecordCount": label_records.len(),
+            "resolvedRecordCount": replays.len(),
+            "governanceExcludedRecordCount": declared_excluded_groups.len(),
+            "evaluatedRecordCount": evaluated_rows.len(),
+            "evaluatedUniqueSourceCaptureCount": evaluated_unique_source_count,
+            "duplicateExactContextKeyCount": 0,
+            "poseSidecarJoinCoverage": 1.0,
+            "expectedRepCount": evaluated_expected_rep_count,
+            "humanRangeCount": evaluated_rows.iter().map(|row| row.truth_count).sum::<usize>(),
+            "reviewedNegativeWindowCount": reviewed_negative_window_count,
+        },
+        "aggregate": evaluation_summary(&evaluated_rows),
+        "buckets": {
+            "byAction": evaluation_buckets(&evaluated_rows, |row| row.exercise_id.clone()),
+            "byView": evaluation_buckets(&evaluated_rows, |row| row.capture_position.clone()),
+            "byActionView": evaluation_buckets(&evaluated_rows, |row| format!("{}|{}", row.exercise_id, row.capture_position)),
+        },
+        "structuralRuntime": {
+            "packetCount": packet_count,
+            "localStates": local_states,
+            "poseChannelFrames": pose_channel_frames,
+            "equipmentChannelFrames": equipment_channel_frames,
+            "fusionStates": fusion_states,
+            "dimensionStates": dimension_states,
+            "referenceKinds": reference_kinds,
+            "traceCompleteReportCount": trace_complete_reports,
+        },
+        "unsupportedAccuracyClaims": {
+            "equipmentTrackAccuracy": "not_evaluable_no_human_equipment_track_truth",
+            "techniqueQualityAccuracy": "not_evaluable_no_human_quality_truth",
+        },
+        "rows": evaluated_rows,
+    });
+    let report_digest = sha256_bytes(
+        &serde_json::to_vec(&report_semantic).expect("stable known-video evaluation report"),
+    );
+    let mut report_output = report_semantic;
+    report_output
+        .as_object_mut()
+        .expect("evaluation report object")
+        .insert("reportDigest".into(), serde_json::json!(report_digest));
+    if let Ok(output_path) = std::env::var("MAXPOWER_GOVERNED_EVALUATION_OUTPUT") {
+        let output_path = PathBuf::from(output_path);
+        let output_path = if output_path.is_absolute() {
+            output_path
+        } else {
+            root.join(output_path)
+        };
+        std::fs::write(
+            &output_path,
+            serde_json::to_vec_pretty(&report_output).expect("pretty evaluation JSON"),
+        )
+        .expect("write governed evaluation output");
+    }
+    eprintln!(
+        "known-video alignment: {}",
+        serde_json::to_string(&report_output["aggregate"]).expect("aggregate JSON")
+    );
     eprintln!(
         "governed replay: resolved=54 replayed={replayed_records} non_rejected={} boundary_aligned={} gaps={:?}",
         records_with_non_rejected_rep, records_with_boundary_alignment, structural_gaps

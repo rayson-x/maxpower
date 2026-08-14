@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "maxpower-known-video-alignment-protocol/v1",
+  "evaluationId": "current-rust-v7-known-video-alignment-2026-08-15",
+  "protocolSha256": "ab9a8c65836888d21e051885bce5c831488b661bd5b4c9ff8511bce5909fc1b7",
+  "protocol": {
+    "evaluationScope": "known_participant_known_video_regression",
+    "generalizationClaimAllowed": false,
+    "replayManifest": {
+      "path": "rust/motion-sdk/tests/fixtures/all_action_governed_replay_manifest_v1.json",
+      "sha256": "26e37821a88ea8658fbc87f5856873e0adcf4e4cb8f3644abe68a87bf3a5b6bc",
+      "assembledInputSha256": "abe32d60911f83af6fb7214bd55a13b94f93e363db9bad6fe9122a7a0b91b72e"
+    },
+    "modelConfiguration": {
+      "assessmentCatalogId": "maxpower/current-all-family-assessment/v7",
+      "poseRuntimeId": "rtmpose-m",
+      "poseSchema": "halpe26/v1",
+      "packetContract": "1.10",
+      "countedDispositions": [
+        "confirmed",
+        "needs_review"
+      ]
+    },
+    "truthReveal": "all_predictions_hashed_before_human_ranges_are_loaded",
+    "matchingPolicy": {
+      "algorithm": "monotonic_start_end_dynamic_programming",
+      "candidateEligibility": "interval_iou_gte_0.10_or_both_boundaries_within_1500ms",
+      "minimumIntervalIoU": 0.1,
+      "candidateBoundaryToleranceMs": 1500,
+      "strictBoundaryAlignment": "interval_iou_gte_0.60_and_both_boundaries_within_500ms",
+      "strictMinimumIntervalIoU": 0.6,
+      "strictStartEndToleranceMs": 500,
+      "negativeWindowFalseTrigger": "predicted_rep_midpoint_inside_reviewed_negative_window"
+    },
+    "humanSupervision": {
+      "assetId": "personal-human-rep-ranges-v2",
+      "consumedForTasks": [
+        "rep_counting",
+        "rep_segmentation",
+        "negative_window_rejection"
+      ],
+      "selectedFields": [
+        "sourceCaptureId",
+        "exerciseId",
+        "capturePosition",
+        "expectedCount",
+        "segments[].startMs",
+        "segments[].endMs",
+        "reviewedNegativeWindows[].startMs",
+        "reviewedNegativeWindows[].endMs"
+      ]
+    },
+    "forbiddenClaims": [
+      "held_out_accuracy",
+      "unseen_user_generalization",
+      "equipment_track_accuracy",
+      "technique_quality_accuracy",
+      "production_promotion"
+    ],
+    "output": {
+      "path": "docs/reports/current-rust-v7-known-video-alignment-2026-08-15.json",
+      "schemaVersion": "maxpower-current-rust-known-video-alignment/v1"
+    }
+  }
+}

@@ -8,13 +8,17 @@ Rust catalog v7 contains executable Bundles for all 24 exact action×view contex
 
 This proves that the shared engine and report chain run across every current action family. It does not prove acceptable Rep or movement-quality accuracy.
 
-The only admitted frozen human-metric output currently available covers three sources from an earlier Rust WASM evaluation pass, not catalog v7: 23 confirmed predictions, 23 matches, precision 100%, recall 65.71%, start-boundary MAE 467 ms, end-boundary MAE 498 ms, and exact-set rate 33.33%. These numbers must not be extrapolated to the other 51 records, to quality conclusions, or to other users.
+The current v7 known-video alignment now covers all 53 governance-eligible records: 435 counted predictions against 455 human Rep ranges, 379 candidate matches, precision 87.13%, recall 83.30%, exact-set rate 30.19%, and strict 500 ms / IoU 0.60 boundary alignment on 52.31% of truth Reps. Only 1/53 sets has both exact count and every boundary strictly aligned. This is evaluation-only evidence on the touched personal corpus, not a held-out or cross-user claim.
+
+A separate earlier admitted Rust WASM evaluation covers three sources: 23 confirmed predictions, 23 matches, precision 100%, recall 65.71%, start-boundary MAE 467 ms, end-boundary MAE 498 ms, and exact-set rate 33.33%. It predates catalog v7 and must not be blended with the current result.
 
 ## Governed evidence
 
 - Labels: `personal-human-rep-ranges-v2`, `label_allowed`, `user_reviewed`, group key `sourceCaptureId`, SHA-256 `63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727`.
 - Pose observations: `personal-native-rtmpose-halpe26-observations`, `feature_only`, `model_generated`, group key `sourceCaptureId`.
 - Full-corpus structural manifest: `rust/motion-sdk/tests/fixtures/all_action_governed_replay_manifest_v1.json`. It freezes all 54 label records, exact selected fields, source groups, exclusion policy, pose selector, packet contract and catalog v7 identity.
+- Current v7 alignment protocol: `rust/motion-sdk/tests/fixtures/current_v7_known_video_alignment_protocol_v1.json`. It freezes the candidate/strict matching rules, counted dispositions, truth-reveal order and forbidden claims.
+- Current v7 alignment output: `docs/reports/current-rust-v7-known-video-alignment-2026-08-15.json`, admitted as `current-rust-v7-known-video-alignment-report` with `evaluation_only` authority. Predictions are hashed before human ranges are loaded, but the corpus remains known/touched.
 - Frozen metric manifest: `rust/motion-sdk/tests/fixtures/current_rust_evaluation_evidence_manifest_v1.json`. It resolves the admitted evaluation asset, exact output path and SHA-256, label hash, prediction hash, truth-reveal protocol and published aggregate values.
 - One full-source record is excluded from exact-set evaluation because expected count and admitted Rep ranges disagree. It still resolves an executable exact-context Bundle but is not replayed as evaluation evidence.
 
@@ -72,6 +76,21 @@ Other records in both affected exact contexts do produce aligned non-rejected Re
 | body only | push-up: rearRight45 | 1 | pose-only Rep + report + trace | more independent sources |
 | fixed support | pull-up: rearLeft45 | 1 | support-relative Rep + report + trace | more sources and observed support evidence |
 
+## Current v7 known-video alignment
+
+The complete per-action and per-record result is in `docs/reports/current-rust-v7-known-video-alignment-2026-08-15.md`. The headline difference between candidate recognition and boundary quality is material:
+
+| Measure | Current v7 result |
+| --- | ---: |
+| Candidate precision | 87.13% |
+| Candidate recall | 83.30% |
+| Exact-set rate | 30.19% |
+| Strict boundary-aligned truth Reps | 52.31% |
+| Exact count plus every boundary aligned | 1 / 53 sets |
+| Negative-window false-trigger predictions | 32 |
+
+`lateral_raise`, `machine_chest_press`, and `lat_pulldown` are the strongest multi-record known-video contexts. `rear_delt_fly` is the dominant miss failure, `single_arm_cable_lateral_raise` over-counts, and several actions find candidates while disagreeing with the human complete-cycle boundaries. These are regression priorities, not support/promotion labels.
+
 ## Frozen human-supported metrics
 
 The admitted frozen output `rust-cycle-aligned-frozen-debug-evaluation.json` covers only:
@@ -94,4 +113,4 @@ Aggregate precision is 100% and recall is 65.71%. Matched start MAE is 467 ms an
 
 ## Release interpretation
 
-The engine is suitable for a feasibility Demo/Beta that shows Rep results, dimensioned set conclusions, `cannot_judge` states and expandable derivation. The current evidence does not justify calling the recognition or quality judgement reliable for general users. The next evidence sequence is: freeze a v7 prediction/evaluation output for all eligible records; repair the three structural failures; admit real equipment tracks; add governed phase/equipment/quality truth; then evaluate source-independent and cross-user generalization.
+The engine is suitable for a feasibility Demo/Beta that shows Rep results, dimensioned set conclusions, `cannot_judge` states and expandable derivation. The current evidence does not justify calling the recognition or quality judgement reliable for general users. The next evidence sequence is: repair the three structural failures and the per-action boundary/over-count gaps exposed by the v7 report; admit real equipment tracks; add governed phase/equipment/quality truth; then evaluate source-independent and cross-user generalization.
