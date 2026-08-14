@@ -593,6 +593,44 @@ fn validate_trace_graph(
     {
         return Err(AssessmentRuntimeError::InvalidTraceGraph);
     }
+    let node_by_id = nodes
+        .iter()
+        .map(|node| (node.node_id.as_str(), node))
+        .collect::<HashMap<_, _>>();
+    for root in conclusion_root_ids {
+        let mut pending = vec![root.as_str()];
+        let mut visited = HashSet::new();
+        let mut kinds = Vec::new();
+        while let Some(node_id) = pending.pop() {
+            if !visited.insert(node_id) {
+                continue;
+            }
+            let node = node_by_id
+                .get(node_id)
+                .copied()
+                .ok_or(AssessmentRuntimeError::InvalidTraceGraph)?;
+            if !kinds.contains(&node.kind) {
+                kinds.push(node.kind);
+            }
+            pending.extend(node.input_node_ids.iter().map(String::as_str));
+        }
+        if [
+            TraceNodeKind::SourceObservation,
+            TraceNodeKind::LocalCoordinate,
+            TraceNodeKind::PoseEquipmentFusion,
+            TraceNodeKind::RepBoundary,
+            TraceNodeKind::FeatureFact,
+            TraceNodeKind::ReferenceComparison,
+            TraceNodeKind::RuleConclusion,
+            TraceNodeKind::SetPattern,
+            TraceNodeKind::SetConclusion,
+        ]
+        .iter()
+        .any(|required| !kinds.contains(required))
+        {
+            return Err(AssessmentRuntimeError::InvalidTraceGraph);
+        }
+    }
     Ok(())
 }
 
@@ -1522,6 +1560,9 @@ impl ExecutionAssessmentEngine {
             .ok_or(AssessmentRuntimeError::NoActiveSet)?;
         if active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly {
             return self.bundle_not_executable_refusal();
+        }
+        if active.packets.is_empty() {
+            return Err(AssessmentRuntimeError::CanonicalPacketRequired);
         }
         if active.closure_observed {
             return Err(AssessmentRuntimeError::CanonicalSetClosureAlreadyObserved);
@@ -5377,6 +5418,21 @@ mod tests {
         assert_eq!(
             resolved, None,
             "opposite motion remains an explicit conflict"
+        );
+    }
+
+    #[test]
+    fn trace_sealer_rejects_a_root_without_full_causal_ancestry() {
+        let nodes = vec![EvidenceTraceNode {
+            node_id: "set-conclusion:task_completion".into(),
+            kind: TraceNodeKind::SetConclusion,
+            summary: "decorative root".into(),
+            source_ids: Vec::new(),
+            input_node_ids: Vec::new(),
+        }];
+        assert_eq!(
+            validate_trace_graph(&nodes, &["set-conclusion:task_completion".into()]),
+            Err(AssessmentRuntimeError::InvalidTraceGraph)
         );
     }
 }

@@ -395,6 +395,46 @@ fn packet_local_coordinate_strategy_must_match_the_frozen_exact_context() {
 }
 
 #[test]
+fn canonical_set_closure_without_any_packet_is_refused() {
+    let binding = current_rigid_bar_assessment_profiles_v1()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "barbell_bench_press"
+                && binding.capture_view == AssessmentCaptureView::Front
+        })
+        .expect("bench front profile");
+    let (_, closure) = canonical_packets_for(&binding, "fixture:empty-assessment-stream");
+    let mut engine = ExecutionAssessmentEngine::configure(
+        current_motion_assessment_catalog_v3(),
+        WorkoutAssessmentContext {
+            workout_session_id: "empty-assessment-stream".into(),
+        },
+    )
+    .expect("v3 catalog");
+    let mut context = video_context("barbell_bench_press", "front");
+    context.source_capture_id = "fixture:empty-assessment-stream".into();
+    engine
+        .advance(AssessmentEvent::SetStarted(SetExecutionContext {
+            set_id: "empty-assessment-stream-set".into(),
+            set_ordinal: 1,
+            video_context: context,
+            intent: SetIntent::Working,
+            planned_load: None,
+            performed_load: None,
+        }))
+        .expect("start exact context");
+
+    assert_eq!(
+        engine
+            .advance(AssessmentEvent::CanonicalSetClosureObserved(Box::new(
+                closure,
+            )))
+            .expect_err("an empty canonical stream cannot produce user conclusions"),
+        AssessmentRuntimeError::CanonicalPacketRequired
+    );
+}
+
+#[test]
 fn visible_return_deviation_does_not_require_a_prior_range_reference() {
     let binding = current_rigid_bar_assessment_profiles_v1()
         .into_iter()
