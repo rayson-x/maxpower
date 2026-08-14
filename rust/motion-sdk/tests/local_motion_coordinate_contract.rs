@@ -883,18 +883,21 @@ fn missing_feed_mirroring_keeps_anatomical_mapping_unknown() {
 }
 
 #[test]
-fn unsupported_coarse_view_keeps_anatomical_mapping_unknown() {
+fn rear_coarse_view_is_available_for_current_action_family_bundles() {
     let mut unsupported = ExerciseProfile::barbell_bench_press_local_front_provisional();
     unsupported.identity = "barbell-bench-press/rear/bilateral/barbell/local-v1".into();
     unsupported.content_hash = unsupported.computed_content_hash();
-    let unknown = endpoint_mapping_for_context(unsupported, Some(false), false);
-    assert_eq!(unknown.coarse_view, None);
+    let rear = endpoint_mapping_for_context(unsupported, Some(false), false);
     assert_eq!(
-        unknown.anatomical_side_mapping,
+        rear.coarse_view,
+        Some(maxpower_motion_sdk::LocalCoarseView::Rear)
+    );
+    assert_ne!(
+        rear.anatomical_side_mapping,
         maxpower_motion_sdk::AnatomicalSideMapping::Unknown,
     );
-    assert!(unknown.anatomical_left_endpoint_progress.is_none());
-    assert!(unknown.anatomical_right_endpoint_progress.is_none());
+    assert!(rear.anatomical_left_endpoint_progress.is_some());
+    assert!(rear.anatomical_right_endpoint_progress.is_some());
 }
 
 #[test]

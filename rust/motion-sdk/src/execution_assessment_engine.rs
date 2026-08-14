@@ -742,6 +742,8 @@ struct CompiledAssessmentProgram {
     minimum_feature_confidence: f32,
     late_set_window: usize,
     minimum_persistent_reps: usize,
+    bilateral_difference_threshold: f32,
+    bilateral_timing_difference_threshold_ms: f32,
     rep_rules: Vec<CompiledRepRule>,
     set_rules: Vec<CompiledSetRule>,
 }
@@ -790,6 +792,14 @@ struct ReferenceSample {
     load_unit: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ActiveSideMotionCandidate {
+    side: AnatomicalSide,
+    origin: [f32; 2],
+    observations: u32,
+    maximum_displacement: f32,
+}
+
 #[derive(Clone, Debug)]
 struct PacketEvidenceSummary {
     frame_id: u64,
@@ -820,6 +830,74 @@ struct ActiveSet {
     closure_observed: bool,
     packet_lineage: Option<crate::PacketLineage>,
     subject_reference_key: Option<String>,
+    active_side_candidates: HashMap<u64, ActiveSideMotionCandidate>,
+    active_side_conflicted: bool,
+}
+
+fn update_observed_active_side(
+    candidates: &mut HashMap<u64, ActiveSideMotionCandidate>,
+    tracks: &[crate::EquipmentTrackEvidence],
+    resolved_side: &mut Option<AnatomicalSide>,
+    conflicted: &mut bool,
+) {
+    const ACTIVE_SIDE_MINIMUM_DISPLACEMENT: f32 = 0.015;
+    for track in tracks.iter().filter(|track| track.judgeable_path) {
+        let side = match track.held_by {
+            crate::EquipmentHand::Left => AnatomicalSide::Left,
+            crate::EquipmentHand::Right => AnatomicalSide::Right,
+            crate::EquipmentHand::Both | crate::EquipmentHand::Unknown => continue,
+        };
+        let center = [track.center_x, track.center_y];
+        match candidates.entry(track.track_id) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(ActiveSideMotionCandidate {
+                    side,
+                    origin: center,
+                    observations: 1,
+                    maximum_displacement: 0.0,
+                });
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let candidate = entry.get_mut();
+                if candidate.side != side {
+                    *conflicted = true;
+                    continue;
+                }
+                candidate.observations = candidate.observations.saturating_add(1);
+                candidate.maximum_displacement = candidate.maximum_displacement.max(
+                    ((center[0] - candidate.origin[0]).powi(2)
+                        + (center[1] - candidate.origin[1]).powi(2))
+                    .sqrt(),
+                );
+            }
+        }
+    }
+    let established_sides = candidates
+        .values()
+        .filter(|candidate| {
+            candidate.observations >= 2
+                && candidate.maximum_displacement >= ACTIVE_SIDE_MINIMUM_DISPLACEMENT
+        })
+        .map(|candidate| candidate.side)
+        .collect::<HashSet<_>>();
+    if established_sides.len() > 1 {
+        *resolved_side = None;
+        *conflicted = true;
+    } else if let Some(observed) = established_sides.iter().next().copied()
+        && !*conflicted
+    {
+        match *resolved_side {
+            None => *resolved_side = Some(observed),
+            Some(previous) if previous == observed => {}
+            Some(_) => {
+                *resolved_side = None;
+                *conflicted = true;
+            }
+        }
+    }
+    if *conflicted {
+        *resolved_side = None;
+    }
 }
 
 pub struct ExecutionAssessmentEngine {
@@ -1070,6 +1148,8 @@ impl ExecutionAssessmentEngine {
                 local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
                     capture_view: crate::LocalCoarseView::Front,
                     preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortDown,
+                    equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
+                    pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
                 },
                 reference_order: vec![
                     ReferenceComparisonKind::SetPrefix,
@@ -1079,6 +1159,8 @@ impl ExecutionAssessmentEngine {
                 minimum_feature_confidence: 0.50,
                 late_set_window: 2,
                 minimum_persistent_reps: 2,
+                bilateral_difference_threshold: 0.15,
+                bilateral_timing_difference_threshold_ms: 150.0,
                 rep_rules: Vec::new(),
                 set_rules: Vec::new(),
             });
@@ -1105,6 +1187,8 @@ impl ExecutionAssessmentEngine {
             closure_observed: false,
             packet_lineage: None,
             subject_reference_key: self.subject_reference_key.clone(),
+            active_side_candidates: HashMap::new(),
+            active_side_conflicted: false,
         });
         self.last_terminal = None;
         Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
@@ -1192,6 +1276,10 @@ impl ExecutionAssessmentEngine {
                             .local_coordinate_strategy
                             .preparation_to_effort,
                     )
+                || packet.local_motion_coordinate.equipment_mode
+                    != active.program.local_coordinate_strategy.equipment_mode
+                || packet.local_motion_coordinate.pose_anchor
+                    != active.program.local_coordinate_strategy.pose_anchor
             {
                 return Err(AssessmentRuntimeError::PacketLocalCoordinateStrategyMismatch);
             }
@@ -1224,6 +1312,14 @@ impl ExecutionAssessmentEngine {
             crate::EquipmentFrameStatus::Observed
         );
         let active = self.active_set.as_mut().expect("active set observed above");
+        if active.resolved_context.laterality_mode == AssessmentLateralityMode::ObservedActiveSide {
+            update_observed_active_side(
+                &mut active.active_side_candidates,
+                &packet.equipment.tracks,
+                &mut active.resolved_context.observed_active_side,
+                &mut active.active_side_conflicted,
+            );
+        }
         let lineage_id = packet_lineage_id(&packet.lineage);
         active.packet_lineage.get_or_insert(packet.lineage.clone());
         active.trace_nodes.push(EvidenceTraceNode {
@@ -1258,8 +1354,17 @@ impl ExecutionAssessmentEngine {
             node_id: fusion_id,
             kind: TraceNodeKind::PoseEquipmentFusion,
             summary: format!(
-                "Pose/equipment channel state is {:?}; independent equipment observed: {equipment_observed}.",
-                packet.local_motion_coordinate.channel_agreement
+                "Pose/equipment channel state is {:?}; independent equipment observed: {equipment_observed}; observed active side: {}.",
+                packet.local_motion_coordinate.channel_agreement,
+                if active.active_side_conflicted {
+                    "conflict"
+                } else {
+                    match active.resolved_context.observed_active_side {
+                        Some(AnatomicalSide::Left) => "left",
+                        Some(AnatomicalSide::Right) => "right",
+                        None => "unknown",
+                    }
+                }
             ),
             source_ids: vec![source_id.clone()],
             input_node_ids: vec![source_id.clone(), coordinate_id],
@@ -1970,6 +2075,8 @@ fn compile_catalog_programs(
         {
             Some("up") => crate::LocalActionAxisDirection::PreparationToEffortUp,
             Some("down") => crate::LocalActionAxisDirection::PreparationToEffortDown,
+            Some("left") => crate::LocalActionAxisDirection::PreparationToEffortLeft,
+            Some("right") => crate::LocalActionAxisDirection::PreparationToEffortRight,
             _ => {
                 return Err(invalid(
                     "LocalCoordinateStrategy preparationToEffortDirection is unsupported",
@@ -1979,7 +2086,26 @@ fn compile_catalog_programs(
         let local_coordinate_strategy = crate::LocalMotionCoordinateStrategy {
             capture_view: expected_local_view,
             preparation_to_effort,
+            equipment_mode: local_equipment_mode(bundle.exact_context.equipment_semantics),
+            pose_anchor: local_pose_anchor(bundle.exact_context.equipment_semantics),
         };
+        if local
+            .content
+            .get("equipmentMode")
+            .and_then(serde_json::Value::as_str)
+            != Some(local_equipment_mode_id(
+                local_coordinate_strategy.equipment_mode,
+            ))
+            || local
+                .content
+                .get("poseAnchor")
+                .and_then(serde_json::Value::as_str)
+                != Some(local_pose_anchor_id(local_coordinate_strategy.pose_anchor))
+        {
+            return Err(invalid(
+                "LocalCoordinateStrategy equipmentMode or poseAnchor does not match exact context",
+            ));
+        }
         if execution
             .content
             .get("equipmentSemantics")
@@ -1992,6 +2118,8 @@ fn compile_catalog_programs(
                 "ExecutionContract equipmentSemantics does not match exact context",
             ));
         }
+        let expected_evidence_policy =
+            equipment_evidence_policy(bundle.exact_context.equipment_semantics);
         if local
             .content
             .get("coordinateSpace")
@@ -2001,7 +2129,7 @@ fn compile_catalog_programs(
                 .content
                 .get("evidencePolicy")
                 .and_then(serde_json::Value::as_str)
-                != Some("independent_subject_associated_rigid_bar_axis")
+                != Some(expected_evidence_policy)
             || equipment
                 .content
                 .get("conflictPolicy")
@@ -2085,6 +2213,8 @@ fn compile_catalog_programs(
                                 | "local_return_error"
                                 | "equipment_primary_excursion"
                                 | "pose_primary_excursion"
+                                | "bilateral_endpoint_difference"
+                                | "bilateral_turnaround_timing_difference"
                                 | "authorization_phase_control"
                                 | "authorization_support_stability"
                                 | "authorization_bilateral_coordination"
@@ -2327,6 +2457,32 @@ fn compile_catalog_programs(
             .and_then(|value| usize::try_from(value).ok())
             .filter(|value| *value > 0)
             .ok_or_else(|| invalid("minimumPersistentReps is invalid"))?;
+        let requires_bilateral_thresholds = feature_ids.iter().any(|feature_id| {
+            matches!(
+                feature_id.as_str(),
+                "bilateral_endpoint_difference" | "bilateral_turnaround_timing_difference"
+            )
+        });
+        let bilateral_difference_threshold = aggregation
+            .content
+            .get("bilateralDifferenceThreshold")
+            .and_then(serde_json::Value::as_f64)
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .or((!requires_bilateral_thresholds).then_some(0.15))
+            .ok_or_else(|| {
+                invalid("bilateralDifferenceThreshold is required and must be positive")
+            })?;
+        let bilateral_timing_difference_threshold_ms = aggregation
+            .content
+            .get("bilateralTimingDifferenceThresholdMs")
+            .and_then(serde_json::Value::as_f64)
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite() && *value > 0.0)
+            .or((!requires_bilateral_thresholds).then_some(150.0))
+            .ok_or_else(|| {
+                invalid("bilateralTimingDifferenceThresholdMs is required and must be positive")
+            })?;
         let set_rules = aggregation
             .content
             .get("setRules")
@@ -2387,6 +2543,8 @@ fn compile_catalog_programs(
                 minimum_feature_confidence,
                 late_set_window,
                 minimum_persistent_reps,
+                bilateral_difference_threshold,
+                bilateral_timing_difference_threshold_ms,
                 rep_rules,
                 set_rules,
             },
@@ -2420,9 +2578,73 @@ fn local_coarse_view(view: AssessmentCaptureView) -> Option<crate::LocalCoarseVi
         AssessmentCaptureView::FrontObliqueRight => Some(crate::LocalCoarseView::FrontObliqueRight),
         AssessmentCaptureView::RearObliqueLeft => Some(crate::LocalCoarseView::RearObliqueLeft),
         AssessmentCaptureView::RearObliqueRight => Some(crate::LocalCoarseView::RearObliqueRight),
-        AssessmentCaptureView::Rear
-        | AssessmentCaptureView::LeftSide
-        | AssessmentCaptureView::RightSide => None,
+        AssessmentCaptureView::Rear => Some(crate::LocalCoarseView::Rear),
+        AssessmentCaptureView::LeftSide => Some(crate::LocalCoarseView::LeftSide),
+        AssessmentCaptureView::RightSide => Some(crate::LocalCoarseView::RightSide),
+    }
+}
+
+fn local_equipment_mode(value: AssessmentEquipmentSemantics) -> crate::LocalEquipmentMode {
+    match value {
+        AssessmentEquipmentSemantics::RigidBarAxis => crate::LocalEquipmentMode::RigidBarAxis,
+        AssessmentEquipmentSemantics::CableOrMovingHandle
+        | AssessmentEquipmentSemantics::UnilateralCableHandle
+        | AssessmentEquipmentSemantics::ConstrainedMachineLever => {
+            crate::LocalEquipmentMode::MovingHandle
+        }
+        AssessmentEquipmentSemantics::TwoIndependentDumbbells => {
+            crate::LocalEquipmentMode::TwoIndependentDumbbells
+        }
+        AssessmentEquipmentSemantics::BodyOnly => crate::LocalEquipmentMode::PoseOnly,
+        AssessmentEquipmentSemantics::FixedSupport => crate::LocalEquipmentMode::FixedSupport,
+    }
+}
+
+fn local_pose_anchor(value: AssessmentEquipmentSemantics) -> crate::LocalPoseAnchor {
+    match value {
+        AssessmentEquipmentSemantics::BodyOnly | AssessmentEquipmentSemantics::FixedSupport => {
+            crate::LocalPoseAnchor::ShoulderMidpoint
+        }
+        _ => crate::LocalPoseAnchor::WristMidpoint,
+    }
+}
+
+fn local_equipment_mode_id(value: crate::LocalEquipmentMode) -> &'static str {
+    match value {
+        crate::LocalEquipmentMode::RigidBarAxis => "rigidbaraxis",
+        crate::LocalEquipmentMode::MovingHandle => "movinghandle",
+        crate::LocalEquipmentMode::TwoIndependentDumbbells => "twoindependentdumbbells",
+        crate::LocalEquipmentMode::PoseOnly => "poseonly",
+        crate::LocalEquipmentMode::FixedSupport => "fixedsupport",
+    }
+}
+
+fn local_pose_anchor_id(value: crate::LocalPoseAnchor) -> &'static str {
+    match value {
+        crate::LocalPoseAnchor::WristMidpoint => "wristmidpoint",
+        crate::LocalPoseAnchor::ShoulderMidpoint => "shouldermidpoint",
+    }
+}
+
+fn equipment_evidence_policy(value: AssessmentEquipmentSemantics) -> &'static str {
+    match value {
+        AssessmentEquipmentSemantics::RigidBarAxis => {
+            "independent_subject_associated_rigid_bar_axis"
+        }
+        AssessmentEquipmentSemantics::CableOrMovingHandle => {
+            "independent_subject_associated_moving_handle"
+        }
+        AssessmentEquipmentSemantics::UnilateralCableHandle => {
+            "observed_side_subject_associated_moving_handle"
+        }
+        AssessmentEquipmentSemantics::ConstrainedMachineLever => {
+            "moving_lever_separate_from_fixed_structure"
+        }
+        AssessmentEquipmentSemantics::TwoIndependentDumbbells => {
+            "two_independent_subject_associated_loads"
+        }
+        AssessmentEquipmentSemantics::BodyOnly => "pose_only_no_moving_equipment",
+        AssessmentEquipmentSemantics::FixedSupport => "body_relative_to_fixed_support",
     }
 }
 
@@ -2494,6 +2716,18 @@ fn pose_channel(
     evidence.pose
 }
 
+fn left_equipment_channel(
+    evidence: &crate::LocalMotionCoordinateEvidence,
+) -> Option<crate::LocalTrajectoryChannel> {
+    evidence.anatomical_left_equipment
+}
+
+fn right_equipment_channel(
+    evidence: &crate::LocalMotionCoordinateEvidence,
+) -> Option<crate::LocalTrajectoryChannel> {
+    evidence.anatomical_right_equipment
+}
+
 fn fused_channel(
     evidence: &crate::LocalMotionCoordinateEvidence,
 ) -> Option<crate::LocalTrajectoryChannel> {
@@ -2559,6 +2793,19 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
     ) = trajectory_metrics(endpoints, equipment_channel);
     let (pose_range, _pose_return_error, pose_coverage, pose_confidence, pose_uncertainty) =
         trajectory_metrics(endpoints, pose_channel);
+    let (left_range, _, left_coverage, left_confidence, left_uncertainty) =
+        trajectory_metrics(endpoints, left_equipment_channel);
+    let (right_range, _, right_coverage, right_confidence, right_uncertainty) =
+        trajectory_metrics(endpoints, right_equipment_channel);
+    let bilateral_difference = left_range
+        .zip(right_range)
+        .map(|(left, right)| (left - right).abs());
+    let bilateral_timing_difference = endpoints.and_then(|value| {
+        value
+            .anatomical_left_turnaround_timestamp_ms
+            .zip(value.anatomical_right_turnaround_timestamp_ms)
+            .map(|(left, right)| left.abs_diff(right) as f32)
+    });
     let mut candidates = vec![
         numeric_feature(
             "cycle_duration",
@@ -2658,6 +2905,32 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
             pose_confidence,
             pose_uncertainty,
             vec!["pose_measured".into(), "local_motion_coordinate".into()],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "bilateral_endpoint_difference",
+            bilateral_difference,
+            MotionFeatureUnit::NormalizedDisplacement,
+            left_coverage.min(right_coverage),
+            left_confidence.min(right_confidence),
+            left_uncertainty.max(right_uncertainty),
+            vec![
+                "independent_left_equipment_track".into(),
+                "independent_right_equipment_track".into(),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "bilateral_turnaround_timing_difference",
+            bilateral_timing_difference,
+            MotionFeatureUnit::Milliseconds,
+            left_coverage.min(right_coverage),
+            left_confidence.min(right_confidence),
+            left_uncertainty.max(right_uncertainty),
+            vec![
+                "independent_left_equipment_turnaround".into(),
+                "independent_right_equipment_turnaround".into(),
+            ],
             source_range.clone(),
         ),
     ];
@@ -3266,6 +3539,63 @@ fn aggregate_set_patterns(active: &ActiveSet) -> Vec<SetPatternFact> {
             });
         }
     }
+    let bilateral_differences = active
+        .rep_assessments
+        .iter()
+        .filter_map(|rep| {
+            let endpoint = rep
+                .features
+                .iter()
+                .find(|feature| feature.feature_id == "bilateral_endpoint_difference")
+                .and_then(|feature| feature.value);
+            let timing = rep
+                .features
+                .iter()
+                .find(|feature| feature.feature_id == "bilateral_turnaround_timing_difference")
+                .and_then(|feature| feature.value);
+            let exceeds = endpoint
+                .is_some_and(|value| value >= active.program.bilateral_difference_threshold)
+                || timing.is_some_and(|value| {
+                    value >= active.program.bilateral_timing_difference_threshold_ms
+                });
+            exceeds.then_some((rep.rep.rep_id, endpoint, timing))
+        })
+        .collect::<Vec<_>>();
+    if !bilateral_differences.is_empty() {
+        let persistent = bilateral_differences.len() >= active.program.minimum_persistent_reps;
+        let late_start = active
+            .reps
+            .len()
+            .saturating_sub(active.program.late_set_window);
+        let late_rep_ids = active.reps[late_start..]
+            .iter()
+            .map(|rep| rep.rep_id)
+            .collect::<HashSet<_>>();
+        let late_only = bilateral_differences
+            .iter()
+            .all(|(rep_id, _, _)| late_rep_ids.contains(rep_id));
+        patterns.push(SetPatternFact {
+            pattern_id: if persistent {
+                "persistent_bilateral_endpoint_difference"
+            } else {
+                "isolated_bilateral_endpoint_difference"
+            }
+            .into(),
+            summary: format!(
+                "{} Rep(s) exceeded the Bundle's {:.3} normalized endpoint or {:.0} ms turnaround-timing difference observation threshold{}; this is an observed bilateral-difference fact, not a correctness standard.",
+                bilateral_differences.len(),
+                active.program.bilateral_difference_threshold,
+                active.program.bilateral_timing_difference_threshold_ms,
+                if late_only { " in the late-set window" } else { "" },
+            ),
+            supporting_rep_ids: bilateral_differences
+                .iter()
+                .map(|(rep_id, _, _)| *rep_id)
+                .collect(),
+            evidence_dimensions: vec![AssessmentDimension::BilateralCoordination],
+            confidence: if persistent { 0.85 } else { 0.65 },
+        });
+    }
     patterns
 }
 
@@ -3686,6 +4016,8 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
                 "coordinateSpace": "causal_set_local_camera_plane",
                 "captureView": "front-oblique-left",
                 "preparationToEffortDirection": "down",
+                "equipmentMode": "rigidbaraxis",
+                "poseAnchor": "wristmidpoint",
                 "deliveryStage": "ticket_02_first_complete_tracer",
             }),
         ),
@@ -3857,6 +4189,8 @@ pub fn current_rigid_bar_assessment_profiles_v1() -> Vec<RigidBarAssessmentProfi
                 } else {
                     crate::LocalActionAxisDirection::PreparationToEffortUp
                 },
+                equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
+                pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
             },
         }
     })
@@ -4105,7 +4439,11 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
                     "preparationToEffortDirection": match binding.local_coordinate_strategy.preparation_to_effort {
                         crate::LocalActionAxisDirection::PreparationToEffortUp => "up",
                         crate::LocalActionAxisDirection::PreparationToEffortDown => "down",
+                        crate::LocalActionAxisDirection::PreparationToEffortLeft => "left",
+                        crate::LocalActionAxisDirection::PreparationToEffortRight => "right",
                     },
+                    "equipmentMode": "rigidbaraxis",
+                    "poseAnchor": "wristmidpoint",
                     "deliveryStage": delivery_stage,
                 }),
             ),
@@ -4209,6 +4547,578 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
     catalog
 }
 
+#[derive(Clone, Debug)]
+pub struct ActionFamilyAssessmentProfileBinding {
+    pub action_id: String,
+    pub capture_view: AssessmentCaptureView,
+    pub profile: crate::ExerciseProfile,
+    pub local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
+}
+
+fn action_family_profile_binding(
+    action_id: &str,
+    capture_view: AssessmentCaptureView,
+    equipment: AssessmentEquipmentSemantics,
+) -> ActionFamilyAssessmentProfileBinding {
+    let direction = local_direction(action_id, capture_view);
+    let identity = format!(
+        "{action_id}/{}/{}/{}/provisional-known-video-v1",
+        capture_view.catalog_slug(),
+        if equipment == AssessmentEquipmentSemantics::UnilateralCableHandle {
+            "observed-active-side"
+        } else {
+            "bilateral"
+        },
+        equipment_semantics_id(equipment),
+    );
+    let mut profile = crate::ExerciseProfile::rigid_bar_provisional(
+        &identity,
+        action_family_profile_initializer(action_id, capture_view),
+    );
+    if action_id == "rear_delt_fly" {
+        profile.min_secondary_amplitude = 24.65;
+        profile.content_hash = profile.computed_content_hash();
+    }
+    ActionFamilyAssessmentProfileBinding {
+        action_id: action_id.into(),
+        capture_view,
+        profile,
+        local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
+            capture_view: local_coarse_view(capture_view)
+                .expect("current exact context has a local view strategy"),
+            preparation_to_effort: direction,
+            equipment_mode: local_equipment_mode(equipment),
+            pose_anchor: local_pose_anchor(equipment),
+        },
+    }
+}
+
+pub fn current_cable_assessment_profiles_v1() -> Vec<ActionFamilyAssessmentProfileBinding> {
+    use AssessmentCaptureView as View;
+    use AssessmentEquipmentSemantics as Equipment;
+    [
+        ("lat_pulldown", View::Rear, Equipment::CableOrMovingHandle),
+        (
+            "lat_pulldown",
+            View::RearObliqueLeft,
+            Equipment::CableOrMovingHandle,
+        ),
+        (
+            "seated_row",
+            View::FrontObliqueLeft,
+            Equipment::CableOrMovingHandle,
+        ),
+        (
+            "seated_row",
+            View::RearObliqueLeft,
+            Equipment::CableOrMovingHandle,
+        ),
+        (
+            "seated_row",
+            View::RightSide,
+            Equipment::CableOrMovingHandle,
+        ),
+        (
+            "straight_arm_pulldown",
+            View::FrontObliqueLeft,
+            Equipment::CableOrMovingHandle,
+        ),
+        (
+            "straight_arm_pulldown",
+            View::FrontObliqueRight,
+            Equipment::CableOrMovingHandle,
+        ),
+        (
+            "single_arm_cable_lateral_raise",
+            View::FrontObliqueLeft,
+            Equipment::UnilateralCableHandle,
+        ),
+        (
+            "single_arm_cable_lateral_raise",
+            View::RearObliqueRight,
+            Equipment::UnilateralCableHandle,
+        ),
+    ]
+    .into_iter()
+    .map(|(action, view, equipment)| action_family_profile_binding(action, view, equipment))
+    .collect()
+}
+
+pub fn current_machine_assessment_profiles_v1() -> Vec<ActionFamilyAssessmentProfileBinding> {
+    use AssessmentCaptureView as View;
+    use AssessmentEquipmentSemantics as Equipment;
+    [
+        ("machine_chest_press", View::Front),
+        ("machine_chest_press", View::FrontObliqueRight),
+        ("rear_delt_fly", View::Front),
+    ]
+    .into_iter()
+    .map(|(action, view)| {
+        action_family_profile_binding(action, view, Equipment::ConstrainedMachineLever)
+    })
+    .collect()
+}
+
+pub fn current_dual_dumbbell_assessment_profiles_v1() -> Vec<ActionFamilyAssessmentProfileBinding> {
+    vec![action_family_profile_binding(
+        "lateral_raise",
+        AssessmentCaptureView::Front,
+        AssessmentEquipmentSemantics::TwoIndependentDumbbells,
+    )]
+}
+
+pub fn current_bodyweight_assessment_profiles_v1() -> Vec<ActionFamilyAssessmentProfileBinding> {
+    vec![
+        action_family_profile_binding(
+            "push_up",
+            AssessmentCaptureView::RearObliqueRight,
+            AssessmentEquipmentSemantics::BodyOnly,
+        ),
+        action_family_profile_binding(
+            "pull_up",
+            AssessmentCaptureView::RearObliqueLeft,
+            AssessmentEquipmentSemantics::FixedSupport,
+        ),
+    ]
+}
+
+fn local_direction(
+    action_id: &str,
+    view: AssessmentCaptureView,
+) -> crate::LocalActionAxisDirection {
+    use crate::LocalActionAxisDirection as Direction;
+    match (action_id, view) {
+        ("seated_row", AssessmentCaptureView::RightSide) => Direction::PreparationToEffortRight,
+        ("machine_chest_press", _) | ("rear_delt_fly", _) => Direction::PreparationToEffortRight,
+        ("lat_pulldown", _) | ("straight_arm_pulldown", _) | ("pull_up", _) => {
+            Direction::PreparationToEffortDown
+        }
+        _ => Direction::PreparationToEffortUp,
+    }
+}
+
+fn action_family_profile_initializer(
+    action_id: &str,
+    view: AssessmentCaptureView,
+) -> crate::RigidBarProfileInitializer {
+    use crate::{ExerciseSignal, ExerciseSignalKind as Kind, MovementDirection as Direction};
+    let signal = |kind, landmarks: &[usize]| ExerciseSignal {
+        kind,
+        landmarks: landmarks.to_vec(),
+    };
+    let build = |primary_signal,
+                 secondary_signal,
+                 direction,
+                 start_amplitude,
+                 minimum_amplitude,
+                 return_hysteresis,
+                 ready_tolerance,
+                 min_rep_duration_ms,
+                 max_rep_duration_ms| crate::RigidBarProfileInitializer {
+        primary_signal,
+        secondary_signal,
+        direction,
+        start_amplitude,
+        minimum_amplitude,
+        return_hysteresis,
+        ready_tolerance,
+        max_gap_ms: 700,
+        min_rep_duration_ms,
+        max_rep_duration_ms,
+    };
+    match (action_id, view) {
+        ("lat_pulldown", AssessmentCaptureView::Rear) => build(
+            signal(Kind::LandmarkY, &[9, 10]),
+            signal(Kind::LandmarkY, &[7, 8]),
+            Direction::Increasing,
+            0.02,
+            0.19951468,
+            0.06983014,
+            0.011,
+            523,
+            2630,
+        ),
+        ("lat_pulldown", AssessmentCaptureView::RearObliqueLeft) => build(
+            signal(Kind::LandmarkY, &[9, 10]),
+            signal(Kind::LandmarkY, &[7, 8]),
+            Direction::Increasing,
+            0.02,
+            0.17038266,
+            0.05963393,
+            0.011,
+            586,
+            3069,
+        ),
+        ("seated_row", AssessmentCaptureView::RightSide) => build(
+            signal(Kind::LandmarkY, &[8]),
+            signal(Kind::LandmarkY, &[8]),
+            Direction::Increasing,
+            0.015,
+            0.06,
+            0.015,
+            0.02,
+            800,
+            8000,
+        ),
+        (
+            "seated_row",
+            AssessmentCaptureView::FrontObliqueLeft | AssessmentCaptureView::RearObliqueLeft,
+        ) => build(
+            signal(Kind::LandmarkY, &[7]),
+            signal(Kind::LandmarkY, &[7]),
+            Direction::Decreasing,
+            0.015,
+            0.06,
+            0.015,
+            0.02,
+            350,
+            8000,
+        ),
+        ("straight_arm_pulldown", AssessmentCaptureView::FrontObliqueLeft) => build(
+            signal(Kind::JointAngle, &[11, 5, 7]),
+            signal(Kind::JointAngle, &[11, 5, 7]),
+            Direction::Decreasing,
+            7.25,
+            20.0,
+            2.75,
+            6.0,
+            350,
+            8000,
+        ),
+        ("straight_arm_pulldown", AssessmentCaptureView::FrontObliqueRight) => build(
+            signal(Kind::LandmarkY, &[8]),
+            signal(Kind::LandmarkY, &[8]),
+            Direction::Increasing,
+            0.027,
+            0.06,
+            0.015,
+            0.02,
+            350,
+            8000,
+        ),
+        ("single_arm_cable_lateral_raise", AssessmentCaptureView::FrontObliqueLeft) => build(
+            signal(Kind::JointAngle, &[11, 5, 9]),
+            signal(Kind::JointAngle, &[11, 5, 9]),
+            Direction::Increasing,
+            5.0,
+            20.0,
+            5.0,
+            6.0,
+            350,
+            8000,
+        ),
+        ("single_arm_cable_lateral_raise", AssessmentCaptureView::RearObliqueRight) => build(
+            signal(Kind::JointAngle, &[11, 5, 6]),
+            signal(Kind::JointAngle, &[11, 5, 6]),
+            Direction::Increasing,
+            1.1,
+            7.0,
+            2.0,
+            3.0,
+            600,
+            8000,
+        ),
+        ("machine_chest_press", AssessmentCaptureView::Front) => build(
+            signal(Kind::LandmarkY, &[9]),
+            signal(Kind::LandmarkY, &[10]),
+            Direction::Decreasing,
+            0.011,
+            0.08,
+            0.02,
+            0.025,
+            350,
+            8000,
+        ),
+        ("machine_chest_press", AssessmentCaptureView::FrontObliqueRight) => build(
+            signal(Kind::JointAngle, &[5, 7, 9]),
+            signal(Kind::JointAngle, &[6, 8, 10]),
+            Direction::Increasing,
+            5.0,
+            20.0,
+            5.0,
+            6.0,
+            350,
+            8000,
+        ),
+        ("rear_delt_fly", AssessmentCaptureView::Front) => build(
+            signal(Kind::JointAngle, &[11, 5, 9]),
+            signal(Kind::JointAngle, &[11, 5, 9]),
+            Direction::Increasing,
+            5.075,
+            75.69,
+            5.0,
+            7.2,
+            600,
+            8000,
+        ),
+        ("lateral_raise", AssessmentCaptureView::Front) => build(
+            signal(Kind::JointAngle, &[11, 5, 9]),
+            signal(Kind::JointAngle, &[12, 6, 10]),
+            Direction::Increasing,
+            5.0,
+            41.2547,
+            8.02175,
+            2.75,
+            600,
+            2618,
+        ),
+        ("push_up", AssessmentCaptureView::RearObliqueRight) => build(
+            signal(Kind::JointAngle, &[6, 8, 10]),
+            signal(Kind::JointAngle, &[6, 8, 10]),
+            Direction::Increasing,
+            7.6613,
+            21.1055,
+            18.805,
+            7.6613,
+            800,
+            2262,
+        ),
+        ("pull_up", AssessmentCaptureView::RearObliqueLeft) => build(
+            signal(Kind::JointAngle, &[11, 5, 7]),
+            signal(Kind::JointAngle, &[11, 5, 7]),
+            Direction::Decreasing,
+            5.0,
+            20.0,
+            5.0,
+            6.0,
+            350,
+            8000,
+        ),
+        _ => unreachable!("current action-family initializer matrix is closed"),
+    }
+}
+
+fn action_execution_semantics(action_id: &str) -> ([&'static str; 2], [&'static str; 3]) {
+    match action_id {
+        "lat_pulldown" | "straight_arm_pulldown" => (
+            ["pulling", "controlled_return"],
+            ["extended_start", "pulled_turnaround", "returned_extension"],
+        ),
+        "seated_row" => (
+            ["pulling", "return_to_reach"],
+            ["reach_start", "handle_to_torso", "returned_reach"],
+        ),
+        "single_arm_cable_lateral_raise" | "lateral_raise" | "rear_delt_fly" => (
+            ["raising", "lowering"],
+            ["lowered_start", "visible_top", "returned_lowered"],
+        ),
+        "machine_chest_press" => (
+            ["concentric_press", "eccentric_return"],
+            ["retracted_start", "visible_extension", "returned_retracted"],
+        ),
+        "push_up" => (
+            ["lowering", "pressing"],
+            ["extended_start", "visible_bottom", "returned_extension"],
+        ),
+        "pull_up" => (
+            ["pulling", "lowering"],
+            ["hanging_start", "visible_top", "returned_hang"],
+        ),
+        _ => (["effort", "return"], ["start", "turnaround", "return"]),
+    }
+}
+
+fn direction_id(direction: crate::LocalActionAxisDirection) -> &'static str {
+    match direction {
+        crate::LocalActionAxisDirection::PreparationToEffortUp => "up",
+        crate::LocalActionAxisDirection::PreparationToEffortDown => "down",
+        crate::LocalActionAxisDirection::PreparationToEffortLeft => "left",
+        crate::LocalActionAxisDirection::PreparationToEffortRight => "right",
+    }
+}
+
+fn promote_action_family(
+    mut catalog: ExecutionAssessmentBundleCatalog,
+    catalog_id: &str,
+    delivery_stage: &str,
+    bindings: Vec<ActionFamilyAssessmentProfileBinding>,
+) -> ExecutionAssessmentBundleCatalog {
+    catalog.catalog_id = catalog_id.into();
+    for binding in bindings {
+        let bundle_id = format!(
+            "{}/{}/v1",
+            binding.action_id,
+            binding.capture_view.catalog_slug()
+        );
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("action-family exact context is installed");
+        let semantics = bundle.exact_context.equipment_semantics;
+        let (phases, endpoints) = action_execution_semantics(&binding.action_id);
+        let prefix = format!("{bundle_id}/{delivery_stage}");
+        let mut common_features = vec![
+            "cycle_duration",
+            "rep_disposition",
+            "first_phase_duration",
+            "second_phase_duration",
+            "phase_duration_ratio",
+            "local_primary_excursion",
+            "local_return_error",
+            "equipment_primary_excursion",
+            "pose_primary_excursion",
+            "authorization_phase_control",
+            "authorization_support_stability",
+            "authorization_bilateral_coordination",
+            "authorization_trajectory_control",
+            "authorization_standard_variant_compatibility",
+        ];
+        if semantics == AssessmentEquipmentSemantics::TwoIndependentDumbbells {
+            common_features.push("bilateral_endpoint_difference");
+            common_features.push("bilateral_turnaround_timing_difference");
+        }
+        let definitions = [
+            (
+                AssessmentAssetKind::RecognitionProfile,
+                "recognition-profile",
+                serde_json::json!({
+                    "runtimeProfileIdentity": binding.profile.identity,
+                    "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
+                    "maturity": binding.profile.maturity.as_str(),
+                    "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
+                    "evidenceScope": "governed_known_video_rep_counting_initializer",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::ExecutionContract,
+                "execution-contract",
+                serde_json::json!({
+                    "phaseOrder": phases, "taskEndpoints": endpoints,
+                    "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
+                    "equipmentSemantics": equipment_semantics_id(semantics), "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::LocalCoordinateStrategy,
+                "local-coordinate-strategy",
+                serde_json::json!({
+                    "requireNormalizedEndpoints": true, "coordinateSpace": "causal_set_local_camera_plane",
+                    "captureView": binding.capture_view.catalog_slug(),
+                    "preparationToEffortDirection": direction_id(binding.local_coordinate_strategy.preparation_to_effort),
+                    "equipmentMode": local_equipment_mode_id(binding.local_coordinate_strategy.equipment_mode),
+                    "poseAnchor": local_pose_anchor_id(binding.local_coordinate_strategy.pose_anchor),
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::EquipmentAdapter,
+                "equipment-adapter",
+                serde_json::json!({
+                    "evidencePolicy": equipment_evidence_policy(semantics),
+                    "conflictPolicy": "abstain_fused_preserve_channels",
+                    "poseFallback": "preserve_as_independent_channel", "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::FeatureProgram,
+                "feature-program",
+                serde_json::json!({
+                    "features": common_features, "boundedFacts": true, "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::ReferencePolicy,
+                "reference-policy",
+                serde_json::json!({
+                    "order": ["self_geometry", "set_prefix", "same_workout_prior_set"],
+                    "compareBeforeUpdate": true, "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::RulePack,
+                "rule-pack",
+                serde_json::json!({
+                    "rangeFeatureId": "local_primary_excursion", "rangeDeviationRatio": 0.20,
+                    "minimumFeatureConfidence": 0.50, "missingEvidence": "cannot_judge",
+                    "repRules": [
+                        {"dimension":"task_completion","operator":"rep_disposition","featureId":"rep_disposition"},
+                        {"dimension":"range_of_motion","operator":"reference_lower_bound","featureId":"local_primary_excursion","returnFeatureId":"local_return_error","maximumReturnError":0.15},
+                        {"dimension":"phase_control","operator":"abstain","featureIds":["authorization_phase_control"],"reason":"no_governed_phase_quality_threshold"},
+                        {"dimension":"support_stability","operator":"abstain","featureIds":["authorization_support_stability"],"reason":"support_or_trunk_quality_threshold_not_governed"},
+                        {"dimension":"bilateral_coordination","operator":"abstain","featureIds":["authorization_bilateral_coordination"],"reason":"bilateral_quality_threshold_not_governed"},
+                        {"dimension":"trajectory_control","operator":"abstain","featureIds":["authorization_trajectory_control"],"reason":"no_governed_trajectory_quality_corridor"},
+                        {"dimension":"standard_variant_compatibility","operator":"abstain","featureIds":["authorization_standard_variant_compatibility"],"reason":"no_human_standard_variant_truth"},
+                        {"dimension":"observation_confidence","operator":"features_available","featureIds":["local_primary_excursion"]}
+                    ], "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::SetAggregationPolicy,
+                "set-aggregation-policy",
+                serde_json::json!({
+                    "lateSetWindow": 2, "minimumPersistentReps": 2,
+                    "bilateralDifferenceThreshold": 0.15,
+                    "bilateralTimingDifferenceThresholdMs": 150,
+                    "setRules": AssessmentDimension::ALL.map(|dimension| serde_json::json!({
+                        "dimension": dimension.as_str(),
+                        "operator": if dimension == AssessmentDimension::RangeOfMotion { "late_set_persistence" } else { "rollup_rep_dimension" }
+                    })), "deliveryStage": delivery_stage,
+                }),
+            ),
+        ];
+        let references = definitions
+            .into_iter()
+            .map(|(kind, slug, content)| {
+                let asset = executable_bundle_asset(kind, format!("{prefix}/{slug}"), content);
+                let reference = asset.reference();
+                catalog.installed_assets.push(asset);
+                reference
+            })
+            .collect::<Vec<_>>();
+        bundle.lineage = AssessmentBundleLineage {
+            recognition_profile: references[0].clone(),
+            execution_contract: references[1].clone(),
+            local_coordinate_strategy: references[2].clone(),
+            equipment_adapter: references[3].clone(),
+            feature_program: references[4].clone(),
+            reference_policy: references[5].clone(),
+            rule_pack: references[6].clone(),
+            set_aggregation_policy: references[7].clone(),
+        };
+        bundle.capability = AssessmentBundleCapability::Executable;
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
+pub fn current_motion_assessment_catalog_v4() -> ExecutionAssessmentBundleCatalog {
+    promote_action_family(
+        current_motion_assessment_catalog_v3(),
+        "maxpower/current-cable-assessment/v4",
+        "ticket_04_cable_family",
+        current_cable_assessment_profiles_v1(),
+    )
+}
+
+pub fn current_motion_assessment_catalog_v5() -> ExecutionAssessmentBundleCatalog {
+    promote_action_family(
+        current_motion_assessment_catalog_v4(),
+        "maxpower/current-machine-assessment/v5",
+        "ticket_05_machine_family",
+        current_machine_assessment_profiles_v1(),
+    )
+}
+
+pub fn current_motion_assessment_catalog_v6() -> ExecutionAssessmentBundleCatalog {
+    promote_action_family(
+        current_motion_assessment_catalog_v5(),
+        "maxpower/current-dual-dumbbell-assessment/v6",
+        "ticket_06_dual_dumbbell_family",
+        current_dual_dumbbell_assessment_profiles_v1(),
+    )
+}
+
+pub fn current_motion_assessment_catalog_v7() -> ExecutionAssessmentBundleCatalog {
+    promote_action_family(
+        current_motion_assessment_catalog_v6(),
+        "maxpower/current-all-family-assessment/v7",
+        "ticket_07_bodyweight_family",
+        current_bodyweight_assessment_profiles_v1(),
+    )
+}
+
 fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
     SealedRepReference {
         rep_id: rep.rep_id,
@@ -4266,6 +5176,30 @@ fn hash_serialized<T: Serialize>(value: &T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unilateral_track(
+        track_id: u64,
+        hand: crate::EquipmentHand,
+        x: f32,
+        y: f32,
+    ) -> crate::EquipmentTrackEvidence {
+        crate::EquipmentTrackEvidence {
+            track_id,
+            proposal_id: track_id,
+            subject_candidate_id: 7,
+            kind: crate::EquipmentKind::MachineHandle,
+            bbox: crate::NormalizedRect::new(x - 0.01, y - 0.01, 0.02, 0.02),
+            axis: None,
+            center_x: x,
+            center_y: y,
+            observation_score: 0.95,
+            association_confidence: 0.95,
+            uncertainty_px: Some(1.0),
+            source: crate::EquipmentSource::Detector,
+            held_by: hand,
+            judgeable_path: true,
+        }
+    }
 
     fn local_channel(
         progress: f32,
@@ -4333,6 +5267,54 @@ mod tests {
             Some(AssessmentConfigurationError::DuplicateExactContext(
                 original_context,
             ))
+        );
+    }
+
+    #[test]
+    fn unilateral_side_requires_motion_and_preserves_later_conflict() {
+        let mut candidates = HashMap::new();
+        let mut resolved = None;
+        let mut conflicted = false;
+        update_observed_active_side(
+            &mut candidates,
+            &[unilateral_track(1, crate::EquipmentHand::Left, 0.4, 0.5)],
+            &mut resolved,
+            &mut conflicted,
+        );
+        assert_eq!(
+            resolved, None,
+            "one static association is not motion evidence"
+        );
+        update_observed_active_side(
+            &mut candidates,
+            &[unilateral_track(1, crate::EquipmentHand::Left, 0.4, 0.505)],
+            &mut resolved,
+            &mut conflicted,
+        );
+        assert_eq!(resolved, None, "sub-threshold jitter cannot establish side");
+        update_observed_active_side(
+            &mut candidates,
+            &[unilateral_track(1, crate::EquipmentHand::Left, 0.4, 0.54)],
+            &mut resolved,
+            &mut conflicted,
+        );
+        assert_eq!(resolved, Some(AnatomicalSide::Left));
+        update_observed_active_side(
+            &mut candidates,
+            &[unilateral_track(2, crate::EquipmentHand::Right, 0.6, 0.5)],
+            &mut resolved,
+            &mut conflicted,
+        );
+        update_observed_active_side(
+            &mut candidates,
+            &[unilateral_track(2, crate::EquipmentHand::Right, 0.6, 0.54)],
+            &mut resolved,
+            &mut conflicted,
+        );
+        assert!(conflicted);
+        assert_eq!(
+            resolved, None,
+            "opposite motion remains an explicit conflict"
         );
     }
 }

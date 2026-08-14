@@ -4,12 +4,12 @@
 
 **Blocked by:** 02 — First complete motion-understanding tracer.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Lat pulldown, seated row, straight-arm pulldown and single-arm cable lateral raise resolve action-specific cable/handle equipment semantics from ActionDefinition.
-- [ ] The adapter tracks the applicable moving bar or handle independently from fixed machine structure and from pose evidence.
-- [ ] When the moving part is not visible, equipment-dependent features abstain while pose-supported task, Rep and quality facts remain available where the ExecutionContract permits them.
-- [ ] Unilateral cable motion binds to an anatomical side only when observed motion evidence establishes it; ambiguous or occluded side remains unknown.
-- [ ] Each supported context completes the full evidence→Rep→Feature→Comparison→Rep rules→Set aggregation→Set rules→Trace→SealedSetAssessment chain.
-- [ ] Conflict between pose phase and moving-handle phase is preserved as conflict/cannot-judge rather than forced agreement.
-- [ ] Governed replays cover all current cable/handle action/view contexts and report per-context evidence and quality-dimension availability.
+- [x] Lat pulldown, seated row, straight-arm pulldown and single-arm cable lateral raise resolve action-specific cable/handle equipment semantics from ActionDefinition.
+- [x] The adapter tracks the applicable moving bar or handle independently from fixed machine structure and from pose evidence.
+- [x] When the moving part is not visible, equipment-dependent features abstain while pose-supported task, Rep and quality facts remain available where the ExecutionContract permits them.
+- [x] Unilateral cable motion binds to an anatomical side only when observed motion evidence establishes it; ambiguous or occluded side remains unknown.
+- [x] Each supported context completes the full evidence→Rep→Feature→Comparison→Rep rules→Set aggregation→Set rules→Trace→SealedSetAssessment chain.
+- [x] Conflict between pose phase and moving-handle phase is preserved as conflict/cannot-judge rather than forced agreement.
+- [x] Governed replays cover all current cable/handle action/view contexts and report per-context evidence and quality-dimension availability.

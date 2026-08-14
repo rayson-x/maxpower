@@ -677,6 +677,8 @@ impl BarbellBenchPhaseEngine {
                         start_anchor,
                         primary_turnaround,
                         end_return,
+                        anatomical_left_turnaround_timestamp_ms: None,
+                        anatomical_right_turnaround_timestamp_ms: None,
                     })
                 }
                 _ => None,

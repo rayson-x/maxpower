@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "maxpower-rust-evaluation-evidence-manifest/v1",
+  "assembledInputSha256": "35a42017b0b693b62f5268e776ca41363e3aacc23c51b649f5138bd935eccf08",
+  "assembledInput": {
+    "task": "model_evaluation",
+    "sourceAssets": [
+      {
+        "assetId": "personal-human-rep-ranges-v2",
+        "admission": "label_allowed",
+        "authority": "user_reviewed",
+        "groupKey": "sourceCaptureId",
+        "immutableSha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727"
+      },
+      {
+        "assetId": "client-single-pass-predictions-and-agent-output",
+        "admission": "evaluation_only",
+        "authority": "frozen_prediction_or_report",
+        "groupKey": "sourceCaptureId"
+      }
+    ],
+    "evaluationOutput": {
+      "path": "data/workflows/client-realtime-agent/client-single-pass-v1/rust-cycle-aligned-frozen-debug-evaluation.json",
+      "sha256": "2555cd5061dcd3b9ddc6f2e78dd2eaf34ab1b10fe47cced4440c429d32546bf7",
+      "schemaVersion": "maxpower-client-rep-phase-evaluation/v1",
+      "generatedAt": "2026-08-12T07:15:15.650Z"
+    },
+    "protocol": {
+      "pass": "frozen-client-observations-rust-only-debug-replay",
+      "truthReveal": "after-client-prediction-was-frozen",
+      "predictionSha256": "73db3f0501b0f78af283cd2c72c3fe4df5a5db7d600d5a3901bc3488e5806d6e",
+      "datasetSha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727"
+    },
+    "frozenResult": {
+      "sourceCount": 3,
+      "truthRepCount": 35,
+      "confirmedPredictedRepCount": 23,
+      "matchedRepCount": 23,
+      "candidatePrecision": 1.0,
+      "candidateRecall": 0.6571428571428571,
+      "startBoundaryMaeMs": 467.4347826086956,
+      "endBoundaryMaeMs": 498.2608695652174,
+      "exactSetSourceRate": 0.3333333333333333,
+      "reviewedNegativeWindowFalseTriggerRate": null
+    }
+  }
+}

@@ -1552,6 +1552,10 @@ pub struct NormalizedRepEndpointEvidence {
     pub start_anchor: LocalMotionCoordinateEvidence,
     pub primary_turnaround: LocalMotionCoordinateEvidence,
     pub end_return: LocalMotionCoordinateEvidence,
+    #[serde(default)]
+    pub anatomical_left_turnaround_timestamp_ms: Option<u64>,
+    #[serde(default)]
+    pub anatomical_right_turnaround_timestamp_ms: Option<u64>,
 }
 
 /// Immutable recognition decision for one completed movement candidate. Only
@@ -2913,6 +2917,17 @@ impl RepEngine {
         evidence_reason: Option<RepEvidenceReason>,
         observation_findings: Vec<RepObservationFinding>,
     ) -> SealedRep {
+        // A continuity recovery may retain a pre-gap return candidate while a
+        // later sample becomes the peak. A sealed causal interval can never
+        // end before that peak; preserve the outcome as reviewable evidence
+        // and close it at the latest observed peak instead of emitting an
+        // impossible frame/timestamp order.
+        let end =
+            if end.frame_id < active.peak.frame_id || end.timestamp_ms < active.peak.timestamp_ms {
+                active.peak
+            } else {
+                end
+            };
         if disposition == RepDisposition::Rejected {
             self.state.partial_attempts = self.state.partial_attempts.saturating_add(1);
         }
@@ -3506,11 +3521,37 @@ impl RepEngine {
                 .find(|(candidate_frame_id, _, _)| *candidate_frame_id == frame_id)
                 .map(|(_, _, evidence)| evidence.clone())
         };
+        let independent_turnaround =
+            |channel: fn(&LocalMotionCoordinateEvidence) -> Option<LocalTrajectoryChannel>| {
+                let start =
+                    evidence_for(active.start.frame_id).and_then(|value| channel(&value))?;
+                self.local_evidence_history
+                    .iter()
+                    .filter(|(frame_id, _, _)| {
+                        *frame_id >= active.start.frame_id && *frame_id <= end.frame_id
+                    })
+                    .filter_map(|(_, timestamp_ms, evidence)| {
+                        channel(evidence).map(|sample| {
+                            (
+                                (sample.along_axis_progress - start.along_axis_progress).abs(),
+                                *timestamp_ms,
+                            )
+                        })
+                    })
+                    .max_by(|left, right| left.0.total_cmp(&right.0))
+                    .map(|(_, timestamp_ms)| timestamp_ms)
+            };
         Some(NormalizedRepEndpointEvidence {
             coordinate_frame_id: evidence_for(active.start.frame_id)?.coordinate_frame_id,
             start_anchor: evidence_for(active.start.frame_id)?,
             primary_turnaround: evidence_for(active.peak.frame_id)?,
             end_return: evidence_for(end.frame_id)?,
+            anatomical_left_turnaround_timestamp_ms: independent_turnaround(|evidence| {
+                evidence.anatomical_left_equipment
+            }),
+            anatomical_right_turnaround_timestamp_ms: independent_turnaround(|evidence| {
+                evidence.anatomical_right_equipment
+            }),
         })
     }
 

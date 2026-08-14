@@ -22,9 +22,9 @@ This plan implements the Rust-only recognition scope in `../PRD.md`. Every actio
 7. [Body-only and fixed-support reuse](07-bodyweight-fixed-support-family.md)
 8. [Current corpus capability and recognition evaluation](08-current-corpus-capability-evaluation.md)
 
-## Frontier
+## Completion
 
-Tickets 01–02 are complete. Tickets 03–07 are now the active family-reuse frontier. Ticket 08 starts only after all five family slices finish.
+Tickets 01–08 are complete for the current Rust-only feasibility scope. The v7 catalog executes all 24 current exact action×view contexts. The governed report freezes all 54 current records, reports three per-record structural recognition failures, and separates the limited admitted three-source human metric output from quality/equipment evidence that remains unavailable.
 
 ## Existing implementation boundary
 

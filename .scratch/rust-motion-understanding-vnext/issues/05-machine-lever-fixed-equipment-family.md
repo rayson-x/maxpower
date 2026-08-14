@@ -4,11 +4,11 @@
 
 **Blocked by:** 02 — First complete motion-understanding tracer.
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] Machine chest press and machine rear-delt fly resolve distinct constrained-handle/lever Bundles with action-specific phase and endpoint semantics.
-- [ ] Fixed machine structure is represented as support/context, while only the visible moving handle or lever contributes motion-trajectory evidence.
-- [ ] Missing moving-part evidence does not create a synthetic machine trajectory; pose-supported dimensions continue only where the contract permits them.
-- [ ] Each supported context completes the full evidence→Rep→Feature→Comparison→Rep rules→Set aggregation→Set rules→Trace→SealedSetAssessment chain.
-- [ ] Constrained-path features, visible return completeness, bilateral timing and support/trunk facts carry independent observability and cannot-judge gates.
-- [ ] Governed replay tests cover current machine action/view contexts and distinguish fixed structure from actual moving evidence.
+- [x] Machine chest press and machine rear-delt fly resolve distinct constrained-handle/lever Bundles with action-specific phase and endpoint semantics.
+- [x] Fixed machine structure is represented as support/context, while only the visible moving handle or lever contributes motion-trajectory evidence.
+- [x] Missing moving-part evidence does not create a synthetic machine trajectory; pose-supported dimensions continue only where the contract permits them.
+- [x] Each supported context completes the full evidence→Rep→Feature→Comparison→Rep rules→Set aggregation→Set rules→Trace→SealedSetAssessment chain.
+- [x] Constrained-path features, visible return completeness, bilateral timing and support/trunk facts carry independent observability and cannot-judge gates.
+- [x] Governed replay tests cover current machine action/view contexts and distinguish fixed structure from actual moving evidence.

@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CanonicalLandmark, EquipmentAxis2d, EquipmentFrameEvidence, EquipmentKind, EquipmentSource,
-    LandmarkSource,
+    CanonicalLandmark, EquipmentAxis2d, EquipmentFrameEvidence, EquipmentHand, EquipmentKind,
+    EquipmentSource, LandmarkSource,
 };
 
 const FREEZE_MINIMUM_SAMPLES: usize = 3;
@@ -49,6 +49,7 @@ pub enum LocalCoordinateReason {
 #[serde(rename_all = "snake_case")]
 pub enum LocalScaleSource {
     ProjectedBarLength,
+    BodyGeometry,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -62,10 +63,13 @@ pub enum LocalChannelProvenance {
 #[serde(rename_all = "snake_case")]
 pub enum LocalCoarseView {
     Front,
+    Rear,
     FrontObliqueLeft,
     FrontObliqueRight,
     RearObliqueLeft,
     RearObliqueRight,
+    LeftSide,
+    RightSide,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -74,6 +78,27 @@ pub enum LocalActionAxisDirection {
     #[default]
     PreparationToEffortDown,
     PreparationToEffortUp,
+    PreparationToEffortLeft,
+    PreparationToEffortRight,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalEquipmentMode {
+    #[default]
+    RigidBarAxis,
+    MovingHandle,
+    TwoIndependentDumbbells,
+    PoseOnly,
+    FixedSupport,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalPoseAnchor {
+    #[default]
+    WristMidpoint,
+    ShoulderMidpoint,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -81,6 +106,10 @@ pub enum LocalActionAxisDirection {
 pub struct LocalMotionCoordinateStrategy {
     pub capture_view: LocalCoarseView,
     pub preparation_to_effort: LocalActionAxisDirection,
+    #[serde(default)]
+    pub equipment_mode: LocalEquipmentMode,
+    #[serde(default)]
+    pub pose_anchor: LocalPoseAnchor,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -140,6 +169,11 @@ pub struct LocalMotionCoordinateEvidence {
     pub scale: Option<f32>,
     pub scale_source: Option<LocalScaleSource>,
     pub equipment_track_id: Option<u64>,
+    /// All independently observed moving-load identities used by this frame.
+    /// A dual-load strategy never mirrors one ID into the missing side.
+    pub equipment_track_ids: Vec<u64>,
+    pub anatomical_left_equipment: Option<LocalTrajectoryChannel>,
+    pub anatomical_right_equipment: Option<LocalTrajectoryChannel>,
     /// The measured ordered shaft endpoints that produced the normalized
     /// equipment channel. Endpoint order is screen geometry, not anatomy.
     pub raw_bar_axis: Option<[f32; 4]>,
@@ -147,6 +181,13 @@ pub struct LocalMotionCoordinateEvidence {
     /// context. This is never inferred from image geometry.
     pub coarse_view: Option<LocalCoarseView>,
     pub preparation_to_effort: Option<LocalActionAxisDirection>,
+    /// Frozen action-specific strategy identity. These fields let downstream
+    /// assessment reject a packet normalized for another equipment primitive
+    /// or body anchor even when view and direction happen to match.
+    #[serde(default)]
+    pub equipment_mode: LocalEquipmentMode,
+    #[serde(default)]
+    pub pose_anchor: LocalPoseAnchor,
     /// Whether the canonical coordinate feed itself is horizontally mirrored.
     /// Preview-only mirroring does not set this value.
     pub canonical_feed_mirrored: Option<bool>,
@@ -197,9 +238,14 @@ impl Default for LocalMotionCoordinateEvidence {
             scale: None,
             scale_source: None,
             equipment_track_id: None,
+            equipment_track_ids: Vec::new(),
+            anatomical_left_equipment: None,
+            anatomical_right_equipment: None,
             raw_bar_axis: None,
             coarse_view: None,
             preparation_to_effort: None,
+            equipment_mode: LocalEquipmentMode::RigidBarAxis,
+            pose_anchor: LocalPoseAnchor::WristMidpoint,
             canonical_feed_mirrored: None,
             anatomical_side_mapping: AnatomicalSideMapping::Unknown,
             endpoint_order_mapping: EndpointOrderMapping::ScreenOrderedAnatomyUnknown,
@@ -223,6 +269,8 @@ pub(crate) struct LocalMotionCoordinateEstimator {
     paused: bool,
     coordinate_frame_id: u64,
     action_axis_prior: LocalActionAxisDirection,
+    equipment_mode: LocalEquipmentMode,
+    pose_anchor: LocalPoseAnchor,
     coarse_view: Option<LocalCoarseView>,
     canonical_feed_mirrored: Option<bool>,
     image_width_px: u32,
@@ -256,6 +304,8 @@ impl LocalMotionCoordinateEstimator {
         let coarse_view = self.coarse_view;
         let canonical_feed_mirrored = self.canonical_feed_mirrored;
         let action_axis_prior = self.action_axis_prior;
+        let equipment_mode = self.equipment_mode;
+        let pose_anchor = self.pose_anchor;
         let image_width_px = self.image_width_px;
         let image_height_px = self.image_height_px;
         *self = Self {
@@ -264,6 +314,8 @@ impl LocalMotionCoordinateEstimator {
             coarse_view,
             canonical_feed_mirrored,
             action_axis_prior,
+            equipment_mode,
+            pose_anchor,
             image_width_px,
             image_height_px,
             state: LocalCoordinateState::Uninitialized,
@@ -272,6 +324,8 @@ impl LocalMotionCoordinateEstimator {
                 reason: Some(LocalCoordinateReason::InsufficientPreparation),
                 coarse_view,
                 preparation_to_effort: Some(action_axis_prior),
+                equipment_mode,
+                pose_anchor,
                 canonical_feed_mirrored,
                 ..LocalMotionCoordinateEvidence::default()
             },
@@ -288,8 +342,14 @@ impl LocalMotionCoordinateEstimator {
         self.action_axis_prior = strategy
             .map(|strategy| strategy.preparation_to_effort)
             .unwrap_or_default();
+        self.equipment_mode = strategy
+            .map(|value| value.equipment_mode)
+            .unwrap_or_default();
+        self.pose_anchor = strategy.map(|value| value.pose_anchor).unwrap_or_default();
         self.latest.coarse_view = self.coarse_view;
         self.latest.preparation_to_effort = strategy.map(|value| value.preparation_to_effort);
+        self.latest.equipment_mode = self.equipment_mode;
+        self.latest.pose_anchor = self.pose_anchor;
         self.refresh_endpoint_mapping();
     }
 
@@ -298,6 +358,8 @@ impl LocalMotionCoordinateEstimator {
             Some(LocalMotionCoordinateStrategy {
                 capture_view: coarse_view_from_profile_identity(identity)?,
                 preparation_to_effort: action_axis_prior_from_profile_identity(identity),
+                equipment_mode: LocalEquipmentMode::RigidBarAxis,
+                pose_anchor: LocalPoseAnchor::WristMidpoint,
             })
         }));
     }
@@ -373,6 +435,9 @@ impl LocalMotionCoordinateEstimator {
         }
         self.subject_candidate_id = Some(subject_id);
         self.observed_frames = self.observed_frames.saturating_add(1);
+        if self.equipment_mode != LocalEquipmentMode::RigidBarAxis {
+            return self.observe_point_strategy(timestamp_ms, independent_pose, equipment);
+        }
         let pose_center = measured_wrist_midpoint(independent_pose);
 
         let measured_track = equipment
@@ -577,6 +642,8 @@ impl LocalMotionCoordinateEstimator {
             raw_bar_axis: Some([axis.x1, axis.y1, axis.x2, axis.y2]),
             coarse_view: self.coarse_view,
             preparation_to_effort: Some(self.action_axis_prior),
+            equipment_mode: self.equipment_mode,
+            pose_anchor: self.pose_anchor,
             canonical_feed_mirrored: self.canonical_feed_mirrored,
             anatomical_side_mapping,
             endpoint_order_mapping: EndpointOrderMapping::ScreenOrderedAnatomyUnknown,
@@ -596,6 +663,213 @@ impl LocalMotionCoordinateEstimator {
             } else {
                 (equipment_reliability * 0.6).clamp(0.0, 1.0)
             },
+            ..LocalMotionCoordinateEvidence::default()
+        };
+        self.latest.clone()
+    }
+
+    fn observe_point_strategy(
+        &mut self,
+        timestamp_ms: u64,
+        independent_pose: &[CanonicalLandmark],
+        equipment: &EquipmentFrameEvidence,
+    ) -> LocalMotionCoordinateEvidence {
+        let pose_point = if self.equipment_mode == LocalEquipmentMode::FixedSupport {
+            measured_pose_anchor(independent_pose, LocalPoseAnchor::ShoulderMidpoint)
+                .zip(measured_pose_anchor(
+                    independent_pose,
+                    LocalPoseAnchor::WristMidpoint,
+                ))
+                .map(|(body, support)| sub(body, support))
+        } else {
+            measured_pose_anchor(independent_pose, self.pose_anchor)
+        };
+        let pose_confidence = if self.equipment_mode == LocalEquipmentMode::FixedSupport {
+            measured_pose_anchor_confidence(independent_pose, LocalPoseAnchor::ShoulderMidpoint)
+                .min(measured_pose_anchor_confidence(
+                    independent_pose,
+                    LocalPoseAnchor::WristMidpoint,
+                ))
+        } else {
+            measured_pose_anchor_confidence(independent_pose, self.pose_anchor)
+        };
+        let body_scale = measured_shoulder_scale(independent_pose);
+        let expected_kind = match self.equipment_mode {
+            LocalEquipmentMode::MovingHandle => Some(EquipmentKind::MachineHandle),
+            LocalEquipmentMode::TwoIndependentDumbbells => Some(EquipmentKind::Dumbbell),
+            LocalEquipmentMode::PoseOnly | LocalEquipmentMode::FixedSupport => None,
+            LocalEquipmentMode::RigidBarAxis => unreachable!("rigid bar uses the axis strategy"),
+        };
+        let mut tracks = equipment
+            .tracks
+            .iter()
+            .filter(|track| {
+                expected_kind == Some(track.kind)
+                    && track.judgeable_path
+                    && track.source != EquipmentSource::Predicted
+            })
+            .collect::<Vec<_>>();
+        tracks.sort_by_key(|track| track.track_id);
+        let equipment_point = if tracks.is_empty() {
+            None
+        } else {
+            Some([
+                tracks.iter().map(|track| track.center_x).sum::<f32>() / tracks.len() as f32,
+                tracks.iter().map(|track| track.center_y).sum::<f32>() / tracks.len() as f32,
+            ])
+        };
+        if equipment_point.is_some() {
+            self.equipment_samples = self.equipment_samples.saturating_add(1);
+        }
+        if pose_point.is_some() {
+            self.pose_samples = self.pose_samples.saturating_add(1);
+        }
+
+        let driving_point = equipment_point.or(pose_point);
+        let Some(driving_point) = driving_point else {
+            self.clear_frame_observations(LocalCoordinateReason::InsufficientPreparation);
+            return self.latest.clone();
+        };
+        let Some(scale) = body_scale.filter(|value| value.is_finite() && *value > f32::EPSILON)
+        else {
+            self.clear_frame_observations(LocalCoordinateReason::InvalidGeometry);
+            return self.latest.clone();
+        };
+        if let Some(frame) = self.frozen_frame {
+            let scale_ratio = scale / frame.scale;
+            if !(GEOMETRY_SCALE_RATIO_MINIMUM..=GEOMETRY_SCALE_RATIO_MAXIMUM).contains(&scale_ratio)
+            {
+                self.reset_for_discontinuity(LocalCoordinateReason::InvalidGeometry);
+                return self.latest.clone();
+            }
+        }
+        self.centers.push(driving_point);
+        if let Some(point) = pose_point {
+            self.pose_origins.push(point);
+        }
+        let prior = action_axis_prior_vector(self.action_axis_prior);
+        if self.frozen_frame.is_none() {
+            self.state = if self.centers.len() == 1 {
+                LocalCoordinateState::Provisional
+            } else {
+                LocalCoordinateState::Learning
+            };
+            let baseline_count = self.centers.len().saturating_sub(1).max(1);
+            let origin = median_point(&self.centers[..baseline_count]).unwrap_or(self.centers[0]);
+            let progress = dot(sub(driving_point, origin), prior).abs() / scale;
+            if self.centers.len() >= FREEZE_MINIMUM_SAMPLES
+                && progress >= FREEZE_MINIMUM_NORMALIZED_PROGRESS
+            {
+                let primary =
+                    robust_path_direction(&self.centers, origin, prior, scale).unwrap_or(prior);
+                self.frozen_frame = Some(FrozenLocalCoordinateFrame {
+                    primary,
+                    cross: [primary[1], -primary[0]],
+                    preparation_bar_axis: [primary[1], -primary[0]],
+                    equipment_origin: origin,
+                    pose_origin: median_point(
+                        &self.pose_origins[..self.pose_origins.len().saturating_sub(1)],
+                    ),
+                    scale,
+                    equipment_scale_px: scale
+                        * self.image_width_px.max(self.image_height_px) as f32,
+                });
+                self.state = LocalCoordinateState::Frozen;
+            }
+        }
+        let primary = self.frozen_frame.map_or(prior, |frame| frame.primary);
+        let cross = self
+            .frozen_frame
+            .map_or([primary[1], -primary[0]], |frame| frame.cross);
+        let origin = self
+            .frozen_frame
+            .map_or(self.centers[0], |frame| frame.equipment_origin);
+        let scale = self.frozen_frame.map_or(scale, |frame| frame.scale);
+        let equipment_confidence = tracks
+            .iter()
+            .map(|track| track.observation_score * track.association_confidence)
+            .reduce(f32::min)
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0);
+        let equipment_channel = equipment_point.and_then(|point| {
+            trajectory_channel(
+                point,
+                origin,
+                primary,
+                cross,
+                scale,
+                equipment_confidence,
+                self.channel_coverage(self.equipment_samples),
+                1.0 - equipment_confidence,
+                LocalChannelProvenance::EquipmentMeasured,
+            )
+        });
+        let pose_origin = self
+            .frozen_frame
+            .and_then(|frame| frame.pose_origin)
+            .unwrap_or_else(|| self.pose_origins.first().copied().unwrap_or(driving_point));
+        let pose_channel = pose_point.and_then(|point| {
+            trajectory_channel(
+                point,
+                pose_origin,
+                primary,
+                cross,
+                scale,
+                pose_confidence,
+                self.channel_coverage(self.pose_samples),
+                1.0 - pose_confidence,
+                LocalChannelProvenance::PoseMeasured,
+            )
+        });
+        let per_track_channel = |hand: EquipmentHand| {
+            tracks
+                .iter()
+                .find(|track| track.held_by == hand)
+                .and_then(|track| {
+                    let confidence =
+                        (track.observation_score * track.association_confidence).clamp(0.0, 1.0);
+                    trajectory_channel(
+                        [track.center_x, track.center_y],
+                        origin,
+                        primary,
+                        cross,
+                        scale,
+                        confidence,
+                        self.channel_coverage(self.equipment_samples),
+                        1.0 - confidence,
+                        LocalChannelProvenance::EquipmentMeasured,
+                    )
+                })
+        };
+        let left = per_track_channel(EquipmentHand::Left);
+        let right = per_track_channel(EquipmentHand::Right);
+        let agreement = channel_agreement(equipment_channel, pose_channel);
+        self.latest = LocalMotionCoordinateEvidence {
+            coordinate_frame_id: self.coordinate_frame_id,
+            source_timestamp_ms: Some(timestamp_ms),
+            state: self.state,
+            reason: (self.state != LocalCoordinateState::Frozen)
+                .then_some(LocalCoordinateReason::InsufficientPreparation),
+            primary_axis: Some(primary),
+            cross_axis: Some(cross),
+            origin: Some(origin),
+            scale: Some(scale),
+            scale_source: Some(LocalScaleSource::BodyGeometry),
+            equipment_track_id: tracks.first().map(|track| track.track_id),
+            equipment_track_ids: tracks.iter().map(|track| track.track_id).collect(),
+            anatomical_left_equipment: left,
+            anatomical_right_equipment: right,
+            coarse_view: self.coarse_view,
+            preparation_to_effort: Some(self.action_axis_prior),
+            equipment_mode: self.equipment_mode,
+            pose_anchor: self.pose_anchor,
+            canonical_feed_mirrored: self.canonical_feed_mirrored,
+            equipment: equipment_channel,
+            pose: pose_channel,
+            channel_agreement: agreement,
+            confidence: equipment_channel
+                .or(pose_channel)
+                .map_or(0.0, |channel| channel_reliability_for_phase_claim(&channel)),
             ..LocalMotionCoordinateEvidence::default()
         };
         self.latest.clone()
@@ -661,6 +935,9 @@ impl LocalMotionCoordinateEstimator {
         self.latest.source_timestamp_ms = self.last_timestamp_ms;
         self.latest.reason = Some(reason);
         self.latest.equipment_track_id = None;
+        self.latest.equipment_track_ids.clear();
+        self.latest.anatomical_left_equipment = None;
+        self.latest.anatomical_right_equipment = None;
         self.latest.raw_bar_axis = None;
         self.latest.equipment = None;
         self.latest.pose = None;
@@ -733,6 +1010,15 @@ fn coarse_view_from_profile_identity(identity: &str) -> Option<LocalCoarseView> 
     {
         return Some(LocalCoarseView::RearObliqueRight);
     }
+    if normalized.contains("/rear/") {
+        return Some(LocalCoarseView::Rear);
+    }
+    if normalized.contains("/left-side/") || normalized.contains("/left/") {
+        return Some(LocalCoarseView::LeftSide);
+    }
+    if normalized.contains("/right-side/") || normalized.contains("/right/") {
+        return Some(LocalCoarseView::RightSide);
+    }
     (normalized.contains("/front/")).then_some(LocalCoarseView::Front)
 }
 
@@ -749,11 +1035,20 @@ fn action_axis_prior_from_profile_identity(identity: &str) -> LocalActionAxisDir
 }
 
 fn orient_axis_to_action_prior(mut axis: [f32; 2], prior: LocalActionAxisDirection) -> [f32; 2] {
-    let wants_positive_image_y = prior == LocalActionAxisDirection::PreparationToEffortDown;
-    if (axis[1] >= 0.0) != wants_positive_image_y {
+    let prior_vector = action_axis_prior_vector(prior);
+    if dot(axis, prior_vector) < 0.0 {
         axis = [-axis[0], -axis[1]];
     }
     axis
+}
+
+fn action_axis_prior_vector(prior: LocalActionAxisDirection) -> [f32; 2] {
+    match prior {
+        LocalActionAxisDirection::PreparationToEffortDown => [0.0, 1.0],
+        LocalActionAxisDirection::PreparationToEffortUp => [0.0, -1.0],
+        LocalActionAxisDirection::PreparationToEffortLeft => [-1.0, 0.0],
+        LocalActionAxisDirection::PreparationToEffortRight => [1.0, 0.0],
+    }
 }
 
 /// Detector endpoint order is stable but may run in either image direction.
@@ -813,6 +1108,54 @@ fn measured_wrist_midpoint(canonical: &[CanonicalLandmark]) -> Option<[f32; 2]> 
         return None;
     }
     Some([(left.x? + right.x?) * 0.5, (left.y? + right.y?) * 0.5])
+}
+
+fn measured_pose_anchor(
+    canonical: &[CanonicalLandmark],
+    anchor: LocalPoseAnchor,
+) -> Option<[f32; 2]> {
+    match anchor {
+        LocalPoseAnchor::WristMidpoint => measured_pair_midpoint(canonical, 9, 10),
+        LocalPoseAnchor::ShoulderMidpoint => measured_pair_midpoint(canonical, 5, 6),
+    }
+}
+
+fn measured_pair_midpoint(
+    canonical: &[CanonicalLandmark],
+    left_index: usize,
+    right_index: usize,
+) -> Option<[f32; 2]> {
+    let left = canonical.get(left_index)?;
+    let right = canonical.get(right_index)?;
+    if !independent_measured(left) || !independent_measured(right) {
+        return None;
+    }
+    Some([(left.x? + right.x?) * 0.5, (left.y? + right.y?) * 0.5])
+}
+
+fn measured_pose_anchor_confidence(
+    canonical: &[CanonicalLandmark],
+    anchor: LocalPoseAnchor,
+) -> f32 {
+    let (left, right) = match anchor {
+        LocalPoseAnchor::WristMidpoint => (9, 10),
+        LocalPoseAnchor::ShoulderMidpoint => (5, 6),
+    };
+    canonical
+        .get(left)
+        .zip(canonical.get(right))
+        .map_or(0.0, |(left, right)| {
+            left.canonical_confidence.min(right.canonical_confidence)
+        })
+}
+
+fn measured_shoulder_scale(canonical: &[CanonicalLandmark]) -> Option<f32> {
+    let left = canonical.get(5)?;
+    let right = canonical.get(6)?;
+    if !independent_measured(left) || !independent_measured(right) {
+        return None;
+    }
+    Some((left.x? - right.x?).hypot(left.y? - right.y?))
 }
 
 fn measured_wrist_confidence(canonical: &[CanonicalLandmark]) -> f32 {
@@ -1009,9 +1352,14 @@ fn median_point(points: &[[f32; 2]]) -> Option<[f32; 2]> {
 mod tests {
     use super::{
         LocalActionAxisDirection, LocalChannelAgreement, LocalChannelProvenance, LocalCoarseView,
-        LocalTrajectoryChannel, action_axis_prior_from_profile_identity, channel_agreement,
-        coarse_view_from_profile_identity, combined_motion_axis, orient_axis_to_action_prior,
-        robust_path_direction,
+        LocalEquipmentMode, LocalMotionCoordinateEstimator, LocalMotionCoordinateStrategy,
+        LocalPoseAnchor, LocalTrajectoryChannel, action_axis_prior_from_profile_identity,
+        channel_agreement, coarse_view_from_profile_identity, combined_motion_axis,
+        orient_axis_to_action_prior, robust_path_direction,
+    };
+    use crate::{
+        CanonicalLandmark, EquipmentFrameEvidence, EquipmentFrameStatus, EquipmentHand,
+        EquipmentKind, EquipmentSource, EquipmentTrackEvidence, NormalizedRect,
     };
 
     fn channel(
@@ -1108,5 +1456,158 @@ mod tests {
         let axis = combined_motion_axis([1.0, 0.0], Some([0.98, 0.20]), Some([-1.0, 0.0]));
         assert!(axis[0] > 0.0);
         assert!(axis[1] > 0.0);
+    }
+
+    fn pose(shoulder_y: f32) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        pose[5] = CanonicalLandmark::measured(0.4, shoulder_y, 0.0, 0.95);
+        pose[6] = CanonicalLandmark::measured(0.6, shoulder_y, 0.0, 0.95);
+        pose[9] = CanonicalLandmark::measured(0.4, shoulder_y - 0.2, 0.0, 0.95);
+        pose[10] = CanonicalLandmark::measured(0.6, shoulder_y - 0.2, 0.0, 0.95);
+        pose
+    }
+
+    fn no_equipment(timestamp_ms: u64) -> EquipmentFrameEvidence {
+        EquipmentFrameEvidence {
+            timestamp_ms,
+            subject_candidate_id: Some(7),
+            status: EquipmentFrameStatus::Observed,
+            tracks: Vec::new(),
+            rejected_reflection_count: 0,
+            rejected_static_count: 0,
+            rejected_low_confidence_or_invalid_count: 0,
+            rejected_outside_subject_count: 0,
+        }
+    }
+
+    #[test]
+    fn pose_only_strategy_freezes_without_fabricating_equipment() {
+        let mut estimator = LocalMotionCoordinateEstimator::new(720, 1280);
+        estimator.set_strategy(Some(LocalMotionCoordinateStrategy {
+            capture_view: LocalCoarseView::RearObliqueRight,
+            preparation_to_effort: LocalActionAxisDirection::PreparationToEffortDown,
+            equipment_mode: LocalEquipmentMode::PoseOnly,
+            pose_anchor: LocalPoseAnchor::ShoulderMidpoint,
+        }));
+        estimator.begin_set();
+        estimator.observe(0, Some(7), &pose(0.40), &no_equipment(0));
+        estimator.observe(100, Some(7), &pose(0.41), &no_equipment(100));
+        let evidence = estimator.observe(200, Some(7), &pose(0.52), &no_equipment(200));
+        assert_eq!(evidence.state, super::LocalCoordinateState::Frozen);
+        assert!(evidence.pose.is_some());
+        assert!(evidence.equipment.is_none());
+        assert!(evidence.equipment_track_ids.is_empty());
+        assert_eq!(evidence.channel_agreement, LocalChannelAgreement::PoseOnly);
+    }
+
+    #[test]
+    fn point_strategy_refuses_a_large_body_scale_change_after_freeze() {
+        let mut estimator = LocalMotionCoordinateEstimator::new(720, 1280);
+        estimator.set_strategy(Some(LocalMotionCoordinateStrategy {
+            capture_view: LocalCoarseView::RearObliqueRight,
+            preparation_to_effort: LocalActionAxisDirection::PreparationToEffortDown,
+            equipment_mode: LocalEquipmentMode::PoseOnly,
+            pose_anchor: LocalPoseAnchor::ShoulderMidpoint,
+        }));
+        estimator.begin_set();
+        estimator.observe(0, Some(7), &pose(0.40), &no_equipment(0));
+        estimator.observe(100, Some(7), &pose(0.41), &no_equipment(100));
+        assert_eq!(
+            estimator
+                .observe(200, Some(7), &pose(0.52), &no_equipment(200))
+                .state,
+            super::LocalCoordinateState::Frozen
+        );
+        let mut scale_jump = pose(0.54);
+        scale_jump[5] = CanonicalLandmark::measured(0.49, 0.54, 0.0, 0.95);
+        scale_jump[6] = CanonicalLandmark::measured(0.51, 0.54, 0.0, 0.95);
+        let evidence = estimator.observe(300, Some(7), &scale_jump, &no_equipment(300));
+        assert_eq!(evidence.state, super::LocalCoordinateState::Degraded);
+        assert_eq!(
+            evidence.reason,
+            Some(super::LocalCoordinateReason::InvalidGeometry)
+        );
+        assert!(evidence.pose.is_none());
+        assert!(evidence.equipment.is_none());
+        assert_eq!(
+            evidence.channel_agreement,
+            LocalChannelAgreement::CannotJudge
+        );
+    }
+
+    fn dumbbell_track(
+        track_id: u64,
+        hand: EquipmentHand,
+        x: f32,
+        y: f32,
+    ) -> EquipmentTrackEvidence {
+        EquipmentTrackEvidence {
+            track_id,
+            proposal_id: track_id,
+            subject_candidate_id: 7,
+            kind: EquipmentKind::Dumbbell,
+            bbox: NormalizedRect::new(x - 0.02, y - 0.02, 0.04, 0.04),
+            axis: None,
+            center_x: x,
+            center_y: y,
+            observation_score: 0.95,
+            association_confidence: 0.95,
+            uncertainty_px: Some(2.0),
+            source: EquipmentSource::Detector,
+            held_by: hand,
+            judgeable_path: true,
+        }
+    }
+
+    #[test]
+    fn dual_load_strategy_preserves_ids_and_does_not_mirror_a_missing_side() {
+        let mut estimator = LocalMotionCoordinateEstimator::new(720, 1280);
+        estimator.set_strategy(Some(LocalMotionCoordinateStrategy {
+            capture_view: LocalCoarseView::Front,
+            preparation_to_effort: LocalActionAxisDirection::PreparationToEffortUp,
+            equipment_mode: LocalEquipmentMode::TwoIndependentDumbbells,
+            pose_anchor: LocalPoseAnchor::WristMidpoint,
+        }));
+        estimator.begin_set();
+        for (index, y) in [0.60, 0.58, 0.40].into_iter().enumerate() {
+            let evidence = EquipmentFrameEvidence {
+                tracks: vec![dumbbell_track(11, EquipmentHand::Left, 0.38, y)],
+                ..no_equipment(index as u64 * 100)
+            };
+            let latest = estimator.observe(index as u64 * 100, Some(7), &pose(0.50), &evidence);
+            if index == 2 {
+                assert_eq!(latest.equipment_track_ids, vec![11]);
+                assert!(latest.anatomical_left_equipment.is_some());
+                assert!(latest.anatomical_right_equipment.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_support_uses_body_relative_to_observed_hands() {
+        let mut estimator = LocalMotionCoordinateEstimator::new(720, 1280);
+        estimator.set_strategy(Some(LocalMotionCoordinateStrategy {
+            capture_view: LocalCoarseView::RearObliqueLeft,
+            preparation_to_effort: LocalActionAxisDirection::PreparationToEffortUp,
+            equipment_mode: LocalEquipmentMode::FixedSupport,
+            pose_anchor: LocalPoseAnchor::ShoulderMidpoint,
+        }));
+        estimator.begin_set();
+        for (index, shoulder_y) in [0.55, 0.54, 0.40].into_iter().enumerate() {
+            let mut frame = pose(shoulder_y);
+            frame[9] = CanonicalLandmark::measured(0.4, 0.25, 0.0, 0.95);
+            frame[10] = CanonicalLandmark::measured(0.6, 0.25, 0.0, 0.95);
+            let evidence = estimator.observe(
+                index as u64 * 100,
+                Some(7),
+                &frame,
+                &no_equipment(index as u64 * 100),
+            );
+            if index == 2 {
+                assert_eq!(evidence.state, super::LocalCoordinateState::Frozen);
+                assert!(evidence.pose.is_some());
+                assert!(evidence.equipment.is_none());
+            }
+        }
     }
 }

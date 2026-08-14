@@ -1,6 +1,6 @@
-Status: approved / ticketed / in progress (Ticket 01 complete)
+Status: implemented for the current Rust-only feasibility scope (Tickets 01–08 complete)
 
-Current implementation state: Ticket 01 installs only `context_resolution_only` Bundles. Rust resolves action/view/equipment/Pose context and immutable eight-component lineage for the current corpus, while frame execution and quality-report claims remain fail-closed until Ticket 02 supplies the first real vertical tracer.
+Current implementation state: catalog v7 installs executable Bundles for all 24 exact action×view contexts in the current governed corpus. The shared engine now runs context → local coordinate/fusion → Rep/phase → Feature/Comparison/Rule → set aggregation → Trace → `SealedSetAssessment`. Full-corpus structural replay covers all 54 records (one governed exclusion, three explicit Rep-output failures); admitted human-quality truth and a frozen all-record v7 accuracy output remain evidence gaps rather than completion claims.
 
 Delivery plan: [`issues/PLAN.md`](issues/PLAN.md)
 
