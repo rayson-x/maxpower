@@ -1071,7 +1071,9 @@ fn endpoint_order_mapping(
     let endpoint_one_is_image_left = axis.x1 < axis.x2;
     let rear_facing = matches!(
         view,
-        LocalCoarseView::RearObliqueLeft | LocalCoarseView::RearObliqueRight
+        LocalCoarseView::Rear
+            | LocalCoarseView::RearObliqueLeft
+            | LocalCoarseView::RearObliqueRight
     );
     let endpoint_one_is_anatomical_left = if rear_facing {
         endpoint_one_is_image_left != mirrored

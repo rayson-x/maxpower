@@ -892,12 +892,19 @@ fn rear_coarse_view_is_available_for_current_action_family_bundles() {
         rear.coarse_view,
         Some(maxpower_motion_sdk::LocalCoarseView::Rear)
     );
-    assert_ne!(
+    assert_eq!(
         rear.anatomical_side_mapping,
-        maxpower_motion_sdk::AnatomicalSideMapping::Unknown,
+        maxpower_motion_sdk::AnatomicalSideMapping::EndpointOneAnatomicalLeft,
+        "an unmirrored rear view maps image-left to anatomical left",
     );
-    assert!(rear.anatomical_left_endpoint_progress.is_some());
-    assert!(rear.anatomical_right_endpoint_progress.is_some());
+    assert_eq!(
+        rear.anatomical_left_endpoint_progress,
+        rear.endpoint_one_progress
+    );
+    assert_eq!(
+        rear.anatomical_right_endpoint_progress,
+        rear.endpoint_two_progress
+    );
 }
 
 #[test]

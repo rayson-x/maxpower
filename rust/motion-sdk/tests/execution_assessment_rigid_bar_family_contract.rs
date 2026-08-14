@@ -736,6 +736,15 @@ fn sha256_bytes(bytes: &[u8]) -> String {
         .to_owned()
 }
 
+fn stable_fnv_hash<T: serde::Serialize>(value: &T) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in serde_json::to_vec(value).expect("trace is JSON serializable") {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
 #[test]
 fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -743,13 +752,12 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
         .and_then(|path| path.parent())
         .expect("MaxPower root")
         .to_path_buf();
+    let governance_root = root
+        .parent()
+        .expect("power workspace")
+        .join("maxpower-training-data-governance");
     let governance: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(
-            root.parent()
-                .expect("power workspace")
-                .join("maxpower-training-data-governance/catalog/assets.json"),
-        )
-        .expect("governance catalog"),
+        &std::fs::read(governance_root.join("catalog/assets.json")).expect("governance catalog"),
     )
     .expect("governance JSON");
     let manifest: serde_json::Value = serde_json::from_slice(include_bytes!(
@@ -771,12 +779,13 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
         assert_eq!(governed["authority"], expected["authority"]);
         assert_eq!(governed["groupKey"], expected["groupKey"]);
         let allowed_tasks = governed["allowedTasks"].as_array().expect("allowed tasks");
+        let target_tasks = assembled["targetTasks"].as_array().expect("target tasks");
         assert!(
             expected["consumedForTasks"]
                 .as_array()
                 .expect("consumed tasks")
                 .iter()
-                .all(|task| allowed_tasks.contains(task)),
+                .all(|task| allowed_tasks.contains(task) && target_tasks.contains(task)),
             "every consumed task must be admitted by governance"
         );
         assert!(
@@ -809,6 +818,32 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
             .as_array()
             .is_some_and(|tasks| tasks.iter().any(|task| task == "model_evaluation"))
     );
+    let label_asset = catalog_assets
+        .iter()
+        .find(|asset| asset["id"] == "personal-human-rep-ranges-v2")
+        .expect("label asset");
+    let manifest_label = assembled["sourceAssets"]
+        .as_array()
+        .expect("source assets")
+        .iter()
+        .find(|asset| asset["assetId"] == "personal-human-rep-ranges-v2")
+        .expect("manifest label asset");
+    assert_eq!(
+        label_asset["location"]["sha256"],
+        manifest_label["immutableSha256"]
+    );
+    let label_bytes = std::fs::read(
+        root.join(
+            label_asset["location"]["path"]
+                .as_str()
+                .expect("label asset path"),
+        ),
+    )
+    .expect("immutable label file");
+    assert_eq!(
+        sha256_bytes(&label_bytes),
+        manifest_label["immutableSha256"]
+    );
     let output_path = assembled["evaluationOutput"]["path"]
         .as_str()
         .expect("evaluation output path");
@@ -834,8 +869,62 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
         output["generatedAt"],
         assembled["evaluationOutput"]["generatedAt"]
     );
-    for key in ["pass", "truthReveal", "predictionSha256", "datasetSha256"] {
+    for key in [
+        "visualRuntime",
+        "motionRuntime",
+        "pass",
+        "truthReveal",
+        "predictionSha256",
+        "datasetSha256",
+    ] {
         assert_eq!(output["protocol"][key], assembled["protocol"][key]);
+    }
+    for key in [
+        "visualRuntime",
+        "motionRuntime",
+        "pass",
+        "truthReveal",
+        "predictionSha256",
+    ] {
+        assert_eq!(
+            assembled["modelConfiguration"][key],
+            assembled["protocol"][key]
+        );
+    }
+    let exclusion_bytes = std::fs::read(
+        governance_root.join(
+            assembled["exclusions"]["path"]
+                .as_str()
+                .expect("exclusions path"),
+        ),
+    )
+    .expect("governance exclusions");
+    assert_eq!(
+        sha256_bytes(&exclusion_bytes),
+        assembled["exclusions"]["sha256"]
+    );
+    let exclusions: serde_json::Value =
+        serde_json::from_slice(&exclusion_bytes).expect("exclusions JSON");
+    let source_groups = assembled["sourceGroups"].as_array().expect("source groups");
+    assert_eq!(
+        source_groups.len(),
+        output["rows"].as_array().expect("rows").len()
+    );
+    for row in output["rows"].as_array().expect("rows") {
+        let capture_id = &row["captureId"];
+        assert!(source_groups.iter().any(|group| {
+            group["sourceCaptureId"] == *capture_id
+                && group["splitId"] == "frozen-client-observation-debug-evaluation"
+        }));
+        assert!(
+            !exclusions["recordExclusions"]
+                .as_array()
+                .expect("record exclusions")
+                .iter()
+                .any(|excluded| {
+                    excluded["sourceCaptureId"] == *capture_id && excluded["repIndex"].is_null()
+                })
+        );
     }
     for key in [
         "sourceCount",
@@ -1384,6 +1473,49 @@ fn governed_real_replays_cover_every_current_action_view() {
             trace_complete,
             "every set dimension needs a resolvable trace root"
         );
+        let mut unhashed_trace = report.trace.clone();
+        unhashed_trace.content_hash.clear();
+        assert_eq!(
+            stable_fnv_hash(&unhashed_trace),
+            report.trace.content_hash,
+            "sealed trace hash must reproduce from its immutable graph"
+        );
+        for root in &report.trace.conclusion_root_ids {
+            let mut pending = vec![root.as_str()];
+            let mut visited = HashSet::new();
+            let mut kinds = Vec::new();
+            while let Some(node_id) = pending.pop() {
+                if !visited.insert(node_id) {
+                    continue;
+                }
+                let node = report
+                    .trace
+                    .nodes
+                    .iter()
+                    .find(|node| node.node_id == node_id)
+                    .expect("every trace input resolves");
+                if !kinds.contains(&node.kind) {
+                    kinds.push(node.kind);
+                }
+                pending.extend(node.input_node_ids.iter().map(String::as_str));
+            }
+            for required in [
+                TraceNodeKind::SourceObservation,
+                TraceNodeKind::LocalCoordinate,
+                TraceNodeKind::PoseEquipmentFusion,
+                TraceNodeKind::RepBoundary,
+                TraceNodeKind::FeatureFact,
+                TraceNodeKind::ReferenceComparison,
+                TraceNodeKind::RuleConclusion,
+                TraceNodeKind::SetPattern,
+                TraceNodeKind::SetConclusion,
+            ] {
+                assert!(
+                    kinds.contains(&required),
+                    "root {root} is missing required {required:?} ancestry"
+                );
+            }
+        }
         trace_complete_reports += 1;
     }
     eprintln!(
@@ -1393,8 +1525,48 @@ fn governed_real_replays_cover_every_current_action_view() {
     eprintln!(
         "structural metrics: packets={packet_count} local_states={local_states:?} pose_channel_frames={pose_channel_frames} equipment_channel_frames={equipment_channel_frames} fusion_states={fusion_states:?} dimension_states={dimension_states:?} reference_kinds={reference_kinds:?} trace_complete_reports={trace_complete_reports} typed_refusals=0"
     );
-    assert_eq!(replayed_records, 53, "one governed full-source exclusion");
-    assert_eq!(trace_complete_reports, replayed_records);
+    let expected = &assembled_input["expectedStructuralResult"];
+    assert_eq!(replays.len() as u64, expected["resolvedRecordCount"]);
+    assert_eq!(
+        declared_excluded_groups.len() as u64,
+        expected["governanceExcludedRecordCount"]
+    );
+    assert_eq!(replayed_records as u64, expected["replayedRecordCount"]);
+    assert_eq!(
+        records_with_non_rejected_rep as u64,
+        expected["recordsWithNonRejectedRep"]
+    );
+    assert_eq!(
+        records_with_boundary_alignment as u64,
+        expected["recordsWithBoundaryAlignment"]
+    );
+    assert_eq!(packet_count as u64, expected["packetCount"]);
+    assert_eq!(
+        serde_json::to_value(&local_states).expect("local state metrics"),
+        expected["localStates"]
+    );
+    assert_eq!(pose_channel_frames as u64, expected["poseChannelFrames"]);
+    assert_eq!(
+        equipment_channel_frames as u64,
+        expected["equipmentChannelFrames"]
+    );
+    assert_eq!(
+        serde_json::to_value(&fusion_states).expect("fusion state metrics"),
+        expected["fusionStates"]
+    );
+    assert_eq!(
+        serde_json::to_value(&dimension_states).expect("dimension state metrics"),
+        expected["dimensionStates"]
+    );
+    assert_eq!(
+        serde_json::to_value(&reference_kinds).expect("reference metrics"),
+        expected["referenceKinds"]
+    );
+    assert_eq!(
+        trace_complete_reports as u64,
+        expected["traceCompleteReportCount"]
+    );
+    assert_eq!(expected["typedRefusalCount"], 0);
 }
 
 #[test]

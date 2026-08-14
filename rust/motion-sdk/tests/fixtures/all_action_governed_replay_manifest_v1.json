@@ -1,7 +1,7 @@
 {
   "schemaVersion": "maxpower-governed-replay-manifest/v1",
   "bundleId": "current-all-action-known-video-regression/v1",
-  "assembledInputSha256": "08a7732c7787e1c62522d9700f93a7c138d0b8c85825eeb496b1f36ce895fc36",
+  "assembledInputSha256": "abe32d60911f83af6fb7214bd55a13b94f93e363db9bad6fe9122a7a0b91b72e",
   "assembledInput": {
     "task": "known_video_rep_counting_regression",
     "sourceAssets": [
@@ -66,6 +66,49 @@
         "needs_review"
       ],
       "boundaryPolicy": "predicted_start_within_3000ms_and_end_within_1500ms_of_human_rep_range"
+    },
+    "expectedStructuralResult": {
+      "resolvedRecordCount": 54,
+      "governanceExcludedRecordCount": 1,
+      "replayedRecordCount": 53,
+      "recordsWithNonRejectedRep": 50,
+      "recordsWithBoundaryAlignment": 50,
+      "packetCount": 15879,
+      "localStates": {
+        "Uninitialized": 6465,
+        "Provisional": 95,
+        "Learning": 86,
+        "Frozen": 5570,
+        "Degraded": 3663
+      },
+      "poseChannelFrames": 4835,
+      "equipmentChannelFrames": 0,
+      "fusionStates": {
+        "PoseOnly": 4787,
+        "CannotJudge": 11092
+      },
+      "dimensionStates": {
+        "TaskCompletion/ObservedAcceptable": 25,
+        "TaskCompletion/ObservedDeviation": 26,
+        "TaskCompletion/CannotJudge": 2,
+        "RangeOfMotion/ObservedAcceptable": 12,
+        "RangeOfMotion/ObservedDeviation": 6,
+        "RangeOfMotion/CannotJudge": 35,
+        "PhaseControl/CannotJudge": 53,
+        "SupportStability/CannotJudge": 53,
+        "BilateralCoordination/CannotJudge": 53,
+        "TrajectoryControl/CannotJudge": 53,
+        "StandardVariantCompatibility/CannotJudge": 53,
+        "ObservationConfidence/ObservedAcceptable": 21,
+        "ObservationConfidence/CannotJudge": 32
+      },
+      "referenceKinds": {
+        "SelfGeometry": 557,
+        "SetPrefix": 203,
+        "NoReference": 7174
+      },
+      "traceCompleteReportCount": 53,
+      "typedRefusalCount": 0
     },
     "sourceGroups": [
       {

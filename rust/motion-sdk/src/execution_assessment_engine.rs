@@ -1635,6 +1635,58 @@ impl ExecutionAssessmentEngine {
             return Err(AssessmentRuntimeError::CanonicalSetClosureRequired);
         }
         let mut active = self.active_set.take().expect("active set checked above");
+        if active.rep_assessments.is_empty() {
+            let source_ids = active
+                .packets
+                .iter()
+                .map(|packet| packet.source_id.clone())
+                .collect::<Vec<_>>();
+            let no_rep_boundary = "set:rep-boundary:no-sealed-rep".to_owned();
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: no_rep_boundary.clone(),
+                kind: TraceNodeKind::RepBoundary,
+                summary: "Canonical set closure sealed without a completed Rep candidate.".into(),
+                source_ids: source_ids.clone(),
+                input_node_ids: active
+                    .packets
+                    .iter()
+                    .map(|packet| format!("fusion:{}", packet.frame_id))
+                    .collect(),
+            });
+            for dimension in AssessmentDimension::ALL {
+                let dimension_id = dimension.as_str();
+                let feature_node = format!("set:feature:no-sealed-rep:{dimension_id}");
+                let comparison_node = format!("set:comparison:no-sealed-rep:{dimension_id}");
+                let rule_node = format!("set:rule:no-sealed-rep:{dimension_id}");
+                active.trace_nodes.push(EvidenceTraceNode {
+                    node_id: feature_node.clone(),
+                    kind: TraceNodeKind::FeatureFact,
+                    summary: format!(
+                        "No sealed Rep exists, so {dimension_id} has no Rep-scoped feature fact."
+                    ),
+                    source_ids: source_ids.clone(),
+                    input_node_ids: vec![no_rep_boundary.clone()],
+                });
+                active.trace_nodes.push(EvidenceTraceNode {
+                    node_id: comparison_node.clone(),
+                    kind: TraceNodeKind::ReferenceComparison,
+                    summary: format!(
+                        "No {dimension_id} comparison is possible without a sealed Rep feature."
+                    ),
+                    source_ids: source_ids.clone(),
+                    input_node_ids: vec![feature_node],
+                });
+                active.trace_nodes.push(EvidenceTraceNode {
+                    node_id: rule_node,
+                    kind: TraceNodeKind::RuleConclusion,
+                    summary: format!(
+                        "The {dimension_id} Rep rule abstains because set closure contained no sealed Rep."
+                    ),
+                    source_ids: source_ids.clone(),
+                    input_node_ids: vec![comparison_node],
+                });
+            }
+        }
         let set_patterns = aggregate_set_patterns(&active);
         for pattern in &set_patterns {
             let source_ids = active
@@ -1642,20 +1694,30 @@ impl ExecutionAssessmentEngine {
                 .iter()
                 .map(|packet| packet.source_id.clone())
                 .collect::<Vec<_>>();
+            let mut input_node_ids = pattern
+                .supporting_rep_ids
+                .iter()
+                .flat_map(|rep_id| {
+                    pattern
+                        .evidence_dimensions
+                        .iter()
+                        .map(move |dimension| format!("rep:{rep_id}:rule:{}", dimension.as_str()))
+                })
+                .collect::<Vec<_>>();
+            if input_node_ids.is_empty() && active.rep_assessments.is_empty() {
+                input_node_ids.extend(
+                    pattern
+                        .evidence_dimensions
+                        .iter()
+                        .map(|dimension| format!("set:rule:no-sealed-rep:{}", dimension.as_str())),
+                );
+            }
             active.trace_nodes.push(EvidenceTraceNode {
                 node_id: format!("set-pattern:{}", pattern.pattern_id),
                 kind: TraceNodeKind::SetPattern,
                 summary: pattern.summary.clone(),
                 source_ids,
-                input_node_ids: pattern
-                    .supporting_rep_ids
-                    .iter()
-                    .flat_map(|rep_id| {
-                        pattern.evidence_dimensions.iter().map(move |dimension| {
-                            format!("rep:{rep_id}:rule:{}", dimension.as_str())
-                        })
-                    })
-                    .collect(),
+                input_node_ids,
             });
         }
         let dimension_findings = aggregate_dimension_findings(&active, &set_patterns);

@@ -1,8 +1,12 @@
 {
   "schemaVersion": "maxpower-rust-evaluation-evidence-manifest/v1",
-  "assembledInputSha256": "b343273ce92d424d08cbdf9bff4aadb4ef193154150a0d30f15c218abf59fd16",
+  "assembledInputSha256": "3e5ea550a04b401e687fee05a74037b340c857462636f4a6b4ed0c40bf1bfeb7",
   "assembledInput": {
-    "task": "model_evaluation",
+    "targetTasks": [
+      "rep_counting",
+      "rep_segmentation",
+      "model_evaluation"
+    ],
     "sourceAssets": [
       {
         "assetId": "personal-human-rep-ranges-v2",
@@ -34,6 +38,8 @@
         "selectedFields": [
           "schemaVersion",
           "generatedAt",
+          "protocol.visualRuntime",
+          "protocol.motionRuntime",
           "protocol.pass",
           "protocol.truthReveal",
           "protocol.predictionSha256",
@@ -45,6 +51,14 @@
           "aggregate.candidatePrecision",
           "aggregate.candidateRecall",
           "aggregate.exactSetSourceRate",
+          "rows[].captureId",
+          "rows[].exerciseId",
+          "rows[].capturePosition",
+          "rows[].truthSegments",
+          "rows[].confirmedEvaluation.predictedSegments",
+          "rows[].confirmedEvaluation.matchedCount",
+          "rows[].confirmedEvaluation.falsePositiveCount",
+          "rows[].confirmedEvaluation.missedCount",
           "rows[].confirmedEvaluation.matches[].startOffsetMs",
           "rows[].confirmedEvaluation.matches[].endOffsetMs"
         ]
@@ -57,10 +71,44 @@
       "generatedAt": "2026-08-12T07:15:15.650Z"
     },
     "protocol": {
+      "visualRuntime": "onnxruntime-web/yolox-nano-humanart/rtmpose-m-halpe26",
+      "motionRuntime": "rust-wasm/maxpower-motion-sdk",
       "pass": "frozen-client-observations-rust-only-debug-replay",
       "truthReveal": "after-client-prediction-was-frozen",
       "predictionSha256": "73db3f0501b0f78af283cd2c72c3fe4df5a5db7d600d5a3901bc3488e5806d6e",
       "datasetSha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727"
+    },
+    "exclusions": {
+      "path": "catalog/exclusions.json",
+      "sha256": "32861ac0aac92063bf073afff52ad365c4d2b23342009ea8179772a311730f90",
+      "appliedTasks": [
+        "rep_counting",
+        "rep_segmentation",
+        "exact_set_evaluation"
+      ],
+      "excludedSourceGroups": []
+    },
+    "splitPolicy": "frozen_client_observation_debug_evaluation_only",
+    "sourceGroups": [
+      {
+        "sourceCaptureId": "839e233f09acd809593551b125645bf7",
+        "splitId": "frozen-client-observation-debug-evaluation"
+      },
+      {
+        "sourceCaptureId": "cb71ee6302a7a378d75d1dcdf30cee6a",
+        "splitId": "frozen-client-observation-debug-evaluation"
+      },
+      {
+        "sourceCaptureId": "d8a6e62c017a63b0aa20493301147a47",
+        "splitId": "frozen-client-observation-debug-evaluation"
+      }
+    ],
+    "modelConfiguration": {
+      "visualRuntime": "onnxruntime-web/yolox-nano-humanart/rtmpose-m-halpe26",
+      "motionRuntime": "rust-wasm/maxpower-motion-sdk",
+      "pass": "frozen-client-observations-rust-only-debug-replay",
+      "predictionSha256": "73db3f0501b0f78af283cd2c72c3fe4df5a5db7d600d5a3901bc3488e5806d6e",
+      "truthReveal": "after-client-prediction-was-frozen"
     },
     "frozenResult": {
       "sourceCount": 3,
