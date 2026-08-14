@@ -11,6 +11,10 @@
 namespace {
 
 constexpr NSUInteger kProfileArgumentCount = 24;
+constexpr uint32_t kFirstHashBoundBenchProfileCode =
+    MOTION_SDK_PROFILE_BARBELL_BENCH_PRESS_LOCAL_FRONT;
+constexpr uint32_t kLastHashBoundBenchProfileCode =
+    MOTION_SDK_PROFILE_BARBELL_BENCH_PRESS_LOCAL_FRONT_RIGHT;
 
 bool AsU32(NSNumber *number, uint32_t *output) {
   const double value = number.doubleValue;
@@ -43,10 +47,31 @@ NSDictionary<NSString *, id> *ParseProfile(NSString *profileJSON) {
 int32_t InstallProfile(NSDictionary<NSString *, id> *profile) {
   NSString *mode = profile[@"mode"];
   NSNumber *profileCode = profile[@"profileCode"];
-  if ([mode isEqualToString:@"none"] || [mode isEqualToString:@"built_in"]) {
+  if ([mode isEqualToString:@"none"]) {
+    uint32_t code = 0;
+    if (!profileCode || !AsU32(profileCode, &code) || code != 0) return -10;
+    return motion_sdk_set_profile(code);
+  }
+  if ([mode isEqualToString:@"built_in"]) {
     uint32_t code = 0;
     if (!profileCode || !AsU32(profileCode, &code) || code > 115
         || (code > 8 && code < 101)) return -10;
+    if (code >= kFirstHashBoundBenchProfileCode
+        && code <= kLastHashBoundBenchProfileCode) {
+      NSNumber *expectedHashLow = profile[@"expectedProfileHashLow"];
+      NSNumber *expectedHashHigh = profile[@"expectedProfileHashHigh"];
+      uint32_t expectedLow = 0;
+      uint32_t expectedHigh = 0;
+      if (![expectedHashLow isKindOfClass:NSNumber.class]
+          || ![expectedHashHigh isKindOfClass:NSNumber.class]
+          || !AsU32(expectedHashLow, &expectedLow)
+          || !AsU32(expectedHashHigh, &expectedHigh)) return -17;
+      const uint32_t actualLow = motion_sdk_builtin_profile_hash_low(code);
+      const uint32_t actualHigh = motion_sdk_builtin_profile_hash_high(code);
+      if ((actualLow == 0 && actualHigh == 0)
+          || actualLow != expectedLow
+          || actualHigh != expectedHigh) return -18;
+    }
     return motion_sdk_set_profile(code);
   }
   if (![mode isEqualToString:@"data"]) return -11;

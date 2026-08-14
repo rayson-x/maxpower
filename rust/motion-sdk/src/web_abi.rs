@@ -1292,63 +1292,117 @@ pub extern "C" fn motion_sdk_contract_minor() -> u32 {
     10
 }
 
+fn builtin_profile(profile_code: u32) -> Result<Option<super::ExerciseProfile>, ()> {
+    match profile_code {
+        0 => Ok(None),
+        1 => Ok(Some(super::ExerciseProfile::lat_pulldown_provisional())),
+        2 => Ok(Some(
+            super::ExerciseProfile::seated_shoulder_press_provisional(),
+        )),
+        3 => Ok(Some(
+            super::ExerciseProfile::lat_pulldown_rear_left_45_provisional(),
+        )),
+        4 => Ok(Some(
+            super::ExerciseProfile::seated_shoulder_press_front_provisional(),
+        )),
+        5 => Ok(Some(
+            super::ExerciseProfile::march_in_place_front_provisional(),
+        )),
+        6 => Ok(Some(
+            super::ExerciseProfile::side_step_touch_front_provisional(),
+        )),
+        7 => Ok(Some(
+            super::ExerciseProfile::alternating_knee_raise_front_provisional(),
+        )),
+        8 => Ok(Some(super::ExerciseProfile::step_jack_front_provisional())),
+        101 => super::ExerciseProfile::lat_pulldown_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        102 => super::ExerciseProfile::seated_shoulder_press_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        103 => super::ExerciseProfile::lat_pulldown_rear_left_45_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        104 => super::ExerciseProfile::seated_shoulder_press_front_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        105 => super::ExerciseProfile::march_in_place_front_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        106 => super::ExerciseProfile::side_step_touch_front_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        107 => super::ExerciseProfile::alternating_knee_raise_front_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        108 => super::ExerciseProfile::step_jack_front_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        109 => Ok(Some(
+            super::ExerciseProfile::barbell_bench_press_local_front_provisional(),
+        )),
+        110 => Ok(Some(
+            super::ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
+        )),
+        111 => Ok(Some(
+            super::ExerciseProfile::barbell_bench_press_local_front_right_provisional(),
+        )),
+        112 => Ok(Some(
+            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_provisional(),
+        )),
+        113 => Ok(Some(
+            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_left_provisional(),
+        )),
+        114 => Ok(Some(
+            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_right_provisional(),
+        )),
+        115 => super::ExerciseProfile::dumbbell_shoulder_press_front_provisional()
+            .into_halpe26()
+            .map(Some)
+            .map_err(|_| ()),
+        _ => Err(()),
+    }
+}
+
+fn builtin_profile_hash(profile_code: u32) -> u64 {
+    builtin_profile(profile_code)
+        .ok()
+        .flatten()
+        .map_or(0, |profile| profile.content_hash)
+}
+
+/// Returns the low 32 bits of the content hash computed by the exact built-in
+/// profile factory used by `motion_sdk_set_profile`. Both halves are zero when
+/// the code is `NONE`, unknown, or cannot be constructed by this binary.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_builtin_profile_hash_low(profile_code: u32) -> u32 {
+    builtin_profile_hash(profile_code) as u32
+}
+
+/// Returns the high 32 bits of the content hash computed by the exact built-in
+/// profile factory used by `motion_sdk_set_profile`.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_builtin_profile_hash_high(profile_code: u32) -> u32 {
+    (builtin_profile_hash(profile_code) >> 32) as u32
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
         return -1;
     };
-    let profile = match profile_code {
-        0 => None,
-        1 => Some(super::ExerciseProfile::lat_pulldown_provisional()),
-        2 => Some(super::ExerciseProfile::seated_shoulder_press_provisional()),
-        3 => Some(super::ExerciseProfile::lat_pulldown_rear_left_45_provisional()),
-        4 => Some(super::ExerciseProfile::seated_shoulder_press_front_provisional()),
-        5 => Some(super::ExerciseProfile::march_in_place_front_provisional()),
-        6 => Some(super::ExerciseProfile::side_step_touch_front_provisional()),
-        7 => Some(super::ExerciseProfile::alternating_knee_raise_front_provisional()),
-        8 => Some(super::ExerciseProfile::step_jack_front_provisional()),
-        101 => super::ExerciseProfile::lat_pulldown_provisional()
-            .into_halpe26()
-            .ok(),
-        102 => super::ExerciseProfile::seated_shoulder_press_provisional()
-            .into_halpe26()
-            .ok(),
-        103 => super::ExerciseProfile::lat_pulldown_rear_left_45_provisional()
-            .into_halpe26()
-            .ok(),
-        104 => super::ExerciseProfile::seated_shoulder_press_front_provisional()
-            .into_halpe26()
-            .ok(),
-        105 => super::ExerciseProfile::march_in_place_front_provisional()
-            .into_halpe26()
-            .ok(),
-        106 => super::ExerciseProfile::side_step_touch_front_provisional()
-            .into_halpe26()
-            .ok(),
-        107 => super::ExerciseProfile::alternating_knee_raise_front_provisional()
-            .into_halpe26()
-            .ok(),
-        108 => super::ExerciseProfile::step_jack_front_provisional()
-            .into_halpe26()
-            .ok(),
-        109 => Some(super::ExerciseProfile::barbell_bench_press_local_front_provisional()),
-        110 => Some(super::ExerciseProfile::barbell_bench_press_local_front_left_provisional()),
-        111 => Some(super::ExerciseProfile::barbell_bench_press_local_front_right_provisional()),
-        112 => {
-            Some(super::ExerciseProfile::seated_barbell_shoulder_press_local_front_provisional())
-        }
-        113 => Some(
-            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_left_provisional(),
-        ),
-        114 => Some(
-            super::ExerciseProfile::seated_barbell_shoulder_press_local_front_right_provisional(),
-        ),
-        115 => Some(
-            super::ExerciseProfile::dumbbell_shoulder_press_front_provisional()
-                .into_halpe26()
-                .unwrap(),
-        ),
-        _ => return -2,
+    let profile = match builtin_profile(profile_code) {
+        Ok(profile) => profile,
+        Err(()) => return -2,
     };
     if profile
         .as_ref()

@@ -11,6 +11,7 @@ import {
   selectBenchRecognitionProfile,
 } from "../../src/motion/benchProfileSelector";
 import { resolveRustRuntimeProfile } from "../../src/motion/rustProfileResolver";
+import { resolveRecognitionCapability } from "../../src/mobile/exerciseRecognition";
 
 const hash = (character: string) => `sha256:${character.repeat(64)}` as const;
 
@@ -26,6 +27,11 @@ const candidateProfile = {
   version: "1.0.0",
   uri: "profiles/barbell-bench-local-motion-v1.json",
   sha256: hash("b"),
+} as const;
+
+const executableBenchLeftProfile = {
+  profileCode: 110,
+  contentHash: "fnv1a64:0123456789abcdef",
 } as const;
 
 const manifestRef = {
@@ -884,10 +890,11 @@ test("the shared production resolver installs a promoted bench profile only afte
       manifests: [{ ref: manifestRef, manifest }],
       evidenceStore,
       activation: {
-        schemaVersion: "maxpower-profile-activation/v1",
+        schemaVersion: "maxpower-profile-activation/v2",
         decision: "activate",
         manifestSha256: manifestRef.sha256,
         profileSha256: candidateProfile.sha256,
+        executableProfiles: [executableBenchLeftProfile],
         authorizedBy: "release-review:bench-v1",
         authorizedAt: "2026-08-14T02:00:00.000Z",
       },
@@ -898,6 +905,8 @@ test("the shared production resolver installs a promoted bench profile only afte
       trainingSide: "bilateral",
       variation: "",
       equipment: "barbell",
+    }, {
+      runtimeAttestation: { ...executableBenchLeftProfile, source: "rust_abi" },
     });
     assert.equal(promoted.kind, "built_in");
     assert.equal(promoted.kind === "built_in" ? promoted.profile : null, "barbell_bench_press_local_front_left");
@@ -905,5 +914,127 @@ test("the shared production resolver installs a promoted bench profile only afte
     assert.equal(promoted.promotion.status, "promoted");
   } finally {
     installBenchProfilePromotionRuntime(null);
+  }
+});
+
+test("production promotion fails closed when the same Rust identity executes different content", () => {
+  installBenchProfilePromotionRuntime({
+    stableProfile,
+    manifests: [{ ref: manifestRef, manifest }],
+    evidenceStore,
+    activation: {
+      schemaVersion: "maxpower-profile-activation/v2",
+      decision: "activate",
+      manifestSha256: manifestRef.sha256,
+      profileSha256: candidateProfile.sha256,
+      executableProfiles: [executableBenchLeftProfile],
+      authorizedBy: "release-review:bench-v1",
+      authorizedAt: "2026-08-14T02:00:00.000Z",
+    },
+  });
+  try {
+    const resolution = resolveRustRuntimeProfile({
+      exerciseId: "barbell_bench_press",
+      capturePosition: "frontLeft45",
+      trainingSide: "bilateral",
+      variation: "",
+      equipment: "barbell",
+    }, {
+      runtimeAttestation: {
+        ...executableBenchLeftProfile,
+        contentHash: "fnv1a64:fedcba9876543210",
+        source: "rust_abi",
+      },
+    });
+    assert.equal(resolution.kind, "legacy");
+    assert.ok(resolution.promotion);
+    assert.equal(resolution.promotion.status, "data_gated");
+    assert.deepEqual(
+      resolution.promotion.reasonCodes,
+      ["promotion_executable_profile_content_hash_mismatch"],
+    );
+  } finally {
+    installBenchProfilePromotionRuntime(null);
+  }
+});
+
+test("native promotion carries the activation hash for the Rust bridge to attest", () => {
+  installBenchProfilePromotionRuntime({
+    stableProfile,
+    manifests: [{ ref: manifestRef, manifest }],
+    evidenceStore,
+    activation: {
+      schemaVersion: "maxpower-profile-activation/v2",
+      decision: "activate",
+      manifestSha256: manifestRef.sha256,
+      profileSha256: candidateProfile.sha256,
+      executableProfiles: [executableBenchLeftProfile],
+      authorizedBy: "release-review:bench-v1",
+      authorizedAt: "2026-08-14T02:00:00.000Z",
+    },
+  });
+  try {
+    const capability = resolveRecognitionCapability(
+      "barbell_bench_press",
+      "frontLeft45",
+      "android",
+      { selectedEquipment: "barbell" },
+    );
+    const envelope = JSON.parse(capability.nativeProfileJson) as Record<string, unknown>;
+    assert.equal(capability.mode, "built_in");
+    assert.equal(envelope.profileCode, 110);
+    assert.equal(envelope.expectedProfileHashLow, 0x89ab_cdef);
+    assert.equal(envelope.expectedProfileHashHigh, 0x0123_4567);
+  } finally {
+    installBenchProfilePromotionRuntime(null);
+  }
+});
+
+test("old activation evidence and missing Rust metadata cannot activate a built-in profile", () => {
+  for (const runtime of [
+    {
+      stableProfile,
+      manifests: [{ ref: manifestRef, manifest }],
+      evidenceStore,
+      activation: {
+        schemaVersion: "maxpower-profile-activation/v1" as const,
+        decision: "activate" as const,
+        manifestSha256: manifestRef.sha256,
+        profileSha256: candidateProfile.sha256,
+        authorizedBy: "release-review:bench-v1",
+        authorizedAt: "2026-08-14T02:00:00.000Z",
+      },
+    },
+    {
+      stableProfile,
+      manifests: [{ ref: manifestRef, manifest }],
+      evidenceStore,
+      activation: {
+        schemaVersion: "maxpower-profile-activation/v2" as const,
+        decision: "activate" as const,
+        manifestSha256: manifestRef.sha256,
+        profileSha256: candidateProfile.sha256,
+        executableProfiles: [executableBenchLeftProfile],
+        authorizedBy: "release-review:bench-v1",
+        authorizedAt: "2026-08-14T02:00:00.000Z",
+      },
+    },
+  ]) {
+    installBenchProfilePromotionRuntime(runtime);
+    try {
+      const resolution = resolveRustRuntimeProfile({
+        exerciseId: "barbell_bench_press",
+        capturePosition: "frontLeft45",
+        trainingSide: "bilateral",
+        variation: "",
+        equipment: "barbell",
+      });
+      assert.equal(resolution.kind, "legacy");
+      assert.ok(resolution.promotion);
+      assert.equal(resolution.promotion.status, "data_gated");
+      assert.match(resolution.promotion.reasonCodes[0] ?? "", /^promotion_executable_profile_/);
+    } finally {
+      installBenchProfilePromotionRuntime(null);
+    }
   }
 });

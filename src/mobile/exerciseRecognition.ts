@@ -69,6 +69,9 @@ export function resolveRecognitionCapability(
     trainingSide: "bilateral",
     variation: options.variation ?? "",
     equipment: selectedEquipment,
+    poseRuntime: platform === "android" || platform === "ios"
+      ? { engine: "rtmpose", schema: "halpe26" } as const
+      : { engine: "mediapipe", schema: "blazepose33" } as const,
   } as const;
   if (platform !== "android" && platform !== "ios" && platform !== "fixture") {
     return {
@@ -85,7 +88,9 @@ export function resolveRecognitionCapability(
       }),
     };
   }
-  const runtimeProfile = resolveRustRuntimeProfile(context);
+  const runtimeProfile = resolveRustRuntimeProfile(context, {
+    deferRuntimeAttestationToNative: platform === "android" || platform === "ios",
+  });
   const builtIn = runtimeProfile.kind === "built_in" ? runtimeProfile.profile : null;
   const prefersBuiltIn = builtIn?.includes("_local_") === true;
   const observed = prefersBuiltIn ? null : resolveObservedRecognitionProfile(context);
@@ -110,6 +115,12 @@ export function resolveRecognitionCapability(
   if (builtIn) {
     const baseProfileCode = RUST_EXERCISE_PROFILE_CODES[builtIn];
     const profileCode = targetSchema === "halpe26" ? baseProfileCode + 100 : baseProfileCode;
+    const promotedBinding = runtimeProfile.kind === "built_in"
+      ? runtimeProfile.executableProfile
+      : undefined;
+    const expectedHashWords = promotedBinding
+      ? executableProfileHashWords(promotedBinding.contentHash)
+      : null;
     return {
       mode: "built_in",
       canRunRustRecognition: true,
@@ -121,6 +132,12 @@ export function resolveRecognitionCapability(
         mode: "built_in",
         profileCode,
         equipmentVision,
+        ...(expectedHashWords
+          ? {
+            expectedProfileHashLow: expectedHashWords.low,
+            expectedProfileHashHigh: expectedHashWords.high,
+          }
+          : {}),
       }),
     };
   }
@@ -136,6 +153,20 @@ export function resolveRecognitionCapability(
       profileCode: 0,
       equipmentVision,
     }),
+  };
+}
+
+function executableProfileHashWords(contentHash: `fnv1a64:${string}`): {
+  readonly low: number;
+  readonly high: number;
+} {
+  if (!/^fnv1a64:[0-9a-f]{16}$/u.test(contentHash)) {
+    throw new Error("invalid Rust executable profile content hash");
+  }
+  const value = BigInt(`0x${contentHash.slice("fnv1a64:".length)}`);
+  return {
+    low: Number(value & 0xffff_ffffn),
+    high: Number((value >> 32n) & 0xffff_ffffn),
   };
 }
 

@@ -215,7 +215,10 @@ class PoseCameraView(context: Context, appContext: AppContext) :
 
   /** Clears the previous rep engine, then installs exactly one selected profile. */
   private fun installNativeProfile(profile: NativeRecognitionProfile): Int {
-    val selectStatus = MotionNative.nativeSetProfile(profile.profileCode)
+    val selectStatus = MotionNative.nativeSetProfile(
+      profile.profileCode,
+      (profile as? NativeRecognitionProfile.BuiltIn)?.expectedProfileHash,
+    )
     if (selectStatus != 0) return selectStatus
     return if (profile is NativeRecognitionProfile.Data) {
       MotionNative.nativeInstallProfile(profile.identity, profile.abiArguments)
@@ -423,7 +426,8 @@ class PoseCameraView(context: Context, appContext: AppContext) :
         desiredProfile.profileCode,
         1,
         false,
-        if (isReplay) 2 else 0
+        if (isReplay) 2 else 0,
+        (desiredProfile as? NativeRecognitionProfile.BuiltIn)?.expectedProfileHash,
       )
       if (status != 0) throw IllegalStateException("Rust configure failed ($status)")
       if (desiredProfile is NativeRecognitionProfile.Data) {
@@ -788,15 +792,24 @@ private class CameraFrameTimestampMapper(
   }
 }
 
-private sealed class NativeRecognitionProfile(
+internal data class NativeProfileHash(val low: Int, val high: Int)
+
+internal sealed class NativeRecognitionProfile(
   val key: String,
   val profileCode: Int,
   val equipmentVision: NativeEquipmentVision,
 ) {
   data object None : NativeRecognitionProfile("none", 0, NativeEquipmentVision.Off)
 
-  class BuiltIn(code: Int, equipmentVision: NativeEquipmentVision) :
-    NativeRecognitionProfile("built-in:$code:$equipmentVision", code, equipmentVision)
+  class BuiltIn(
+    code: Int,
+    equipmentVision: NativeEquipmentVision,
+    val expectedProfileHash: NativeProfileHash?,
+  ) : NativeRecognitionProfile(
+    "built-in:$code:$equipmentVision:${expectedProfileHash?.key ?: "unbound"}",
+    code,
+    equipmentVision,
+  )
 
   class Data(
     val identity: String,
@@ -824,7 +837,21 @@ private sealed class NativeRecognitionProfile(
         "built_in" -> {
           val code = envelope.getInt("profileCode")
           require(code in 1..8 || code in 101..115) { "invalid built-in profile code" }
-          BuiltIn(code, equipmentVision)
+          val hasHashLow = envelope.has("expectedProfileHashLow")
+              && !envelope.isNull("expectedProfileHashLow")
+          val hasHashHigh = envelope.has("expectedProfileHashHigh")
+              && !envelope.isNull("expectedProfileHashHigh")
+          require(hasHashLow == hasHashHigh) { "incomplete expected built-in profile hash" }
+          val expectedProfileHash = if (hasHashLow) {
+            NativeProfileHash(
+              parseHashWord(envelope.getLong("expectedProfileHashLow")),
+              parseHashWord(envelope.getLong("expectedProfileHashHigh")),
+            )
+          } else null
+          require(code !in 109..111 || expectedProfileHash != null) {
+            "bench local built-in profile requires expected hash"
+          }
+          BuiltIn(code, equipmentVision, expectedProfileHash)
         }
         "data" -> {
           val identity = envelope.getString("identity")
@@ -841,10 +868,18 @@ private sealed class NativeRecognitionProfile(
         else -> throw IllegalArgumentException("unsupported recognition profile mode")
       }
     }
+
+    private fun parseHashWord(value: Long): Int {
+      require(value in 0..0xffff_ffffL) { "invalid expected built-in profile hash word" }
+      return value.toInt()
+    }
   }
 }
 
-private enum class NativeEquipmentVision {
+private val NativeProfileHash.key: String
+  get() = "${Integer.toUnsignedString(low)}:${Integer.toUnsignedString(high)}"
+
+internal enum class NativeEquipmentVision {
   Off,
   BarbellAxis;
 

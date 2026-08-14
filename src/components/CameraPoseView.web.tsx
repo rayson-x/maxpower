@@ -19,7 +19,10 @@ import {
   MotionPerformanceDegradationController,
   type MotionDegradationLevel,
 } from "../motion/performanceDegradation";
-import { resolveRustRuntimeProfile } from "../motion/rustProfileResolver";
+import {
+  resolveRustExerciseProfile,
+  resolveRustRuntimeProfile,
+} from "../motion/rustProfileResolver";
 import {
   defaultSelectedFreeWeightEquipment,
   resolveEquipmentRecognitionPolicy,
@@ -241,19 +244,35 @@ function poseSchemaForEngine(kind: EngineKind): PoseSchema {
   return kind === "rtmpose" ? "halpe26" : "blazepose33";
 }
 
+function poseRuntimeForEngine(kind: EngineKind) {
+  return kind === "rtmpose"
+    ? { engine: "rtmpose", schema: "halpe26" } as const
+    : { engine: "mediapipe", schema: "blazepose33" } as const;
+}
+
 function rustProfileForContext(
   exerciseId: string,
   capturePosition: CapturePosition,
   trainingSide: TrainingSide,
   variation: string,
+  engineKind: EngineKind,
+  session?: RustCanonicalWasmSession | null,
 ): RustExerciseProfile {
-  const resolution = resolveRustRuntimeProfile({
+  const context = {
     exerciseId,
     capturePosition,
     trainingSide,
     variation,
     equipment: selectedEquipmentForContext(exerciseId, variation),
-  });
+    poseRuntime: poseRuntimeForEngine(engineKind),
+  } as const;
+  const localCandidate = session
+    ? resolveRustExerciseProfile({ ...context, experiment: "local-motion-coordinate-v1" })
+    : null;
+  const runtimeAttestation = localCandidate
+    ? session?.attestBuiltInProfile(localCandidate) ?? null
+    : null;
+  const resolution = resolveRustRuntimeProfile(context, { runtimeAttestation });
   return resolution.kind === "built_in" ? resolution.profile : null;
 }
 
@@ -263,12 +282,14 @@ function referenceRuntimeContextFor(
   trainingSide: TrainingSide,
   variation: string,
   modelPath: string,
+  engineKind: EngineKind,
 ): RustReferenceRuntimeContext | null {
   const activeProfile = rustProfileForContext(
     exerciseId,
     capturePosition,
     trainingSide,
     variation,
+    engineKind,
   );
   const explicitStraightBar = ["cable straight bar", "绳索直杆", "直杆"]
     .includes(variation.trim().toLowerCase());
@@ -298,6 +319,7 @@ function configureRustExerciseProfile(
   trainingSide: TrainingSide,
   variation: string,
   modelPath: string,
+  engineKind: EngineKind,
 ): void {
   const context = {
     exerciseId,
@@ -305,8 +327,16 @@ function configureRustExerciseProfile(
     trainingSide,
     variation,
     equipment: selectedEquipmentForContext(exerciseId, variation),
+    poseRuntime: poseRuntimeForEngine(engineKind),
   } as const;
-  const runtimeProfile = resolveRustRuntimeProfile(context);
+  const localCandidate = resolveRustExerciseProfile({
+    ...context,
+    experiment: "local-motion-coordinate-v1",
+  });
+  const runtimeAttestation = localCandidate
+    ? session.attestBuiltInProfile(localCandidate)
+    : null;
+  const runtimeProfile = resolveRustRuntimeProfile(context, { runtimeAttestation });
   const builtInProfile = runtimeProfile.kind === "built_in" ? runtimeProfile.profile : null;
   const prefersBuiltIn = builtInProfile?.includes("_local_") === true;
   const observedProfile = prefersBuiltIn ? null : resolveObservedRecognitionProfile(context);
@@ -339,7 +369,10 @@ function configureRustExerciseProfile(
     );
     if (baseline) session.installSimulatedTrajectoryBaseline(baseline);
   } else {
-    session.setExerciseProfile(builtInProfile);
+    session.setExerciseProfile(
+      builtInProfile,
+      runtimeProfile.kind === "built_in" ? runtimeProfile.executableProfile : undefined,
+    );
   }
   const referenceContext = referenceRuntimeContextFor(
     exerciseId,
@@ -347,6 +380,7 @@ function configureRustExerciseProfile(
     trainingSide,
     variation,
     modelPath,
+    engineKind,
   );
   if (referenceContext) session.setReferenceRuntimeContext(referenceContext);
   if (
@@ -837,6 +871,7 @@ export function CameraPoseView() {
     trainingSide,
     variation,
     POSE_MODELS.find((model) => model.id === modelId)?.path ?? POSE_MODELS[2]!.path,
+    engineKind,
   ) !== null;
   const simulatedRecognitionBaseline = resolveSimulatedRecognitionProfile({
     exerciseId: exerciseChoice,
@@ -884,6 +919,7 @@ export function CameraPoseView() {
       trainingSideRef.current,
       variationRef.current,
       modelPathRef.current,
+      engineKindRef.current,
     );
   }, [observedProfilesReady]);
 
@@ -964,6 +1000,7 @@ export function CameraPoseView() {
         trainingSideRef.current,
         variationRef.current,
         modelPathRef.current,
+        engineKindRef.current,
       );
       rustSealedRepsRef.current = [];
       rustNeedsReviewRepsRef.current = [];
@@ -993,6 +1030,7 @@ export function CameraPoseView() {
         trainingSideRef.current,
         variationRef.current,
         modelPathRef.current,
+        engineKindRef.current,
       );
       rustSealedRepsRef.current = [];
       rustNeedsReviewRepsRef.current = [];
@@ -1048,6 +1086,7 @@ export function CameraPoseView() {
         trainingSideRef.current,
         variationRef.current,
         modelPathRef.current,
+        engineKindRef.current,
       );
       rustSealedRepsRef.current = [];
       rustNeedsReviewRepsRef.current = [];
@@ -1182,6 +1221,7 @@ export function CameraPoseView() {
         trainingSideRef.current,
         variationRef.current,
         modelPathRef.current,
+        engineKindRef.current,
       );
       canonicalSessionRef.current = session;
       canonicalShadowRef.current = createPoseContinuitySession({ ...config, stabilization: "fusion" });
@@ -1944,6 +1984,10 @@ export function CameraPoseView() {
       recordingMetadata?.capturePosition ?? "frontLeft45",
       recordingMetadata?.trainingSide ?? "bilateral",
       recordingMetadata?.variation ?? "",
+      engineKindRef.current,
+      canonicalSessionRef.current instanceof RustCanonicalWasmSession
+        ? canonicalSessionRef.current
+        : null,
     );
     const rustProfileContext = {
       exerciseId: recordingMetadata?.exerciseChoice ?? "",
@@ -3554,6 +3598,7 @@ export function CameraPoseView() {
                         trainingSideRef.current,
                         next,
                         modelPathRef.current,
+                        engineKindRef.current,
                       );
                       rustSealedRepsRef.current = [];
                       rustNeedsReviewRepsRef.current = [];
@@ -3584,6 +3629,7 @@ export function CameraPoseView() {
                         next,
                         variationRef.current,
                         modelPathRef.current,
+                        engineKindRef.current,
                       );
                       rustSealedRepsRef.current = [];
                       rustNeedsReviewRepsRef.current = [];

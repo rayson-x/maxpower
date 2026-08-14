@@ -1,6 +1,79 @@
 #import <Foundation/Foundation.h>
 
 #import "MotionBridge.h"
+#import "motion_sdk.h"
+
+static NSString *BuiltInProfileJSON(
+    uint32_t profileCode,
+    NSNumber *expectedHashLow,
+    NSNumber *expectedHashHigh) {
+  NSMutableDictionary *profile = [@{
+    @"schemaVersion": @"maxpower-native-recognition-profile/v1",
+    @"mode": @"built_in",
+    @"profileCode": @(profileCode),
+  } mutableCopy];
+  if (expectedHashLow != nil) profile[@"expectedProfileHashLow"] = expectedHashLow;
+  if (expectedHashHigh != nil) profile[@"expectedProfileHashHigh"] = expectedHashHigh;
+  NSData *data = [NSJSONSerialization dataWithJSONObject:profile options:0 error:nil];
+  return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+}
+
+static int AssertProfileStatus(
+    MPMotionBridge *bridge,
+    NSString *label,
+    NSString *profileJSON,
+    int32_t expectedStatus) {
+  const int32_t actualStatus = [bridge setProfileJSON:profileJSON];
+  if (actualStatus == expectedStatus) return 0;
+  fprintf(stderr, "%s profile status mismatch: actual=%d expected=%d\n",
+          label.UTF8String, actualStatus, expectedStatus);
+  return 1;
+}
+
+static int VerifyBuiltInProfileHashGate(MPMotionBridge *bridge) {
+  for (uint32_t profileCode = 109; profileCode <= 111; ++profileCode) {
+    const uint32_t expectedLow = motion_sdk_builtin_profile_hash_low(profileCode);
+    const uint32_t expectedHigh = motion_sdk_builtin_profile_hash_high(profileCode);
+    if (expectedLow == 0 && expectedHigh == 0) {
+      fprintf(stderr, "Rust returned no built-in hash for bench profile %u\n", profileCode);
+      return 1;
+    }
+    if (AssertProfileStatus(
+            bridge,
+            [NSString stringWithFormat:@"bench %u missing hash", profileCode],
+            BuiltInProfileJSON(profileCode, nil, nil),
+            -17) != 0) return 1;
+    if (AssertProfileStatus(
+            bridge,
+            [NSString stringWithFormat:@"bench %u partial hash", profileCode],
+            BuiltInProfileJSON(profileCode, @(expectedLow), nil),
+            -17) != 0) return 1;
+    if (AssertProfileStatus(
+            bridge,
+            [NSString stringWithFormat:@"bench %u mismatched hash", profileCode],
+            BuiltInProfileJSON(profileCode, @(expectedLow ^ 1U), @(expectedHigh)),
+            -18) != 0) return 1;
+    if (AssertProfileStatus(
+            bridge,
+            [NSString stringWithFormat:@"bench %u mismatched high hash", profileCode],
+            BuiltInProfileJSON(profileCode, @(expectedLow), @(expectedHigh ^ 1U)),
+            -18) != 0) return 1;
+    if (AssertProfileStatus(
+            bridge,
+            [NSString stringWithFormat:@"bench %u exact hash", profileCode],
+            BuiltInProfileJSON(profileCode, @(expectedLow), @(expectedHigh)),
+            0) != 0) return 1;
+  }
+  if (AssertProfileStatus(
+          bridge,
+          @"non-bench built-in compatibility",
+          BuiltInProfileJSON(112, nil, nil),
+          0) != 0) return 1;
+  NSString *invalidNone = @"{\"schemaVersion\":\"maxpower-native-recognition-profile/v1\","
+      "\"mode\":\"none\",\"profileCode\":109}";
+  if (AssertProfileStatus(bridge, @"none-mode bench bypass", invalidNone, -10) != 0) return 1;
+  return 0;
+}
 
 static id ReadJSON(NSString *path, NSError **error) {
   NSData *data = [NSData dataWithContentsOfFile:path options:0 error:error];
@@ -78,6 +151,11 @@ static int Run(NSString *fixturePath, NSString *oraclePath) {
   if (configureStatus != 0) {
     fprintf(stderr, "configure failed: %d\n", configureStatus);
     return 5;
+  }
+  if (VerifyBuiltInProfileHashGate(bridge) != 0) return 10;
+  if ([bridge setProfileJSON:@""] != 0) {
+    fprintf(stderr, "failed to restore no-profile fixture state\n");
+    return 11;
   }
   for (NSUInteger index = 0; index < frames.count; ++index) {
     NSDictionary *frame = frames[index];

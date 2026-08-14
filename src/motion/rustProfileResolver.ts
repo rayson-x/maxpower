@@ -1,7 +1,12 @@
-import type { RustExerciseProfile } from "./rustCanonicalWasm";
+import {
+  RUST_EXERCISE_PROFILE_CODES,
+  type RustExerciseProfile,
+} from "./rustCanonicalWasm";
 import {
   resolveInstalledBenchProfileSelection,
   type BenchProfileSelection,
+  type ExecutableRustProfileRef,
+  type RuntimeBuiltInProfileAttestation,
 } from "./benchProfileSelector";
 
 export interface RustProfileContext {
@@ -10,6 +15,11 @@ export interface RustProfileContext {
   readonly trainingSide: "bilateral" | "left" | "right";
   readonly variation: string;
   readonly equipment?: "barbell" | "dumbbell" | "none";
+  /** Exact pose contract for callers that can switch inference engines. */
+  readonly poseRuntime?: Readonly<{
+    engine: "mediapipe" | "rtmpose";
+    schema: "blazepose33" | "halpe26";
+  }>;
   /** Candidate profiles are never selected by default. */
   readonly experiment?: "local-motion-coordinate-v1";
 }
@@ -18,6 +28,8 @@ export type RustRuntimeProfileResolution = Readonly<{
   kind: "built_in";
   profile: Exclude<RustExerciseProfile, null>;
   promotion: Pick<BenchProfileSelection, "status" | "reasonCodes"> | null;
+  /** Present only for an evidence-promoted profile that Rust must attest before execution. */
+  executableProfile?: ExecutableRustProfileRef;
 }> | Readonly<{
   kind: "legacy";
   profile: null;
@@ -25,6 +37,13 @@ export type RustRuntimeProfileResolution = Readonly<{
 }>;
 
 const BENCH_LOCAL_PROFILE_IDENTITY = "barbell_bench_press/local-motion/v1";
+
+export interface RustRuntimeProfileOptions {
+  /** Web reads this from the currently loaded WASM ABI. */
+  readonly runtimeAttestation?: RuntimeBuiltInProfileAttestation | null;
+  /** Native bridges verify the sealed hash immediately before `motion_sdk_set_profile`. */
+  readonly deferRuntimeAttestationToNative?: boolean;
+}
 
 /**
  * Shared production profile gate used by Web and both native clients.
@@ -34,25 +53,34 @@ const BENCH_LOCAL_PROFILE_IDENTITY = "barbell_bench_press/local-motion/v1";
  */
 export function resolveRustRuntimeProfile(
   context: RustProfileContext,
+  options: RustRuntimeProfileOptions = {},
 ): RustRuntimeProfileResolution {
   if (context.exerciseId === "barbell_bench_press") {
     const view = normalizeCoarseMotionView(context.capturePosition);
+    const localProfile = supportsLocalMotionProfile(context)
+      ? resolveRustExerciseProfile({ ...context, experiment: "local-motion-coordinate-v1" })
+      : null;
     const promotion = resolveInstalledBenchProfileSelection({
       exerciseId: context.exerciseId,
       variation: normalizedBenchVariation(context.variation),
       equipment: context.equipment ?? "none",
       trainingSide: context.trainingSide,
       capturePosition: view ?? context.capturePosition,
-    });
+    }, localProfile ? RUST_EXERCISE_PROFILE_CODES[localProfile] + 100 : null,
+    options.runtimeAttestation ?? null,
+    options.deferRuntimeAttestationToNative === true);
     if (
       promotion?.status === "promoted"
       && promotion.selectedProfile.identity === BENCH_LOCAL_PROFILE_IDENTITY
+      && promotion.executableProfile
+      && localProfile
     ) {
-      const profile = resolveRustExerciseProfile({
-        ...context,
-        experiment: "local-motion-coordinate-v1",
-      });
-      if (profile) return { kind: "built_in", profile, promotion };
+      return {
+        kind: "built_in",
+        profile: localProfile,
+        promotion,
+        executableProfile: promotion.executableProfile,
+      };
     }
     return {
       kind: "legacy",
@@ -65,6 +93,7 @@ export function resolveRustRuntimeProfile(
 
   const selected = context.exerciseId === "seated_shoulder_press"
     && context.equipment === "barbell"
+    && supportsLocalMotionProfile(context)
     ? resolveRustExerciseProfile({ ...context, experiment: "local-motion-coordinate-v1" })
     : resolveRustExerciseProfile(context);
   return selected
@@ -76,6 +105,10 @@ export function resolveRustRuntimeProfile(
 export function resolveRustExerciseProfile(
   context: RustProfileContext,
 ): RustExerciseProfile {
+  if (
+    context.experiment === "local-motion-coordinate-v1"
+    && !supportsLocalMotionProfile(context)
+  ) return null;
   if (context.trainingSide !== "bilateral") return null;
   const detail = context.variation.trim().toLowerCase();
   const view = normalizeCoarseMotionView(context.capturePosition);
@@ -121,6 +154,13 @@ export function resolveRustExerciseProfile(
     if (view === "front_oblique_right") return "barbell_bench_press_local_front_right";
   }
   return null;
+}
+
+function supportsLocalMotionProfile(context: RustProfileContext): boolean {
+  // Native callers currently omit this because their adapter is fixed to
+  // RTMPose Halpe-26. Runtime-switchable Web callers always provide it.
+  return context.poseRuntime === undefined
+    || (context.poseRuntime.engine === "rtmpose" && context.poseRuntime.schema === "halpe26");
 }
 
 /** Coarse public view buckets retain side semantics without claiming an exact angle. */

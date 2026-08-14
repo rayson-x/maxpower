@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeCoarseMotionView, resolveRustExerciseProfile } from "../../src/motion/rustProfileResolver";
+import {
+  normalizeCoarseMotionView,
+  resolveRustExerciseProfile,
+  resolveRustRuntimeProfile,
+} from "../../src/motion/rustProfileResolver";
 
 test("Rust profile selection requires exact action, camera position, side, and variation", () => {
   assert.equal(resolveRustExerciseProfile({
@@ -146,4 +150,50 @@ test("local-coordinate candidates are explicit, equipment-exact, and preserve ob
     equipment: "dumbbell",
     experiment: "local-motion-coordinate-v1",
   }), null, "dumbbell context must not inherit the barbell oblique profile");
+});
+
+test("local-coordinate runtime profiles require the RTMPose Halpe-26 observation contract", () => {
+  const context = {
+    exerciseId: "seated_shoulder_press",
+    capturePosition: "frontLeft45",
+    trainingSide: "bilateral",
+    variation: "",
+    equipment: "barbell",
+  } as const;
+
+  assert.deepEqual(resolveRustRuntimeProfile({
+    ...context,
+    poseRuntime: { engine: "rtmpose", schema: "halpe26" },
+  }), {
+    kind: "built_in",
+    profile: "seated_barbell_shoulder_press_local_front_left",
+    promotion: null,
+  });
+  assert.deepEqual(resolveRustRuntimeProfile({
+    ...context,
+    poseRuntime: { engine: "mediapipe", schema: "blazepose33" },
+  }), {
+    kind: "legacy",
+    profile: null,
+    promotion: null,
+  });
+  assert.deepEqual(resolveRustRuntimeProfile({
+    ...context,
+    poseRuntime: { engine: "rtmpose", schema: "blazepose33" },
+  }), {
+    kind: "legacy",
+    profile: null,
+    promotion: null,
+  });
+  assert.deepEqual(resolveRustRuntimeProfile({
+    exerciseId: "lat_pulldown",
+    capturePosition: "rear",
+    trainingSide: "bilateral",
+    variation: "绳索直杆",
+    poseRuntime: { engine: "mediapipe", schema: "blazepose33" },
+  }), {
+    kind: "built_in",
+    profile: "lat_pulldown",
+    promotion: null,
+  }, "a compatible legacy BlazePose profile remains available");
 });

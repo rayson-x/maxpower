@@ -20,10 +20,35 @@ if [ -z "$oracle_path" ]; then
     --output "$oracle_path"
 fi
 
-# Rebuild the same Rust static library used by the client before compiling the
-# bridge harness. This keeps parity reproducible from a clean checkout instead
-# of silently accepting a stale target-native-apple archive.
-sh "$repo_root/tools/motion-sdk/build-native.sh" apple "$build_dir/apple-products"
+case $(uname -m) in
+  arm64)
+    rust_target=aarch64-apple-ios-sim
+    simulator_target=arm64-apple-ios16.4-simulator
+    ;;
+  x86_64)
+    rust_target=x86_64-apple-ios
+    simulator_target=x86_64-apple-ios16.4-simulator
+    ;;
+  *)
+    echo "unsupported macOS architecture: $(uname -m)" >&2
+    exit 4
+    ;;
+esac
+
+# Build only the SDK library for the current simulator architecture. Building
+# device + both simulator architectures (and every Rust binary) adds no parity
+# coverage here and can exhaust a developer machine before the bridge runs.
+cargo_bin=$(rustup which cargo)
+RUSTC=$(rustup which rustc)
+export RUSTC
+DEVELOPER_DIR="$developer_dir" CARGO_TARGET_DIR="$build_dir/rust-target" \
+  "$cargo_bin" build \
+    --manifest-path "$repo_root/Cargo.toml" \
+    -p maxpower-motion-sdk \
+    --release \
+    --target "$rust_target" \
+    --lib
+rust_library="$build_dir/rust-target/$rust_target/release/libmaxpower_motion_sdk.a"
 
 simulator_id=${IOS_SIMULATOR_ID:-}
 if [ -z "$simulator_id" ]; then
@@ -40,19 +65,6 @@ if ! /usr/bin/xcrun simctl list devices booted -j \
   /usr/bin/xcrun simctl bootstatus "$simulator_id" -b
 fi
 
-case $(uname -m) in
-  arm64)
-    simulator_target=arm64-apple-ios16.4-simulator
-    ;;
-  x86_64)
-    simulator_target=x86_64-apple-ios16.4-simulator
-    ;;
-  *)
-    echo "unsupported macOS architecture: $(uname -m)" >&2
-    exit 4
-    ;;
-esac
-
 /usr/bin/xcrun --sdk iphonesimulator clang++ \
   -target "$simulator_target" \
   -isysroot "$sdk" \
@@ -63,7 +75,7 @@ esac
   -I "$repo_root/modules/pose-camera/common" \
   "$repo_root/tools/motion-sdk/ios/RealHalpe26BridgeParity.mm" \
   "$repo_root/modules/pose-camera/ios/MotionBridge.mm" \
-  "$repo_root/target-native-apple/ios-simulator-universal/libmaxpower_motion_sdk.a" \
+  "$rust_library" \
   -framework Foundation \
   -o "$build_dir/RealHalpe26BridgeParity"
 

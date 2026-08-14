@@ -29,6 +29,10 @@ int32_t motion_sdk_commit_sequence(void);
 int32_t motion_sdk_reset(uint32_t width, uint32_t height, uint32_t fusion);
 int32_t motion_sdk_set_pose_schema(uint32_t schema);
 int32_t motion_sdk_set_profile(uint32_t profile_code);
+// These halves attest the ExerciseProfile::content_hash built by the same
+// factory as motion_sdk_set_profile. NONE, unknown, or unavailable => 0/0.
+uint32_t motion_sdk_builtin_profile_hash_low(uint32_t profile_code);
+uint32_t motion_sdk_builtin_profile_hash_high(uint32_t profile_code);
 int32_t motion_sdk_set_canonical_feed_mirroring(uint32_t mirrored);
 int32_t motion_sdk_begin_profile_identity(uint32_t length);
 int32_t motion_sdk_set_profile_identity_byte(uint32_t index, uint32_t value);

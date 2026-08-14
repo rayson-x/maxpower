@@ -6,15 +6,55 @@ internal object MotionNative {
     System.loadLibrary("pose_camera_motion")
   }
 
-  external fun nativeConfigure(
+  private external fun nativeConfigureChecked(
     width: Int,
     height: Int,
     profileCode: Int,
     poseSchemaCode: Int,
     active: Boolean,
     canonicalFeedMirroring: Int,
+    expectedProfileHashPresent: Boolean,
+    expectedProfileHashLow: Int,
+    expectedProfileHashHigh: Int,
   ): Int
-  external fun nativeSetProfile(profileCode: Int): Int
+  private external fun nativeSetProfileChecked(
+    profileCode: Int,
+    expectedProfileHashPresent: Boolean,
+    expectedProfileHashLow: Int,
+    expectedProfileHashHigh: Int,
+  ): Int
+  external fun nativeBuiltinProfileHashLow(profileCode: Int): Int
+  external fun nativeBuiltinProfileHashHigh(profileCode: Int): Int
+
+  fun nativeConfigure(
+    width: Int,
+    height: Int,
+    profileCode: Int,
+    poseSchemaCode: Int,
+    active: Boolean,
+    canonicalFeedMirroring: Int,
+    expectedProfileHash: NativeProfileHash? = null,
+  ): Int = nativeConfigureChecked(
+    width,
+    height,
+    profileCode,
+    poseSchemaCode,
+    active,
+    canonicalFeedMirroring,
+    expectedProfileHash != null,
+    expectedProfileHash?.low ?: 0,
+    expectedProfileHash?.high ?: 0,
+  )
+
+  fun nativeSetProfile(
+    profileCode: Int,
+    expectedProfileHash: NativeProfileHash? = null,
+  ): Int = nativeSetProfileChecked(
+    profileCode,
+    expectedProfileHash != null,
+    expectedProfileHash?.low ?: 0,
+    expectedProfileHash?.high ?: 0,
+  )
   external fun nativeInstallProfile(identity: String, abiArguments: DoubleArray): Int
   external fun nativeSetActive(active: Boolean): Int
   external fun nativePauseSet(): Int

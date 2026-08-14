@@ -14,6 +14,10 @@ import {
   type DecodedMotionPacket,
   type DecodedRustQualityProposal,
 } from "./motionPacket";
+import type {
+  ExecutableRustProfileRef,
+  RuntimeBuiltInProfileAttestation,
+} from "./benchProfileSelector";
 
 export type RustTargetState = "acquiring" | "locked" | "uncertain" | "lost" | "reacquiring";
 export interface RustTargetSnapshot {
@@ -409,6 +413,8 @@ export interface MotionWasmExports extends WebAssembly.Exports {
   motion_sdk_schedule(timestampLow: number, timestampHigh: number, inFlight: number): number;
   motion_sdk_set_degradation(level: number): number;
   motion_sdk_set_profile(profileCode: number): number;
+  motion_sdk_builtin_profile_hash_low(profileCode: number): number;
+  motion_sdk_builtin_profile_hash_high(profileCode: number): number;
   motion_sdk_begin_profile_identity(length: number): number;
   motion_sdk_set_profile_identity_byte(index: number, value: number): number;
   motion_sdk_install_profile(
@@ -814,9 +820,38 @@ export class RustCanonicalWasmSession implements PoseContinuitySession {
     this.applyDecodedPacket(this.readPacket());
   }
 
-  setExerciseProfile(profile: RustExerciseProfile): void {
+  attestBuiltInProfile(
+    profile: Exclude<RustExerciseProfile, null>,
+  ): RuntimeBuiltInProfileAttestation | null {
+    const baseCode = RUST_EXERCISE_PROFILE_CODES[profile];
+    const profileCode = this.config.schema === "halpe26" ? baseCode + 100 : baseCode;
+    const low = this.wasm.motion_sdk_builtin_profile_hash_low(profileCode) >>> 0;
+    const high = this.wasm.motion_sdk_builtin_profile_hash_high(profileCode) >>> 0;
+    if (low === 0 && high === 0) return null;
+    const hash = (BigInt(high) << 32n) | BigInt(low);
+    return Object.freeze({
+      profileCode,
+      contentHash: `fnv1a64:${hash.toString(16).padStart(16, "0")}`,
+      source: "rust_abi",
+    });
+  }
+
+  setExerciseProfile(
+    profile: RustExerciseProfile,
+    expectedExecutable?: ExecutableRustProfileRef,
+  ): void {
     const baseCode = profile === null ? 0 : RUST_EXERCISE_PROFILE_CODES[profile];
     const code = profile !== null && this.config.schema === "halpe26" ? baseCode + 100 : baseCode;
+    if (expectedExecutable) {
+      const attestation = profile === null ? null : this.attestBuiltInProfile(profile);
+      if (
+        !attestation
+        || attestation.profileCode !== expectedExecutable.profileCode
+        || attestation.contentHash !== expectedExecutable.contentHash
+      ) {
+        throw new Error("Rust built-in profile does not match the promoted executable binding");
+      }
+    }
     ensureOk(this.wasm.motion_sdk_set_profile(code), "set_profile");
     this.lastRepState = {
       phase: "ready",
