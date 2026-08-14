@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "maxpower-governed-replay-manifest/v1",
+  "bundleId": "current-rigid-bar-known-video-regression/v1",
+  "assembledInputSha256": "11e9635f521dccae2886755a4144d46cde67561e3aa66da8927d7de4122a6ca8",
+  "assembledInput": {
+    "task": "known_video_rep_counting_regression",
+    "sourceAssets": [
+      {
+        "assetId": "personal-human-rep-ranges-v2",
+        "admission": "label_allowed",
+        "authority": "user_reviewed",
+        "groupKey": "sourceCaptureId",
+        "consumedForTasks": ["rep_counting", "rep_segmentation"],
+        "immutableSha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727",
+        "selectedFields": [
+          "sourceCaptureId",
+          "exerciseId",
+          "capturePosition",
+          "expectedCount",
+          "segments[].startMs",
+          "segments[].endMs"
+        ]
+      },
+      {
+        "assetId": "personal-native-rtmpose-halpe26-observations",
+        "admission": "feature_only",
+        "authority": "model_generated",
+        "groupKey": "sourceCaptureId",
+        "consumedForTasks": ["runtime_parity"],
+        "selector": "*.halpe26.json.gz",
+        "selectedFields": [
+          "source.widthPx",
+          "source.heightPx",
+          "frames[].frameNumber",
+          "frames[].timestampMs",
+          "frames[].selectedBbox",
+          "frames[].landmarks"
+        ]
+      }
+    ],
+    "exclusions": {
+      "path": "catalog/exclusions.json",
+      "sha256": "32861ac0aac92063bf073afff52ad365c4d2b23342009ea8179772a311730f90",
+      "appliedTasks": [
+        "rep_counting",
+        "rep_boundary_training",
+        "exact_set_evaluation"
+      ],
+      "excludedSourceGroups": []
+    },
+    "splitPolicy": "known_participant_known_video_regression_only",
+    "modelConfiguration": {
+      "assessmentCatalogId": "maxpower/current-rigid-bar-assessment/v3",
+      "poseRuntimeId": "rtmpose-m",
+      "poseSchema": "halpe26/v1",
+      "packetContract": "1.10",
+      "countedDispositions": ["confirmed", "needs_review"],
+      "boundaryPolicy": "predicted_start_within_3000ms_and_end_within_1500ms_of_human_rep_range"
+    },
+    "sourceGroups": [
+      {
+        "sourceCaptureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+        "exerciseId": "barbell_bench_press",
+        "capturePosition": "front",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "e963bc2e0819f5ef528561cc1260b7ef",
+        "exerciseId": "barbell_bench_press",
+        "capturePosition": "frontLeft45",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "839e233f09acd809593551b125645bf7",
+        "exerciseId": "barbell_bench_press",
+        "capturePosition": "frontRight45",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "field-capture-2026-08-02T18-24-38-253Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "front",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "field-capture-2026-08-02T18-34-19-006Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "frontLeft45",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "field-capture-2026-08-02T18-26-54-722Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "frontRight45",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "field-capture-2026-08-02T18-30-30-478Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "rearLeft45",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "field-capture-2026-08-02T18-16-42-757Z",
+        "exerciseId": "barbell_row",
+        "capturePosition": "rearRight45",
+        "splitId": "known-participant-known-video-regression"
+      },
+      {
+        "sourceCaptureId": "field-capture-2026-08-03T07-57-28-214Z",
+        "exerciseId": "seated_shoulder_press",
+        "capturePosition": "front",
+        "splitId": "known-participant-known-video-regression"
+      }
+    ]
+  }
+}

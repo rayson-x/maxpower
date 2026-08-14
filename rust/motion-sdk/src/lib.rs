@@ -574,6 +574,19 @@ pub struct ExerciseProfile {
     pub max_rep_duration_ms: u64,
 }
 
+pub(crate) struct RigidBarProfileInitializer {
+    pub primary_signal: ExerciseSignal,
+    pub secondary_signal: ExerciseSignal,
+    pub direction: MovementDirection,
+    pub start_amplitude: f32,
+    pub minimum_amplitude: f32,
+    pub return_hysteresis: f32,
+    pub ready_tolerance: f32,
+    pub max_gap_ms: u64,
+    pub min_rep_duration_ms: u64,
+    pub max_rep_duration_ms: u64,
+}
+
 impl ExerciseProfile {
     fn into_halpe26(mut self) -> Result<Self, MotionError> {
         const BLAZEPOSE33_TO_HALPE26: [(usize, usize); 21] = [
@@ -848,6 +861,40 @@ impl ExerciseProfile {
             max_gap_ms: 1_000,
             min_rep_duration_ms: 350,
             max_rep_duration_ms: 10_000,
+        })
+    }
+
+    /// Provisional rigid-bar family initializer used by the assessment Bundle
+    /// catalog. It observes bilateral elbow excursion in the canonical Halpe-26
+    /// stream; action identity and camera view remain explicit inputs rather
+    /// than being inferred from pose geometry.
+    pub(crate) fn rigid_bar_provisional(
+        identity: &str,
+        initializer: RigidBarProfileInitializer,
+    ) -> Self {
+        let coordinate_unit = expected_coordinate_unit(
+            initializer.primary_signal.kind,
+            initializer.secondary_signal.kind,
+        );
+        Self::with_computed_hash(Self {
+            identity: identity.into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::Halpe26,
+            coordinate_unit: coordinate_unit.into(),
+            state_machine_id: "cycle-aligned-ready-effort-peak-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: initializer.primary_signal,
+            secondary_signal: initializer.secondary_signal,
+            direction: initializer.direction,
+            start_amplitude: initializer.start_amplitude,
+            min_primary_amplitude: initializer.minimum_amplitude,
+            min_secondary_amplitude: initializer.minimum_amplitude,
+            return_hysteresis: initializer.return_hysteresis,
+            ready_tolerance: initializer.ready_tolerance,
+            max_gap_ms: initializer.max_gap_ms,
+            min_rep_duration_ms: initializer.min_rep_duration_ms,
+            max_rep_duration_ms: initializer.max_rep_duration_ms,
         })
     }
 
@@ -2679,6 +2726,7 @@ struct RepEngine {
     pending_activation: Option<PendingActivation>,
     pending_return_since_ms: Option<u64>,
     pending_ready: Option<PendingReady>,
+    local_evidence_history: VecDeque<(u64, u64, LocalMotionCoordinateEvidence)>,
     finalized_outcomes: Option<Vec<SealedRep>>,
 }
 
@@ -2726,6 +2774,7 @@ impl RepEngine {
             pending_activation: None,
             pending_return_since_ms: None,
             pending_ready: None,
+            local_evidence_history: VecDeque::new(),
             finalized_outcomes: None,
         }
     }
@@ -2758,6 +2807,7 @@ impl RepEngine {
         self.abort_active();
         self.signal_window.clear();
         self.ready_history.clear();
+        self.local_evidence_history.clear();
         // Orientation is a set-level decision. A later set may legitimately
         // begin from the opposite physical extreme, so it must earn a fresh
         // auto-direction lock rather than inheriting the prior set's choice.
@@ -2873,6 +2923,7 @@ impl RepEngine {
         self.pending_activation = None;
         self.pending_return_since_ms = None;
         self.pending_ready = None;
+        let normalized_endpoints = self.normalized_endpoints_for(&active, end);
         let sealed = SealedRep {
             rep_id: active.rep_id,
             start_frame_id: active.start.frame_id,
@@ -2892,7 +2943,7 @@ impl RepEngine {
             disposition,
             evidence_reason,
             observation_findings,
-            normalized_endpoints: None,
+            normalized_endpoints,
         };
         // Every outcome, including a filtered one, is immutable and
         // addressable evidence. Never reuse its id in the same set.
@@ -3141,6 +3192,19 @@ impl RepEngine {
         canonical: &[CanonicalLandmark],
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<SealedRep> {
+        if let Some(evidence) = local_coordinate {
+            self.local_evidence_history
+                .push_back((frame_id, timestamp_ms, evidence.clone()));
+            let oldest_retained = timestamp_ms
+                .saturating_sub(self.profile.max_rep_duration_ms + self.profile.max_gap_ms);
+            while self
+                .local_evidence_history
+                .front()
+                .is_some_and(|(_, timestamp_ms, _)| *timestamp_ms < oldest_retained)
+            {
+                self.local_evidence_history.pop_front();
+            }
+        }
         if target_state != TargetState::Locked {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::LongContinuityLoss);
         }
@@ -3429,6 +3493,25 @@ impl RepEngine {
         }
         self.previous = Some(sample);
         sealed
+    }
+
+    fn normalized_endpoints_for(
+        &self,
+        active: &ActiveRep,
+        end: RepSample,
+    ) -> Option<NormalizedRepEndpointEvidence> {
+        let evidence_for = |frame_id: u64| {
+            self.local_evidence_history
+                .iter()
+                .find(|(candidate_frame_id, _, _)| *candidate_frame_id == frame_id)
+                .map(|(_, _, evidence)| evidence.clone())
+        };
+        Some(NormalizedRepEndpointEvidence {
+            coordinate_frame_id: evidence_for(active.start.frame_id)?.coordinate_frame_id,
+            start_anchor: evidence_for(active.start.frame_id)?,
+            primary_turnaround: evidence_for(active.peak.frame_id)?,
+            end_return: evidence_for(end.frame_id)?,
+        })
     }
 
     /// Temporal variant of the profile graph. Thresholds remain the
@@ -5028,6 +5111,22 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         &mut self,
         profile: ExerciseProfile,
     ) -> Result<(), MotionError> {
+        self.install_exercise_profile_internal(profile, None)
+    }
+
+    pub fn install_exercise_profile_with_local_strategy(
+        &mut self,
+        profile: ExerciseProfile,
+        strategy: LocalMotionCoordinateStrategy,
+    ) -> Result<(), MotionError> {
+        self.install_exercise_profile_internal(profile, Some(strategy))
+    }
+
+    fn install_exercise_profile_internal(
+        &mut self,
+        profile: ExerciseProfile,
+        strategy: Option<LocalMotionCoordinateStrategy>,
+    ) -> Result<(), MotionError> {
         if self.accepted_frames != 0 {
             return Err(MotionError::ProfileInstallAfterFrames);
         }
@@ -5035,8 +5134,12 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             return Err(MotionError::ProfileAlreadyActive);
         }
         profile.validate()?;
-        self.local_motion_coordinate
-            .set_profile_identity(Some(&profile.identity));
+        if let Some(strategy) = strategy {
+            self.local_motion_coordinate.set_strategy(Some(strategy));
+        } else {
+            self.local_motion_coordinate
+                .set_legacy_profile_identity(Some(&profile.identity));
+        }
         self.rep_engine = Some(RepEngine::new(profile));
         Ok(())
     }

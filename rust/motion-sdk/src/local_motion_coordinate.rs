@@ -64,13 +64,23 @@ pub enum LocalCoarseView {
     Front,
     FrontObliqueLeft,
     FrontObliqueRight,
+    RearObliqueLeft,
+    RearObliqueRight,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum LocalActionAxisPrior {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalActionAxisDirection {
     #[default]
     PreparationToEffortDown,
     PreparationToEffortUp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalMotionCoordinateStrategy {
+    pub capture_view: LocalCoarseView,
+    pub preparation_to_effort: LocalActionAxisDirection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -136,6 +146,7 @@ pub struct LocalMotionCoordinateEvidence {
     /// Exact coarse front-view bucket supplied by the installed action
     /// context. This is never inferred from image geometry.
     pub coarse_view: Option<LocalCoarseView>,
+    pub preparation_to_effort: Option<LocalActionAxisDirection>,
     /// Whether the canonical coordinate feed itself is horizontally mirrored.
     /// Preview-only mirroring does not set this value.
     pub canonical_feed_mirrored: Option<bool>,
@@ -188,6 +199,7 @@ impl Default for LocalMotionCoordinateEvidence {
             equipment_track_id: None,
             raw_bar_axis: None,
             coarse_view: None,
+            preparation_to_effort: None,
             canonical_feed_mirrored: None,
             anatomical_side_mapping: AnatomicalSideMapping::Unknown,
             endpoint_order_mapping: EndpointOrderMapping::ScreenOrderedAnatomyUnknown,
@@ -210,7 +222,7 @@ pub(crate) struct LocalMotionCoordinateEstimator {
     active: bool,
     paused: bool,
     coordinate_frame_id: u64,
-    action_axis_prior: LocalActionAxisPrior,
+    action_axis_prior: LocalActionAxisDirection,
     coarse_view: Option<LocalCoarseView>,
     canonical_feed_mirrored: Option<bool>,
     image_width_px: u32,
@@ -259,6 +271,7 @@ impl LocalMotionCoordinateEstimator {
                 coordinate_frame_id: next_id,
                 reason: Some(LocalCoordinateReason::InsufficientPreparation),
                 coarse_view,
+                preparation_to_effort: Some(action_axis_prior),
                 canonical_feed_mirrored,
                 ..LocalMotionCoordinateEvidence::default()
             },
@@ -270,13 +283,23 @@ impl LocalMotionCoordinateEstimator {
         self.active = false;
     }
 
-    pub(crate) fn set_profile_identity(&mut self, identity: Option<&str>) {
-        self.coarse_view = identity.and_then(coarse_view_from_profile_identity);
-        self.action_axis_prior = identity
-            .map(action_axis_prior_from_profile_identity)
+    pub(crate) fn set_strategy(&mut self, strategy: Option<LocalMotionCoordinateStrategy>) {
+        self.coarse_view = strategy.map(|strategy| strategy.capture_view);
+        self.action_axis_prior = strategy
+            .map(|strategy| strategy.preparation_to_effort)
             .unwrap_or_default();
         self.latest.coarse_view = self.coarse_view;
+        self.latest.preparation_to_effort = strategy.map(|value| value.preparation_to_effort);
         self.refresh_endpoint_mapping();
+    }
+
+    pub(crate) fn set_legacy_profile_identity(&mut self, identity: Option<&str>) {
+        self.set_strategy(identity.and_then(|identity| {
+            Some(LocalMotionCoordinateStrategy {
+                capture_view: coarse_view_from_profile_identity(identity)?,
+                preparation_to_effort: action_axis_prior_from_profile_identity(identity),
+            })
+        }));
     }
 
     pub(crate) fn set_canonical_feed_mirroring(&mut self, mirrored: Option<bool>) {
@@ -553,6 +576,7 @@ impl LocalMotionCoordinateEstimator {
             equipment_track_id: Some(track.track_id),
             raw_bar_axis: Some([axis.x1, axis.y1, axis.x2, axis.y2]),
             coarse_view: self.coarse_view,
+            preparation_to_effort: Some(self.action_axis_prior),
             canonical_feed_mirrored: self.canonical_feed_mirrored,
             anatomical_side_mapping,
             endpoint_order_mapping: EndpointOrderMapping::ScreenOrderedAnatomyUnknown,
@@ -684,29 +708,48 @@ fn coarse_view_from_profile_identity(identity: &str) -> Option<LocalCoarseView> 
     if normalized.contains("/front-left-45/")
         || normalized.contains("/frontleft45/")
         || normalized.contains("/front_oblique_left/")
+        || normalized.contains("/front-oblique-left/")
     {
         return Some(LocalCoarseView::FrontObliqueLeft);
     }
     if normalized.contains("/front-right-45/")
         || normalized.contains("/frontright45/")
         || normalized.contains("/front_oblique_right/")
+        || normalized.contains("/front-oblique-right/")
     {
         return Some(LocalCoarseView::FrontObliqueRight);
+    }
+    if normalized.contains("/rear-left-45/")
+        || normalized.contains("/rearleft45/")
+        || normalized.contains("/rear_oblique_left/")
+        || normalized.contains("/rear-oblique-left/")
+    {
+        return Some(LocalCoarseView::RearObliqueLeft);
+    }
+    if normalized.contains("/rear-right-45/")
+        || normalized.contains("/rearright45/")
+        || normalized.contains("/rear_oblique_right/")
+        || normalized.contains("/rear-oblique-right/")
+    {
+        return Some(LocalCoarseView::RearObliqueRight);
     }
     (normalized.contains("/front/")).then_some(LocalCoarseView::Front)
 }
 
-fn action_axis_prior_from_profile_identity(identity: &str) -> LocalActionAxisPrior {
+fn action_axis_prior_from_profile_identity(identity: &str) -> LocalActionAxisDirection {
     let normalized = identity.to_ascii_lowercase();
-    if normalized.contains("shoulder-press") || normalized.contains("shoulder_press") {
-        LocalActionAxisPrior::PreparationToEffortUp
+    if normalized.contains("/effort-up/")
+        || normalized.contains("shoulder-press")
+        || normalized.contains("shoulder_press")
+    {
+        LocalActionAxisDirection::PreparationToEffortUp
     } else {
-        LocalActionAxisPrior::PreparationToEffortDown
+        LocalActionAxisDirection::PreparationToEffortDown
     }
 }
 
-fn orient_axis_to_action_prior(mut axis: [f32; 2], prior: LocalActionAxisPrior) -> [f32; 2] {
-    let wants_positive_image_y = prior == LocalActionAxisPrior::PreparationToEffortDown;
+fn orient_axis_to_action_prior(mut axis: [f32; 2], prior: LocalActionAxisDirection) -> [f32; 2] {
+    let wants_positive_image_y = prior == LocalActionAxisDirection::PreparationToEffortDown;
     if (axis[1] >= 0.0) != wants_positive_image_y {
         axis = [-axis[0], -axis[1]];
     }
@@ -722,7 +765,7 @@ fn endpoint_order_mapping(
     coarse_view: Option<LocalCoarseView>,
     canonical_feed_mirrored: Option<bool>,
 ) -> AnatomicalSideMapping {
-    let (Some(_view), Some(mirrored)) = (coarse_view, canonical_feed_mirrored) else {
+    let (Some(view), Some(mirrored)) = (coarse_view, canonical_feed_mirrored) else {
         return AnatomicalSideMapping::Unknown;
     };
     if !axis.x1.is_finite() || !axis.x2.is_finite() || (axis.x1 - axis.x2).abs() <= f32::EPSILON {
@@ -731,7 +774,15 @@ fn endpoint_order_mapping(
     // For an unmirrored front-facing image, the athlete's anatomical right is
     // image-left. Horizontal feed mirroring reverses that deterministic map.
     let endpoint_one_is_image_left = axis.x1 < axis.x2;
-    let endpoint_one_is_anatomical_left = endpoint_one_is_image_left == mirrored;
+    let rear_facing = matches!(
+        view,
+        LocalCoarseView::RearObliqueLeft | LocalCoarseView::RearObliqueRight
+    );
+    let endpoint_one_is_anatomical_left = if rear_facing {
+        endpoint_one_is_image_left != mirrored
+    } else {
+        endpoint_one_is_image_left == mirrored
+    };
     if endpoint_one_is_anatomical_left {
         AnatomicalSideMapping::EndpointOneAnatomicalLeft
     } else {
@@ -957,7 +1008,7 @@ fn median_point(points: &[[f32; 2]]) -> Option<[f32; 2]> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LocalActionAxisPrior, LocalChannelAgreement, LocalChannelProvenance, LocalCoarseView,
+        LocalActionAxisDirection, LocalChannelAgreement, LocalChannelProvenance, LocalCoarseView,
         LocalTrajectoryChannel, action_axis_prior_from_profile_identity, channel_agreement,
         coarse_view_from_profile_identity, combined_motion_axis, orient_axis_to_action_prior,
         robust_path_direction,
@@ -1000,8 +1051,10 @@ mod tests {
             Some(LocalCoarseView::FrontObliqueLeft),
         );
         assert_eq!(
-            coarse_view_from_profile_identity("unsupported/rear/v1"),
-            None
+            coarse_view_from_profile_identity(
+                "barbell_row/rear-oblique-left/bilateral/rigid-bar/effort-up/provisional-v1"
+            ),
+            Some(LocalCoarseView::RearObliqueLeft)
         );
     }
 
@@ -1013,8 +1066,8 @@ mod tests {
         let bench = action_axis_prior_from_profile_identity(
             "barbell-bench-press/front/bilateral/barbell/local-v1",
         );
-        assert_eq!(shoulder, LocalActionAxisPrior::PreparationToEffortUp);
-        assert_eq!(bench, LocalActionAxisPrior::PreparationToEffortDown);
+        assert_eq!(shoulder, LocalActionAxisDirection::PreparationToEffortUp);
+        assert_eq!(bench, LocalActionAxisDirection::PreparationToEffortDown);
         assert!(orient_axis_to_action_prior([0.0, 1.0], shoulder)[1] < 0.0);
         assert!(orient_axis_to_action_prior([0.0, -1.0], bench)[1] > 0.0);
     }

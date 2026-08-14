@@ -405,9 +405,10 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
         .expect("range rule node");
     assert_eq!(
         range_rule.input_node_ids,
-        [format!(
-            "rep:{first_rep_id}:comparison:local_primary_excursion"
-        )],
+        [
+            format!("rep:{first_rep_id}:comparison:local_primary_excursion"),
+            format!("rep:{first_rep_id}:comparison:local_return_error"),
+        ],
         "a rule must depend only on the facts it actually evaluated"
     );
     for (dimension, feature_id) in [
@@ -438,11 +439,12 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
 
 #[test]
 fn same_workout_reference_is_read_before_the_current_set_is_published() {
-    let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
+    let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure_for_subject(
         current_motion_assessment_catalog_v2(),
         WorkoutAssessmentContext {
             workout_session_id: "workout-reference-order".into(),
         },
+        "athlete:tracer-reference",
     )
     .expect("executable assessment catalog");
     let mut reports = Vec::new();
@@ -525,6 +527,7 @@ fn configured_feature_program_controls_facts_and_rejects_raw_landmark_operators(
                 "second_phase_duration",
                 "phase_duration_ratio",
                 "local_primary_excursion",
+                "local_return_error",
                 "authorization_phase_control",
                 "authorization_support_stability",
                 "authorization_bilateral_coordination",
@@ -570,7 +573,7 @@ fn configured_feature_program_controls_facts_and_rejects_raw_landmark_operators(
         panic!("sealed report");
     };
     assert!(report.rep_assessments.iter().all(|rep| {
-        rep.features.len() == 11
+        rep.features.len() == 12
             && !rep
                 .features
                 .iter()

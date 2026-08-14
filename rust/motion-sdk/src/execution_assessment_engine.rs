@@ -701,6 +701,7 @@ pub enum AssessmentConfigurationError {
     IncompleteBundleLineage {
         bundle_id: String,
     },
+    InvalidSubjectReferenceId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -715,6 +716,7 @@ pub enum AssessmentRuntimeError {
     DuplicateRepId(u64),
     RepProfileMismatch,
     PacketProfileMismatch,
+    PacketLocalCoordinateStrategyMismatch,
     PacketSourceMismatch,
     RepNotFromCanonicalPacket,
     CanonicalPacketRequired,
@@ -733,6 +735,8 @@ struct CompiledAssessmentProgram {
     feature_ids: Vec<String>,
     range_feature_id: String,
     phase_names: [String; 2],
+    task_endpoints: [String; 3],
+    local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
     reference_order: Vec<ReferenceComparisonKind>,
     range_deviation_ratio: f32,
     minimum_feature_confidence: f32,
@@ -751,6 +755,8 @@ enum CompiledRepRule {
     ReferenceLowerBound {
         dimension: AssessmentDimension,
         feature_id: String,
+        return_feature_id: String,
+        maximum_return_error: f32,
     },
     FeaturesAvailable {
         dimension: AssessmentDimension,
@@ -779,6 +785,9 @@ struct ReferenceSample {
     set_id: String,
     source_capture_id: String,
     rep_id: u64,
+    subject_epoch: u64,
+    subject_reference_key: Option<String>,
+    load_unit: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -810,6 +819,7 @@ struct ActiveSet {
     program: CompiledAssessmentProgram,
     closure_observed: bool,
     packet_lineage: Option<crate::PacketLineage>,
+    subject_reference_key: Option<String>,
 }
 
 pub struct ExecutionAssessmentEngine {
@@ -822,12 +832,37 @@ pub struct ExecutionAssessmentEngine {
     active_set: Option<ActiveSet>,
     last_terminal: Option<SealedSetAssessment>,
     workout_finished: bool,
+    subject_reference_key: Option<String>,
 }
 
 impl ExecutionAssessmentEngine {
     pub fn configure(
         catalog: ExecutionAssessmentBundleCatalog,
         workout: WorkoutAssessmentContext,
+    ) -> Result<Self, AssessmentConfigurationError> {
+        Self::configure_inner(catalog, workout, None)
+    }
+
+    pub fn configure_for_subject(
+        catalog: ExecutionAssessmentBundleCatalog,
+        workout: WorkoutAssessmentContext,
+        subject_reference_id: impl Into<String>,
+    ) -> Result<Self, AssessmentConfigurationError> {
+        let subject_reference_id = subject_reference_id.into();
+        if subject_reference_id.trim().is_empty() {
+            return Err(AssessmentConfigurationError::InvalidSubjectReferenceId);
+        }
+        let subject_reference_key = hash_serialized(&(
+            "maxpower.workout-subject-reference/v1",
+            subject_reference_id,
+        ));
+        Self::configure_inner(catalog, workout, Some(subject_reference_key))
+    }
+
+    fn configure_inner(
+        catalog: ExecutionAssessmentBundleCatalog,
+        workout: WorkoutAssessmentContext,
+        subject_reference_key: Option<String>,
     ) -> Result<Self, AssessmentConfigurationError> {
         validate_catalog(&catalog)?;
         let programs = compile_catalog_programs(&catalog)?;
@@ -851,6 +886,7 @@ impl ExecutionAssessmentEngine {
             active_set: None,
             last_terminal: None,
             workout_finished: false,
+            subject_reference_key,
         })
     }
 
@@ -1030,6 +1066,11 @@ impl ExecutionAssessmentEngine {
                 feature_ids: Vec::new(),
                 range_feature_id: "local_primary_excursion".into(),
                 phase_names: ["first_phase".into(), "second_phase".into()],
+                task_endpoints: ["start".into(), "turnaround".into(), "return".into()],
+                local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
+                    capture_view: crate::LocalCoarseView::Front,
+                    preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortDown,
+                },
                 reference_order: vec![
                     ReferenceComparisonKind::SetPrefix,
                     ReferenceComparisonKind::SameWorkoutPriorSet,
@@ -1063,6 +1104,7 @@ impl ExecutionAssessmentEngine {
             program,
             closure_observed: false,
             packet_lineage: None,
+            subject_reference_key: self.subject_reference_key.clone(),
         });
         self.last_terminal = None;
         Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
@@ -1140,6 +1182,18 @@ impl ExecutionAssessmentEngine {
                 || packet.lineage.active_profile_hash != Some(active.program.runtime_profile_hash)
             {
                 return Err(AssessmentRuntimeError::PacketProfileMismatch);
+            }
+            if packet.local_motion_coordinate.coarse_view
+                != Some(active.program.local_coordinate_strategy.capture_view)
+                || packet.local_motion_coordinate.preparation_to_effort
+                    != Some(
+                        active
+                            .program
+                            .local_coordinate_strategy
+                            .preparation_to_effort,
+                    )
+            {
+                return Err(AssessmentRuntimeError::PacketLocalCoordinateStrategyMismatch);
             }
             if active
                 .packet_lineage
@@ -1231,12 +1285,16 @@ impl ExecutionAssessmentEngine {
         debug_assert!(active.rep_ids.insert(rep.rep_id));
         let rep_ref = rep_reference(&rep, subject_epoch);
         let (features, range_value) = feature_facts(active, &rep);
+        let load_unit = declared_load_unit(&active.context);
         let comparisons = compare_features(
             &features,
             &active.prefix_range_values,
             &active.prior_workout_range_values,
             &active.program.range_feature_id,
             &active.program.reference_order,
+            subject_epoch,
+            active.subject_reference_key.as_deref(),
+            load_unit.as_deref(),
         );
         let evaluated_rules = evaluate_rep_rules(active, &comparisons);
         let rep_node = format!("rep:{}:boundary", rep.rep_id);
@@ -1342,6 +1400,9 @@ impl ExecutionAssessmentEngine {
                 set_id: active.context.set_id.clone(),
                 source_capture_id: active.context.video_context.source_capture_id.clone(),
                 rep_id: rep.rep_id,
+                subject_epoch,
+                subject_reference_key: active.subject_reference_key.clone(),
+                load_unit,
             });
         }
     }
@@ -1871,6 +1932,54 @@ fn compile_catalog_programs(
             })
             .filter(|values| values.iter().all(|value| !value.trim().is_empty()))
             .ok_or_else(|| invalid("ExecutionContract phaseOrder must name two phases"))?;
+        let task_endpoints = execution
+            .content
+            .get("taskEndpoints")
+            .and_then(serde_json::Value::as_array)
+            .filter(|values| values.len() == 3)
+            .and_then(|values| {
+                Some([
+                    values[0].as_str()?.to_owned(),
+                    values[1].as_str()?.to_owned(),
+                    values[2].as_str()?.to_owned(),
+                ])
+            })
+            .filter(|values| {
+                values.iter().all(|value| !value.trim().is_empty())
+                    && values.iter().collect::<HashSet<_>>().len() == values.len()
+            })
+            .ok_or_else(|| {
+                invalid("ExecutionContract taskEndpoints must name three unique endpoints")
+            })?;
+        let expected_local_view = local_coarse_view(bundle.exact_context.capture_view)
+            .ok_or_else(|| invalid("executable Bundle capture view has no local strategy"))?;
+        if local
+            .content
+            .get("captureView")
+            .and_then(serde_json::Value::as_str)
+            != Some(bundle.exact_context.capture_view.catalog_slug())
+        {
+            return Err(invalid(
+                "LocalCoordinateStrategy captureView does not match exact context",
+            ));
+        }
+        let preparation_to_effort = match local
+            .content
+            .get("preparationToEffortDirection")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("up") => crate::LocalActionAxisDirection::PreparationToEffortUp,
+            Some("down") => crate::LocalActionAxisDirection::PreparationToEffortDown,
+            _ => {
+                return Err(invalid(
+                    "LocalCoordinateStrategy preparationToEffortDirection is unsupported",
+                ));
+            }
+        };
+        let local_coordinate_strategy = crate::LocalMotionCoordinateStrategy {
+            capture_view: expected_local_view,
+            preparation_to_effort,
+        };
         if execution
             .content
             .get("equipmentSemantics")
@@ -1973,6 +2082,7 @@ fn compile_catalog_programs(
                                 | "second_phase_duration"
                                 | "phase_duration_ratio"
                                 | "local_primary_excursion"
+                                | "local_return_error"
                                 | "equipment_primary_excursion"
                                 | "pose_primary_excursion"
                                 | "authorization_phase_control"
@@ -2086,9 +2196,23 @@ fn compile_catalog_programs(
                             .and_then(serde_json::Value::as_str)
                             .filter(|id| feature_ids.iter().any(|value| value == *id))
                             .ok_or_else(|| invalid("reference rule feature is invalid"))?;
+                        let return_feature_id = rule
+                            .get("returnFeatureId")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|id| feature_ids.iter().any(|value| value == *id))
+                            .filter(|id| *id == "local_return_error")
+                            .ok_or_else(|| invalid("reference rule return feature is invalid"))?;
+                        let maximum_return_error = rule
+                            .get("maximumReturnError")
+                            .and_then(serde_json::Value::as_f64)
+                            .map(|value| value as f32)
+                            .filter(|value| value.is_finite() && *value >= 0.0)
+                            .ok_or_else(|| invalid("reference rule return threshold is invalid"))?;
                         Ok(CompiledRepRule::ReferenceLowerBound {
                             dimension,
                             feature_id: feature_id.into(),
+                            return_feature_id: return_feature_id.into(),
+                            maximum_return_error,
                         })
                     }
                     "features_available" => {
@@ -2256,6 +2380,8 @@ fn compile_catalog_programs(
                 feature_ids,
                 range_feature_id,
                 phase_names,
+                task_endpoints,
+                local_coordinate_strategy,
                 reference_order,
                 range_deviation_ratio,
                 minimum_feature_confidence,
@@ -2285,6 +2411,28 @@ fn equipment_semantics_id(value: AssessmentEquipmentSemantics) -> &'static str {
         AssessmentEquipmentSemantics::BodyOnly => "body_only",
         AssessmentEquipmentSemantics::FixedSupport => "fixed_support",
     }
+}
+
+fn local_coarse_view(view: AssessmentCaptureView) -> Option<crate::LocalCoarseView> {
+    match view {
+        AssessmentCaptureView::Front => Some(crate::LocalCoarseView::Front),
+        AssessmentCaptureView::FrontObliqueLeft => Some(crate::LocalCoarseView::FrontObliqueLeft),
+        AssessmentCaptureView::FrontObliqueRight => Some(crate::LocalCoarseView::FrontObliqueRight),
+        AssessmentCaptureView::RearObliqueLeft => Some(crate::LocalCoarseView::RearObliqueLeft),
+        AssessmentCaptureView::RearObliqueRight => Some(crate::LocalCoarseView::RearObliqueRight),
+        AssessmentCaptureView::Rear
+        | AssessmentCaptureView::LeftSide
+        | AssessmentCaptureView::RightSide => None,
+    }
+}
+
+fn declared_load_unit(context: &SetExecutionContext) -> Option<String> {
+    context
+        .performed_load
+        .as_ref()
+        .or(context.planned_load.as_ref())
+        .map(|load| load.unit.trim().to_ascii_lowercase())
+        .filter(|unit| !unit.is_empty())
 }
 
 fn compiled_rep_rule_dimension(rule: &CompiledRepRule) -> AssessmentDimension {
@@ -2361,19 +2509,20 @@ fn fused_channel(
 fn trajectory_metrics(
     endpoints: Option<&crate::NormalizedRepEndpointEvidence>,
     channel: fn(&crate::LocalMotionCoordinateEvidence) -> Option<crate::LocalTrajectoryChannel>,
-) -> (Option<f32>, f32, f32, f32) {
+) -> (Option<f32>, Option<f32>, f32, f32, f32) {
     let Some(endpoints) = endpoints else {
-        return (None, 0.0, 0.0, 1.0);
+        return (None, None, 0.0, 0.0, 1.0);
     };
     let (Some(start), Some(turn), Some(end)) = (
         channel(&endpoints.start_anchor),
         channel(&endpoints.primary_turnaround),
         channel(&endpoints.end_return),
     ) else {
-        return (None, 0.0, 0.0, 1.0);
+        return (None, None, 0.0, 0.0, 1.0);
     };
     (
         Some((turn.along_axis_progress - start.along_axis_progress).abs()),
+        Some((end.along_axis_progress - start.along_axis_progress).abs()),
         start.coverage.min(turn.coverage).min(end.coverage),
         start.confidence.min(turn.confidence).min(end.confidence),
         start.uncertainty.max(turn.uncertainty).max(end.uncertainty),
@@ -2394,11 +2543,21 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
     let second_phase = rep.end_timestamp_ms.saturating_sub(rep.peak_timestamp_ms) as f32;
     let phase_ratio = (second_phase > 0.0).then_some(first_phase / second_phase);
     let endpoints = rep.normalized_endpoints.as_ref();
-    let (range_value, trajectory_coverage, trajectory_confidence, trajectory_uncertainty) =
-        trajectory_metrics(endpoints, fused_channel);
-    let (equipment_range, equipment_coverage, equipment_confidence, equipment_uncertainty) =
-        trajectory_metrics(endpoints, equipment_channel);
-    let (pose_range, pose_coverage, pose_confidence, pose_uncertainty) =
+    let (
+        range_value,
+        return_error,
+        trajectory_coverage,
+        trajectory_confidence,
+        trajectory_uncertainty,
+    ) = trajectory_metrics(endpoints, fused_channel);
+    let (
+        equipment_range,
+        _equipment_return_error,
+        equipment_coverage,
+        equipment_confidence,
+        equipment_uncertainty,
+    ) = trajectory_metrics(endpoints, equipment_channel);
+    let (pose_range, _pose_return_error, pose_coverage, pose_confidence, pose_uncertainty) =
         trajectory_metrics(endpoints, pose_channel);
     let mut candidates = vec![
         numeric_feature(
@@ -2465,6 +2624,20 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
             source_range.clone(),
         ),
         numeric_feature(
+            "local_return_error",
+            return_error,
+            MotionFeatureUnit::NormalizedDisplacement,
+            trajectory_coverage,
+            trajectory_confidence,
+            trajectory_uncertainty,
+            vec![
+                "local_motion_coordinate".into(),
+                "start_to_return_closure".into(),
+                "pose_equipment_fusion".into(),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
             "equipment_primary_excursion",
             equipment_range,
             MotionFeatureUnit::NormalizedDisplacement,
@@ -2493,7 +2666,12 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
             CompiledRepRule::RepDisposition { feature_id, .. } => Some((
                 feature_id.as_str(),
                 format!("{:?}", rep.disposition).to_ascii_lowercase(),
-                vec!["rep_engine_disposition".into()],
+                vec![
+                    "rep_engine_disposition".into(),
+                    format!("task_start:{}", active.program.task_endpoints[0]),
+                    format!("task_turnaround:{}", active.program.task_endpoints[1]),
+                    format!("task_return:{}", active.program.task_endpoints[2]),
+                ],
             )),
             CompiledRepRule::Abstain {
                 feature_ids,
@@ -2601,25 +2779,43 @@ fn compare_features(
     prior_workout_range_values: &[ReferenceSample],
     range_feature_id: &str,
     reference_order: &[ReferenceComparisonKind],
+    subject_epoch: u64,
+    subject_reference_key: Option<&str>,
+    load_unit: Option<&str>,
 ) -> Vec<ReferenceComparisonFact> {
     features
         .iter()
         .map(|feature| {
             if feature.feature_id == range_feature_id {
+                let compatible_prefix = prefix_range_values
+                    .iter()
+                    .filter(|sample| {
+                        sample.subject_epoch == subject_epoch
+                            && sample.load_unit.as_deref() == load_unit
+                    })
+                    .collect::<Vec<_>>();
+                let compatible_prior = prior_workout_range_values
+                    .iter()
+                    .filter(|sample| {
+                        subject_reference_key.is_some()
+                            && sample.subject_reference_key.as_deref() == subject_reference_key
+                            && sample.load_unit.as_deref() == load_unit
+                    })
+                    .collect::<Vec<_>>();
                 let (kind, reference_values) = reference_order
                     .iter()
                     .find_map(|kind| match kind {
-                        ReferenceComparisonKind::SetPrefix if !prefix_range_values.is_empty() => {
-                            Some((*kind, prefix_range_values))
+                        ReferenceComparisonKind::SetPrefix if !compatible_prefix.is_empty() => {
+                            Some((*kind, compatible_prefix.as_slice()))
                         }
                         ReferenceComparisonKind::SameWorkoutPriorSet
-                            if !prior_workout_range_values.is_empty() =>
+                            if !compatible_prior.is_empty() =>
                         {
-                            Some((*kind, prior_workout_range_values))
+                            Some((*kind, compatible_prior.as_slice()))
                         }
                         _ => None,
                     })
-                    .unwrap_or((ReferenceComparisonKind::NoReference, &[][..]));
+                    .unwrap_or((ReferenceComparisonKind::NoReference, &[]));
                 let reference_value = (!reference_values.is_empty()).then(|| {
                     reference_values
                         .iter()
@@ -2646,13 +2842,21 @@ fn compare_features(
                         .iter()
                         .map(|sample| {
                             format!(
-                                "{}:set:{}:rep:{}",
-                                sample.source_capture_id, sample.set_id, sample.rep_id
+                                "{}:set:{}:rep:{}:subject_epoch:{}:subject_reference:{}:load_unit:{}",
+                                sample.source_capture_id,
+                                sample.set_id,
+                                sample.rep_id,
+                                sample.subject_epoch,
+                                sample
+                                    .subject_reference_key
+                                    .as_deref()
+                                    .unwrap_or("unverified"),
+                                sample.load_unit.as_deref().unwrap_or("undeclared"),
                             )
                         })
                         .collect(),
                     reason: reference_value.is_none().then(|| {
-                        "first Rep establishes the causal set-prefix reference after evaluation"
+                        "no action/view/subject/coordinate/load-compatible prior Rep exists; this Rep is published only after evaluation"
                             .into()
                     }),
                 }
@@ -2749,21 +2953,67 @@ fn evaluate_rep_rules(
             CompiledRepRule::ReferenceLowerBound {
                 dimension,
                 feature_id,
+                return_feature_id,
+                maximum_return_error,
             } => {
                 let comparison = comparisons
                     .iter()
                     .find(|comparison| comparison.feature_id == *feature_id);
+                let return_error = comparisons
+                    .iter()
+                    .find(|comparison| comparison.feature_id == *return_feature_id)
+                    .and_then(|comparison| comparison.observed_value);
+                let Some(return_error) = return_error else {
+                    return EvaluatedRepRule {
+                        conclusion: rule_finding(
+                            *dimension,
+                            AssessmentConclusionState::CannotJudge,
+                            "The visible return-to-start path was not observable.".into(),
+                            vec![feature_id.clone(), return_feature_id.clone()],
+                            Some("visible_return_unavailable".into()),
+                            0.0,
+                        ),
+                        feature_dependencies: vec![
+                            feature_id.clone(),
+                            return_feature_id.clone(),
+                        ],
+                    };
+                };
+                let return_incomplete = return_error > *maximum_return_error;
+                if return_incomplete {
+                    return EvaluatedRepRule {
+                        conclusion: rule_finding(
+                            *dimension,
+                            AssessmentConclusionState::ObservedDeviation,
+                            format!(
+                                "Visible return error {return_error:.3} exceeded the configured {maximum_return_error:.3} local-coordinate tolerance."
+                            ),
+                            vec![feature_id.clone(), return_feature_id.clone()],
+                            None,
+                            0.75,
+                        ),
+                        feature_dependencies: vec![
+                            feature_id.clone(),
+                            return_feature_id.clone(),
+                        ],
+                    };
+                }
                 let Some(delta_ratio) = comparison.and_then(|value| value.delta_ratio) else {
                     return EvaluatedRepRule {
                         conclusion: rule_finding(
                             *dimension,
                             AssessmentConclusionState::CannotJudge,
-                            "No causal reference exists yet for this measured feature.".into(),
-                            vec![feature_id.clone()],
+                            format!(
+                                "Visible return error {return_error:.3} stayed within the configured tolerance, but no causal range reference exists yet."
+                            ),
+                            vec![feature_id.clone(), return_feature_id.clone()],
                             Some("no_reference".into()),
-                            0.0,
+                            0.5,
                         ),
-                        feature_dependencies: vec![feature_id.clone()],
+                        feature_dependencies: vec![
+                            feature_id.clone(),
+                            return_feature_id.clone(),
+                        ],
                     };
                 };
                 let state = if delta_ratio < -active.program.range_deviation_ratio {
@@ -2788,11 +3038,11 @@ fn evaluate_rep_rules(
                         *dimension,
                         state,
                         summary,
-                        vec![feature_id.clone()],
+                        vec![feature_id.clone(), return_feature_id.clone()],
                         None,
                         0.75,
                     ),
-                    vec![feature_id.clone()],
+                    vec![feature_id.clone(), return_feature_id.clone()],
                 )
             }
             CompiledRepRule::FeaturesAvailable {
@@ -3423,6 +3673,7 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
             target.lineage.execution_contract.id.clone(),
             serde_json::json!({
                 "phaseOrder": ["eccentric", "concentric"],
+                "taskEndpoints": ["locked_out_start", "visible_bottom_turnaround", "returned_lockout"],
                 "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                 "equipmentSemantics": "rigid_bar_axis",
                 "deliveryStage": "ticket_02_first_complete_tracer",
@@ -3433,6 +3684,8 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
             serde_json::json!({
                 "requireNormalizedEndpoints": true,
                 "coordinateSpace": "causal_set_local_camera_plane",
+                "captureView": "front-oblique-left",
+                "preparationToEffortDirection": "down",
                 "deliveryStage": "ticket_02_first_complete_tracer",
             }),
         ),
@@ -3455,6 +3708,7 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
                     "second_phase_duration",
                     "phase_duration_ratio",
                     "local_primary_excursion",
+                    "local_return_error",
                     "equipment_primary_excursion",
                     "pose_primary_excursion",
                     "authorization_phase_control",
@@ -3484,7 +3738,7 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
                 "missingEvidence": "cannot_judge",
                 "repRules": [
                     {"dimension": "task_completion", "operator": "rep_disposition", "featureId": "rep_disposition"},
-                    {"dimension": "range_of_motion", "operator": "reference_lower_bound", "featureId": "local_primary_excursion"},
+                    {"dimension": "range_of_motion", "operator": "reference_lower_bound", "featureId": "local_primary_excursion", "returnFeatureId": "local_return_error", "maximumReturnError": 0.15},
                     {"dimension": "phase_control", "operator": "abstain", "featureIds": ["authorization_phase_control"], "reason": "no_governed_phase_quality_threshold"},
                     {"dimension": "support_stability", "operator": "abstain", "featureIds": ["authorization_support_stability"], "reason": "support_stability_not_observed_by_tracer_contract"},
                     {"dimension": "bilateral_coordination", "operator": "abstain", "featureIds": ["authorization_bilateral_coordination"], "reason": "anatomical_endpoint_mapping_not_required_by_tracer_contract"},
@@ -3547,6 +3801,409 @@ pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalo
         if bundle.bundle_id == target_bundle_id {
             bundle.capability = AssessmentBundleCapability::Executable;
         }
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
+#[derive(Clone, Debug)]
+pub struct RigidBarAssessmentProfileBinding {
+    pub action_id: String,
+    pub capture_view: AssessmentCaptureView,
+    pub profile: crate::ExerciseProfile,
+    pub local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
+}
+
+/// The currently governed rigid-bar action/view matrix. Profiles are
+/// deliberately exact-context and provisional: they initialize Rep boundaries
+/// but do not encode universal exercise-quality truth.
+pub fn current_rigid_bar_assessment_profiles_v1() -> Vec<RigidBarAssessmentProfileBinding> {
+    use AssessmentCaptureView as View;
+
+    [
+        ("barbell_bench_press", View::Front),
+        ("barbell_bench_press", View::FrontObliqueLeft),
+        ("barbell_bench_press", View::FrontObliqueRight),
+        ("barbell_row", View::Front),
+        ("barbell_row", View::FrontObliqueLeft),
+        ("barbell_row", View::FrontObliqueRight),
+        ("barbell_row", View::RearObliqueLeft),
+        ("barbell_row", View::RearObliqueRight),
+        ("seated_shoulder_press", View::Front),
+    ]
+    .into_iter()
+    .map(|(action_id, capture_view)| {
+        let local_axis_token = if action_id == "barbell_row" {
+            "effort-up"
+        } else {
+            "effort-down"
+        };
+        let identity = format!(
+            "{action_id}/{}/bilateral/rigid-bar/{local_axis_token}/provisional-v1",
+            capture_view.catalog_slug(),
+        );
+        RigidBarAssessmentProfileBinding {
+            action_id: action_id.into(),
+            capture_view,
+            profile: crate::ExerciseProfile::rigid_bar_provisional(
+                &identity,
+                rigid_bar_profile_initializer(action_id, capture_view),
+            ),
+            local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
+                capture_view: local_coarse_view(capture_view)
+                    .expect("rigid-bar views have local strategy support"),
+                preparation_to_effort: if local_axis_token == "effort-down" {
+                    crate::LocalActionAxisDirection::PreparationToEffortDown
+                } else {
+                    crate::LocalActionAxisDirection::PreparationToEffortUp
+                },
+            },
+        }
+    })
+    .collect()
+}
+
+fn rigid_bar_profile_initializer(
+    action_id: &str,
+    view: AssessmentCaptureView,
+) -> crate::RigidBarProfileInitializer {
+    use crate::{ExerciseSignal, ExerciseSignalKind as Kind, MovementDirection as Direction};
+    let signal = |kind, landmarks: &[usize]| ExerciseSignal {
+        kind,
+        landmarks: landmarks.to_vec(),
+    };
+    let build = |primary_signal,
+                 secondary_signal,
+                 direction,
+                 start_amplitude,
+                 minimum_amplitude,
+                 return_hysteresis,
+                 ready_tolerance,
+                 max_gap_ms,
+                 min_rep_duration_ms,
+                 max_rep_duration_ms| crate::RigidBarProfileInitializer {
+        primary_signal,
+        secondary_signal,
+        direction,
+        start_amplitude,
+        minimum_amplitude,
+        return_hysteresis,
+        ready_tolerance,
+        max_gap_ms,
+        min_rep_duration_ms,
+        max_rep_duration_ms,
+    };
+    match (action_id, view) {
+        ("barbell_bench_press", AssessmentCaptureView::Front) => build(
+            signal(Kind::LandmarkY, &[9]),
+            signal(Kind::LandmarkY, &[10]),
+            Direction::Increasing,
+            0.02,
+            0.08,
+            0.02,
+            0.025,
+            700,
+            350,
+            8_000,
+        ),
+        ("barbell_bench_press", AssessmentCaptureView::FrontObliqueLeft) => build(
+            signal(Kind::LandmarkY, &[9]),
+            signal(Kind::LandmarkY, &[10]),
+            Direction::Increasing,
+            0.02,
+            0.08,
+            0.02,
+            0.025,
+            700,
+            350,
+            8_000,
+        ),
+        ("barbell_bench_press", AssessmentCaptureView::FrontObliqueRight) => build(
+            signal(Kind::LandmarkY, &[7]),
+            signal(Kind::LandmarkY, &[8]),
+            Direction::Increasing,
+            0.015,
+            0.06,
+            0.015,
+            0.02,
+            700,
+            350,
+            8_000,
+        ),
+        ("barbell_row", AssessmentCaptureView::Front) => build(
+            signal(Kind::JointAngle, &[5, 7, 9]),
+            signal(Kind::JointAngle, &[6, 8, 10]),
+            Direction::Decreasing,
+            5.0,
+            20.0,
+            5.0,
+            6.0,
+            700,
+            350,
+            8_000,
+        ),
+        ("barbell_row", AssessmentCaptureView::FrontObliqueLeft) => build(
+            signal(Kind::JointAngle, &[5, 7, 9]),
+            signal(Kind::JointAngle, &[5, 7, 9]),
+            Direction::Decreasing,
+            5.0,
+            52.0,
+            5.0,
+            6.0,
+            700,
+            450,
+            8_000,
+        ),
+        ("barbell_row", AssessmentCaptureView::FrontObliqueRight) => build(
+            signal(Kind::JointAngle, &[12, 6, 8]),
+            signal(Kind::JointAngle, &[12, 6, 8]),
+            Direction::Decreasing,
+            5.0,
+            20.0,
+            5.0,
+            6.0,
+            700,
+            350,
+            2_000,
+        ),
+        ("barbell_row", AssessmentCaptureView::RearObliqueLeft) => build(
+            signal(Kind::JointAngle, &[5, 7, 9]),
+            signal(Kind::JointAngle, &[5, 7, 9]),
+            Direction::Decreasing,
+            5.0,
+            20.0,
+            5.0,
+            8.7,
+            700,
+            250,
+            8_000,
+        ),
+        ("barbell_row", AssessmentCaptureView::RearObliqueRight) => build(
+            signal(Kind::LandmarkY, &[8]),
+            signal(Kind::LandmarkY, &[8]),
+            Direction::Increasing,
+            0.015,
+            0.06,
+            0.015,
+            0.02,
+            700,
+            600,
+            8_000,
+        ),
+        ("seated_shoulder_press", AssessmentCaptureView::Front) => build(
+            signal(Kind::LandmarkY, &[10]),
+            signal(Kind::LandmarkY, &[10]),
+            Direction::Increasing,
+            0.02,
+            0.08,
+            0.02,
+            0.045,
+            700,
+            350,
+            8_000,
+        ),
+        _ => unreachable!("rigid-bar initializer matrix is closed"),
+    }
+}
+
+fn rigid_bar_execution_semantics(
+    action_id: &str,
+) -> (&'static [&'static str; 2], &'static [&'static str; 3]) {
+    const BENCH_PHASES: [&str; 2] = ["lowering", "pressing"];
+    const BENCH_ENDPOINTS: [&str; 3] = [
+        "locked_out_start",
+        "visible_bottom_turnaround",
+        "returned_lockout",
+    ];
+    const ROW_PHASES: [&str; 2] = ["pulling", "return_to_reach"];
+    const ROW_ENDPOINTS: [&str; 3] = [
+        "arms_extended_start",
+        "bar_to_torso_turnaround",
+        "returned_reach",
+    ];
+    const SHOULDER_PHASES: [&str; 2] = ["lowering", "pressing"];
+    const SHOULDER_ENDPOINTS: [&str; 3] = [
+        "overhead_start",
+        "visible_bottom_turnaround",
+        "returned_overhead",
+    ];
+    match action_id {
+        "barbell_bench_press" => (&BENCH_PHASES, &BENCH_ENDPOINTS),
+        "barbell_row" => (&ROW_PHASES, &ROW_ENDPOINTS),
+        "seated_shoulder_press" => (&SHOULDER_PHASES, &SHOULDER_ENDPOINTS),
+        _ => unreachable!("rigid-bar binding action is closed"),
+    }
+}
+
+fn executable_bundle_asset(
+    kind: AssessmentAssetKind,
+    id: String,
+    content: serde_json::Value,
+) -> AssessmentAsset {
+    AssessmentAsset {
+        kind,
+        id,
+        schema_version: "v1".into(),
+        content,
+        content_hash: String::new(),
+    }
+    .with_computed_hash()
+}
+
+/// Ticket 03 executable catalog for the current rigid-bar action family.
+/// Each exact action/view Bundle owns a complete immutable asset lineage even
+/// when two contexts currently select the same generic feature operators.
+pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v1();
+    catalog.catalog_id = "maxpower/current-rigid-bar-assessment/v3".into();
+
+    for binding in current_rigid_bar_assessment_profiles_v1() {
+        let bundle_id = format!(
+            "{}/{}/v1",
+            binding.action_id,
+            binding.capture_view.catalog_slug()
+        );
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("rigid-bar exact context is installed");
+        let asset_prefix = format!("{bundle_id}/executable-v3");
+        let (phase_order, task_endpoints) = rigid_bar_execution_semantics(&binding.action_id);
+        let delivery_stage = "ticket_03_rigid_bar_family";
+        let definitions = [
+            (
+                AssessmentAssetKind::RecognitionProfile,
+                "recognition-profile",
+                serde_json::json!({
+                    "runtimeProfileIdentity": binding.profile.identity,
+                    "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
+                    "maturity": binding.profile.maturity.as_str(),
+                    "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
+                    "evidenceScope": "governed_known_video_rep_counting_initializer",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::ExecutionContract,
+                "execution-contract",
+                serde_json::json!({
+                    "phaseOrder": phase_order,
+                    "taskEndpoints": task_endpoints,
+                    "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
+                    "equipmentSemantics": "rigid_bar_axis",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::LocalCoordinateStrategy,
+                "local-coordinate-strategy",
+                serde_json::json!({
+                    "requireNormalizedEndpoints": true,
+                    "coordinateSpace": "causal_set_local_camera_plane",
+                    "captureView": binding.capture_view.catalog_slug(),
+                    "preparationToEffortDirection": match binding.local_coordinate_strategy.preparation_to_effort {
+                        crate::LocalActionAxisDirection::PreparationToEffortUp => "up",
+                        crate::LocalActionAxisDirection::PreparationToEffortDown => "down",
+                    },
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::EquipmentAdapter,
+                "equipment-adapter",
+                serde_json::json!({
+                    "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                    "conflictPolicy": "abstain_fused_preserve_channels",
+                    "poseFallback": "preserve_as_independent_channel",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::FeatureProgram,
+                "feature-program",
+                serde_json::json!({
+                    "features": [
+                        "cycle_duration", "rep_disposition", "first_phase_duration",
+                        "second_phase_duration", "phase_duration_ratio",
+                        "local_primary_excursion", "local_return_error", "equipment_primary_excursion",
+                        "pose_primary_excursion", "authorization_phase_control",
+                        "authorization_support_stability",
+                        "authorization_bilateral_coordination",
+                        "authorization_trajectory_control",
+                        "authorization_standard_variant_compatibility"
+                    ],
+                    "boundedFacts": true,
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::ReferencePolicy,
+                "reference-policy",
+                serde_json::json!({
+                    "order": ["self_geometry", "set_prefix", "same_workout_prior_set"],
+                    "compareBeforeUpdate": true,
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::RulePack,
+                "rule-pack",
+                serde_json::json!({
+                    "rangeFeatureId": "local_primary_excursion",
+                    "rangeDeviationRatio": 0.20,
+                    "minimumFeatureConfidence": 0.50,
+                    "missingEvidence": "cannot_judge",
+                    "repRules": [
+                        {"dimension": "task_completion", "operator": "rep_disposition", "featureId": "rep_disposition"},
+                        {"dimension": "range_of_motion", "operator": "reference_lower_bound", "featureId": "local_primary_excursion", "returnFeatureId": "local_return_error", "maximumReturnError": 0.15},
+                        {"dimension": "phase_control", "operator": "abstain", "featureIds": ["authorization_phase_control"], "reason": "no_governed_phase_quality_threshold"},
+                        {"dimension": "support_stability", "operator": "abstain", "featureIds": ["authorization_support_stability"], "reason": "support_stability_not_observed_by_current_contract"},
+                        {"dimension": "bilateral_coordination", "operator": "abstain", "featureIds": ["authorization_bilateral_coordination"], "reason": "bilateral_quality_threshold_not_yet_governed"},
+                        {"dimension": "trajectory_control", "operator": "abstain", "featureIds": ["authorization_trajectory_control"], "reason": "no_governed_trajectory_quality_corridor"},
+                        {"dimension": "standard_variant_compatibility", "operator": "abstain", "featureIds": ["authorization_standard_variant_compatibility"], "reason": "no_human_standard_variant_truth"},
+                        {"dimension": "observation_confidence", "operator": "features_available", "featureIds": ["local_primary_excursion"]}
+                    ],
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::SetAggregationPolicy,
+                "set-aggregation-policy",
+                serde_json::json!({
+                    "lateSetWindow": 2,
+                    "minimumPersistentReps": 2,
+                    "setRules": [
+                        {"dimension": "task_completion", "operator": "rollup_rep_dimension"},
+                        {"dimension": "range_of_motion", "operator": "late_set_persistence"},
+                        {"dimension": "phase_control", "operator": "rollup_rep_dimension"},
+                        {"dimension": "support_stability", "operator": "rollup_rep_dimension"},
+                        {"dimension": "bilateral_coordination", "operator": "rollup_rep_dimension"},
+                        {"dimension": "trajectory_control", "operator": "rollup_rep_dimension"},
+                        {"dimension": "standard_variant_compatibility", "operator": "rollup_rep_dimension"},
+                        {"dimension": "observation_confidence", "operator": "rollup_rep_dimension"}
+                    ],
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+        ];
+        let mut references = Vec::new();
+        for (kind, slug, content) in definitions {
+            let asset = executable_bundle_asset(kind, format!("{asset_prefix}/{slug}"), content);
+            references.push(asset.reference());
+            catalog.installed_assets.push(asset);
+        }
+        bundle.lineage = AssessmentBundleLineage {
+            recognition_profile: references[0].clone(),
+            execution_contract: references[1].clone(),
+            local_coordinate_strategy: references[2].clone(),
+            equipment_adapter: references[3].clone(),
+            feature_program: references[4].clone(),
+            reference_policy: references[5].clone(),
+            rule_pack: references[6].clone(),
+            set_aggregation_policy: references[7].clone(),
+        };
+        bundle.capability = AssessmentBundleCapability::Executable;
         *bundle = bundle.clone().with_computed_hash();
     }
     catalog

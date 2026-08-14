@@ -1413,7 +1413,7 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     }
     runtime
         .local_motion_coordinate
-        .set_profile_identity(profile.as_ref().map(|value| value.identity.as_str()));
+        .set_legacy_profile_identity(profile.as_ref().map(|value| value.identity.as_str()));
     runtime.rep_engine = profile.map(super::RepEngine::new);
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
@@ -1606,7 +1606,7 @@ pub extern "C" fn motion_sdk_install_profile(
     }
     runtime
         .local_motion_coordinate
-        .set_profile_identity(Some(&profile.identity));
+        .set_legacy_profile_identity(Some(&profile.identity));
     runtime.rep_engine = Some(super::RepEngine::new(profile));
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();
