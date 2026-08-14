@@ -106,6 +106,59 @@ fn bar_path_remains_observable_when_wrists_are_unknown_without_fabricating_pose(
 }
 
 #[test]
+fn rigid_bar_axis_far_from_two_reliable_wrists_is_not_subject_equipment() {
+    let subject = PoseCandidate {
+        id: 41,
+        // A wider person box keeps the background line spatially inside, so
+        // this test specifically requires hand/shaft geometry rather than a
+        // bounding-box rejection.
+        bbox: NormalizedRect::new(0.24, 0.06, 0.38, 0.93),
+        ..subject()
+    };
+    let mut canonical = unknown_canonical();
+    for (index, x, y) in [(9, 0.4524982, 0.6015692), (10, 0.3246425, 0.6105712)] {
+        canonical[index] = CanonicalLandmark {
+            x: Some(x),
+            y: Some(y),
+            z: None,
+            observation_score: 0.8,
+            canonical_confidence: 0.8,
+            uncertainty: Some(0.01),
+            source: LandmarkSource::Measured,
+            renderable: true,
+            reason: None,
+        };
+    }
+    let mut background_line = observation(
+        313,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.21665314, 0.42204046, 0.7059613, 0.07359201),
+    );
+    background_line.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+        x1: 0.21665314,
+        y1: 0.49563247,
+        x2: 0.9226144,
+        y2: 0.42204046,
+    });
+    background_line.score = 0.52578264;
+    let mut engine = EquipmentFusionEngine::new();
+
+    let output = engine.process(EquipmentFrameInput {
+        timestamp_ms: 10_519,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[background_line],
+    });
+
+    assert_eq!(
+        output.status,
+        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::OutsideLockedSubject)
+    );
+    assert!(output.tracks.is_empty());
+    assert_eq!(output.rejected_outside_subject_count, 1);
+}
+
+#[test]
 fn a_missing_equipment_frame_publishes_cannot_judge_but_keeps_private_track_continuity() {
     let subject = subject();
     let canonical = unknown_canonical();

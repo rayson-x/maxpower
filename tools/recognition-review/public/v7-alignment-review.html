@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rust v8 器械融合轨迹与标注对齐台</title>
+  <title>Rust v9 手腕约束器械融合与标注对齐台</title>
   <style>
     :root {
       color-scheme: dark;
@@ -213,7 +213,7 @@
 <body>
   <section id="v7Loading" class="loading">
     <div class="loading-card">
-      <b>RUST V8 / EQUIPMENT-FUSED ALIGNMENT</b>
+      <b>RUST V9 / WRIST-CONSTRAINED EQUIPMENT ALIGNMENT</b>
       <h1 id="v7LoadingTitle">正在读取冻结预测与人工标注</h1>
       <p id="v7LoadingDetail">预测、标注、视频与 Halpe-26 轨迹保持各自来源，不会在页面内重算 Rust 结论。</p>
     </div>
@@ -222,7 +222,7 @@
   <main id="v7App" class="app" data-v7-alignment-review hidden>
     <header class="masthead">
       <div class="brand">
-        <div class="brand-mark">V8</div>
+        <div class="brand-mark">V9</div>
         <div><small>KNOWN-VIDEO FORENSIC VIEW</small><h1>轨迹与 Rep 标注对齐台</h1></div>
       </div>
       <div class="header-metrics">
@@ -258,13 +258,14 @@
           <canvas id="poseOverlay"></canvas>
           <div class="hud top-left">
             <span id="humanRepHud" class="hud-chip">HUMAN —</span>
-            <span id="v7RepHud" class="hud-chip live">V8 —</span>
+            <span id="v7RepHud" class="hud-chip live">V9 —</span>
             <span id="v7PhaseHud" class="hud-chip live">PHASE —</span>
           </div>
           <div class="hud top-right">
             <button class="layer-toggle active" data-layer="skeleton">骨架</button>
             <button class="layer-toggle active" data-layer="trail">腕点轨迹</button>
-            <button class="layer-toggle active" data-layer="equipment">杠铃轨迹</button>
+            <button class="layer-toggle active" data-layer="equipment">融合杠铃</button>
+            <button class="layer-toggle" data-layer="equipmentRaw">原始候选</button>
             <button class="layer-toggle active" data-layer="labels">REP 标签</button>
           </div>
           <div id="frameReadout" class="frame-readout">POSE OBSERVATION —</div>
@@ -284,19 +285,20 @@
           <div class="legend">
             <span><i style="background:var(--cyan)"></i>LEFT WRIST</span>
             <span><i style="background:var(--amber)"></i>RIGHT WRIST</span>
-            <span><i style="background:var(--magenta)"></i>BAR AXIS CENTER Y</span>
+            <span><i style="background:var(--magenta)"></i>FUSION-ELIGIBLE BAR AXIS</span>
+            <span><i style="background:rgba(237,243,232,.38)"></i>RAW REJECTED（调试层）</span>
             <span><i style="background:var(--acid)"></i>HUMAN REP</span>
-            <span><i style="background:var(--red)"></i>V8 UNMATCHED</span>
+            <span><i style="background:var(--red)"></i>V9 UNMATCHED</span>
             <span><i style="height:9px;width:2px;background:var(--magenta);vertical-align:-1px"></i>器械融合换向</span>
             <span><i style="height:9px;width:2px;background:#fff;vertical-align:-1px"></i>姿态换向</span>
           </div>
         </section>
 
         <section class="timeline-panel">
-          <div class="panel-title"><strong>人工标注 × v8 融合预测</strong><span>Rep 内紫红短线为器械融合换向，白色短线为姿态换向；贯穿白线为当前帧</span></div>
+          <div class="panel-title"><strong>人工标注 × v9 手腕约束融合预测</strong><span>Rep 内紫红短线为器械融合换向，白色短线为姿态换向；贯穿白线为当前帧</span></div>
           <div id="alignmentTimeline" class="timeline">
             <div id="truthTrack" class="track" data-label="HUMAN"></div>
-            <div id="predictionTrack" class="track" data-label="RUST V8"></div>
+            <div id="predictionTrack" class="track" data-label="RUST V9"></div>
             <div id="timelinePlayhead" class="playhead"></div>
           </div>
         </section>
@@ -321,7 +323,7 @@
           <div id="matchList" class="match-list"></div>
         </section>
         <section class="inspector">
-          <h3>V8 SET FINDINGS</h3>
+          <h3>V9 SET FINDINGS</h3>
           <div id="qualityFindings"></div>
         </section>
         <section class="inspector">

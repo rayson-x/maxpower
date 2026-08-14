@@ -2954,6 +2954,7 @@ impl RepEngine {
                 track.kind == EquipmentKind::BarbellShaft
                     && track.judgeable_path
                     && track.source != EquipmentSource::Predicted
+                    && track.held_by == EquipmentHand::Both
                     && track.center_y.is_finite()
             })
             .max_by(|left, right| {

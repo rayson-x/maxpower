@@ -14,6 +14,7 @@ const MINIMUM_OBSERVATION_SCORE: f32 = 0.50;
 const MAXIMUM_TRACK_GAP_MS: u64 = 500;
 const MAXIMUM_TRACK_CENTER_DISTANCE: f32 = 0.18;
 const MAXIMUM_HAND_DISTANCE: f32 = 0.22;
+const MAXIMUM_RIGID_BAR_HAND_DISTANCE: f32 = 0.10;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EquipmentKind {
@@ -284,6 +285,10 @@ impl EquipmentFusionEngine {
                 rejected_low_confidence_or_invalid_count += 1;
                 continue;
             }
+            if !rigid_bar_matches_reliable_hands(observation, input.canonical) {
+                rejected_outside_subject_count += 1;
+                continue;
+            }
             let Some(association_confidence) = subject_association_confidence(subject, observation)
             else {
                 rejected_outside_subject_count += 1;
@@ -516,25 +521,75 @@ fn hand_association(
     observation: EquipmentObservation,
     canonical: &[CanonicalLandmark],
 ) -> EquipmentHand {
-    let (center_x, center_y) = observation.bbox.center();
     let left = reliable_point(canonical.get(9));
     let right = reliable_point(canonical.get(10));
-    let left_distance = left.map(|(x, y)| (x - center_x).hypot(y - center_y));
-    let right_distance = right.map(|(x, y)| (x - center_x).hypot(y - center_y));
+    let left_distance = left.map(|point| equipment_distance_to_point(observation, point));
+    let right_distance = right.map(|point| equipment_distance_to_point(observation, point));
+    let maximum_distance =
+        if observation.kind == EquipmentKind::BarbellShaft && observation.axis.is_some() {
+            MAXIMUM_RIGID_BAR_HAND_DISTANCE
+        } else {
+            MAXIMUM_HAND_DISTANCE
+        };
     match (left_distance, right_distance) {
-        (Some(left), Some(right))
-            if left <= MAXIMUM_HAND_DISTANCE && right <= MAXIMUM_HAND_DISTANCE =>
-        {
+        (Some(left), Some(right)) if left <= maximum_distance && right <= maximum_distance => {
             EquipmentHand::Both
         }
-        (Some(left), Some(right)) if left <= MAXIMUM_HAND_DISTANCE && left < right => {
+        (Some(left), Some(right)) if left <= maximum_distance && left < right => {
             EquipmentHand::Left
         }
-        (Some(_left), Some(right)) if right <= MAXIMUM_HAND_DISTANCE => EquipmentHand::Right,
-        (Some(left), None) if left <= MAXIMUM_HAND_DISTANCE => EquipmentHand::Left,
-        (None, Some(right)) if right <= MAXIMUM_HAND_DISTANCE => EquipmentHand::Right,
+        (Some(_left), Some(right)) if right <= maximum_distance => EquipmentHand::Right,
+        (Some(left), None) if left <= maximum_distance => EquipmentHand::Left,
+        (None, Some(right)) if right <= maximum_distance => EquipmentHand::Right,
         _ => EquipmentHand::Unknown,
     }
+}
+
+fn rigid_bar_matches_reliable_hands(
+    observation: EquipmentObservation,
+    canonical: &[CanonicalLandmark],
+) -> bool {
+    if observation.kind != EquipmentKind::BarbellShaft {
+        return true;
+    }
+    let (Some(left), Some(right)) = (
+        reliable_point(canonical.get(9)),
+        reliable_point(canonical.get(10)),
+    ) else {
+        return true;
+    };
+    // Generic detector boxes do not claim a measured rigid axis. Preserve
+    // their established subject-association/pose-repair path; the stricter
+    // bilateral wrist check applies only when an axis is actually asserted.
+    let Some(axis) = observation.axis else {
+        return true;
+    };
+    equipment_distance_to_axis(axis, left) <= MAXIMUM_RIGID_BAR_HAND_DISTANCE
+        && equipment_distance_to_axis(axis, right) <= MAXIMUM_RIGID_BAR_HAND_DISTANCE
+}
+
+fn equipment_distance_to_point(observation: EquipmentObservation, point: (f32, f32)) -> f32 {
+    observation.axis.map_or_else(
+        || {
+            let (center_x, center_y) = observation.bbox.center();
+            (point.0 - center_x).hypot(point.1 - center_y)
+        },
+        |axis| equipment_distance_to_axis(axis, point),
+    )
+}
+
+fn equipment_distance_to_axis(axis: EquipmentAxis2d, point: (f32, f32)) -> f32 {
+    let dx = axis.x2 - axis.x1;
+    let dy = axis.y2 - axis.y1;
+    let length_squared = dx * dx + dy * dy;
+    if length_squared <= f32::EPSILON {
+        return (point.0 - axis.x1).hypot(point.1 - axis.y1);
+    }
+    let projection =
+        (((point.0 - axis.x1) * dx + (point.1 - axis.y1) * dy) / length_squared).clamp(0.0, 1.0);
+    let closest_x = axis.x1 + projection * dx;
+    let closest_y = axis.y1 + projection * dy;
+    (point.0 - closest_x).hypot(point.1 - closest_y)
 }
 
 fn reliable_point(landmark: Option<&CanonicalLandmark>) -> Option<(f32, f32)> {

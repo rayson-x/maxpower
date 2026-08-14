@@ -4464,6 +4464,24 @@ pub fn equipment_fused_rigid_bar_assessment_profiles_v2() -> Vec<RigidBarAssessm
     .collect()
 }
 
+/// Wrist-constrained successor to v2. It keeps the proven pose-owned
+/// complete-cycle lifecycle and changes only the equipment-evidence contract.
+pub fn wrist_constrained_rigid_bar_assessment_profiles_v3() -> Vec<RigidBarAssessmentProfileBinding>
+{
+    equipment_fused_rigid_bar_assessment_profiles_v2()
+        .into_iter()
+        .map(|mut binding| {
+            binding.profile.identity = format!(
+                "{}/{}/bilateral/rigid-bar/wrist-constrained-equipment-turnaround/v3",
+                binding.action_id,
+                binding.capture_view.catalog_slug(),
+            );
+            binding.profile.content_hash = binding.profile.computed_content_hash();
+            binding
+        })
+        .collect()
+}
+
 fn rigid_bar_profile_initializer(
     action_id: &str,
     view: AssessmentCaptureView,
@@ -5486,6 +5504,129 @@ pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalo
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel",
                     "repBoundaryAuthority": "pose_cycle_equipment_turnaround_fused",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+        ];
+        let references = definitions
+            .into_iter()
+            .map(|(kind, slug, content)| {
+                let asset =
+                    executable_bundle_asset(kind, format!("{asset_prefix}/{slug}"), content);
+                let reference = asset.reference();
+                catalog.installed_assets.push(asset);
+                reference
+            })
+            .collect::<Vec<_>>();
+        bundle.lineage.recognition_profile = references[0].clone();
+        bundle.lineage.execution_contract = references[1].clone();
+        bundle.lineage.local_coordinate_strategy = references[2].clone();
+        bundle.lineage.equipment_adapter = references[3].clone();
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
+/// Wrist-constrained equipment fusion. The Rust visual provider must measure
+/// a shaft inside the pose-guided search corridor and the canonical equipment
+/// layer must associate that axis with both reliable wrists before it can
+/// relocate a Rep turnaround.
+pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v8();
+    catalog.catalog_id = "maxpower/current-wrist-constrained-equipment-assessment/v9".into();
+    let delivery_stage = "wrist_constrained_rigid_bar_fusion_v9";
+    for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
+        let bundle_id = format!(
+            "{}/{}/v1",
+            binding.action_id,
+            binding.capture_view.catalog_slug()
+        );
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("wrist-constrained rigid-bar exact context is installed");
+        let (phase_order, task_endpoints): ([&str; 2], [&str; 3]) = match binding.action_id.as_str()
+        {
+            "barbell_bench_press" => (
+                ["lowering", "pressing"],
+                [
+                    "locked_out_start",
+                    "equipment_bottom_turnaround",
+                    "returned_lockout",
+                ],
+            ),
+            "barbell_row" => (
+                ["pulling", "return_to_reach"],
+                [
+                    "arms_extended_start",
+                    "equipment_near_torso_turnaround",
+                    "returned_reach",
+                ],
+            ),
+            "seated_shoulder_press" => (
+                ["pressing", "lowering"],
+                [
+                    "bar_at_shoulders_start",
+                    "equipment_overhead_turnaround",
+                    "returned_to_shoulders",
+                ],
+            ),
+            _ => unreachable!("wrist-constrained rigid-bar action matrix is closed"),
+        };
+        let asset_prefix = format!("{bundle_id}/{delivery_stage}");
+        let definitions = [
+            (
+                AssessmentAssetKind::RecognitionProfile,
+                "recognition-profile",
+                serde_json::json!({
+                    "runtimeProfileIdentity": binding.profile.identity,
+                    "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
+                    "maturity": binding.profile.maturity.as_str(),
+                    "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
+                    "evidenceScope": "known_video_wrist_constrained_equipment_fusion_feasibility",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::ExecutionContract,
+                "execution-contract",
+                serde_json::json!({
+                    "phaseOrder": phase_order,
+                    "taskEndpoints": task_endpoints,
+                    "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
+                    "equipmentSemantics": "rigid_bar_axis",
+                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "equipmentConstraintPolicy": "pose_guided_visual_axis_bilateral_wrist_required",
+                    "repBoundaryAuthority": "pose_cycle_wrist_constrained_equipment_turnaround_fused",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::LocalCoordinateStrategy,
+                "local-coordinate-strategy",
+                serde_json::json!({
+                    "requireNormalizedEndpoints": true,
+                    "coordinateSpace": "causal_set_local_camera_plane",
+                    "captureView": binding.capture_view.catalog_slug(),
+                    "preparationToEffortDirection": direction_id(binding.local_coordinate_strategy.preparation_to_effort),
+                    "equipmentMode": "rigidbaraxis",
+                    "poseAnchor": "wristmidpoint",
+                    "wristGuidedSearch": true,
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::EquipmentAdapter,
+                "equipment-adapter",
+                serde_json::json!({
+                    "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                    "wristConstraintPolicy": "visual_axis_near_both_reliable_wrists",
+                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "conflictPolicy": "abstain_fused_preserve_channels",
+                    "poseFallback": "preserve_as_independent_channel",
+                    "rawCandidatePolicy": "diagnostic_only_until_canonical_association",
+                    "repBoundaryAuthority": "pose_cycle_wrist_constrained_equipment_turnaround_fused",
                     "deliveryStage": delivery_stage,
                 }),
             ),

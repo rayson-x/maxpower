@@ -398,6 +398,13 @@ fn detect_shaft_candidates(
             let wrist_support = interval_wrist_support(&merged, &wrist_xs, width);
             let wrist_axis_support =
                 line_wrist_axis_support(center_y as f32, slope, &wrist_pairs, width, height);
+            // When both hands are reliable, a rigid bar candidate must pass
+            // close to both of them. Length, edge strength, and tracker
+            // continuity may rank plausible shafts, but they must never let a
+            // rack or background line override the action's hand geometry.
+            if has_reliable_bilateral_wrists(&wrist_pairs) && wrist_axis_support < 0.30 {
+                continue;
+            }
             let score = 0.20 * (coverage / 0.56).clamp(0.0, 1.0)
                 + 0.12 * (span / 0.78).clamp(0.0, 1.0)
                 + 0.14 * motion
@@ -449,9 +456,28 @@ fn pose_search_context(subjects: &[PoseCandidate], height: usize) -> (usize, usi
     }
     let minimum = shoulder_y.iter().copied().fold(f32::INFINITY, f32::min);
     let maximum = shoulder_y.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let wrist_y = subjects
+        .iter()
+        .flat_map(|subject| [subject.observations.get(9), subject.observations.get(10)])
+        .flatten()
+        .filter(|point| point.visibility >= 0.2 && point.y.is_finite())
+        .map(|point| point.y)
+        .collect::<Vec<_>>();
+    let wrist_minimum = wrist_y.iter().copied().fold(f32::INFINITY, f32::min);
+    let wrist_maximum = wrist_y.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let top = if wrist_minimum.is_finite() {
+        (minimum - 0.38).min(wrist_minimum - 0.12)
+    } else {
+        minimum - 0.38
+    };
+    let bottom = if wrist_maximum.is_finite() {
+        (maximum + 0.20).max(wrist_maximum + 0.12)
+    } else {
+        maximum + 0.20
+    };
     (
-        ((minimum - 0.38).clamp(0.0, 1.0) * height as f32).round() as usize,
-        ((maximum + 0.20).clamp(0.0, 1.0) * height as f32).round() as usize,
+        (top.clamp(0.0, 1.0) * height as f32).round() as usize,
+        (bottom.clamp(0.0, 1.0) * height as f32).round() as usize,
     )
 }
 
@@ -476,6 +502,13 @@ struct WristPoint {
 struct WristPair {
     left: Option<WristPoint>,
     right: Option<WristPoint>,
+}
+
+fn has_reliable_bilateral_wrists(pairs: &[WristPair]) -> bool {
+    pairs.iter().any(|pair| {
+        pair.left.is_some_and(|point| point.confidence >= 0.50)
+            && pair.right.is_some_and(|point| point.confidence >= 0.50)
+    })
 }
 
 fn reliable_wrist_pairs(subjects: &[PoseCandidate]) -> Vec<WristPair> {

@@ -12,6 +12,7 @@
   const REPORT_SCHEMAS = new Set([
     "maxpower-current-rust-known-video-alignment/v1",
     "maxpower-current-rust-equipment-fused-known-video-alignment/v1",
+    "maxpower-current-rust-wrist-constrained-equipment-alignment/v1",
   ]);
   const HALPE26_EDGES = [
     [0, 1], [0, 2], [1, 3], [2, 4],
@@ -114,6 +115,8 @@
         x2: finite(frame.x2, `器械帧 ${index + 1} x2`),
         y2: finite(frame.y2, `器械帧 ${index + 1} y2`),
         centerY: finite(frame.centerY, `器械帧 ${index + 1} centerY`),
+        canonicalAccepted: Boolean(frame.canonicalAccepted),
+        fusionEligible: Boolean(frame.fusionEligible),
       });
     }) : [];
     const trackerOutputFrameCount = finite(
@@ -236,7 +239,7 @@
       filter: "all",
       search: "",
       speedIndex: 1,
-      layers: { skeleton: true, trail: true, equipment: true, labels: true },
+      layers: { skeleton: true, trail: true, equipment: true, equipmentRaw: false, labels: true },
       animationFrame: null,
     };
 
@@ -333,7 +336,7 @@
     function renderCase() {
       const row = state.activeRow;
       byId("caseKicker").textContent = `${row.exerciseId.toUpperCase()} / ${row.capturePosition.toUpperCase()}`;
-      byId("caseTitle").textContent = `${row.truthCount} 次人工标注 · ${row.predictedCount} 次 v8 融合预测`;
+      byId("caseTitle").textContent = `${row.truthCount} 次人工标注 · ${row.predictedCount} 次 v9 融合预测`;
       byId("caseId").textContent = row.sourceCaptureId;
     }
 
@@ -422,10 +425,10 @@
       const activePhase = phaseAt(predictedRep, row.phaseOrder, currentMs);
       byId("activeRepSummary").innerHTML = `
         <div class="active-rep"><b>HUMAN ${human ? `REP ${human.index + 1}` : "非动作区间"}</b><p>${human ? `${formatMs(human.range.startMs)} → ${formatMs(human.range.endMs)}` : "当前时间不在人工作业 Rep 区间内。"}</p></div>
-        <div class="active-rep"><b style="color:var(--cyan)">RUST V8 ${predicted ? `REP ${predicted.index + 1}` : "无 Rep"}</b><p>${predictedRep ? `${phaseLabel(row.phaseOrder[0])} ${formatMs(predictedRep.turnaroundMs - predictedRep.startMs)} → ${turnaroundSourceLabel(predictedRep.turnaroundSource)} ${formatMs(predictedRep.turnaroundMs)} → ${phaseLabel(row.phaseOrder[1])} ${formatMs(predictedRep.endMs - predictedRep.turnaroundMs)}` : "当前时间没有非 rejected 的 v8 Rep。"}</p></div>`;
+        <div class="active-rep"><b style="color:var(--cyan)">RUST V9 ${predicted ? `REP ${predicted.index + 1}` : "无 Rep"}</b><p>${predictedRep ? `${phaseLabel(row.phaseOrder[0])} ${formatMs(predictedRep.turnaroundMs - predictedRep.startMs)} → ${turnaroundSourceLabel(predictedRep.turnaroundSource)} ${formatMs(predictedRep.turnaroundMs)} → ${phaseLabel(row.phaseOrder[1])} ${formatMs(predictedRep.endMs - predictedRep.turnaroundMs)}` : "当前时间没有非 rejected 的 v9 Rep。"}</p></div>`;
       byId("humanRepHud").textContent = human ? `HUMAN REP ${human.index + 1}` : "HUMAN —";
-      byId("v7RepHud").textContent = predicted ? `V8 REP ${predicted.index + 1}` : "V8 —";
-      byId("v7PhaseHud").textContent = activePhase ? `${phaseLabel(activePhase.phase)} · V8` : "PHASE —";
+      byId("v7RepHud").textContent = predicted ? `V9 REP ${predicted.index + 1}` : "V9 —";
+      byId("v7PhaseHud").textContent = activePhase ? `${phaseLabel(activePhase.phase)} · V9` : "PHASE —";
     }
 
     function signed(value) {
@@ -493,14 +496,20 @@
         if (state.layers.equipment) drawEquipmentTrail(currentMs, transform);
       }
       if (frame && state.layers.skeleton) drawSkeleton(frame.landmarks || [], transform);
+      const equipmentFrames = state.layers.equipmentRaw
+        ? state.activeRow.equipmentProvider.frames
+        : state.activeRow.equipmentProvider.frames.filter((candidate) => candidate.fusionEligible);
       const equipmentFrame = state.layers.equipment
+        ? frameAt(equipmentFrames, currentMs)
+        : null;
+      const hiddenRawFrame = state.layers.equipment && !state.layers.equipmentRaw && !equipmentFrame
         ? frameAt(state.activeRow.equipmentProvider.frames, currentMs)
         : null;
       if (equipmentFrame) drawEquipmentAxis(equipmentFrame, transform);
       if (frame && state.layers.labels) drawRepLabels(currentMs, transform);
       const visible = frame?.landmarks?.filter(visiblePoint).length || 0;
       byId("frameReadout").textContent = frame
-        ? `OBS ${formatMs(frame.timestampMs)} · FRAME ${frame.frameNumber} · HALPE26 ${visible}/26 · BAR ${equipmentFrame ? `${equipmentFrame.source.toUpperCase()} ${(equipmentFrame.confidence * 100).toFixed(0)}% ±${equipmentFrame.uncertaintyPx.toFixed(1)}PX` : "UNKNOWN"}`
+        ? `OBS ${formatMs(frame.timestampMs)} · FRAME ${frame.frameNumber} · HALPE26 ${visible}/26 · BAR ${equipmentFrame ? `${equipmentFrame.fusionEligible ? "FUSION ELIGIBLE" : equipmentFrame.canonicalAccepted ? "CANONICAL LOW CONF" : "RAW REJECTED"} · ${equipmentFrame.source.toUpperCase()} ${(equipmentFrame.confidence * 100).toFixed(0)}% ±${equipmentFrame.uncertaintyPx.toFixed(1)}PX` : hiddenRawFrame ? "NO FUSION EVIDENCE · RAW CANDIDATE HIDDEN" : "UNKNOWN"}`
         : "POSE OBSERVATION UNKNOWN · no frame within 180ms";
     }
 
@@ -544,7 +553,8 @@
     }
 
     function drawEquipmentTrail(currentMs, transform) {
-      const samples = state.activeRow.equipmentProvider.frames.filter((frame) => frame.timestampMs <= currentMs
+      const samples = state.activeRow.equipmentProvider.frames.filter((frame) => frame.fusionEligible
+        && frame.timestampMs <= currentMs
         && frame.timestampMs >= currentMs - 1_500);
       if (samples.length < 2) return;
       overlayContext.save();
@@ -567,11 +577,11 @@
     function drawEquipmentAxis(frame, transform) {
       const from = mapPoint({ x: frame.x1, y: frame.y1 }, transform);
       const to = mapPoint({ x: frame.x2, y: frame.y2 }, transform);
-      const style = frame.source === "Measured"
+      const style = frame.fusionEligible
         ? { color: "#ff4dce", dash: [], width: 4 }
-        : frame.source === "Predicted"
-          ? { color: "#ffd34e", dash: [8, 5], width: 3 }
-          : { color: "#4de4ee", dash: [3, 4], width: 3 };
+        : frame.canonicalAccepted
+          ? { color: "#4de4ee", dash: [5, 4], width: 2 }
+          : { color: "rgba(237,243,232,.38)", dash: [3, 6], width: 1 };
       overlayContext.save();
       overlayContext.strokeStyle = style.color;
       overlayContext.fillStyle = style.color;
@@ -579,7 +589,7 @@
       overlayContext.lineCap = "round";
       overlayContext.setLineDash(style.dash);
       overlayContext.shadowColor = style.color;
-      overlayContext.shadowBlur = frame.source === "Measured" ? 12 : 5;
+      overlayContext.shadowBlur = frame.fusionEligible ? 12 : 0;
       overlayContext.beginPath(); overlayContext.moveTo(from.x, from.y); overlayContext.lineTo(to.x, to.y); overlayContext.stroke();
       overlayContext.setLineDash([]);
       for (const point of [from, to]) {
@@ -598,7 +608,7 @@
       overlayContext.fillStyle = "#caff38";
       overlayContext.fillText(human ? `HUMAN REP ${human.index + 1}` : "HUMAN —", transform.offsetX + 22, transform.offsetY + transform.height - 25);
       overlayContext.fillStyle = "#4de4ee";
-      overlayContext.fillText(predicted ? `V8 REP ${predicted.index + 1}` : "V8 —", transform.offsetX + 132, transform.offsetY + transform.height - 25);
+      overlayContext.fillText(predicted ? `V9 REP ${predicted.index + 1}` : "V9 —", transform.offsetX + 132, transform.offsetY + transform.height - 25);
       overlayContext.restore();
     }
 
@@ -665,7 +675,9 @@
         plotContext.lineWidth = 2.2;
         plotContext.beginPath();
         let previousTimestampMs = null;
-        state.activeRow.equipmentProvider.frames.forEach((frame) => {
+        state.activeRow.equipmentProvider.frames
+          .filter((frame) => state.layers.equipmentRaw || frame.fusionEligible)
+          .forEach((frame) => {
           const x = frame.timestampMs / duration * width;
           const y = frame.centerY * height;
           if (!started || previousTimestampMs === null || frame.timestampMs - previousTimestampMs > 180) {

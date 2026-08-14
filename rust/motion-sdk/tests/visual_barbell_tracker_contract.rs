@@ -86,6 +86,27 @@ fn shared_rust_tracker_prefers_the_shaft_through_the_wrists_over_a_static_rack_l
 }
 
 #[test]
+fn shared_rust_tracker_searches_below_the_shoulders_for_a_row_held_at_the_wrists() {
+    let mut tracker = BarbellAxisVisualTracker::default();
+    // Matches the governed front-left row failure: shoulders are near 0.30,
+    // while both hands and the real shaft are near 0.61. The former
+    // shoulder-only search ended at 0.50 and could only see the rack line.
+    let subject = subject_with_wrists(1, 0.30, 0.61);
+    let measured = process_halpe26(
+        &mut tracker,
+        &frame_with_two_shafts(0.466, 0.61),
+        1_000,
+        &[subject],
+    )
+    .expect("the wrist-guided row shaft should be measured");
+    assert_eq!(measured.source, BarbellAxisSource::Measured);
+    assert!(
+        (measured.center_y - 0.61).abs() < 0.03,
+        "the background line won because the true row shaft was outside the search: {measured:?}"
+    );
+}
+
+#[test]
 fn shared_rust_tracker_reacquires_the_hand_associated_shaft_after_a_static_lock() {
     let mut tracker = BarbellAxisVisualTracker::default();
     let ready = subject_with_wrists(1, 0.34, 0.34);

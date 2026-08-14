@@ -62,7 +62,33 @@ fn local_bar_frame_with_conflicting_pose(progress: f32, angle: f32) -> FrameObse
     let mut frame = local_bar_frame(progress, angle);
     let cross = [angle.cos(), angle.sin()];
     let primary = [-cross[1], cross[0]];
-    let pose_center = [0.5 - primary[0] * progress, 0.5 - primary[1] * progress];
+    let original_axis = frame.equipment[0].axis.expect("local bar axis");
+    let bar_center = [
+        (original_axis.x1 + original_axis.x2) * 0.5,
+        (original_axis.y1 + original_axis.y2) * 0.5,
+    ];
+    let half = 0.12;
+    let axis = EquipmentAxis2d {
+        x1: bar_center[0] - cross[0] * half,
+        y1: bar_center[1] - cross[1] * half,
+        x2: bar_center[0] + cross[0] * half,
+        y2: bar_center[1] + cross[1] * half,
+    };
+    frame.equipment[0].axis = Some(axis);
+    frame.equipment[0].bbox = NormalizedRect::new(
+        axis.x1.min(axis.x2),
+        axis.y1.min(axis.y2),
+        (axis.x2 - axis.x1).abs(),
+        (axis.y2 - axis.y1).abs().max(0.005),
+    );
+    // Keep both wrists physically close enough to the measured shaft to
+    // remain the same held object, while preserving a normalized pose/load
+    // path discrepancy large enough for the conflict rule to observe.
+    let pose_offset = (progress * 2.0).min(0.09);
+    let pose_center = [
+        bar_center[0] - primary[0] * pose_offset,
+        bar_center[1] - primary[1] * pose_offset,
+    ];
     for (index, sign) in [(9, -1.0_f32), (10, 1.0_f32)] {
         frame.pose_candidates[0].observations[index] = PoseObservation::new(
             pose_center[0] + cross[0] * 0.04 * sign,
@@ -913,10 +939,15 @@ fn a_missing_shaft_clears_frame_local_trajectory_instead_of_reusing_stale_progre
         .into_iter()
         .map(|value| {
             let mut frame = local_bar_frame(value, 0.22);
-            frame.pose_candidates[0].observations[9] =
-                PoseObservation::new(0.46, 0.50 + value, 0.0, 0.95);
-            frame.pose_candidates[0].observations[10] =
-                PoseObservation::new(0.54, 0.50 + value, 0.0, 0.95);
+            let axis = frame.equipment[0].axis.expect("local bar axis");
+            for (wrist, interpolation) in [(9, 0.42_f32), (10, 0.58_f32)] {
+                frame.pose_candidates[0].observations[wrist] = PoseObservation::new(
+                    axis.x1 + (axis.x2 - axis.x1) * interpolation,
+                    axis.y1 + (axis.y2 - axis.y1) * interpolation,
+                    0.0,
+                    0.95,
+                );
+            }
             frame
         })
         .collect::<Vec<_>>();

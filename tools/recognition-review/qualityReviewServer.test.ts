@@ -367,6 +367,9 @@ test("v7 alignment review exposes immutable report, pose trajectory, and range v
     const v8PageResponse = await fetch(`${baseUrl}/v8-equipment-fusion-review.html`);
     assert.equal(v8PageResponse.status, 200);
     assert.match(await v8PageResponse.text(), /V7 alignment/u);
+    const v9PageResponse = await fetch(`${baseUrl}/v9-wrist-constrained-equipment-review.html`);
+    assert.equal(v9PageResponse.status, 200);
+    assert.match(await v9PageResponse.text(), /V7 alignment/u);
     const appResponse = await fetch(`${baseUrl}/v7AlignmentReviewApp.js`);
     assert.equal(appResponse.status, 200);
 

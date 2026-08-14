@@ -119,7 +119,7 @@ async function main(): Promise<void> {
     const dumbbell = dumbbellReviews.index() as { stats: { itemCount: number; submittedItems: number } };
     const poseKeypoint = poseKeypointReviews.index() as { stats: { itemCount: number; submittedItems: number } };
     const benchPhase = benchPhaseReviews.index() as { stats: { repCount: number; submittedCaptures: number; captureCount: number } };
-    process.stdout.write(`[recognition-review] http://127.0.0.1:${port} · v8 equipment fusion /v8-equipment-fusion-review.html · personal ${stats.personalAnnotatedVideos} · MM-Fit ${stats.mmfitClips} · barbell ${equipment.stats.submittedItems}/${equipment.stats.itemCount} · dumbbell ${dumbbell.stats.submittedItems}/${dumbbell.stats.itemCount} · pose truth ${poseKeypoint.stats.submittedItems}/${poseKeypoint.stats.itemCount} · bench phase ${benchPhase.stats.submittedCaptures}/${benchPhase.stats.captureCount} (${benchPhase.stats.repCount} reps) · evidence read-only / labels append-only\n`);
+    process.stdout.write(`[recognition-review] http://127.0.0.1:${port} · v9 wrist-constrained equipment /v9-wrist-constrained-equipment-review.html · personal ${stats.personalAnnotatedVideos} · MM-Fit ${stats.mmfitClips} · barbell ${equipment.stats.submittedItems}/${equipment.stats.itemCount} · dumbbell ${dumbbell.stats.submittedItems}/${dumbbell.stats.itemCount} · pose truth ${poseKeypoint.stats.submittedItems}/${poseKeypoint.stats.itemCount} · bench phase ${benchPhase.stats.submittedCaptures}/${benchPhase.stats.captureCount} (${benchPhase.stats.repCount} reps) · evidence read-only / labels append-only\n`);
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => server.close(() => process.exit(0)));
@@ -167,7 +167,7 @@ async function resolveV7GovernedAssets(projectRoot: string): Promise<{
     return asset.location;
   };
   const report = requireAsset(
-    "current-rust-v8-equipment-fused-known-video-alignment-report",
+    "current-rust-v9-wrist-constrained-equipment-alignment-report",
     "evaluation_only",
     "regression_diagnosis",
   );

@@ -15,12 +15,14 @@ const {
 test("v7 alignment page is independent from the quality annotation desk", () => {
   const html = readFileSync("tools/recognition-review/public/v7-alignment-review.html", "utf8");
   assert.match(html, /data-v7-alignment-review/u);
-  assert.match(html, /人工标注 × v8 融合预测/u);
+  assert.match(html, /人工标注 × v9 手腕约束融合预测/u);
   assert.match(html, /页面只渲染证据，不在浏览器内识别或重算/u);
   assert.match(html, /器械融合换向/u);
   assert.match(html, /FUSED TURNAROUND/u);
   assert.match(html, /data-layer="equipment"/u);
-  assert.match(html, /BAR AXIS CENTER Y/u);
+  assert.match(html, /data-layer="equipmentRaw"/u);
+  assert.match(html, /FUSION-ELIGIBLE BAR AXIS/u);
+  assert.match(html, /RAW REJECTED/u);
   assert.match(html, /v7AlignmentReviewApp\.js/u);
   assert.doesNotMatch(html, /qualityReviewApp\.js/u);
 });
@@ -32,6 +34,8 @@ test("normalization preserves frozen matches and rejects duplicate contexts", ()
   assert.equal(report.rows[0].predictedReps.length, 2);
   assert.equal(report.rows[0].equipmentProvider.frames.length, 2);
   assert.equal(report.rows[0].equipmentProvider.frames[0].source, "Measured");
+  assert.equal(report.rows[0].equipmentProvider.frames[0].fusionEligible, true);
+  assert.equal(report.rows[0].equipmentProvider.frames[1].canonicalAccepted, false);
   assert.equal(report.turnaroundEvaluation.equipmentFusedTurnaroundCount, 1);
   assert.equal(predictionMatchMap(report.rows[0]).get(0).strictBoundaryAligned, true);
   assert.equal(rowProblem(report.rows[0]), true);
@@ -120,6 +124,8 @@ function fixtureReport() {
             x2: 0.8,
             y2: 0.41,
             centerY: 0.415,
+            canonicalAccepted: true,
+            fusionEligible: true,
           },
           {
             frameNumber: 31,
@@ -132,6 +138,8 @@ function fixtureReport() {
             x2: 0.8,
             y2: 0.42,
             centerY: 0.425,
+            canonicalAccepted: false,
+            fusionEligible: false,
           },
         ],
       },

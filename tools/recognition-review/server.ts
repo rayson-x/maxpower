@@ -126,7 +126,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
   }
   if (request.method === "GET"
     && (url.pathname === "/v7-alignment-review.html"
-      || url.pathname === "/v8-equipment-fusion-review.html")) {
+      || url.pathname === "/v8-equipment-fusion-review.html"
+      || url.pathname === "/v9-wrist-constrained-equipment-review.html")) {
     const review = requireV7AlignmentReviewOptions(options);
     await serveStaticPath(response, review.pagePath, "text/html; charset=utf-8");
     return;
@@ -448,12 +449,15 @@ interface V7EquipmentFrame extends Record<string, unknown> {
   readonly x2: number;
   readonly y2: number;
   readonly centerY: number;
+  readonly canonicalAccepted?: boolean;
+  readonly fusionEligible?: boolean;
 }
 
 interface V7AlignmentReport extends Record<string, unknown> {
   readonly schemaVersion:
     | "maxpower-current-rust-known-video-alignment/v1"
-    | "maxpower-current-rust-equipment-fused-known-video-alignment/v1";
+    | "maxpower-current-rust-equipment-fused-known-video-alignment/v1"
+    | "maxpower-current-rust-wrist-constrained-equipment-alignment/v1";
   readonly reportDigest: string;
   readonly rows: readonly V7AlignmentReportRow[];
 }
@@ -492,7 +496,8 @@ async function readV7AlignmentSources(options: RecognitionReviewServerOptions): 
   ]);
   const reportRecord = requireJsonRecord(reportValue, "v7 alignment report");
   if (reportRecord.schemaVersion !== "maxpower-current-rust-known-video-alignment/v1"
-    && reportRecord.schemaVersion !== "maxpower-current-rust-equipment-fused-known-video-alignment/v1") {
+    && reportRecord.schemaVersion !== "maxpower-current-rust-equipment-fused-known-video-alignment/v1"
+    && reportRecord.schemaVersion !== "maxpower-current-rust-wrist-constrained-equipment-alignment/v1") {
     throw new Error("unsupported v7 alignment report schema");
   }
   const schemaVersion = reportRecord.schemaVersion;
@@ -575,6 +580,11 @@ function requireV7EquipmentProvider(value: unknown, rowIndex: number): V7Equipme
     if (confidence < 0 || confidence > 1 || uncertaintyPx < 0) {
       throw new Error(`${frameLabel} confidence or uncertainty is invalid`);
     }
+    for (const field of ["canonicalAccepted", "fusionEligible"] as const) {
+      if (field in frame && typeof frame[field] !== "boolean") {
+        throw new Error(`${frameLabel} ${field} is invalid`);
+      }
+    }
     return {
       ...frame,
       frameNumber,
@@ -587,6 +597,12 @@ function requireV7EquipmentProvider(value: unknown, rowIndex: number): V7Equipme
       x2: requireJsonFiniteNumber(frame.x2, `${frameLabel} x2`),
       y2: requireJsonFiniteNumber(frame.y2, `${frameLabel} y2`),
       centerY: requireJsonFiniteNumber(frame.centerY, `${frameLabel} center y`),
+      ...(typeof frame.canonicalAccepted === "boolean"
+        ? { canonicalAccepted: frame.canonicalAccepted }
+        : {}),
+      ...(typeof frame.fusionEligible === "boolean"
+        ? { fusionEligible: frame.fusionEligible }
+        : {}),
     };
   });
   if (trackerOutputFrameCount !== frames.length) {
