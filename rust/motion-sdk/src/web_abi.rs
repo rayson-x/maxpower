@@ -1239,6 +1239,7 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
         set_state: runtime.set_gate.state.clone(),
         rep_state: runtime.rep_state.clone(),
         quality_proposals: super::build_quality_proposals(&runtime.completed_reps),
+        completed_rep_subject_epochs: vec![runtime.subject_epoch; runtime.completed_reps.len()],
         completed_reps: runtime.completed_reps.clone(),
     };
     runtime.packet_bytes = super::encode_motion_packet(&packet).unwrap_or_default();

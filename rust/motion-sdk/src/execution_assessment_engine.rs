@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AssessmentConclusionState, AssessmentDimension, QualityConclusion, RepDisposition, SealedRep,
+    AssessmentConclusionState, AssessmentDimension, LocalChannelAgreement, MotionPacket,
+    QualityConclusion, RepDisposition, SealedRep,
 };
 
 pub const EXECUTION_ASSESSMENT_BUNDLE_SCHEMA: &str = "maxpower.execution-assessment-bundle/v1";
@@ -390,6 +391,15 @@ pub enum AssessmentEvent {
         frame_id: u64,
         timestamp_ms: u64,
     },
+    /// The only executable assessment input. It is authored by `MotionSession`
+    /// after canonical pose, equipment fusion, local coordinates and RepEngine
+    /// have run; this engine never owns a second repetition counter.
+    CanonicalPacketObserved(Box<MotionPacket>),
+    /// Opaque terminal RepEngine output returned by
+    /// `MotionSession::finish_set_for_assessment`.
+    CanonicalSetClosureObserved(Box<crate::MotionSetClosure>),
+    /// Legacy context-resolution seam. Executable bundles reject this event so
+    /// callers cannot inject an arbitrary repetition outside MotionSession.
     RepSealed(Box<SealedRep>),
     SetPaused,
     SetResumed,
@@ -424,11 +434,166 @@ pub struct LiveMotionFacts {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SealedRepReference {
     pub rep_id: u64,
+    pub subject_epoch: u64,
     pub disposition: String,
     pub start_timestamp_ms: u64,
     pub turnaround_timestamp_ms: u64,
     pub end_timestamp_ms: u64,
     pub canonical_slice_hash: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionFeatureStatus {
+    Observed,
+    CannotJudge,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionFeatureUnit {
+    Milliseconds,
+    NormalizedDisplacement,
+    Ratio,
+    Confidence,
+    Count,
+    Categorical,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvidenceSourceRange {
+    pub source_capture_id: String,
+    pub start_frame_id: u64,
+    pub end_frame_id: u64,
+    pub start_timestamp_ms: u64,
+    pub end_timestamp_ms: u64,
+    pub canonical_slice_hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MotionFeatureFact {
+    pub feature_id: String,
+    pub value: Option<f32>,
+    pub categorical_value: Option<String>,
+    pub unit: MotionFeatureUnit,
+    pub status: MotionFeatureStatus,
+    pub coverage: f32,
+    pub confidence: f32,
+    pub uncertainty: f32,
+    pub provenance: Vec<String>,
+    pub source_range: EvidenceSourceRange,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReferenceComparisonKind {
+    SelfGeometry,
+    SetPrefix,
+    SameWorkoutPriorSet,
+    NoReference,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReferenceComparisonFact {
+    pub feature_id: String,
+    pub kind: ReferenceComparisonKind,
+    pub observed_value: Option<f32>,
+    pub observed_category: Option<String>,
+    pub reference_value: Option<f32>,
+    pub delta_ratio: Option<f32>,
+    pub reference_source_ids: Vec<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SealedRepAssessment {
+    pub rep: SealedRepReference,
+    pub features: Vec<MotionFeatureFact>,
+    pub comparisons: Vec<ReferenceComparisonFact>,
+    pub dimension_findings: Vec<QualityConclusion>,
+    pub trace_root_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetPatternFact {
+    pub pattern_id: String,
+    pub summary: String,
+    pub supporting_rep_ids: Vec<u64>,
+    pub evidence_dimensions: Vec<AssessmentDimension>,
+    pub confidence: f32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceNodeKind {
+    SourceObservation,
+    LocalCoordinate,
+    PoseEquipmentFusion,
+    RepBoundary,
+    FeatureFact,
+    ReferenceComparison,
+    RuleConclusion,
+    SetPattern,
+    SetConclusion,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvidenceTraceNode {
+    pub node_id: String,
+    pub kind: TraceNodeKind,
+    pub summary: String,
+    pub source_ids: Vec<String>,
+    pub input_node_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EvidenceDerivationTrace {
+    pub schema_version: String,
+    pub nodes: Vec<EvidenceTraceNode>,
+    pub conclusion_root_ids: Vec<String>,
+    pub content_hash: String,
+}
+
+impl EvidenceDerivationTrace {
+    fn computed_content_hash(&self) -> String {
+        let mut semantic = self.clone();
+        semantic.content_hash.clear();
+        hash_serialized(&semantic)
+    }
+}
+
+fn validate_trace_graph(
+    nodes: &[EvidenceTraceNode],
+    conclusion_root_ids: &[String],
+) -> Result<(), AssessmentRuntimeError> {
+    let mut seen = HashSet::new();
+    for node in nodes {
+        if node.node_id.trim().is_empty()
+            || seen.contains(node.node_id.as_str())
+            || node
+                .input_node_ids
+                .iter()
+                .any(|input_id| !seen.contains(input_id.as_str()))
+        {
+            return Err(AssessmentRuntimeError::InvalidTraceGraph);
+        }
+        seen.insert(node.node_id.as_str());
+    }
+    if conclusion_root_ids.is_empty()
+        || conclusion_root_ids
+            .iter()
+            .any(|root_id| !seen.contains(root_id.as_str()))
+    {
+        return Err(AssessmentRuntimeError::InvalidTraceGraph);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -442,7 +607,10 @@ pub struct SealedSetAssessment {
     pub bundle_id: String,
     pub bundle_hash: String,
     pub reps: Vec<SealedRepReference>,
+    pub rep_assessments: Vec<SealedRepAssessment>,
+    pub set_patterns: Vec<SetPatternFact>,
     pub dimension_findings: Vec<QualityConclusion>,
+    pub trace: EvidenceDerivationTrace,
     pub content_hash: String,
 }
 
@@ -490,8 +658,9 @@ pub enum AssessmentConfigurationError {
     UnsupportedBundleSchema {
         bundle_id: String,
     },
-    ExecutableBundleNotSupported {
+    InvalidExecutableBundleProgram {
         bundle_id: String,
+        detail: String,
     },
     InvalidBundleHash {
         bundle_id: String,
@@ -545,6 +714,83 @@ pub enum AssessmentRuntimeError {
     FrameIdNotStrictlyIncreasing,
     DuplicateRepId(u64),
     RepProfileMismatch,
+    PacketProfileMismatch,
+    PacketSourceMismatch,
+    RepNotFromCanonicalPacket,
+    CanonicalPacketRequired,
+    CanonicalSetClosureRequired,
+    CanonicalSetClosureAlreadyObserved,
+    PacketLineageChangedDuringSet,
+    DuplicateSetId,
+    InvalidRepProvenance,
+    InvalidTraceGraph,
+}
+
+#[derive(Clone, Debug)]
+struct CompiledAssessmentProgram {
+    runtime_profile_identity: String,
+    runtime_profile_hash: u64,
+    feature_ids: Vec<String>,
+    range_feature_id: String,
+    phase_names: [String; 2],
+    reference_order: Vec<ReferenceComparisonKind>,
+    range_deviation_ratio: f32,
+    minimum_feature_confidence: f32,
+    late_set_window: usize,
+    minimum_persistent_reps: usize,
+    rep_rules: Vec<CompiledRepRule>,
+    set_rules: Vec<CompiledSetRule>,
+}
+
+#[derive(Clone, Debug)]
+enum CompiledRepRule {
+    RepDisposition {
+        dimension: AssessmentDimension,
+        feature_id: String,
+    },
+    ReferenceLowerBound {
+        dimension: AssessmentDimension,
+        feature_id: String,
+    },
+    FeaturesAvailable {
+        dimension: AssessmentDimension,
+        feature_ids: Vec<String>,
+    },
+    Abstain {
+        dimension: AssessmentDimension,
+        feature_ids: Vec<String>,
+        reason: String,
+    },
+    NotApplicable {
+        dimension: AssessmentDimension,
+        feature_ids: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug)]
+enum CompiledSetRule {
+    RollupRepDimension { dimension: AssessmentDimension },
+    LateSetPersistence { dimension: AssessmentDimension },
+}
+
+#[derive(Clone, Debug)]
+struct ReferenceSample {
+    value: f32,
+    set_id: String,
+    source_capture_id: String,
+    rep_id: u64,
+}
+
+#[derive(Clone, Debug)]
+struct PacketEvidenceSummary {
+    frame_id: u64,
+    timestamp_ms: u64,
+    subject_epoch: u64,
+    source_id: String,
+    coordinate_frame_id: u64,
+    local_state: String,
+    channel_agreement: LocalChannelAgreement,
+    equipment_observed: bool,
 }
 
 struct ActiveSet {
@@ -555,13 +801,24 @@ struct ActiveSet {
     latest_frame_id: Option<u64>,
     latest_timestamp_ms: Option<u64>,
     reps: Vec<SealedRepReference>,
+    rep_assessments: Vec<SealedRepAssessment>,
+    trace_nodes: Vec<EvidenceTraceNode>,
+    packets: Vec<PacketEvidenceSummary>,
+    prefix_range_values: Vec<ReferenceSample>,
+    prior_workout_range_values: Vec<ReferenceSample>,
     rep_ids: HashSet<u64>,
+    program: CompiledAssessmentProgram,
+    closure_observed: bool,
+    packet_lineage: Option<crate::PacketLineage>,
 }
 
 pub struct ExecutionAssessmentEngine {
     workout: WorkoutAssessmentContext,
     action_definitions: HashMap<String, ActionDefinition>,
     bundles: HashMap<String, ExecutionAssessmentBundle>,
+    programs: HashMap<String, CompiledAssessmentProgram>,
+    workout_range_references: HashMap<String, Vec<ReferenceSample>>,
+    completed_set_ids: HashSet<String>,
     active_set: Option<ActiveSet>,
     last_terminal: Option<SealedSetAssessment>,
     workout_finished: bool,
@@ -573,6 +830,7 @@ impl ExecutionAssessmentEngine {
         workout: WorkoutAssessmentContext,
     ) -> Result<Self, AssessmentConfigurationError> {
         validate_catalog(&catalog)?;
+        let programs = compile_catalog_programs(&catalog)?;
         let action_definitions = catalog
             .action_definitions
             .into_iter()
@@ -587,6 +845,9 @@ impl ExecutionAssessmentEngine {
             workout,
             action_definitions,
             bundles,
+            programs,
+            workout_range_references: HashMap::new(),
+            completed_set_ids: HashSet::new(),
             active_set: None,
             last_terminal: None,
             workout_finished: false,
@@ -611,7 +872,11 @@ impl ExecutionAssessmentEngine {
                 frame_id,
                 timestamp_ms,
             } => self.observe_frame(frame_id, timestamp_ms),
-            AssessmentEvent::RepSealed(rep) => self.seal_rep(*rep),
+            AssessmentEvent::CanonicalPacketObserved(packet) => self.observe_packet(*packet),
+            AssessmentEvent::CanonicalSetClosureObserved(closure) => {
+                self.observe_set_closure(*closure)
+            }
+            AssessmentEvent::RepSealed(_) => Err(AssessmentRuntimeError::RepNotFromCanonicalPacket),
             AssessmentEvent::SetPaused => self.pause_set(),
             AssessmentEvent::SetResumed => self.resume_set(),
             AssessmentEvent::SetFinished => self.finish_set(),
@@ -663,6 +928,9 @@ impl ExecutionAssessmentEngine {
         &mut self,
         context: SetExecutionContext,
     ) -> Result<AssessmentEmission, AssessmentRuntimeError> {
+        if self.completed_set_ids.contains(&context.set_id) {
+            return Err(AssessmentRuntimeError::DuplicateSetId);
+        }
         if let Some(active) = self.active_set.as_ref() {
             if active.context.video_context != context.video_context {
                 return Ok(AssessmentEmission::TypedRefusal(TypedAssessmentRefusal {
@@ -752,6 +1020,32 @@ impl ExecutionAssessmentEngine {
             bundle_capability: bundle.capability,
             bundle_lineage: bundle.lineage.clone(),
         };
+        let program = self
+            .programs
+            .get(&bundle.bundle_id)
+            .cloned()
+            .unwrap_or_else(|| CompiledAssessmentProgram {
+                runtime_profile_identity: String::new(),
+                runtime_profile_hash: 0,
+                feature_ids: Vec::new(),
+                range_feature_id: "local_primary_excursion".into(),
+                phase_names: ["first_phase".into(), "second_phase".into()],
+                reference_order: vec![
+                    ReferenceComparisonKind::SetPrefix,
+                    ReferenceComparisonKind::SameWorkoutPriorSet,
+                ],
+                range_deviation_ratio: 0.20,
+                minimum_feature_confidence: 0.50,
+                late_set_window: 2,
+                minimum_persistent_reps: 2,
+                rep_rules: Vec::new(),
+                set_rules: Vec::new(),
+            });
+        let prior_workout_range_values = self
+            .workout_range_references
+            .get(&bundle.bundle_id)
+            .cloned()
+            .unwrap_or_default();
         self.active_set = Some(ActiveSet {
             context,
             resolved_context,
@@ -760,7 +1054,15 @@ impl ExecutionAssessmentEngine {
             latest_frame_id: None,
             latest_timestamp_ms: None,
             reps: Vec::new(),
+            rep_assessments: Vec::new(),
+            trace_nodes: Vec::new(),
+            packets: Vec::new(),
+            prefix_range_values: Vec::new(),
+            prior_workout_range_values,
             rep_ids: HashSet::new(),
+            program,
+            closure_observed: false,
+            packet_lineage: None,
         });
         self.last_terminal = None;
         Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
@@ -776,6 +1078,15 @@ impl ExecutionAssessmentEngine {
         }) {
             return self.bundle_not_executable_refusal();
         }
+        let _ = (frame_id, timestamp_ms);
+        Err(AssessmentRuntimeError::CanonicalPacketRequired)
+    }
+
+    fn record_packet_position(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+    ) -> Result<(), AssessmentRuntimeError> {
         let active = self
             .active_set
             .as_mut()
@@ -797,29 +1108,316 @@ impl ExecutionAssessmentEngine {
         }
         active.latest_frame_id = Some(frame_id);
         active.latest_timestamp_ms = Some(timestamp_ms);
-        Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
+        Ok(())
     }
 
-    fn seal_rep(&mut self, rep: SealedRep) -> Result<AssessmentEmission, AssessmentRuntimeError> {
+    fn observe_packet(
+        &mut self,
+        packet: MotionPacket,
+    ) -> Result<AssessmentEmission, AssessmentRuntimeError> {
         if self.active_set.as_ref().is_some_and(|active| {
             active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly
         }) {
             return self.bundle_not_executable_refusal();
         }
+        if self
+            .active_set
+            .as_ref()
+            .is_some_and(|active| active.closure_observed)
+        {
+            return Err(AssessmentRuntimeError::CanonicalSetClosureAlreadyObserved);
+        }
+        {
+            let active = self
+                .active_set
+                .as_ref()
+                .ok_or(AssessmentRuntimeError::NoActiveSet)?;
+            if packet.lineage.sequence_id != active.context.video_context.source_capture_id {
+                return Err(AssessmentRuntimeError::PacketSourceMismatch);
+            }
+            if packet.lineage.active_profile_identity.as_deref()
+                != Some(active.program.runtime_profile_identity.as_str())
+                || packet.lineage.active_profile_hash != Some(active.program.runtime_profile_hash)
+            {
+                return Err(AssessmentRuntimeError::PacketProfileMismatch);
+            }
+            if active
+                .packet_lineage
+                .as_ref()
+                .is_some_and(|frozen| frozen != &packet.lineage)
+            {
+                return Err(AssessmentRuntimeError::PacketLineageChangedDuringSet);
+            }
+        }
+        if packet.completed_reps.len() != packet.completed_rep_subject_epochs.len() {
+            return Err(AssessmentRuntimeError::InvalidRepProvenance);
+        }
+        self.record_packet_position(packet.frame_id, packet.source_timestamp_ms)?;
+
+        let source_id = format!(
+            "{}:frame:{}@{}",
+            packet.lineage.sequence_id, packet.frame_id, packet.source_timestamp_ms
+        );
+        let coordinate_id = format!(
+            "coordinate:{}:{}",
+            packet.local_motion_coordinate.coordinate_frame_id, packet.frame_id
+        );
+        let fusion_id = format!("fusion:{}", packet.frame_id);
+        let local_state =
+            format!("{:?}", packet.local_motion_coordinate.state).to_ascii_lowercase();
+        let equipment_observed = matches!(
+            packet.equipment.status,
+            crate::EquipmentFrameStatus::Observed
+        );
+        let active = self.active_set.as_mut().expect("active set observed above");
+        let lineage_id = packet_lineage_id(&packet.lineage);
+        active.packet_lineage.get_or_insert(packet.lineage.clone());
+        active.trace_nodes.push(EvidenceTraceNode {
+            node_id: source_id.clone(),
+            kind: TraceNodeKind::SourceObservation,
+            summary: format!(
+                "Canonical frame {} at {} ms from MotionSession lineage {} (contract {}.{}, algorithm {}, config {}, inference {}, diagnostics {}).",
+                packet.frame_id,
+                packet.source_timestamp_ms,
+                lineage_id,
+                packet.lineage.contract.major,
+                packet.lineage.contract.minor,
+                packet.lineage.algorithm_version,
+                packet.lineage.config_version,
+                packet.lineage.inference_version,
+                packet.lineage.diagnostic_version,
+            ),
+            source_ids: vec![source_id.clone()],
+            input_node_ids: Vec::new(),
+        });
+        active.trace_nodes.push(EvidenceTraceNode {
+            node_id: coordinate_id.clone(),
+            kind: TraceNodeKind::LocalCoordinate,
+            summary: format!(
+                "Local coordinate {} is {local_state}.",
+                packet.local_motion_coordinate.coordinate_frame_id
+            ),
+            source_ids: vec![source_id.clone()],
+            input_node_ids: vec![source_id.clone()],
+        });
+        active.trace_nodes.push(EvidenceTraceNode {
+            node_id: fusion_id,
+            kind: TraceNodeKind::PoseEquipmentFusion,
+            summary: format!(
+                "Pose/equipment channel state is {:?}; independent equipment observed: {equipment_observed}.",
+                packet.local_motion_coordinate.channel_agreement
+            ),
+            source_ids: vec![source_id.clone()],
+            input_node_ids: vec![source_id.clone(), coordinate_id],
+        });
+        active.packets.push(PacketEvidenceSummary {
+            frame_id: packet.frame_id,
+            timestamp_ms: packet.source_timestamp_ms,
+            subject_epoch: packet.subject_epoch,
+            source_id,
+            coordinate_frame_id: packet.local_motion_coordinate.coordinate_frame_id,
+            local_state,
+            channel_agreement: packet.local_motion_coordinate.channel_agreement,
+            equipment_observed,
+        });
+        Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
+    }
+
+    fn assess_rep(&mut self, rep: SealedRep, subject_epoch: u64) {
         let active = self
             .active_set
             .as_mut()
+            .expect("Rep provenance validated against an active set");
+        debug_assert!(active.rep_ids.insert(rep.rep_id));
+        let rep_ref = rep_reference(&rep, subject_epoch);
+        let (features, range_value) = feature_facts(active, &rep);
+        let comparisons = compare_features(
+            &features,
+            &active.prefix_range_values,
+            &active.prior_workout_range_values,
+            &active.program.range_feature_id,
+            &active.program.reference_order,
+        );
+        let evaluated_rules = evaluate_rep_rules(active, &comparisons);
+        let rep_node = format!("rep:{}:boundary", rep.rep_id);
+        let source_ids = active
+            .packets
+            .iter()
+            .filter(|packet| {
+                packet.frame_id >= rep.start_frame_id
+                    && packet.frame_id <= rep.end_frame_id
+                    && packet.subject_epoch == subject_epoch
+            })
+            .map(|packet| packet.source_id.clone())
+            .collect::<Vec<_>>();
+        active.trace_nodes.push(EvidenceTraceNode {
+            node_id: rep_node.clone(),
+            kind: TraceNodeKind::RepBoundary,
+            summary: format!(
+                "RepEngine sealed Rep {} from {} to {} ms with {:?} disposition.",
+                rep.rep_id, rep.start_timestamp_ms, rep.end_timestamp_ms, rep.disposition
+            ),
+            source_ids: source_ids.clone(),
+            input_node_ids: active
+                .packets
+                .iter()
+                .filter(|packet| {
+                    packet.frame_id >= rep.start_frame_id
+                        && packet.frame_id <= rep.end_frame_id
+                        && packet.subject_epoch == subject_epoch
+                })
+                .map(|packet| format!("fusion:{}", packet.frame_id))
+                .collect(),
+        });
+        for feature in &features {
+            let feature_node = format!("rep:{}:feature:{}", rep.rep_id, feature.feature_id);
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: feature_node.clone(),
+                kind: TraceNodeKind::FeatureFact,
+                summary: feature_summary(feature),
+                source_ids: source_ids.clone(),
+                input_node_ids: vec![rep_node.clone()],
+            });
+            let comparison = comparisons
+                .iter()
+                .find(|value| value.feature_id == feature.feature_id)
+                .expect("every feature has a comparison fact");
+            let comparison_node = format!("rep:{}:comparison:{}", rep.rep_id, feature.feature_id);
+            let mut comparison_sources = source_ids.clone();
+            comparison_sources.extend(comparison.reference_source_ids.clone());
+            comparison_sources.sort();
+            comparison_sources.dedup();
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: comparison_node.clone(),
+                kind: TraceNodeKind::ReferenceComparison,
+                summary: comparison_summary(comparison),
+                source_ids: comparison_sources,
+                input_node_ids: vec![feature_node],
+            });
+        }
+        let mut rule_node_ids = Vec::new();
+        for evaluated in &evaluated_rules {
+            let conclusion = &evaluated.conclusion;
+            let rule_node = format!("rep:{}:rule:{}", rep.rep_id, conclusion.dimension.as_str());
+            let input_node_ids = if evaluated.feature_dependencies.is_empty() {
+                vec![rep_node.clone()]
+            } else {
+                evaluated
+                    .feature_dependencies
+                    .iter()
+                    .map(|feature_id| format!("rep:{}:comparison:{feature_id}", rep.rep_id))
+                    .collect()
+            };
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: rule_node.clone(),
+                kind: TraceNodeKind::RuleConclusion,
+                summary: conclusion.summary.clone(),
+                source_ids: source_ids.clone(),
+                input_node_ids,
+            });
+            rule_node_ids.push(rule_node);
+        }
+        active.reps.push(rep_ref.clone());
+        active.rep_assessments.push(SealedRepAssessment {
+            rep: rep_ref,
+            features,
+            comparisons,
+            dimension_findings: evaluated_rules
+                .into_iter()
+                .map(|evaluated| evaluated.conclusion)
+                .collect(),
+            trace_root_ids: rule_node_ids,
+        });
+        // Reference policy is compare-before-update: this Rep was evaluated
+        // against only the prior set prefix and becomes reference afterwards.
+        let range_is_observed = active.rep_assessments.last().is_some_and(|assessment| {
+            assessment.features.iter().any(|feature| {
+                feature.feature_id == active.program.range_feature_id
+                    && feature.status == MotionFeatureStatus::Observed
+            })
+        });
+        if let Some(value) = range_value.filter(|_| range_is_observed) {
+            active.prefix_range_values.push(ReferenceSample {
+                value,
+                set_id: active.context.set_id.clone(),
+                source_capture_id: active.context.video_context.source_capture_id.clone(),
+                rep_id: rep.rep_id,
+            });
+        }
+    }
+
+    fn observe_set_closure(
+        &mut self,
+        closure: crate::MotionSetClosure,
+    ) -> Result<AssessmentEmission, AssessmentRuntimeError> {
+        let active = self
+            .active_set
+            .as_ref()
             .ok_or(AssessmentRuntimeError::NoActiveSet)?;
-        if active.paused {
-            return Err(AssessmentRuntimeError::SetPaused);
+        if active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly {
+            return self.bundle_not_executable_refusal();
         }
-        if rep.profile_identity != active.bundle.lineage.recognition_profile.id {
-            return Err(AssessmentRuntimeError::RepProfileMismatch);
+        if active.closure_observed {
+            return Err(AssessmentRuntimeError::CanonicalSetClosureAlreadyObserved);
         }
-        if !active.rep_ids.insert(rep.rep_id) {
-            return Err(AssessmentRuntimeError::DuplicateRepId(rep.rep_id));
+        if closure.lineage.sequence_id != active.context.video_context.source_capture_id {
+            return Err(AssessmentRuntimeError::PacketSourceMismatch);
         }
-        active.reps.push(rep_reference(&rep));
+        if closure.lineage.active_profile_identity.as_deref()
+            != Some(active.program.runtime_profile_identity.as_str())
+            || closure.lineage.active_profile_hash != Some(active.program.runtime_profile_hash)
+        {
+            return Err(AssessmentRuntimeError::PacketProfileMismatch);
+        }
+        if active
+            .packet_lineage
+            .as_ref()
+            .is_some_and(|frozen| frozen != &closure.lineage)
+        {
+            return Err(AssessmentRuntimeError::PacketLineageChangedDuringSet);
+        }
+        if closure
+            .source_timestamp_ms
+            .zip(active.latest_timestamp_ms)
+            .is_some_and(|(closure_timestamp, observed_timestamp)| {
+                closure_timestamp != observed_timestamp
+            })
+        {
+            return Err(AssessmentRuntimeError::PacketSourceMismatch);
+        }
+        if closure.completed_reps.len() != closure.completed_rep_subject_epochs.len() {
+            return Err(AssessmentRuntimeError::InvalidRepProvenance);
+        }
+        let completed_reps = closure
+            .completed_reps
+            .into_iter()
+            .zip(closure.completed_rep_subject_epochs)
+            .collect::<Vec<_>>();
+        {
+            let active = self
+                .active_set
+                .as_ref()
+                .expect("active set validated above");
+            let mut rep_ids = active.rep_ids.clone();
+            for (rep, subject_epoch) in &completed_reps {
+                if !rep_ids.insert(rep.rep_id) {
+                    return Err(AssessmentRuntimeError::DuplicateRepId(rep.rep_id));
+                }
+                validate_rep_provenance(
+                    active,
+                    rep,
+                    *subject_epoch,
+                    closure.source_timestamp_ms.unwrap_or(0),
+                )?;
+            }
+        }
+        for (rep, subject_epoch) in completed_reps {
+            self.assess_rep(rep, subject_epoch);
+        }
+        self.active_set
+            .as_mut()
+            .expect("active set validated above")
+            .closure_observed = true;
         Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
     }
 
@@ -863,11 +1461,81 @@ impl ExecutionAssessmentEngine {
             self.active_set = None;
             return refusal;
         }
-        let active = self.active_set.take().expect("active set checked above");
+        if self
+            .active_set
+            .as_ref()
+            .is_some_and(|active| !active.closure_observed)
+        {
+            return Err(AssessmentRuntimeError::CanonicalSetClosureRequired);
+        }
+        let mut active = self.active_set.take().expect("active set checked above");
+        let set_patterns = aggregate_set_patterns(&active);
+        for pattern in &set_patterns {
+            let source_ids = active
+                .packets
+                .iter()
+                .map(|packet| packet.source_id.clone())
+                .collect::<Vec<_>>();
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: format!("set-pattern:{}", pattern.pattern_id),
+                kind: TraceNodeKind::SetPattern,
+                summary: pattern.summary.clone(),
+                source_ids,
+                input_node_ids: pattern
+                    .supporting_rep_ids
+                    .iter()
+                    .flat_map(|rep_id| {
+                        pattern.evidence_dimensions.iter().map(move |dimension| {
+                            format!("rep:{rep_id}:rule:{}", dimension.as_str())
+                        })
+                    })
+                    .collect(),
+            });
+        }
+        let dimension_findings = aggregate_dimension_findings(&active, &set_patterns);
+        let all_source_ids = active
+            .packets
+            .iter()
+            .map(|packet| packet.source_id.clone())
+            .collect::<Vec<_>>();
+        let mut conclusion_root_ids = Vec::new();
+        for finding in &dimension_findings {
+            let node_id = format!("set-conclusion:{}", finding.dimension.as_str());
+            let mut input_node_ids = active
+                .rep_assessments
+                .iter()
+                .map(|rep| format!("rep:{}:rule:{}", rep.rep.rep_id, finding.dimension.as_str()))
+                .collect::<Vec<_>>();
+            input_node_ids.extend(
+                set_patterns
+                    .iter()
+                    .filter(|pattern| pattern.evidence_dimensions.contains(&finding.dimension))
+                    .map(|pattern| format!("set-pattern:{}", pattern.pattern_id)),
+            );
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: node_id.clone(),
+                kind: TraceNodeKind::SetConclusion,
+                summary: finding.summary.clone(),
+                source_ids: all_source_ids.clone(),
+                input_node_ids,
+            });
+            conclusion_root_ids.push(node_id);
+        }
         let assessment_id = format!(
             "{}:{}:{}",
             self.workout.workout_session_id, active.context.set_id, active.bundle.bundle_id
         );
+        let completed_set_id = active.context.set_id.clone();
+        let reference_key = active.bundle.bundle_id.clone();
+        let sealed_range_values = active.prefix_range_values.clone();
+        let mut trace = EvidenceDerivationTrace {
+            schema_version: "maxpower.evidence-derivation-trace/v1".into(),
+            nodes: active.trace_nodes,
+            conclusion_root_ids,
+            content_hash: String::new(),
+        };
+        validate_trace_graph(&trace.nodes, &trace.conclusion_root_ids)?;
+        trace.content_hash = trace.computed_content_hash();
         let mut assessment = SealedSetAssessment {
             schema_version: "maxpower.sealed-set-assessment/v1".into(),
             assessment_id,
@@ -877,11 +1545,21 @@ impl ExecutionAssessmentEngine {
             bundle_id: active.bundle.bundle_id,
             bundle_hash: active.bundle.content_hash,
             reps: active.reps,
-            dimension_findings: scaffold_findings(),
+            rep_assessments: active.rep_assessments,
+            set_patterns,
+            dimension_findings,
+            trace,
             content_hash: String::new(),
         };
         assessment.content_hash = assessment.computed_content_hash();
         self.last_terminal = Some(assessment.clone());
+        // The report above is immutable before any same-workout reference is
+        // updated, so this set can never compare against its own future facts.
+        self.completed_set_ids.insert(completed_set_id);
+        self.workout_range_references
+            .entry(reference_key)
+            .or_default()
+            .extend(sealed_range_values);
         Ok(AssessmentEmission::SealedSetAssessment(Box::new(
             assessment,
         )))
@@ -1033,11 +1711,6 @@ fn validate_catalog(
                 bundle_id: bundle.bundle_id.clone(),
             });
         }
-        if bundle.capability == AssessmentBundleCapability::Executable {
-            return Err(AssessmentConfigurationError::ExecutableBundleNotSupported {
-                bundle_id: bundle.bundle_id.clone(),
-            });
-        }
         if bundle.content_hash != bundle.computed_content_hash() {
             return Err(AssessmentConfigurationError::InvalidBundleHash {
                 bundle_id: bundle.bundle_id.clone(),
@@ -1136,6 +1809,1353 @@ fn validate_catalog(
         }
     }
     Ok(())
+}
+
+fn compile_catalog_programs(
+    catalog: &ExecutionAssessmentBundleCatalog,
+) -> Result<HashMap<String, CompiledAssessmentProgram>, AssessmentConfigurationError> {
+    let assets = catalog
+        .installed_assets
+        .iter()
+        .map(|asset| (asset.id.as_str(), asset))
+        .collect::<HashMap<_, _>>();
+    let mut programs = HashMap::new();
+    for bundle in &catalog.bundles {
+        if bundle.capability != AssessmentBundleCapability::Executable {
+            continue;
+        }
+        let read_asset = |reference: &AssessmentAssetRef| {
+            assets.get(reference.id.as_str()).copied().ok_or_else(|| {
+                AssessmentConfigurationError::UnknownBundleAssetReference {
+                    bundle_id: bundle.bundle_id.clone(),
+                    asset_id: reference.id.clone(),
+                }
+            })
+        };
+        let recognition = read_asset(&bundle.lineage.recognition_profile)?;
+        let execution = read_asset(&bundle.lineage.execution_contract)?;
+        let local = read_asset(&bundle.lineage.local_coordinate_strategy)?;
+        let equipment = read_asset(&bundle.lineage.equipment_adapter)?;
+        let feature = read_asset(&bundle.lineage.feature_program)?;
+        let reference = read_asset(&bundle.lineage.reference_policy)?;
+        let rules = read_asset(&bundle.lineage.rule_pack)?;
+        let aggregation = read_asset(&bundle.lineage.set_aggregation_policy)?;
+        let invalid = |detail: &str| AssessmentConfigurationError::InvalidExecutableBundleProgram {
+            bundle_id: bundle.bundle_id.clone(),
+            detail: detail.into(),
+        };
+        let runtime_profile_identity = recognition
+            .content
+            .get("runtimeProfileIdentity")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| invalid("recognition profile runtime identity is missing"))?
+            .to_owned();
+        let runtime_profile_hash = recognition
+            .content
+            .get("runtimeProfileHash")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| is_fixed_hash(value))
+            .and_then(|value| u64::from_str_radix(value, 16).ok())
+            .ok_or_else(|| invalid("recognition profile runtime hash is missing"))?;
+        let phase_names = execution
+            .content
+            .get("phaseOrder")
+            .and_then(serde_json::Value::as_array)
+            .filter(|values| values.len() == 2)
+            .and_then(|values| {
+                Some([
+                    values[0].as_str()?.to_owned(),
+                    values[1].as_str()?.to_owned(),
+                ])
+            })
+            .filter(|values| values.iter().all(|value| !value.trim().is_empty()))
+            .ok_or_else(|| invalid("ExecutionContract phaseOrder must name two phases"))?;
+        if execution
+            .content
+            .get("equipmentSemantics")
+            .and_then(serde_json::Value::as_str)
+            != Some(equipment_semantics_id(
+                bundle.exact_context.equipment_semantics,
+            ))
+        {
+            return Err(invalid(
+                "ExecutionContract equipmentSemantics does not match exact context",
+            ));
+        }
+        if local
+            .content
+            .get("coordinateSpace")
+            .and_then(serde_json::Value::as_str)
+            != Some("causal_set_local_camera_plane")
+            || equipment
+                .content
+                .get("evidencePolicy")
+                .and_then(serde_json::Value::as_str)
+                != Some("independent_subject_associated_rigid_bar_axis")
+            || equipment
+                .content
+                .get("conflictPolicy")
+                .and_then(serde_json::Value::as_str)
+                != Some("abstain_fused_preserve_channels")
+            || equipment
+                .content
+                .get("poseFallback")
+                .and_then(serde_json::Value::as_str)
+                != Some("preserve_as_independent_channel")
+            || feature
+                .content
+                .get("boundedFacts")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+            || rules
+                .content
+                .get("missingEvidence")
+                .and_then(serde_json::Value::as_str)
+                != Some("cannot_judge")
+        {
+            return Err(invalid(
+                "coordinate or equipment policy is unsupported by this runtime",
+            ));
+        }
+        if execution
+            .content
+            .get("dimensions")
+            .and_then(serde_json::Value::as_array)
+            .is_none()
+            || local
+                .content
+                .get("requireNormalizedEndpoints")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+            || equipment
+                .content
+                .get("evidencePolicy")
+                .and_then(serde_json::Value::as_str)
+                .is_none()
+            || feature
+                .content
+                .get("features")
+                .and_then(serde_json::Value::as_array)
+                .is_none()
+            || reference
+                .content
+                .get("compareBeforeUpdate")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+        {
+            return Err(invalid(
+                "one or more executable program assets are incomplete",
+            ));
+        }
+        let range_deviation_ratio = rules
+            .content
+            .get("rangeDeviationRatio")
+            .and_then(serde_json::Value::as_f64)
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite() && (0.0..1.0).contains(value))
+            .ok_or_else(|| invalid("RulePack rangeDeviationRatio is invalid"))?;
+        let feature_ids = feature
+            .content
+            .get("features")
+            .and_then(serde_json::Value::as_array)
+            .expect("feature array validated above")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .filter(|feature_id| {
+                        matches!(
+                            *feature_id,
+                            "cycle_duration"
+                                | "rep_disposition"
+                                | "first_phase_duration"
+                                | "second_phase_duration"
+                                | "phase_duration_ratio"
+                                | "local_primary_excursion"
+                                | "equipment_primary_excursion"
+                                | "pose_primary_excursion"
+                                | "authorization_phase_control"
+                                | "authorization_support_stability"
+                                | "authorization_bilateral_coordination"
+                                | "authorization_trajectory_control"
+                                | "authorization_standard_variant_compatibility"
+                        )
+                    })
+                    .map(str::to_owned)
+                    .ok_or_else(|| invalid("FeatureProgram contains an unknown operator"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if feature_ids.is_empty() {
+            return Err(invalid("FeatureProgram must contain at least one feature"));
+        }
+        if feature_ids.iter().collect::<HashSet<_>>().len() != feature_ids.len() {
+            return Err(invalid("FeatureProgram contains duplicate features"));
+        }
+        let range_feature_id = rules
+            .content
+            .get("rangeFeatureId")
+            .and_then(serde_json::Value::as_str)
+            .filter(|feature_id| feature_ids.iter().any(|value| value == *feature_id))
+            .ok_or_else(|| invalid("RulePack rangeFeatureId is not in FeatureProgram"))?
+            .to_owned();
+        let contract_dimensions = execution
+            .content
+            .get("dimensions")
+            .and_then(serde_json::Value::as_array)
+            .expect("execution dimensions validated above")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .and_then(parse_assessment_dimension)
+                    .ok_or_else(|| invalid("ExecutionContract contains an unknown dimension"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if contract_dimensions.len() != AssessmentDimension::ALL.len()
+            || AssessmentDimension::ALL
+                .iter()
+                .any(|dimension| !contract_dimensions.contains(dimension))
+        {
+            return Err(invalid(
+                "ExecutionContract must classify every assessment dimension",
+            ));
+        }
+        let reference_order = reference
+            .content
+            .get("order")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| invalid("ReferencePolicy order is missing"))?
+            .iter()
+            .map(|value| match value.as_str() {
+                Some("self_geometry") => Ok(ReferenceComparisonKind::SelfGeometry),
+                Some("set_prefix") => Ok(ReferenceComparisonKind::SetPrefix),
+                Some("same_workout_prior_set") => Ok(ReferenceComparisonKind::SameWorkoutPriorSet),
+                _ => Err(invalid("ReferencePolicy order contains an unknown source")),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if reference_order.is_empty()
+            || reference_order.iter().collect::<HashSet<_>>().len() != reference_order.len()
+        {
+            return Err(invalid(
+                "ReferencePolicy order must be non-empty and contain unique sources",
+            ));
+        }
+        let rep_rules = rules
+            .content
+            .get("repRules")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| invalid("RulePack repRules are missing"))?
+            .iter()
+            .map(|rule| {
+                let operator = rule
+                    .get("operator")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| invalid("Rep rule operator is missing"))?;
+                let dimension = rule
+                    .get("dimension")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(parse_assessment_dimension)
+                    .filter(|dimension| contract_dimensions.contains(dimension))
+                    .ok_or_else(|| invalid("Rep rule dimension is outside ExecutionContract"))?;
+                match operator {
+                    "rep_disposition" => {
+                        if dimension != AssessmentDimension::TaskCompletion {
+                            return Err(invalid(
+                                "rep_disposition is restricted to task_completion",
+                            ));
+                        }
+                        let feature_id = rule
+                            .get("featureId")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|id| feature_ids.iter().any(|value| value == *id))
+                            .ok_or_else(|| invalid("rep disposition feature is invalid"))?;
+                        if feature_id != "rep_disposition" {
+                            return Err(invalid(
+                                "rep disposition must consume the typed rep_disposition fact",
+                            ));
+                        }
+                        Ok(CompiledRepRule::RepDisposition {
+                            dimension,
+                            feature_id: feature_id.into(),
+                        })
+                    }
+                    "reference_lower_bound" => {
+                        let feature_id = rule
+                            .get("featureId")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|id| feature_ids.iter().any(|value| value == *id))
+                            .ok_or_else(|| invalid("reference rule feature is invalid"))?;
+                        Ok(CompiledRepRule::ReferenceLowerBound {
+                            dimension,
+                            feature_id: feature_id.into(),
+                        })
+                    }
+                    "features_available" => {
+                        if dimension != AssessmentDimension::ObservationConfidence {
+                            return Err(invalid(
+                                "features_available is restricted to observation_confidence",
+                            ));
+                        }
+                        let ids = rule
+                            .get("featureIds")
+                            .and_then(serde_json::Value::as_array)
+                            .ok_or_else(|| invalid("availability rule features are missing"))?
+                            .iter()
+                            .map(|value| {
+                                value
+                                    .as_str()
+                                    .filter(|id| feature_ids.iter().any(|item| item == *id))
+                                    .map(str::to_owned)
+                                    .ok_or_else(|| invalid("availability rule feature is invalid"))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        if ids.is_empty() || ids.iter().collect::<HashSet<_>>().len() != ids.len() {
+                            return Err(invalid(
+                                "availability rule features must be non-empty and unique",
+                            ));
+                        }
+                        Ok(CompiledRepRule::FeaturesAvailable {
+                            dimension,
+                            feature_ids: ids,
+                        })
+                    }
+                    "abstain" | "not_applicable" => {
+                        let feature_ids = rule
+                            .get("featureIds")
+                            .and_then(serde_json::Value::as_array)
+                            .ok_or_else(|| invalid("non-verdict rule features are missing"))?
+                            .iter()
+                            .map(|value| {
+                                value
+                                    .as_str()
+                                    .filter(|id| feature_ids.iter().any(|item| item == *id))
+                                    .map(str::to_owned)
+                                    .ok_or_else(|| invalid("non-verdict rule feature is invalid"))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        if feature_ids.is_empty()
+                            || feature_ids.iter().collect::<HashSet<_>>().len() != feature_ids.len()
+                        {
+                            return Err(invalid(
+                                "non-verdict rule features must be non-empty and unique",
+                            ));
+                        }
+                        let expected = format!("authorization_{}", dimension.as_str());
+                        if feature_ids.as_slice() != [expected.as_str()] {
+                            return Err(invalid(
+                                "non-verdict rule must consume its typed authorization fact",
+                            ));
+                        }
+                        if operator == "abstain" {
+                            Ok(CompiledRepRule::Abstain {
+                                dimension,
+                                feature_ids,
+                                reason: rule
+                                    .get("reason")
+                                    .and_then(serde_json::Value::as_str)
+                                    .filter(|value| !value.trim().is_empty())
+                                    .ok_or_else(|| invalid("abstain rule reason is missing"))?
+                                    .into(),
+                            })
+                        } else {
+                            Ok(CompiledRepRule::NotApplicable {
+                                dimension,
+                                feature_ids,
+                            })
+                        }
+                    }
+                    _ => Err(invalid("Rep rule operator is unsupported")),
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let ruled_dimensions = rep_rules
+            .iter()
+            .map(compiled_rep_rule_dimension)
+            .collect::<Vec<_>>();
+        if ruled_dimensions.len() != contract_dimensions.len()
+            || contract_dimensions
+                .iter()
+                .any(|dimension| !ruled_dimensions.contains(dimension))
+        {
+            return Err(invalid(
+                "RulePack must define exactly the ExecutionContract dimensions",
+            ));
+        }
+        let minimum_feature_confidence = rules
+            .content
+            .get("minimumFeatureConfidence")
+            .and_then(serde_json::Value::as_f64)
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite() && (0.0..=1.0).contains(value))
+            .ok_or_else(|| invalid("RulePack minimumFeatureConfidence is invalid"))?;
+        let late_set_window = aggregation
+            .content
+            .get("lateSetWindow")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| invalid("set aggregation lateSetWindow is invalid"))?;
+        let minimum_persistent_reps = aggregation
+            .content
+            .get("minimumPersistentReps")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| *value > 0)
+            .ok_or_else(|| invalid("minimumPersistentReps is invalid"))?;
+        let set_rules = aggregation
+            .content
+            .get("setRules")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| invalid("setRules are missing"))?
+            .iter()
+            .map(|rule| {
+                let dimension = rule
+                    .get("dimension")
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(parse_assessment_dimension)
+                    .filter(|dimension| contract_dimensions.contains(dimension))
+                    .ok_or_else(|| invalid("set rule dimension is invalid"))?;
+                match rule.get("operator").and_then(serde_json::Value::as_str) {
+                    Some("rollup_rep_dimension") => {
+                        Ok(CompiledSetRule::RollupRepDimension { dimension })
+                    }
+                    Some("late_set_persistence") => {
+                        if dimension != AssessmentDimension::RangeOfMotion {
+                            return Err(invalid(
+                                "late_set_persistence is restricted to range_of_motion",
+                            ));
+                        }
+                        Ok(CompiledSetRule::LateSetPersistence { dimension })
+                    }
+                    _ => Err(invalid("set rule operator is unsupported")),
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let set_dimensions = set_rules
+            .iter()
+            .map(|rule| match rule {
+                CompiledSetRule::RollupRepDimension { dimension }
+                | CompiledSetRule::LateSetPersistence { dimension } => *dimension,
+            })
+            .collect::<Vec<_>>();
+        if set_dimensions.len() != contract_dimensions.len()
+            || contract_dimensions
+                .iter()
+                .any(|dimension| !set_dimensions.contains(dimension))
+        {
+            return Err(invalid(
+                "set rules must define exactly the ExecutionContract dimensions",
+            ));
+        }
+        programs.insert(
+            bundle.bundle_id.clone(),
+            CompiledAssessmentProgram {
+                runtime_profile_identity,
+                runtime_profile_hash,
+                feature_ids,
+                range_feature_id,
+                phase_names,
+                reference_order,
+                range_deviation_ratio,
+                minimum_feature_confidence,
+                late_set_window,
+                minimum_persistent_reps,
+                rep_rules,
+                set_rules,
+            },
+        );
+    }
+    Ok(programs)
+}
+
+fn parse_assessment_dimension(value: &str) -> Option<AssessmentDimension> {
+    AssessmentDimension::ALL
+        .into_iter()
+        .find(|dimension| dimension.as_str() == value)
+}
+
+fn equipment_semantics_id(value: AssessmentEquipmentSemantics) -> &'static str {
+    match value {
+        AssessmentEquipmentSemantics::RigidBarAxis => "rigid_bar_axis",
+        AssessmentEquipmentSemantics::CableOrMovingHandle => "cable_or_moving_handle",
+        AssessmentEquipmentSemantics::UnilateralCableHandle => "unilateral_cable_handle",
+        AssessmentEquipmentSemantics::ConstrainedMachineLever => "constrained_machine_lever",
+        AssessmentEquipmentSemantics::TwoIndependentDumbbells => "two_independent_dumbbells",
+        AssessmentEquipmentSemantics::BodyOnly => "body_only",
+        AssessmentEquipmentSemantics::FixedSupport => "fixed_support",
+    }
+}
+
+fn compiled_rep_rule_dimension(rule: &CompiledRepRule) -> AssessmentDimension {
+    match rule {
+        CompiledRepRule::RepDisposition { dimension, .. }
+        | CompiledRepRule::ReferenceLowerBound { dimension, .. }
+        | CompiledRepRule::FeaturesAvailable { dimension, .. }
+        | CompiledRepRule::Abstain { dimension, .. }
+        | CompiledRepRule::NotApplicable { dimension, .. } => *dimension,
+    }
+}
+
+fn equipment_channel(
+    evidence: &crate::LocalMotionCoordinateEvidence,
+) -> Option<crate::LocalTrajectoryChannel> {
+    evidence.equipment
+}
+
+fn validate_rep_provenance(
+    active: &ActiveSet,
+    rep: &SealedRep,
+    subject_epoch: u64,
+    sealed_at_timestamp_ms: u64,
+) -> Result<(), AssessmentRuntimeError> {
+    if rep.profile_identity != active.program.runtime_profile_identity
+        || rep.profile_hash != active.program.runtime_profile_hash
+    {
+        return Err(AssessmentRuntimeError::RepProfileMismatch);
+    }
+    if rep.start_timestamp_ms > rep.peak_timestamp_ms
+        || rep.peak_timestamp_ms > rep.turnaround_confirmed_timestamp_ms
+        || rep.turnaround_confirmed_timestamp_ms > rep.end_timestamp_ms
+        || rep.start_frame_id > rep.peak_frame_id
+        || rep.peak_frame_id > rep.end_frame_id
+        || rep.end_timestamp_ms > sealed_at_timestamp_ms
+        || rep.canonical_slice_hash == 0
+    {
+        return Err(AssessmentRuntimeError::InvalidRepProvenance);
+    }
+    let endpoint_exists = |frame_id: u64, timestamp_ms: u64| {
+        active.packets.iter().any(|packet| {
+            packet.subject_epoch == subject_epoch
+                && packet.frame_id == frame_id
+                && packet.timestamp_ms == timestamp_ms
+        })
+    };
+    if !endpoint_exists(rep.start_frame_id, rep.start_timestamp_ms)
+        || !endpoint_exists(rep.peak_frame_id, rep.peak_timestamp_ms)
+        || !endpoint_exists(rep.end_frame_id, rep.end_timestamp_ms)
+    {
+        return Err(AssessmentRuntimeError::InvalidRepProvenance);
+    }
+    Ok(())
+}
+
+fn pose_channel(
+    evidence: &crate::LocalMotionCoordinateEvidence,
+) -> Option<crate::LocalTrajectoryChannel> {
+    evidence.pose
+}
+
+fn fused_channel(
+    evidence: &crate::LocalMotionCoordinateEvidence,
+) -> Option<crate::LocalTrajectoryChannel> {
+    match evidence.channel_agreement {
+        LocalChannelAgreement::Agreement | LocalChannelAgreement::EquipmentOnly => {
+            evidence.equipment
+        }
+        LocalChannelAgreement::PoseOnly => evidence.pose,
+        LocalChannelAgreement::Conflict | LocalChannelAgreement::CannotJudge => None,
+    }
+}
+
+fn trajectory_metrics(
+    endpoints: Option<&crate::NormalizedRepEndpointEvidence>,
+    channel: fn(&crate::LocalMotionCoordinateEvidence) -> Option<crate::LocalTrajectoryChannel>,
+) -> (Option<f32>, f32, f32, f32) {
+    let Some(endpoints) = endpoints else {
+        return (None, 0.0, 0.0, 1.0);
+    };
+    let (Some(start), Some(turn), Some(end)) = (
+        channel(&endpoints.start_anchor),
+        channel(&endpoints.primary_turnaround),
+        channel(&endpoints.end_return),
+    ) else {
+        return (None, 0.0, 0.0, 1.0);
+    };
+    (
+        Some((turn.along_axis_progress - start.along_axis_progress).abs()),
+        start.coverage.min(turn.coverage).min(end.coverage),
+        start.confidence.min(turn.confidence).min(end.confidence),
+        start.uncertainty.max(turn.uncertainty).max(end.uncertainty),
+    )
+}
+
+fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>, Option<f32>) {
+    let source_range = EvidenceSourceRange {
+        source_capture_id: active.context.video_context.source_capture_id.clone(),
+        start_frame_id: rep.start_frame_id,
+        end_frame_id: rep.end_frame_id,
+        start_timestamp_ms: rep.start_timestamp_ms,
+        end_timestamp_ms: rep.end_timestamp_ms,
+        canonical_slice_hash: format!("{:016x}", rep.canonical_slice_hash),
+    };
+    let duration = rep.end_timestamp_ms.saturating_sub(rep.start_timestamp_ms) as f32;
+    let first_phase = rep.peak_timestamp_ms.saturating_sub(rep.start_timestamp_ms) as f32;
+    let second_phase = rep.end_timestamp_ms.saturating_sub(rep.peak_timestamp_ms) as f32;
+    let phase_ratio = (second_phase > 0.0).then_some(first_phase / second_phase);
+    let endpoints = rep.normalized_endpoints.as_ref();
+    let (range_value, trajectory_coverage, trajectory_confidence, trajectory_uncertainty) =
+        trajectory_metrics(endpoints, fused_channel);
+    let (equipment_range, equipment_coverage, equipment_confidence, equipment_uncertainty) =
+        trajectory_metrics(endpoints, equipment_channel);
+    let (pose_range, pose_coverage, pose_confidence, pose_uncertainty) =
+        trajectory_metrics(endpoints, pose_channel);
+    let mut candidates = vec![
+        numeric_feature(
+            "cycle_duration",
+            Some(duration),
+            MotionFeatureUnit::Milliseconds,
+            1.0,
+            1.0,
+            0.0,
+            vec!["rep_engine_boundaries".into()],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "first_phase_duration",
+            Some(first_phase),
+            MotionFeatureUnit::Milliseconds,
+            1.0,
+            1.0,
+            0.0,
+            vec![
+                "rep_engine_boundaries".into(),
+                format!("phase:{}", active.program.phase_names[0]),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "second_phase_duration",
+            Some(second_phase),
+            MotionFeatureUnit::Milliseconds,
+            1.0,
+            1.0,
+            0.0,
+            vec![
+                "rep_engine_boundaries".into(),
+                format!("phase:{}", active.program.phase_names[1]),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "phase_duration_ratio",
+            phase_ratio,
+            MotionFeatureUnit::Ratio,
+            1.0,
+            1.0,
+            0.0,
+            vec![
+                "rep_engine_boundaries".into(),
+                format!("phase:{}", active.program.phase_names[0]),
+                format!("phase:{}", active.program.phase_names[1]),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "local_primary_excursion",
+            range_value,
+            MotionFeatureUnit::NormalizedDisplacement,
+            trajectory_coverage,
+            trajectory_confidence,
+            trajectory_uncertainty,
+            vec![
+                "local_motion_coordinate".into(),
+                "pose_equipment_fusion".into(),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "equipment_primary_excursion",
+            equipment_range,
+            MotionFeatureUnit::NormalizedDisplacement,
+            equipment_coverage,
+            equipment_confidence,
+            equipment_uncertainty,
+            vec![
+                "equipment_measured".into(),
+                "local_motion_coordinate".into(),
+            ],
+            source_range.clone(),
+        ),
+        numeric_feature(
+            "pose_primary_excursion",
+            pose_range,
+            MotionFeatureUnit::NormalizedDisplacement,
+            pose_coverage,
+            pose_confidence,
+            pose_uncertainty,
+            vec!["pose_measured".into(), "local_motion_coordinate".into()],
+            source_range.clone(),
+        ),
+    ];
+    for rule in &active.program.rep_rules {
+        let categorical = match rule {
+            CompiledRepRule::RepDisposition { feature_id, .. } => Some((
+                feature_id.as_str(),
+                format!("{:?}", rep.disposition).to_ascii_lowercase(),
+                vec!["rep_engine_disposition".into()],
+            )),
+            CompiledRepRule::Abstain {
+                feature_ids,
+                reason,
+                ..
+            } => Some((
+                feature_ids[0].as_str(),
+                "not_authorized".into(),
+                vec!["execution_contract".into(), format!("rule_pack:{reason}")],
+            )),
+            CompiledRepRule::NotApplicable { feature_ids, .. } => Some((
+                feature_ids[0].as_str(),
+                "not_applicable".into(),
+                vec!["execution_contract".into(), "rule_pack".into()],
+            )),
+            CompiledRepRule::ReferenceLowerBound { .. }
+            | CompiledRepRule::FeaturesAvailable { .. } => None,
+        };
+        if let Some((feature_id, category, provenance)) = categorical
+            && !candidates
+                .iter()
+                .any(|candidate| candidate.feature_id == feature_id)
+        {
+            candidates.push(categorical_feature(
+                feature_id,
+                category,
+                provenance,
+                source_range.clone(),
+            ));
+        }
+    }
+    let mut facts = active
+        .program
+        .feature_ids
+        .iter()
+        .filter_map(|feature_id| {
+            candidates
+                .iter()
+                .find(|fact| &fact.feature_id == feature_id)
+                .cloned()
+        })
+        .collect::<Vec<_>>();
+    for fact in &mut facts {
+        if fact.confidence < active.program.minimum_feature_confidence {
+            fact.status = MotionFeatureStatus::CannotJudge;
+            fact.value = None;
+            fact.categorical_value = None;
+        }
+    }
+    (facts, range_value)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn numeric_feature(
+    feature_id: &str,
+    value: Option<f32>,
+    unit: MotionFeatureUnit,
+    coverage: f32,
+    confidence: f32,
+    uncertainty: f32,
+    provenance: Vec<String>,
+    source_range: EvidenceSourceRange,
+) -> MotionFeatureFact {
+    MotionFeatureFact {
+        feature_id: feature_id.into(),
+        value,
+        categorical_value: None,
+        unit,
+        status: if value.is_some() {
+            MotionFeatureStatus::Observed
+        } else {
+            MotionFeatureStatus::CannotJudge
+        },
+        coverage: coverage.clamp(0.0, 1.0),
+        confidence: confidence.clamp(0.0, 1.0),
+        uncertainty: uncertainty.clamp(0.0, 1.0),
+        provenance,
+        source_range,
+    }
+}
+
+fn categorical_feature(
+    feature_id: &str,
+    categorical_value: String,
+    provenance: Vec<String>,
+    source_range: EvidenceSourceRange,
+) -> MotionFeatureFact {
+    MotionFeatureFact {
+        feature_id: feature_id.into(),
+        value: None,
+        categorical_value: Some(categorical_value),
+        unit: MotionFeatureUnit::Categorical,
+        status: MotionFeatureStatus::Observed,
+        coverage: 1.0,
+        confidence: 1.0,
+        uncertainty: 0.0,
+        provenance,
+        source_range,
+    }
+}
+
+fn compare_features(
+    features: &[MotionFeatureFact],
+    prefix_range_values: &[ReferenceSample],
+    prior_workout_range_values: &[ReferenceSample],
+    range_feature_id: &str,
+    reference_order: &[ReferenceComparisonKind],
+) -> Vec<ReferenceComparisonFact> {
+    features
+        .iter()
+        .map(|feature| {
+            if feature.feature_id == range_feature_id {
+                let (kind, reference_values) = reference_order
+                    .iter()
+                    .find_map(|kind| match kind {
+                        ReferenceComparisonKind::SetPrefix if !prefix_range_values.is_empty() => {
+                            Some((*kind, prefix_range_values))
+                        }
+                        ReferenceComparisonKind::SameWorkoutPriorSet
+                            if !prior_workout_range_values.is_empty() =>
+                        {
+                            Some((*kind, prior_workout_range_values))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or((ReferenceComparisonKind::NoReference, &[][..]));
+                let reference_value = (!reference_values.is_empty()).then(|| {
+                    reference_values
+                        .iter()
+                        .map(|sample| sample.value)
+                        .sum::<f32>()
+                        / reference_values.len() as f32
+                });
+                let delta_ratio =
+                    feature
+                        .value
+                        .zip(reference_value)
+                        .and_then(|(value, reference)| {
+                            (reference.abs() > f32::EPSILON)
+                                .then_some((value - reference) / reference)
+                        });
+                ReferenceComparisonFact {
+                    feature_id: feature.feature_id.clone(),
+                    kind,
+                    observed_value: feature.value,
+                    observed_category: feature.categorical_value.clone(),
+                    reference_value,
+                    delta_ratio,
+                    reference_source_ids: reference_values
+                        .iter()
+                        .map(|sample| {
+                            format!(
+                                "{}:set:{}:rep:{}",
+                                sample.source_capture_id, sample.set_id, sample.rep_id
+                            )
+                        })
+                        .collect(),
+                    reason: reference_value.is_none().then(|| {
+                        "first Rep establishes the causal set-prefix reference after evaluation"
+                            .into()
+                    }),
+                }
+            } else if feature.feature_id == "phase_duration_ratio"
+                && reference_order.contains(&ReferenceComparisonKind::SelfGeometry)
+            {
+                ReferenceComparisonFact {
+                    feature_id: feature.feature_id.clone(),
+                    kind: ReferenceComparisonKind::SelfGeometry,
+                    observed_value: feature.value,
+                    observed_category: feature.categorical_value.clone(),
+                    reference_value: Some(1.0),
+                    delta_ratio: feature.value.map(|value| value - 1.0),
+                    reference_source_ids: vec![format!(
+                        "{}:self:rep:{}",
+                        feature.source_range.source_capture_id,
+                        feature.source_range.canonical_slice_hash
+                    )],
+                    reason: Some("compares the two measured phases within the same Rep".into()),
+                }
+            } else {
+                ReferenceComparisonFact {
+                    feature_id: feature.feature_id.clone(),
+                    kind: ReferenceComparisonKind::NoReference,
+                    observed_value: feature.value,
+                    observed_category: feature.categorical_value.clone(),
+                    reference_value: None,
+                    delta_ratio: None,
+                    reference_source_ids: Vec::new(),
+                    reason: Some(
+                        "descriptive fact; no governed comparison reference applies".into(),
+                    ),
+                }
+            }
+        })
+        .collect()
+}
+
+struct EvaluatedRepRule {
+    conclusion: QualityConclusion,
+    feature_dependencies: Vec<String>,
+}
+
+fn evaluate_rep_rules(
+    active: &ActiveSet,
+    comparisons: &[ReferenceComparisonFact],
+) -> Vec<EvaluatedRepRule> {
+    active
+        .program
+        .rep_rules
+        .iter()
+        .map(|rule| {
+            let (conclusion, feature_dependencies) = match rule {
+            CompiledRepRule::RepDisposition {
+                dimension,
+                feature_id,
+            } => {
+                let category = comparisons
+                    .iter()
+                    .find(|comparison| comparison.feature_id == *feature_id)
+                    .and_then(|comparison| comparison.observed_category.as_deref());
+                let (state, summary, reason, confidence) = match category {
+                    Some("confirmed") => (
+                        AssessmentConclusionState::ObservedAcceptable,
+                        "RepEngine confirmed a complete causal movement cycle.".into(),
+                        None,
+                        1.0,
+                    ),
+                    Some("needsreview") => (
+                        AssessmentConclusionState::CannotJudge,
+                        "RepEngine sealed a reviewable cycle but did not confirm it.".into(),
+                        Some("rep_needs_review".into()),
+                        0.5,
+                    ),
+                    Some("rejected") => (
+                        AssessmentConclusionState::ObservedDeviation,
+                        "RepEngine rejected this movement candidate as an incomplete or invalid cycle."
+                            .into(),
+                        Some("rep_rejected".into()),
+                        1.0,
+                    ),
+                    _ => (
+                        AssessmentConclusionState::CannotJudge,
+                        "The typed Rep disposition fact was unavailable.".into(),
+                        Some("rep_disposition_unavailable".into()),
+                        0.0,
+                    ),
+                };
+                (
+                    rule_finding(*dimension, state, summary, Vec::new(), reason, confidence),
+                    vec![feature_id.clone()],
+                )
+            }
+            CompiledRepRule::ReferenceLowerBound {
+                dimension,
+                feature_id,
+            } => {
+                let comparison = comparisons
+                    .iter()
+                    .find(|comparison| comparison.feature_id == *feature_id);
+                let Some(delta_ratio) = comparison.and_then(|value| value.delta_ratio) else {
+                    return EvaluatedRepRule {
+                        conclusion: rule_finding(
+                            *dimension,
+                            AssessmentConclusionState::CannotJudge,
+                            "No causal reference exists yet for this measured feature.".into(),
+                            vec![feature_id.clone()],
+                            Some("no_reference".into()),
+                            0.0,
+                        ),
+                        feature_dependencies: vec![feature_id.clone()],
+                    };
+                };
+                let state = if delta_ratio < -active.program.range_deviation_ratio {
+                    AssessmentConclusionState::ObservedDeviation
+                } else {
+                    AssessmentConclusionState::ObservedAcceptable
+                };
+                let summary = if state == AssessmentConclusionState::ObservedDeviation {
+                    format!(
+                        "Observed {feature_id} was {:.1}% below the causal {:?} reference.",
+                        delta_ratio.abs() * 100.0,
+                        comparison.expect("comparison exists").kind
+                    )
+                } else {
+                    format!(
+                        "Observed {feature_id} remained within the configured {:.0}% lower-bound tolerance.",
+                        active.program.range_deviation_ratio * 100.0
+                    )
+                };
+                (
+                    rule_finding(
+                        *dimension,
+                        state,
+                        summary,
+                        vec![feature_id.clone()],
+                        None,
+                        0.75,
+                    ),
+                    vec![feature_id.clone()],
+                )
+            }
+            CompiledRepRule::FeaturesAvailable {
+                dimension,
+                feature_ids,
+            } => {
+                let available = feature_ids.iter().all(|feature_id| {
+                    comparisons.iter().any(|comparison| {
+                        comparison.feature_id == *feature_id
+                            && (comparison.observed_value.is_some()
+                                || comparison.observed_category.is_some())
+                    })
+                });
+                (
+                    rule_finding(
+                        *dimension,
+                        if available {
+                            AssessmentConclusionState::ObservedAcceptable
+                        } else {
+                            AssessmentConclusionState::CannotJudge
+                        },
+                        if available {
+                            format!("Configured facts {} were observable.", feature_ids.join(", "))
+                        } else {
+                            format!(
+                                "Configured facts {} were not all observable.",
+                                feature_ids.join(", ")
+                            )
+                        },
+                        feature_ids.clone(),
+                        (!available).then(|| "required_feature_unavailable".into()),
+                        if available { 0.75 } else { 0.0 },
+                    ),
+                    feature_ids.clone(),
+                )
+            }
+            CompiledRepRule::Abstain {
+                dimension,
+                feature_ids,
+                reason,
+            } => {
+                let authorization_observed = feature_ids.iter().all(|feature_id| {
+                    comparisons.iter().any(|comparison| {
+                        comparison.feature_id == *feature_id
+                            && comparison.observed_category.as_deref() == Some("not_authorized")
+                    })
+                });
+                (
+                    rule_finding(
+                        *dimension,
+                        AssessmentConclusionState::CannotJudge,
+                        if authorization_observed {
+                            "The installed Bundle does not authorize a conclusion for this dimension."
+                                .into()
+                        } else {
+                            "The Bundle authorization fact was unavailable.".into()
+                        },
+                        feature_ids.clone(),
+                        Some(if authorization_observed {
+                            reason.clone()
+                        } else {
+                            "authorization_fact_unavailable".into()
+                        }),
+                        0.0,
+                    ),
+                    feature_ids.clone(),
+                )
+            }
+            CompiledRepRule::NotApplicable {
+                dimension,
+                feature_ids,
+            } => {
+                let not_applicable = feature_ids.iter().all(|feature_id| {
+                    comparisons.iter().any(|comparison| {
+                        comparison.feature_id == *feature_id
+                            && comparison.observed_category.as_deref() == Some("not_applicable")
+                    })
+                });
+                (
+                    rule_finding(
+                        *dimension,
+                        if not_applicable {
+                            AssessmentConclusionState::NotApplicable
+                        } else {
+                            AssessmentConclusionState::CannotJudge
+                        },
+                        if not_applicable {
+                            "This dimension is not applicable to the installed execution contract."
+                                .into()
+                        } else {
+                            "The Bundle applicability fact was unavailable.".into()
+                        },
+                        feature_ids.clone(),
+                        (!not_applicable).then(|| "applicability_fact_unavailable".into()),
+                        if not_applicable { 1.0 } else { 0.0 },
+                    ),
+                    feature_ids.clone(),
+                )
+            }
+            };
+            EvaluatedRepRule {
+                conclusion,
+                feature_dependencies,
+            }
+        })
+        .collect()
+}
+
+fn rule_finding(
+    dimension: AssessmentDimension,
+    state: AssessmentConclusionState,
+    summary: String,
+    evidence: Vec<String>,
+    reason: Option<String>,
+    confidence: f32,
+) -> QualityConclusion {
+    QualityConclusion {
+        conclusion_id: format!("rule:{}", dimension.as_str()),
+        dimension,
+        state,
+        summary,
+        evidence,
+        reason,
+        confidence,
+    }
+}
+
+fn aggregate_set_patterns(active: &ActiveSet) -> Vec<SetPatternFact> {
+    let mut patterns = AssessmentDimension::ALL
+        .into_iter()
+        .map(|dimension| {
+            let findings = active
+                .rep_assessments
+                .iter()
+                .filter_map(|assessment| {
+                    assessment
+                        .dimension_findings
+                        .iter()
+                        .find(|finding| finding.dimension == dimension)
+                })
+                .collect::<Vec<_>>();
+            let deviations = findings
+                .iter()
+                .filter(|finding| finding.state == AssessmentConclusionState::ObservedDeviation)
+                .count();
+            let cannot_judge = findings
+                .iter()
+                .filter(|finding| finding.state == AssessmentConclusionState::CannotJudge)
+                .count();
+            SetPatternFact {
+                pattern_id: format!("dimension_rollup:{}", dimension.as_str()),
+                summary: format!(
+                    "Across {} Rep conclusion(s), {deviations} deviation(s) and {cannot_judge} abstention(s) were observed for {}.",
+                    findings.len(),
+                    dimension.as_str(),
+                ),
+                supporting_rep_ids: active.reps.iter().map(|rep| rep.rep_id).collect(),
+                evidence_dimensions: vec![dimension],
+                confidence: if findings.is_empty() { 0.0 } else { 1.0 },
+            }
+        })
+        .collect::<Vec<_>>();
+    if let (Some(first), Some(last)) = (active.packets.first(), active.packets.last()) {
+        let equipment_observed = active
+            .packets
+            .iter()
+            .filter(|packet| packet.equipment_observed)
+            .count();
+        let fused = active
+            .packets
+            .iter()
+            .filter(|packet| packet.channel_agreement == LocalChannelAgreement::Agreement)
+            .count();
+        let coordinate_frames = active
+            .packets
+            .iter()
+            .map(|packet| packet.coordinate_frame_id)
+            .collect::<HashSet<_>>()
+            .len();
+        patterns.push(SetPatternFact {
+            pattern_id: "observation_chain_availability".into(),
+            summary: format!(
+                "Across {}–{} ms, {equipment_observed}/{} frames had independent equipment and {fused}/{} had agreeing pose/equipment channels; {} coordinate frame(s), ending {}.",
+                first.timestamp_ms,
+                last.timestamp_ms,
+                active.packets.len(),
+                active.packets.len(),
+                coordinate_frames,
+                last.local_state,
+            ),
+            supporting_rep_ids: active.reps.iter().map(|rep| rep.rep_id).collect(),
+            evidence_dimensions: vec![AssessmentDimension::ObservationConfidence],
+            confidence: u8::from(!active.packets.is_empty()) as f32,
+        });
+    }
+    let ranges = active
+        .rep_assessments
+        .iter()
+        .filter_map(|rep| {
+            rep.features
+                .iter()
+                .find(|feature| feature.feature_id == active.program.range_feature_id)
+                .and_then(|feature| feature.value)
+                .map(|value| (rep.rep.rep_id, value))
+        })
+        .collect::<Vec<_>>();
+    let late_window = active.program.late_set_window.min(ranges.len());
+    if ranges.len() > late_window && late_window > 0 {
+        let split = ranges.len() - late_window;
+        let earlier = ranges[..split].iter().map(|(_, value)| *value).sum::<f32>() / split as f32;
+        let late =
+            ranges[split..].iter().map(|(_, value)| *value).sum::<f32>() / late_window as f32;
+        if earlier > f32::EPSILON && late < earlier * (1.0 - active.program.range_deviation_ratio) {
+            patterns.push(SetPatternFact {
+                pattern_id: "late_set_excursion_reduction".into(),
+                summary: "The late-set local excursion was persistently lower than the earlier set prefix."
+                    .into(),
+                supporting_rep_ids: ranges[split..].iter().map(|(rep_id, _)| *rep_id).collect(),
+                evidence_dimensions: vec![AssessmentDimension::RangeOfMotion],
+                confidence: 0.75,
+            });
+        }
+    }
+    patterns
+}
+
+fn aggregate_dimension_findings(
+    active: &ActiveSet,
+    patterns: &[SetPatternFact],
+) -> Vec<QualityConclusion> {
+    active
+        .program
+        .set_rules
+        .iter()
+        .map(|rule| {
+            let dimension = match rule {
+                CompiledSetRule::RollupRepDimension { dimension }
+                | CompiledSetRule::LateSetPersistence { dimension } => *dimension,
+            };
+            let candidates = active
+                .rep_assessments
+                .iter()
+                .flat_map(|rep| &rep.dimension_findings)
+                .filter(|finding| finding.dimension == dimension)
+                .collect::<Vec<_>>();
+            let deviations = candidates
+                .iter()
+                .filter(|finding| finding.state == AssessmentConclusionState::ObservedDeviation)
+                .count();
+            let acceptable = candidates
+                .iter()
+                .filter(|finding| finding.state == AssessmentConclusionState::ObservedAcceptable)
+                .count();
+            let late_pattern = patterns
+                .iter()
+                .find(|pattern| pattern.pattern_id == "late_set_excursion_reduction")
+                .filter(|pattern| {
+                    pattern.supporting_rep_ids.len() >= active.program.minimum_persistent_reps
+                });
+            let persistent_deviation = match rule {
+                CompiledSetRule::LateSetPersistence { .. } => late_pattern.is_some(),
+                CompiledSetRule::RollupRepDimension { .. } => {
+                    deviations >= active.program.minimum_persistent_reps
+                }
+            };
+            if persistent_deviation {
+                rule_finding(
+                    dimension,
+                    AssessmentConclusionState::ObservedDeviation,
+                    late_pattern.map_or_else(
+                        || {
+                            format!(
+                                "{} Rep findings showed a persistent set-level deviation.",
+                                deviations
+                            )
+                        },
+                        |pattern| pattern.summary.clone(),
+                    ),
+                    patterns
+                        .iter()
+                        .filter(|pattern| pattern.evidence_dimensions.contains(&dimension))
+                        .map(|pattern| pattern.pattern_id.clone())
+                        .collect(),
+                    None,
+                    0.75,
+                )
+            } else if acceptable > 0 {
+                rule_finding(
+                    dimension,
+                    AssessmentConclusionState::ObservedAcceptable,
+                    "No persistent set-level deviation satisfied the configured Set Rule.".into(),
+                    candidates
+                        .iter()
+                        .flat_map(|finding| finding.evidence.clone())
+                        .collect(),
+                    None,
+                    0.75,
+                )
+            } else if candidates
+                .iter()
+                .all(|finding| finding.state == AssessmentConclusionState::NotApplicable)
+                && !candidates.is_empty()
+            {
+                rule_finding(
+                    dimension,
+                    AssessmentConclusionState::NotApplicable,
+                    "The dimension is not applicable to this set contract.".into(),
+                    Vec::new(),
+                    None,
+                    1.0,
+                )
+            } else {
+                rule_finding(
+                    dimension,
+                    AssessmentConclusionState::CannotJudge,
+                    "The set did not contain enough persistent judgeable evidence.".into(),
+                    patterns
+                        .iter()
+                        .filter(|pattern| pattern.evidence_dimensions.contains(&dimension))
+                        .map(|pattern| pattern.pattern_id.clone())
+                        .collect(),
+                    Some("insufficient_persistent_set_evidence".into()),
+                    0.0,
+                )
+            }
+        })
+        .collect()
+}
+
+fn feature_summary(feature: &MotionFeatureFact) -> String {
+    if let Some(value) = feature.value {
+        format!("{} = {:.4} {:?}.", feature.feature_id, value, feature.unit)
+    } else if let Some(category) = feature.categorical_value.as_deref() {
+        format!("{} = {category}.", feature.feature_id)
+    } else {
+        format!(
+            "{} cannot be judged from available evidence.",
+            feature.feature_id
+        )
+    }
+}
+
+fn comparison_summary(comparison: &ReferenceComparisonFact) -> String {
+    if let Some(category) = comparison.observed_category.as_deref() {
+        return format!(
+            "{} observed categorical state {category}; no external reference is required.",
+            comparison.feature_id
+        );
+    }
+    match comparison.delta_ratio {
+        Some(delta) => format!(
+            "{} differs from the {:?} reference by {:.1}%.",
+            comparison.feature_id,
+            comparison.kind,
+            delta * 100.0
+        ),
+        None => comparison.reason.clone().unwrap_or_else(|| {
+            format!(
+                "{} has no applicable reference comparison.",
+                comparison.feature_id
+            )
+        }),
+    }
 }
 
 fn invalid_video_context_detail(context: &VideoRecognitionContext) -> Option<String> {
@@ -1374,9 +3394,168 @@ pub fn current_motion_assessment_catalog_v1() -> ExecutionAssessmentBundleCatalo
     }
 }
 
-fn rep_reference(rep: &SealedRep) -> SealedRepReference {
+/// First executable catalog. Ticket 02 promotes one exact governed context;
+/// every other binding remains an explicit context-resolution capability until
+/// its action-family ticket supplies a compatible RecognitionProfile.
+pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v1();
+    catalog.catalog_id = "maxpower/current-motion-assessment/v2".into();
+    let target_bundle_id = "barbell_bench_press/front-oblique-left/v1";
+    let target = catalog
+        .bundles
+        .iter()
+        .find(|bundle| bundle.bundle_id == target_bundle_id)
+        .expect("built-in bench front-oblique-left bundle")
+        .clone();
+    let profile =
+        crate::ExerciseProfile::barbell_bench_press_touched_benchmark_front_left_provisional();
+    let programs = [
+        (
+            target.lineage.recognition_profile.id.clone(),
+            serde_json::json!({
+                "runtimeProfileIdentity": profile.identity,
+                "runtimeProfileHash": format!("{:016x}", profile.content_hash),
+                "maturity": profile.maturity.as_str(),
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.execution_contract.id.clone(),
+            serde_json::json!({
+                "phaseOrder": ["eccentric", "concentric"],
+                "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
+                "equipmentSemantics": "rigid_bar_axis",
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.local_coordinate_strategy.id.clone(),
+            serde_json::json!({
+                "requireNormalizedEndpoints": true,
+                "coordinateSpace": "causal_set_local_camera_plane",
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.equipment_adapter.id.clone(),
+            serde_json::json!({
+                "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                "conflictPolicy": "abstain_fused_preserve_channels",
+                "poseFallback": "preserve_as_independent_channel",
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.feature_program.id.clone(),
+            serde_json::json!({
+                "features": [
+                    "cycle_duration",
+                    "rep_disposition",
+                    "first_phase_duration",
+                    "second_phase_duration",
+                    "phase_duration_ratio",
+                    "local_primary_excursion",
+                    "equipment_primary_excursion",
+                    "pose_primary_excursion",
+                    "authorization_phase_control",
+                    "authorization_support_stability",
+                    "authorization_bilateral_coordination",
+                    "authorization_trajectory_control",
+                    "authorization_standard_variant_compatibility"
+                ],
+                "boundedFacts": true,
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.reference_policy.id.clone(),
+            serde_json::json!({
+                "order": ["self_geometry", "set_prefix", "same_workout_prior_set"],
+                "compareBeforeUpdate": true,
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.rule_pack.id.clone(),
+            serde_json::json!({
+                "rangeFeatureId": "local_primary_excursion",
+                "rangeDeviationRatio": 0.20,
+                "minimumFeatureConfidence": 0.50,
+                "missingEvidence": "cannot_judge",
+                "repRules": [
+                    {"dimension": "task_completion", "operator": "rep_disposition", "featureId": "rep_disposition"},
+                    {"dimension": "range_of_motion", "operator": "reference_lower_bound", "featureId": "local_primary_excursion"},
+                    {"dimension": "phase_control", "operator": "abstain", "featureIds": ["authorization_phase_control"], "reason": "no_governed_phase_quality_threshold"},
+                    {"dimension": "support_stability", "operator": "abstain", "featureIds": ["authorization_support_stability"], "reason": "support_stability_not_observed_by_tracer_contract"},
+                    {"dimension": "bilateral_coordination", "operator": "abstain", "featureIds": ["authorization_bilateral_coordination"], "reason": "anatomical_endpoint_mapping_not_required_by_tracer_contract"},
+                    {"dimension": "trajectory_control", "operator": "abstain", "featureIds": ["authorization_trajectory_control"], "reason": "no_governed_trajectory_quality_corridor"},
+                    {"dimension": "standard_variant_compatibility", "operator": "abstain", "featureIds": ["authorization_standard_variant_compatibility"], "reason": "no_human_standard_variant_truth"},
+                    {"dimension": "observation_confidence", "operator": "features_available", "featureIds": ["local_primary_excursion"]}
+                ],
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+        (
+            target.lineage.set_aggregation_policy.id.clone(),
+            serde_json::json!({
+                "lateSetWindow": 2,
+                "minimumPersistentReps": 2,
+                "setRules": [
+                    {"dimension": "task_completion", "operator": "rollup_rep_dimension"},
+                    {"dimension": "range_of_motion", "operator": "late_set_persistence"},
+                    {"dimension": "phase_control", "operator": "rollup_rep_dimension"},
+                    {"dimension": "support_stability", "operator": "rollup_rep_dimension"},
+                    {"dimension": "bilateral_coordination", "operator": "rollup_rep_dimension"},
+                    {"dimension": "trajectory_control", "operator": "rollup_rep_dimension"},
+                    {"dimension": "standard_variant_compatibility", "operator": "rollup_rep_dimension"},
+                    {"dimension": "observation_confidence", "operator": "rollup_rep_dimension"}
+                ],
+                "deliveryStage": "ticket_02_first_complete_tracer",
+            }),
+        ),
+    ];
+    for (asset_id, content) in programs {
+        let asset = catalog
+            .installed_assets
+            .iter_mut()
+            .find(|asset| asset.id == asset_id)
+            .expect("built-in executable asset");
+        asset.content = content;
+        *asset = asset.clone().with_computed_hash();
+    }
+    let installed = catalog
+        .installed_assets
+        .iter()
+        .map(|asset| (asset.id.clone(), asset.reference()))
+        .collect::<HashMap<_, _>>();
+    for bundle in &mut catalog.bundles {
+        let lineage = &mut bundle.lineage;
+        for reference in [
+            &mut lineage.recognition_profile,
+            &mut lineage.execution_contract,
+            &mut lineage.local_coordinate_strategy,
+            &mut lineage.equipment_adapter,
+            &mut lineage.feature_program,
+            &mut lineage.reference_policy,
+            &mut lineage.rule_pack,
+            &mut lineage.set_aggregation_policy,
+        ] {
+            if let Some(updated) = installed.get(&reference.id) {
+                *reference = updated.clone();
+            }
+        }
+        if bundle.bundle_id == target_bundle_id {
+            bundle.capability = AssessmentBundleCapability::Executable;
+        }
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
+fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
     SealedRepReference {
         rep_id: rep.rep_id,
+        subject_epoch,
         disposition: match rep.disposition {
             RepDisposition::Confirmed => "confirmed",
             RepDisposition::NeedsReview => "needs_review",
@@ -1390,19 +3569,31 @@ fn rep_reference(rep: &SealedRep) -> SealedRepReference {
     }
 }
 
-fn scaffold_findings() -> Vec<QualityConclusion> {
-    AssessmentDimension::ALL
-        .iter()
-        .map(|dimension| QualityConclusion {
-            conclusion_id: format!("set:{}", dimension.as_str()),
-            dimension: *dimension,
-            state: AssessmentConclusionState::CannotJudge,
-            summary: "Cannot judge until the configured FeatureProgram and RulePack run.".into(),
-            evidence: Vec::new(),
-            reason: Some("execution_assessment_engine_scaffold".into()),
-            confidence: 0.0,
-        })
-        .collect()
+fn packet_lineage_id(lineage: &crate::PacketLineage) -> String {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct StablePacketLineage<'a> {
+        sequence_id: &'a str,
+        contract_major: u16,
+        contract_minor: u16,
+        algorithm_version: &'a str,
+        config_version: &'a str,
+        inference_version: &'a str,
+        diagnostic_version: &'a str,
+        active_profile_identity: Option<&'a str>,
+        active_profile_hash: Option<u64>,
+    }
+    hash_serialized(&StablePacketLineage {
+        sequence_id: &lineage.sequence_id,
+        contract_major: lineage.contract.major,
+        contract_minor: lineage.contract.minor,
+        algorithm_version: &lineage.algorithm_version,
+        config_version: &lineage.config_version,
+        inference_version: &lineage.inference_version,
+        diagnostic_version: &lineage.diagnostic_version,
+        active_profile_identity: lineage.active_profile_identity.as_deref(),
+        active_profile_hash: lineage.active_profile_hash,
+    })
 }
 
 fn hash_serialized<T: Serialize>(value: &T) -> String {
@@ -1418,6 +3609,37 @@ fn hash_serialized<T: Serialize>(value: &T) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local_channel(
+        progress: f32,
+        provenance: crate::LocalChannelProvenance,
+    ) -> crate::LocalTrajectoryChannel {
+        crate::LocalTrajectoryChannel {
+            along_axis_progress: progress,
+            cross_axis_displacement: 0.0,
+            confidence: 0.9,
+            coverage: 0.9,
+            uncertainty: 0.1,
+            provenance,
+        }
+    }
+
+    #[test]
+    fn conflicting_pose_and_equipment_remain_independent_and_cannot_be_fused() {
+        let mut evidence = crate::LocalMotionCoordinateEvidence::default();
+        evidence.equipment = Some(local_channel(
+            0.4,
+            crate::LocalChannelProvenance::EquipmentMeasured,
+        ));
+        evidence.pose = Some(local_channel(
+            -0.3,
+            crate::LocalChannelProvenance::PoseMeasured,
+        ));
+        evidence.channel_agreement = LocalChannelAgreement::Conflict;
+        assert!(equipment_channel(&evidence).is_some());
+        assert!(pose_channel(&evidence).is_some());
+        assert_eq!(fused_channel(&evidence), None);
+    }
 
     #[test]
     fn catalog_hash_and_duplicate_context_validation_fail_closed() {

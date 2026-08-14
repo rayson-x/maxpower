@@ -817,6 +817,40 @@ impl ExerciseProfile {
         )
     }
 
+    /// Frozen known-video tracer profile. Its name and maturity deliberately
+    /// prevent callers from mistaking a touched-benchmark feasibility profile
+    /// for source-independent production recognition.
+    pub fn barbell_bench_press_touched_benchmark_front_left_provisional() -> Self {
+        Self::with_computed_hash(Self {
+            identity:
+                "barbell_bench_press/frontLeft45/bilateral/barbell/touched-benchmark-provisional-v1"
+                    .into(),
+            content_hash: 0,
+            maturity: ExerciseMaturity::Provisional,
+            schema: PoseSchemaId::Halpe26,
+            coordinate_unit: "image-angle-deg".into(),
+            state_machine_id: "barbell-axis-primary-ready-effort-return/v1".into(),
+            required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
+            primary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::JointAngle,
+                landmarks: vec![6, 8, 10],
+            },
+            secondary_signal: ExerciseSignal {
+                kind: ExerciseSignalKind::JointAngle,
+                landmarks: vec![5, 7, 9],
+            },
+            direction: MovementDirection::Decreasing,
+            start_amplitude: 10.0,
+            min_primary_amplitude: 30.0,
+            min_secondary_amplitude: 30.0,
+            return_hysteresis: 15.0,
+            ready_tolerance: 8.0,
+            max_gap_ms: 1_000,
+            min_rep_duration_ms: 350,
+            max_rep_duration_ms: 10_000,
+        })
+    }
+
     pub fn seated_barbell_shoulder_press_local_front_provisional() -> Self {
         Self::local_barbell_profile(
             "seated-shoulder-press/front/bilateral/barbell/local-v1",
@@ -1577,9 +1611,31 @@ pub struct MotionPacket {
     /// Newly sealed objects only. Consumers accumulate by `(subject_epoch,
     /// rep_id, revision)`; boundaries never mutate in later packets.
     pub completed_reps: Vec<SealedRep>,
+    /// Subject epoch captured when each corresponding Rep outcome was sealed.
+    /// This is native provenance for assessment; legacy packet encodings omit
+    /// it until a future contract minor explicitly adds the field.
+    pub completed_rep_subject_epochs: Vec<u64>,
     /// Rust-authored, immutable review proposals for `completed_reps`.  This
     /// remains empty for packet contract minors before 1.8.
     pub quality_proposals: Vec<RustQualityProposal>,
+}
+
+/// Opaque end-of-set output authored by `MotionSession`. It carries only Rep
+/// candidates sealed by the installed RepEngine; assessment consumers cannot
+/// construct a second, competing repetition stream.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MotionSetClosure {
+    lineage: PacketLineage,
+    source_timestamp_ms: Option<u64>,
+    subject_epoch: u64,
+    completed_reps: Vec<SealedRep>,
+    completed_rep_subject_epochs: Vec<u64>,
+}
+
+impl MotionSetClosure {
+    pub fn completed_rep_count(&self) -> usize {
+        self.completed_reps.len()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -4800,7 +4856,14 @@ pub struct MotionSession<I: InferenceAdapter, O: OutputAdapter> {
     local_motion_coordinate: LocalMotionCoordinateEstimator,
     rep_engine: Option<RepEngine>,
     set_gate: SetGate,
-    pending_outcomes: Vec<SealedRep>,
+    pending_outcomes: Vec<PendingRepOutcome>,
+    assessment_outcomes: Vec<PendingRepOutcome>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingRepOutcome {
+    subject_epoch: u64,
+    rep: SealedRep,
 }
 
 impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
@@ -4863,6 +4926,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             rep_engine: None,
             set_gate: SetGate::replay_active(),
             pending_outcomes: Vec::new(),
+            assessment_outcomes: Vec::new(),
         })
     }
 
@@ -4870,6 +4934,8 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     /// the same boundary as their recorder; offline replay retains its active
     /// default until it opts into the set lifecycle.
     pub fn begin_set(&mut self) {
+        self.pending_outcomes.clear();
+        self.assessment_outcomes.clear();
         self.set_gate.begin();
         self.local_motion_coordinate.begin_set();
         if let Some(rep_engine) = self.rep_engine.as_mut() {
@@ -4880,11 +4946,68 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     /// Seals the lifecycle without synthesising a rep from an incomplete
     /// movement. A later `begin_set` creates a fresh arming window.
     pub fn finish_set(&mut self) -> Vec<SealedRep> {
+        let outcomes = self
+            .finish_set_outcomes()
+            .into_iter()
+            .map(|outcome| outcome.rep)
+            .collect();
+        self.assessment_outcomes.clear();
+        outcomes
+    }
+
+    fn finish_set_outcomes(&mut self) -> Vec<PendingRepOutcome> {
         self.set_gate.finish();
         self.local_motion_coordinate.finish_set();
-        self.rep_engine
-            .as_mut()
-            .map_or_else(Vec::new, RepEngine::finish_set)
+        let mut outcomes = std::mem::take(&mut self.pending_outcomes);
+        outcomes.extend(
+            self.rep_engine
+                .as_mut()
+                .map_or_else(Vec::new, RepEngine::finish_set)
+                .into_iter()
+                .map(|rep| PendingRepOutcome {
+                    subject_epoch: self.subject_epoch,
+                    rep,
+                }),
+        );
+        outcomes
+    }
+
+    /// Finishes the canonical set and retains RepEngine provenance for the
+    /// execution-assessment lifecycle. Use this instead of `finish_set` when
+    /// driving `ExecutionAssessmentEngine`.
+    pub fn finish_set_for_assessment(&mut self) -> MotionSetClosure {
+        let terminal_outcomes = self.finish_set_outcomes();
+        self.assessment_outcomes.extend(terminal_outcomes);
+        let outcomes = std::mem::take(&mut self.assessment_outcomes);
+        MotionSetClosure {
+            lineage: self.packet_lineage(),
+            source_timestamp_ms: self.last_timestamp_ms,
+            subject_epoch: self.subject_epoch,
+            completed_rep_subject_epochs: outcomes
+                .iter()
+                .map(|outcome| outcome.subject_epoch)
+                .collect(),
+            completed_reps: outcomes.into_iter().map(|outcome| outcome.rep).collect(),
+        }
+    }
+
+    fn packet_lineage(&self) -> PacketLineage {
+        let active_profile = self.rep_engine.as_ref().map(|engine| &engine.profile);
+        PacketLineage {
+            sequence_id: self.config.sequence_id.clone(),
+            contract: self.config.contract,
+            algorithm_version: "motion-session-replay/v1".into(),
+            config_version: "motion-session-config/v1".into(),
+            inference_version: "inference-adapter-contract/v1".into(),
+            diagnostic_version: match self.config.diagnostics {
+                DiagnosticLevel::Off => "diagnostics-off/v1",
+                DiagnosticLevel::Summary => "diagnostics-summary/v1",
+                DiagnosticLevel::Full => "diagnostics-full/v1",
+            }
+            .into(),
+            active_profile_identity: active_profile.map(|profile| profile.identity.clone()),
+            active_profile_hash: active_profile.map(|profile| profile.content_hash),
+        }
     }
 
     pub fn pause_set(&mut self) {
@@ -4999,10 +5122,16 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     .reset_for_discontinuity(LocalCoordinateReason::ObservationGap);
                 if let Some(rep_engine) = self.rep_engine.as_mut() {
                     self.pending_outcomes.extend(
-                        rep_engine.reject_active(
-                            RepEvidenceReason::LongContinuityLoss,
-                            rep_engine.previous,
-                        ),
+                        rep_engine
+                            .reject_active(
+                                RepEvidenceReason::LongContinuityLoss,
+                                rep_engine.previous,
+                            )
+                            .into_iter()
+                            .map(|rep| PendingRepOutcome {
+                                subject_epoch: self.subject_epoch,
+                                rep,
+                            }),
                     );
                 }
             }
@@ -5018,18 +5147,30 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             pose_candidates,
             equipment: raw_equipment,
         } = result;
-        let mut completed_reps = std::mem::take(&mut self.pending_outcomes);
+        let pending_outcomes = std::mem::take(&mut self.pending_outcomes);
+        let mut completed_rep_subject_epochs = pending_outcomes
+            .iter()
+            .map(|outcome| outcome.subject_epoch)
+            .collect::<Vec<_>>();
+        let mut completed_reps = pending_outcomes
+            .into_iter()
+            .map(|outcome| outcome.rep)
+            .collect::<Vec<_>>();
         let (target, selected) = self
             .subject_tracker
             .update(pose_candidates, source_timestamp_ms);
         if self.subject_tracker.take_identity_boundary() {
+            let previous_subject_epoch = self.subject_epoch;
             self.subject_epoch = self.subject_epoch.saturating_add(1);
             self.continuity.reset();
             self.equipment_pose_constraint.reset();
             self.local_motion_coordinate
                 .reset_for_discontinuity(LocalCoordinateReason::SubjectChanged);
-            if let Some(rep_engine) = self.rep_engine.as_mut() {
-                completed_reps.extend(rep_engine.reject_for_subject_change());
+            if let Some(rep_engine) = self.rep_engine.as_mut()
+                && let Some(rep) = rep_engine.reject_for_subject_change()
+            {
+                completed_reps.push(rep);
+                completed_rep_subject_epochs.push(previous_subject_epoch);
             }
         }
         let mut canonical = if let Some(selected) = selected.as_ref() {
@@ -5127,33 +5268,21 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             Vec::new()
         }
         .into_iter()
-        .for_each(|rep| completed_reps.push(rep));
+        .for_each(|rep| {
+            completed_reps.push(rep);
+            completed_rep_subject_epochs.push(self.subject_epoch);
+        });
         let rep_state = self
             .rep_engine
             .as_ref()
             .map_or_else(RepStateSnapshot::default, |engine| engine.state.clone());
-        let active_profile = self.rep_engine.as_ref().map(|engine| &engine.profile);
         let pose_schema = self
             .rep_engine
             .as_ref()
             .map_or(PoseSchemaId::BlazePose33, |engine| engine.profile.schema);
         let joint_angles = measure_joint_angles_for_schema(&canonical, target.state, pose_schema);
         let packet = MotionPacket {
-            lineage: PacketLineage {
-                sequence_id: self.config.sequence_id.clone(),
-                contract: self.config.contract,
-                algorithm_version: "motion-session-replay/v1".into(),
-                config_version: "motion-session-config/v1".into(),
-                inference_version: "inference-adapter-contract/v1".into(),
-                diagnostic_version: match self.config.diagnostics {
-                    DiagnosticLevel::Off => "diagnostics-off/v1",
-                    DiagnosticLevel::Summary => "diagnostics-summary/v1",
-                    DiagnosticLevel::Full => "diagnostics-full/v1",
-                }
-                .into(),
-                active_profile_identity: active_profile.map(|profile| profile.identity.clone()),
-                active_profile_hash: active_profile.map(|profile| profile.content_hash),
-            },
+            lineage: self.packet_lineage(),
             frame_id,
             source_timestamp_ms,
             subject_epoch: self.subject_epoch,
@@ -5169,10 +5298,19 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             } else {
                 Vec::new()
             },
+            completed_rep_subject_epochs,
             completed_reps,
         };
+        let assessment_outcomes = packet
+            .completed_rep_subject_epochs
+            .iter()
+            .copied()
+            .zip(packet.completed_reps.iter().cloned())
+            .map(|(subject_epoch, rep)| PendingRepOutcome { subject_epoch, rep })
+            .collect::<Vec<_>>();
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.output.publish(packet)))
             .map_err(|_| MotionError::PanicIsolated("output_adapter"))??;
+        self.assessment_outcomes.extend(assessment_outcomes);
 
         lease.release();
         self.last_timestamp_ms = Some(source_timestamp_ms);
@@ -5188,6 +5326,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         y: f32,
     ) -> Result<SubjectSelectionAck, SubjectSelectionError> {
         let candidate_id = self.subject_tracker.select_at(x, y)?;
+        let previous_subject_epoch = self.subject_epoch;
         self.subject_epoch = self.subject_epoch.saturating_add(1);
         self.continuity.reset();
         self.equipment_pose_constraint.reset();
@@ -5195,7 +5334,15 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             .reset_for_discontinuity(LocalCoordinateReason::SubjectChanged);
         if let Some(rep_engine) = self.rep_engine.as_mut() {
             self.pending_outcomes
-                .extend(rep_engine.reject_for_subject_change());
+                .extend(
+                    rep_engine
+                        .reject_for_subject_change()
+                        .into_iter()
+                        .map(|rep| PendingRepOutcome {
+                            subject_epoch: previous_subject_epoch,
+                            rep,
+                        }),
+                );
         }
         Ok(SubjectSelectionAck {
             candidate_id,

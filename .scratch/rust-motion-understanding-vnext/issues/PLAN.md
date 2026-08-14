@@ -24,7 +24,7 @@ This plan implements the Rust-only recognition scope in `../PRD.md`. Every actio
 
 ## Frontier
 
-Ticket 01 is complete. Ticket 02 is now the active dependency frontier. Tickets 03–07 can run in parallel after 02. Ticket 08 starts only after all five family slices finish.
+Tickets 01–02 are complete. Tickets 03–07 are now the active family-reuse frontier. Ticket 08 starts only after all five family slices finish.
 
 ## Existing implementation boundary
 

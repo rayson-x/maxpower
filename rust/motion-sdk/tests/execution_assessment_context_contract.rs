@@ -82,7 +82,7 @@ fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_
                 workout_session_id: "workout-premature-execution".into(),
             },
         ),
-        Err(AssessmentConfigurationError::ExecutableBundleNotSupported { .. })
+        Err(AssessmentConfigurationError::InvalidExecutableBundleProgram { .. })
     ));
 
     let mut missing = current_motion_assessment_catalog_v1();
