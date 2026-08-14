@@ -4,6 +4,7 @@ mod barbell_phase;
 mod equipment_fusion;
 mod equipment_pose_constraint;
 mod execution_assessment;
+mod execution_assessment_engine;
 mod local_motion_coordinate;
 #[doc(hidden)]
 pub mod temporal_template;
@@ -13,6 +14,7 @@ pub mod web_abi;
 
 pub use equipment_fusion::*;
 pub use execution_assessment::*;
+pub use execution_assessment_engine::*;
 pub use local_motion_coordinate::*;
 pub use visual_equipment::*;
 
