@@ -1113,6 +1113,22 @@ struct EquipmentProviderEvaluation {
     measured_frame_count: usize,
     predicted_frame_count: usize,
     pose_fused_frame_count: usize,
+    frames: Vec<EquipmentFramePrediction>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EquipmentFramePrediction {
+    frame_number: u64,
+    timestamp_ms: u64,
+    source: String,
+    confidence: f32,
+    uncertainty_px: f32,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    center_y: f32,
 }
 
 fn governed_pose_candidates(frame: &serde_json::Value) -> Vec<PoseCandidate> {
@@ -1252,6 +1268,18 @@ fn governed_frames_with_equipment_provider(
                     }
                     BarbellAxisSource::Fused => evaluation.pose_fused_frame_count += 1,
                 }
+                evaluation.frames.push(EquipmentFramePrediction {
+                    frame_number: frame_id,
+                    timestamp_ms,
+                    source: format!("{:?}", axis.source),
+                    confidence: axis.confidence,
+                    uncertainty_px: axis.uncertainty_px,
+                    x1: axis.x1,
+                    y1: axis.y1,
+                    x2: axis.x2,
+                    y2: axis.y2,
+                    center_y: axis.center_y,
+                });
             }
             axis.and_then(|axis| axis.equipment_observation())
                 .into_iter()

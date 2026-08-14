@@ -426,6 +426,26 @@ interface V7AlignmentReportRow extends Record<string, unknown> {
   readonly contextId: string;
   readonly exerciseId: string;
   readonly capturePosition: string;
+  readonly equipmentProvider: V7EquipmentProvider;
+}
+
+interface V7EquipmentProvider extends Record<string, unknown> {
+  readonly recognitionMode: string;
+  readonly trackerOutputFrameCount: number;
+  readonly frames: readonly V7EquipmentFrame[];
+}
+
+interface V7EquipmentFrame extends Record<string, unknown> {
+  readonly frameNumber: number;
+  readonly timestampMs: number;
+  readonly source: "Measured" | "Predicted" | "Fused";
+  readonly confidence: number;
+  readonly uncertaintyPx: number;
+  readonly x1: number;
+  readonly y1: number;
+  readonly x2: number;
+  readonly y2: number;
+  readonly centerY: number;
 }
 
 interface V7AlignmentReport extends Record<string, unknown> {
@@ -487,6 +507,7 @@ async function readV7AlignmentSources(options: RecognitionReviewServerOptions): 
       sourceCaptureId: requireJsonString(row.sourceCaptureId, `v7 alignment row ${index} source`),
       exerciseId: requireJsonString(row.exerciseId, `v7 alignment row ${index} exercise`),
       capturePosition: requireJsonString(row.capturePosition, `v7 alignment row ${index} view`),
+      equipmentProvider: requireV7EquipmentProvider(row.equipmentProvider, index),
     };
   });
   const labelRecord = requireJsonRecord(labelValue, "v7 alignment labels");
@@ -516,6 +537,56 @@ async function readV7AlignmentSources(options: RecognitionReviewServerOptions): 
     },
     labels,
   };
+}
+
+function requireV7EquipmentProvider(value: unknown, rowIndex: number): V7EquipmentProvider {
+  const label = `v7 alignment row ${rowIndex} equipment provider`;
+  const provider = requireJsonRecord(value, label);
+  const recognitionMode = requireJsonString(provider.recognitionMode, `${label} mode`);
+  const trackerOutputFrameCount = requireJsonNonNegativeInteger(
+    provider.trackerOutputFrameCount,
+    `${label} tracker frame count`,
+  );
+  if (!Array.isArray(provider.frames)) throw new Error(`${label} frames are invalid`);
+  let previousFrameNumber = -1;
+  let previousTimestampMs = -1;
+  const frames = provider.frames.map((valueFrame, frameIndex): V7EquipmentFrame => {
+    const frameLabel = `${label} frame ${frameIndex}`;
+    const frame = requireJsonRecord(valueFrame, frameLabel);
+    const frameNumber = requireJsonNonNegativeInteger(frame.frameNumber, `${frameLabel} number`);
+    const timestampMs = requireJsonNonNegativeInteger(frame.timestampMs, `${frameLabel} timestamp`);
+    if (frameNumber <= previousFrameNumber || timestampMs <= previousTimestampMs) {
+      throw new Error(`${label} frame order is invalid`);
+    }
+    previousFrameNumber = frameNumber;
+    previousTimestampMs = timestampMs;
+    const source = requireJsonString(frame.source, `${frameLabel} source`);
+    if (source !== "Measured" && source !== "Predicted" && source !== "Fused") {
+      throw new Error(`${frameLabel} source is invalid`);
+    }
+    const confidence = requireJsonFiniteNumber(frame.confidence, `${frameLabel} confidence`);
+    const uncertaintyPx = requireJsonFiniteNumber(frame.uncertaintyPx, `${frameLabel} uncertainty`);
+    if (confidence < 0 || confidence > 1 || uncertaintyPx < 0) {
+      throw new Error(`${frameLabel} confidence or uncertainty is invalid`);
+    }
+    return {
+      ...frame,
+      frameNumber,
+      timestampMs,
+      source,
+      confidence,
+      uncertaintyPx,
+      x1: requireJsonFiniteNumber(frame.x1, `${frameLabel} x1`),
+      y1: requireJsonFiniteNumber(frame.y1, `${frameLabel} y1`),
+      x2: requireJsonFiniteNumber(frame.x2, `${frameLabel} x2`),
+      y2: requireJsonFiniteNumber(frame.y2, `${frameLabel} y2`),
+      centerY: requireJsonFiniteNumber(frame.centerY, `${frameLabel} center y`),
+    };
+  });
+  if (trackerOutputFrameCount !== frames.length) {
+    throw new Error(`${label} tracker frame count is invalid`);
+  }
+  return { ...provider, recognitionMode, trackerOutputFrameCount, frames };
 }
 
 async function readJsonFile(path: string, label: string): Promise<unknown> {
@@ -803,6 +874,17 @@ function requireJsonRecord(value: unknown, label: string): Record<string, unknow
 function requireJsonString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${label} is invalid`);
   return value.trim();
+}
+
+function requireJsonFiniteNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function requireJsonNonNegativeInteger(value: unknown, label: string): number {
+  const number = requireJsonFiniteNumber(value, label);
+  if (!Number.isInteger(number) || number < 0) throw new Error(`${label} is invalid`);
+  return number;
 }
 
 async function serveStaticPath(

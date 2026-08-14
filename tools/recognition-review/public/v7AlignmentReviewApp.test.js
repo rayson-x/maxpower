@@ -16,9 +16,10 @@ test("v7 alignment page is independent from the quality annotation desk", () => 
   const html = readFileSync("tools/recognition-review/public/v7-alignment-review.html", "utf8");
   assert.match(html, /data-v7-alignment-review/u);
   assert.match(html, /人工标注 × v7 预测/u);
-  assert.match(html, /不会在浏览器内伪造或重算/u);
+  assert.match(html, /页面只渲染证据，不在浏览器内识别或重算/u);
   assert.match(html, /V7 换向点/u);
-  assert.match(html, /器械未输出/u);
+  assert.match(html, /data-layer="equipment"/u);
+  assert.match(html, /BAR AXIS CENTER Y/u);
   assert.match(html, /v7AlignmentReviewApp\.js/u);
   assert.doesNotMatch(html, /qualityReviewApp\.js/u);
 });
@@ -28,6 +29,8 @@ test("normalization preserves frozen matches and rejects duplicate contexts", ()
   assert.equal(report.rows.length, 1);
   assert.equal(report.rows[0].truthRanges.length, 2);
   assert.equal(report.rows[0].predictedReps.length, 2);
+  assert.equal(report.rows[0].equipmentProvider.frames.length, 2);
+  assert.equal(report.rows[0].equipmentProvider.frames[0].source, "Measured");
   assert.equal(predictionMatchMap(report.rows[0]).get(0).strictBoundaryAligned, true);
   assert.equal(rowProblem(report.rows[0]), true);
   assert.equal(formatPercent(0.871264), "87.1%");
@@ -96,6 +99,36 @@ function fixtureReport() {
       missedCount: 1,
       falsePositiveCount: 1,
       exactSet: true,
+      equipmentProvider: {
+        recognitionMode: "RustVisualRigidBarAxis",
+        trackerOutputFrameCount: 2,
+        frames: [
+          {
+            frameNumber: 30,
+            timestampMs: 1_000,
+            source: "Measured",
+            confidence: 0.92,
+            uncertaintyPx: 2.4,
+            x1: 0.2,
+            y1: 0.42,
+            x2: 0.8,
+            y2: 0.41,
+            centerY: 0.415,
+          },
+          {
+            frameNumber: 31,
+            timestampMs: 1_033,
+            source: "Predicted",
+            confidence: 0.74,
+            uncertaintyPx: 4.8,
+            x1: 0.2,
+            y1: 0.43,
+            x2: 0.8,
+            y2: 0.42,
+            centerY: 0.425,
+          },
+        ],
+      },
       qualityFindingStates: ["TaskCompletion/ObservedAcceptable"],
       bundleId: "bundle-a",
       bundleHash: "c".repeat(64),

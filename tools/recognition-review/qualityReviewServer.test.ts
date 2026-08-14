@@ -294,6 +294,22 @@ test("v7 alignment review exposes immutable report, pose trajectory, and range v
       truthRanges: [{ startMs: 1_000, endMs: 2_000 }],
       predictedReps: [],
       matches: [],
+      equipmentProvider: {
+        recognitionMode: "RustVisualRigidBarAxis",
+        trackerOutputFrameCount: 1,
+        frames: [{
+          frameNumber: 30,
+          timestampMs: 1_000,
+          source: "Measured",
+          confidence: 0.92,
+          uncertaintyPx: 2.4,
+          x1: 0.2,
+          y1: 0.42,
+          x2: 0.8,
+          y2: 0.41,
+          centerY: 0.415,
+        }],
+      },
     }],
   };
   const labels = {
@@ -359,6 +375,10 @@ test("v7 alignment review exposes immutable report, pose trajectory, and range v
     assert.equal(clientReport.rows[0]?.durationMs, 4_000);
     assert.deepEqual(clientReport.rows[0]?.phaseOrder, ["concentric", "eccentric"]);
     assert.equal(clientReport.rows[0]?.phaseContractSource, "action-contract-catalog");
+    assert.deepEqual(
+      (clientReport.rows[0]?.equipmentProvider as { frames: unknown[] }).frames,
+      report.rows[0]!.equipmentProvider.frames,
+    );
     assert.equal(clientReport.rows[0]?.videoPath, undefined);
 
     const poseResponse = await fetch(`${baseUrl}/api/review/v7-pose?id=capture-a`);

@@ -50,6 +50,7 @@
         intervalIou: finite(match.intervalIou, "intervalIou"),
         strictBoundaryAligned: Boolean(match.strictBoundaryAligned),
       })) : [];
+      const equipmentProvider = normalizeEquipmentProvider(rawRow.equipmentProvider);
       return Object.freeze({
         ...rawRow,
         contextId,
@@ -67,12 +68,55 @@
         phaseOrder,
         predictedReps,
         matches,
+        equipmentProvider,
         qualityFindingStates: Array.isArray(rawRow.qualityFindingStates)
           ? rawRow.qualityFindingStates.map(String)
           : [],
       });
     });
     return Object.freeze({ ...raw, rows: Object.freeze(rows) });
+  }
+
+  function normalizeEquipmentProvider(raw) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return Object.freeze({ recognitionMode: "Unavailable", frames: Object.freeze([]) });
+    }
+    let previousFrameNumber = -1;
+    let previousTimestamp = -1;
+    const frames = Array.isArray(raw.frames) ? raw.frames.map((frame, index) => {
+      const frameNumber = finite(frame?.frameNumber, `器械帧 ${index + 1} frameNumber`);
+      const timestampMs = finite(frame?.timestampMs, `器械帧 ${index + 1} timestampMs`);
+      if (frameNumber <= previousFrameNumber || timestampMs <= previousTimestamp) {
+        throw new Error("器械轨迹时间顺序无效");
+      }
+      previousFrameNumber = frameNumber;
+      previousTimestamp = timestampMs;
+      const source = requireString(frame?.source, `器械帧 ${index + 1} source`);
+      if (!["Measured", "Predicted", "Fused"].includes(source)) throw new Error("器械轨迹来源无效");
+      return Object.freeze({
+        frameNumber,
+        timestampMs,
+        source,
+        confidence: finite(frame.confidence, `器械帧 ${index + 1} confidence`),
+        uncertaintyPx: finite(frame.uncertaintyPx, `器械帧 ${index + 1} uncertaintyPx`),
+        x1: finite(frame.x1, `器械帧 ${index + 1} x1`),
+        y1: finite(frame.y1, `器械帧 ${index + 1} y1`),
+        x2: finite(frame.x2, `器械帧 ${index + 1} x2`),
+        y2: finite(frame.y2, `器械帧 ${index + 1} y2`),
+        centerY: finite(frame.centerY, `器械帧 ${index + 1} centerY`),
+      });
+    }) : [];
+    const trackerOutputFrameCount = finite(
+      raw.trackerOutputFrameCount ?? frames.length,
+      "equipment trackerOutputFrameCount",
+    );
+    if (trackerOutputFrameCount !== frames.length) throw new Error("器械轨迹帧计数无效");
+    return Object.freeze({
+      ...raw,
+      recognitionMode: requireString(raw.recognitionMode || "Unavailable", "equipment recognitionMode"),
+      trackerOutputFrameCount,
+      frames: Object.freeze(frames),
+    });
   }
 
   function normalizePhaseOrder(value) {
@@ -182,7 +226,7 @@
       filter: "all",
       search: "",
       speedIndex: 1,
-      layers: { skeleton: true, trail: true, labels: true },
+      layers: { skeleton: true, trail: true, equipment: true, labels: true },
       animationFrame: null,
     };
 
@@ -348,7 +392,7 @@
           : findingState === "ObservedDeviation" ? "deviation" : "unknown";
         return `<div class="finding ${status}">${escapeHtml(dimension)}<br>${escapeHtml(findingState || "Unknown")}</div>`;
       }).join("");
-      byId("lineage").innerHTML = `CATALOG maxpower/current-all-family-assessment/v7<br>PHASE CONTRACT ${escapeHtml(row.phaseContractSource)} · ${phaseLabel(row.phaseOrder[0])} → ${phaseLabel(row.phaseOrder[1])}<br>BUNDLE ${escapeHtml(row.bundleId)}<br>BUNDLE HASH ${escapeHtml(row.bundleHash)}<br>TRACE ROOTS ${row.traceRootCount}<br>TRACE HASH ${escapeHtml(row.traceContentHash)}<br>REPORT ${escapeHtml(state.report.reportDigest)}<br>PREDICTION ${escapeHtml(state.report.predictionSha256)}`;
+      byId("lineage").innerHTML = `CATALOG maxpower/current-all-family-assessment/v7<br>PHASE CONTRACT ${escapeHtml(row.phaseContractSource)} · ${phaseLabel(row.phaseOrder[0])} → ${phaseLabel(row.phaseOrder[1])}<br>EQUIPMENT ${escapeHtml(row.equipmentProvider.recognitionMode)} · ${row.equipmentProvider.frames.length} TRACK FRAMES<br>BUNDLE ${escapeHtml(row.bundleId)}<br>BUNDLE HASH ${escapeHtml(row.bundleHash)}<br>TRACE ROOTS ${row.traceRootCount}<br>TRACE HASH ${escapeHtml(row.traceContentHash)}<br>REPORT ${escapeHtml(state.report.reportDigest)}<br>PREDICTION ${escapeHtml(state.report.predictionSha256)}`;
     }
 
     function renderActiveRep() {
@@ -429,12 +473,17 @@
       if (state.layers.trail) {
         drawWristTrail(9, currentMs, transform, "rgba(77,228,238,.78)");
         drawWristTrail(10, currentMs, transform, "rgba(255,211,78,.78)");
+        if (state.layers.equipment) drawEquipmentTrail(currentMs, transform);
       }
       if (frame && state.layers.skeleton) drawSkeleton(frame.landmarks || [], transform);
+      const equipmentFrame = state.layers.equipment
+        ? frameAt(state.activeRow.equipmentProvider.frames, currentMs)
+        : null;
+      if (equipmentFrame) drawEquipmentAxis(equipmentFrame, transform);
       if (frame && state.layers.labels) drawRepLabels(currentMs, transform);
       const visible = frame?.landmarks?.filter(visiblePoint).length || 0;
       byId("frameReadout").textContent = frame
-        ? `OBS ${formatMs(frame.timestampMs)} · FRAME ${frame.frameNumber} · HALPE26 ${visible}/26 · RAW POSE ONLY`
+        ? `OBS ${formatMs(frame.timestampMs)} · FRAME ${frame.frameNumber} · HALPE26 ${visible}/26 · BAR ${equipmentFrame ? `${equipmentFrame.source.toUpperCase()} ${(equipmentFrame.confidence * 100).toFixed(0)}% ±${equipmentFrame.uncertaintyPx.toFixed(1)}PX` : "UNKNOWN"}`
         : "POSE OBSERVATION UNKNOWN · no frame within 180ms";
     }
 
@@ -474,6 +523,51 @@
         else overlayContext.lineTo(point.x, point.y);
       });
       overlayContext.stroke();
+      overlayContext.restore();
+    }
+
+    function drawEquipmentTrail(currentMs, transform) {
+      const samples = state.activeRow.equipmentProvider.frames.filter((frame) => frame.timestampMs <= currentMs
+        && frame.timestampMs >= currentMs - 1_500);
+      if (samples.length < 2) return;
+      overlayContext.save();
+      overlayContext.strokeStyle = "rgba(255,77,206,.7)";
+      overlayContext.lineWidth = 3;
+      overlayContext.beginPath();
+      let previousTimestampMs = null;
+      samples.forEach((frame) => {
+        const point = mapPoint({ x: (frame.x1 + frame.x2) / 2, y: frame.centerY }, transform);
+        if (previousTimestampMs === null || frame.timestampMs - previousTimestampMs > 180) {
+          overlayContext.moveTo(point.x, point.y);
+        }
+        else overlayContext.lineTo(point.x, point.y);
+        previousTimestampMs = frame.timestampMs;
+      });
+      overlayContext.stroke();
+      overlayContext.restore();
+    }
+
+    function drawEquipmentAxis(frame, transform) {
+      const from = mapPoint({ x: frame.x1, y: frame.y1 }, transform);
+      const to = mapPoint({ x: frame.x2, y: frame.y2 }, transform);
+      const style = frame.source === "Measured"
+        ? { color: "#ff4dce", dash: [], width: 4 }
+        : frame.source === "Predicted"
+          ? { color: "#ffd34e", dash: [8, 5], width: 3 }
+          : { color: "#4de4ee", dash: [3, 4], width: 3 };
+      overlayContext.save();
+      overlayContext.strokeStyle = style.color;
+      overlayContext.fillStyle = style.color;
+      overlayContext.lineWidth = style.width;
+      overlayContext.lineCap = "round";
+      overlayContext.setLineDash(style.dash);
+      overlayContext.shadowColor = style.color;
+      overlayContext.shadowBlur = frame.source === "Measured" ? 12 : 5;
+      overlayContext.beginPath(); overlayContext.moveTo(from.x, from.y); overlayContext.lineTo(to.x, to.y); overlayContext.stroke();
+      overlayContext.setLineDash([]);
+      for (const point of [from, to]) {
+        overlayContext.beginPath(); overlayContext.arc(point.x, point.y, 4, 0, Math.PI * 2); overlayContext.fill();
+      }
       overlayContext.restore();
     }
 
@@ -523,6 +617,7 @@
       plotContext.setLineDash([]);
       drawSignal(9, "#4de4ee");
       drawSignal(10, "#ffd34e");
+      drawEquipmentSignal();
       const playheadX = video.currentTime * 1000 / duration * width;
       plotContext.strokeStyle = "rgba(255,255,255,.9)";
       plotContext.beginPath(); plotContext.moveTo(playheadX, 0); plotContext.lineTo(playheadX, height); plotContext.stroke();
@@ -543,9 +638,29 @@
         });
         plotContext.stroke();
       }
+
+      function drawEquipmentSignal() {
+        if (!state.layers.equipment || !state.activeRow.equipmentProvider.frames.length) return;
+        let started = false;
+        plotContext.strokeStyle = "#ff4dce";
+        plotContext.lineWidth = 2.2;
+        plotContext.beginPath();
+        let previousTimestampMs = null;
+        state.activeRow.equipmentProvider.frames.forEach((frame) => {
+          const x = frame.timestampMs / duration * width;
+          const y = frame.centerY * height;
+          if (!started || previousTimestampMs === null || frame.timestampMs - previousTimestampMs > 180) {
+            plotContext.moveTo(x, y);
+            started = true;
+          }
+          else plotContext.lineTo(x, y);
+          previousTimestampMs = frame.timestampMs;
+        });
+        plotContext.stroke();
+      }
     }
 
-  function visiblePoint(point) {
+    function visiblePoint(point) {
       return Boolean(point) && Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y))
         && Number(point.visibility ?? 1) >= .15;
     }
