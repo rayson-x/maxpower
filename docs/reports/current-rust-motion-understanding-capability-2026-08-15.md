@@ -30,6 +30,23 @@ The only admitted frozen human-metric output currently available covers three so
 | At least one non-rejected Rep | 50 / 53 | Structural availability, not precision/recall |
 | At least one broadly aligned boundary | 50 / 53 | Uses the manifest's 3000 ms start / 1500 ms end structural gate; not an accuracy threshold |
 
+Across 15,879 canonical packets, local-coordinate states were: 6,465 uninitialized, 95 provisional, 86 learning, 5,570 frozen and 3,663 degraded. A pose trajectory channel was available on 4,835 frames; an equipment channel was available on 0 frames. Fusion states were 4,787 pose-only and 11,092 cannot-judge, with no equipment-only, agreement or conflict result because the admitted sidecars contain no equipment tracks.
+
+Set-level dimension judgeability across the 53 reports was:
+
+| Dimension | Observed judgement | Cannot judge / not applicable |
+| --- | ---: | ---: |
+| Task completion | 51 | 2 |
+| Visible range/return | 18 | 35 |
+| Observation confidence | 21 | 32 |
+| Phase control | 0 | 53 |
+| Support stability | 0 | 53 |
+| Bilateral coordination | 0 | 53 |
+| Trajectory control | 0 | 53 |
+| Standard-variant compatibility | 0 | 53 |
+
+Rep comparisons contained 557 self-geometry references, 203 set-prefix references and 7,174 explicit no-reference results; no same-workout prior-set reference is expected because each corpus video is replayed as an independent workout. All 53 reports had eight resolvable conclusion roots. Known-context typed refusals were 0/54; the one non-replayed record was a governance exclusion, not an SDK refusal.
+
 The three structural gaps are:
 
 - `straight_arm_pulldown/frontRight45`, source `field-capture-2026-08-02T19-05-43-889Z`: no non-rejected Rep, expected 8.

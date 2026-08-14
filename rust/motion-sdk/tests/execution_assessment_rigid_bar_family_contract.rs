@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -770,6 +770,35 @@ fn frozen_rust_evaluation_metrics_resolve_to_governed_immutable_evidence() {
         assert_eq!(governed["admission"], expected["admission"]);
         assert_eq!(governed["authority"], expected["authority"]);
         assert_eq!(governed["groupKey"], expected["groupKey"]);
+        let allowed_tasks = governed["allowedTasks"].as_array().expect("allowed tasks");
+        assert!(
+            expected["consumedForTasks"]
+                .as_array()
+                .expect("consumed tasks")
+                .iter()
+                .all(|task| allowed_tasks.contains(task)),
+            "every consumed task must be admitted by governance"
+        );
+        assert!(
+            !expected["selectedFields"]
+                .as_array()
+                .expect("selected fields")
+                .is_empty(),
+            "every source must declare the exact consumed fields"
+        );
+        if expected["assetId"] == "personal-human-rep-ranges-v2" {
+            let allowed_fields = governed["allowedSupervision"]
+                .as_array()
+                .expect("allowed label fields");
+            assert!(
+                expected["selectedFields"]
+                    .as_array()
+                    .expect("selected label fields")
+                    .iter()
+                    .all(|field| field == "sourceCaptureId" || allowed_fields.contains(field)),
+                "evaluation must not consume undeclared label supervision"
+            );
+        }
     }
     let evaluation_asset = catalog_assets
         .iter()
@@ -1079,6 +1108,14 @@ fn governed_real_replays_cover_every_current_action_view() {
     let mut records_with_non_rejected_rep = 0_usize;
     let mut records_with_boundary_alignment = 0_usize;
     let mut structural_gaps = Vec::new();
+    let mut packet_count = 0_usize;
+    let mut local_states = BTreeMap::<String, usize>::new();
+    let mut pose_channel_frames = 0_usize;
+    let mut equipment_channel_frames = 0_usize;
+    let mut fusion_states = BTreeMap::<String, usize>::new();
+    let mut dimension_states = BTreeMap::<String, usize>::new();
+    let mut reference_kinds = BTreeMap::<String, usize>::new();
+    let mut trace_complete_reports = 0_usize;
     for (ordinal, source_group) in replays.iter().enumerate() {
         let action_id = source_group["exerciseId"].as_str().expect("exercise ID");
         let capture_position = source_group["capturePosition"]
@@ -1221,6 +1258,21 @@ fn governed_real_replays_cover_every_current_action_view() {
         }
         let closure = session.finish_set_for_assessment();
         let packets = output.packets();
+        for packet in &packets {
+            packet_count += 1;
+            *local_states
+                .entry(format!("{:?}", packet.local_motion_coordinate.state))
+                .or_default() += 1;
+            pose_channel_frames += usize::from(packet.local_motion_coordinate.pose.is_some());
+            equipment_channel_frames +=
+                usize::from(packet.local_motion_coordinate.equipment.is_some());
+            *fusion_states
+                .entry(format!(
+                    "{:?}",
+                    packet.local_motion_coordinate.channel_agreement
+                ))
+                .or_default() += 1;
+        }
         let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
             current_motion_assessment_catalog_v7(),
             WorkoutAssessmentContext {
@@ -1301,12 +1353,48 @@ fn governed_real_replays_cover_every_current_action_view() {
             AssessmentDimension::ALL.len()
         );
         assert!(!report.trace.conclusion_root_ids.is_empty());
+        for finding in &report.dimension_findings {
+            *dimension_states
+                .entry(format!("{:?}/{:?}", finding.dimension, finding.state))
+                .or_default() += 1;
+        }
+        for comparison in report
+            .rep_assessments
+            .iter()
+            .flat_map(|assessment| &assessment.comparisons)
+        {
+            *reference_kinds
+                .entry(format!("{:?}", comparison.kind))
+                .or_default() += 1;
+        }
+        let node_ids = report
+            .trace
+            .nodes
+            .iter()
+            .map(|node| node.node_id.as_str())
+            .collect::<HashSet<_>>();
+        let trace_complete = report.trace.conclusion_root_ids.len()
+            == AssessmentDimension::ALL.len()
+            && report
+                .trace
+                .conclusion_root_ids
+                .iter()
+                .all(|root| node_ids.contains(root.as_str()));
+        assert!(
+            trace_complete,
+            "every set dimension needs a resolvable trace root"
+        );
+        trace_complete_reports += 1;
     }
     eprintln!(
         "governed replay: resolved=54 replayed={replayed_records} non_rejected={} boundary_aligned={} gaps={:?}",
         records_with_non_rejected_rep, records_with_boundary_alignment, structural_gaps
     );
+    eprintln!(
+        "structural metrics: packets={packet_count} local_states={local_states:?} pose_channel_frames={pose_channel_frames} equipment_channel_frames={equipment_channel_frames} fusion_states={fusion_states:?} dimension_states={dimension_states:?} reference_kinds={reference_kinds:?} trace_complete_reports={trace_complete_reports} typed_refusals=0"
+    );
     assert_eq!(replayed_records, 53, "one governed full-source exclusion");
+    assert_eq!(trace_complete_reports, replayed_records);
 }
 
 #[test]

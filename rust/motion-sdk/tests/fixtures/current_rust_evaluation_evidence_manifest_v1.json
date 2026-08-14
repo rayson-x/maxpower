@@ -1,6 +1,6 @@
 {
   "schemaVersion": "maxpower-rust-evaluation-evidence-manifest/v1",
-  "assembledInputSha256": "35a42017b0b693b62f5268e776ca41363e3aacc23c51b649f5138bd935eccf08",
+  "assembledInputSha256": "b343273ce92d424d08cbdf9bff4aadb4ef193154150a0d30f15c218abf59fd16",
   "assembledInput": {
     "task": "model_evaluation",
     "sourceAssets": [
@@ -9,13 +9,45 @@
         "admission": "label_allowed",
         "authority": "user_reviewed",
         "groupKey": "sourceCaptureId",
-        "immutableSha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727"
+        "immutableSha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727",
+        "consumedForTasks": [
+          "rep_counting",
+          "rep_segmentation"
+        ],
+        "selectedFields": [
+          "sourceCaptureId",
+          "exerciseId",
+          "capturePosition",
+          "expectedCount",
+          "segments[].startMs",
+          "segments[].endMs"
+        ]
       },
       {
         "assetId": "client-single-pass-predictions-and-agent-output",
         "admission": "evaluation_only",
         "authority": "frozen_prediction_or_report",
-        "groupKey": "sourceCaptureId"
+        "groupKey": "sourceCaptureId",
+        "consumedForTasks": [
+          "model_evaluation"
+        ],
+        "selectedFields": [
+          "schemaVersion",
+          "generatedAt",
+          "protocol.pass",
+          "protocol.truthReveal",
+          "protocol.predictionSha256",
+          "protocol.datasetSha256",
+          "aggregate.sourceCount",
+          "aggregate.truthRepCount",
+          "aggregate.confirmedPredictedRepCount",
+          "aggregate.matchedRepCount",
+          "aggregate.candidatePrecision",
+          "aggregate.candidateRecall",
+          "aggregate.exactSetSourceRate",
+          "rows[].confirmedEvaluation.matches[].startOffsetMs",
+          "rows[].confirmedEvaluation.matches[].endOffsetMs"
+        ]
       }
     ],
     "evaluationOutput": {
