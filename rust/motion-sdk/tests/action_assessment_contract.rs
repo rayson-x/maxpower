@@ -737,6 +737,28 @@ fn measured_profile_relative_deviations_are_scoped_to_applicable_dimensions() {
     }
 }
 
+#[test]
+fn normalized_path_conflict_cannot_be_reported_as_aligned_quality() {
+    let proposal = proposal_for_identity_with_disposition(
+        "barbell_bench_press/front/bilateral/barbell/action-assessment-contract-v1",
+        vec![
+            RepObservationFinding::EquipmentPrimaryBoundary,
+            RepObservationFinding::PoseEquipmentTurnaroundAligned,
+            RepObservationFinding::LocalTrajectoryChannelConflict,
+        ],
+        RepDisposition::NeedsReview,
+    );
+
+    assert_eq!(
+        conclusion(&proposal, AssessmentDimension::TrajectoryControl).state,
+        AssessmentConclusionState::ObservedDeviation,
+    );
+    assert_eq!(
+        conclusion(&proposal, AssessmentDimension::ObservationConfidence).state,
+        AssessmentConclusionState::ObservedDeviation,
+    );
+}
+
 fn proposal_for(
     action_id: &str,
     view: &str,

@@ -212,6 +212,39 @@ test("view-bounded dimensions abstain instead of turning projection into physica
   );
 });
 
+test("seated barbell shoulder press supports tracked front-oblique review without enabling dumbbells", () => {
+  for (const capturePosition of ["front", "frontLeft45", "frontRight45"] as const) {
+    const context = getExactActionContextContract({
+      exerciseId: "seated_shoulder_press",
+      capturePosition,
+      equipment: "barbell",
+      trainingSide: "bilateral",
+    });
+    assert.ok(context, `missing seated barbell shoulder press ${capturePosition} contract`);
+    assert.equal(context.capability.phase, "phase_supported");
+    assert.equal(context.capability.equipment, "tracked");
+    assert.ok(context.dimensions.trajectory_control.observations.includes(
+      "equipment_center_path",
+    ));
+
+    if (capturePosition !== "front") {
+      assert.ok(context.dimensions.bilateral_coordination.abstainReasons.includes(
+        "front_oblique_projection_not_physical_height",
+      ));
+      assert.ok(!context.dimensions.trajectory_control.observations.includes(
+        "equipment_axis_image_slope",
+      ));
+    }
+  }
+
+  assert.equal(getExactActionContextContract({
+    exerciseId: "seated_shoulder_press",
+    capturePosition: "frontLeft45",
+    equipment: "dumbbell",
+    trainingSide: "bilateral",
+  }), undefined);
+});
+
 test("physical capture directions remain exact and are never folded into generic front or rear views", () => {
   const positions = ACTION_CONTRACT_CATALOG.flatMap((contract) => (
     contract.contexts.map((context) => context.key.capturePosition)

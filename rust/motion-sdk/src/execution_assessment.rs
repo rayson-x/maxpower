@@ -611,15 +611,20 @@ fn conclusion_for(
             let equipment_coverage_low = rep
                 .observation_findings
                 .contains(&RepObservationFinding::EquipmentPathCoverageLow);
+            let local_channel_conflict = rep
+                .observation_findings
+                .contains(&RepObservationFinding::LocalTrajectoryChannelConflict);
             QualityConclusion {
                 conclusion_id: id,
                 dimension,
-                state: if equipment_coverage_low {
+                state: if equipment_coverage_low || local_channel_conflict {
                     AssessmentConclusionState::ObservedDeviation
                 } else {
                     AssessmentConclusionState::ObservedAcceptable
                 },
-                summary: if equipment_coverage_low {
+                summary: if local_channel_conflict {
+                    "The reliable view-normalized pose and equipment paths conflicted during this Rep."
+                } else if equipment_coverage_low {
                     "The subject-associated equipment path coverage was below the active evidence gate."
                 } else if equipment_primary {
                     "The phase boundary and path came from the subject-associated equipment track."
@@ -631,17 +636,28 @@ fn conclusion_for(
                     format!("equipment_role={}", contract.equipment_role),
                     format!("canonical_slice_hash={:016x}", rep.canonical_slice_hash),
                 ],
-                reason: equipment_coverage_low.then(|| {
-                    "This reports visible equipment-path coverage only; it does not infer force, strength or compensation."
-                        .into()
-                }),
+                reason: if local_channel_conflict {
+                    Some(
+                        "Turnaround timing agreement cannot override conflicting normalized paths; dependent trajectory quality remains reviewable rather than aligned."
+                            .into(),
+                    )
+                } else {
+                    equipment_coverage_low.then(|| {
+                        "This reports visible equipment-path coverage only; it does not infer force, strength or compensation."
+                            .into()
+                    })
+                },
                 confidence,
             }
         }
         AssessmentDimension::ObservationConfidence => {
-            let channel_conflict = rep
-                .observation_findings
-                .contains(&RepObservationFinding::PoseEquipmentTurnaroundConflict);
+            let channel_conflict = rep.observation_findings.iter().any(|finding| {
+                matches!(
+                    finding,
+                    RepObservationFinding::PoseEquipmentTurnaroundConflict
+                        | RepObservationFinding::LocalTrajectoryChannelConflict
+                )
+            });
             let equipment_coverage_low = rep
                 .observation_findings
                 .contains(&RepObservationFinding::EquipmentPathCoverageLow);
@@ -658,7 +674,7 @@ fn conclusion_for(
                 },
                 summary: match rep.disposition {
                     RepDisposition::Confirmed if channel_conflict => {
-                        "Pose and equipment disagreed on the observed turnaround."
+                        "Pose and equipment evidence conflicted during the observed Rep."
                     }
                     RepDisposition::Confirmed if equipment_coverage_low => {
                         "The equipment path had insufficient measured coverage."
@@ -739,10 +755,13 @@ fn proposal_confidence(rep: &SealedRep) -> f32 {
     {
         confidence -= 0.15;
     }
-    if rep
-        .observation_findings
-        .contains(&RepObservationFinding::PoseEquipmentTurnaroundConflict)
-    {
+    if rep.observation_findings.iter().any(|finding| {
+        matches!(
+            finding,
+            RepObservationFinding::PoseEquipmentTurnaroundConflict
+                | RepObservationFinding::LocalTrajectoryChannelConflict
+        )
+    }) {
         confidence -= 0.20;
     }
     if !(rep.start_timestamp_ms < rep.peak_timestamp_ms

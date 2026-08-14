@@ -31,6 +31,42 @@ export interface BenchProfileSelection {
   readonly manifestRef?: ImmutableEvidenceRef;
 }
 
+export interface BenchProfilePromotionRuntime {
+  readonly stableProfile: ImmutableRecognitionProfileRef;
+  readonly manifests: readonly {
+    readonly ref: ImmutableEvidenceRef;
+    readonly manifest: BenchProfilePromotionManifest;
+  }[];
+  readonly evidenceStore: BenchPromotionEvidenceStore;
+  readonly activation?: ProfilePromotionActivation;
+}
+
+let installedRuntime: BenchProfilePromotionRuntime | null = null;
+
+/**
+ * Installs the immutable release decision consumed by every client resolver.
+ * `null` is the production-safe default: the normalized candidate remains
+ * shadow-only and existing stable profile lookup continues unchanged.
+ */
+export function installBenchProfilePromotionRuntime(
+  runtime: BenchProfilePromotionRuntime | null,
+): void {
+  installedRuntime = runtime;
+}
+
+export function resolveInstalledBenchProfileSelection(
+  context: BenchProfileSelectionContext,
+): BenchProfileSelection | null {
+  if (!installedRuntime || context.exerciseId !== "barbell_bench_press") return null;
+  return selectBenchRecognitionProfile({
+    context,
+    stableProfile: installedRuntime.stableProfile,
+    manifests: installedRuntime.manifests,
+    evidenceStore: installedRuntime.evidenceStore,
+    activation: installedRuntime.activation,
+  });
+}
+
 export function selectBenchRecognitionProfile(input: {
   readonly context: BenchProfileSelectionContext;
   readonly stableProfile: ImmutableRecognitionProfileRef;

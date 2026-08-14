@@ -15,6 +15,7 @@ import {
 } from "../../workout/CanonicalSetObservation";
 import type { SetObservationData } from "../../coach/domain";
 import { workoutSetRealtimeGate } from "./workoutRealtimeGate";
+import type { SelectedFreeWeightEquipment } from "../../motion/equipmentRecognitionPolicy";
 
 export type WorkoutSafetySignal =
   | "new_sharp_pain"
@@ -45,6 +46,7 @@ export function resolveWorkoutSetRealtimeCapability(input: {
   capturePosition?: CapturePosition;
   lensFacing?: LensFacing;
   poseModel?: "rtmpose-m-halpe26";
+  selectedEquipment?: SelectedFreeWeightEquipment;
 }): WorkoutSetRealtimeCapability {
   const capturePosition = input.capturePosition
     ?? recommendCapturePosition(input.exerciseVariantId)?.position
@@ -55,6 +57,7 @@ export function resolveWorkoutSetRealtimeCapability(input: {
     input.exerciseVariantId,
     capturePosition,
     input.platform,
+    { selectedEquipment: input.selectedEquipment },
   );
   const runtime = resolveMotionRuntimeCapability({
     exerciseVariantId: input.exerciseVariantId,
@@ -62,6 +65,7 @@ export function resolveWorkoutSetRealtimeCapability(input: {
     lensFacing,
     poseModel,
     platform: input.platform,
+    selectedEquipment: input.selectedEquipment,
   });
   const available = workoutSetRealtimeGate({
     nativeRuntimeAvailable: input.nativeRuntimeAvailable,
@@ -90,6 +94,7 @@ export interface WorkoutSetRealtimeContext {
   setIndex: number;
   targetReps?: number;
   executionLoad?: { value: number; unit: "kg" | "lb" };
+  selectedEquipment?: SelectedFreeWeightEquipment;
   capabilityIdentity?: string;
 }
 

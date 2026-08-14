@@ -16,9 +16,14 @@ import {
   type RecognitionCapability,
 } from "../exerciseRecognition";
 import { colors } from "./theme";
+import {
+  defaultSelectedFreeWeightEquipment,
+  type SelectedFreeWeightEquipment,
+} from "../../motion/equipmentRecognitionPolicy";
 
 export interface SessionConfig {
   exerciseId: string;
+  selectedEquipment: SelectedFreeWeightEquipment;
   capturePosition: CapturePosition;
   lensFacing: LensFacing;
   recognition: RecognitionCapability;
@@ -48,13 +53,23 @@ export function SetupScreen(props: {
     recommendation?.position ?? "front",
   );
   const [lens, setLens] = useState<LensFacing>(defaultLensFacing(props.exerciseId));
+  // The selected exercise is the equipment contract. For example,
+  // seated_shoulder_press is the barbell variant; dumbbell_shoulder_press is
+  // a different action. The camera flow never guesses equipment from pixels.
+  const selectedEquipment = defaultSelectedFreeWeightEquipment(props.exerciseId);
 
-  const recognition = resolveRecognitionCapability(props.exerciseId, position);
+  const recognition = resolveRecognitionCapability(
+    props.exerciseId,
+    position,
+    "android",
+    { selectedEquipment },
+  );
   const runtimeCapability = resolveMotionRuntimeCapability({
     exerciseVariantId: props.exerciseId,
     capturePosition: position,
     lensFacing: lens,
     platform: "android",
+    selectedEquipment,
   });
   const positionMeta = useMemo(
     () => CAPTURE_POSITIONS.find((p) => p.id === position),
@@ -179,6 +194,7 @@ export function SetupScreen(props: {
           onPress={() =>
             props.onStart({
               exerciseId: props.exerciseId,
+              selectedEquipment,
               capturePosition: position,
               lensFacing: lens,
               recognition,

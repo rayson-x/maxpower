@@ -1490,6 +1490,7 @@ pub enum RepEvidenceReason {
     DurationExceeded,
     RequiredJointLoss,
     CoordinateProvisional,
+    LocalTrajectoryChannelConflict,
 }
 
 /// Profile-relative observations attached to a sealed movement. They are not
@@ -1506,6 +1507,9 @@ pub enum RepObservationFinding {
     PoseUnavailableAtTurnaround,
     PoseEquipmentTurnaroundConflict,
     EquipmentPathCoverageLow,
+    /// Reliable view-normalized pose and equipment paths materially
+    /// disagreed during this Rep, even if their extrema occurred together.
+    LocalTrajectoryChannelConflict,
 }
 
 /// Stable anatomical names for the projected joint angles published with
@@ -2064,6 +2068,7 @@ fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
         RepEvidenceReason::DurationExceeded => 6,
         RepEvidenceReason::RequiredJointLoss => 7,
         RepEvidenceReason::CoordinateProvisional => 8,
+        RepEvidenceReason::LocalTrajectoryChannelConflict => 9,
     }
 }
 
@@ -2079,6 +2084,11 @@ fn rep_observation_findings_flags(findings: &[RepObservationFinding]) -> u8 {
                 RepObservationFinding::PoseUnavailableAtTurnaround => 1 << 5,
                 RepObservationFinding::PoseEquipmentTurnaroundConflict => 1 << 6,
                 RepObservationFinding::EquipmentPathCoverageLow => 1 << 7,
+                // The legacy RPS1 flags byte is exhausted. Preserve the
+                // fail-closed conflict semantic for old decoders on the
+                // existing pose/equipment conflict bit; QLT1 retains the
+                // exact local-trajectory finding and explanation.
+                RepObservationFinding::LocalTrajectoryChannelConflict => 1 << 6,
             }
     })
 }
@@ -3015,6 +3025,15 @@ impl RepEngine {
             }
             None => findings.push(RepObservationFinding::PoseUnavailableAtTurnaround),
         }
+        if candidate.local_trajectory_channel_conflict {
+            findings.retain(|finding| {
+                *finding != RepObservationFinding::PoseEquipmentTurnaroundAligned
+            });
+            findings.push(RepObservationFinding::LocalTrajectoryChannelConflict);
+            if disposition == RepDisposition::Confirmed {
+                disposition = RepDisposition::NeedsReview;
+            }
+        }
         if candidate.equipment_coverage < 0.70 {
             findings.push(RepObservationFinding::EquipmentPathCoverageLow);
             if disposition == RepDisposition::Confirmed {
@@ -3044,6 +3063,8 @@ impl RepEngine {
             disposition,
             evidence_reason: if disposition == RepDisposition::Rejected {
                 Some(RepEvidenceReason::AntiInterferenceFilter)
+            } else if candidate.local_trajectory_channel_conflict {
+                Some(RepEvidenceReason::LocalTrajectoryChannelConflict)
             } else if disposition == RepDisposition::NeedsReview && coordinate_provisional {
                 Some(RepEvidenceReason::CoordinateProvisional)
             } else {
@@ -4125,23 +4146,20 @@ fn measure_local_signal(
     match kind {
         ExerciseSignalKind::LocalAlongAxisProgress => {
             let channel = local.equipment?;
-            SignalMeasurement::new(channel.along_axis_progress, channel.confidence)
+            local_channel_measurement(channel, channel.along_axis_progress)
         }
         ExerciseSignalKind::LocalCrossAxisDisplacement => {
             let channel = local.equipment?;
-            SignalMeasurement::new(channel.cross_axis_displacement, channel.confidence)
+            local_channel_measurement(channel, channel.cross_axis_displacement)
         }
         ExerciseSignalKind::LocalEndpointRelativeProgress => {
             let endpoint_one = local.endpoint_one_progress?;
             let endpoint_two = local.endpoint_two_progress?;
-            SignalMeasurement::new(
-                (endpoint_one + endpoint_two) * 0.5,
-                local.equipment?.confidence,
-            )
+            local_channel_measurement(local.equipment?, (endpoint_one + endpoint_two) * 0.5)
         }
-        ExerciseSignalKind::LocalDynamicBarAngle => SignalMeasurement::new(
+        ExerciseSignalKind::LocalDynamicBarAngle => local_channel_measurement(
+            local.equipment?,
             local.baseline_corrected_bar_angle_radians?,
-            local.equipment?.confidence,
         ),
         ExerciseSignalKind::LocalChannelAgreement => {
             let (value, confidence) = match local.channel_agreement {
@@ -4172,13 +4190,41 @@ fn measure_local_signal(
                 ),
                 LocalChannelAgreement::CannotJudge => return None,
             };
-            SignalMeasurement::new(value, confidence)
+            let reliability = match local.channel_agreement {
+                LocalChannelAgreement::Agreement | LocalChannelAgreement::Conflict => {
+                    local.equipment.zip(local.pose).map(|(equipment, pose)| {
+                        local_channel_reliability(equipment).min(local_channel_reliability(pose))
+                    })?
+                }
+                LocalChannelAgreement::EquipmentOnly => local_channel_reliability(local.equipment?),
+                LocalChannelAgreement::PoseOnly => local_channel_reliability(local.pose?),
+                LocalChannelAgreement::CannotJudge => return None,
+            };
+            SignalMeasurement::new(value, confidence.min(reliability))
         }
         ExerciseSignalKind::LocalObservability => {
             SignalMeasurement::new(local.confidence, local.confidence)
         }
         _ => None,
     }
+}
+
+fn local_channel_measurement(
+    channel: LocalTrajectoryChannel,
+    value: f32,
+) -> Option<SignalMeasurement> {
+    SignalMeasurement::new(value, local_channel_reliability(channel))
+}
+
+/// Claim eligibility remains Rust-owned. Confidence cannot mask sparse
+/// coverage or detector uncertainty; either one lowers the phase signal below
+/// the same public transition gate used by all Recognition Profiles.
+fn local_channel_reliability(channel: LocalTrajectoryChannel) -> f32 {
+    channel
+        .confidence
+        .min(channel.coverage)
+        .min(1.0 - channel.uncertainty.clamp(0.0, 1.0))
+        .clamp(0.0, 1.0)
 }
 
 fn signal_confidence(signal: &ExerciseSignal, canonical: &[CanonicalLandmark]) -> f32 {
@@ -4361,6 +4407,26 @@ mod local_profile_signal_consumption_tests {
             measure_signal(PoseSchemaId::Halpe26, &signal, &canonical, None)
                 .map(|measurement| measurement.value),
             Some(0.25),
+        );
+    }
+
+    #[test]
+    fn local_phase_eligibility_uses_coverage_and_uncertainty_with_confidence() {
+        let profile = local_profile(ExerciseSignalKind::LocalAlongAxisProgress);
+        let canonical = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        let mut evidence = local_evidence(ExerciseSignalKind::LocalAlongAxisProgress, 0.5, 1_000);
+        evidence.equipment.as_mut().unwrap().coverage = 0.30;
+        assert!(
+            !profile_signal_transition_eligible(&profile, &canonical, Some(&evidence)),
+            "high detector confidence cannot hide sparse channel coverage",
+        );
+
+        let channel = evidence.equipment.as_mut().unwrap();
+        channel.coverage = 0.95;
+        channel.uncertainty = 0.70;
+        assert!(
+            !profile_signal_transition_eligible(&profile, &canonical, Some(&evidence)),
+            "high detector confidence and coverage cannot hide channel uncertainty",
         );
     }
 }
@@ -4771,6 +4837,8 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             config.image_height_px,
         );
         let subject_tracker = SubjectTracker::new(config.subject_policy);
+        let image_width_px = config.image_width_px;
+        let image_height_px = config.image_height_px;
         Ok(Self {
             config,
             inference,
@@ -4786,7 +4854,10 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             equipment_fusion: EquipmentFusionEngine::new(),
             equipment_pose_constraint:
                 equipment_pose_constraint::EquipmentPoseConstraintEngine::new(),
-            local_motion_coordinate: LocalMotionCoordinateEstimator::new(),
+            local_motion_coordinate: LocalMotionCoordinateEstimator::new(
+                image_width_px,
+                image_height_px,
+            ),
             rep_engine: None,
             set_gate: SetGate::replay_active(),
             pending_outcomes: Vec::new(),

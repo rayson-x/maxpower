@@ -33,7 +33,7 @@
     },
     "rustWasm": {
       "assetId": "maxpower-motion-sdk-wasm",
-      "definitionSha256": "1ef9b34b5b856d6325aece413d553c964d4bafb605e11b9b05acae9c1a10ab2b"
+      "definitionSha256": "9698063b51aba682f337c280c063f987f79c8af60ef87f965bc5bd1c11c33194"
     },
     "touchedBenchmarkBenchProfile": {
       "assetId": "touched-benchmark-bench-profile-config",

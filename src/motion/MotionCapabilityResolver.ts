@@ -1,4 +1,5 @@
 import type { CapturePosition } from "../pose/viewGating";
+import type { SelectedFreeWeightEquipment } from "./equipmentRecognitionPolicy";
 
 export type MotionRuntimePlatform = "android" | "ios" | "web" | "fixture";
 
@@ -10,6 +11,7 @@ export interface MotionCapabilityInput {
   lensFacing: "front" | "back";
   poseModel: "lite" | "full" | "heavy" | "rtmpose-m-halpe26";
   platform: MotionRuntimePlatform;
+  selectedEquipment?: SelectedFreeWeightEquipment;
   profileEnvelope?: { schemaVersion: string; identity?: string; hash?: string; abiVersion?: string };
 }
 

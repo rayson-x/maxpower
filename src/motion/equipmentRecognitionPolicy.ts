@@ -30,6 +30,19 @@ export interface EquipmentRecognitionPolicy {
     | "selected-exercise-does-not-use-supported-equipment";
 }
 
+/**
+ * Product default used only when the selected exercise already fixes the
+ * free-weight variant. Callers must still preserve an explicit user choice.
+ */
+export function defaultSelectedFreeWeightEquipment(
+  exerciseId: string,
+): SelectedFreeWeightEquipment {
+  if (exerciseId === "seated_shoulder_press") return "barbell";
+  if (BARBELL_EXERCISES.has(exerciseId)) return "barbell";
+  if (DUMBBELL_EXERCISES.has(exerciseId)) return "dumbbell";
+  return "none";
+}
+
 const BARBELL_KINDS = Object.freeze([
   "barbell_shaft",
   "weight_plate",

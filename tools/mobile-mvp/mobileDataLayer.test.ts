@@ -19,6 +19,7 @@ import { assessFraming, type FramingLandmark } from "../../src/mobile/frameGatin
 import { assembleSetReport } from "../../src/mobile/setReport";
 import { liveObservationLine, mapFinding, phaseLabel } from "../../src/mobile/findingsCopy";
 import type { DecodedMotionPacket } from "../../src/motion/motionPacket";
+import { resolveWorkoutSetRealtimeCapability } from "../../src/mobile/ui/workoutRealtime";
 
 test("Android 实时识别使用冻结的 YOLOX + RTMPose Halpe-26 多人候选管线", () => {
   const viewSource = fs.readFileSync(path.join(
@@ -130,6 +131,65 @@ test("识别能力：built-in 和 data profile 都能编码为 Android envelope"
   const unavailable = resolveRecognitionCapability("bodyweight_squat", "front");
   assert.equal(unavailable.mode, "none");
   assert.equal(unavailable.canCount, false);
+});
+
+test("杠铃坐姿推肩由动作契约开启杠轴，显式哑铃上下文不会误启", () => {
+  const actionDefault = resolveRecognitionCapability(
+    "seated_shoulder_press",
+    "frontLeft45",
+    "android",
+  );
+  const defaultEnvelope = JSON.parse(actionDefault.nativeProfileJson) as {
+    equipmentVision: string;
+  };
+  assert.equal(actionDefault.profileIdentity, "seated_barbell_shoulder_press_local_front_left");
+  assert.equal(defaultEnvelope.equipmentVision, "barbell_axis");
+
+  const barbell = resolveRecognitionCapability(
+    "seated_shoulder_press",
+    "frontLeft45",
+    "android",
+    { selectedEquipment: "barbell" },
+  );
+  const barbellEnvelope = JSON.parse(barbell.nativeProfileJson) as {
+    profileCode: number;
+    equipmentVision: string;
+  };
+  assert.equal(barbell.mode, "built_in");
+  assert.equal(barbell.profileIdentity, "seated_barbell_shoulder_press_local_front_left");
+  assert.equal(barbellEnvelope.profileCode, 113);
+  assert.equal(barbellEnvelope.equipmentVision, "barbell_axis");
+
+  const dumbbell = resolveRecognitionCapability(
+    "seated_shoulder_press",
+    "frontLeft45",
+    "android",
+    { selectedEquipment: "dumbbell" },
+  );
+  const dumbbellEnvelope = JSON.parse(dumbbell.nativeProfileJson) as {
+    equipmentVision: string;
+  };
+  assert.equal(dumbbell.profileIdentity, "seated_shoulder_press");
+  assert.equal(dumbbellEnvelope.equipmentVision, "off");
+
+  const workoutEntry = resolveWorkoutSetRealtimeCapability({
+    exerciseVariantId: "seated_shoulder_press",
+    selectedEquipment: "barbell",
+    capturePosition: "frontRight45",
+    lensFacing: "back",
+    platform: "android",
+    nativeRuntimeAvailable: true,
+  });
+  assert.equal(workoutEntry.available, true);
+  assert.equal(workoutEntry.profileIdentity, "seated_barbell_shoulder_press_local_front_right");
+
+  const webSource = fs.readFileSync(path.join(
+    process.cwd(),
+    "src/components/CameraPoseView.web.tsx",
+  ), "utf8");
+  assert.match(webSource, /estimateCapturedFrame\(/);
+  assert.match(webSource, /readCapturedLumaFrame\(/);
+  assert.match(webSource, /processCandidates\([\s\S]*candidates,[\s\S]*canonicalTimestampMs,[\s\S]*\[\],[\s\S]*visualEquipmentFrame,[\s\S]*\)/);
 });
 
 test("iOS 只在共享 Halpe-26 Rust packet bridge 下声明 rep count 与 phase", () => {

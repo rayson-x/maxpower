@@ -9,10 +9,14 @@ import {
   installObservedRecognitionProfiles,
   resolveObservedRecognitionProfile,
 } from "../motion/observedRecognitionProfiles";
-import { resolveRustExerciseProfile } from "../motion/rustProfileResolver";
+import { resolveRustRuntimeProfile } from "../motion/rustProfileResolver";
 import { resolveSimulatedRecognitionProfile } from "../motion/simulatedRecognitionProfile";
 import { recommendCapturePosition, type CapturePosition } from "../pose/viewGating";
-import { resolveEquipmentRecognitionPolicy } from "../motion/equipmentRecognitionPolicy";
+import {
+  defaultSelectedFreeWeightEquipment,
+  resolveEquipmentRecognitionPolicy,
+} from "../motion/equipmentRecognitionPolicy";
+import type { SelectedFreeWeightEquipment } from "../motion/equipmentRecognitionPolicy";
 import {
   ExactMotionCapabilityResolver,
   type ExecutableProfileLookup,
@@ -39,6 +43,11 @@ export interface RecognitionCapability {
   readonly nativeProfileJson: string;
 }
 
+export interface RecognitionContextOptions {
+  readonly selectedEquipment?: SelectedFreeWeightEquipment;
+  readonly variation?: string;
+}
+
 const NATIVE_PROFILE_SCHEMA = "maxpower-native-recognition-profile/v1" as const;
 type NativeEquipmentVision = "off" | "barbell_axis";
 
@@ -50,13 +59,16 @@ export function resolveRecognitionCapability(
   exerciseId: string,
   capturePosition: CapturePosition,
   platform: "android" | "ios" | "web" | "fixture" = "android",
+  options: RecognitionContextOptions = {},
 ): RecognitionCapability {
-  const equipmentVision = resolveNativeEquipmentVision(exerciseId);
+  const selectedEquipment = resolveSelectedEquipment(exerciseId, options.selectedEquipment);
+  const equipmentVision = resolveNativeEquipmentVision(exerciseId, selectedEquipment);
   const context = {
     exerciseId,
     capturePosition,
     trainingSide: "bilateral",
-    variation: "",
+    variation: options.variation ?? "",
+    equipment: selectedEquipment,
   } as const;
   if (platform !== "android" && platform !== "ios" && platform !== "fixture") {
     return {
@@ -73,8 +85,10 @@ export function resolveRecognitionCapability(
       }),
     };
   }
-  const builtIn = resolveRustExerciseProfile(context);
-  const observed = resolveObservedRecognitionProfile(context);
+  const runtimeProfile = resolveRustRuntimeProfile(context);
+  const builtIn = runtimeProfile.kind === "built_in" ? runtimeProfile.profile : null;
+  const prefersBuiltIn = builtIn?.includes("_local_") === true;
+  const observed = prefersBuiltIn ? null : resolveObservedRecognitionProfile(context);
   const keepsBuiltInReferenceBinding = builtIn === "lat_pulldown"
     || builtIn === "lat_pulldown_rear_left_45";
   const simulated = !builtIn && !observed
@@ -135,7 +149,12 @@ export function recognitionAvailabilityForExercise(exerciseId: string): Recognit
 /** Android/iOS adapters use this lookup; product claims still go through the exact resolver. */
 export const mobileExecutableProfileLookup: ExecutableProfileLookup = {
   resolve(input) {
-    const recognition = resolveRecognitionCapability(input.exerciseVariantId, input.capturePosition, input.platform);
+    const recognition = resolveRecognitionCapability(
+      input.exerciseVariantId,
+      input.capturePosition,
+      input.platform,
+      { selectedEquipment: input.selectedEquipment },
+    );
     return {
       canRecord: input.platform !== "web",
       canCount: recognition.canCount,
@@ -161,6 +180,7 @@ export function resolveMotionRuntimeCapability(input: {
   platform: "android" | "ios" | "web" | "fixture";
   /** Defaults to the single production landmark stream used by the app. */
   poseModel?: MotionCapabilityInput["poseModel"];
+  selectedEquipment?: SelectedFreeWeightEquipment;
 }): MotionCapabilityDecision {
   return new ExactMotionCapabilityResolver(mobileExecutableProfileLookup).resolve({
     ...input,
@@ -216,14 +236,25 @@ function activateClientPhaseEvidence(
   };
 }
 
-function resolveNativeEquipmentVision(exerciseId: string): NativeEquipmentVision {
-  const policy = resolveEquipmentRecognitionPolicy({ exerciseId });
+function resolveNativeEquipmentVision(
+  exerciseId: string,
+  selectedEquipment?: SelectedFreeWeightEquipment,
+): NativeEquipmentVision {
+  const policy = resolveEquipmentRecognitionPolicy({ exerciseId, selectedEquipment });
   if (!policy.enabled) return "off";
   if (policy.kinds.includes("barbell_shaft")) return "barbell_axis";
   // The policy models future dumbbell evidence, but the native producer in
   // this release implements only the continuous barbell shaft track. Never
   // advertise a client mode that would silently emit no observations.
   return "off";
+}
+
+function resolveSelectedEquipment(
+  exerciseId: string,
+  selectedEquipment?: SelectedFreeWeightEquipment,
+): SelectedFreeWeightEquipment {
+  if (selectedEquipment) return selectedEquipment;
+  return defaultSelectedFreeWeightEquipment(exerciseId);
 }
 
 /**

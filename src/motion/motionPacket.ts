@@ -29,7 +29,8 @@ export type MotionRepEvidenceReason =
   | "anti_interference_filter"
   | "duration_exceeded"
   | "required_joint_loss"
-  | "coordinate_provisional";
+  | "coordinate_provisional"
+  | "local_trajectory_channel_conflict";
 export type MotionRepObservationFinding =
   | "primary_range_below_expectation"
   | "secondary_range_below_expectation"
@@ -1207,6 +1208,7 @@ function decodeRepEvidenceReason(code: number): MotionRepEvidenceReason | null {
     case 6: return "duration_exceeded";
     case 7: return "required_joint_loss";
     case 8: return "coordinate_provisional";
+    case 9: return "local_trajectory_channel_conflict";
     default: throw new Error(`MotionPacket rep evidence reason code ${code} is invalid`);
   }
 }

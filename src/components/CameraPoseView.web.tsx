@@ -19,7 +19,12 @@ import {
   MotionPerformanceDegradationController,
   type MotionDegradationLevel,
 } from "../motion/performanceDegradation";
-import { resolveRustExerciseProfile } from "../motion/rustProfileResolver";
+import { resolveRustRuntimeProfile } from "../motion/rustProfileResolver";
+import {
+  defaultSelectedFreeWeightEquipment,
+  resolveEquipmentRecognitionPolicy,
+  type SelectedFreeWeightEquipment,
+} from "../motion/equipmentRecognitionPolicy";
 import {
   loadObservedRecognitionProfiles,
   resolveObservedRecognitionProfile,
@@ -82,6 +87,7 @@ import {
   type RustRepState,
   type RustSealedRep,
   type RustSetLifecycle,
+  type RustExerciseProfile,
   type RustTargetSnapshot,
 } from "../motion/rustCanonicalWasm";
 import { buildLatPulldownQualityEvidence } from "../pose/trajectoryQualityEvidence";
@@ -240,8 +246,15 @@ function rustProfileForContext(
   capturePosition: CapturePosition,
   trainingSide: TrainingSide,
   variation: string,
-): ReturnType<typeof resolveRustExerciseProfile> {
-  return resolveRustExerciseProfile({ exerciseId, capturePosition, trainingSide, variation });
+): RustExerciseProfile {
+  const resolution = resolveRustRuntimeProfile({
+    exerciseId,
+    capturePosition,
+    trainingSide,
+    variation,
+    equipment: selectedEquipmentForContext(exerciseId, variation),
+  });
+  return resolution.kind === "built_in" ? resolution.profile : null;
 }
 
 function referenceRuntimeContextFor(
@@ -286,9 +299,17 @@ function configureRustExerciseProfile(
   variation: string,
   modelPath: string,
 ): void {
-  const context = { exerciseId, capturePosition, trainingSide, variation } as const;
-  const builtInProfile = resolveRustExerciseProfile(context);
-  const observedProfile = resolveObservedRecognitionProfile(context);
+  const context = {
+    exerciseId,
+    capturePosition,
+    trainingSide,
+    variation,
+    equipment: selectedEquipmentForContext(exerciseId, variation),
+  } as const;
+  const runtimeProfile = resolveRustRuntimeProfile(context);
+  const builtInProfile = runtimeProfile.kind === "built_in" ? runtimeProfile.profile : null;
+  const prefersBuiltIn = builtInProfile?.includes("_local_") === true;
+  const observedProfile = prefersBuiltIn ? null : resolveObservedRecognitionProfile(context);
   // The current high-pulldown normative trajectory binding is deliberately
   // sealed to its built-in profile. Do not make an observed counting profile
   // silently replace the reference-compatible profile until that binding is
@@ -336,6 +357,24 @@ function configureRustExerciseProfile(
       profile: buildSimulatedLatPulldownReference(referenceContext),
     });
   }
+}
+
+function selectedEquipmentForContext(
+  exerciseId: string,
+  variation: string,
+): SelectedFreeWeightEquipment {
+  const detail = variation.trim().toLowerCase();
+  if (["barbell", "杠铃", "杠铃坐姿"].includes(detail)) return "barbell";
+  if (["dumbbell", "哑铃", "哑铃坐姿"].includes(detail)) return "dumbbell";
+  return defaultSelectedFreeWeightEquipment(exerciseId);
+}
+
+function shouldSubmitBarbellLuma(exerciseId: string, variation: string): boolean {
+  const policy = resolveEquipmentRecognitionPolicy({
+    exerciseId,
+    selectedEquipment: selectedEquipmentForContext(exerciseId, variation),
+  });
+  return policy.enabled && policy.kinds.includes("barbell_shaft");
 }
 
 const EXERCISE_MATURITY_LABEL: Record<ExerciseMaturity, string> = {
@@ -614,6 +653,8 @@ function candidateEvidenceLabel(reason: RustSealedRep["evidenceReason"]): string
     anti_interference_filter: "整体移动干扰",
     duration_exceeded: "动作时长超出上限",
     required_joint_loss: "关键关节不可用",
+    coordinate_provisional: "本组局部坐标仍在校准",
+    local_trajectory_channel_conflict: "骨架与器械的规范轨迹冲突",
   };
   return labels[reason] ?? "未说明原因";
 }
@@ -1241,7 +1282,7 @@ export function CameraPoseView() {
     rotateCanonicalSequence();
     let lastCurveUpdate = 0;
     let lastDiagnosticUpdate = 0;
-    const processDecodedFrame = (sourceTimestampMs: number, now: number) => {
+    const processDecodedFrame = async (sourceTimestampMs: number, now: number) => {
       const frameProcessingStartedAt = performance.now();
       const diagnosticMode = recordingActiveRef.current || workspacePageRef.current === "console"
         ? "full" as const
@@ -1293,10 +1334,9 @@ export function CameraPoseView() {
           }
           const inferenceStartedAt = performance.now();
           const inferenceToken = inferenceCompletionGateRef.current.begin();
-          const candidates = engine.estimateCandidates(
-            currentVideo,
-            engine instanceof RtmposeEngine ? mediaTimestampMs : inferenceTimestampMs,
-          );
+          const candidates = engine instanceof RtmposeEngine
+            ? await engine.estimateCapturedFrame(currentVideo, mediaTimestampMs)
+            : engine.estimateCandidates(currentVideo, inferenceTimestampMs);
           const inferenceMs = engine instanceof RtmposeEngine
             ? engine.latestInferenceMs
             : performance.now() - inferenceStartedAt;
@@ -1354,9 +1394,18 @@ export function CameraPoseView() {
             }
             processingStage = "rust-core";
             const rustStartedAt = performance.now();
+            const visualEquipmentFrame = engine instanceof RtmposeEngine
+              && shouldSubmitBarbellLuma(exerciseChoiceRef.current, variationRef.current)
+              ? engine.readCapturedLumaFrame()
+              : undefined;
             const canonicalFrame =
               canonicalSessionRef.current instanceof RustCanonicalWasmSession
-                ? canonicalSessionRef.current.processCandidates(candidates, canonicalTimestampMs)
+                ? canonicalSessionRef.current.processCandidates(
+                  candidates,
+                  canonicalTimestampMs,
+                  [],
+                  visualEquipmentFrame,
+                )
                 : canonicalSessionRef.current!.process(estimate);
             const rustTotalMs = performance.now() - rustStartedAt;
             const rustTiming = canonicalSessionRef.current instanceof RustCanonicalWasmSession
@@ -1692,8 +1741,7 @@ export function CameraPoseView() {
             rotateCanonicalSequence();
           }
           lastProcessedMediaTimeRef.current = mediaTime;
-          processDecodedFrame(mediaTime * 1000, now);
-          scheduleNextFrame();
+          void processDecodedFrame(mediaTime * 1000, now).finally(scheduleNextFrame);
         });
         return;
       }
@@ -1711,7 +1759,8 @@ export function CameraPoseView() {
           }
           if (mediaTime !== lastProcessedMediaTimeRef.current) {
             lastProcessedMediaTimeRef.current = mediaTime;
-            processDecodedFrame(mediaTime * 1000, now);
+            void processDecodedFrame(mediaTime * 1000, now).finally(scheduleNextFrame);
+            return;
           }
         }
         scheduleNextFrame();

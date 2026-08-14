@@ -49,9 +49,12 @@ export function WorkoutMonitorWorkspace(props: WorkoutMonitorWorkspaceProps) {
       exerciseId,
       capturePosition,
       lensFacing: defaultLensFacing(exerciseId),
-      recognition: resolveRecognitionCapability(exerciseId, capturePosition, "ios"),
+      selectedEquipment: props.setContext.selectedEquipment ?? "none",
+      recognition: resolveRecognitionCapability(exerciseId, capturePosition, "ios", {
+        selectedEquipment: props.setContext.selectedEquipment,
+      }),
     };
-  }, [exerciseId]);
+  }, [exerciseId, props.setContext.selectedEquipment]);
   const exit = async () => {
     await closeWorkoutSetRealtime({ application: props.application, userId: props.userId, workoutId: props.workoutId, reason: "exit", setId: props.setContext.setId, onClosed: props.onExit });
   };

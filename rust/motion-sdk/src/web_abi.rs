@@ -280,7 +280,7 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.candidate_meta = None;
     runtime.equipment_observations.clear();
     runtime.equipment_output = None;
-    runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new();
+    runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new(width, height);
     runtime.visual_equipment_tracker.reset();
     runtime.visual_luma.clear();
     runtime.visual_width = 0;
@@ -335,7 +335,7 @@ pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
     runtime.equipment_fusion = super::EquipmentFusionEngine::new();
     runtime.equipment_observations.clear();
     runtime.equipment_output = None;
-    runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new();
+    runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new(width, height);
     runtime.visual_equipment_tracker.reset();
     runtime.visual_luma.clear();
     runtime.visual_width = 0;

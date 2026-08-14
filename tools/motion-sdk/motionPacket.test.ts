@@ -161,7 +161,7 @@ test("minor extension decodes subject identity and immutable sealed rep", () => 
   offset += 1;
   view.setUint8(offset, 0b0110);
   offset += 1;
-  view.setUint8(offset, 1);
+  view.setUint8(offset, 9);
   offset += 1;
   view.setUint8(offset, 0b101);
   offset += 1;
@@ -184,7 +184,7 @@ test("minor extension decodes subject identity and immutable sealed rep", () => 
   assert.equal(packet.completedReps[0].qualityVerdict, null);
   assert.equal(packet.completedReps[0].recoveredAcrossGap, true);
   assert.equal(packet.completedReps[0].disposition, "needs_review");
-  assert.equal(packet.completedReps[0].evidenceReason, "short_continuity_recovery");
+  assert.equal(packet.completedReps[0].evidenceReason, "local_trajectory_channel_conflict");
   assert.deepEqual(packet.completedReps[0].observationFindings, [
     "primary_range_below_expectation",
     "cycle_faster_than_expected",

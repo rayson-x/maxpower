@@ -169,6 +169,7 @@ struct FrozenLocalCoordinateFrame {
     equipment_origin: [f32; 2],
     pose_origin: Option<[f32; 2]>,
     scale: f32,
+    equipment_scale_px: f32,
 }
 
 impl Default for LocalMotionCoordinateEvidence {
@@ -212,6 +213,8 @@ pub(crate) struct LocalMotionCoordinateEstimator {
     action_axis_prior: LocalActionAxisPrior,
     coarse_view: Option<LocalCoarseView>,
     canonical_feed_mirrored: Option<bool>,
+    image_width_px: u32,
+    image_height_px: u32,
     state: LocalCoordinateState,
     subject_candidate_id: Option<u64>,
     last_timestamp_ms: Option<u64>,
@@ -228,8 +231,12 @@ pub(crate) struct LocalMotionCoordinateEstimator {
 }
 
 impl LocalMotionCoordinateEstimator {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(image_width_px: u32, image_height_px: u32) -> Self {
+        Self {
+            image_width_px,
+            image_height_px,
+            ..Self::default()
+        }
     }
 
     pub(crate) fn begin_set(&mut self) {
@@ -237,12 +244,16 @@ impl LocalMotionCoordinateEstimator {
         let coarse_view = self.coarse_view;
         let canonical_feed_mirrored = self.canonical_feed_mirrored;
         let action_axis_prior = self.action_axis_prior;
+        let image_width_px = self.image_width_px;
+        let image_height_px = self.image_height_px;
         *self = Self {
             active: true,
             coordinate_frame_id: next_id,
             coarse_view,
             canonical_feed_mirrored,
             action_axis_prior,
+            image_width_px,
+            image_height_px,
             state: LocalCoordinateState::Uninitialized,
             latest: LocalMotionCoordinateEvidence {
                 coordinate_frame_id: next_id,
@@ -448,6 +459,11 @@ impl LocalMotionCoordinateEstimator {
                     equipment_origin: preparation_origin,
                     pose_origin: preparation_pose_origin,
                     scale,
+                    equipment_scale_px: axis_projected_length_px(
+                        baseline_axis,
+                        self.image_width_px,
+                        self.image_height_px,
+                    ),
                 });
                 self.baseline_axis_angle = Some(baseline_axis.image_angle_radians());
                 self.baseline_endpoints = Some(baseline_axis);
@@ -471,6 +487,15 @@ impl LocalMotionCoordinateEstimator {
         };
         let equipment_confidence =
             (track.observation_score * track.association_confidence).clamp(0.0, 1.0);
+        let equipment_scale_px = self.frozen_frame.map_or_else(
+            || axis_projected_length_px(axis, self.image_width_px, self.image_height_px),
+            |frame| frame.equipment_scale_px,
+        );
+        let equipment_uncertainty = track
+            .uncertainty_px
+            .map_or(1.0 - equipment_confidence, |uncertainty_px| {
+                uncertainty_px / equipment_scale_px.max(f32::EPSILON)
+            });
         let equipment_channel = trajectory_channel(
             center,
             origin,
@@ -479,7 +504,7 @@ impl LocalMotionCoordinateEstimator {
             scale,
             equipment_confidence,
             self.channel_coverage(self.equipment_samples),
-            1.0 - equipment_confidence,
+            equipment_uncertainty,
             LocalChannelProvenance::EquipmentMeasured,
         );
         let pose_confidence = measured_wrist_confidence(independent_pose);
@@ -499,6 +524,8 @@ impl LocalMotionCoordinateEstimator {
             )
         });
         let agreement = channel_agreement(equipment_channel, pose_channel);
+        let equipment_reliability =
+            equipment_channel.map_or(0.0, |channel| channel_reliability_for_phase_claim(&channel));
         let baseline = self.baseline_endpoints.unwrap_or(axis);
         let endpoint_one_progress =
             dot([axis.x1 - baseline.x1, axis.y1 - baseline.y1], primary_axis) / scale;
@@ -541,9 +568,9 @@ impl LocalMotionCoordinateEstimator {
                 .baseline_axis_angle
                 .map(|baseline| axis.image_angle_radians() - baseline),
             confidence: if self.state == LocalCoordinateState::Frozen {
-                equipment_confidence
+                equipment_reliability
             } else {
-                (equipment_confidence * 0.6).clamp(0.0, 1.0)
+                (equipment_reliability * 0.6).clamp(0.0, 1.0)
             },
             ..LocalMotionCoordinateEvidence::default()
         };
@@ -593,7 +620,8 @@ impl LocalMotionCoordinateEstimator {
         } else {
             LocalChannelAgreement::CannotJudge
         };
-        self.latest.confidence = pose.map_or(0.0, |channel| channel.confidence);
+        self.latest.confidence =
+            pose.map_or(0.0, |channel| channel_reliability_for_phase_claim(&channel));
         self.latest.clone()
     }
 
@@ -786,6 +814,10 @@ fn trajectory_channel(
     })
 }
 
+fn axis_projected_length_px(axis: EquipmentAxis2d, width_px: u32, height_px: u32) -> f32 {
+    ((axis.x2 - axis.x1) * width_px as f32).hypot((axis.y2 - axis.y1) * height_px as f32)
+}
+
 fn channel_agreement(
     equipment: Option<LocalTrajectoryChannel>,
     pose: Option<LocalTrajectoryChannel>,
@@ -815,6 +847,14 @@ fn channel_is_reliable_for_phase_claim(channel: &LocalTrajectoryChannel) -> bool
     channel.confidence >= CHANNEL_MINIMUM_CONFIDENCE
         && channel.coverage >= CHANNEL_MINIMUM_COVERAGE
         && channel.uncertainty <= CHANNEL_MAXIMUM_UNCERTAINTY
+}
+
+fn channel_reliability_for_phase_claim(channel: &LocalTrajectoryChannel) -> f32 {
+    channel
+        .confidence
+        .min(channel.coverage)
+        .min(1.0 - channel.uncertainty.clamp(0.0, 1.0))
+        .clamp(0.0, 1.0)
 }
 
 fn dot(left: [f32; 2], right: [f32; 2]) -> f32 {

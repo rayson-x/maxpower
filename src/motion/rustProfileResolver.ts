@@ -1,4 +1,8 @@
 import type { RustExerciseProfile } from "./rustCanonicalWasm";
+import {
+  resolveInstalledBenchProfileSelection,
+  type BenchProfileSelection,
+} from "./benchProfileSelector";
 
 export interface RustProfileContext {
   readonly exerciseId: string;
@@ -8,6 +12,64 @@ export interface RustProfileContext {
   readonly equipment?: "barbell" | "dumbbell" | "none";
   /** Candidate profiles are never selected by default. */
   readonly experiment?: "local-motion-coordinate-v1";
+}
+
+export type RustRuntimeProfileResolution = Readonly<{
+  kind: "built_in";
+  profile: Exclude<RustExerciseProfile, null>;
+  promotion: Pick<BenchProfileSelection, "status" | "reasonCodes"> | null;
+}> | Readonly<{
+  kind: "legacy";
+  profile: null;
+  promotion: Pick<BenchProfileSelection, "status" | "reasonCodes"> | null;
+}>;
+
+const BENCH_LOCAL_PROFILE_IDENTITY = "barbell_bench_press/local-motion/v1";
+
+/**
+ * Shared production profile gate used by Web and both native clients.
+ * Bench local-coordinate profiles require immutable evidence plus an exact
+ * manual activation. The separately scoped shoulder-press expansion is
+ * executable only when the caller explicitly selects a barbell.
+ */
+export function resolveRustRuntimeProfile(
+  context: RustProfileContext,
+): RustRuntimeProfileResolution {
+  if (context.exerciseId === "barbell_bench_press") {
+    const view = normalizeCoarseMotionView(context.capturePosition);
+    const promotion = resolveInstalledBenchProfileSelection({
+      exerciseId: context.exerciseId,
+      variation: normalizedBenchVariation(context.variation),
+      equipment: context.equipment ?? "none",
+      trainingSide: context.trainingSide,
+      capturePosition: view ?? context.capturePosition,
+    });
+    if (
+      promotion?.status === "promoted"
+      && promotion.selectedProfile.identity === BENCH_LOCAL_PROFILE_IDENTITY
+    ) {
+      const profile = resolveRustExerciseProfile({
+        ...context,
+        experiment: "local-motion-coordinate-v1",
+      });
+      if (profile) return { kind: "built_in", profile, promotion };
+    }
+    return {
+      kind: "legacy",
+      profile: null,
+      promotion: promotion
+        ? { status: promotion.status, reasonCodes: promotion.reasonCodes }
+        : null,
+    };
+  }
+
+  const selected = context.exerciseId === "seated_shoulder_press"
+    && context.equipment === "barbell"
+    ? resolveRustExerciseProfile({ ...context, experiment: "local-motion-coordinate-v1" })
+    : resolveRustExerciseProfile(context);
+  return selected
+    ? { kind: "built_in", profile: selected, promotion: null }
+    : { kind: "legacy", profile: null, promotion: null };
 }
 
 /** Exact context gate for built-in provisional Rust profiles. */
@@ -72,4 +134,11 @@ export function normalizeCoarseMotionView(capturePosition: string):
     return "front_oblique_right";
   }
   return null;
+}
+
+function normalizedBenchVariation(variation: string): string {
+  const detail = variation.trim().toLowerCase();
+  return ["", "standard", "standard_variant", "标准", "标准变式"].includes(detail)
+    ? "standard_variant"
+    : variation;
 }

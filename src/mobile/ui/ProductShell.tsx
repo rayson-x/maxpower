@@ -61,6 +61,7 @@ import { APPLE_HEALTHKIT_MVP_METRICS } from "../native/AppleHealthKitPort";
 import { ProgressScreen as VideoLibraryScreen, type ReplaySelection } from "./ProgressScreen";
 import { ReplayScreen } from "./ReplayScreen";
 import { WorkoutMonitorWorkspace } from "./WorkoutMonitorWorkspace";
+import { defaultSelectedFreeWeightEquipment } from "../../motion/equipmentRecognitionPolicy";
 import {
   readPoseCameraRuntimeHealth,
   type PoseCameraRuntimeHealth,
@@ -3008,8 +3009,12 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     : undefined;
   const pendingSetIndex = pending ? pending.task.sets.findIndex((set) => set.id === pending.set.id) + 1 : 0;
   const runtimePlatform = Platform.OS === "android" || Platform.OS === "ios" ? Platform.OS : "web";
+  const selectedEquipment = pending
+    ? defaultSelectedFreeWeightEquipment(pending.task.exerciseVariantId)
+    : "none";
   const realtimeCapability = pending ? resolveWorkoutSetRealtimeCapability({
     exerciseVariantId: pending.task.exerciseVariantId,
+    selectedEquipment,
     platform: runtimePlatform,
     nativeRuntimeAvailable:
       poseRuntimeHealth?.canonicalBridgeReady === true
@@ -3021,6 +3026,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     workoutId,
     setId: pending.set.id,
     exerciseVariantId: pending.task.exerciseVariantId,
+    selectedEquipment,
     setIndex: pendingSetIndex,
     ...(pending.set.targetReps ? { targetReps: pending.set.targetReps.max } : {}),
     ...(executionLoad ? { executionLoad } : {}),

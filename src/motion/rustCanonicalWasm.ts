@@ -141,6 +141,7 @@ export interface RustSealedRep {
     | "duration_exceeded"
     | "required_joint_loss"
     | "coordinate_provisional"
+    | "local_trajectory_channel_conflict"
     | null;
   observationFindings: readonly (
     | "primary_range_below_expectation"

@@ -163,6 +163,7 @@ pub(crate) struct BarbellRepCandidate {
     pub amplitude: f32,
     pub signature_duration_ms: u64,
     pub pose_peak_timestamp_ms: Option<u64>,
+    pub local_trajectory_channel_conflict: bool,
     pub path_hash: u64,
     pub disposition: RepDisposition,
     pub normalized_endpoints: Option<NormalizedRepEndpointEvidence>,
@@ -634,6 +635,12 @@ impl BarbellBenchPhaseEngine {
             .or_else(|| local_coordinate.cloned());
         let equipment_coverage =
             1.0 - active.missed_samples as f32 / active.total_samples.max(1) as f32;
+        let local_trajectory_channel_conflict =
+            start_coordinate.as_ref().is_some_and(|coordinate| {
+                coordinate.channel_agreement == crate::LocalChannelAgreement::Conflict
+            }) || active.coordinate_history.iter().any(|coordinate| {
+                coordinate.channel_agreement == crate::LocalChannelAgreement::Conflict
+            });
         Some(BarbellRepCandidate {
             rep_id: active.rep_id,
             start_frame_id: active.reported_start.frame_id,
@@ -652,6 +659,7 @@ impl BarbellBenchPhaseEngine {
             amplitude,
             signature_duration_ms: end.timestamp_ms.saturating_sub(active.start.timestamp_ms),
             pose_peak_timestamp_ms: active.pose_extreme.map(|extreme| extreme.timestamp_ms),
+            local_trajectory_channel_conflict,
             path_hash: active.hash,
             disposition: if equipment_coverage < LOW_EQUIPMENT_COVERAGE
                 || (self.use_local_coordinate

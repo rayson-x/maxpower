@@ -6,7 +6,11 @@ import {
   type BenchPromotionEvidenceStore,
   type BenchProfilePromotionManifest,
 } from "../../src/motion/benchProfilePromotion";
-import { selectBenchRecognitionProfile } from "../../src/motion/benchProfileSelector";
+import {
+  installBenchProfilePromotionRuntime,
+  selectBenchRecognitionProfile,
+} from "../../src/motion/benchProfileSelector";
+import { resolveRustRuntimeProfile } from "../../src/motion/rustProfileResolver";
 
 const hash = (character: string) => `sha256:${character.repeat(64)}` as const;
 
@@ -851,4 +855,55 @@ test("rollback remains available after candidate evidence is revoked", () => {
   });
   assert.equal(selection.status, "rolled_back");
   assert.equal(selection.selectedProfile, stableProfile);
+});
+
+test("the shared production resolver installs a promoted bench profile only after evidence and manual activation", () => {
+  installBenchProfilePromotionRuntime({
+    stableProfile,
+    manifests: [{ ref: manifestRef, manifest }],
+    evidenceStore,
+  });
+  try {
+    const shadowOnly = resolveRustRuntimeProfile({
+      exerciseId: "barbell_bench_press",
+      capturePosition: "frontLeft45",
+      trainingSide: "bilateral",
+      variation: "",
+      equipment: "barbell",
+    });
+    assert.notEqual(
+      shadowOnly.kind === "built_in" ? shadowOnly.profile : null,
+      "barbell_bench_press_local_front_left",
+    );
+    assert.ok(shadowOnly.promotion);
+    assert.equal(shadowOnly.promotion.status, "stable");
+    assert.deepEqual(shadowOnly.promotion.reasonCodes, ["manual_promotion_activation_required"]);
+
+    installBenchProfilePromotionRuntime({
+      stableProfile,
+      manifests: [{ ref: manifestRef, manifest }],
+      evidenceStore,
+      activation: {
+        schemaVersion: "maxpower-profile-activation/v1",
+        decision: "activate",
+        manifestSha256: manifestRef.sha256,
+        profileSha256: candidateProfile.sha256,
+        authorizedBy: "release-review:bench-v1",
+        authorizedAt: "2026-08-14T02:00:00.000Z",
+      },
+    });
+    const promoted = resolveRustRuntimeProfile({
+      exerciseId: "barbell_bench_press",
+      capturePosition: "frontLeft45",
+      trainingSide: "bilateral",
+      variation: "",
+      equipment: "barbell",
+    });
+    assert.equal(promoted.kind, "built_in");
+    assert.equal(promoted.kind === "built_in" ? promoted.profile : null, "barbell_bench_press_local_front_left");
+    assert.ok(promoted.promotion);
+    assert.equal(promoted.promotion.status, "promoted");
+  } finally {
+    installBenchProfilePromotionRuntime(null);
+  }
 });

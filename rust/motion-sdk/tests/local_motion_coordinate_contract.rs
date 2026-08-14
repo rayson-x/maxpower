@@ -58,6 +58,22 @@ fn local_bar_frame_with_reversed_endpoints(progress: f32, angle: f32) -> FrameOb
     frame
 }
 
+fn local_bar_frame_with_conflicting_pose(progress: f32, angle: f32) -> FrameObservations {
+    let mut frame = local_bar_frame(progress, angle);
+    let cross = [angle.cos(), angle.sin()];
+    let primary = [-cross[1], cross[0]];
+    let pose_center = [0.5 - primary[0] * progress, 0.5 - primary[1] * progress];
+    for (index, sign) in [(9, -1.0_f32), (10, 1.0_f32)] {
+        frame.pose_candidates[0].observations[index] = PoseObservation::new(
+            pose_center[0] + cross[0] * 0.04 * sign,
+            pose_center[1] + cross[1] * 0.04 * sign,
+            0.0,
+            0.95,
+        );
+    }
+    frame
+}
+
 #[derive(Clone)]
 struct LocalProfileFixture {
     frames: VecDeque<FrameObservations>,
@@ -531,6 +547,199 @@ fn predicted_or_weak_wrists_do_not_double_count_equipment_as_pose_corroboration(
     assert_eq!(
         frozen.endpoint_order_mapping,
         maxpower_motion_sdk::EndpointOrderMapping::ScreenOrderedAnatomyUnknown,
+    );
+}
+
+#[test]
+fn equipment_pixel_uncertainty_is_normalized_by_the_frozen_set_scale() {
+    let progress = [0.0, 0.005, 0.025, 0.050, 0.080];
+    let mut frames = progress
+        .into_iter()
+        .map(|value| local_bar_frame(value, 0.22))
+        .collect::<Vec<_>>();
+    frames.last_mut().unwrap().equipment[0].uncertainty_px = Some(300.0);
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:normalized-equipment-uncertainty".into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: 720,
+            image_height_px: 1_280,
+            continuity: ContinuityMode::Raw,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        LocalProfileFixture {
+            frames: frames.into(),
+        },
+        output.clone(),
+    )
+    .unwrap();
+    session.begin_set();
+    for frame_id in 0..5 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                1_000 + frame_id * 50,
+                Arc::new(AtomicUsize::new(0)),
+            ))
+            .unwrap();
+    }
+    let packets = output.packets();
+    let coordinate = &packets.last().unwrap().local_motion_coordinate;
+    let equipment = coordinate.equipment.expect("equipment trajectory");
+    assert!(
+        (equipment.uncertainty - 0.793).abs() < 0.01,
+        "300px uncertainty must be expressed against the frozen ~378px shaft scale: {equipment:?}",
+    );
+    assert_eq!(
+        coordinate.channel_agreement,
+        maxpower_motion_sdk::LocalChannelAgreement::CannotJudge,
+        "high detector uncertainty must make phase fusion abstain even when score is high",
+    );
+}
+
+#[test]
+fn high_uncertainty_equipment_cannot_drive_a_local_phase_profile() {
+    let progress = [0.0; 12]
+        .into_iter()
+        .chain([
+            0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
+        ])
+        .chain([0.0; 6])
+        .collect::<Vec<_>>();
+    let mut frames = progress
+        .iter()
+        .copied()
+        .map(|value| local_bar_frame(value, 0.28))
+        .collect::<Vec<_>>();
+    for frame in &mut frames {
+        frame.equipment[0].uncertainty_px = Some(300.0);
+    }
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:uncertain-local-phase-refusal".into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: 720,
+            image_height_px: 1_280,
+            continuity: ContinuityMode::Raw,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        LocalProfileFixture {
+            frames: frames.into(),
+        },
+        output.clone(),
+    )
+    .unwrap();
+    session
+        .install_exercise_profile(
+            ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
+        )
+        .unwrap();
+    session.begin_set();
+    for frame_id in 0..progress.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                frame_id * 100,
+                Arc::new(AtomicUsize::new(0)),
+            ))
+            .unwrap();
+    }
+    let mut reps = output
+        .packets()
+        .into_iter()
+        .flat_map(|packet| packet.completed_reps)
+        .collect::<Vec<_>>();
+    reps.extend(session.finish_set());
+    assert!(
+        reps.is_empty(),
+        "a high-score but high-uncertainty shaft must not establish local phase transitions",
+    );
+}
+
+#[test]
+fn normalized_channel_conflict_is_aggregated_into_the_sealed_rep() {
+    let progress = [0.0; 12]
+        .into_iter()
+        .chain([
+            0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
+        ])
+        .chain([0.0; 6])
+        .collect::<Vec<_>>();
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:sealed-local-channel-conflict".into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: 720,
+            image_height_px: 1_280,
+            continuity: ContinuityMode::Raw,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        LocalProfileFixture {
+            frames: progress
+                .iter()
+                .copied()
+                .map(|value| local_bar_frame_with_conflicting_pose(value, 0.28))
+                .collect(),
+        },
+        output.clone(),
+    )
+    .unwrap();
+    session
+        .install_exercise_profile(
+            ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
+        )
+        .unwrap();
+    session.begin_set();
+    for frame_id in 0..progress.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                frame_id * 100,
+                Arc::new(AtomicUsize::new(0)),
+            ))
+            .unwrap();
+    }
+    let mut reps = output
+        .packets()
+        .into_iter()
+        .flat_map(|packet| packet.completed_reps)
+        .collect::<Vec<_>>();
+    reps.extend(session.finish_set());
+    let rep = reps
+        .iter()
+        .find(|rep| rep.disposition != RepDisposition::Rejected)
+        .expect("equipment path should still seal a reviewable rep");
+    assert!(
+        rep.observation_findings
+            .contains(&maxpower_motion_sdk::RepObservationFinding::LocalTrajectoryChannelConflict,),
+    );
+    assert_eq!(rep.disposition, RepDisposition::NeedsReview);
+    assert_eq!(
+        rep.evidence_reason,
+        Some(maxpower_motion_sdk::RepEvidenceReason::LocalTrajectoryChannelConflict),
+    );
+    assert!(
+        !rep.observation_findings
+            .contains(&maxpower_motion_sdk::RepObservationFinding::PoseEquipmentTurnaroundAligned,),
+        "turnaround timing must not hide a conflicting normalized path",
     );
 }
 

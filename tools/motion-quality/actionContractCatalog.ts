@@ -356,7 +356,13 @@ export const ACTION_CONTRACT_CATALOG = [
     exerciseId: "seated_shoulder_press",
     phase: phase("bar_at_shoulders", "overhead_turnaround", "bar_at_shoulders_return", ["concentric", "eccentric"]),
     countingMode: "bilateral_cycle",
-    contexts: bilateralContexts("seated_shoulder_press", "barbell", ["front"]),
+    contexts: bilateralContexts(
+      "seated_shoulder_press",
+      "barbell",
+      ["front", "frontLeft45", "frontRight45"],
+      "phase_supported",
+      "tracked",
+    ),
   },
   {
     exerciseId: "push_up",

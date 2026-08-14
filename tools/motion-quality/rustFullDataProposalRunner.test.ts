@@ -127,6 +127,20 @@ test("review capabilities stay inside the public four-state contract", () => {
     anatomicalSide: null,
     profileIdentity: "pull_up/rearLeft45/bilateral/fixed_pull_up_bar/fixture-v1",
   }), "observation_only");
+  for (const capturePosition of ["frontLeft45", "frontRight45"] as const) {
+    assert.equal(capability({
+      actionId: "seated_shoulder_press",
+      capturePosition,
+      anatomicalSide: null,
+      profileIdentity: `seated_shoulder_press/${capturePosition}/bilateral/barbell/fixture-v1`,
+    }), "phase_supported");
+  }
+  assert.equal(capability({
+    actionId: "seated_shoulder_press",
+    capturePosition: "frontLeft45",
+    anatomicalSide: null,
+    profileIdentity: "seated_shoulder_press/frontLeft45/bilateral/dumbbell/fixture-v1",
+  }), "unsupported");
   assert.equal(capability({
     actionId: "unknown_action",
     capturePosition: "front",

@@ -258,12 +258,12 @@ const SEED_EXERCISES: readonly ExerciseConcept[] = [
   },
   {
     id: "seated_shoulder_press",
-    nameZh: "坐姿推肩",
-    nameEn: "Seated shoulder press",
-    aliases: ["坐姿哑铃推肩", "坐姿器械推肩", "肩上推举"],
+    nameZh: "杠铃坐姿推肩",
+    nameEn: "Seated barbell shoulder press",
+    aliases: ["坐姿杠铃推肩", "坐姿推肩", "肩上推举"],
     muscleGroup: "shoulders",
     movementPattern: "vertical_push",
-    equipment: ["dumbbell or shoulder press machine", "bench"],
+    equipment: ["barbell", "bench"],
     variationOf: null,
     // The segmentation contract is ready for field capture, but its scores
     // must first be approved against the athlete's recordings.
