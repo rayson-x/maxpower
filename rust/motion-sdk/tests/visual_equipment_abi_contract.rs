@@ -1,11 +1,11 @@
 use maxpower_motion_sdk::web_abi::{
     motion_sdk_add_equipment_observation, motion_sdk_begin_candidate, motion_sdk_begin_multi,
-    motion_sdk_begin_visual_equipment_frame, motion_sdk_close, motion_sdk_commit_candidate,
-    motion_sdk_copy_packet, motion_sdk_copy_visual_equipment_luma, motion_sdk_detect_barbell_axis,
-    motion_sdk_detect_visual_equipment, motion_sdk_packet_len, motion_sdk_process_multi,
-    motion_sdk_reset, motion_sdk_select_visual_action_context, motion_sdk_set_landmark,
-    motion_sdk_set_pose_schema, motion_sdk_set_profile, motion_sdk_visual_barbell_axis_number,
-    motion_sdk_visual_barbell_axis_source,
+    motion_sdk_begin_set, motion_sdk_begin_visual_equipment_frame, motion_sdk_close,
+    motion_sdk_commit_candidate, motion_sdk_copy_packet, motion_sdk_copy_visual_equipment_luma,
+    motion_sdk_detect_barbell_axis, motion_sdk_detect_visual_equipment, motion_sdk_packet_len,
+    motion_sdk_process_multi, motion_sdk_reset, motion_sdk_select_visual_action_context,
+    motion_sdk_set_landmark, motion_sdk_set_pose_schema, motion_sdk_set_profile,
+    motion_sdk_visual_barbell_axis_number, motion_sdk_visual_barbell_axis_source,
 };
 use std::sync::Mutex;
 
@@ -237,6 +237,33 @@ fn action_context_cannot_consume_geometry_queued_before_provider_selection() {
         unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
         -11,
         "selection is atomic and refuses a pre-queued host geometry channel"
+    );
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
+fn active_set_cannot_clear_or_replace_an_installed_action_plan() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(320, 240, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    let bench = b"flat_barbell_bench_press";
+    // SAFETY: `bench` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(bench.as_ptr(), bench.len(), 0) },
+        0
+    );
+    assert_eq!(motion_sdk_begin_set(), 0);
+    assert_eq!(
+        motion_sdk_set_pose_schema(1),
+        -4,
+        "the schema setter may not clear plan/profile state during a recorded set"
+    );
+    let press = b"seated_dumbbell_shoulder_press";
+    // SAFETY: `press` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(press.as_ptr(), press.len(), 0) },
+        -12,
+        "a second action context must start a new Rust set lifecycle"
     );
     assert_eq!(motion_sdk_close(), 0);
 }

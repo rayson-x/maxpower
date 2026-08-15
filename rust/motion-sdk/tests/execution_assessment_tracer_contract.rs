@@ -165,7 +165,23 @@ fn canonical_bench_packets() -> (
         },
         AdapterCapabilities::fixture(),
         Fixture {
-            frames: progress.iter().copied().map(local_bar_frame).collect(),
+            // A single bounded missing observation after activation exercises
+            // the same weak-evidence path users see in real video. The
+            // following frame resumes within the profile's gap budget, so the
+            // final Rep must retain an incident rather than hide it.
+            frames: progress
+                .iter()
+                .copied()
+                .enumerate()
+                .map(|(index, progress)| {
+                    (index == 18)
+                        .then(|| FrameObservations {
+                            pose_candidates: Vec::new(),
+                            equipment: Vec::new(),
+                        })
+                        .unwrap_or_else(|| local_bar_frame(progress))
+                })
+                .collect(),
         },
         output.clone(),
     )
@@ -361,6 +377,8 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
         TraceNodeKind::SourceObservation,
         TraceNodeKind::LocalCoordinate,
         TraceNodeKind::PoseEquipmentFusion,
+        TraceNodeKind::EvidenceIncident,
+        TraceNodeKind::AlgorithmExecution,
         TraceNodeKind::RepBoundary,
         TraceNodeKind::FeatureFact,
         TraceNodeKind::ReferenceComparison,
@@ -410,11 +428,39 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
         );
         observed_node_ids.insert(&node.node_id);
         match node.kind {
-            TraceNodeKind::RepBoundary => assert!(
-                node.input_node_ids
-                    .iter()
-                    .all(|node_id| kind_for(node_id) == TraceNodeKind::PoseEquipmentFusion)
+            TraceNodeKind::EvidenceIncident => {
+                assert!(
+                    node.input_node_ids
+                        .iter()
+                        .any(|node_id| { kind_for(node_id) == TraceNodeKind::SourceObservation })
+                );
+                assert!(
+                    node.input_node_ids
+                        .iter()
+                        .any(|node_id| { kind_for(node_id) == TraceNodeKind::LocalCoordinate })
+                );
+                assert!(
+                    node.input_node_ids
+                        .iter()
+                        .any(|node_id| { kind_for(node_id) == TraceNodeKind::PoseEquipmentFusion })
+                );
+            }
+            TraceNodeKind::AlgorithmExecution => assert!(
+                node.input_node_ids.iter().any(|node_id| matches!(
+                    kind_for(node_id),
+                    TraceNodeKind::SourceObservation
+                        | TraceNodeKind::LocalCoordinate
+                        | TraceNodeKind::PoseEquipmentFusion
+                        | TraceNodeKind::AlgorithmExecution
+                )),
+                "an execution receipt must name concrete prior evidence or a prior executor"
             ),
+            TraceNodeKind::RepBoundary => {
+                assert!(node.input_node_ids.iter().all(|node_id| matches!(
+                    kind_for(node_id),
+                    TraceNodeKind::AlgorithmExecution | TraceNodeKind::EvidenceIncident
+                )));
+            }
             TraceNodeKind::RuleConclusion => assert!(
                 node.input_node_ids
                     .iter()
@@ -439,6 +485,13 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
             _ => {}
         }
     }
+    assert!(report.trace.nodes.iter().any(|node| {
+        node.kind == TraceNodeKind::RepBoundary
+            && node
+                .input_node_ids
+                .iter()
+                .any(|input| kind_for(input) == TraceNodeKind::EvidenceIncident)
+    }));
     assert!(
         report
             .trace

@@ -2993,13 +2993,15 @@ impl ActionExecutionPipeline {
         self.categories.contains(&category)
     }
 
-    fn receipt(
+    fn receipt_with_facts(
         &self,
         category: AlgorithmModuleCategory,
         start_frame_id: u64,
         end_frame_id: u64,
         start_timestamp_ms: u64,
         end_timestamp_ms: u64,
+        input_fact_ids: Option<Vec<String>>,
+        output_fact_ids: Option<Vec<String>>,
     ) -> Option<AlgorithmExecutionReceipt> {
         let module = self
             .modules
@@ -3008,16 +3010,11 @@ impl ActionExecutionPipeline {
         Some(AlgorithmExecutionReceipt {
             module_id: module.module_id.clone(),
             category,
-            input_fact_ids: module
-                .required_inputs
-                .iter()
-                .map(|fact| fact.fact_id.clone())
-                .collect(),
-            output_fact_ids: module
-                .produced_facts
-                .iter()
-                .map(|fact| fact.fact_id.clone())
-                .collect(),
+            // The caller must supply the concrete facts read and produced by
+            // this invocation. Static module contracts select the executor;
+            // they are not evidence that it ran for this Rep.
+            input_fact_ids: input_fact_ids.unwrap_or_default(),
+            output_fact_ids: output_fact_ids.unwrap_or_default(),
             start_frame_id,
             end_frame_id,
             start_timestamp_ms,
@@ -3077,34 +3074,39 @@ impl ActionRepAuthority {
         retention_ms: u64,
         equipment_pipeline_executed: bool,
     ) {
-        self.record_stage(
-            AlgorithmModuleCategory::PoseRelation,
-            frame_id,
-            frame_id,
-            timestamp_ms,
-            timestamp_ms,
-        );
-        self.record_stage(
+        self.record_stage_with_facts(
             AlgorithmModuleCategory::LocalCoordinate,
             frame_id,
             frame_id,
             timestamp_ms,
             timestamp_ms,
+            vec![format!("canonical_pose:{frame_id}")],
+            vec![format!(
+                "coordinate:{}:{frame_id}",
+                local_coordinate.coordinate_frame_id
+            )],
         );
         if equipment_pipeline_executed {
-            self.record_stage(
+            self.record_stage_with_facts(
                 AlgorithmModuleCategory::EquipmentObservation,
                 frame_id,
                 frame_id,
                 timestamp_ms,
                 timestamp_ms,
+                vec![format!("visual_equipment_frame:{frame_id}")],
+                vec![format!("equipment_observation:{frame_id}")],
             );
-            self.record_stage(
+            self.record_stage_with_facts(
                 AlgorithmModuleCategory::EquipmentFusion,
                 frame_id,
                 frame_id,
                 timestamp_ms,
                 timestamp_ms,
+                vec![
+                    format!("canonical_pose:{frame_id}"),
+                    format!("equipment_observation:{frame_id}"),
+                ],
+                vec![format!("fusion:{frame_id}")],
             );
         }
         self.history.push_back(ActionRepFrame {
@@ -3132,19 +3134,68 @@ impl ActionRepAuthority {
     }
 
     pub(crate) fn admit(&mut self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
-        self.record_stage(
-            AlgorithmModuleCategory::CandidateAdmission,
-            rep.start_frame_id,
-            rep.end_frame_id,
-            rep.start_timestamp_ms,
-            rep.end_timestamp_ms,
-        );
-        self.record_stage(
+        let initial_disposition = rep.disposition;
+        let (refinement_inputs, refinement_output) = self.refine_candidate_turnaround(&mut rep);
+        self.record_stage_with_facts(
             AlgorithmModuleCategory::BoundaryRefinement,
             rep.start_frame_id,
             rep.end_frame_id,
             rep.start_timestamp_ms,
             rep.end_timestamp_ms,
+            refinement_inputs,
+            vec![refinement_output.clone()],
+        );
+        let result = if initial_disposition == RepDisposition::Confirmed {
+            self.validate_rep_consensus(&rep).and_then(|_| {
+                // Rep admission is intentionally limited to action identity.
+                // Coordinated-motion, stability and substitution relations
+                // remain dimension-scoped evidence for assessment; missing or
+                // deviating auxiliary evidence must not erase a completed
+                // identity-defining primary cycle.
+                self.plan
+                    .relations
+                    .iter()
+                    .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .try_for_each(|relation| {
+                        let validation = self.validate_primary_relation(&rep, profile, relation);
+                        self.record_primary_relation_execution(&rep, relation, validation.is_ok());
+                        validation
+                    })
+            })
+        } else {
+            Ok(())
+        };
+        if initial_disposition == RepDisposition::Confirmed {
+            match result {
+                Ok(()) => {
+                    rep.observation_findings
+                        .push(RepObservationFinding::ActionPrimaryRelationSatisfied);
+                }
+                Err(reason) => {
+                    rep.disposition = RepDisposition::Rejected;
+                    rep.evidence_reason = Some(reason);
+                }
+            }
+        }
+        self.record_stage_with_facts(
+            AlgorithmModuleCategory::CandidateAdmission,
+            rep.start_frame_id,
+            rep.end_frame_id,
+            rep.start_timestamp_ms,
+            rep.end_timestamp_ms,
+            vec![format!("rep_candidate:{}", rep.rep_id), refinement_output],
+            vec![format!(
+                "rep_admission:{}:{}",
+                rep.rep_id,
+                match rep.disposition {
+                    RepDisposition::Confirmed => "confirmed",
+                    RepDisposition::NeedsReview => "needs_review",
+                    RepDisposition::Rejected => "rejected",
+                }
+            )],
         );
         rep.execution_receipts = self.receipts_for_rep(&rep);
         rep.executed_algorithm_module_ids = rep
@@ -3152,31 +3203,6 @@ impl ActionRepAuthority {
             .iter()
             .map(|receipt| receipt.module_id.clone())
             .collect();
-        if rep.disposition != RepDisposition::Confirmed {
-            return rep;
-        }
-        let result = self.validate_rep_consensus(&rep).and_then(|_| {
-            // Rep admission is intentionally limited to action identity.
-            // Coordinated-motion, stability and substitution relations
-            // remain dimension-scoped evidence for assessment; missing or
-            // deviating auxiliary evidence must not erase a completed
-            // identity-defining primary cycle.
-            self.plan
-                .relations
-                .iter()
-                .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
-                .try_for_each(|relation| self.validate_primary_relation(&rep, profile, relation))
-        });
-        match result {
-            Ok(()) => {
-                rep.observation_findings
-                    .push(RepObservationFinding::ActionPrimaryRelationSatisfied);
-            }
-            Err(reason) => {
-                rep.disposition = RepDisposition::Rejected;
-                rep.evidence_reason = Some(reason);
-            }
-        }
         rep
     }
 
@@ -3291,29 +3317,35 @@ impl ActionRepAuthority {
     /// to advance a candidate. Priming/idle frames deliberately do not claim
     /// this receipt.
     pub(crate) fn record_rep_topology(&mut self, frame_id: u64, timestamp_ms: u64) {
-        self.record_stage(
+        self.record_stage_with_facts(
             AlgorithmModuleCategory::RepTopology,
             frame_id,
             frame_id,
             timestamp_ms,
             timestamp_ms,
+            vec![format!("rep_topology_input:{frame_id}")],
+            vec![format!("rep_topology_step:{frame_id}")],
         );
     }
 
-    fn record_stage(
+    fn record_stage_with_facts(
         &mut self,
         category: AlgorithmModuleCategory,
         start_frame_id: u64,
         end_frame_id: u64,
         start_timestamp_ms: u64,
         end_timestamp_ms: u64,
+        input_fact_ids: Vec<String>,
+        output_fact_ids: Vec<String>,
     ) {
-        let Some(receipt) = self.pipeline.receipt(
+        let Some(receipt) = self.pipeline.receipt_with_facts(
             category,
             start_frame_id,
             end_frame_id,
             start_timestamp_ms,
             end_timestamp_ms,
+            Some(input_fact_ids),
+            Some(output_fact_ids),
         ) else {
             return;
         };
@@ -3324,6 +3356,8 @@ impl ActionRepAuthority {
             previous.module_id == receipt.module_id
                 && previous.start_frame_id == receipt.start_frame_id
                 && previous.end_frame_id == receipt.end_frame_id
+                && previous.input_fact_ids == receipt.input_fact_ids
+                && previous.output_fact_ids == receipt.output_fact_ids
         }) {
             return;
         }
@@ -3331,28 +3365,195 @@ impl ActionRepAuthority {
     }
 
     fn receipts_for_rep(&self, rep: &SealedRep) -> Vec<AlgorithmExecutionReceipt> {
-        self.pipeline
-            .modules
+        // Preserve first observed execution order. The plan graph may list a
+        // category before another category it only permits; it cannot rewrite
+        // the causal order in which this Rep actually ran.
+        let mut aggregated = Vec::<AlgorithmExecutionReceipt>::new();
+        for receipt in self.stage_receipts.iter().filter(|receipt| {
+            receipt.end_frame_id >= rep.start_frame_id && receipt.start_frame_id <= rep.end_frame_id
+        }) {
+            if let Some(existing) = aggregated
+                .iter_mut()
+                .find(|existing| existing.module_id == receipt.module_id)
+            {
+                existing.start_frame_id = existing.start_frame_id.min(receipt.start_frame_id);
+                existing.end_frame_id = existing.end_frame_id.max(receipt.end_frame_id);
+                existing.start_timestamp_ms =
+                    existing.start_timestamp_ms.min(receipt.start_timestamp_ms);
+                existing.end_timestamp_ms = existing.end_timestamp_ms.max(receipt.end_timestamp_ms);
+                existing
+                    .input_fact_ids
+                    .extend(receipt.input_fact_ids.clone());
+                existing
+                    .output_fact_ids
+                    .extend(receipt.output_fact_ids.clone());
+            } else {
+                aggregated.push(receipt.clone());
+            }
+        }
+        for receipt in &mut aggregated {
+            receipt.input_fact_ids.sort();
+            receipt.input_fact_ids.dedup();
+            receipt.output_fact_ids.sort();
+            receipt.output_fact_ids.dedup();
+        }
+        aggregated
+    }
+
+    fn record_primary_relation_execution(
+        &mut self,
+        rep: &SealedRep,
+        relation: &CompiledMotionRelation,
+        observed: bool,
+    ) {
+        let mut inputs = relation
+            .inputs
             .iter()
-            .filter_map(|module| {
-                let mut matching = self.stage_receipts.iter().filter(|receipt| {
-                    receipt.module_id == module.module_id
-                        && receipt.end_frame_id >= rep.start_frame_id
-                        && receipt.start_frame_id <= rep.end_frame_id
-                });
-                let first = matching.next()?;
-                let mut aggregate = first.clone();
-                for receipt in matching {
-                    aggregate.start_frame_id = aggregate.start_frame_id.min(receipt.start_frame_id);
-                    aggregate.end_frame_id = aggregate.end_frame_id.max(receipt.end_frame_id);
-                    aggregate.start_timestamp_ms =
-                        aggregate.start_timestamp_ms.min(receipt.start_timestamp_ms);
-                    aggregate.end_timestamp_ms =
-                        aggregate.end_timestamp_ms.max(receipt.end_timestamp_ms);
-                }
-                Some(aggregate)
+            .map(|input| format!("motion_input:{}", input.source))
+            .collect::<Vec<_>>();
+        inputs.extend(self.boundary_refinement_inputs(rep));
+        inputs.sort();
+        inputs.dedup();
+        self.record_stage_with_facts(
+            AlgorithmModuleCategory::PoseRelation,
+            rep.start_frame_id,
+            rep.end_frame_id,
+            rep.start_timestamp_ms,
+            rep.end_timestamp_ms,
+            inputs,
+            vec![format!(
+                "motion_relation:{}:{}",
+                relation.relation_id,
+                if observed { "observed" } else { "cannot_judge" }
+            )],
+        );
+    }
+
+    /// Refines the candidate turnaround to the strongest measured local
+    /// excursion inside the immutable candidate window. Start/end remain the
+    /// RepEngine's causal seal; only the extremum can move, and only to an
+    /// actual observed frame. This prevents an invented post-hoc boundary
+    /// while allowing action-local evidence to correct a coarse topology peak.
+    fn refine_candidate_turnaround(&self, rep: &mut SealedRep) -> (Vec<String>, String) {
+        let requirement = self
+            .plan
+            .relations
+            .iter()
+            .find(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
+            .map(|relation| relation.source_requirement);
+        let Some(requirement) = requirement else {
+            return (
+                Vec::new(),
+                format!("boundary_refinement:{}:no_required_relation", rep.rep_id),
+            );
+        };
+        let Some(start) = self
+            .history
+            .iter()
+            .find(|frame| frame.frame_id == rep.start_frame_id)
+            .and_then(|frame| {
+                measured_local_channel_for_requirement(&frame.local_coordinate, requirement)
             })
-            .collect()
+        else {
+            return (
+                self.boundary_refinement_inputs(rep),
+                format!(
+                    "boundary_refinement:{}:start_signal_unavailable",
+                    rep.rep_id
+                ),
+            );
+        };
+        let candidate =
+            self.history
+                .iter()
+                .filter(|frame| {
+                    frame.frame_id >= rep.start_frame_id && frame.frame_id <= rep.end_frame_id
+                })
+                .filter_map(|frame| {
+                    measured_local_channel_for_requirement(&frame.local_coordinate, requirement)
+                        .map(|channel| {
+                            (
+                                (channel.along_axis_progress - start.along_axis_progress).abs(),
+                                frame,
+                            )
+                        })
+                })
+                .max_by(|left, right| left.0.total_cmp(&right.0));
+        let Some((_, selected)) = candidate else {
+            return (
+                self.boundary_refinement_inputs(rep),
+                format!(
+                    "boundary_refinement:{}:turnaround_signal_unavailable",
+                    rep.rep_id
+                ),
+            );
+        };
+        let expected_peak = rep.normalized_endpoints.as_ref().and_then(|endpoints| {
+            measured_local_channel_for_requirement(&endpoints.primary_turnaround, requirement)
+        });
+        let selected_peak =
+            measured_local_channel_for_requirement(&selected.local_coordinate, requirement)
+                .expect("candidate was selected from a measured local channel");
+        if expected_peak.is_some_and(|expected| {
+            (expected.along_axis_progress - selected_peak.along_axis_progress).abs()
+                > (expected.uncertainty + selected_peak.uncertainty).max(0.05)
+        }) {
+            return (
+                self.boundary_refinement_inputs(rep),
+                format!(
+                    "boundary_refinement:{}:endpoint_evidence_conflict",
+                    rep.rep_id
+                ),
+            );
+        }
+        let prior_frame_id = rep.peak_frame_id;
+        let prior_timestamp_ms = rep.peak_timestamp_ms;
+        rep.peak_frame_id = selected.frame_id;
+        rep.peak_timestamp_ms = selected.timestamp_ms;
+        rep.turnaround_confirmed_timestamp_ms = rep
+            .turnaround_confirmed_timestamp_ms
+            .max(selected.timestamp_ms);
+        if let Some(endpoints) = rep.normalized_endpoints.as_mut() {
+            endpoints.primary_turnaround = selected.local_coordinate.clone();
+        }
+        (
+            self.boundary_refinement_inputs(rep),
+            format!(
+                "boundary_refinement:{}:turnaround:{}@{}->{}@{}",
+                rep.rep_id,
+                prior_frame_id,
+                prior_timestamp_ms,
+                selected.frame_id,
+                selected.timestamp_ms
+            ),
+        )
+    }
+
+    fn boundary_refinement_inputs(&self, rep: &SealedRep) -> Vec<String> {
+        let mut inputs = self
+            .history
+            .iter()
+            .filter(|frame| {
+                [
+                    rep.start_timestamp_ms,
+                    rep.peak_timestamp_ms,
+                    rep.end_timestamp_ms,
+                ]
+                .into_iter()
+                .any(|endpoint| {
+                    frame.timestamp_ms.abs_diff(endpoint) <= ACTION_ENDPOINT_EVIDENCE_WINDOW_MS
+                })
+            })
+            .map(|frame| {
+                format!(
+                    "coordinate:{}:{}",
+                    frame.local_coordinate.coordinate_frame_id, frame.frame_id
+                )
+            })
+            .collect::<Vec<_>>();
+        inputs.sort();
+        inputs.dedup();
+        inputs
     }
 
     fn validate_primary_relation(
@@ -3843,12 +4044,20 @@ mod action_rep_authority_tests {
                 .observation_findings
                 .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
         );
-        assert_eq!(accepted.execution_receipts.len(), 2);
+        assert_eq!(accepted.execution_receipts.len(), 3);
         assert!(accepted.execution_receipts.iter().all(|receipt| matches!(
             receipt.category,
-            AlgorithmModuleCategory::CandidateAdmission
+            AlgorithmModuleCategory::PoseRelation
+                | AlgorithmModuleCategory::CandidateAdmission
                 | AlgorithmModuleCategory::BoundaryRefinement
         )));
+        assert!(accepted.execution_receipts.iter().any(|receipt| {
+            receipt.category == AlgorithmModuleCategory::PoseRelation
+                && receipt
+                    .output_fact_ids
+                    .iter()
+                    .any(|fact| fact == "motion_relation:task_primary:observed")
+        }));
         assert_eq!(
             accepted.executed_algorithm_module_ids,
             accepted
@@ -3887,6 +4096,23 @@ mod action_rep_authority_tests {
             incomplete.evidence_reason,
             Some(RepEvidenceReason::ActionPrimaryIncompleteReturn)
         );
+
+        let mut pending_review = rep(&binding.profile, 0.8, 0.05);
+        pending_review.disposition = RepDisposition::NeedsReview;
+        let mut review_authority = ActionRepAuthority::new(binding.motion_plan.clone().unwrap())
+            .expect("review plan authority");
+        review_authority.history = authority.history.clone();
+        let review = review_authority.admit(pending_review, &binding.profile);
+        assert!(
+            !review
+                .execution_receipts
+                .iter()
+                .any(|receipt| { receipt.category == AlgorithmModuleCategory::PoseRelation }),
+            "a pre-rejected candidate must not claim that a TaskPrimary relation was evaluated"
+        );
+        assert!(review.execution_receipts.iter().all(|receipt| {
+            !receipt.input_fact_ids.is_empty() && !receipt.output_fact_ids.is_empty()
+        }));
 
         authority.history.clear();
         for (frame_id, angle) in [(1, 160.0), (2, 80.0), (3, 158.0)] {

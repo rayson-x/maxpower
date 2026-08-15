@@ -47,11 +47,17 @@ single-view failure and cannot guide action-driven parameter repair.
 ## Completion evidence
 
 Each sealed Rep now keeps actual pre-seal execution receipts: module category
-and ID, named input/output facts, and concrete frame/time range. The static
-plan graph is never copied as an execution claim; post-seal feature and quality
-rule receipts are appended only after this assessment lifecycle runs. Bounded
-weak-evidence incidents are independent Trace nodes connected to the exact
-source packet plus local-coordinate/fusion facts before they reach the Rep.
+and ID, the concrete facts read/produced, and the causal frame/time window.
+Receipts retain their first observed execution order rather than the plan's
+declaration order. A bounded refiner selects the measured local-trajectory
+turnaround only inside the immutable Rep window and refuses to overwrite a
+conflicting endpoint. Every pre-seal receipt is also an `AlgorithmExecution`
+Trace node that links its actual source/coordinate/fusion inputs (and prior
+executor outputs) before the Rep boundary; the static plan graph is never
+copied as an execution claim. Post-seal feature and quality rule receipts are
+appended only after this assessment lifecycle runs. Bounded weak-evidence
+incidents are independent Trace nodes connected to the exact source packet
+plus local-coordinate/fusion facts before they reach the Rep.
 The governed report generator now rejects missing action×view funnel fields and
 writes only local-private derived artifacts, but Ticket 10 must supply the
 missing evaluator schema before a numeric funnel is claimed.

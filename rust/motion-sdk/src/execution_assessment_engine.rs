@@ -1018,6 +1018,10 @@ pub enum TraceNodeKind {
     LocalCoordinate,
     PoseEquipmentFusion,
     EvidenceIncident,
+    /// Concrete pre-seal module invocation. Its edges reference the actual
+    /// source/coordinate/fusion facts consumed by the receipt, never merely
+    /// the plan's declared dependency graph.
+    AlgorithmExecution,
     RepBoundary,
     FeatureFact,
     ReferenceComparison,
@@ -1952,6 +1956,10 @@ impl ExecutionAssessmentEngine {
                 &rep,
                 features
                     .iter()
+                    .flat_map(|feature| feature.provenance.iter().cloned())
+                    .collect(),
+                features
+                    .iter()
                     .map(|feature| feature.feature_id.clone())
                     .collect(),
             ) {
@@ -1961,6 +1969,10 @@ impl ExecutionAssessmentEngine {
                 plan,
                 crate::AlgorithmModuleCategory::QualityRule,
                 &rep,
+                evaluated_rules
+                    .iter()
+                    .flat_map(|rule| rule.feature_dependencies.iter().cloned())
+                    .collect(),
                 evaluated_rules
                     .iter()
                     .map(|rule| {
@@ -2010,7 +2022,10 @@ impl ExecutionAssessmentEngine {
                 // concrete local/fusion facts, not merely rendered into a
                 // Rep summary. Keep both channels where available so a
                 // disagreement remains inspectable rather than overwritten.
-                incident_inputs.push(format!("coordinate:{}", packet.frame_id));
+                incident_inputs.push(format!(
+                    "coordinate:{}:{}",
+                    packet.coordinate_frame_id, packet.frame_id
+                ));
                 incident_inputs.push(format!("fusion:{}", packet.frame_id));
             }
             incident_inputs.sort();
@@ -2032,16 +2047,71 @@ impl ExecutionAssessmentEngine {
             });
             incident_node_ids.push(incident_node);
         }
-        let mut rep_inputs = active
-            .packets
-            .iter()
-            .filter(|packet| {
-                packet.frame_id >= rep.start_frame_id
-                    && packet.frame_id <= rep.end_frame_id
-                    && packet.subject_epoch == subject_epoch
-            })
-            .map(|packet| format!("fusion:{}", packet.frame_id))
-            .collect::<Vec<_>>();
+        let mut produced_fact_nodes = std::collections::HashMap::<String, String>::new();
+        let mut execution_node_ids = Vec::new();
+        for (receipt_index, receipt) in rep.execution_receipts.iter().enumerate() {
+            let execution_sources = active
+                .packets
+                .iter()
+                .filter(|packet| {
+                    packet.subject_epoch == subject_epoch
+                        && packet.frame_id >= receipt.start_frame_id
+                        && packet.frame_id <= receipt.end_frame_id
+                })
+                .map(|packet| packet.source_id.clone())
+                .collect::<Vec<_>>();
+            let mut execution_inputs = Vec::new();
+            for fact in &receipt.input_fact_ids {
+                if active.trace_nodes.iter().any(|node| node.node_id == *fact) {
+                    execution_inputs.push(fact.clone());
+                } else if let Some(producer) = produced_fact_nodes.get(fact) {
+                    execution_inputs.push(producer.clone());
+                } else if let Some(frame_id) = fact
+                    .strip_prefix("canonical_pose:")
+                    .or_else(|| fact.strip_prefix("visual_equipment_frame:"))
+                    .or_else(|| fact.strip_prefix("rep_topology_input:"))
+                    .and_then(|value| value.parse::<u64>().ok())
+                {
+                    execution_inputs.extend(
+                        active
+                            .packets
+                            .iter()
+                            .filter(|packet| {
+                                packet.subject_epoch == subject_epoch && packet.frame_id == frame_id
+                            })
+                            .map(|packet| packet.source_id.clone()),
+                    );
+                }
+            }
+            if execution_inputs.is_empty() {
+                execution_inputs.extend(execution_sources.iter().cloned());
+            }
+            execution_inputs.sort();
+            execution_inputs.dedup();
+            let execution_node = format!("rep:{}:execution:{receipt_index}", rep.rep_id);
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: execution_node.clone(),
+                kind: TraceNodeKind::AlgorithmExecution,
+                summary: format!(
+                    "{} ({:?}) consumed [{}] and produced [{}] from frame {} at {} ms through frame {} at {} ms.",
+                    receipt.module_id,
+                    receipt.category,
+                    receipt.input_fact_ids.join(", "),
+                    receipt.output_fact_ids.join(", "),
+                    receipt.start_frame_id,
+                    receipt.start_timestamp_ms,
+                    receipt.end_frame_id,
+                    receipt.end_timestamp_ms,
+                ),
+                source_ids: execution_sources,
+                input_node_ids: execution_inputs,
+            });
+            for output in &receipt.output_fact_ids {
+                produced_fact_nodes.insert(output.clone(), execution_node.clone());
+            }
+            execution_node_ids.push(execution_node);
+        }
+        let mut rep_inputs = execution_node_ids;
         rep_inputs.extend(incident_node_ids);
         rep_inputs.sort();
         rep_inputs.dedup();
@@ -8105,7 +8175,8 @@ fn assessment_execution_receipt(
     plan: &crate::ActionObservationPlan,
     category: crate::AlgorithmModuleCategory,
     rep: &SealedRep,
-    output_fact_ids: Vec<String>,
+    mut input_fact_ids: Vec<String>,
+    mut output_fact_ids: Vec<String>,
 ) -> Option<crate::AlgorithmExecutionReceipt> {
     let module = plan
         .algorithm_modules
@@ -8114,12 +8185,18 @@ fn assessment_execution_receipt(
     Some(crate::AlgorithmExecutionReceipt {
         module_id: module.module_id.clone(),
         category,
-        input_fact_ids: module
-            .required_inputs
-            .iter()
-            .map(|fact| fact.fact_id.clone())
-            .collect(),
-        output_fact_ids,
+        // These are the concrete feature/comparison facts evaluated for this
+        // Rep, not the module descriptor's possible input vocabulary.
+        input_fact_ids: {
+            input_fact_ids.sort();
+            input_fact_ids.dedup();
+            input_fact_ids
+        },
+        output_fact_ids: {
+            output_fact_ids.sort();
+            output_fact_ids.dedup();
+            output_fact_ids
+        },
         start_frame_id: rep.start_frame_id,
         end_frame_id: rep.end_frame_id,
         start_timestamp_ms: rep.start_timestamp_ms,
@@ -8134,12 +8211,14 @@ fn rep_has_required_pre_seal_receipts(
     use crate::AlgorithmModuleCategory as Category;
 
     let mut required = vec![
-        Category::PoseRelation,
         Category::LocalCoordinate,
         Category::RepTopology,
         Category::CandidateAdmission,
         Category::BoundaryRefinement,
     ];
+    if rep.disposition == RepDisposition::Confirmed {
+        required.push(Category::PoseRelation);
+    }
     if plan.equipment_provider.is_some() {
         required.extend([Category::EquipmentObservation, Category::EquipmentFusion]);
     }
@@ -8165,16 +8244,6 @@ fn rep_has_required_pre_seal_receipts(
         else {
             return false;
         };
-        let expected_inputs = module
-            .required_inputs
-            .iter()
-            .map(|fact| fact.fact_id.as_str())
-            .collect::<Vec<_>>();
-        let expected_outputs = module
-            .produced_facts
-            .iter()
-            .map(|fact| fact.fact_id.as_str())
-            .collect::<Vec<_>>();
         rep.execution_receipts.iter().any(|receipt| {
             receipt.module_id == module.module_id
                 && receipt.category == category
@@ -8182,18 +8251,8 @@ fn rep_has_required_pre_seal_receipts(
                 && receipt.end_frame_id <= rep.end_frame_id
                 && receipt.start_timestamp_ms >= rep.start_timestamp_ms
                 && receipt.end_timestamp_ms <= rep.end_timestamp_ms
-                && receipt
-                    .input_fact_ids
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    == expected_inputs
-                && receipt
-                    .output_fact_ids
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    == expected_outputs
+                && !receipt.input_fact_ids.is_empty()
+                && !receipt.output_fact_ids.is_empty()
         })
     })
 }

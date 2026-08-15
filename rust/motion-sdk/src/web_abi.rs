@@ -386,6 +386,15 @@ pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
     let Some(engine) = runtime.engine.as_ref() else {
         return -3;
     };
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        // A schema reset clears the canonical, local-coordinate and Rep
+        // runtime. Allowing it during a recording set would make a later
+        // action selection appear to share one causal lifecycle.
+        return -4;
+    }
     let mode = engine.mode;
     let width = engine.width as u32;
     let height = engine.height as u32;
@@ -887,6 +896,12 @@ pub unsafe extern "C" fn motion_sdk_select_visual_action_context(
     let Ok(mut runtime) = runtime().lock() else {
         return -8;
     };
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        return -12;
+    }
     if runtime.last_processed_timestamp_ms.is_some()
         || runtime.rep_engine.is_some()
         || runtime.candidate_meta.is_some()
@@ -1686,6 +1701,12 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     if runtime.action_rep_authority.is_some() {
         return -4;
     }
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        return -5;
+    }
     let profile = match builtin_profile(profile_code) {
         Ok(profile) => profile,
         Err(()) => return -2,
@@ -1791,6 +1812,12 @@ pub extern "C" fn motion_sdk_install_profile(
     };
     if runtime.action_rep_authority.is_some() {
         return -8;
+    }
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        return -9;
     }
     let Ok(identity) = String::from_utf8(std::mem::take(&mut runtime.profile_identity_buffer))
     else {

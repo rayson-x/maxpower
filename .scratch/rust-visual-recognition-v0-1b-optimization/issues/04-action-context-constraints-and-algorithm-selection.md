@@ -64,8 +64,10 @@ the `MotionSession` profile before candidate segmentation starts.
 The same compiled binding is installed by the Web ABI before its first frame:
 it owns the `RepEngine`, local-coordinate strategy, plan authority and selected
 Provider as one unit. Legacy profile installation is rejected while that unit
-is active, so an action/view cannot degrade into a host-selected generic
-profile after planning.
+is active, and schema/profile/action replacement is rejected throughout
+`Arming`, `Active` and `Paused` lifecycle states. An action/view therefore
+cannot degrade into a host-selected generic profile, or silently become a
+second action, during one causal set.
 
 The action-plan contract now materialises every compiled installed action×view
 through this same binding and asserts that the resulting profile contains that
