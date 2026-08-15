@@ -915,6 +915,8 @@ pub struct SealedRepReference {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub executed_algorithm_module_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub execution_receipts: Vec<crate::AlgorithmExecutionReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence_incidents: Vec<crate::RepEvidenceIncident>,
 }
 
@@ -992,6 +994,10 @@ pub struct SealedRepAssessment {
     pub features: Vec<MotionFeatureFact>,
     pub comparisons: Vec<ReferenceComparisonFact>,
     pub dimension_findings: Vec<QualityConclusion>,
+    /// Includes the sealed Rep's actual pre-seal receipts plus receipts for
+    /// the feature/rule modules executed by this assessment call.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub execution_receipts: Vec<crate::AlgorithmExecutionReceipt>,
     pub trace_root_ids: Vec<String>,
 }
 
@@ -1011,6 +1017,7 @@ pub enum TraceNodeKind {
     SourceObservation,
     LocalCoordinate,
     PoseEquipmentFusion,
+    EvidenceIncident,
     RepBoundary,
     FeatureFact,
     ReferenceComparison,
@@ -1897,20 +1904,11 @@ impl ExecutionAssessmentEngine {
             .expect("Rep provenance validated against an active set");
         debug_assert!(active.rep_ids.insert(rep.rep_id));
         if let Some(plan) = active.motion_plan.as_ref() {
-            let expected_module_ids = plan
-                .algorithm_modules
-                .iter()
-                .map(|module| module.module_id.as_str())
-                .collect::<Vec<_>>();
-            let executed_module_ids = rep
-                .executed_algorithm_module_ids
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>();
-            // This verifies the actual pre-seal pipeline that authored this
-            // Rep, rather than trusting a plan hash or appending decorative
-            // modules only when building the assessment trace.
-            if executed_module_ids != expected_module_ids {
+            // Post-seal feature/rule modules have not run yet. Validate only
+            // the actual pre-seal receipts that authored this Rep; the
+            // assessment records its own receipts after those later stages
+            // execute below.
+            if !rep_has_required_pre_seal_receipts(plan, &rep) {
                 return Err(AssessmentRuntimeError::RepAlgorithmPipelineMismatch);
             }
         }
@@ -1946,6 +1944,36 @@ impl ExecutionAssessmentEngine {
             load_unit.as_deref(),
         );
         let evaluated_rules = evaluate_rep_rules(active, &comparisons);
+        let mut execution_receipts = rep.execution_receipts.clone();
+        if let Some(plan) = active.motion_plan.as_ref() {
+            if let Some(receipt) = assessment_execution_receipt(
+                plan,
+                crate::AlgorithmModuleCategory::PostSealFeature,
+                &rep,
+                features
+                    .iter()
+                    .map(|feature| feature.feature_id.clone())
+                    .collect(),
+            ) {
+                execution_receipts.push(receipt);
+            }
+            if let Some(receipt) = assessment_execution_receipt(
+                plan,
+                crate::AlgorithmModuleCategory::QualityRule,
+                &rep,
+                evaluated_rules
+                    .iter()
+                    .map(|rule| {
+                        format!(
+                            "dimension_conclusion:{}",
+                            rule.conclusion.dimension.as_str()
+                        )
+                    })
+                    .collect(),
+            ) {
+                execution_receipts.push(receipt);
+            }
+        }
         let rep_node = format!("rep:{}:boundary", rep.rep_id);
         let source_ids = active
             .packets
@@ -1957,6 +1985,66 @@ impl ExecutionAssessmentEngine {
             })
             .map(|packet| packet.source_id.clone())
             .collect::<Vec<_>>();
+        let mut incident_node_ids = Vec::new();
+        for (incident_index, incident) in rep.evidence_incidents.iter().enumerate() {
+            let incident_packets = active
+                .packets
+                .iter()
+                .filter(|packet| {
+                    packet.subject_epoch == subject_epoch
+                        && packet.frame_id >= incident.start_frame_id
+                        && packet.frame_id <= incident.end_frame_id
+                })
+                .collect::<Vec<_>>();
+            let incident_node = format!("rep:{}:incident:{incident_index}", rep.rep_id);
+            let mut incident_sources = incident_packets
+                .iter()
+                .map(|packet| packet.source_id.clone())
+                .collect::<Vec<_>>();
+            incident_sources.sort();
+            incident_sources.dedup();
+            let mut incident_inputs = Vec::new();
+            for packet in incident_packets {
+                incident_inputs.push(packet.source_id.clone());
+                // The incident is rooted in the exact source packet and its
+                // concrete local/fusion facts, not merely rendered into a
+                // Rep summary. Keep both channels where available so a
+                // disagreement remains inspectable rather than overwritten.
+                incident_inputs.push(format!("coordinate:{}", packet.frame_id));
+                incident_inputs.push(format!("fusion:{}", packet.frame_id));
+            }
+            incident_inputs.sort();
+            incident_inputs.dedup();
+            active.trace_nodes.push(EvidenceTraceNode {
+                node_id: incident_node.clone(),
+                kind: TraceNodeKind::EvidenceIncident,
+                summary: format!(
+                    "{:?} from frame {} at {} ms through frame {} at {} ms; source lineage {}.",
+                    incident.reason,
+                    incident.start_frame_id,
+                    incident.start_timestamp_ms,
+                    incident.end_frame_id,
+                    incident.end_timestamp_ms,
+                    incident.source_lineage,
+                ),
+                source_ids: incident_sources,
+                input_node_ids: incident_inputs,
+            });
+            incident_node_ids.push(incident_node);
+        }
+        let mut rep_inputs = active
+            .packets
+            .iter()
+            .filter(|packet| {
+                packet.frame_id >= rep.start_frame_id
+                    && packet.frame_id <= rep.end_frame_id
+                    && packet.subject_epoch == subject_epoch
+            })
+            .map(|packet| format!("fusion:{}", packet.frame_id))
+            .collect::<Vec<_>>();
+        rep_inputs.extend(incident_node_ids);
+        rep_inputs.sort();
+        rep_inputs.dedup();
         active.trace_nodes.push(EvidenceTraceNode {
             node_id: rep_node.clone(),
             kind: TraceNodeKind::RepBoundary,
@@ -1972,16 +2060,7 @@ impl ExecutionAssessmentEngine {
                 rep.evidence_incidents.iter().map(|incident| format!("{:?}@{}-{}:{}", incident.reason, incident.start_timestamp_ms, incident.end_timestamp_ms, incident.source_lineage)).collect::<Vec<_>>().join(", "),
             ),
             source_ids: source_ids.clone(),
-            input_node_ids: active
-                .packets
-                .iter()
-                .filter(|packet| {
-                    packet.frame_id >= rep.start_frame_id
-                        && packet.frame_id <= rep.end_frame_id
-                        && packet.subject_epoch == subject_epoch
-                })
-                .map(|packet| format!("fusion:{}", packet.frame_id))
-                .collect(),
+            input_node_ids: rep_inputs,
         });
         for feature in &features {
             let feature_node = format!("rep:{}:feature:{}", rep.rep_id, feature.feature_id);
@@ -2040,6 +2119,7 @@ impl ExecutionAssessmentEngine {
                 .into_iter()
                 .map(|evaluated| evaluated.conclusion)
                 .collect(),
+            execution_receipts,
             trace_root_ids: rule_node_ids,
         });
         // Reference policy is compare-before-update: this Rep was evaluated
@@ -5319,6 +5399,137 @@ pub struct RigidBarAssessmentProfileBinding {
     pub motion_plan: Option<crate::ActionObservationPlan>,
 }
 
+/// The plan-owned runtime materialisation used by every provider surface.
+///
+/// An `ActionObservationPlan` is the sole semantic input here: no legacy
+/// RecognitionProfile, Bundle, host profile code or action-name switch is
+/// consulted while producing the Rep state machine and local-coordinate
+/// strategy.  Assessment Bundles may bind this result to their lineage, but
+/// they cannot alter the action/view semantics that authored a Rep.
+pub fn compile_action_plan_runtime_binding(
+    plan: crate::ActionObservationPlan,
+) -> Result<RigidBarAssessmentProfileBinding, &'static str> {
+    use crate::{ExerciseSignal, ExerciseSignalKind, MovementDirection};
+
+    let capture_view = match plan.capture_view.as_str() {
+        "front" => AssessmentCaptureView::Front,
+        "rear" => AssessmentCaptureView::Rear,
+        "left_side" => AssessmentCaptureView::LeftSide,
+        "right_side" => AssessmentCaptureView::RightSide,
+        "front_left_45" => AssessmentCaptureView::FrontObliqueLeft,
+        "front_right_45" => AssessmentCaptureView::FrontObliqueRight,
+        "rear_left_45" => AssessmentCaptureView::RearObliqueLeft,
+        "rear_right_45" => AssessmentCaptureView::RearObliqueRight,
+        _ => return Err("compiled action plan has an unknown capture view"),
+    };
+    let task_primary_is_pose = plan.relations.iter().any(|relation| {
+        relation.role == crate::MotionRole::TaskPrimary
+            && relation.source_requirement == crate::OperatorSourceRequirement::CurrentMeasuredPose
+    });
+    let equipment_mode = if task_primary_is_pose {
+        crate::LocalEquipmentMode::PoseOnly
+    } else {
+        match plan.exact_identity.equipment_topology.as_str() {
+            "free_rigid_barbell" | "smith_guided_bar" | "trap_bar" => {
+                crate::LocalEquipmentMode::RigidBarAxis
+            }
+            "independent_dumbbell" | "generic_single_free_load" | "kettlebell" | "weight_plate" => {
+                crate::LocalEquipmentMode::TwoIndependentDumbbells
+            }
+            "constrained_machine_handle"
+            | "cable_handle"
+            | "resistance_band"
+            | "landmine_lever" => crate::LocalEquipmentMode::MovingHandle,
+            "fixed_support" | "bodyweight_station" => crate::LocalEquipmentMode::FixedSupport,
+            "none" | "bodyweight" => crate::LocalEquipmentMode::PoseOnly,
+            _ => return Err("action plan has an unsupported equipment topology"),
+        }
+    };
+    let primary_signal_kind = match equipment_mode {
+        crate::LocalEquipmentMode::PoseOnly | crate::LocalEquipmentMode::FixedSupport => {
+            ExerciseSignalKind::LocalPoseAlongAxisProgress
+        }
+        crate::LocalEquipmentMode::MovingHandle
+        | crate::LocalEquipmentMode::TwoIndependentDumbbells
+            if plan.rep_consensus.mode == crate::RepConsensusMode::IndependentBilateral =>
+        {
+            ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
+        }
+        crate::LocalEquipmentMode::RigidBarAxis
+        | crate::LocalEquipmentMode::MovingHandle
+        | crate::LocalEquipmentMode::TwoIndependentDumbbells => {
+            ExerciseSignalKind::LocalObservedAlongAxisProgress
+        }
+    };
+    let topology = &plan.rep_topology;
+    let direction = match topology.direction_policy {
+        crate::LocalDirectionPolicy::SignInvariant => MovementDirection::Auto,
+        crate::LocalDirectionPolicy::PreparationToEffortPositive => MovementDirection::Increasing,
+        crate::LocalDirectionPolicy::PreparationToEffortNegative => MovementDirection::Decreasing,
+    };
+    let initializer = crate::RigidBarProfileInitializer {
+        primary_signal: ExerciseSignal {
+            kind: primary_signal_kind,
+            landmarks: Vec::new(),
+        },
+        secondary_signal: ExerciseSignal {
+            kind: primary_signal_kind,
+            landmarks: Vec::new(),
+        },
+        direction,
+        start_amplitude: topology.start_threshold(),
+        minimum_amplitude: topology.minimum_excursion(),
+        return_hysteresis: topology.turnaround_hysteresis(),
+        ready_tolerance: f32::from(topology.ready_tolerance_milli) / 1_000.0,
+        minimum_phase_dwell_ms: topology.minimum_phase_dwell_ms,
+        max_gap_ms: topology.maximum_gap_ms,
+        min_rep_duration_ms: topology.minimum_rep_duration_ms,
+        max_rep_duration_ms: topology.maximum_rep_duration_ms,
+    };
+    let identity = format!(
+        "{}/{}/plan-driven-local-cycle/v0.1",
+        plan.action_id,
+        capture_view.catalog_slug(),
+    );
+    let mut profile = crate::ExerciseProfile::rigid_bar_provisional(&identity, initializer);
+    profile.state_machine_id = crate::action_plan_topology_state_machine_id(
+        &topology.topology_id,
+        topology.minimum_phase_dwell_ms,
+    );
+    profile.content_hash = profile.computed_content_hash();
+    let profile = bind_runtime_profile_to_action_plan(profile, &plan);
+    let pose_anchor = match plan.exact_identity.equipment_topology.as_str() {
+        "none" | "bodyweight" | "fixed_support" | "bodyweight_station" => {
+            crate::LocalPoseAnchor::ShoulderMidpoint
+        }
+        "constrained_machine_handle" => crate::LocalPoseAnchor::RightWrist,
+        _ => crate::LocalPoseAnchor::WristMidpoint,
+    };
+    Ok(RigidBarAssessmentProfileBinding {
+        action_id: plan.action_id.clone(),
+        capture_view,
+        profile,
+        local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
+            capture_view: match capture_view {
+                AssessmentCaptureView::Front => crate::LocalCoarseView::Front,
+                AssessmentCaptureView::FrontObliqueLeft => crate::LocalCoarseView::FrontObliqueLeft,
+                AssessmentCaptureView::FrontObliqueRight => {
+                    crate::LocalCoarseView::FrontObliqueRight
+                }
+                AssessmentCaptureView::Rear => crate::LocalCoarseView::Rear,
+                AssessmentCaptureView::RearObliqueLeft => crate::LocalCoarseView::RearObliqueLeft,
+                AssessmentCaptureView::RearObliqueRight => crate::LocalCoarseView::RearObliqueRight,
+                AssessmentCaptureView::LeftSide => crate::LocalCoarseView::LeftSide,
+                AssessmentCaptureView::RightSide => crate::LocalCoarseView::RightSide,
+            },
+            preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortUp,
+            equipment_mode,
+            pose_anchor,
+        },
+        motion_plan: Some(plan),
+    })
+}
+
 /// The currently governed rigid-bar action/view matrix. Profiles are
 /// deliberately exact-context and provisional: they initialize Rep boundaries
 /// but do not encode universal exercise-quality truth.
@@ -6774,96 +6985,16 @@ pub fn compile_plan_driven_runtime_binding(
     bundle: &ExecutionAssessmentBundle,
     plan: crate::ActionObservationPlan,
 ) -> RigidBarAssessmentProfileBinding {
-    use crate::{ExerciseSignal, ExerciseSignalKind, MovementDirection};
-
-    let task_primary_is_pose = plan.relations.iter().any(|relation| {
-        relation.role == crate::MotionRole::TaskPrimary
-            && relation.source_requirement == crate::OperatorSourceRequirement::CurrentMeasuredPose
-    });
-    let equipment_mode = if task_primary_is_pose {
-        crate::LocalEquipmentMode::PoseOnly
-    } else {
-        local_equipment_mode(bundle.exact_context.equipment_semantics)
-    };
-    let primary_signal_kind = match equipment_mode {
-        crate::LocalEquipmentMode::PoseOnly | crate::LocalEquipmentMode::FixedSupport => {
-            ExerciseSignalKind::LocalPoseAlongAxisProgress
-        }
-        crate::LocalEquipmentMode::MovingHandle
-        | crate::LocalEquipmentMode::TwoIndependentDumbbells
-            if plan.rep_consensus.mode == crate::RepConsensusMode::IndependentBilateral =>
-        {
-            ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
-        }
-        crate::LocalEquipmentMode::RigidBarAxis
-        | crate::LocalEquipmentMode::MovingHandle
-        | crate::LocalEquipmentMode::TwoIndependentDumbbells => {
-            ExerciseSignalKind::LocalObservedAlongAxisProgress
-        }
-    };
-
-    // Candidate segmentation is configured by the frozen exact action × view
-    // topology asset.  It is deliberately separate from quality thresholds:
-    // this is the plan that produces the candidate, not post-seal decoration.
-    let topology = &plan.rep_topology;
-    let direction = match topology.direction_policy {
-        crate::LocalDirectionPolicy::SignInvariant => MovementDirection::Auto,
-        crate::LocalDirectionPolicy::PreparationToEffortPositive => MovementDirection::Increasing,
-        crate::LocalDirectionPolicy::PreparationToEffortNegative => MovementDirection::Decreasing,
-    };
-    let initializer = crate::RigidBarProfileInitializer {
-        primary_signal: ExerciseSignal {
-            kind: primary_signal_kind,
-            landmarks: Vec::new(),
-        },
-        secondary_signal: ExerciseSignal {
-            kind: primary_signal_kind,
-            landmarks: Vec::new(),
-        },
-        direction,
-        start_amplitude: topology.start_threshold(),
-        minimum_amplitude: topology.minimum_excursion(),
-        return_hysteresis: topology.turnaround_hysteresis(),
-        ready_tolerance: f32::from(topology.ready_tolerance_milli) / 1_000.0,
-        minimum_phase_dwell_ms: topology.minimum_phase_dwell_ms,
-        max_gap_ms: topology.maximum_gap_ms,
-        min_rep_duration_ms: topology.minimum_rep_duration_ms,
-        max_rep_duration_ms: topology.maximum_rep_duration_ms,
-    };
-    let identity = format!(
-        "{}/{}/plan-driven-local-cycle/v0.1",
-        bundle.exact_context.action_id,
-        bundle.exact_context.capture_view.catalog_slug(),
-    );
-    let mut profile = crate::ExerciseProfile::rigid_bar_provisional(&identity, initializer);
-    // The topology is not a report label. It selects the state graph that the
-    // RepEngine runs before any candidate can be sealed. `alternating` has a
-    // distinct primary/secondary progression path; the other supported
-    // round-trip topologies retain their own immutable executor identity and
-    // compatible signal choice.
-    profile.state_machine_id = crate::action_plan_topology_state_machine_id(
-        &topology.topology_id,
-        topology.minimum_phase_dwell_ms,
-    );
-    profile.content_hash = profile.computed_content_hash();
-    let profile = bind_runtime_profile_to_action_plan(profile, &plan);
-    RigidBarAssessmentProfileBinding {
-        action_id: bundle.exact_context.action_id.clone(),
-        capture_view: bundle.exact_context.capture_view,
-        profile,
-        local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
-            capture_view: local_coarse_view(bundle.exact_context.capture_view)
-                .expect("installed exact view has a local coordinate projection"),
-            // The estimator learns the actual camera-plane departure vector;
-            // this is only a deterministic sign seed. Rep admission validates
-            // departure + opposite return, so screen up/down is not action
-            // semantics and cannot be hard-coded by action name.
-            preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortUp,
-            equipment_mode,
-            pose_anchor: local_pose_anchor(bundle.exact_context.equipment_semantics),
-        },
-        motion_plan: Some(plan),
-    }
+    // Historical assessment Bundle IDs may be product-facing aliases of the
+    // leaf ActionMotionDefinition (for example `flat_barbell_bench_press`
+    // versus its motion definition `barbell_bench_press`).  Keep the Bundle
+    // key solely for catalog lookup; profile/topology/strategy come only from
+    // the compiled plan and are never reconstructed from this alias.
+    let mut binding = compile_action_plan_runtime_binding(plan)
+        .expect("an installed action plan must materialise a runtime binding");
+    binding.action_id = bundle.exact_context.action_id.clone();
+    binding.capture_view = bundle.exact_context.capture_view;
+    binding
 }
 
 pub fn visual_recognition_baseline_profiles_v0_1() -> Vec<RigidBarAssessmentProfileBinding> {
@@ -7970,6 +8101,103 @@ pub fn current_motion_assessment_catalog() -> ExecutionAssessmentBundleCatalog {
         .into_runtime_catalog()
 }
 
+fn assessment_execution_receipt(
+    plan: &crate::ActionObservationPlan,
+    category: crate::AlgorithmModuleCategory,
+    rep: &SealedRep,
+    output_fact_ids: Vec<String>,
+) -> Option<crate::AlgorithmExecutionReceipt> {
+    let module = plan
+        .algorithm_modules
+        .iter()
+        .find(|module| module.category == category)?;
+    Some(crate::AlgorithmExecutionReceipt {
+        module_id: module.module_id.clone(),
+        category,
+        input_fact_ids: module
+            .required_inputs
+            .iter()
+            .map(|fact| fact.fact_id.clone())
+            .collect(),
+        output_fact_ids,
+        start_frame_id: rep.start_frame_id,
+        end_frame_id: rep.end_frame_id,
+        start_timestamp_ms: rep.start_timestamp_ms,
+        end_timestamp_ms: rep.end_timestamp_ms,
+    })
+}
+
+fn rep_has_required_pre_seal_receipts(
+    plan: &crate::ActionObservationPlan,
+    rep: &SealedRep,
+) -> bool {
+    use crate::AlgorithmModuleCategory as Category;
+
+    let mut required = vec![
+        Category::PoseRelation,
+        Category::LocalCoordinate,
+        Category::RepTopology,
+        Category::CandidateAdmission,
+        Category::BoundaryRefinement,
+    ];
+    if plan.equipment_provider.is_some() {
+        required.extend([Category::EquipmentObservation, Category::EquipmentFusion]);
+    }
+    let receipt_ids = rep
+        .execution_receipts
+        .iter()
+        .map(|receipt| receipt.module_id.as_str())
+        .collect::<Vec<_>>();
+    if rep
+        .executed_algorithm_module_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        != receipt_ids
+    {
+        return false;
+    }
+    required.into_iter().all(|category| {
+        let Some(module) = plan
+            .algorithm_modules
+            .iter()
+            .find(|module| module.category == category)
+        else {
+            return false;
+        };
+        let expected_inputs = module
+            .required_inputs
+            .iter()
+            .map(|fact| fact.fact_id.as_str())
+            .collect::<Vec<_>>();
+        let expected_outputs = module
+            .produced_facts
+            .iter()
+            .map(|fact| fact.fact_id.as_str())
+            .collect::<Vec<_>>();
+        rep.execution_receipts.iter().any(|receipt| {
+            receipt.module_id == module.module_id
+                && receipt.category == category
+                && receipt.start_frame_id >= rep.start_frame_id
+                && receipt.end_frame_id <= rep.end_frame_id
+                && receipt.start_timestamp_ms >= rep.start_timestamp_ms
+                && receipt.end_timestamp_ms <= rep.end_timestamp_ms
+                && receipt
+                    .input_fact_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    == expected_inputs
+                && receipt
+                    .output_fact_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    == expected_outputs
+        })
+    })
+}
+
 fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
     SealedRepReference {
         rep_id: rep.rep_id,
@@ -7986,6 +8214,7 @@ fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
         end_timestamp_ms: rep.end_timestamp_ms,
         canonical_slice_hash: format!("{:016x}", rep.canonical_slice_hash),
         executed_algorithm_module_ids: rep.executed_algorithm_module_ids.clone(),
+        execution_receipts: rep.execution_receipts.clone(),
         evidence_incidents: rep.evidence_incidents.clone(),
     }
 }

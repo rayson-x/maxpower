@@ -60,3 +60,13 @@ Rep signal.
 shortcut. It supplies the visible/prohibited relations and `RepTopologyProfile`;
 the compiler binds the resulting topology parameters and dwell state graph into
 the `MotionSession` profile before candidate segmentation starts.
+
+The same compiled binding is installed by the Web ABI before its first frame:
+it owns the `RepEngine`, local-coordinate strategy, plan authority and selected
+Provider as one unit. Legacy profile installation is rejected while that unit
+is active, so an action/view cannot degrade into a host-selected generic
+profile after planning.
+
+The action-plan contract now materialises every compiled installed action×view
+through this same binding and asserts that the resulting profile contains that
+plan's immutable hash and topology state-graph identity.

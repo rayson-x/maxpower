@@ -162,6 +162,7 @@ fn sealed(start: u64, peak: u64, end: u64) -> SealedRep {
         disposition: RepDisposition::Confirmed,
         evidence_reason: None,
         executed_algorithm_module_ids: vec![],
+        execution_receipts: vec![],
         evidence_incidents: vec![],
         observation_findings: vec![],
         normalized_endpoints: None,

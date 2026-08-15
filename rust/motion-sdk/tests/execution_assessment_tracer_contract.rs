@@ -325,6 +325,29 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
             .iter()
             .all(|rep| !rep.features.is_empty())
     );
+    assert!(
+        report.reps.iter().all(|rep| {
+            !rep.execution_receipts.is_empty()
+                && rep.execution_receipts.iter().all(|receipt| {
+                    !matches!(
+                        receipt.category,
+                        maxpower_motion_sdk::AlgorithmModuleCategory::PostSealFeature
+                            | maxpower_motion_sdk::AlgorithmModuleCategory::QualityRule
+                    )
+                })
+        }),
+        "a sealed Rep retains only actual pre-seal execution receipts"
+    );
+    assert!(
+        report.rep_assessments.iter().all(|assessment| {
+            assessment.execution_receipts.iter().any(|receipt| {
+                receipt.category == maxpower_motion_sdk::AlgorithmModuleCategory::PostSealFeature
+            }) && assessment.execution_receipts.iter().any(|receipt| {
+                receipt.category == maxpower_motion_sdk::AlgorithmModuleCategory::QualityRule
+            })
+        }),
+        "post-seal features and rules are receipted only after assessment executes them"
+    );
     assert!(!report.dimension_findings.is_empty());
     assert!(!report.set_patterns.is_empty());
 

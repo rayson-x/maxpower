@@ -1227,6 +1227,11 @@ pub struct ActionObservationPlan {
     pub action_id: String,
     pub definition_id: String,
     pub definition_hash: String,
+    /// Exact equipment/posture identity carried from the signed action
+    /// definition. Runtime binding consumes this field directly; it must not
+    /// reconstruct action semantics from a legacy assessment Bundle or a host
+    /// profile selection.
+    pub exact_identity: ExactActionIdentity,
     pub capture_view: String,
     pub projection: ViewProjectionPlan,
     pub view_observation: ViewObservationPlan,
@@ -1519,6 +1524,7 @@ fn project_definition(
     let projection_hash = stable_hash(&(
         definition.definition_id.as_str(),
         definition.computed_hash(),
+        &definition.exact_identity,
         view,
         relations
             .iter()
@@ -1598,6 +1604,7 @@ fn plan(
         action_id: definition.action_id.clone(),
         definition_id: definition.definition_id.clone(),
         definition_hash: definition.computed_hash(),
+        exact_identity: definition.exact_identity.clone(),
         capture_view,
         projection,
         rep_topology: view_observation.rep_topology.clone(),

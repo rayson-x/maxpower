@@ -43,7 +43,10 @@ struct WebRuntime {
     /// boundaries; `visual_equipment_provider` below is only the provider
     /// armed for the current frame.
     configured_equipment_provider: Option<super::EquipmentProviderId>,
-    selected_action_plan_hash: Option<String>,
+    /// The action plan is installed before any frame is accepted. This
+    /// authority, the profile and the provider are one Rust-owned unit; a
+    /// caller cannot install a legacy profile beside it.
+    action_rep_authority: Option<super::ActionRepAuthority>,
     visual_equipment_provider: Option<super::EquipmentProviderId>,
     visual_barbell_axis: Option<super::BarbellAxisObservation>,
     subject_tracker: Option<SubjectTracker>,
@@ -95,7 +98,7 @@ impl Default for WebRuntime {
             visual_height: 0,
             visual_equipment_processed: false,
             configured_equipment_provider: None,
-            selected_action_plan_hash: None,
+            action_rep_authority: None,
             visual_equipment_provider: None,
             visual_barbell_axis: None,
             subject_tracker: None,
@@ -346,7 +349,7 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.visual_height = 0;
     runtime.visual_equipment_processed = false;
     runtime.configured_equipment_provider = None;
-    runtime.selected_action_plan_hash = None;
+    runtime.action_rep_authority = None;
     runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::DominantVisible));
@@ -404,7 +407,7 @@ pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
     runtime.visual_height = 0;
     runtime.visual_equipment_processed = false;
     runtime.configured_equipment_provider = None;
-    runtime.selected_action_plan_hash = None;
+    runtime.action_rep_authority = None;
     runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     runtime.last_processed_timestamp_ms = None;
@@ -429,6 +432,9 @@ pub extern "C" fn motion_sdk_begin_set() -> i32 {
     } else {
         runtime.rep_state = super::RepStateSnapshot::default();
     }
+    if let Some(authority) = runtime.action_rep_authority.as_mut() {
+        authority.begin_set();
+    }
     runtime.completed_reps.clear();
     runtime.pending_outcomes.clear();
     runtime.frame_history.clear();
@@ -449,6 +455,13 @@ pub extern "C" fn motion_sdk_begin_replay_set() -> i32 {
     }
     runtime.set_gate = super::SetGate::replay_active();
     runtime.local_motion_coordinate.begin_set();
+    if let Some(rep_engine) = runtime.rep_engine.as_mut() {
+        rep_engine.begin_set();
+        runtime.rep_state = rep_engine.state.clone();
+    }
+    if let Some(authority) = runtime.action_rep_authority.as_mut() {
+        authority.begin_set();
+    }
     0
 }
 
@@ -463,10 +476,14 @@ pub extern "C" fn motion_sdk_finish_set() -> i32 {
     }
     runtime.set_gate.finish();
     runtime.local_motion_coordinate.finish_set();
-    runtime.completed_reps = runtime
+    let terminal = runtime
         .rep_engine
         .as_mut()
         .map_or_else(Vec::new, super::RepEngine::finish_set);
+    runtime.completed_reps = terminal
+        .into_iter()
+        .map(|rep| apply_action_rep_authority(&mut runtime, rep))
+        .collect();
     runtime.pending_outcomes.clear();
     runtime.rep_state = runtime
         .rep_engine
@@ -859,17 +876,54 @@ pub unsafe extern "C" fn motion_sdk_select_visual_action_context(
         Err(super::ActionMotionError::IdentityRelationNotObservable { .. }) => return -6,
         Err(_) => return -7,
     };
+    let binding = match super::compile_action_plan_runtime_binding(plan.clone()) {
+        Ok(binding) => binding,
+        Err(_) => return -7,
+    };
+    let authority = match super::ActionRepAuthority::new(plan.clone()) {
+        Ok(authority) => authority,
+        Err(_) => return -7,
+    };
     let Ok(mut runtime) = runtime().lock() else {
         return -8;
     };
-    if runtime.last_processed_timestamp_ms.is_some() {
+    if runtime.last_processed_timestamp_ms.is_some()
+        || runtime.rep_engine.is_some()
+        || runtime.candidate_meta.is_some()
+        || !runtime.candidates.is_empty()
+    {
         return -9;
     }
+    if runtime.engine.is_none() || runtime.pose_schema != binding.profile.schema {
+        return -10;
+    }
+    // Do not let a caller queue legacy geometry before choosing the plan and
+    // then have it silently consumed beside the Rust-selected Provider.
+    if !runtime.equipment_observations.is_empty()
+        || runtime.equipment_output.is_some()
+        || !runtime.visual_luma.is_empty()
+        || runtime.visual_equipment_processed
+    {
+        return -11;
+    }
+    // Install the exact action×view profile and coordinate strategy atomically
+    // with its plan authority. A Web caller cannot later replace just one of
+    // these pieces with `motion_sdk_set_profile`.
+    runtime
+        .local_motion_coordinate
+        .set_strategy(Some(binding.local_coordinate_strategy));
+    runtime.rep_engine = Some(super::RepEngine::new(binding.profile));
+    runtime.action_rep_authority = Some(authority);
+    runtime.rep_state = super::RepStateSnapshot::default();
+    runtime.completed_reps.clear();
+    runtime.pending_outcomes.clear();
+    clear_reference(&mut runtime);
     runtime.configured_equipment_provider = plan
         .equipment_provider
         .as_ref()
         .map(|provider| provider.provider_id);
-    runtime.selected_action_plan_hash = Some(plan.plan_hash);
+    runtime.visual_equipment_provider = None;
+    runtime.visual_barbell_axis = None;
     0
 }
 
@@ -937,6 +991,14 @@ pub extern "C" fn motion_sdk_add_equipment_observation(
     };
     if runtime.engine.is_none() {
         return -2;
+    }
+    // Exact action contexts receive equipment only through the provider
+    // selected by their compiled Rust plan. This legacy proposal ABI remains
+    // available for controlled legacy/test sessions, but a host cannot inject
+    // arbitrary geometry to bypass provider provenance after selecting an
+    // action/view.
+    if runtime.action_rep_authority.is_some() {
+        return -7;
     }
     let kind = match kind {
         0 => super::EquipmentKind::WeightPlate,
@@ -1078,7 +1140,10 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
             .rep_engine
             .as_mut()
             .and_then(super::RepEngine::reject_for_subject_change);
-        runtime.pending_outcomes.extend(subject_change_outcome);
+        if let Some(rep) = subject_change_outcome {
+            let rep = apply_action_rep_authority(&mut runtime, rep);
+            runtime.pending_outcomes.push(rep);
+        }
         runtime.equipment_providers.reset();
         runtime
             .local_motion_coordinate
@@ -1203,6 +1268,21 @@ pub extern "C" fn motion_sdk_current_frame_valid() -> i32 {
     i32::from(target_locked && observable)
 }
 
+/// Applies the same plan-owned final admission used by `MotionSession` to
+/// every Web ABI terminal route (ordinary candidate, subject switch and set
+/// closure). The generic `RepEngine` can propose a cycle, but it cannot emit a
+/// plan-bound conclusion on its own.
+fn apply_action_rep_authority(runtime: &mut WebRuntime, rep: super::SealedRep) -> super::SealedRep {
+    let profile = runtime
+        .rep_engine
+        .as_ref()
+        .map(|engine| engine.profile.clone());
+    match (runtime.action_rep_authority.as_mut(), profile.as_ref()) {
+        (Some(authority), Some(profile)) => authority.admit(rep, profile),
+        _ => rep,
+    }
+}
+
 fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObservation]) {
     runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
     if runtime.reference_profile.is_some() || runtime.simulated_baseline.is_some() {
@@ -1240,6 +1320,23 @@ fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObser
             super::EquipmentCannotJudgeReason::NoEquipmentObservation,
         )
     });
+    if let (Some(authority), Some(rep_engine)) = (
+        runtime.action_rep_authority.as_mut(),
+        runtime.rep_engine.as_ref(),
+    ) {
+        let equipment_pipeline_executed = authority.has_equipment_provider()
+            && authority.runs(super::AlgorithmModuleCategory::EquipmentObservation)
+            && authority.runs(super::AlgorithmModuleCategory::EquipmentFusion);
+        authority.observe(
+            runtime.frame_id,
+            runtime.timestamp_ms,
+            &runtime.output,
+            &equipment,
+            &runtime.local_motion_coordinate.snapshot(),
+            rep_engine.profile.max_rep_duration_ms + rep_engine.profile.max_gap_ms,
+            equipment_pipeline_executed,
+        );
+    }
     let may_process_rep = runtime.set_gate.advance(
         runtime.rep_engine.as_ref().map(|engine| &engine.profile),
         target.state,
@@ -1250,21 +1347,29 @@ fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObser
         rep_phase,
     );
     if may_process_rep {
-        if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-            runtime
-                .completed_reps
-                .extend(rep_engine.process_with_equipment(
-                    runtime.frame_id,
-                    runtime.timestamp_ms,
-                    target.state,
-                    &runtime.output,
-                    &equipment,
-                    Some(&runtime.local_motion_coordinate.snapshot()),
-                ));
+        if let Some(authority) = runtime.action_rep_authority.as_mut() {
+            authority.record_rep_topology(runtime.frame_id, runtime.timestamp_ms);
+        }
+        let proposed = if let Some(rep_engine) = runtime.rep_engine.as_mut() {
+            let proposed = rep_engine.process_with_equipment(
+                runtime.frame_id,
+                runtime.timestamp_ms,
+                target.state,
+                &runtime.output,
+                &equipment,
+                Some(&runtime.local_motion_coordinate.snapshot()),
+            );
             runtime.rep_state = rep_engine.state.clone();
+            proposed
         } else {
             runtime.rep_state = super::RepStateSnapshot::default();
-        }
+            Vec::new()
+        };
+        let admitted = proposed
+            .into_iter()
+            .map(|rep| apply_action_rep_authority(runtime, rep))
+            .collect::<Vec<_>>();
+        runtime.completed_reps.extend(admitted);
     } else {
         if let Some(rep_engine) = runtime.rep_engine.as_mut() {
             rep_engine.prime_barbell_ready(
@@ -1575,6 +1680,12 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
         return -1;
     };
+    // Plan-bound action sessions own their profile. Accepting this legacy
+    // setter would split one Rep lifecycle into host-selected and plan-driven
+    // halves, so callers must reset before choosing a legacy profile.
+    if runtime.action_rep_authority.is_some() {
+        return -4;
+    }
     let profile = match builtin_profile(profile_code) {
         Ok(profile) => profile,
         Err(()) => return -2,
@@ -1588,7 +1699,6 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     runtime
         .local_motion_coordinate
         .set_legacy_profile_identity(profile.as_ref().map(|value| value.identity.as_str()));
-    runtime.selected_action_plan_hash = None;
     // A legacy profile can configure pose/Rep compatibility only. It must not
     // implicitly select a visual-equipment implementation: hosts establish
     // that through `motion_sdk_select_visual_action_context`, where Rust
@@ -1679,6 +1789,9 @@ pub extern "C" fn motion_sdk_install_profile(
     let Ok(mut runtime) = runtime().lock() else {
         return -1;
     };
+    if runtime.action_rep_authority.is_some() {
+        return -8;
+    }
     let Ok(identity) = String::from_utf8(std::mem::take(&mut runtime.profile_identity_buffer))
     else {
         return -4;

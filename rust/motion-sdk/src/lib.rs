@@ -1650,9 +1650,13 @@ pub struct SealedRep {
     pub disposition: RepDisposition,
     pub evidence_reason: Option<RepEvidenceReason>,
     /// Ordered runtime modules that actually participated in this Rep's
-    /// plan-bound calculation. Legacy profiles leave it empty; it is never a
-    /// decorative copy of an unexecuted catalog graph.
+    /// plan-bound calculation. This is a compatibility projection of
+    /// `execution_receipts`; consumers needing causal inputs/outputs must use
+    /// the receipts rather than treating a plan graph as proof of execution.
     pub executed_algorithm_module_ids: Vec<String>,
+    /// Actual pre-seal execution receipts. Post-seal feature/rule receipts
+    /// are recorded only by the assessment engine after those stages run.
+    pub execution_receipts: Vec<AlgorithmExecutionReceipt>,
     /// Bounded weak-evidence incidents retained even when a complete cycle is
     /// ultimately confirmed. This distinguishes a brief coordinate/signal
     /// interruption from missing identity evidence and gives trace consumers
@@ -1666,6 +1670,22 @@ pub struct SealedRep {
     /// Causal normalized facts captured at the three immutable Rep endpoints.
     /// This is additive shadow evidence; legacy profiles leave it absent.
     pub normalized_endpoints: Option<NormalizedRepEndpointEvidence>,
+}
+
+/// One plan module's observed participation in a sealed Rep. The event range
+/// and named input/output facts make this an execution receipt, rather than a
+/// copy of the static ActionObservationPlan graph.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlgorithmExecutionReceipt {
+    pub module_id: String,
+    pub category: AlgorithmModuleCategory,
+    pub input_fact_ids: Vec<String>,
+    pub output_fact_ids: Vec<String>,
+    pub start_frame_id: u64,
+    pub end_frame_id: u64,
+    pub start_timestamp_ms: u64,
+    pub end_timestamp_ms: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2921,21 +2941,21 @@ struct ActionRepFrame {
 /// not report-only metadata.
 #[derive(Clone, Debug)]
 struct ActionExecutionPipeline {
-    module_ids: Vec<String>,
+    modules: Vec<AlgorithmModuleDescriptor>,
     categories: HashSet<AlgorithmModuleCategory>,
 }
 
 impl ActionExecutionPipeline {
     fn new(plan: &ActionObservationPlan) -> Result<Self, MotionError> {
         let mut categories = HashSet::new();
-        let mut module_ids = Vec::with_capacity(plan.algorithm_modules.len());
+        let mut modules = Vec::with_capacity(plan.algorithm_modules.len());
         for module in &plan.algorithm_modules {
             if !categories.insert(module.category) {
                 return Err(MotionError::InvalidActionPlan(
                     "compiled action plan contains duplicate execution stage",
                 ));
             }
-            module_ids.push(module.module_id.clone());
+            modules.push(module.clone());
         }
         for required in [
             AlgorithmModuleCategory::PoseRelation,
@@ -2964,7 +2984,7 @@ impl ActionExecutionPipeline {
             }
         }
         Ok(Self {
-            module_ids,
+            modules,
             categories,
         })
     }
@@ -2973,8 +2993,36 @@ impl ActionExecutionPipeline {
         self.categories.contains(&category)
     }
 
-    fn executed_module_ids(&self) -> Vec<String> {
-        self.module_ids.clone()
+    fn receipt(
+        &self,
+        category: AlgorithmModuleCategory,
+        start_frame_id: u64,
+        end_frame_id: u64,
+        start_timestamp_ms: u64,
+        end_timestamp_ms: u64,
+    ) -> Option<AlgorithmExecutionReceipt> {
+        let module = self
+            .modules
+            .iter()
+            .find(|module| module.category == category)?;
+        Some(AlgorithmExecutionReceipt {
+            module_id: module.module_id.clone(),
+            category,
+            input_fact_ids: module
+                .required_inputs
+                .iter()
+                .map(|fact| fact.fact_id.clone())
+                .collect(),
+            output_fact_ids: module
+                .produced_facts
+                .iter()
+                .map(|fact| fact.fact_id.clone())
+                .collect(),
+            start_frame_id,
+            end_frame_id,
+            start_timestamp_ms,
+            end_timestamp_ms,
+        })
     }
 }
 
@@ -2984,16 +3032,17 @@ impl ActionExecutionPipeline {
 /// measured, correctly directed excursion and return in the same causal
 /// window. This keeps candidate segmentation and action identity separate
 /// without creating a second downstream Rep truth.
-struct ActionRepAuthority {
+pub(crate) struct ActionRepAuthority {
     plan: ActionObservationPlan,
     pipeline: ActionExecutionPipeline,
     history: VecDeque<ActionRepFrame>,
+    stage_receipts: Vec<AlgorithmExecutionReceipt>,
 }
 
 const ACTION_ENDPOINT_EVIDENCE_WINDOW_MS: u64 = 250;
 
 impl ActionRepAuthority {
-    fn new(plan: ActionObservationPlan) -> Result<Self, MotionError> {
+    pub(crate) fn new(plan: ActionObservationPlan) -> Result<Self, MotionError> {
         if plan.rep_authority.is_none()
             || !plan.relations.iter().any(|relation| {
                 relation.role == MotionRole::TaskPrimary
@@ -3009,14 +3058,16 @@ impl ActionRepAuthority {
             plan,
             pipeline,
             history: VecDeque::new(),
+            stage_receipts: Vec::new(),
         })
     }
 
-    fn begin_set(&mut self) {
+    pub(crate) fn begin_set(&mut self) {
         self.history.clear();
+        self.stage_receipts.clear();
     }
 
-    fn observe(
+    pub(crate) fn observe(
         &mut self,
         frame_id: u64,
         timestamp_ms: u64,
@@ -3024,7 +3075,38 @@ impl ActionRepAuthority {
         equipment: &EquipmentFrameEvidence,
         local_coordinate: &LocalMotionCoordinateEvidence,
         retention_ms: u64,
+        equipment_pipeline_executed: bool,
     ) {
+        self.record_stage(
+            AlgorithmModuleCategory::PoseRelation,
+            frame_id,
+            frame_id,
+            timestamp_ms,
+            timestamp_ms,
+        );
+        self.record_stage(
+            AlgorithmModuleCategory::LocalCoordinate,
+            frame_id,
+            frame_id,
+            timestamp_ms,
+            timestamp_ms,
+        );
+        if equipment_pipeline_executed {
+            self.record_stage(
+                AlgorithmModuleCategory::EquipmentObservation,
+                frame_id,
+                frame_id,
+                timestamp_ms,
+                timestamp_ms,
+            );
+            self.record_stage(
+                AlgorithmModuleCategory::EquipmentFusion,
+                frame_id,
+                frame_id,
+                timestamp_ms,
+                timestamp_ms,
+            );
+        }
         self.history.push_back(ActionRepFrame {
             frame_id,
             timestamp_ms,
@@ -3040,10 +3122,36 @@ impl ActionRepAuthority {
         {
             self.history.pop_front();
         }
+        let oldest_frame = self
+            .history
+            .front()
+            .map(|frame| frame.frame_id)
+            .unwrap_or(frame_id);
+        self.stage_receipts
+            .retain(|receipt| receipt.end_frame_id >= oldest_frame);
     }
 
-    fn admit(&mut self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
-        rep.executed_algorithm_module_ids = self.pipeline.executed_module_ids();
+    pub(crate) fn admit(&mut self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
+        self.record_stage(
+            AlgorithmModuleCategory::CandidateAdmission,
+            rep.start_frame_id,
+            rep.end_frame_id,
+            rep.start_timestamp_ms,
+            rep.end_timestamp_ms,
+        );
+        self.record_stage(
+            AlgorithmModuleCategory::BoundaryRefinement,
+            rep.start_frame_id,
+            rep.end_frame_id,
+            rep.start_timestamp_ms,
+            rep.end_timestamp_ms,
+        );
+        rep.execution_receipts = self.receipts_for_rep(&rep);
+        rep.executed_algorithm_module_ids = rep
+            .execution_receipts
+            .iter()
+            .map(|receipt| receipt.module_id.clone())
+            .collect();
         if rep.disposition != RepDisposition::Confirmed {
             return rep;
         }
@@ -3171,12 +3279,80 @@ impl ActionRepAuthority {
             .ok_or(RepEvidenceReason::EquipmentConsensusUnavailable)
     }
 
-    fn runs(&self, category: AlgorithmModuleCategory) -> bool {
+    pub(crate) fn runs(&self, category: AlgorithmModuleCategory) -> bool {
         self.pipeline.runs(category)
     }
 
-    fn has_equipment_provider(&self) -> bool {
+    pub(crate) fn has_equipment_provider(&self) -> bool {
         self.plan.equipment_provider.is_some()
+    }
+
+    /// Marks the topology executor only when the RepEngine is actually asked
+    /// to advance a candidate. Priming/idle frames deliberately do not claim
+    /// this receipt.
+    pub(crate) fn record_rep_topology(&mut self, frame_id: u64, timestamp_ms: u64) {
+        self.record_stage(
+            AlgorithmModuleCategory::RepTopology,
+            frame_id,
+            frame_id,
+            timestamp_ms,
+            timestamp_ms,
+        );
+    }
+
+    fn record_stage(
+        &mut self,
+        category: AlgorithmModuleCategory,
+        start_frame_id: u64,
+        end_frame_id: u64,
+        start_timestamp_ms: u64,
+        end_timestamp_ms: u64,
+    ) {
+        let Some(receipt) = self.pipeline.receipt(
+            category,
+            start_frame_id,
+            end_frame_id,
+            start_timestamp_ms,
+            end_timestamp_ms,
+        ) else {
+            return;
+        };
+        // Every frame-stage is a distinct causal observation. The two
+        // post-candidate stages span immutable boundaries and therefore are
+        // never accidentally deduplicated with a frame-local receipt.
+        if self.stage_receipts.last().is_some_and(|previous| {
+            previous.module_id == receipt.module_id
+                && previous.start_frame_id == receipt.start_frame_id
+                && previous.end_frame_id == receipt.end_frame_id
+        }) {
+            return;
+        }
+        self.stage_receipts.push(receipt);
+    }
+
+    fn receipts_for_rep(&self, rep: &SealedRep) -> Vec<AlgorithmExecutionReceipt> {
+        self.pipeline
+            .modules
+            .iter()
+            .filter_map(|module| {
+                let mut matching = self.stage_receipts.iter().filter(|receipt| {
+                    receipt.module_id == module.module_id
+                        && receipt.end_frame_id >= rep.start_frame_id
+                        && receipt.start_frame_id <= rep.end_frame_id
+                });
+                let first = matching.next()?;
+                let mut aggregate = first.clone();
+                for receipt in matching {
+                    aggregate.start_frame_id = aggregate.start_frame_id.min(receipt.start_frame_id);
+                    aggregate.end_frame_id = aggregate.end_frame_id.max(receipt.end_frame_id);
+                    aggregate.start_timestamp_ms =
+                        aggregate.start_timestamp_ms.min(receipt.start_timestamp_ms);
+                    aggregate.end_timestamp_ms =
+                        aggregate.end_timestamp_ms.max(receipt.end_timestamp_ms);
+                }
+                Some(aggregate)
+            })
+            .collect()
     }
 
     fn validate_primary_relation(
@@ -3587,6 +3763,7 @@ mod action_rep_authority_tests {
             disposition: RepDisposition::Confirmed,
             evidence_reason: None,
             executed_algorithm_module_ids: Vec::new(),
+            execution_receipts: Vec::new(),
             evidence_incidents: Vec::new(),
             observation_findings: Vec::new(),
             normalized_endpoints: Some(NormalizedRepEndpointEvidence {
@@ -3666,15 +3843,20 @@ mod action_rep_authority_tests {
                 .observation_findings
                 .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
         );
+        assert_eq!(accepted.execution_receipts.len(), 2);
+        assert!(accepted.execution_receipts.iter().all(|receipt| matches!(
+            receipt.category,
+            AlgorithmModuleCategory::CandidateAdmission
+                | AlgorithmModuleCategory::BoundaryRefinement
+        )));
         assert_eq!(
             accepted.executed_algorithm_module_ids,
-            authority
-                .plan
-                .algorithm_modules
+            accepted
+                .execution_receipts
                 .iter()
-                .map(|module| module.module_id.clone())
+                .map(|receipt| receipt.module_id.clone())
                 .collect::<Vec<_>>(),
-            "a sealed plan-bound Rep must retain the modules that actually ran"
+            "manual fixture history cannot claim frame stages it did not execute"
         );
 
         let reversed = authority.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
@@ -4171,6 +4353,7 @@ impl RepEngine {
             disposition,
             evidence_reason,
             executed_algorithm_module_ids: Vec::new(),
+            execution_receipts: Vec::new(),
             evidence_incidents: active.evidence_incidents,
             observation_findings,
             normalized_endpoints,
@@ -4419,6 +4602,7 @@ impl RepEngine {
                 None
             },
             executed_algorithm_module_ids: Vec::new(),
+            execution_receipts: Vec::new(),
             evidence_incidents: Vec::new(),
             observation_findings: findings,
             normalized_endpoints: candidate.normalized_endpoints,
@@ -6593,6 +6777,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             disposition: original.disposition,
             evidence_reason: original.evidence_reason,
             executed_algorithm_module_ids: original.executed_algorithm_module_ids.clone(),
+            execution_receipts: original.execution_receipts.clone(),
             evidence_incidents: original.evidence_incidents.clone(),
             observation_findings: original.observation_findings.clone(),
             normalized_endpoints: original.normalized_endpoints.clone(),
@@ -6726,6 +6911,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 &equipment,
                 &local_motion_coordinate,
                 rep_engine.profile.max_rep_duration_ms + rep_engine.profile.max_gap_ms,
+                action_runs_equipment_fusion,
             );
         }
         if self
@@ -6781,6 +6967,9 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             .is_none_or(|authority| authority.runs(AlgorithmModuleCategory::RepTopology));
         let proposed_reps =
             if action_runs_rep_topology && (may_process_rep || active_rep_requires_observation) {
+                if let Some(authority) = self.action_rep_authority.as_mut() {
+                    authority.record_rep_topology(frame_id, source_timestamp_ms);
+                }
                 self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
                     engine.process_with_equipment(
                         frame_id,

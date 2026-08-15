@@ -58,3 +58,9 @@ implementations. Equipment Rep contracts explicitly reject raw fallback after
 association conflict; visual point tracker contracts prove that a retained
 wrist cannot keep an object geometry alive after pixels disappear. Ticket 10
 is the sole owner of frozen, action×view cadence and accuracy reporting.
+
+The Web provider surface is now also plan-bound: after an exact action×view
+context is selected, legacy host geometry ingress is rejected. Only the
+Rust-selected Provider may create raw observations for that set, so a client
+cannot use a wrist-aligned box or arbitrary axis proposal to bypass provider,
+association, grip and fusion provenance.

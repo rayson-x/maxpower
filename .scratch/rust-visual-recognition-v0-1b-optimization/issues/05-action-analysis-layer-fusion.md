@@ -46,7 +46,12 @@ single-view failure and cannot guide action-driven parameter repair.
 
 ## Completion evidence
 
-The runtime keeps actual plan module IDs and bounded evidence incidents on each
-sealed Rep. The governed report generator now rejects missing action×view
-funnel fields and writes only local-private derived artifacts, but Ticket 10
-must supply the missing evaluator schema before a numeric funnel is claimed.
+Each sealed Rep now keeps actual pre-seal execution receipts: module category
+and ID, named input/output facts, and concrete frame/time range. The static
+plan graph is never copied as an execution claim; post-seal feature and quality
+rule receipts are appended only after this assessment lifecycle runs. Bounded
+weak-evidence incidents are independent Trace nodes connected to the exact
+source packet plus local-coordinate/fusion facts before they reach the Rep.
+The governed report generator now rejects missing action×view funnel fields and
+writes only local-private derived artifacts, but Ticket 10 must supply the
+missing evaluator schema before a numeric funnel is claimed.

@@ -1,7 +1,7 @@
 use maxpower_motion_sdk::web_abi::{
-    motion_sdk_begin_candidate, motion_sdk_begin_multi, motion_sdk_begin_visual_equipment_frame,
-    motion_sdk_close, motion_sdk_commit_candidate, motion_sdk_copy_packet,
-    motion_sdk_copy_visual_equipment_luma, motion_sdk_detect_barbell_axis,
+    motion_sdk_add_equipment_observation, motion_sdk_begin_candidate, motion_sdk_begin_multi,
+    motion_sdk_begin_visual_equipment_frame, motion_sdk_close, motion_sdk_commit_candidate,
+    motion_sdk_copy_packet, motion_sdk_copy_visual_equipment_luma, motion_sdk_detect_barbell_axis,
     motion_sdk_detect_visual_equipment, motion_sdk_packet_len, motion_sdk_process_multi,
     motion_sdk_reset, motion_sdk_select_visual_action_context, motion_sdk_set_landmark,
     motion_sdk_set_pose_schema, motion_sdk_set_profile, motion_sdk_visual_barbell_axis_number,
@@ -35,7 +35,6 @@ fn shared_visual_abi_runs_the_action_plan_bound_dumbbell_provider_without_host_g
         assert_eq!(motion_sdk_close(), 0);
         assert_eq!(motion_sdk_reset(320, 240, 1), 0);
         assert_eq!(motion_sdk_set_pose_schema(1), 0);
-        assert_eq!(motion_sdk_set_profile(115), 0);
         let action = b"seated_dumbbell_shoulder_press";
         // SAFETY: `action` is a stable UTF-8 byte slice for this call.
         assert_eq!(
@@ -107,7 +106,6 @@ fn native_visual_abi_runs_the_shared_detector_before_the_same_multi_frame() {
     let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
     assert_eq!(motion_sdk_reset(WIDTH as u32, HEIGHT as u32, 1), 0);
     assert_eq!(motion_sdk_set_pose_schema(1), 0);
-    assert_eq!(motion_sdk_set_profile(109), 0);
     let action = b"flat_barbell_bench_press";
     // SAFETY: `action` is a stable UTF-8 byte slice for this call.
     assert_eq!(
@@ -154,7 +152,6 @@ fn caller_mode_cannot_replace_the_provider_selected_by_rust() {
     let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
     assert_eq!(motion_sdk_reset(320, 240, 1), 0);
     assert_eq!(motion_sdk_set_pose_schema(1), 0);
-    assert_eq!(motion_sdk_set_profile(115), 0);
     let action = b"seated_dumbbell_shoulder_press";
     // SAFETY: `action` is a stable UTF-8 byte slice for this call.
     assert_eq!(
@@ -200,6 +197,47 @@ fn action_context_compiles_the_visual_provider_in_rust_before_pixels_arrive() {
     );
     assert_eq!(motion_sdk_detect_visual_equipment(2), -4);
     assert_eq!(motion_sdk_detect_visual_equipment(1), 0);
+    assert_eq!(motion_sdk_set_profile(109), -4);
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
+fn plan_bound_visual_context_rejects_host_equipment_geometry_and_legacy_profile_replacement() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(320, 240, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    let action = b"flat_barbell_bench_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+        0
+    );
+    assert_eq!(
+        motion_sdk_add_equipment_observation(7, 0, 1, 0.2, 0.4, 0.6, 0.02, 0.95, 2.0, 0, 0),
+        -7,
+        "an action-bound session accepts only its Rust-selected provider output"
+    );
+    assert_eq!(motion_sdk_set_profile(109), -4);
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
+fn action_context_cannot_consume_geometry_queued_before_provider_selection() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(320, 240, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    assert_eq!(
+        motion_sdk_add_equipment_observation(7, 0, 1, 0.2, 0.4, 0.6, 0.02, 0.95, 2.0, 0, 0),
+        0,
+        "legacy ingress remains available only before an action context is selected"
+    );
+    let action = b"flat_barbell_bench_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+        -11,
+        "selection is atomic and refuses a pre-queued host geometry channel"
+    );
     assert_eq!(motion_sdk_close(), 0);
 }
 

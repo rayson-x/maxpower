@@ -3,8 +3,9 @@ use maxpower_motion_sdk::{
     ActionMotionCatalog, ActionMotionCompiler, AlgorithmModuleRegistry, AssessmentAssetKind,
     AssessmentCaptureView, ExecutionAssessmentEngine, FeatureJudgeability, MotionEvidenceChannel,
     MotionRole, OperatorRegistry, OperatorSourceRequirement, WorkoutAssessmentContext,
-    installed_action_asset_inventory_v1, installed_action_motion_catalog_v1,
-    visual_recognition_baseline_catalog_v0_1, visual_recognition_baseline_registry_v0_1,
+    compile_action_plan_runtime_binding, installed_action_asset_inventory_v1,
+    installed_action_motion_catalog_v1, visual_recognition_baseline_catalog_v0_1,
+    visual_recognition_baseline_registry_v0_1,
 };
 
 const ASSET_ONLY_ACTION: &str = include_str!("fixtures/asset_only_action_motion_catalog_v1.json");
@@ -50,6 +51,43 @@ fn an_unknown_action_asset_compiles_without_an_action_name_branch() {
         MotionRole::TaskPrimary
     );
     assert!(!plan.plan_hash.is_empty());
+}
+
+#[test]
+fn every_compiled_installed_action_view_materializes_the_same_plan_owned_runtime() {
+    let catalog = installed_action_motion_catalog_v1().expect("installed action catalog");
+    let compiler = ActionMotionCompiler::new(OperatorRegistry::standard());
+    let mut executable_contexts = 0_usize;
+    for definition in &catalog.definitions {
+        for view in &definition.supported_views {
+            let plan = match compiler.compile(definition, view) {
+                Ok(plan) => plan,
+                Err(maxpower_motion_sdk::ActionMotionError::IdentityRelationNotObservable {
+                    ..
+                }) => continue,
+                Err(error) => panic!(
+                    "installed action {} / {} must compile or typed-refuse: {error:?}",
+                    definition.action_id, view
+                ),
+            };
+            let plan_hash = plan.plan_hash.clone();
+            let topology = plan.rep_topology.topology_id.clone();
+            let binding = compile_action_plan_runtime_binding(plan)
+                .expect("every compiled action plan has a Rust-owned runtime binding");
+            assert!(
+                binding
+                    .profile
+                    .identity
+                    .ends_with(&format!("action-plan-{plan_hash}"))
+            );
+            assert!(binding.profile.state_machine_id.contains(&topology));
+            executable_contexts += 1;
+        }
+    }
+    assert!(
+        executable_contexts > 0,
+        "the installed catalog must contain executable exact contexts"
+    );
 }
 
 #[test]
