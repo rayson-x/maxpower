@@ -3354,19 +3354,17 @@ fn pose_relation_metrics(
     let mut point_values = Vec::new();
     let mut confidences = Vec::new();
     let mut uncertainties = Vec::new();
+    let frozen_point_scale = packets
+        .iter()
+        .find_map(|packet| body_scale(&packet.canonical_pose));
     for packet in &packets {
         let canonical = packet.canonical_pose.as_slice();
         let observation = match relation.operator_id.as_str() {
             "point_displacement" => relation.inputs.first().and_then(|input| {
                 let (point, confidence, uncertainty) =
                     measured_pose_point(canonical, &input.source)?;
-                let scale = body_scale(canonical)?;
-                Some((
-                    None,
-                    Some([point[0] / scale, point[1] / scale]),
-                    confidence,
-                    uncertainty,
-                ))
+                frozen_point_scale?;
+                Some((None, Some(point), confidence, uncertainty))
             }),
             "segment_angle" => relation.inputs.first().and_then(|input| {
                 let (from, to, confidence, uncertainty) =
@@ -3425,6 +3423,8 @@ fn pose_relation_metrics(
             .iter()
             .map(|point| (point[0] - first[0]).hypot(point[1] - first[1]))
             .reduce(f32::max)
+            .zip(frozen_point_scale)
+            .map(|(distance, scale)| distance / scale)
     } else if scalar_values.is_empty() {
         None
     } else {
