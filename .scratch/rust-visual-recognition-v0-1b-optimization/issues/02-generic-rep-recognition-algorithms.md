@@ -48,7 +48,9 @@ before a recognition-rate claim is reconsidered.
 - Frozen replay reports proposal, Confirmed-only and
   Confirmed-plus-NeedsReview changes by **action×view**, including FP/FN and
   reviewed-negative-window false triggers. An aggregate reason count alone is
-  not evidence that a particular context was repaired.
+  not evidence that a particular context was repaired. This governed
+  evaluator-output acceptance is owned by Ticket 10; the runtime must not
+  fabricate the absent human matching evidence.
 
 - [x] 已安装资产选择并运行 bilateral synchronous、independent bilateral、unilateral、alternating、pose-primary；hold interval、locomotion step 与 multi-stage 没有已安装动作语义，已拆至 Ticket 07。
 - [x] 往返拓扑使用 action-local departure-turnaround-return 语义：镜像或局部轴反号不改变同一完整动作的结果，真实违反显式起始状态/方向合同的动作不会被确认。
@@ -63,4 +65,5 @@ The candidate engine consumes the exact action×view `RepTopologyProfile` before
 sealing: amplitude, hysteresis, return, gap, duration and phase dwell no
 longer fall back to one global initializer. A dynamic dwell state graph proves
 a rapid round trip is not formal volume, while a sign-invariant contract accepts
-the mirrored equivalent cycle.
+the mirrored equivalent cycle. Ticket 10 separately verifies the numerical
+action×view replay outcome against governed human truth.

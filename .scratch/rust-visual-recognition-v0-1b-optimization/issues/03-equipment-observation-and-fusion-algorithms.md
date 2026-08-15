@@ -40,7 +40,9 @@ wrist-derived pseudo-track or hide disagreement with a pose fallback.
   `GripEstablished` track may participate in an equipment-primary Rep.
 - Replay reports detector, tracker, canonical local-channel and fusion cadence
   separately. It does not call tracker FPS an improvement unless the measured
-  evidence reaches the candidate/Rep path.
+  evidence reaches the candidate/Rep path. The governed replay artifact is
+  owned by Ticket 10; this ticket supplies the separately traceable runtime
+  channels and does not invent an ungoverned performance claim.
 
 - [x] 为 rigid bar、independent dumbbell 与 machine handle 注册统一 Provider/model descriptor、detector、tracker/geometry、association、grip 和 fusion 算法合同。
 - [x] detector、tracker/geometry、prediction 与 display estimate 保留独立 provenance、来源帧、TTL、uncertainty 和可判定性；prediction/display estimate 永远不是 judgeable equipment。
@@ -54,4 +56,5 @@ wrist-derived pseudo-track or hide disagreement with a pose fallback.
 The standard provider registry owns rigid-bar, dumbbell and machine-handle
 implementations. Equipment Rep contracts explicitly reject raw fallback after
 association conflict; visual point tracker contracts prove that a retained
-wrist cannot keep an object geometry alive after pixels disappear.
+wrist cannot keep an object geometry alive after pixels disappear. Ticket 10
+is the sole owner of frozen, action×view cadence and accuracy reporting.
