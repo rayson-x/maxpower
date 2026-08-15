@@ -36,9 +36,18 @@ fn weak_subject() -> PoseCandidate {
     }
 }
 
+fn weak_subject_gripping(bar_center_y: f32) -> PoseCandidate {
+    let mut subject = weak_subject();
+    subject.observations[5] = PoseObservation::new(0.42, 0.42, 0.0, 0.95);
+    subject.observations[6] = PoseObservation::new(0.58, 0.42, 0.0, 0.95);
+    subject.observations[9] = PoseObservation::new(0.29, bar_center_y, 0.0, 0.95);
+    subject.observations[10] = PoseObservation::new(0.71, bar_center_y, 0.0, 0.95);
+    subject
+}
+
 fn frame(bar_center_y: f32) -> FrameObservations {
     FrameObservations {
-        pose_candidates: vec![weak_subject()],
+        pose_candidates: vec![weak_subject_gripping(bar_center_y)],
         equipment: vec![EquipmentObservation {
             proposal_id: 1,
             kind: EquipmentKind::BarbellShaft,
@@ -52,8 +61,21 @@ fn frame(bar_center_y: f32) -> FrameObservations {
     }
 }
 
+fn frame_without_grip(bar_center_y: f32) -> FrameObservations {
+    FrameObservations {
+        pose_candidates: vec![weak_subject()],
+        equipment: frame(bar_center_y).equipment,
+    }
+}
+
+fn frame_with_independent_hands(bar_center_y: f32, hand_y: f32) -> FrameObservations {
+    let mut value = frame(bar_center_y);
+    value.pose_candidates[0] = weak_subject_gripping(hand_y);
+    value
+}
+
 fn frame_with_subject_bbox(bar_center_y: f32, subject_bbox: NormalizedRect) -> FrameObservations {
-    let mut subject = weak_subject();
+    let mut subject = weak_subject_gripping(bar_center_y);
     subject.bbox = subject_bbox;
     FrameObservations {
         pose_candidates: vec![subject],
@@ -195,6 +217,69 @@ fn reliable_bar_axis_seals_reps_when_pose_cannot_establish_the_turnaround() {
 }
 
 #[test]
+fn raw_bar_cannot_finish_an_active_rep_after_hand_equipment_disagreement() {
+    let mut frames = [0.25; 10]
+        .into_iter()
+        .chain([0.31, 0.38, 0.47])
+        .map(frame)
+        .collect::<Vec<_>>();
+    frames.push(frame_with_independent_hands(0.52, 0.44));
+    frames.extend(
+        [0.47, 0.40, 0.33, 0.27, 0.25]
+            .into_iter()
+            .map(|bar_y| frame_with_independent_hands(bar_y, 0.44)),
+    );
+    let frame_count = frames.len();
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "equipment-conflict-no-raw-fallback".into(),
+            contract: ContractVersion { major: 1, minor: 7 },
+            diagnostics: DiagnosticLevel::Summary,
+            image_width_px: 1_000,
+            image_height_px: 1_000,
+            continuity: ContinuityMode::Fusion,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        ObservationSequence {
+            frames: frames.into(),
+        },
+        output.clone(),
+    )
+    .unwrap();
+    session
+        .install_exercise_profile(front_bench_equipment_profile())
+        .unwrap();
+    let releases = Arc::new(AtomicUsize::new(0));
+    for frame_id in 0..frame_count as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                frame_id * 100,
+                Arc::clone(&releases),
+            ))
+            .unwrap();
+    }
+    let packets = output.packets();
+    assert!(
+        packets
+            .iter()
+            .any(|packet| packet.equipment.tracks.iter().any(|track| {
+                track.association_stage == maxpower_motion_sdk::EquipmentAssociationStage::Conflict
+                    || track.held_by != maxpower_motion_sdk::EquipmentHand::Both
+            }))
+    );
+    let terminal = session.finish_set();
+    assert!(
+        terminal
+            .iter()
+            .all(|rep| rep.disposition != RepDisposition::Confirmed),
+        "raw visual motion after a typed association conflict must not seal a confirmed Rep: {terminal:?}",
+    );
+}
+
+#[test]
 fn equipment_coverage_counts_missing_equipment_frames_in_the_active_rep() {
     let positions = [0.25; 10]
         .into_iter()
@@ -202,12 +287,13 @@ fn equipment_coverage_counts_missing_equipment_frames_in_the_active_rep() {
         .chain([0.25; 4])
         .collect::<Vec<_>>();
     let mut frames = positions.iter().copied().map(frame).collect::<Vec<_>>();
-    // Four missing frames during the active cycle are real coverage loss, not
+    // Missing frames during the active cycle are real coverage loss, not
     // an opportunity to shrink the denominator to observed equipment only.
     frames[11] = pose_only_frame();
     frames[13] = pose_only_frame();
     frames[15] = pose_only_frame();
     frames[17] = pose_only_frame();
+    frames[19] = pose_only_frame();
     let inference = ObservationSequence {
         frames: frames.into(),
     };
@@ -248,7 +334,20 @@ fn equipment_coverage_counts_missing_equipment_frames_in_the_active_rep() {
         repeated, completed,
         "finish_set must return the same immutable terminal result"
     );
-    assert_eq!(completed[0].disposition, RepDisposition::NeedsReview);
+    assert_eq!(
+        completed[0].disposition,
+        RepDisposition::NeedsReview,
+        "states={:?}",
+        output
+            .packets()
+            .iter()
+            .map(|packet| (
+                &packet.set_state.lifecycle,
+                &packet.rep_state.phase,
+                &packet.equipment.status
+            ))
+            .collect::<Vec<_>>()
+    );
     assert!(
         completed[0]
             .observation_findings
@@ -257,7 +356,7 @@ fn equipment_coverage_counts_missing_equipment_frames_in_the_active_rep() {
 }
 
 #[test]
-fn active_rep_keeps_causal_bar_path_when_pose_subject_temporarily_changes_identity() {
+fn active_rep_refuses_raw_bar_when_subject_association_temporarily_changes_identity() {
     let ready = [0.34; 10];
     let first = [0.36, 0.42, 0.52, 0.65, 0.58, 0.48, 0.39, 0.34];
     let between = [0.34; 10];
@@ -277,8 +376,8 @@ fn active_rep_keeps_causal_bar_path_when_pose_subject_temporarily_changes_identi
     let third_start = 10 + first.len() + between.len() + second.len() + between.len();
     // During the lowest part of the third rep, the pose detector switches to
     // a box that cannot spatially own the already calibrated foreground bar.
-    // The measured bar line remains continuous and must preserve rep phase,
-    // while public pose/equipment confidence remains conservative.
+    // The measured raw bar line remains continuous, but it is no longer owned
+    // by the locked subject and therefore cannot preserve or seal Rep phase.
     let mismatched_subject = NormalizedRect::new(0.10, 0.05, 0.30, 0.90);
     for index in 2..=5 {
         frames[third_start + index] = frame_with_subject_bbox(third[index], mismatched_subject);
@@ -326,7 +425,7 @@ fn active_rep_keeps_causal_bar_path_when_pose_subject_temporarily_changes_identi
         .collect::<Vec<_>>();
     assert_eq!(
         completed.len(),
-        3,
+        2,
         "completed={completed:?}; states={:?}",
         packets
             .iter()
@@ -343,11 +442,13 @@ fn active_rep_keeps_causal_bar_path_when_pose_subject_temporarily_changes_identi
             ))
             .collect::<Vec<_>>()
     );
-    assert_eq!(completed[2].disposition, RepDisposition::NeedsReview);
     assert!(
-        completed[2]
-            .observation_findings
-            .contains(&RepObservationFinding::EquipmentPathCoverageLow)
+        packets[third_start..third_start + third.len()]
+            .iter()
+            .any(|packet| matches!(
+                packet.equipment.status,
+                maxpower_motion_sdk::EquipmentFrameStatus::CannotJudge(_)
+            ))
     );
 }
 
@@ -496,8 +597,20 @@ fn preset_barbell_bench_rejects_a_post_set_rack_cycle_outside_the_learned_range(
         .chain(rack)
         .chain(tail)
         .collect::<Vec<_>>();
+    let working_count = ready.len() + first.len() + between.len() + second.len() + pause.len();
     let inference = ObservationSequence {
-        frames: positions.iter().copied().map(frame).collect(),
+        frames: positions
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, y)| {
+                if index < working_count {
+                    frame(y)
+                } else {
+                    frame_without_grip(y)
+                }
+            })
+            .collect(),
     };
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
@@ -544,12 +657,9 @@ fn preset_barbell_bench_rejects_a_post_set_rack_cycle_outside_the_learned_range(
         "{completed:?}"
     );
     assert_eq!(
-        completed
-            .iter()
-            .filter(|rep| rep.disposition == RepDisposition::Rejected)
-            .count(),
-        1,
-        "{completed:?}"
+        completed.len(),
+        2,
+        "released/racked motion must not create a third Rep: {completed:?}"
     );
 }
 

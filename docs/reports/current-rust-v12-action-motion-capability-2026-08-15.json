@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "maxpower.action-motion-capability-report/v1",
+  "generatedAt": "2026-08-15",
+  "rustCatalog": "maxpower/current-action-motion-assessment/v12",
+  "definitionAsset": {
+    "catalogId": "maxpower/reviewed-action-motion-leaves/v1",
+    "leafCount": 248,
+    "sha256": "fa3efe23cc47807f2ead59ea65de633b461369cafb9792d6dab28415c259c8e5",
+    "reviewedFamilyCount": 30,
+    "distinctStructuredRelationGraphs": 45,
+    "note": "Task, coordination, stability, and substitution roles are structured by reviewed movement family; prose is explanatory and is not the executable relation itself."
+  },
+  "planResolution": {
+    "fullPlanCompiled": 5,
+    "poseSupportedLimited": 0,
+    "unsupportedEquipmentCatalogOnly": 165,
+    "admissibleVisualRefusal": 78,
+    "meaning": "A compiled plan proves definition/operator/view compatibility only; it does not claim validated video recognition or production readiness."
+  },
+  "exactLeafViewMatrix": {
+    "path": "rust/motion-sdk/assets/action-motion-capability-matrix-v1.json",
+    "sha256": "f75b737ec63c31726ee081f822821c7bf8e41249b7aef7161aa507a35ff4e907",
+    "recordCount": 1525,
+    "fullPlanCompiled": 11,
+    "unsupportedEquipmentCatalogOnly": 1030,
+    "admissibleVisualRefusal": 484,
+    "repQualityTracePolicy": "Each record is explicitly not_validated until that exact leaf and view passes the real video-to-report lifecycle."
+  },
+  "currentContextMigration": {
+    "boundExactContextCount": 24,
+    "executableBundleCount": 11,
+    "contextResolutionOnlyCount": 13,
+    "unsupportedContexts": "Cable, dumbbell, and machine-handle primary contexts remain context-resolution-only because this Rust slice does not yet provide those runtime equipment adapters."
+  },
+  "equipmentCausality": {
+    "rawGeometry": "current visual frame only",
+    "wristGeneratedMeasuredGeometry": false,
+    "singleFrameProximityCanEstablishGrip": false,
+    "requiredGripEvidence": ["temporal_contact", "stable_relative_geometry", "common_motion"],
+    "predictionInCanonicalEquipment": false,
+    "conflictingHandEquipmentMotion": "typed_conflict_and_not_rep_eligible"
+  },
+  "accuracy": {
+    "repCountAndBoundary": {
+      "status": "known_video_regression_baseline_only",
+      "sourceAssetId": "current-rust-v11-multirate-equipment-alignment-report",
+      "sourceSha256": "39c4f0adbb6577e91318bfba944b066e93240a35ffa528daedfe8d64d3346928",
+      "candidatePrecision": 0.871264367816092,
+      "candidateRecall": 0.832967032967033,
+      "exactSetRate": 0.3018867924528302
+    },
+    "rawEquipmentGeometry": "not_evaluable_no_governed_human_geometry_truth",
+    "subjectAssociation": "not_evaluable_no_governed_human_association_truth",
+    "gripEstablishmentAndRelease": "not_evaluable_no_governed_human_grip_truth",
+    "qualityVerdicts": "not_evaluable_no_governed_quality_truth"
+  },
+  "releaseBoundary": "No aggregate recognition-rate improvement is claimed in v12 until a new participant/source/session/view-isolated frozen evaluation is run."
+}

@@ -1,5 +1,6 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod action_motion;
 mod barbell_phase;
 mod equipment_fusion;
 mod equipment_pose_constraint;
@@ -12,6 +13,7 @@ mod visual_equipment;
 #[doc(hidden)]
 pub mod web_abi;
 
+pub use action_motion::*;
 pub use equipment_fusion::*;
 pub use execution_assessment::*;
 pub use execution_assessment_engine::*;
@@ -2950,13 +2952,7 @@ impl RepEngine {
         let Some(track) = equipment
             .tracks
             .iter()
-            .filter(|track| {
-                track.kind == EquipmentKind::BarbellShaft
-                    && track.judgeable_path
-                    && track.source != EquipmentSource::Predicted
-                    && track.held_by == EquipmentHand::Both
-                    && track.center_y.is_finite()
-            })
+            .filter(|track| rigid_bar_track_supports_turnaround(track))
             .max_by(|left, right| {
                 (left.observation_score * left.association_confidence)
                     .total_cmp(&(right.observation_score * right.association_confidence))
@@ -3221,7 +3217,6 @@ impl RepEngine {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
         equipment: &EquipmentFrameEvidence,
-        raw_equipment: &[EquipmentObservation],
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) -> Vec<SealedRep> {
         self.observe_equipment_turnaround(frame_id, timestamp_ms, equipment);
@@ -3253,7 +3248,6 @@ impl RepEngine {
                 frame_id,
                 timestamp_ms,
                 equipment,
-                raw_equipment,
                 pose_signal,
                 MovementDirection::Decreasing,
                 primary_signal,
@@ -4643,6 +4637,7 @@ mod local_profile_signal_consumption_tests {
                 uncertainty_px: Some(1.0),
                 source: EquipmentSource::Geometry,
                 held_by: EquipmentHand::Both,
+                association_stage: EquipmentAssociationStage::GripEstablished,
                 judgeable_path: true,
             }],
             rejected_reflection_count: 0,
@@ -4682,7 +4677,6 @@ mod local_profile_signal_consumption_tests {
                 TargetState::Locked,
                 &canonical,
                 &equipment,
-                &[],
                 provide_local_evidence.then_some(&evidence),
             ));
         }
@@ -5526,7 +5520,14 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             source_timestamp_ms,
             rep_phase,
         );
-        if may_process_rep {
+        // Once a causal Rep is active, evidence loss is itself an observation:
+        // the phase engine must receive the frame so coverage decreases and an
+        // incomplete equipment path cannot be silently reported as complete.
+        let active_rep_requires_observation = matches!(
+            rep_phase,
+            RepPhase::Effort | RepPhase::Peak | RepPhase::Return
+        );
+        if may_process_rep || active_rep_requires_observation {
             self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
                 engine.process_with_equipment(
                     frame_id,
@@ -5534,7 +5535,6 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     target.state,
                     &phase_pose_canonical,
                     &equipment,
-                    &raw_equipment,
                     Some(&local_motion_coordinate),
                 )
             })

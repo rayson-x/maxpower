@@ -347,6 +347,17 @@ pub struct ExecutionAssessmentBundleCatalog {
     pub installed_assets: Vec<AssessmentAsset>,
     pub action_definitions: Vec<ActionDefinition>,
     pub bundles: Vec<ExecutionAssessmentBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_motion_catalog: Option<crate::ActionMotionCatalog>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub action_motion_bindings: Vec<ActionMotionBundleBinding>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActionMotionBundleBinding {
+    pub bundle_id: String,
+    pub leaf_action_id: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -406,6 +417,12 @@ pub struct ResolvedAssessmentContext {
     pub bundle_hash: String,
     pub bundle_capability: AssessmentBundleCapability,
     pub bundle_lineage: AssessmentBundleLineage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_definition_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_definition_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_plan_hash: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -484,6 +501,7 @@ pub enum MotionFeatureStatus {
 pub enum MotionFeatureUnit {
     Milliseconds,
     NormalizedDisplacement,
+    Radians,
     Ratio,
     Confidence,
     Count,
@@ -770,6 +788,10 @@ pub enum AssessmentConfigurationError {
         bundle_id: String,
     },
     InvalidSubjectReferenceId,
+    InvalidActionMotionPlan {
+        bundle_id: String,
+        detail: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -896,6 +918,7 @@ struct ActiveSet {
     prior_workout_range_values: Vec<ReferenceSample>,
     rep_ids: HashSet<u64>,
     program: CompiledAssessmentProgram,
+    motion_plan: Option<crate::ActionObservationPlan>,
     closure_observed: bool,
     packet_lineage: Option<crate::PacketLineage>,
     subject_reference_key: Option<String>,
@@ -980,6 +1003,7 @@ pub struct ExecutionAssessmentEngine {
     last_terminal: Option<SealedSetAssessment>,
     workout_finished: bool,
     subject_reference_key: Option<String>,
+    motion_plans: HashMap<String, crate::ActionObservationPlan>,
 }
 
 impl ExecutionAssessmentEngine {
@@ -1013,6 +1037,7 @@ impl ExecutionAssessmentEngine {
     ) -> Result<Self, AssessmentConfigurationError> {
         validate_catalog(&catalog)?;
         let programs = compile_catalog_programs(&catalog)?;
+        let motion_plans = compile_action_motion_plans(&catalog)?;
         let action_definitions = catalog
             .action_definitions
             .into_iter()
@@ -1034,6 +1059,7 @@ impl ExecutionAssessmentEngine {
             last_terminal: None,
             workout_finished: false,
             subject_reference_key,
+            motion_plans,
         })
     }
 
@@ -1188,6 +1214,7 @@ impl ExecutionAssessmentEngine {
             .get(&binding.bundle_id)
             .cloned()
             .expect("validated ActionDefinition bundle binding");
+        let motion_plan = self.motion_plans.get(&bundle.bundle_id).cloned();
         let mut resolved_context = ResolvedAssessmentContext {
             source_capture_id: context.video_context.source_capture_id.clone(),
             action_definition_id: definition.action_definition_id,
@@ -1203,6 +1230,11 @@ impl ExecutionAssessmentEngine {
             bundle_hash: bundle.content_hash.clone(),
             bundle_capability: bundle.capability,
             bundle_lineage: bundle.lineage.clone(),
+            motion_definition_id: motion_plan.as_ref().map(|plan| plan.definition_id.clone()),
+            motion_definition_hash: motion_plan
+                .as_ref()
+                .map(|plan| plan.definition_hash.clone()),
+            observation_plan_hash: motion_plan.as_ref().map(|plan| plan.plan_hash.clone()),
         };
         let program = self
             .programs
@@ -1258,6 +1290,7 @@ impl ExecutionAssessmentEngine {
             prior_workout_range_values,
             rep_ids: HashSet::new(),
             program,
+            motion_plan,
             closure_observed: false,
             packet_lineage: None,
             subject_reference_key: self.subject_reference_key.clone(),
@@ -2121,6 +2154,192 @@ fn validate_catalog(
     Ok(())
 }
 
+fn compile_action_motion_plans(
+    catalog: &ExecutionAssessmentBundleCatalog,
+) -> Result<HashMap<String, crate::ActionObservationPlan>, AssessmentConfigurationError> {
+    if catalog.action_motion_bindings.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let motion_catalog = catalog.action_motion_catalog.as_ref().ok_or_else(|| {
+        AssessmentConfigurationError::InvalidActionMotionPlan {
+            bundle_id: "catalog".into(),
+            detail: "motion bindings require a complete ActionMotionCatalog".into(),
+        }
+    })?;
+    let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+    let assets = catalog
+        .installed_assets
+        .iter()
+        .map(|asset| (asset.id.as_str(), asset))
+        .collect::<HashMap<_, _>>();
+    let bundles = catalog
+        .bundles
+        .iter()
+        .map(|bundle| (bundle.bundle_id.as_str(), bundle))
+        .collect::<HashMap<_, _>>();
+    let mut plans = HashMap::new();
+    for binding in &catalog.action_motion_bindings {
+        let bundle = bundles.get(binding.bundle_id.as_str()).ok_or_else(|| {
+            AssessmentConfigurationError::InvalidActionMotionPlan {
+                bundle_id: binding.bundle_id.clone(),
+                detail: "binding references an unknown Bundle".into(),
+            }
+        })?;
+        let definition = motion_catalog
+            .definition(&binding.leaf_action_id)
+            .ok_or_else(|| AssessmentConfigurationError::InvalidActionMotionPlan {
+                bundle_id: binding.bundle_id.clone(),
+                detail: "binding references an unknown complete leaf".into(),
+            })?;
+        let view = action_motion_view(bundle.exact_context.capture_view);
+        let plan = compiler.compile(definition, view).map_err(|error| {
+            AssessmentConfigurationError::InvalidActionMotionPlan {
+                bundle_id: binding.bundle_id.clone(),
+                detail: format!("{error:?}"),
+            }
+        })?;
+        let expected_authority = motion_authority(&plan);
+        for reference in [
+            &bundle.lineage.recognition_profile,
+            &bundle.lineage.execution_contract,
+            &bundle.lineage.feature_program,
+            &bundle.lineage.rule_pack,
+        ] {
+            let asset = assets.get(reference.id.as_str()).ok_or_else(|| {
+                AssessmentConfigurationError::InvalidActionMotionPlan {
+                    bundle_id: binding.bundle_id.clone(),
+                    detail: format!("motion-authority asset {} is missing", reference.id),
+                }
+            })?;
+            if asset.content.get("motionAuthority") != Some(&expected_authority) {
+                return Err(AssessmentConfigurationError::InvalidActionMotionPlan {
+                    bundle_id: binding.bundle_id.clone(),
+                    detail: format!(
+                        "{} conflicts with the ActionMotionDefinition semantic authority",
+                        reference.id
+                    ),
+                });
+            }
+        }
+        let recognition = assets[&bundle.lineage.recognition_profile.id.as_str()];
+        let execution = assets[&bundle.lineage.execution_contract.id.as_str()];
+        let feature = assets[&bundle.lineage.feature_program.id.as_str()];
+        let rules = assets[&bundle.lineage.rule_pack.id.as_str()];
+        let expected_phases = plan
+            .phases
+            .iter()
+            .map(|phase| phase.phase_id.as_str())
+            .collect::<Vec<_>>();
+        let expected_endpoints = [
+            plan.rep_boundary.start.as_str(),
+            plan.rep_boundary.turnaround.as_str(),
+            plan.rep_boundary.return_boundary.as_str(),
+        ];
+        let semantic_conflict = recognition.content.get("repBoundary")
+            != Some(&serde_json::to_value(&plan.rep_boundary).expect("serializable boundary"))
+            || execution.content.get("phaseOrder") != Some(&serde_json::json!(expected_phases))
+            || execution.content.get("taskEndpoints")
+                != Some(&serde_json::json!(expected_endpoints))
+            || feature.content.get("motionRelations") != Some(&motion_relation_authority(&plan))
+            || rules.content.get("semanticRuleRoles") != Some(&motion_rule_role_authority(&plan));
+        if semantic_conflict {
+            return Err(AssessmentConfigurationError::InvalidActionMotionPlan {
+                bundle_id: binding.bundle_id.clone(),
+                detail:
+                    "executable assets conflict with the ActionMotionDefinition semantic authority"
+                        .into(),
+            });
+        }
+        if plan.capability != crate::ActionPlanCapability::FullExecutable
+            && bundle.capability == AssessmentBundleCapability::Executable
+        {
+            return Err(AssessmentConfigurationError::InvalidActionMotionPlan {
+                bundle_id: binding.bundle_id.clone(),
+                detail: "an executable Bundle cannot bypass the motion plan capability boundary"
+                    .into(),
+            });
+        }
+        if plans.insert(binding.bundle_id.clone(), plan).is_some() {
+            return Err(AssessmentConfigurationError::InvalidActionMotionPlan {
+                bundle_id: binding.bundle_id.clone(),
+                detail: "duplicate motion binding".into(),
+            });
+        }
+    }
+    if plans.len() != catalog.bundles.len() {
+        return Err(AssessmentConfigurationError::InvalidActionMotionPlan {
+            bundle_id: "catalog".into(),
+            detail: "every Bundle must bind one exact leaf in unified catalogs".into(),
+        });
+    }
+    Ok(plans)
+}
+
+fn motion_authority(plan: &crate::ActionObservationPlan) -> serde_json::Value {
+    serde_json::json!({
+        "definitionId": plan.definition_id,
+        "definitionHash": plan.definition_hash,
+        "projectionHash": plan.projection.projection_hash,
+        "planHash": plan.plan_hash,
+        "taskPrimaryRelationIds": plan.relations.iter().filter(|relation| relation.role == crate::MotionRole::TaskPrimary).map(|relation| relation.relation_id.clone()).collect::<Vec<_>>(),
+        "repBoundary": plan.rep_boundary,
+        "phases": plan.phases,
+        "allowedClaims": plan.allowed_claims,
+    })
+}
+
+fn motion_relation_authority(plan: &crate::ActionObservationPlan) -> serde_json::Value {
+    serde_json::Value::Array(
+        plan.relations
+            .iter()
+            .map(|relation| {
+                serde_json::json!({
+                    "relationId": relation.relation_id,
+                    "role": format!("{:?}", relation.role).to_ascii_lowercase(),
+                    "operatorId": relation.operator_id,
+                    "inputs": relation.inputs,
+                    "unit": relation.unit,
+                    "scope": relation.scope,
+                    "sourceRequirement": format!("{:?}", relation.source_requirement).to_ascii_lowercase(),
+                    "judgeability": format!("{:?}", relation.judgeability).to_ascii_lowercase(),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn motion_rule_role_authority(plan: &crate::ActionObservationPlan) -> serde_json::Value {
+    serde_json::Value::Array(
+        plan.relations
+            .iter()
+            .map(|relation| {
+                serde_json::json!({
+                    "relationId": relation.relation_id,
+                    "role": format!("{:?}", relation.role).to_ascii_lowercase(),
+                    "policy": if relation.role == crate::MotionRole::TaskPrimary {
+                        "required_for_rep"
+                    } else {
+                        "cannot_judge_without_exact_context_rule"
+                    },
+                })
+            })
+            .collect(),
+    )
+}
+
+fn action_motion_view(view: AssessmentCaptureView) -> &'static str {
+    match view {
+        AssessmentCaptureView::Front => "front",
+        AssessmentCaptureView::Rear => "rear",
+        AssessmentCaptureView::LeftSide => "left_side",
+        AssessmentCaptureView::RightSide => "right_side",
+        AssessmentCaptureView::FrontObliqueLeft => "front_left_45",
+        AssessmentCaptureView::FrontObliqueRight => "front_right_45",
+        AssessmentCaptureView::RearObliqueLeft => "rear_left_45",
+        AssessmentCaptureView::RearObliqueRight => "rear_right_45",
+    }
+}
+
 fn compile_catalog_programs(
     catalog: &ExecutionAssessmentBundleCatalog,
 ) -> Result<HashMap<String, CompiledAssessmentProgram>, AssessmentConfigurationError> {
@@ -2947,6 +3166,52 @@ fn fused_channel(
     }
 }
 
+fn plan_primary_channel(
+    active: &ActiveSet,
+    evidence: &crate::LocalMotionCoordinateEvidence,
+) -> Option<crate::LocalTrajectoryChannel> {
+    let requirement = active.motion_plan.as_ref().and_then(|plan| {
+        plan.relations
+            .iter()
+            .find(|relation| {
+                relation.role == crate::MotionRole::TaskPrimary
+                    && relation.judgeability == crate::FeatureJudgeability::RequiredForRep
+            })
+            .map(|relation| relation.source_requirement)
+    });
+    match requirement {
+        Some(crate::OperatorSourceRequirement::CurrentMeasuredEquipment) => {
+            equipment_channel(evidence)
+        }
+        Some(crate::OperatorSourceRequirement::CurrentMeasuredPose) => pose_channel(evidence),
+        Some(crate::OperatorSourceRequirement::CurrentMeasuredMixed) => fused_channel(evidence),
+        None => fused_channel(evidence),
+    }
+}
+
+fn plan_primary_trajectory_metrics(
+    active: &ActiveSet,
+    endpoints: Option<&crate::NormalizedRepEndpointEvidence>,
+) -> (Option<f32>, Option<f32>, f32, f32, f32) {
+    let Some(endpoints) = endpoints else {
+        return (None, None, 0.0, 0.0, 1.0);
+    };
+    let (Some(start), Some(turn), Some(end)) = (
+        plan_primary_channel(active, &endpoints.start_anchor),
+        plan_primary_channel(active, &endpoints.primary_turnaround),
+        plan_primary_channel(active, &endpoints.end_return),
+    ) else {
+        return (None, None, 0.0, 0.0, 1.0);
+    };
+    (
+        Some((turn.along_axis_progress - start.along_axis_progress).abs()),
+        Some((end.along_axis_progress - start.along_axis_progress).abs()),
+        start.coverage.min(turn.coverage).min(end.coverage),
+        start.confidence.min(turn.confidence).min(end.confidence),
+        start.uncertainty.max(turn.uncertainty).max(end.uncertainty),
+    )
+}
+
 fn trajectory_metrics(
     endpoints: Option<&crate::NormalizedRepEndpointEvidence>,
     channel: fn(&crate::LocalMotionCoordinateEvidence) -> Option<crate::LocalTrajectoryChannel>,
@@ -2990,7 +3255,7 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
         trajectory_coverage,
         trajectory_confidence,
         trajectory_uncertainty,
-    ) = trajectory_metrics(endpoints, fused_channel);
+    ) = plan_primary_trajectory_metrics(active, endpoints);
     let (
         equipment_range,
         _equipment_return_error,
@@ -3071,10 +3336,28 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
             trajectory_coverage,
             trajectory_confidence,
             trajectory_uncertainty,
-            vec![
-                "local_motion_coordinate".into(),
-                "pose_equipment_fusion".into(),
-            ],
+            active
+                .motion_plan
+                .as_ref()
+                .map(|plan| {
+                    let mut provenance = vec![
+                        "local_motion_coordinate".into(),
+                        format!("action_observation_plan:{}", plan.plan_hash),
+                    ];
+                    provenance.extend(
+                        plan.relations
+                            .iter()
+                            .filter(|relation| relation.role == crate::MotionRole::TaskPrimary)
+                            .map(|relation| format!("motion_relation:{}", relation.relation_id)),
+                    );
+                    provenance
+                })
+                .unwrap_or_else(|| {
+                    vec![
+                        "local_motion_coordinate".into(),
+                        "legacy_pose_equipment_fusion".into(),
+                    ]
+                }),
             source_range.clone(),
         ),
         numeric_feature(
@@ -3194,6 +3477,41 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
                 .cloned()
         })
         .collect::<Vec<_>>();
+    if let Some(plan) = active.motion_plan.as_ref() {
+        for relation in &plan.relations {
+            let feature_id = format!("motion_relation:{}", relation.relation_id);
+            let is_primary = relation.role == crate::MotionRole::TaskPrimary;
+            let (value, coverage, confidence, uncertainty) = if is_primary {
+                (
+                    range_value,
+                    trajectory_coverage,
+                    trajectory_confidence,
+                    trajectory_uncertainty,
+                )
+            } else {
+                (None, 0.0, 0.0, 1.0)
+            };
+            facts.push(numeric_feature(
+                &feature_id,
+                value,
+                match relation.unit.as_str() {
+                    "radians" => MotionFeatureUnit::Radians,
+                    "local_scale_ratio" => MotionFeatureUnit::NormalizedDisplacement,
+                    _ => MotionFeatureUnit::Ratio,
+                },
+                coverage,
+                confidence,
+                uncertainty,
+                vec![
+                    format!("action_observation_plan:{}", plan.plan_hash),
+                    format!("motion_relation:{}", relation.relation_id),
+                    format!("operator:{}", relation.operator_id),
+                    format!("semantic_role:{:?}", relation.role).to_ascii_lowercase(),
+                ],
+                source_range.clone(),
+            ));
+        }
+    }
     for fact in &mut facts {
         if fact.confidence < active.program.minimum_feature_confidence {
             fact.status = MotionFeatureStatus::CannotJudge;
@@ -3389,7 +3707,7 @@ fn evaluate_rep_rules(
         .rep_rules
         .iter()
         .map(|rule| {
-            let (conclusion, feature_dependencies) = match rule {
+            let (conclusion, mut feature_dependencies) = match rule {
             CompiledRepRule::RepDisposition {
                 dimension,
                 feature_id,
@@ -3623,6 +3941,36 @@ fn evaluate_rep_rules(
                 )
             }
             };
+            if let Some(plan) = active.motion_plan.as_ref() {
+                let roles: &[crate::MotionRole] = match conclusion.dimension {
+                    AssessmentDimension::TaskCompletion | AssessmentDimension::RangeOfMotion => {
+                        &[crate::MotionRole::TaskPrimary]
+                    }
+                    AssessmentDimension::PhaseControl
+                    | AssessmentDimension::TrajectoryControl
+                    | AssessmentDimension::BilateralCoordination => &[
+                        crate::MotionRole::TaskPrimary,
+                        crate::MotionRole::CoordinatedMotion,
+                    ],
+                    AssessmentDimension::SupportStability => {
+                        &[crate::MotionRole::StabilityRelation]
+                    }
+                    AssessmentDimension::StandardVariantCompatibility => {
+                        &[crate::MotionRole::SubstitutionGuard]
+                    }
+                    AssessmentDimension::ObservationConfidence => {
+                        &[crate::MotionRole::TaskPrimary]
+                    }
+                };
+                feature_dependencies.extend(
+                    plan.relations
+                        .iter()
+                        .filter(|relation| roles.contains(&relation.role))
+                        .map(|relation| format!("motion_relation:{}", relation.relation_id)),
+                );
+                feature_dependencies.sort();
+                feature_dependencies.dedup();
+            }
             EvaluatedRepRule {
                 conclusion,
                 feature_dependencies,
@@ -4178,6 +4526,8 @@ pub fn current_motion_assessment_catalog_v1() -> ExecutionAssessmentBundleCatalo
         installed_assets,
         action_definitions,
         bundles,
+        action_motion_catalog: None,
+        action_motion_bindings: Vec::new(),
     }
 }
 
@@ -5650,6 +6000,318 @@ pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalo
     catalog
 }
 
+/// Grip-validated visual-axis successor to v9. The visual edge remains the
+/// independent measurement, bilateral wrists bound association and published
+/// extent, and pose-derived geometry may bridge display continuity only after
+/// visual calibration. All motion consumers share the canonical turnaround
+/// eligibility rule instead of applying per-surface score products.
+pub fn current_motion_assessment_catalog_v10() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v9();
+    catalog.catalog_id = "maxpower/current-grip-validated-equipment-assessment/v10".into();
+    let delivery_stage = "grip_validated_rigid_bar_continuity_v10";
+    for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
+        let (phase_order, task_endpoints): ([&str; 2], [&str; 3]) = match binding.action_id.as_str()
+        {
+            "barbell_bench_press" => (
+                ["lowering", "pressing"],
+                [
+                    "locked_out_start",
+                    "equipment_bottom_turnaround",
+                    "returned_lockout",
+                ],
+            ),
+            "barbell_row" => (
+                ["pulling", "return_to_reach"],
+                [
+                    "arms_extended_start",
+                    "equipment_near_torso_turnaround",
+                    "returned_reach",
+                ],
+            ),
+            "seated_shoulder_press" => (
+                ["pressing", "lowering"],
+                [
+                    "bar_at_shoulders_start",
+                    "equipment_overhead_turnaround",
+                    "returned_to_shoulders",
+                ],
+            ),
+            _ => unreachable!("grip-validated rigid-bar action matrix is closed"),
+        };
+        let bundle_id = format!(
+            "{}/{}/v1",
+            binding.action_id,
+            binding.capture_view.catalog_slug()
+        );
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("grip-validated rigid-bar exact context is installed");
+        let asset_prefix = format!("{bundle_id}/{delivery_stage}");
+        let definitions = [
+            (
+                AssessmentAssetKind::ExecutionContract,
+                "execution-contract",
+                serde_json::json!({
+                    "phaseOrder": phase_order,
+                    "taskEndpoints": task_endpoints,
+                    "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
+                    "equipmentSemantics": "rigid_bar_axis",
+                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "equipmentConstraintPolicy": "visual_edge_measured_bilateral_wrist_bounded",
+                    "axisExtentSemantics": "validated_grip_supported_axis_not_physical_bar_length",
+                    "displayContinuity": "calibrated_pose_bridge_or_bounded_prediction_non_judgeable",
+                    "repBoundaryAuthority": "pose_cycle_wrist_constrained_equipment_turnaround_fused",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+            (
+                AssessmentAssetKind::EquipmentAdapter,
+                "equipment-adapter",
+                serde_json::json!({
+                    "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                    "visualMeasurementPolicy": "visual_axis_with_bilateral_grip_validation",
+                    "wristConstraintPolicy": "visual_axis_near_both_reliable_wrists",
+                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "visualTrackerAlgorithm": "grip_validated_axis_extent_v2",
+                    "maximumWristAxisResidual": 0.06,
+                    "maximumCanonicalHandDistance": 0.065,
+                    "turnaroundEligibility": "rigid_bar_track_supports_turnaround",
+                    "conflictPolicy": "abstain_fused_preserve_channels",
+                    "poseFallback": "preserve_as_independent_channel",
+                    "displayFallback": "display_only_after_visual_calibration",
+                    "rawCandidatePolicy": "diagnostic_only_until_canonical_association",
+                    "repBoundaryAuthority": "pose_cycle_wrist_constrained_equipment_turnaround_fused",
+                    "deliveryStage": delivery_stage,
+                }),
+            ),
+        ];
+        let references = definitions
+            .into_iter()
+            .map(|(kind, slug, content)| {
+                let asset =
+                    executable_bundle_asset(kind, format!("{asset_prefix}/{slug}"), content);
+                let reference = asset.reference();
+                catalog.installed_assets.push(asset);
+                reference
+            })
+            .collect::<Vec<_>>();
+        bundle.lineage.execution_contract = references[0].clone();
+        bundle.lineage.equipment_adapter = references[1].clone();
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
+/// Multi-rate provider successor to v10. Video frames drive the visual
+/// equipment provider at camera cadence, while pose remains an independently
+/// timestamped constraint channel. Between fresh pose observations the tracker
+/// may consume only the latest causal pose context within 180 ms; canonical
+/// packets do not invent a new pose observation for those equipment-only
+/// frames.
+pub fn current_motion_assessment_catalog_v11() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v10();
+    catalog.catalog_id = "maxpower/current-multirate-equipment-assessment/v11".into();
+    let delivery_stage = "multirate_grip_validated_rigid_bar_v11";
+    for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
+        let bundle_id = format!(
+            "{}/{}/v1",
+            binding.action_id,
+            binding.capture_view.catalog_slug()
+        );
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("multi-rate rigid-bar exact context is installed");
+        let asset = executable_bundle_asset(
+            AssessmentAssetKind::EquipmentAdapter,
+            format!("{bundle_id}/{delivery_stage}/equipment-adapter"),
+            serde_json::json!({
+                "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
+                "visualMeasurementPolicy": "visual_axis_with_bilateral_grip_validation",
+                "wristConstraintPolicy": "visual_axis_near_both_reliable_wrists",
+                "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                "visualTrackerAlgorithm": "grip_validated_multirate_axis_v3",
+                "inputCadence": "every_timestamped_video_frame",
+                "poseConstraintCadence": "latest_causal_pose_max_age_180ms",
+                "intermediatePosePolicy": "equipment_only_no_synthetic_pose_observation",
+                "maximumWristAxisResidual": 0.06,
+                "maximumCanonicalHandDistance": 0.10,
+                "turnaroundEligibility": "rigid_bar_track_supports_turnaround",
+                "conflictPolicy": "abstain_fused_preserve_channels",
+                "poseFallback": "preserve_as_independent_channel",
+                "displayFallback": "display_only_after_visual_calibration",
+                "rawCandidatePolicy": "diagnostic_only_until_canonical_association",
+                "repBoundaryAuthority": "pose_cycle_wrist_constrained_equipment_turnaround_fused",
+                "deliveryStage": delivery_stage,
+            }),
+        );
+        bundle.lineage.equipment_adapter = asset.reference();
+        catalog.installed_assets.push(asset);
+        *bundle = bundle.clone().with_computed_hash();
+    }
+    catalog
+}
+
+/// Unified action-semantics successor. Every existing exact context binds a
+/// reviewed leaf ActionMotionDefinition and must pass the generic exact-view
+/// compiler before an executable Bundle can be configured.
+pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = current_motion_assessment_catalog_v11();
+    catalog.catalog_id = "maxpower/current-action-motion-assessment/v12".into();
+    let motion_catalog = crate::reviewed_action_motion_catalog_v1()
+        .expect("embedded reviewed action-motion catalog must be valid");
+    let bindings: Vec<ActionMotionBundleBinding> = serde_json::from_slice(include_bytes!(
+        "../assets/current-context-motion-bindings-v12.json"
+    ))
+    .expect("embedded current-context motion bindings must be valid");
+    let binding_by_bundle = bindings
+        .iter()
+        .map(|binding| (binding.bundle_id.as_str(), binding.leaf_action_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+    let bundle_ids = catalog
+        .bundles
+        .iter()
+        .map(|bundle| bundle.bundle_id.clone())
+        .collect::<Vec<_>>();
+    for bundle_id in bundle_ids {
+        let bundle = catalog
+            .bundles
+            .iter()
+            .find(|bundle| bundle.bundle_id == bundle_id)
+            .expect("v12 Bundle exists");
+        let leaf_action_id = binding_by_bundle
+            .get(bundle.bundle_id.as_str())
+            .copied()
+            .expect("every v12 Bundle has an explicit reviewed leaf binding");
+        let definition = motion_catalog
+            .definition(leaf_action_id)
+            .expect("v12 leaf binding exists in reviewed catalog");
+        let plan = compiler
+            .compile(
+                definition,
+                action_motion_view(bundle.exact_context.capture_view),
+            )
+            .expect("reviewed v12 binding resolves to a capability plan");
+        install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
+        let bundle = catalog
+            .bundles
+            .iter_mut()
+            .find(|candidate| candidate.bundle_id == bundle_id)
+            .expect("motion-authority Bundle remains installed");
+        if plan.capability != crate::ActionPlanCapability::FullExecutable {
+            bundle.capability = AssessmentBundleCapability::ContextResolutionOnly;
+            *bundle = bundle.clone().with_computed_hash();
+        }
+    }
+    assert_eq!(bindings.len(), catalog.bundles.len());
+    catalog.action_motion_catalog = Some(motion_catalog);
+    catalog.action_motion_bindings = bindings;
+    catalog
+}
+
+/// Materializes the compiled action definition into the executable semantic
+/// asset fields consumed by the generic assessment runtime. This is the only
+/// supported extension seam for an asset-defined action Bundle.
+pub fn install_compiled_action_motion_semantics(
+    catalog: &mut ExecutionAssessmentBundleCatalog,
+    bundle_id: &str,
+    plan: &crate::ActionObservationPlan,
+) {
+    let bundle_index = catalog
+        .bundles
+        .iter()
+        .position(|bundle| bundle.bundle_id == bundle_id)
+        .expect("motion-authority Bundle exists");
+    let lineage = catalog.bundles[bundle_index].lineage.clone();
+    let targets = [
+        (
+            AssessmentAssetKind::RecognitionProfile,
+            lineage.recognition_profile.id,
+        ),
+        (
+            AssessmentAssetKind::ExecutionContract,
+            lineage.execution_contract.id,
+        ),
+        (
+            AssessmentAssetKind::FeatureProgram,
+            lineage.feature_program.id,
+        ),
+        (AssessmentAssetKind::RulePack, lineage.rule_pack.id),
+    ];
+    let authority = motion_authority(plan);
+    for (kind, asset_id) in targets {
+        let asset = catalog
+            .installed_assets
+            .iter_mut()
+            .find(|asset| asset.id == asset_id && asset.kind == kind)
+            .expect("motion-authority asset exists");
+        asset
+            .content
+            .as_object_mut()
+            .expect("assessment asset content is an object")
+            .insert("motionAuthority".into(), authority.clone());
+        let content = asset
+            .content
+            .as_object_mut()
+            .expect("assessment asset content is an object");
+        match kind {
+            AssessmentAssetKind::RecognitionProfile => {
+                content.insert(
+                    "repBoundary".into(),
+                    serde_json::to_value(&plan.rep_boundary).expect("motion boundary serializes"),
+                );
+            }
+            AssessmentAssetKind::ExecutionContract => {
+                content.insert(
+                    "phaseOrder".into(),
+                    serde_json::json!(
+                        plan.phases
+                            .iter()
+                            .map(|phase| &phase.phase_id)
+                            .collect::<Vec<_>>()
+                    ),
+                );
+                content.insert(
+                    "taskEndpoints".into(),
+                    serde_json::json!([
+                        &plan.rep_boundary.start,
+                        &plan.rep_boundary.turnaround,
+                        &plan.rep_boundary.return_boundary,
+                    ]),
+                );
+            }
+            AssessmentAssetKind::FeatureProgram => {
+                content.insert("motionRelations".into(), motion_relation_authority(plan));
+            }
+            AssessmentAssetKind::RulePack => {
+                content.insert("semanticRuleRoles".into(), motion_rule_role_authority(plan));
+            }
+            _ => unreachable!("only semantic execution assets are bound"),
+        }
+        *asset = asset.clone().with_computed_hash();
+        let reference = asset.reference();
+        let bundle = &mut catalog.bundles[bundle_index];
+        match kind {
+            AssessmentAssetKind::RecognitionProfile => {
+                bundle.lineage.recognition_profile = reference
+            }
+            AssessmentAssetKind::ExecutionContract => bundle.lineage.execution_contract = reference,
+            AssessmentAssetKind::FeatureProgram => bundle.lineage.feature_program = reference,
+            AssessmentAssetKind::RulePack => bundle.lineage.rule_pack = reference,
+            _ => unreachable!("only semantic execution assets are bound"),
+        }
+    }
+    catalog.bundles[bundle_index] = catalog.bundles[bundle_index].clone().with_computed_hash();
+}
+
+pub fn current_motion_assessment_catalog() -> ExecutionAssessmentBundleCatalog {
+    current_motion_assessment_catalog_v12()
+}
+
 fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
     SealedRepReference {
         rep_id: rep.rep_id,
@@ -5740,6 +6402,7 @@ mod tests {
             uncertainty_px: Some(1.0),
             source: crate::EquipmentSource::Detector,
             held_by: hand,
+            association_stage: crate::EquipmentAssociationStage::GripEstablished,
             judgeable_path: true,
         }
     }

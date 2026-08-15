@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "maxpower.action-motion-catalog/v1",
+  "catalogId": "asset-only-contract",
+  "definitions": [{
+    "schemaVersion": "maxpower.action-motion-definition/v1",
+    "definitionId": "asset-only/floor-press/v1",
+    "actionId": "asset_only_floor_press",
+    "exactIdentity": {"movementFamily":"horizontal_press","posture":"supine_floor","support":"floor","equipmentTopology":"free_rigid_barbell","laterality":"bilateral_rigid","setup":"floor_press"},
+    "executableLeaf": true,
+    "relations": [
+      {"relationId":"load_press","role":"task_primary","operatorId":"equipment_axis_displacement","inputs":[{"source":"equipment_axis_center","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":true,"identityDefining":true,"semanticStatement":"the measured bar axis completes the press path"},
+      {"relationId":"torso_stability","role":"stability_relation","operatorId":"segment_angle","inputs":[{"source":"shoulder_hip_axis","valueType":"segment2d","unit":"normalized_image"}],"outputType":"scalar","unit":"radians","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"torso angle remains observable"},
+      {"relationId":"press_coordination","role":"coordinated_motion","operatorId":"point_displacement","inputs":[{"source":"shoulder_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"shoulder motion corroborates the load path"},
+      {"relationId":"hip_substitution","role":"substitution_guard","operatorId":"point_displacement","inputs":[{"source":"hip_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"large hip motion is retained as substitution evidence"}
+    ],
+    "tracks": [{"trackId":"bar_axis","source":"equipment_axis","role":"primary","required":true,"identityDefining":true}],
+    "repBoundary": {"activation":"grip_established","start":"load_lowered_from_ready","turnaround":"lowest_load_reversal","return":"load_returns_ready","release":"grip_released"},
+    "phases": [{"phaseId":"eccentric","from":"start","to":"turnaround"},{"phaseId":"concentric","from":"turnaround","to":"return"}],
+    "allowedClaims": ["task_completion","range_of_motion","phase_control","support_stability"],
+    "supportedViews": ["front_right_45"],
+    "admittedViews": ["front_right_45"],
+    "contentHash": ""
+  }]
+}

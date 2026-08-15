@@ -1,0 +1,56 @@
+{
+  "resolvedRecordCount": 54,
+  "governanceExcludedRecordCount": 1,
+  "replayedRecordCount": 53,
+  "recordsWithNonRejectedRep": 50,
+  "recordsWithBoundaryAlignment": 50,
+  "packetCount": 15879,
+  "localStates": {
+    "Uninitialized": 682,
+    "Provisional": 119,
+    "Learning": 169,
+    "Frozen": 7632,
+    "Degraded": 7277
+  },
+  "poseChannelFrames": 6030,
+  "equipmentChannelFrames": 1172,
+  "fusionStates": {
+    "Agreement": 62,
+    "CannotJudge": 9903,
+    "Conflict": 165,
+    "EquipmentOnly": 61,
+    "PoseOnly": 5688
+  },
+  "dimensionStates": {
+    "TaskCompletion/ObservedAcceptable": 25,
+    "TaskCompletion/ObservedDeviation": 26,
+    "TaskCompletion/CannotJudge": 2,
+    "RangeOfMotion/ObservedAcceptable": 15,
+    "RangeOfMotion/ObservedDeviation": 7,
+    "RangeOfMotion/CannotJudge": 31,
+    "PhaseControl/CannotJudge": 53,
+    "SupportStability/CannotJudge": 53,
+    "BilateralCoordination/CannotJudge": 53,
+    "TrajectoryControl/CannotJudge": 53,
+    "StandardVariantCompatibility/CannotJudge": 53,
+    "ObservationConfidence/ObservedAcceptable": 25,
+    "ObservationConfidence/CannotJudge": 28
+  },
+  "referenceKinds": {
+    "SelfGeometry": 557,
+    "SetPrefix": 232,
+    "NoReference": 7145
+  },
+  "equipmentProvider": {
+    "requestedRecordCount": 18,
+    "availableRecordCount": 18,
+    "decodedFrameCount": 18410,
+    "trackerOutputFrameCount": 17440,
+    "canonicalObservationFrameCount": 13976,
+    "measuredFrameCount": 13840,
+    "predictedFrameCount": 136,
+    "poseFusedFrameCount": 3464
+  },
+  "traceCompleteReportCount": 53,
+  "typedRefusalCount": 0
+}

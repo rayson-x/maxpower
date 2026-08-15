@@ -85,11 +85,26 @@ fn local_bar_frame(progress: f32) -> FrameObservations {
         x2: center[0] + cross[0] * half,
         y2: center[1] + cross[1] * half,
     };
+    let mut observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.10); 26];
+    observations[5] = PoseObservation::new(0.42, 0.42, 0.0, 0.95);
+    observations[6] = PoseObservation::new(0.58, 0.42, 0.0, 0.95);
+    observations[9] = PoseObservation::new(
+        center[0] - cross[0] * 0.16,
+        center[1] - cross[1] * 0.16,
+        0.0,
+        0.95,
+    );
+    observations[10] = PoseObservation::new(
+        center[0] + cross[0] * 0.16,
+        center[1] + cross[1] * 0.16,
+        0.0,
+        0.95,
+    );
     FrameObservations {
         pose_candidates: vec![PoseCandidate {
             id: 7,
             bbox: NormalizedRect::new(0.05, 0.02, 0.90, 0.94),
-            observations: vec![PoseObservation::new(0.5, 0.5, 0.0, 0.10); 26],
+            observations,
             torso_color: [0.2, 0.3, 0.4],
         }],
         equipment: vec![EquipmentObservation {
@@ -125,8 +140,9 @@ fn canonical_bench_packets() -> (
     Vec<maxpower_motion_sdk::MotionPacket>,
     maxpower_motion_sdk::MotionSetClosure,
 ) {
-    let progress = [0.0; 12]
+    let progress = [0.0, 0.02, 0.0]
         .into_iter()
+        .chain([0.0; 9])
         .chain([
             0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
         ])

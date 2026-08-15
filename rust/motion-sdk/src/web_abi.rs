@@ -945,7 +945,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     if runtime.visual_equipment_processed && !runtime.visual_luma.is_empty() {
         let visual_subjects = selected.as_ref().map_or(&[][..], std::slice::from_ref);
         let mut visual_tracker = std::mem::take(&mut runtime.visual_equipment_tracker);
-        let axis = match visual_tracker.process(
+        let frame_evidence = match visual_tracker.process_frame(
             runtime.pose_schema,
             &runtime.visual_luma,
             runtime.visual_width,
@@ -953,16 +953,14 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
             timestamp_ms,
             visual_subjects,
         ) {
-            Ok(axis) => axis,
+            Ok(evidence) => evidence,
             Err(super::VisualEquipmentError::UnsupportedPoseSchema) => return -4,
         };
         runtime.visual_equipment_tracker = visual_tracker;
-        runtime.visual_barbell_axis = axis;
-        if let Some(observation) =
-            axis.and_then(super::BarbellAxisObservation::equipment_observation)
-        {
-            runtime.equipment_observations.push(observation);
-        }
+        runtime.visual_barbell_axis = frame_evidence.display_axis;
+        runtime
+            .equipment_observations
+            .extend(frame_evidence.raw_observations);
     }
     let equipment_observations = std::mem::take(&mut runtime.equipment_observations);
     let canonical = runtime.output.clone();
@@ -1028,7 +1026,7 @@ pub extern "C" fn motion_sdk_current_frame_valid() -> i32 {
     i32::from(target_locked && observable)
 }
 
-fn process_rep(runtime: &mut WebRuntime, raw_equipment: &[super::EquipmentObservation]) {
+fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObservation]) {
     runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
     if runtime.reference_profile.is_some() || runtime.simulated_baseline.is_some() {
         runtime.frame_history.push(super::CanonicalFrameSample {
@@ -1084,7 +1082,6 @@ fn process_rep(runtime: &mut WebRuntime, raw_equipment: &[super::EquipmentObserv
                     target.state,
                     &runtime.output,
                     &equipment,
-                    raw_equipment,
                     Some(&runtime.local_motion_coordinate.snapshot()),
                 ));
             runtime.rep_state = rep_engine.state.clone();

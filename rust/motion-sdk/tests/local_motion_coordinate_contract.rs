@@ -21,11 +21,26 @@ fn local_bar_frame(progress: f32, angle: f32) -> FrameObservations {
         x2: center[0] + cross[0] * half,
         y2: center[1] + cross[1] * half,
     };
+    let mut observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.10); 26];
+    observations[5] = PoseObservation::new(0.42, 0.42, 0.0, 0.95);
+    observations[6] = PoseObservation::new(0.58, 0.42, 0.0, 0.95);
+    observations[9] = PoseObservation::new(
+        center[0] - cross[0] * 0.16,
+        center[1] - cross[1] * 0.16,
+        0.0,
+        0.95,
+    );
+    observations[10] = PoseObservation::new(
+        center[0] + cross[0] * 0.16,
+        center[1] + cross[1] * 0.16,
+        0.0,
+        0.95,
+    );
     FrameObservations {
         pose_candidates: vec![PoseCandidate {
             id: 7,
             bbox: NormalizedRect::new(0.05, 0.02, 0.90, 0.94),
-            observations: vec![PoseObservation::new(0.5, 0.5, 0.0, 0.10); 26],
+            observations,
             torso_color: [0.2, 0.3, 0.4],
         }],
         equipment: vec![EquipmentObservation {
@@ -207,11 +222,36 @@ fn run_coordinate_sequence(
                 x2: center[0] + cross[0] * half_length,
                 y2: center[1] + cross[1] * half_length,
             };
+            let mut observations = vec![PoseObservation::new(0.5, 0.5, 0.0, 0.10); 26];
+            observations[5] = PoseObservation::new(
+                center[0] - 0.08 * self.scale,
+                center[1] - 0.10 * self.scale,
+                0.0,
+                0.95,
+            );
+            observations[6] = PoseObservation::new(
+                center[0] + 0.08 * self.scale,
+                center[1] - 0.10 * self.scale,
+                0.0,
+                0.95,
+            );
+            observations[9] = PoseObservation::new(
+                center[0] - cross[0] * 0.16 * self.scale,
+                center[1] - cross[1] * 0.16 * self.scale,
+                0.0,
+                0.95,
+            );
+            observations[10] = PoseObservation::new(
+                center[0] + cross[0] * 0.16 * self.scale,
+                center[1] + cross[1] * 0.16 * self.scale,
+                0.0,
+                0.95,
+            );
             Ok(FrameObservations {
                 pose_candidates: vec![PoseCandidate {
                     id: 7,
                     bbox: NormalizedRect::new(0.0, 0.0, 1.0, 1.0),
-                    observations: vec![PoseObservation::new(0.5, 0.5, 0.0, 0.10); 26],
+                    observations,
                     torso_color: [0.2, 0.3, 0.4],
                 }],
                 equipment: vec![EquipmentObservation {
@@ -372,8 +412,9 @@ fn future_frames_cannot_rewrite_already_emitted_coordinate_facts() {
 
 #[test]
 fn opt_in_local_bench_profile_consumes_normalized_progress_and_seals_endpoint_snapshots() {
-    let progress = [0.0; 12]
+    let progress = [0.0, 0.02, 0.0]
         .into_iter()
+        .chain([0.0; 9])
         .chain([
             0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
         ])
@@ -429,7 +470,25 @@ fn opt_in_local_bench_profile_consumes_normalized_progress_and_seals_endpoint_sn
     let rep = reps
         .iter()
         .find(|rep| rep.disposition != RepDisposition::Rejected)
-        .expect("normalized candidate must produce one reviewable rep");
+        .unwrap_or_else(|| {
+            panic!(
+                "normalized candidate must produce one reviewable rep; packets={:?}",
+                output
+                    .packets()
+                    .iter()
+                    .map(|packet| (
+                        &packet.set_state.lifecycle,
+                        &packet.rep_state.phase,
+                        packet
+                            .equipment
+                            .tracks
+                            .first()
+                            .map(|track| track.association_stage),
+                        packet.local_motion_coordinate.state
+                    ))
+                    .collect::<Vec<_>>()
+            )
+        });
     let endpoints = rep
         .normalized_endpoints
         .as_ref()
@@ -488,8 +547,9 @@ fn seated_barbell_shoulder_press_has_distinct_local_profile_and_dumbbell_does_no
 
 #[test]
 fn seated_barbell_shoulder_press_runs_its_own_causal_local_profile() {
-    let progress = [0.0; 12]
+    let progress = [0.0, 0.02, 0.0]
         .into_iter()
+        .chain([0.0; 9])
         .chain([
             -0.03, -0.08, -0.15, -0.24, -0.33, -0.38, -0.37, -0.33, -0.24, -0.14, -0.05, -0.01,
         ])
@@ -554,16 +614,16 @@ fn seated_barbell_shoulder_press_runs_its_own_causal_local_profile() {
 }
 
 #[test]
-fn predicted_or_weak_wrists_do_not_double_count_equipment_as_pose_corroboration() {
+fn independently_measured_wrists_are_explicit_pose_corroboration() {
     let evidence =
         run_coordinate_sequence(0.22, [0.0, 0.0], 1.0, vec![0.0, 0.005, 0.025, 0.050, 0.080]);
     let frozen = evidence.last().expect("coordinate evidence");
     assert_eq!(
         frozen.channel_agreement,
-        maxpower_motion_sdk::LocalChannelAgreement::EquipmentOnly,
+        maxpower_motion_sdk::LocalChannelAgreement::Agreement,
     );
     assert!(frozen.equipment.is_some());
-    assert!(frozen.pose.is_none());
+    assert!(frozen.pose.is_some());
     assert_eq!(
         frozen.equipment.unwrap().provenance,
         maxpower_motion_sdk::LocalChannelProvenance::EquipmentMeasured,
@@ -624,15 +684,16 @@ fn equipment_pixel_uncertainty_is_normalized_by_the_frozen_set_scale() {
     );
     assert_eq!(
         coordinate.channel_agreement,
-        maxpower_motion_sdk::LocalChannelAgreement::CannotJudge,
-        "high detector uncertainty must make phase fusion abstain even when score is high",
+        maxpower_motion_sdk::LocalChannelAgreement::PoseOnly,
+        "high detector uncertainty removes equipment, while independent measured pose remains explicit",
     );
 }
 
 #[test]
 fn high_uncertainty_equipment_cannot_drive_a_local_phase_profile() {
-    let progress = [0.0; 12]
+    let progress = [0.0, 0.02, 0.0]
         .into_iter()
+        .chain([0.0; 9])
         .chain([
             0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
         ])
@@ -695,9 +756,10 @@ fn high_uncertainty_equipment_cannot_drive_a_local_phase_profile() {
 }
 
 #[test]
-fn normalized_channel_conflict_is_aggregated_into_the_sealed_rep() {
-    let progress = [0.0; 12]
+fn conflicting_hand_and_bar_motion_cannot_establish_grip_or_seal_a_rep() {
+    let progress = [0.0, 0.02, 0.0]
         .into_iter()
+        .chain([0.0; 9])
         .chain([
             0.02, 0.06, 0.12, 0.20, 0.30, 0.34, 0.33, 0.30, 0.22, 0.12, 0.04, 0.01,
         ])
@@ -749,23 +811,9 @@ fn normalized_channel_conflict_is_aggregated_into_the_sealed_rep() {
         .flat_map(|packet| packet.completed_reps)
         .collect::<Vec<_>>();
     reps.extend(session.finish_set());
-    let rep = reps
-        .iter()
-        .find(|rep| rep.disposition != RepDisposition::Rejected)
-        .expect("equipment path should still seal a reviewable rep");
     assert!(
-        rep.observation_findings
-            .contains(&maxpower_motion_sdk::RepObservationFinding::LocalTrajectoryChannelConflict,),
-    );
-    assert_eq!(rep.disposition, RepDisposition::NeedsReview);
-    assert_eq!(
-        rep.evidence_reason,
-        Some(maxpower_motion_sdk::RepEvidenceReason::LocalTrajectoryChannelConflict),
-    );
-    assert!(
-        !rep.observation_findings
-            .contains(&maxpower_motion_sdk::RepObservationFinding::PoseEquipmentTurnaroundAligned,),
-        "turnaround timing must not hide a conflicting normalized path",
+        reps.is_empty(),
+        "conflicting co-motion must not establish grip or authorize Rep evidence: {reps:?}"
     );
 }
 

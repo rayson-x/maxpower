@@ -1557,6 +1557,7 @@ mod tests {
             uncertainty_px: Some(2.0),
             source: EquipmentSource::Detector,
             held_by: hand,
+            association_stage: crate::EquipmentAssociationStage::GripEstablished,
             judgeable_path: true,
         }
     }

@@ -7,23 +7,26 @@ use std::{
 };
 
 use maxpower_motion_sdk::{
-    AdapterCapabilities, AssessmentBundleCapability, AssessmentCaptureView,
+    ActionMotionBundleBinding, ActionMotionCatalog, ActionMotionCompiler, ActionViewBinding,
+    AdapterCapabilities, AssessmentAssetKind, AssessmentBundleCapability, AssessmentCaptureView,
     AssessmentConclusionState, AssessmentDimension, AssessmentEmission,
     AssessmentEquipmentRecognitionMode, AssessmentEvent, AssessmentRuntimeError, BarbellAxisSource,
     BarbellAxisVisualTracker, ContractVersion, DeclaredLoad, DeclaredLoadProvenance,
-    DiagnosticLevel, EquipmentAttributes, EquipmentAxis2d, EquipmentHand, EquipmentKind,
-    EquipmentObservation, EquipmentSource, ExecutionAssessmentEngine, FrameLease,
-    FrameObservations, FrameRotation, InferenceAdapter, LocalActionAxisDirection,
-    LocalEquipmentMode, MotionError, MotionSession, NormalizedRect, PoseCandidate, PoseObservation,
-    PoseObservationContract, PoseSchemaId, RecordingOutputAdapter, ReferenceComparisonKind,
-    SessionConfig, SetExecutionContext, SetIntent, SubjectPolicy, TimestampUnit, TraceNodeKind,
+    DiagnosticLevel, EquipmentAttributes, EquipmentAxis2d, EquipmentKind, EquipmentObservation,
+    EquipmentSource, ExecutionAssessmentEngine, FrameLease, FrameObservations, FrameRotation,
+    InferenceAdapter, LocalActionAxisDirection, LocalEquipmentMode, MotionError, MotionSession,
+    NormalizedRect, OperatorRegistry, PoseCandidate, PoseObservation, PoseObservationContract,
+    PoseSchemaId, RecordingOutputAdapter, ReferenceComparisonKind, SessionConfig,
+    SetExecutionContext, SetIntent, SubjectPolicy, TimestampUnit, TraceNodeKind,
     VideoFrameContract, VideoRecognitionContext, WorkoutAssessmentContext,
     current_bodyweight_assessment_profiles_v1, current_cable_assessment_profiles_v1,
     current_dual_dumbbell_assessment_profiles_v1, current_machine_assessment_profiles_v1,
     current_motion_assessment_catalog_v3, current_motion_assessment_catalog_v7,
     current_motion_assessment_catalog_v8, current_motion_assessment_catalog_v9,
-    current_rigid_bar_assessment_profiles_v1, equipment_fused_rigid_bar_assessment_profiles_v2,
-    wrist_constrained_rigid_bar_assessment_profiles_v3,
+    current_motion_assessment_catalog_v10, current_motion_assessment_catalog_v11,
+    current_motion_assessment_catalog_v12, current_rigid_bar_assessment_profiles_v1,
+    equipment_fused_rigid_bar_assessment_profiles_v2, install_compiled_action_motion_semantics,
+    rigid_bar_track_supports_turnaround, wrist_constrained_rigid_bar_assessment_profiles_v3,
 };
 use serde::Serialize;
 
@@ -667,7 +670,10 @@ fn canonical_packets_for_channels(
                 .zip(&progress)
                 .enumerate()
                 .map(|(index, (angle, progress))| {
-                    let mut frame = aligned_rigid_bar_frame(*angle, *progress);
+                    // A sub-threshold setup dither proves common hand/bar
+                    // motion before the working cycle without becoming a Rep.
+                    let setup_progress = if index == 1 { 0.04 } else { *progress };
+                    let mut frame = aligned_rigid_bar_frame(*angle, setup_progress);
                     if !include_equipment && index >= 12 {
                         frame.equipment.clear();
                     }
@@ -723,7 +729,7 @@ fn canonical_packets_with_visible_return_error(
             } else {
                 complete_progress
             };
-            aligned_rigid_bar_frame(*angle, progress)
+            aligned_rigid_bar_frame(*angle, if index == 1 { 0.04 } else { progress })
         })
         .collect();
     let output = RecordingOutputAdapter::default();
@@ -1210,6 +1216,231 @@ fn frozen_v9_wrist_constrained_report_resolves_to_governed_immutable_evidence() 
     assert_eq!(screenshot_frame["fusionEligible"], false);
 }
 
+#[test]
+fn frozen_v10_grip_validated_report_resolves_to_governed_immutable_evidence() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("MaxPower root")
+        .to_path_buf();
+    let governance_root = root
+        .parent()
+        .expect("power workspace")
+        .join("maxpower-training-data-governance");
+    let governance: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(governance_root.join("catalog/assets.json")).expect("governance catalog"),
+    )
+    .expect("governance JSON");
+    let asset = governance["assets"]
+        .as_array()
+        .expect("governance assets")
+        .iter()
+        .find(|asset| asset["id"] == "current-rust-v10-grip-validated-equipment-alignment-report")
+        .expect("v10 report asset is governed");
+    assert_eq!(asset["admission"], "evaluation_only");
+    assert_eq!(asset["authority"], "frozen_prediction_or_report");
+
+    let report_bytes =
+        std::fs::read(root.join(asset["location"]["path"].as_str().expect("v10 report path")))
+            .expect("frozen v10 report");
+    assert_eq!(
+        sha256_bytes(&report_bytes),
+        asset["location"]["sha256"]
+            .as_str()
+            .expect("report SHA-256")
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&report_bytes).expect("frozen v10 report JSON");
+    assert_eq!(
+        report["schemaVersion"],
+        "maxpower-current-rust-grip-validated-equipment-alignment/v1"
+    );
+    assert_eq!(
+        report["protocol"]["modelConfiguration"]["assessmentCatalogId"],
+        current_motion_assessment_catalog_v10().catalog_id
+    );
+    for key in [
+        "truthRepCount",
+        "predictedRepCount",
+        "matchedRepCount",
+        "candidatePrecision",
+        "candidateRecall",
+        "strictBoundaryAlignedRate",
+    ] {
+        assert_eq!(report["aggregate"][key], asset["snapshot"][key]);
+    }
+    assert_eq!(
+        report["turnaroundEvaluation"]["equipmentFusedTurnaroundCount"],
+        asset["snapshot"]["equipmentFusedTurnaroundCount"]
+    );
+
+    let row = report["rows"]
+        .as_array()
+        .expect("v10 rows")
+        .iter()
+        .find(|row| row["sourceCaptureId"] == "field-capture-2026-08-02T18-26-54-722Z")
+        .expect("reported barbell-row screenshot capture");
+    assert_eq!(row["truthCount"], 10);
+    assert_eq!(row["predictedCount"], 10);
+    assert_eq!(row["matchedCount"], 10);
+    let frames = row["equipmentProvider"]["frames"]
+        .as_array()
+        .expect("equipment frames");
+    for frame_number in [201, 396] {
+        let frame = frames
+            .iter()
+            .find(|frame| frame["frameNumber"] == frame_number)
+            .expect("reported screenshot frame");
+        assert_eq!(frame["canonicalAccepted"], true);
+        assert_eq!(frame["fusionEligible"], true);
+        let span = frame["x2"].as_f64().expect("axis x2") - frame["x1"].as_f64().expect("axis x1");
+        assert!(
+            span < 0.5,
+            "grip-supported axis must not expose a global-frame edge extent"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires the local-private governed v11 per-capture report"]
+fn frozen_v11_multirate_report_resolves_to_governed_immutable_evidence() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("MaxPower root")
+        .to_path_buf();
+    let governance: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(
+            root.parent()
+                .expect("power workspace")
+                .join("maxpower-training-data-governance/catalog/assets.json"),
+        )
+        .expect("governance catalog"),
+    )
+    .expect("governance JSON");
+    let asset = governance["assets"]
+        .as_array()
+        .expect("governance assets")
+        .iter()
+        .find(|asset| asset["id"] == "current-rust-v11-multirate-equipment-alignment-report")
+        .expect("v11 report asset is governed");
+    assert_eq!(asset["admission"], "evaluation_only");
+    let report_bytes =
+        std::fs::read(root.join(asset["location"]["path"].as_str().expect("v11 report path")))
+            .expect("frozen v11 report");
+    assert_eq!(
+        sha256_bytes(&report_bytes),
+        asset["location"]["sha256"]
+            .as_str()
+            .expect("report SHA-256")
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&report_bytes).expect("frozen v11 report JSON");
+    assert_eq!(
+        report["schemaVersion"],
+        "maxpower-current-rust-multirate-equipment-alignment/v1"
+    );
+    assert_eq!(
+        report["protocol"]["modelConfiguration"]["assessmentCatalogId"],
+        current_motion_assessment_catalog_v11().catalog_id
+    );
+    for key in [
+        "truthRepCount",
+        "predictedRepCount",
+        "matchedRepCount",
+        "candidatePrecision",
+        "candidateRecall",
+        "strictBoundaryAlignedRate",
+    ] {
+        assert_eq!(report["aggregate"][key], asset["snapshot"][key]);
+    }
+    let row = report["rows"]
+        .as_array()
+        .expect("v11 rows")
+        .iter()
+        .find(|row| row["sourceCaptureId"] == "field-capture-2026-08-02T18-26-54-722Z")
+        .expect("target barbell-row capture");
+    assert_eq!(row["truthCount"], 10);
+    assert_eq!(row["predictedCount"], 10);
+    assert_eq!(row["matchedCount"], 10);
+    assert_eq!(
+        row["equipmentProvider"]["poseInputRateHz"],
+        asset["snapshot"]["targetPoseInputRateHz"]
+    );
+    assert_eq!(
+        row["equipmentProvider"]["visualProcessingRateHz"],
+        asset["snapshot"]["targetVisualProcessingRateHz"]
+    );
+    assert_eq!(
+        row["equipmentProvider"]["trackerOutputRateHz"],
+        asset["snapshot"]["targetTrackerOutputRateHz"]
+    );
+    assert!(
+        row["equipmentProvider"]["trackerOutputRateHz"]
+            .as_f64()
+            .is_some_and(|rate| rate >= 29.0)
+    );
+    let frames = row["equipmentProvider"]["frames"]
+        .as_array()
+        .expect("equipment frames");
+    for frame_number in [201, 396] {
+        let frame = frames
+            .iter()
+            .find(|frame| frame["frameNumber"] == frame_number)
+            .expect("reported screenshot frame");
+        assert_eq!(frame["providerAccepted"], true);
+        assert_eq!(frame["canonicalAccepted"], true);
+        assert_eq!(frame["fusionEligible"], true);
+        let span = frame["x2"].as_f64().expect("axis x2") - frame["x1"].as_f64().expect("axis x1");
+        assert!(span < 0.5);
+    }
+}
+
+#[test]
+fn action_specific_baseline_freezes_every_action_view_without_claiming_missing_truth() {
+    let baseline: serde_json::Value = serde_json::from_slice(include_bytes!(
+        "fixtures/action_specific_motion_regression_baseline_v1.json"
+    ))
+    .expect("frozen action-specific baseline");
+    assert_eq!(
+        baseline["source"]["immutableSha256"],
+        "39c4f0adbb6577e91318bfba944b066e93240a35ffa528daedfe8d64d3346928"
+    );
+    assert_eq!(baseline["source"]["admission"], "evaluation_only");
+    assert_eq!(baseline["source"]["groupKey"], "sourceCaptureId");
+    assert_eq!(baseline["aggregate"]["recordCount"], 53);
+    assert_eq!(baseline["aggregate"]["truthRepCount"], 455);
+    assert_eq!(
+        baseline["aggregate"]["candidatePrecision"],
+        0.871264367816092
+    );
+    assert_eq!(baseline["aggregate"]["candidateRecall"], 0.832967032967033);
+    assert_eq!(
+        baseline["exactAction"]
+            .as_object()
+            .expect("action matrix")
+            .len(),
+        12
+    );
+    assert_eq!(
+        baseline["exactActionView"]
+            .as_object()
+            .expect("action-view matrix")
+            .len(),
+        24
+    );
+    for task in [
+        "phaseAndTurnaround",
+        "rawEquipmentGeometry",
+        "subjectAssociation",
+        "gripEstablishmentAndRelease",
+        "qualityVerdicts",
+        "traceConclusions",
+    ] {
+        assert_eq!(baseline["accuracyStatus"][task], "not_evaluable");
+    }
+}
+
 const EVALUATION_CANDIDATE_MINIMUM_INTERVAL_IOU: f64 = 0.10;
 const EVALUATION_CANDIDATE_BOUNDARY_TOLERANCE_MS: i64 = 1_500;
 const EVALUATION_STRICT_MINIMUM_INTERVAL_IOU: f64 = 0.60;
@@ -1300,8 +1531,13 @@ struct EvaluatedReplayRow {
 struct EquipmentProviderEvaluation {
     recognition_mode: String,
     source_asset_id: Option<String>,
+    pose_input_frame_count: usize,
+    pose_input_rate_hz: f64,
     decoded_frame_count: usize,
+    visual_processed_frame_count: usize,
+    visual_processing_rate_hz: f64,
     tracker_output_frame_count: usize,
+    tracker_output_rate_hz: f64,
     canonical_observation_frame_count: usize,
     measured_frame_count: usize,
     predicted_frame_count: usize,
@@ -1322,6 +1558,7 @@ struct EquipmentFramePrediction {
     x2: f32,
     y2: f32,
     center_y: f32,
+    provider_accepted: bool,
     canonical_accepted: bool,
     fusion_eligible: bool,
 }
@@ -1374,125 +1611,255 @@ fn governed_frames_with_equipment_provider(
     EquipmentProviderEvaluation,
 ) {
     let raw_frames = raw["frames"].as_array().expect("pose frames");
-    let mut frame_ids = Vec::with_capacity(raw_frames.len());
-    let mut timestamps = Vec::with_capacity(raw_frames.len());
-    let mut frames = VecDeque::with_capacity(raw_frames.len());
+    let duration_seconds = raw["source"]["durationMs"]
+        .as_f64()
+        .expect("source duration")
+        / 1_000.0;
     let mut evaluation = EquipmentProviderEvaluation {
         recognition_mode: format!("{recognition_mode:?}"),
         source_asset_id: video_path.map(|_| "personal-raw-capture-archive".into()),
+        pose_input_frame_count: raw_frames.len(),
+        pose_input_rate_hz: raw_frames.len() as f64 / duration_seconds,
         ..EquipmentProviderEvaluation::default()
     };
-    let mut visual_runtime = if recognition_mode.requires_visual_frame() {
-        let video_path = video_path.expect("the frozen rigid-bar source video");
-        let source_width = raw["source"]["widthPx"].as_u64().expect("pose width") as usize;
-        let source_height = raw["source"]["heightPx"].as_u64().expect("pose height") as usize;
-        let width = 360_usize.min(source_width);
-        let height = ((source_height * width / source_width + 1) / 2) * 2;
-        let frame_limit = raw_frames
-            .last()
-            .and_then(|frame| frame["frameNumber"].as_u64())
-            .expect("last governed frame")
-            .saturating_add(1)
-            .to_string();
-        let mut child = Command::new("ffmpeg")
-            .args(["-v", "error", "-i"])
-            .arg(video_path)
-            .args([
-                "-an",
-                "-vf",
-                &format!("scale={width}:{height}"),
-                "-pix_fmt",
-                "gray",
-                "-frames:v",
-                &frame_limit,
-                "-f",
-                "rawvideo",
-                "pipe:1",
-            ])
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap_or_else(|error| panic!("decode {}: {error}", video_path.display()));
-        let stdout = child.stdout.take().expect("ffmpeg stdout");
-        Some((
-            child,
-            stdout,
-            vec![0_u8; width * height],
-            width,
-            height,
-            0_u64,
-            BarbellAxisVisualTracker::default(),
-        ))
-    } else {
-        None
-    };
-    for frame in raw_frames {
-        let frame_id = frame["frameNumber"].as_u64().expect("frame number");
-        let timestamp_ms = frame["timestampMs"].as_f64().expect("timestamp").round() as u64;
-        frame_ids.push(frame_id);
-        timestamps.push(timestamp_ms);
-        let pose_candidates = governed_pose_candidates(frame);
-        let equipment = visual_runtime.as_mut().map_or_else(Vec::new, |runtime| {
-            let (_, stdout, pixels, width, height, decoded_frame, tracker) = runtime;
-            while *decoded_frame <= frame_id {
-                stdout
-                    .read_exact(pixels)
-                    .unwrap_or_else(|error| panic!("video ended before frame {frame_id}: {error}"));
-                *decoded_frame += 1;
-                evaluation.decoded_frame_count += 1;
-            }
-            let axis = tracker
+    if !recognition_mode.requires_visual_frame() {
+        let mut frame_ids = Vec::with_capacity(raw_frames.len());
+        let mut timestamps = Vec::with_capacity(raw_frames.len());
+        let mut frames = VecDeque::with_capacity(raw_frames.len());
+        for frame in raw_frames {
+            frame_ids.push(frame["frameNumber"].as_u64().expect("frame number"));
+            timestamps.push(frame["timestampMs"].as_f64().expect("timestamp").round() as u64);
+            frames.push_back(FrameObservations {
+                pose_candidates: governed_pose_candidates(frame),
+                equipment: Vec::new(),
+            });
+        }
+        return (frames, frame_ids, timestamps, evaluation);
+    }
+
+    let video_path = video_path.expect("the frozen rigid-bar source video");
+    let source_width = raw["source"]["widthPx"].as_u64().expect("pose width") as usize;
+    let source_height = raw["source"]["heightPx"].as_u64().expect("pose height") as usize;
+    let width = 360_usize.min(source_width);
+    let height = ((source_height * width / source_width + 1) / 2) * 2;
+    let last_frame_id = raw_frames
+        .last()
+        .and_then(|frame| frame["frameNumber"].as_u64())
+        .expect("last governed frame");
+    let video_timestamps = governed_video_frame_timestamps_ms(video_path);
+    assert!(
+        video_timestamps.len() > last_frame_id as usize,
+        "video timestamps end before governed pose frames"
+    );
+    let frame_limit = last_frame_id.saturating_add(1).to_string();
+    let mut child = Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(video_path)
+        .args([
+            "-an",
+            "-vf",
+            &format!("scale={width}:{height}"),
+            "-pix_fmt",
+            "gray",
+            "-frames:v",
+            &frame_limit,
+            "-f",
+            "rawvideo",
+            "pipe:1",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|error| panic!("decode {}: {error}", video_path.display()));
+    let mut stdout = child.stdout.take().expect("ffmpeg stdout");
+    let mut pixels = vec![0_u8; width * height];
+    let mut tracker = BarbellAxisVisualTracker::default();
+    let mut pose_index = 0_usize;
+    let mut latest_pose = Vec::<PoseCandidate>::new();
+    let mut latest_pose_timestamp_ms = 0_u64;
+    let mut previous_published_timestamp_ms = None::<u64>;
+    let mut latest_axis = None;
+    let mut latest_axis_timestamp_ms = 0_u64;
+    let mut frame_ids = Vec::with_capacity(raw_frames.len());
+    let mut timestamps = Vec::with_capacity(raw_frames.len());
+    let mut frames = VecDeque::with_capacity(raw_frames.len());
+    for frame_id in 0..=last_frame_id {
+        stdout
+            .read_exact(&mut pixels)
+            .unwrap_or_else(|error| panic!("video ended before frame {frame_id}: {error}"));
+        evaluation.decoded_frame_count += 1;
+        let video_timestamp_ms = video_timestamps[frame_id as usize];
+        let pose_frame = raw_frames
+            .get(pose_index)
+            .filter(|frame| frame["frameNumber"].as_u64().expect("pose frame number") == frame_id);
+        let pose_candidates = pose_frame.map_or_else(Vec::new, governed_pose_candidates);
+        if pose_frame.is_some() {
+            latest_pose.clone_from(&pose_candidates);
+            latest_pose_timestamp_ms = pose_frame
+                .and_then(|frame| frame["timestampMs"].as_f64())
+                .expect("pose timestamp")
+                .round() as u64;
+            pose_index += 1;
+        }
+        let axis = if previous_published_timestamp_ms
+            .is_some_and(|previous| video_timestamp_ms <= previous)
+        {
+            None
+        } else {
+            previous_published_timestamp_ms = Some(video_timestamp_ms);
+            evaluation.visual_processed_frame_count += 1;
+            let tracker_pose = if video_timestamp_ms.saturating_sub(latest_pose_timestamp_ms) <= 180
+            {
+                latest_pose.as_slice()
+            } else {
+                &[]
+            };
+            tracker
                 .process(
                     PoseSchemaId::Halpe26,
-                    pixels,
-                    *width,
-                    *height,
-                    timestamp_ms,
-                    &pose_candidates,
+                    &pixels,
+                    width,
+                    height,
+                    video_timestamp_ms,
+                    tracker_pose,
                 )
-                .expect("Halpe26 visual equipment provider");
-            if let Some(axis) = axis {
-                evaluation.tracker_output_frame_count += 1;
-                match axis.source {
-                    BarbellAxisSource::Measured => {
-                        evaluation.measured_frame_count += 1;
-                        evaluation.canonical_observation_frame_count += 1;
-                    }
-                    BarbellAxisSource::Predicted => {
-                        evaluation.predicted_frame_count += 1;
-                        evaluation.canonical_observation_frame_count += 1;
-                    }
-                    BarbellAxisSource::Fused => evaluation.pose_fused_frame_count += 1,
+                .expect("Halpe26 multi-rate visual equipment provider")
+        };
+        if let Some(axis) = axis {
+            latest_axis = Some(axis);
+            latest_axis_timestamp_ms = video_timestamp_ms;
+            evaluation.tracker_output_frame_count += 1;
+            match axis.source {
+                BarbellAxisSource::Measured => {
+                    evaluation.measured_frame_count += 1;
+                    evaluation.canonical_observation_frame_count += 1;
                 }
-                evaluation.frames.push(EquipmentFramePrediction {
-                    frame_number: frame_id,
-                    timestamp_ms,
-                    source: format!("{:?}", axis.source),
-                    confidence: axis.confidence,
-                    uncertainty_px: axis.uncertainty_px,
-                    x1: axis.x1,
-                    y1: axis.y1,
-                    x2: axis.x2,
-                    y2: axis.y2,
-                    center_y: axis.center_y,
-                    canonical_accepted: false,
-                    fusion_eligible: false,
-                });
+                BarbellAxisSource::Predicted => {
+                    evaluation.predicted_frame_count += 1;
+                    evaluation.canonical_observation_frame_count += 1;
+                }
+                BarbellAxisSource::Fused => evaluation.pose_fused_frame_count += 1,
             }
-            axis.and_then(|axis| axis.equipment_observation())
+            evaluation.frames.push(EquipmentFramePrediction {
+                frame_number: frame_id,
+                timestamp_ms: video_timestamp_ms,
+                source: format!("{:?}", axis.source),
+                confidence: axis.confidence,
+                uncertainty_px: axis.uncertainty_px,
+                x1: axis.x1,
+                y1: axis.y1,
+                x2: axis.x2,
+                y2: axis.y2,
+                center_y: axis.center_y,
+                provider_accepted: true,
+                canonical_accepted: false,
+                fusion_eligible: false,
+            });
+        }
+        if let Some(pose_frame) = pose_frame {
+            let pose_timestamp_ms = pose_frame["timestampMs"]
+                .as_f64()
+                .expect("pose timestamp")
+                .round() as u64;
+            let equipment = axis
+                .or_else(|| {
+                    (pose_timestamp_ms.saturating_sub(latest_axis_timestamp_ms) <= 180)
+                        .then_some(latest_axis)
+                        .flatten()
+                })
+                .and_then(|axis| axis.equipment_observation())
                 .into_iter()
-                .collect()
-        });
-        frames.push_back(FrameObservations {
-            pose_candidates,
-            equipment,
-        });
+                .collect();
+            frame_ids.push(frame_id);
+            timestamps.push(pose_timestamp_ms);
+            frames.push_back(FrameObservations {
+                pose_candidates,
+                equipment,
+            });
+        }
     }
-    if let Some((mut child, stdout, _, _, _, _, _)) = visual_runtime {
-        drop(stdout);
-        let status = child.wait().expect("wait for video decoder");
-        assert!(status.success(), "video decoder failed: {status}");
-    }
+    drop(stdout);
+    let status = child.wait().expect("wait for video decoder");
+    assert!(status.success(), "video decoder failed: {status}");
+    assert_eq!(
+        pose_index,
+        raw_frames.len(),
+        "every pose frame must be consumed"
+    );
+    evaluation.visual_processing_rate_hz =
+        evaluation.visual_processed_frame_count as f64 / duration_seconds;
+    evaluation.tracker_output_rate_hz =
+        evaluation.tracker_output_frame_count as f64 / duration_seconds;
     (frames, frame_ids, timestamps, evaluation)
+}
+
+fn governed_video_frame_timestamps_ms(video_path: &Path) -> Vec<u64> {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "frame=best_effort_timestamp_time",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(video_path)
+        .output()
+        .unwrap_or_else(|error| panic!("inspect {} timestamps: {error}", video_path.display()));
+    assert!(output.status.success(), "video timestamp inspection failed");
+    let timestamps = String::from_utf8(output.stdout)
+        .expect("UTF-8 video timestamps")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            (line.trim().parse::<f64>().expect("finite video timestamp") * 1_000.0).round() as u64
+        })
+        .collect::<Vec<_>>();
+    timestamps
+}
+
+#[test]
+#[ignore = "requires governed local-private Halpe26 observation and raw video assets"]
+fn governed_barbell_row_multirate_provider_processes_video_cadence_without_pose_duplication() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("MaxPower root")
+        .to_path_buf();
+    let capture_id = "field-capture-2026-08-02T18-26-54-722Z";
+    let raw = read_governed_gzip_json(&root.join(format!(
+        "data/workflows/action-trajectory-database/halpe26-v1/personal-observations/{capture_id}.halpe26.json.gz"
+    )));
+    let video = root.join(format!(
+        "public/archives/confirmed-captures/{capture_id}.webm"
+    ));
+    let (frames, frame_ids, timestamps, evaluation) = governed_frames_with_equipment_provider(
+        &raw,
+        AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis,
+        Some(&video),
+    );
+    assert!(timestamps.windows(2).all(|pair| pair[1] > pair[0]));
+    assert!(frame_ids.windows(2).all(|pair| pair[1] > pair[0]));
+    let published_pose_frames = frames
+        .iter()
+        .filter(|frame| !frame.pose_candidates.is_empty())
+        .count();
+    assert!(
+        published_pose_frames <= evaluation.pose_input_frame_count,
+        "intermediate equipment frames must not duplicate pose observations"
+    );
+    assert!(evaluation.visual_processing_rate_hz >= 20.0);
+    assert!(evaluation.tracker_output_rate_hz >= 15.0);
+    eprintln!(
+        "target multi-rate provider: pose={:.1}Hz visual={:.1}Hz tracker={:.1}Hz decoded={} processed={} outputs={}",
+        evaluation.pose_input_rate_hz,
+        evaluation.visual_processing_rate_hz,
+        evaluation.tracker_output_rate_hz,
+        evaluation.decoded_frame_count,
+        evaluation.visual_processed_frame_count,
+        evaluation.tracker_output_frame_count,
+    );
 }
 
 fn evaluation_interval_iou(left: &EvaluationRange, right: &EvaluationRange) -> f64 {
@@ -1713,16 +2080,16 @@ fn governed_real_replays_cover_every_current_action_view() {
     ))
     .expect("versioned known-video alignment protocol");
     evaluation_protocol["evaluationId"] =
-        serde_json::json!("current-rust-v9-wrist-constrained-equipment-alignment-2026-08-15");
+        serde_json::json!("current-rust-v11-multirate-equipment-alignment-2026-08-15");
     evaluation_protocol["protocol"]["modelConfiguration"]["assessmentCatalogId"] =
-        serde_json::json!(current_motion_assessment_catalog_v9().catalog_id);
+        serde_json::json!(current_motion_assessment_catalog_v11().catalog_id);
     evaluation_protocol["protocol"]["modelConfiguration"]["repBoundaryAuthority"] =
         serde_json::json!("pose_cycle_wrist_constrained_equipment_turnaround_fused");
     evaluation_protocol["protocol"]["output"]["path"] = serde_json::json!(
-        "docs/reports/current-rust-v9-wrist-constrained-equipment-alignment-2026-08-15.json"
+        "docs/reports/current-rust-v11-multirate-equipment-alignment-2026-08-15.json"
     );
     evaluation_protocol["protocol"]["output"]["schemaVersion"] =
-        serde_json::json!("maxpower-current-rust-wrist-constrained-equipment-alignment/v1");
+        serde_json::json!("maxpower-current-rust-multirate-equipment-alignment/v1");
     evaluation_protocol["protocolSha256"] = serde_json::json!(sha256_bytes(
         &serde_json::to_vec(&evaluation_protocol["protocol"])
             .expect("stable equipment-fused evaluation protocol"),
@@ -1779,7 +2146,7 @@ fn governed_real_replays_cover_every_current_action_view() {
     );
     assert_eq!(
         evaluation_rules["modelConfiguration"]["assessmentCatalogId"],
-        current_motion_assessment_catalog_v9().catalog_id
+        current_motion_assessment_catalog_v11().catalog_id
     );
     assert_eq!(
         evaluation_rules["matchingPolicy"]["minimumIntervalIoU"],
@@ -2077,7 +2444,10 @@ fn governed_real_replays_cover_every_current_action_view() {
     let mut trace_complete_reports = 0_usize;
     let mut equipment_provider_requested_records = 0_usize;
     let mut equipment_provider_available_records = 0_usize;
+    let mut equipment_provider_duration_ms = 0_f64;
+    let mut equipment_provider_pose_input_frames = 0_usize;
     let mut equipment_provider_decoded_frames = 0_usize;
+    let mut equipment_provider_visual_processed_frames = 0_usize;
     let mut equipment_provider_tracker_output_frames = 0_usize;
     let mut equipment_provider_canonical_observation_frames = 0_usize;
     let mut equipment_provider_measured_frames = 0_usize;
@@ -2104,7 +2474,7 @@ fn governed_real_replays_cover_every_current_action_view() {
             .any(|value| value == capture_id)
         {
             let mut resolver = ExecutionAssessmentEngine::configure(
-                current_motion_assessment_catalog_v9(),
+                current_motion_assessment_catalog_v11(),
                 WorkoutAssessmentContext {
                     workout_session_id: format!("excluded-context-{ordinal}"),
                 },
@@ -2134,7 +2504,7 @@ fn governed_real_replays_cover_every_current_action_view() {
         }
         replayed_records += 1;
         let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
-            current_motion_assessment_catalog_v9(),
+            current_motion_assessment_catalog_v11(),
             WorkoutAssessmentContext {
                 workout_session_id: format!("governed-rigid-bar-{ordinal}"),
             },
@@ -2183,6 +2553,14 @@ fn governed_real_replays_cover_every_current_action_view() {
                 recognition_mode,
                 video_source.as_deref(),
             );
+        if recognition_mode.requires_visual_frame() {
+            equipment_provider_duration_ms += raw["source"]["durationMs"]
+                .as_f64()
+                .expect("equipment source duration");
+            equipment_provider_pose_input_frames += equipment_provider.pose_input_frame_count;
+            equipment_provider_visual_processed_frames +=
+                equipment_provider.visual_processed_frame_count;
+        }
         equipment_provider_decoded_frames += equipment_provider.decoded_frame_count;
         equipment_provider_tracker_output_frames += equipment_provider.tracker_output_frame_count;
         equipment_provider_canonical_observation_frames +=
@@ -2243,13 +2621,11 @@ fn governed_real_replays_cover_every_current_action_view() {
                     && track.judgeable_path
                     && track.source != EquipmentSource::Predicted
             });
-            let fusion_eligible = packet.equipment.tracks.iter().any(|track| {
-                track.kind == EquipmentKind::BarbellShaft
-                    && track.judgeable_path
-                    && track.source != EquipmentSource::Predicted
-                    && track.held_by == EquipmentHand::Both
-                    && track.observation_score * track.association_confidence >= 0.50
-            });
+            let fusion_eligible = packet
+                .equipment
+                .tracks
+                .iter()
+                .any(|track| rigid_bar_track_supports_turnaround(track));
             if let Some(frame) = equipment_provider
                 .frames
                 .iter_mut()
@@ -2664,8 +3040,13 @@ fn governed_real_replays_cover_every_current_action_view() {
             "runtime": "maxpower_motion_sdk::BarbellAxisVisualTracker",
             "requestedRecordCount": equipment_provider_requested_records,
             "availableRecordCount": equipment_provider_available_records,
+            "poseInputFrameCount": equipment_provider_pose_input_frames,
+            "poseInputRateHz": equipment_provider_pose_input_frames as f64 / (equipment_provider_duration_ms / 1_000.0),
             "decodedFrameCount": equipment_provider_decoded_frames,
+            "visualProcessedFrameCount": equipment_provider_visual_processed_frames,
+            "visualProcessingRateHz": equipment_provider_visual_processed_frames as f64 / (equipment_provider_duration_ms / 1_000.0),
             "trackerOutputFrameCount": equipment_provider_tracker_output_frames,
+            "trackerOutputRateHz": equipment_provider_tracker_output_frames as f64 / (equipment_provider_duration_ms / 1_000.0),
             "canonicalObservationFrameCount": equipment_provider_canonical_observation_frames,
             "measuredFrameCount": equipment_provider_measured_frames,
             "predictedFrameCount": equipment_provider_predicted_frames,
@@ -2722,7 +3103,7 @@ fn governed_real_replays_cover_every_current_action_view() {
         "structural metrics: packets={packet_count} local_states={local_states:?} pose_channel_frames={pose_channel_frames} equipment_channel_frames={equipment_channel_frames} fusion_states={fusion_states:?} dimension_states={dimension_states:?} reference_kinds={reference_kinds:?} trace_complete_reports={trace_complete_reports} typed_refusals=0"
     );
     let expected: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "fixtures/wrist_constrained_v9_expected_structural_result_v1.json"
+        "fixtures/multirate_v11_expected_structural_result_v1.json"
     ))
     .expect("frozen wrist-constrained v9 structural result");
     assert_eq!(replays.len() as u64, expected["resolvedRecordCount"]);
@@ -3010,6 +3391,85 @@ fn v9_rigid_bar_contracts_require_wrist_constrained_visual_equipment() {
 }
 
 #[test]
+fn v10_rigid_bar_contracts_pin_grip_validated_extent_and_one_eligibility_rule() {
+    let catalog = current_motion_assessment_catalog_v10();
+    for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
+        let bundle = catalog
+            .bundles
+            .iter()
+            .find(|bundle| {
+                bundle.exact_context.action_id == binding.action_id
+                    && bundle.exact_context.capture_view == binding.capture_view
+            })
+            .expect("v10 exact rigid-bar bundle");
+        let execution = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == bundle.lineage.execution_contract.id)
+            .expect("v10 ExecutionContract");
+        assert_eq!(
+            execution.content["axisExtentSemantics"],
+            "validated_grip_supported_axis_not_physical_bar_length"
+        );
+        let adapter = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == bundle.lineage.equipment_adapter.id)
+            .expect("v10 EquipmentAdapter");
+        assert_eq!(
+            adapter.content["turnaroundEligibility"],
+            "rigid_bar_track_supports_turnaround"
+        );
+    }
+    ExecutionAssessmentEngine::configure(
+        catalog,
+        WorkoutAssessmentContext {
+            workout_session_id: "v10-grip-validated-fusion".into(),
+        },
+    )
+    .expect("v10 catalog is executable");
+}
+
+#[test]
+fn v11_rigid_bar_contracts_process_video_at_camera_cadence_without_synthetic_pose() {
+    let catalog = current_motion_assessment_catalog_v11();
+    for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
+        let bundle = catalog
+            .bundles
+            .iter()
+            .find(|bundle| {
+                bundle.exact_context.action_id == binding.action_id
+                    && bundle.exact_context.capture_view == binding.capture_view
+            })
+            .expect("v11 exact rigid-bar bundle");
+        let adapter = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == bundle.lineage.equipment_adapter.id)
+            .expect("v11 EquipmentAdapter");
+        assert_eq!(
+            adapter.content["inputCadence"],
+            "every_timestamped_video_frame"
+        );
+        assert_eq!(
+            adapter.content["poseConstraintCadence"],
+            "latest_causal_pose_max_age_180ms"
+        );
+        assert_eq!(
+            adapter.content["intermediatePosePolicy"],
+            "equipment_only_no_synthetic_pose_observation"
+        );
+    }
+    ExecutionAssessmentEngine::configure(
+        catalog,
+        WorkoutAssessmentContext {
+            workout_session_id: "v11-multirate-rigid-bar".into(),
+        },
+    )
+    .expect("v11 catalog is executable");
+}
+
+#[test]
 fn every_current_rigid_bar_context_produces_rep_quality_and_a_causal_trace() {
     for (ordinal, (action_id, capture_position, capture_view)) in
         RIGID_BAR_CONTEXTS.iter().enumerate()
@@ -3112,4 +3572,245 @@ fn every_current_rigid_bar_context_produces_rep_quality_and_a_causal_trace() {
             "{action_id}/{capture_position} must preserve the complete causal route"
         );
     }
+}
+
+#[test]
+fn v12_report_executes_the_bound_motion_plan_instead_of_wrist_proxy_semantics() {
+    let binding = wrist_constrained_rigid_bar_assessment_profiles_v3()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "barbell_bench_press"
+                && binding.capture_view == AssessmentCaptureView::Front
+        })
+        .expect("v12 bench profile");
+    let source_capture_id = "fixture:v12-motion-plan-runtime";
+    let (packets, closure) = canonical_packets_for(&binding, source_capture_id);
+    let mut engine = ExecutionAssessmentEngine::configure(
+        current_motion_assessment_catalog_v12(),
+        WorkoutAssessmentContext {
+            workout_session_id: "v12-plan-runtime".into(),
+        },
+    )
+    .expect("v12 catalog");
+    let mut context = video_context("barbell_bench_press", "front");
+    context.source_capture_id = source_capture_id.into();
+    engine
+        .advance(AssessmentEvent::SetStarted(SetExecutionContext {
+            set_id: "v12-set".into(),
+            set_ordinal: 1,
+            video_context: context,
+            intent: SetIntent::Working,
+            planned_load: None,
+            performed_load: None,
+        }))
+        .expect("start set");
+    for packet in packets {
+        engine
+            .advance(AssessmentEvent::CanonicalPacketObserved(Box::new(packet)))
+            .expect("canonical packet");
+    }
+    engine
+        .advance(AssessmentEvent::CanonicalSetClosureObserved(Box::new(
+            closure,
+        )))
+        .expect("canonical closure");
+    let AssessmentEmission::SealedSetAssessment(report) = engine
+        .advance(AssessmentEvent::SetFinished)
+        .expect("sealed report")
+    else {
+        panic!("sealed report")
+    };
+    assert!(
+        report
+            .resolved_context
+            .observation_plan_hash
+            .as_ref()
+            .is_some_and(|hash| !hash.is_empty())
+    );
+    let assessment = report.rep_assessments.first().expect("sealed Rep");
+    let primary = assessment
+        .features
+        .iter()
+        .find(|feature| feature.feature_id == "motion_relation:task_primary")
+        .expect("plan-generated TaskPrimary fact");
+    assert!(
+        primary.value.is_some(),
+        "measured equipment drives the primary relation"
+    );
+    assert!(
+        primary
+            .provenance
+            .iter()
+            .any(|entry| entry.starts_with("action_observation_plan:"))
+    );
+    assert!(
+        assessment.features.iter().any(|feature| {
+            feature.feature_id == "motion_relation:torso_support_stability"
+                && feature.status == maxpower_motion_sdk::MotionFeatureStatus::CannotJudge
+        }),
+        "an unevaluated semantic relation is retained as typed cannot_judge, not invented as acceptable"
+    );
+    let task_rule = report
+        .trace
+        .nodes
+        .iter()
+        .find(|node| {
+            node.kind == TraceNodeKind::RuleConclusion && node.node_id.contains("task_completion")
+        })
+        .expect("task completion rule");
+    assert!(
+        task_rule
+            .input_node_ids
+            .iter()
+            .any(|node| node.contains("comparison:motion_relation:task_primary"))
+    );
+}
+
+#[test]
+fn an_external_action_asset_runs_the_real_set_lifecycle_without_a_rust_action_branch() {
+    let external_catalog = ActionMotionCatalog::from_json(include_str!(
+        "fixtures/asset_only_action_motion_catalog_v1.json"
+    ))
+    .expect("external action asset");
+    let external_definition = external_catalog.definitions[0].clone();
+    let plan = ActionMotionCompiler::new(OperatorRegistry::standard())
+        .compile(&external_definition, "front_right_45")
+        .expect("generic plan");
+    let mut catalog = current_motion_assessment_catalog_v12();
+    let template_bundle = catalog
+        .bundles
+        .iter()
+        .find(|bundle| bundle.bundle_id == "barbell_bench_press/front-oblique-right/v1")
+        .expect("rigid bar template")
+        .clone();
+    let template_definition = catalog
+        .action_definitions
+        .iter()
+        .find(|definition| definition.action_id == "barbell_bench_press")
+        .expect("action definition template")
+        .clone();
+    let mut bundle = template_bundle.clone();
+    bundle.bundle_id = "asset_only_floor_press/front-oblique-right/v1".into();
+    bundle.exact_context.action_id = "asset_only_floor_press".into();
+    let semantic_assets = [
+        (
+            AssessmentAssetKind::RecognitionProfile,
+            template_bundle.lineage.recognition_profile,
+        ),
+        (
+            AssessmentAssetKind::ExecutionContract,
+            template_bundle.lineage.execution_contract,
+        ),
+        (
+            AssessmentAssetKind::FeatureProgram,
+            template_bundle.lineage.feature_program,
+        ),
+        (
+            AssessmentAssetKind::RulePack,
+            template_bundle.lineage.rule_pack,
+        ),
+    ];
+    for (kind, old_reference) in semantic_assets {
+        let mut asset = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == old_reference.id && asset.kind == kind)
+            .expect("template semantic asset")
+            .clone();
+        asset.id = format!("{}/asset-only", asset.id);
+        asset = asset.with_computed_hash();
+        let reference = asset.reference();
+        match kind {
+            AssessmentAssetKind::RecognitionProfile => {
+                bundle.lineage.recognition_profile = reference
+            }
+            AssessmentAssetKind::ExecutionContract => bundle.lineage.execution_contract = reference,
+            AssessmentAssetKind::FeatureProgram => bundle.lineage.feature_program = reference,
+            AssessmentAssetKind::RulePack => bundle.lineage.rule_pack = reference,
+            _ => unreachable!(),
+        }
+        catalog.installed_assets.push(asset);
+    }
+    bundle = bundle.with_computed_hash();
+    catalog.bundles.push(bundle);
+    let mut action_definition = template_definition;
+    action_definition.action_definition_id = "asset-only/floor-press/action-definition/v1".into();
+    action_definition.action_id = "asset_only_floor_press".into();
+    action_definition.supported_views = vec![ActionViewBinding {
+        capture_view: AssessmentCaptureView::FrontObliqueRight,
+        bundle_id: "asset_only_floor_press/front-oblique-right/v1".into(),
+    }];
+    action_definition = action_definition.with_computed_hash();
+    catalog.action_definitions.push(action_definition);
+    catalog
+        .action_motion_catalog
+        .as_mut()
+        .expect("v12 motion catalog")
+        .definitions
+        .push(external_definition);
+    catalog
+        .action_motion_bindings
+        .push(ActionMotionBundleBinding {
+            bundle_id: "asset_only_floor_press/front-oblique-right/v1".into(),
+            leaf_action_id: "asset_only_floor_press".into(),
+        });
+    install_compiled_action_motion_semantics(
+        &mut catalog,
+        "asset_only_floor_press/front-oblique-right/v1",
+        &plan,
+    );
+
+    let profile = wrist_constrained_rigid_bar_assessment_profiles_v3()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "barbell_bench_press"
+                && binding.capture_view == AssessmentCaptureView::FrontObliqueRight
+        })
+        .expect("provider profile");
+    let source_capture_id = "fixture:external-asset-lifecycle";
+    let (packets, closure) = canonical_packets_for(&profile, source_capture_id);
+    let mut engine = ExecutionAssessmentEngine::configure(
+        catalog,
+        WorkoutAssessmentContext {
+            workout_session_id: "external-asset-lifecycle".into(),
+        },
+    )
+    .expect("external asset configures without a Rust action-name branch");
+    let mut context = video_context("asset_only_floor_press", "frontRight45");
+    context.source_capture_id = source_capture_id.into();
+    engine
+        .advance(AssessmentEvent::SetStarted(SetExecutionContext {
+            set_id: "external-set".into(),
+            set_ordinal: 1,
+            video_context: context,
+            intent: SetIntent::Working,
+            planned_load: None,
+            performed_load: None,
+        }))
+        .expect("start external set");
+    for packet in packets {
+        engine
+            .advance(AssessmentEvent::CanonicalPacketObserved(Box::new(packet)))
+            .expect("canonical packet");
+    }
+    engine
+        .advance(AssessmentEvent::CanonicalSetClosureObserved(Box::new(
+            closure,
+        )))
+        .expect("closure");
+    let AssessmentEmission::SealedSetAssessment(report) = engine
+        .advance(AssessmentEvent::SetFinished)
+        .expect("sealed external report")
+    else {
+        panic!("sealed report")
+    };
+    assert_eq!(report.resolved_context.action_id, "asset_only_floor_press");
+    assert!(!report.reps.is_empty());
+    assert!(
+        report.rep_assessments[0]
+            .features
+            .iter()
+            .any(|feature| feature.feature_id == "motion_relation:load_press")
+    );
+    assert!(!report.trace.conclusion_root_ids.is_empty());
 }

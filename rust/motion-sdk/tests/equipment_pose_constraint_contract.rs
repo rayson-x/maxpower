@@ -85,6 +85,7 @@ fn bar(center_y: f32) -> EquipmentObservation {
 }
 
 fn run(frames: Vec<FrameObservations>) -> Vec<maxpower_motion_sdk::MotionPacket> {
+    let frame_count = frames.len();
     let inference = ObservationSequence {
         frames: frames.into(),
     };
@@ -108,7 +109,7 @@ fn run(frames: Vec<FrameObservations>) -> Vec<maxpower_motion_sdk::MotionPacket>
         .install_exercise_profile(front_bench_equipment_profile())
         .unwrap();
     let releases = Arc::new(AtomicUsize::new(0));
-    for frame_id in 0..3 {
+    for frame_id in 0..frame_count as u64 {
         session
             .offer(FrameLease::fixture(
                 frame_id,
@@ -128,6 +129,14 @@ fn reliable_bar_path_constrains_only_an_unreliable_wrist_after_a_pose_baseline()
             equipment: vec![bar(0.45)],
         },
         FrameObservations {
+            pose_candidates: vec![pose(0.48, 0.48, 0.95)],
+            equipment: vec![bar(0.48)],
+        },
+        FrameObservations {
+            pose_candidates: vec![pose(0.52, 0.52, 0.95)],
+            equipment: vec![bar(0.52)],
+        },
+        FrameObservations {
             pose_candidates: vec![pose(0.88, 0.86, 0.10)],
             equipment: vec![bar(0.56)],
         },
@@ -138,7 +147,7 @@ fn reliable_bar_path_constrains_only_an_unreliable_wrist_after_a_pose_baseline()
     ]);
 
     for wrist in [9_usize, 10] {
-        let constrained = &packets[1].canonical[wrist];
+        let constrained = &packets[3].canonical[wrist];
         assert_eq!(
             constrained.source,
             LandmarkSource::Predicted,
@@ -150,7 +159,7 @@ fn reliable_bar_path_constrains_only_an_unreliable_wrist_after_a_pose_baseline()
         );
         assert!((constrained.y.unwrap() - 0.56).abs() < 0.015);
 
-        let reliable_measurement = &packets[2].canonical[wrist];
+        let reliable_measurement = &packets[4].canonical[wrist];
         assert_eq!(reliable_measurement.source, LandmarkSource::Measured);
         assert_eq!(reliable_measurement.reason, None);
         assert!((reliable_measurement.y.unwrap() - 0.70).abs() < 0.001);

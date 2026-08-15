@@ -1,6 +1,6 @@
 use maxpower_motion_sdk::{
-    BarbellAxisSource, BarbellAxisVisualTracker, EquipmentSource, NormalizedRect, PoseCandidate,
-    PoseObservation, PoseSchemaId, VisualEquipmentError,
+    BarbellAxisSource, BarbellAxisVisualTracker, NormalizedRect, PoseCandidate, PoseObservation,
+    PoseSchemaId, VisualEquipmentError,
 };
 
 const WIDTH: usize = 640;
@@ -40,15 +40,7 @@ fn shared_rust_tracker_measures_a_long_shaft_and_bounds_prediction() {
     let predicted = process_halpe26(&mut tracker, &blank_frame(), 1_100, &[subject])
         .expect("one missing frame should retain private continuity");
     assert_eq!(predicted.source, BarbellAxisSource::Predicted);
-    let predicted_equipment = predicted
-        .equipment_observation()
-        .expect("predicted shaft geometry must survive into canonical provenance");
-    assert_eq!(predicted_equipment.source, EquipmentSource::Predicted);
-    assert_eq!(predicted_equipment.axis.unwrap().x1, predicted.x1);
-    assert_eq!(predicted_equipment.axis.unwrap().y1, predicted.y1);
-    assert_eq!(predicted_equipment.axis.unwrap().x2, predicted.x2);
-    assert_eq!(predicted_equipment.axis.unwrap().y2, predicted.y2);
-    assert_eq!(predicted_equipment.score, predicted.confidence);
+    assert!(predicted.equipment_observation().is_none());
 }
 
 #[test]
@@ -68,20 +60,26 @@ fn shared_rust_tracker_does_not_choose_the_first_person_in_a_mirror_scene() {
 }
 
 #[test]
-fn shared_rust_tracker_prefers_the_shaft_through_the_wrists_over_a_static_rack_line() {
+fn raw_detector_preserves_both_shaft_candidates_before_hand_association() {
     let mut tracker = BarbellAxisVisualTracker::default();
     let subject = subject_with_wrists(1, 0.34, 0.52);
-    let measured = process_halpe26(
+    let evidence = process_frame_halpe26(
         &mut tracker,
         &frame_with_two_shafts(0.29, 0.52),
         1_000,
         &[subject],
-    )
-    .expect("the hand-associated shaft should be measured");
-    assert_eq!(measured.source, BarbellAxisSource::Measured);
+    );
     assert!(
-        (measured.center_y - 0.52).abs() < 0.03,
-        "static rack line won over the hand-associated shaft: {measured:?}"
+        evidence
+            .raw_observations
+            .iter()
+            .any(|candidate| (candidate.bbox.y + candidate.bbox.height * 0.5 - 0.29).abs() < 0.03)
+    );
+    assert!(
+        evidence
+            .raw_observations
+            .iter()
+            .any(|candidate| (candidate.bbox.y + candidate.bbox.height * 0.5 - 0.52).abs() < 0.03)
     );
 }
 
@@ -92,17 +90,17 @@ fn shared_rust_tracker_searches_below_the_shoulders_for_a_row_held_at_the_wrists
     // while both hands and the real shaft are near 0.61. The former
     // shoulder-only search ended at 0.50 and could only see the rack line.
     let subject = subject_with_wrists(1, 0.30, 0.61);
-    let measured = process_halpe26(
+    let evidence = process_frame_halpe26(
         &mut tracker,
         &frame_with_two_shafts(0.466, 0.61),
         1_000,
         &[subject],
-    )
-    .expect("the wrist-guided row shaft should be measured");
-    assert_eq!(measured.source, BarbellAxisSource::Measured);
+    );
     assert!(
-        (measured.center_y - 0.61).abs() < 0.03,
-        "the background line won because the true row shaft was outside the search: {measured:?}"
+        evidence
+            .raw_observations
+            .iter()
+            .any(|candidate| (candidate.bbox.y + candidate.bbox.height * 0.5 - 0.61).abs() < 0.03)
     );
 }
 
@@ -118,16 +116,17 @@ fn shared_rust_tracker_reacquires_the_hand_associated_shaft_after_a_static_lock(
     )
     .expect("ready shaft should initialize the tracker");
     let effort = subject_with_wrists(1, 0.34, 0.52);
-    let measured = process_halpe26(
+    let evidence = process_frame_halpe26(
         &mut tracker,
         &frame_with_two_shafts(0.29, 0.52),
         1_100,
         &[effort],
-    )
-    .expect("moving shaft should remain measurable");
+    );
     assert!(
-        measured.center_y > 0.43,
-        "continuity kept the static rack line instead of reacquiring: {measured:?}"
+        evidence
+            .raw_observations
+            .iter()
+            .any(|candidate| (candidate.bbox.y + candidate.bbox.height * 0.5 - 0.52).abs() < 0.03)
     );
 }
 
@@ -142,7 +141,7 @@ fn shared_rust_tracker_never_invents_a_shaft_from_uncalibrated_wrists() {
 }
 
 #[test]
-fn shared_rust_tracker_fuses_wrists_only_after_visual_full_range_calibration() {
+fn visual_loss_uses_prediction_not_a_wrist_generated_bar() {
     let mut tracker = BarbellAxisVisualTracker::default();
     let ready = subject_with_wrists(1, 0.34, 0.38);
     process_halpe26(
@@ -159,9 +158,8 @@ fn shared_rust_tracker_fuses_wrists_only_after_visual_full_range_calibration() {
         .expect("peak shaft should establish calibration range");
     let occluded_return = subject_with_wrists(1, 0.34, 0.48);
     let fused = process_halpe26(&mut tracker, &blank_frame(), 1_300, &[occluded_return])
-        .expect("calibrated wrists should bridge visual shaft occlusion");
-    assert_eq!(fused.source, BarbellAxisSource::Fused);
-    assert!((fused.center_y - 0.44).abs() < 0.04, "{fused:?}");
+        .expect("bounded visual prediction may bridge display continuity");
+    assert_eq!(fused.source, BarbellAxisSource::Predicted);
     assert!(
         fused.equipment_observation().is_none(),
         "pose-derived fusion may bridge display continuity but is not an independent equipment observation"
@@ -169,7 +167,7 @@ fn shared_rust_tracker_fuses_wrists_only_after_visual_full_range_calibration() {
 }
 
 #[test]
-fn shared_rust_tracker_rejects_a_static_rack_line_after_wrist_calibration() {
+fn wrist_motion_does_not_turn_a_static_rack_line_into_a_pose_generated_bar() {
     let mut tracker = BarbellAxisVisualTracker::default();
     let ready = subject_with_wrists(1, 0.34, 0.38);
     process_halpe26(
@@ -193,8 +191,108 @@ fn shared_rust_tracker_rejects_a_static_rack_line_after_wrist_calibration() {
         &[moving_wrists],
     )
     .expect("calibrated wrist path should survive a visible static rack line");
-    assert_eq!(fused.source, BarbellAxisSource::Fused, "{fused:?}");
-    assert!(fused.center_y > 0.40, "{fused:?}");
+    assert_eq!(fused.source, BarbellAxisSource::Measured, "{fused:?}");
+    assert!(fused.center_y < 0.40, "{fused:?}");
+}
+
+#[test]
+fn raw_detector_publishes_only_the_visible_image_segment_not_a_wrist_length() {
+    let mut tracker = BarbellAxisVisualTracker::default();
+    let left_x = 0.44;
+    let right_x = 0.57;
+    let subject = subject_with_wrist_points(1, 0.30, left_x, 0.42, right_x, 0.42);
+    let measured = process_halpe26(&mut tracker, &frame_with_shaft(0.42), 1_000, &[subject])
+        .expect("the hand-associated shaft should be measured");
+
+    let published_span = measured.x2 - measured.x1;
+    assert!(
+        published_span > 0.60,
+        "the visible segment was cropped to the grip: {measured:?}"
+    );
+    assert!(
+        measured.x1 <= left_x && measured.x2 >= right_x,
+        "{measured:?}"
+    );
+}
+
+#[test]
+fn raw_detector_keeps_a_line_that_misses_a_wrist_for_later_association() {
+    let mut tracker = BarbellAxisVisualTracker::default();
+    let subject = subject_with_wrist_points(1, 0.30, 0.40, 0.42, 0.60, 0.50);
+
+    let measured = process_halpe26(&mut tracker, &frame_with_shaft(0.42), 1_000, &[subject])
+        .expect("image geometry is independent of hand association");
+    assert_eq!(measured.source, BarbellAxisSource::Measured);
+}
+
+#[test]
+fn close_grip_visual_occlusion_remains_prediction_only() {
+    let mut tracker = BarbellAxisVisualTracker::default();
+    let ready = subject_with_wrist_points(1, 0.30, 0.44, 0.38, 0.57, 0.38);
+    process_halpe26(
+        &mut tracker,
+        &frame_with_shaft(0.38),
+        1_000,
+        &[ready.clone()],
+    )
+    .expect("ready shaft should calibrate");
+    process_halpe26(&mut tracker, &frame_with_shaft(0.38), 1_100, &[ready])
+        .expect("ready shaft should remain measured");
+    let peak = subject_with_wrist_points(1, 0.30, 0.44, 0.56, 0.57, 0.56);
+    process_halpe26(&mut tracker, &frame_with_shaft(0.56), 1_200, &[peak])
+        .expect("peak shaft should establish the visible range");
+
+    let return_pose = subject_with_wrist_points(1, 0.30, 0.44, 0.48, 0.57, 0.48);
+    let bridged = process_halpe26(&mut tracker, &blank_frame(), 1_300, &[return_pose])
+        .expect("close-grip wrists should bridge a short visual occlusion");
+    assert_eq!(bridged.source, BarbellAxisSource::Predicted, "{bridged:?}");
+}
+
+#[test]
+fn raw_visual_geometry_is_invariant_when_only_wrists_move() {
+    let frame = frame_with_shaft(0.42);
+    let mut first_tracker = BarbellAxisVisualTracker::default();
+    let first = process_halpe26(
+        &mut first_tracker,
+        &frame,
+        1_000,
+        &[subject_with_wrist_points(1, 0.30, 0.20, 0.24, 0.80, 0.24)],
+    )
+    .expect("the image contains a shaft");
+
+    let mut second_tracker = BarbellAxisVisualTracker::default();
+    let second = process_halpe26(
+        &mut second_tracker,
+        &frame,
+        1_000,
+        &[subject_with_wrist_points(1, 0.30, 0.43, 0.62, 0.57, 0.62)],
+    )
+    .expect("the same image contains the same shaft");
+
+    assert_eq!(first.source, BarbellAxisSource::Measured);
+    assert_eq!(second.source, BarbellAxisSource::Measured);
+    assert_eq!(
+        (first.x1, first.y1, first.x2, first.y2),
+        (second.x1, second.y1, second.x2, second.y2)
+    );
+}
+
+#[test]
+fn wrists_never_generate_canonical_equipment_when_the_shaft_disappears() {
+    let mut tracker = BarbellAxisVisualTracker::default();
+    let subject = subject_with_wrists(1, 0.30, 0.42);
+    process_halpe26(
+        &mut tracker,
+        &frame_with_shaft(0.42),
+        1_000,
+        &[subject.clone()],
+    )
+    .expect("visual measurement establishes a track");
+
+    let continuity = process_halpe26(&mut tracker, &blank_frame(), 1_100, &[subject])
+        .expect("short visual loss may retain bounded display continuity");
+    assert_eq!(continuity.source, BarbellAxisSource::Predicted);
+    assert_ne!(continuity.source, BarbellAxisSource::Fused);
 }
 
 fn blank_frame() -> Vec<u8> {
@@ -217,6 +315,24 @@ fn process_halpe26(
             subjects,
         )
         .expect("Halpe-26 must be accepted by the visual equipment tracker")
+}
+
+fn process_frame_halpe26(
+    tracker: &mut BarbellAxisVisualTracker,
+    luma: &[u8],
+    timestamp_ms: u64,
+    subjects: &[PoseCandidate],
+) -> maxpower_motion_sdk::BarbellAxisFrameEvidence {
+    tracker
+        .process_frame(
+            PoseSchemaId::Halpe26,
+            luma,
+            WIDTH,
+            HEIGHT,
+            timestamp_ms,
+            subjects,
+        )
+        .expect("Halpe-26 must be accepted")
 }
 
 fn frame_with_shaft(normalized_y: f32) -> Vec<u8> {
@@ -246,11 +362,22 @@ fn subject(id: u64, shoulder_y: f32) -> PoseCandidate {
 }
 
 fn subject_with_wrists(id: u64, shoulder_y: f32, wrist_y: f32) -> PoseCandidate {
+    subject_with_wrist_points(id, shoulder_y, 0.25, wrist_y, 0.75, wrist_y)
+}
+
+fn subject_with_wrist_points(
+    id: u64,
+    shoulder_y: f32,
+    left_x: f32,
+    left_y: f32,
+    right_x: f32,
+    right_y: f32,
+) -> PoseCandidate {
     let mut observations = vec![PoseObservation::new(0.5, shoulder_y, 0.0, 0.0); 26];
     observations[5] = PoseObservation::new(0.40, shoulder_y, 0.0, 0.9);
     observations[6] = PoseObservation::new(0.60, shoulder_y, 0.0, 0.9);
-    observations[9] = PoseObservation::new(0.25, wrist_y, 0.0, 0.8);
-    observations[10] = PoseObservation::new(0.75, wrist_y, 0.0, 0.8);
+    observations[9] = PoseObservation::new(left_x, left_y, 0.0, 0.8);
+    observations[10] = PoseObservation::new(right_x, right_y, 0.0, 0.8);
     PoseCandidate {
         id,
         bbox: NormalizedRect::new(0.2, 0.15, 0.6, 0.82),

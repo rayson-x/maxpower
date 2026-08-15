@@ -6,9 +6,9 @@
 use std::collections::VecDeque;
 
 use crate::{
-    EquipmentFrameEvidence, EquipmentKind, EquipmentObservation, EquipmentSource,
-    LocalMotionCoordinateEvidence, MovementDirection, NormalizedRepEndpointEvidence,
-    RepDisposition, RepPhase, SignalMeasurement,
+    EquipmentFrameEvidence, EquipmentKind, EquipmentSource, LocalMotionCoordinateEvidence,
+    MovementDirection, NormalizedRepEndpointEvidence, RepDisposition, RepPhase, SignalMeasurement,
+    rigid_bar_track_supports_turnaround,
 };
 
 const ENTER_DELTA: f32 = 32.0 / 640.0;
@@ -55,7 +55,6 @@ const SIGNATURE_MIN_DURATION_RATIO: f32 = 0.55;
 // switch. It may never start a rep, and its step must remain continuous with
 // the already calibrated shaft path. Public equipment remains cannot-judge;
 // these samples count as association coverage loss.
-const MAXIMUM_ACTIVE_UNASSOCIATED_STEP: f32 = 0.06;
 
 #[derive(Clone, Copy, Debug)]
 struct BarbellPhaseThresholds {
@@ -337,7 +336,12 @@ impl BarbellBenchPhaseEngine {
         profile_signal: Option<SignalMeasurement>,
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
     ) {
-        let Some((position, confidence)) = self.selected_position(equipment, profile_signal) else {
+        let selected = if self.use_local_coordinate {
+            self.selected_position(equipment, profile_signal)
+        } else {
+            selected_bar_position_for_priming(equipment)
+        };
+        let Some((position, confidence)) = selected else {
             return;
         };
         let sample = BarbellFrameSample {
@@ -362,7 +366,6 @@ impl BarbellBenchPhaseEngine {
         frame_id: u64,
         timestamp_ms: u64,
         equipment: &EquipmentFrameEvidence,
-        raw_equipment: &[EquipmentObservation],
         pose_signal: Option<f32>,
         pose_direction: MovementDirection,
         profile_signal: Option<SignalMeasurement>,
@@ -370,24 +373,13 @@ impl BarbellBenchPhaseEngine {
     ) -> Vec<BarbellRepCandidate> {
         let mut emitted = Vec::new();
         let associated = self.selected_position(equipment, profile_signal);
-        let active_fallback = (!self.use_local_coordinate)
-            .then(|| {
-                self.active.as_ref().and_then(|active| {
-                    selected_active_unassociated_bar_position(
-                        raw_equipment,
-                        active.previous_position,
-                    )
-                })
-            })
-            .flatten();
-        let selected = associated.or(active_fallback);
         if let Some(active) = self.active.as_mut() {
             active.total_samples = active.total_samples.saturating_add(1);
             if associated.is_none() {
                 active.missed_samples = active.missed_samples.saturating_add(1);
             }
         }
-        let Some((position, confidence)) = selected else {
+        let Some((position, confidence)) = associated else {
             return emitted;
         };
         let sample = BarbellFrameSample {
@@ -694,6 +686,11 @@ impl BarbellBenchPhaseEngine {
         if !self.use_local_coordinate {
             return selected_bar_position(equipment);
         }
+        equipment
+            .tracks
+            .iter()
+            .any(rigid_bar_track_supports_turnaround)
+            .then_some(())?;
         let measurement = profile_signal?;
         let mut position = measurement.value;
         if self.local_direction == MovementDirection::Decreasing {
@@ -916,7 +913,7 @@ fn selected_bar_position(equipment: &EquipmentFrameEvidence) -> Option<(f32, f32
     equipment
         .tracks
         .iter()
-        .filter(|track| track.kind == EquipmentKind::BarbellShaft && track.judgeable_path)
+        .filter(|track| rigid_bar_track_supports_turnaround(track))
         .max_by(|left, right| {
             (left.observation_score * left.association_confidence)
                 .total_cmp(&(right.observation_score * right.association_confidence))
@@ -924,42 +921,25 @@ fn selected_bar_position(equipment: &EquipmentFrameEvidence) -> Option<(f32, f32
         .map(|track| (track.center_y, track.observation_score))
 }
 
-fn selected_active_unassociated_bar_position(
-    equipment: &[EquipmentObservation],
-    previous_position: f32,
-) -> Option<(f32, f32)> {
+fn selected_bar_position_for_priming(equipment: &EquipmentFrameEvidence) -> Option<(f32, f32)> {
     equipment
+        .tracks
         .iter()
-        .copied()
-        .filter(|observation| {
-            observation.kind == EquipmentKind::BarbellShaft
-                && observation.source != EquipmentSource::Predicted
-                && !observation.attributes.is_reflection_candidate
-                && !observation.attributes.is_static_rack_candidate
-                && observation.score.is_finite()
-                && observation.score >= 0.50
-                && observation.bbox.x.is_finite()
-                && observation.bbox.y.is_finite()
-                && observation.bbox.width.is_finite()
-                && observation.bbox.height.is_finite()
-                && observation.bbox.width > 0.0
-                && observation.bbox.height > 0.0
-        })
-        .filter_map(|observation| {
-            let (_, center_y) = observation.bbox.center();
-            let step = (center_y - previous_position).abs();
-            (center_y.is_finite() && step <= MAXIMUM_ACTIVE_UNASSOCIATED_STEP).then_some((
-                center_y,
-                observation.score,
-                step,
-            ))
+        .filter(|track| {
+            track.kind == EquipmentKind::BarbellShaft
+                && track.source != EquipmentSource::Predicted
+                && track.held_by == crate::EquipmentHand::Both
+                && matches!(
+                    track.association_stage,
+                    crate::EquipmentAssociationStage::ContactCandidate
+                        | crate::EquipmentAssociationStage::GripEstablished
+                )
         })
         .max_by(|left, right| {
-            left.1
-                .total_cmp(&right.1)
-                .then_with(|| right.2.total_cmp(&left.2))
+            (left.observation_score * left.association_confidence)
+                .total_cmp(&(right.observation_score * right.association_confidence))
         })
-        .map(|(position, confidence, _)| (position, confidence))
+        .map(|track| (track.center_y, track.observation_score))
 }
 
 fn update_pose_extreme(

@@ -1,10 +1,11 @@
 use maxpower_motion_sdk::{
     AdapterCapabilities, CanonicalLandmark, ContinuityMode, ContinuityReason, ContractVersion,
-    DiagnosticLevel, EquipmentAttributes, EquipmentCannotJudgeReason, EquipmentFrameInput,
-    EquipmentFrameStatus, EquipmentFusionEngine, EquipmentHand, EquipmentKind,
+    DiagnosticLevel, EquipmentAssociationStage, EquipmentAttributes, EquipmentCannotJudgeReason,
+    EquipmentFrameInput, EquipmentFrameStatus, EquipmentFusionEngine, EquipmentHand, EquipmentKind,
     EquipmentObservation, EquipmentSource, FrameLease, FrameObservations, InferenceAdapter,
     InferenceResult, LandmarkSource, MotionError, MotionSession, NormalizedRect, PoseCandidate,
     PoseObservation, RecordingOutputAdapter, SessionConfig, SubjectPolicy, encode_motion_packet,
+    rigid_bar_track_supports_turnaround,
 };
 use std::sync::{Arc, atomic::AtomicUsize};
 
@@ -15,6 +16,171 @@ fn subject() -> PoseCandidate {
         observations: vec![PoseObservation::new(0.5, 0.5, 0.0, 0.0); 26],
         torso_color: [0.2, 0.3, 0.4],
     }
+}
+
+#[test]
+fn a_single_pre_contact_wrist_alignment_never_becomes_rep_evidence() {
+    let subject = subject();
+    let mut canonical = unknown_canonical();
+    for (index, x) in [(9, 0.40), (10, 0.60)] {
+        canonical[index] = CanonicalLandmark {
+            x: Some(x),
+            y: Some(0.50),
+            z: None,
+            observation_score: 0.9,
+            canonical_confidence: 0.9,
+            uncertainty: Some(0.01),
+            source: LandmarkSource::Measured,
+            renderable: true,
+            reason: None,
+        };
+    }
+    let mut shaft = observation(
+        900,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.25, 0.495, 0.50, 0.01),
+    );
+    shaft.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+        x1: 0.25,
+        y1: 0.50,
+        x2: 0.75,
+        y2: 0.50,
+    });
+    shaft.source = EquipmentSource::Geometry;
+
+    let output = EquipmentFusionEngine::new().process(EquipmentFrameInput {
+        timestamp_ms: 5_400,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[shaft],
+    });
+    let track = output.tracks.first().expect("raw bar remains observable");
+    assert_eq!(
+        track.association_stage,
+        EquipmentAssociationStage::ContactCandidate
+    );
+    assert!(!track.judgeable_path);
+    assert!(!rigid_bar_track_supports_turnaround(track));
+}
+
+#[test]
+fn grip_requires_temporal_proximity_and_common_motion() {
+    let subject = subject();
+    let mut engine = EquipmentFusionEngine::new();
+    let mut last = None;
+    for (step, y) in [0.50, 0.50, 0.53, 0.56].into_iter().enumerate() {
+        let mut canonical = unknown_canonical();
+        for (index, x) in [(9, 0.40), (10, 0.60)] {
+            canonical[index] = CanonicalLandmark {
+                x: Some(x),
+                y: Some(y),
+                z: None,
+                observation_score: 0.9,
+                canonical_confidence: 0.9,
+                uncertainty: Some(0.01),
+                source: LandmarkSource::Measured,
+                renderable: true,
+                reason: None,
+            };
+        }
+        let mut shaft = observation(
+            910 + step as u64,
+            EquipmentKind::BarbellShaft,
+            NormalizedRect::new(0.25, y - 0.005, 0.50, 0.01),
+        );
+        shaft.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+            x1: 0.25,
+            y1: y,
+            x2: 0.75,
+            y2: y,
+        });
+        shaft.source = EquipmentSource::Geometry;
+        last = Some(engine.process(EquipmentFrameInput {
+            timestamp_ms: 1_000 + step as u64 * 34,
+            selected_subject: Some(&subject),
+            canonical: &canonical,
+            equipment: &[shaft],
+        }));
+    }
+    let track = last.unwrap().tracks[0];
+    assert_eq!(
+        track.association_stage,
+        EquipmentAssociationStage::GripEstablished
+    );
+    assert!(rigid_bar_track_supports_turnaround(&track));
+}
+
+#[test]
+fn established_grip_becomes_conflict_when_hands_and_bar_move_against_each_other() {
+    let subject = subject();
+    let mut engine = EquipmentFusionEngine::new();
+    for (step, y) in [0.50, 0.50, 0.53, 0.56].into_iter().enumerate() {
+        let canonical = bar_contact_pose(y);
+        let shaft = bar_axis_observation(920 + step as u64, y);
+        let output = engine.process(EquipmentFrameInput {
+            timestamp_ms: 2_000 + step as u64 * 34,
+            selected_subject: Some(&subject),
+            canonical: &canonical,
+            equipment: &[shaft],
+        });
+        if step == 3 {
+            assert_eq!(
+                output.tracks[0].association_stage,
+                EquipmentAssociationStage::GripEstablished
+            );
+        }
+    }
+
+    // The shaft keeps moving down while both hands move back up. Proximity
+    // alone still passes, so only causal common-motion validation can refuse it.
+    let canonical = bar_contact_pose(0.50);
+    let shaft = bar_axis_observation(925, 0.59);
+    let output = engine.process(EquipmentFrameInput {
+        timestamp_ms: 2_136,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[shaft],
+    });
+    assert_eq!(
+        output.tracks[0].association_stage,
+        EquipmentAssociationStage::Conflict
+    );
+    assert!(!output.tracks[0].judgeable_path);
+    assert!(!rigid_bar_track_supports_turnaround(&output.tracks[0]));
+}
+
+fn bar_contact_pose(y: f32) -> Vec<CanonicalLandmark> {
+    let mut canonical = unknown_canonical();
+    for (index, x) in [(9, 0.40), (10, 0.60)] {
+        canonical[index] = CanonicalLandmark {
+            x: Some(x),
+            y: Some(y),
+            z: None,
+            observation_score: 0.9,
+            canonical_confidence: 0.9,
+            uncertainty: Some(0.01),
+            source: LandmarkSource::Measured,
+            renderable: true,
+            reason: None,
+        };
+    }
+    canonical
+}
+
+fn bar_axis_observation(proposal_id: u64, y: f32) -> EquipmentObservation {
+    let mut shaft = observation(
+        proposal_id,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.25, y - 0.005, 0.50, 0.01),
+    );
+    shaft.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+        x1: 0.25,
+        y1: y,
+        x2: 0.75,
+        y2: y,
+    });
+    shaft.source = EquipmentSource::Geometry;
+    shaft
 }
 
 fn unknown_canonical() -> Vec<CanonicalLandmark> {
@@ -99,14 +265,18 @@ fn bar_path_remains_observable_when_wrists_are_unknown_without_fabricating_pose(
 
     assert_eq!(output.status, EquipmentFrameStatus::Observed);
     assert_eq!(output.tracks.len(), 1);
-    assert!(output.tracks[0].judgeable_path);
+    assert!(!output.tracks[0].judgeable_path);
+    assert_eq!(
+        output.tracks[0].association_stage,
+        EquipmentAssociationStage::Unassociated
+    );
     assert_eq!(output.tracks[0].held_by, EquipmentHand::Unknown);
     assert_eq!(canonical, canonical_before);
     assert!(canonical.iter().all(|landmark| landmark.x.is_none()));
 }
 
 #[test]
-fn rigid_bar_axis_far_from_two_reliable_wrists_is_not_subject_equipment() {
+fn rigid_bar_axis_far_from_two_reliable_wrists_remains_raw_but_unassociated() {
     let subject = PoseCandidate {
         id: 41,
         // A wider person box keeps the background line spatially inside, so
@@ -150,12 +320,59 @@ fn rigid_bar_axis_far_from_two_reliable_wrists_is_not_subject_equipment() {
         equipment: &[background_line],
     });
 
+    assert_eq!(output.status, EquipmentFrameStatus::Observed);
+    assert_eq!(output.tracks.len(), 1);
     assert_eq!(
-        output.status,
-        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::OutsideLockedSubject)
+        output.tracks[0].association_stage,
+        EquipmentAssociationStage::Unassociated
     );
-    assert!(output.tracks.is_empty());
-    assert_eq!(output.rejected_outside_subject_count, 1);
+    assert!(!output.tracks[0].judgeable_path);
+    assert!(!rigid_bar_track_supports_turnaround(&output.tracks[0]));
+}
+
+#[test]
+fn rigid_bar_turnaround_requires_established_grip_beyond_provider_acceptance() {
+    let subject = subject();
+    let mut canonical = unknown_canonical();
+    for (index, x) in [(9, 0.40), (10, 0.60)] {
+        canonical[index] = CanonicalLandmark {
+            x: Some(x),
+            y: Some(0.50),
+            z: None,
+            observation_score: 0.8,
+            canonical_confidence: 0.8,
+            uncertainty: Some(0.01),
+            source: LandmarkSource::Measured,
+            renderable: true,
+            reason: None,
+        };
+    }
+    let mut shaft = observation(
+        314,
+        EquipmentKind::BarbellShaft,
+        NormalizedRect::new(0.32, 0.495, 0.36, 0.01),
+    );
+    shaft.axis = Some(maxpower_motion_sdk::EquipmentAxis2d {
+        x1: 0.32,
+        y1: 0.50,
+        x2: 0.68,
+        y2: 0.50,
+    });
+    shaft.score = 0.51;
+    let mut engine = EquipmentFusionEngine::new();
+    let output = engine.process(EquipmentFrameInput {
+        timestamp_ms: 10_520,
+        selected_subject: Some(&subject),
+        canonical: &canonical,
+        equipment: &[shaft],
+    });
+    let track = output.tracks.first().expect("accepted rigid-bar track");
+    assert!(track.observation_score * track.association_confidence < 0.50);
+    assert_eq!(
+        track.association_stage,
+        EquipmentAssociationStage::ContactCandidate
+    );
+    assert!(!rigid_bar_track_supports_turnaround(track));
 }
 
 #[test]
@@ -204,7 +421,7 @@ fn a_missing_equipment_frame_publishes_cannot_judge_but_keeps_private_track_cont
 }
 
 #[test]
-fn predicted_shaft_is_retained_only_as_non_judgeable_continuity_on_a_measured_track() {
+fn predicted_shaft_is_excluded_from_canonical_equipment_even_with_a_measured_track() {
     let subject = subject();
     let canonical = unknown_canonical();
     let mut engine = EquipmentFusionEngine::new();
@@ -225,7 +442,7 @@ fn predicted_shaft_is_retained_only_as_non_judgeable_continuity_on_a_measured_tr
         canonical: &canonical,
         equipment: &[measured],
     });
-    let measured_track_id = first.tracks[0].track_id;
+    assert_eq!(first.tracks.len(), 1);
 
     let mut predicted = measured;
     predicted.proposal_id = 11;
@@ -249,18 +466,10 @@ fn predicted_shaft_is_retained_only_as_non_judgeable_continuity_on_a_measured_tr
 
     assert_eq!(
         continuity.status,
-        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::NoEquipmentObservation),
-        "predicted-only equipment must never make the frame independently judgeable",
+        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::LowConfidenceOrInvalid),
+        "prediction belongs to display continuity, never canonical equipment",
     );
-    assert_eq!(continuity.tracks.len(), 1);
-    let track = continuity.tracks[0];
-    assert_eq!(track.track_id, measured_track_id);
-    assert_eq!(track.proposal_id, 11);
-    assert_eq!(track.source, EquipmentSource::Predicted);
-    assert_eq!(track.axis, predicted.axis);
-    assert_eq!(track.observation_score, 0.36);
-    assert_eq!(track.uncertainty_px, Some(7.5));
-    assert!(!track.judgeable_path);
+    assert!(continuity.tracks.is_empty());
 }
 
 #[test]
@@ -316,8 +525,10 @@ fn predicted_continuity_does_not_extend_the_measured_track_lifetime() {
         canonical: &canonical,
         equipment: &[predicted],
     });
-    assert_eq!(within_measured_gap.tracks.len(), 1);
-    assert!(!within_measured_gap.tracks[0].judgeable_path);
+    assert!(
+        within_measured_gap.tracks.is_empty(),
+        "display continuity must not enter canonical equipment even inside the private identity gap",
+    );
 
     let after_measured_gap = engine.process(EquipmentFrameInput {
         timestamp_ms: 1_501,
@@ -460,7 +671,7 @@ impl InferenceAdapter for MeasuredThenPredictedEquipmentAdapter {
 }
 
 #[test]
-fn canonical_packet_retains_predicted_axis_without_making_it_observed() {
+fn canonical_packet_excludes_predicted_axis_from_raw_equipment() {
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
         SessionConfig {
@@ -492,30 +703,16 @@ fn canonical_packet_retains_predicted_axis_without_making_it_observed() {
     }
 
     let packets = output.packets();
-    let measured_track_id = packets[0].equipment.tracks[0].track_id;
+    assert_eq!(packets[0].equipment.tracks.len(), 1);
     let predicted_packet = &packets[1];
     assert_eq!(
         predicted_packet.equipment.status,
-        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::NoEquipmentObservation),
+        EquipmentFrameStatus::CannotJudge(EquipmentCannotJudgeReason::LowConfidenceOrInvalid),
     );
-    assert_eq!(predicted_packet.equipment.tracks.len(), 1);
-    let predicted = predicted_packet.equipment.tracks[0];
-    assert_eq!(predicted.track_id, measured_track_id);
-    assert_eq!(predicted.source, EquipmentSource::Predicted);
-    let axis = predicted.axis.expect("predicted ordered axis");
-    assert!((axis.x1 - 0.22).abs() < f32::EPSILON);
-    assert!((axis.y1 - 0.44).abs() < f32::EPSILON);
-    assert!((axis.x2 - 0.78).abs() < f32::EPSILON);
-    assert!((axis.y2 - 0.475).abs() < 1e-6);
-    assert_eq!(predicted.observation_score, 0.36);
-    assert_eq!(predicted.uncertainty_px, Some(7.5));
-    assert!(!predicted.judgeable_path);
+    assert!(predicted_packet.equipment.tracks.is_empty());
     let encoded = encode_motion_packet(predicted_packet).unwrap();
     assert!(encoded.windows(4).any(|window| window == b"EQP1"));
-    assert!(
-        encoded.windows(4).any(|window| window == b"AXI1"),
-        "predicted ordered endpoints must survive the canonical axis extension",
-    );
+    assert!(!encoded.is_empty());
 }
 
 #[test]

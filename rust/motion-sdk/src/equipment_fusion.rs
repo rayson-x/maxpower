@@ -15,6 +15,10 @@ const MAXIMUM_TRACK_GAP_MS: u64 = 500;
 const MAXIMUM_TRACK_CENTER_DISTANCE: f32 = 0.18;
 const MAXIMUM_HAND_DISTANCE: f32 = 0.22;
 const MAXIMUM_RIGID_BAR_HAND_DISTANCE: f32 = 0.10;
+const MINIMUM_CONTACT_FRAMES: u8 = 3;
+const MINIMUM_COMMON_MOTION_SCALE_RATIO: f32 = 0.01;
+const MAXIMUM_RELATIVE_MOTION_ERROR_SCALE_RATIO: f32 = 0.05;
+const MAXIMUM_ESTABLISHED_HAND_GAP_FRAMES: u8 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EquipmentKind {
@@ -100,6 +104,18 @@ pub enum EquipmentHand {
     Unknown,
 }
 
+/// Causal association lifecycle. Image geometry exists before subject contact;
+/// only `GripEstablished` may authorize an equipment-backed Rep boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EquipmentAssociationStage {
+    RawDetected,
+    Unassociated,
+    ContactCandidate,
+    GripEstablished,
+    Released,
+    Conflict,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EquipmentCannotJudgeReason {
     NoLockedSubject,
@@ -114,17 +130,15 @@ pub enum EquipmentCannotJudgeReason {
 pub enum EquipmentFrameStatus {
     /// At least one current, independently observed equipment track is usable.
     Observed,
-    /// No current independent equipment observation is usable. `tracks` may
-    /// still retain explicitly predicted continuity evidence for rendering or
-    /// diagnostics; such tracks always have `judgeable_path == false`.
+    /// No current independent equipment observation is usable. Predictions
+    /// belong to a separate display-continuity output and never appear here.
     CannotJudge(EquipmentCannotJudgeReason),
 }
 
 /// Canonical equipment evidence associated with the currently locked subject.
 /// Coordinates remain normalized image coordinates; downstream action profiles
 /// must still declare the supported view and equipment semantics. Predicted
-/// tracks preserve provenance and geometry but never establish identity or a
-/// judgeable equipment path.
+/// display geometry is excluded from this canonical evidence type.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EquipmentTrackEvidence {
     pub track_id: u64,
@@ -140,9 +154,24 @@ pub struct EquipmentTrackEvidence {
     pub uncertainty_px: Option<f32>,
     pub source: EquipmentSource,
     pub held_by: EquipmentHand,
+    pub association_stage: EquipmentAssociationStage,
     /// True only for a current non-predicted observation associated with the
     /// locked subject. It does not imply that pose or technique is judgeable.
     pub judgeable_path: bool,
+}
+
+/// One canonical eligibility rule for rigid-bar motion consumers. A track has
+/// already passed the provider's minimum observation score, exact subject
+/// association, bilateral hand-distance gate, and predicted-evidence refusal
+/// before reaching this seam. Callers must not add a second arbitrary score
+/// product that makes rendering and Rep turnaround consumption disagree.
+pub fn rigid_bar_track_supports_turnaround(track: &EquipmentTrackEvidence) -> bool {
+    track.kind == EquipmentKind::BarbellShaft
+        && track.judgeable_path
+        && track.source != EquipmentSource::Predicted
+        && track.held_by == EquipmentHand::Both
+        && track.association_stage == EquipmentAssociationStage::GripEstablished
+        && track.center_y.is_finite()
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -190,6 +219,11 @@ struct PrivateTrack {
     center_x: f32,
     center_y: f32,
     last_timestamp_ms: u64,
+    association_stage: EquipmentAssociationStage,
+    contact_frames: u8,
+    common_motion_frames: u8,
+    last_hand_center: Option<(f32, f32)>,
+    hand_gap_frames: u8,
 }
 
 /// Stateful deep module for detector-independent equipment association.
@@ -262,7 +296,6 @@ impl EquipmentFusionEngine {
         let mut rejected_low_confidence_or_invalid_count = 0;
         let mut rejected_outside_subject_count = 0;
         let mut accepted: Vec<(EquipmentObservation, f32, EquipmentHand)> = Vec::new();
-        let mut predicted_continuity = Vec::new();
 
         for observation in input.equipment.iter().copied() {
             if observation.attributes.is_reflection_candidate {
@@ -274,19 +307,11 @@ impl EquipmentFusionEngine {
                 continue;
             }
             if observation.source == EquipmentSource::Predicted {
-                if valid_predicted_observation(observation) {
-                    predicted_continuity.push(observation);
-                } else {
-                    rejected_low_confidence_or_invalid_count += 1;
-                }
+                rejected_low_confidence_or_invalid_count += 1;
                 continue;
             }
             if !valid_observation(observation) {
                 rejected_low_confidence_or_invalid_count += 1;
-                continue;
-            }
-            if !rigid_bar_matches_reliable_hands(observation, input.canonical) {
-                rejected_outside_subject_count += 1;
                 continue;
             }
             let Some(association_confidence) = subject_association_confidence(subject, observation)
@@ -321,25 +346,42 @@ impl EquipmentFusionEngine {
                 })
                 .min_by(|left, right| left.1.total_cmp(&right.1))
                 .map(|(index, _)| index);
-            let track_id = if let Some(index) = track_index {
+            let hand_center = associated_hand_center(held_by, input.canonical);
+            let (track_id, association_stage) = if let Some(index) = track_index {
                 claimed_tracks.insert(index);
                 let track = &mut self.tracks[index];
+                let association_stage = update_association_stage(
+                    track,
+                    held_by,
+                    hand_center,
+                    (center_x, center_y),
+                    observation.bbox.width.hypot(observation.bbox.height),
+                );
                 track.center_x = center_x;
                 track.center_y = center_y;
                 track.last_timestamp_ms = input.timestamp_ms;
-                track.track_id
+                track.last_hand_center = hand_center;
+                (track.track_id, association_stage)
             } else {
                 let track_id = self.next_track_id;
                 self.next_track_id = self.next_track_id.saturating_add(1);
+                let association_stage = initial_association_stage(held_by, observation.kind);
                 self.tracks.push(PrivateTrack {
                     track_id,
                     kind: observation.kind,
                     center_x,
                     center_y,
                     last_timestamp_ms: input.timestamp_ms,
+                    association_stage,
+                    contact_frames: u8::from(
+                        association_stage == EquipmentAssociationStage::ContactCandidate,
+                    ),
+                    common_motion_frames: 0,
+                    last_hand_center: hand_center,
+                    hand_gap_frames: 0,
                 });
                 claimed_tracks.insert(self.tracks.len() - 1);
-                track_id
+                (track_id, association_stage)
             };
             output.push(EquipmentTrackEvidence {
                 track_id,
@@ -355,55 +397,8 @@ impl EquipmentFusionEngine {
                 uncertainty_px: observation.uncertainty_px,
                 source: observation.source,
                 held_by,
-                judgeable_path: true,
-            });
-        }
-
-        let measured_track_count = output.len();
-        predicted_continuity.sort_by(|left, right| right.score.total_cmp(&left.score));
-        for observation in predicted_continuity {
-            let Some(association_confidence) = subject_association_confidence(subject, observation)
-            else {
-                rejected_outside_subject_count += 1;
-                continue;
-            };
-            let (center_x, center_y) = observation.bbox.center();
-            let track_index = self
-                .tracks
-                .iter()
-                .enumerate()
-                .filter(|(index, track)| {
-                    !claimed_tracks.contains(index) && track.kind == observation.kind
-                })
-                .filter_map(|(index, track)| {
-                    let distance = (track.center_x - center_x).hypot(track.center_y - center_y);
-                    (distance <= MAXIMUM_TRACK_CENTER_DISTANCE).then_some((index, distance))
-                })
-                .min_by(|left, right| left.1.total_cmp(&right.1))
-                .map(|(index, _)| index);
-            let Some(track_index) = track_index else {
-                // A prediction cannot establish identity. It is retained only
-                // when an independent measured track already owns that identity.
-                rejected_low_confidence_or_invalid_count += 1;
-                continue;
-            };
-            claimed_tracks.insert(track_index);
-            let track_id = self.tracks[track_index].track_id;
-            output.push(EquipmentTrackEvidence {
-                track_id,
-                proposal_id: observation.proposal_id,
-                subject_candidate_id: subject.id,
-                kind: observation.kind,
-                bbox: observation.bbox,
-                axis: observation.axis,
-                center_x,
-                center_y,
-                observation_score: observation.score,
-                association_confidence,
-                uncertainty_px: observation.uncertainty_px,
-                source: EquipmentSource::Predicted,
-                held_by: EquipmentHand::Unknown,
-                judgeable_path: false,
+                association_stage,
+                judgeable_path: association_stage == EquipmentAssociationStage::GripEstablished,
             });
         }
 
@@ -438,19 +433,121 @@ impl EquipmentFusionEngine {
         EquipmentFrameEvidence {
             timestamp_ms: input.timestamp_ms,
             subject_candidate_id: Some(subject.id),
-            status: if measured_track_count > 0 {
-                EquipmentFrameStatus::Observed
-            } else {
-                EquipmentFrameStatus::CannotJudge(
-                    EquipmentCannotJudgeReason::NoEquipmentObservation,
-                )
-            },
+            status: EquipmentFrameStatus::Observed,
             tracks: output,
             rejected_reflection_count,
             rejected_static_count,
             rejected_low_confidence_or_invalid_count,
             rejected_outside_subject_count,
         }
+    }
+}
+
+fn initial_association_stage(
+    held_by: EquipmentHand,
+    kind: EquipmentKind,
+) -> EquipmentAssociationStage {
+    if contact_hand_is_sufficient(kind, held_by) {
+        EquipmentAssociationStage::ContactCandidate
+    } else {
+        EquipmentAssociationStage::Unassociated
+    }
+}
+
+fn update_association_stage(
+    track: &mut PrivateTrack,
+    held_by: EquipmentHand,
+    hand_center: Option<(f32, f32)>,
+    equipment_center: (f32, f32),
+    equipment_scale: f32,
+) -> EquipmentAssociationStage {
+    let was_established = track.association_stage == EquipmentAssociationStage::GripEstablished;
+    if !contact_hand_is_sufficient(track.kind, held_by) {
+        if was_established
+            && hand_center.is_none()
+            && track.hand_gap_frames < MAXIMUM_ESTABLISHED_HAND_GAP_FRAMES
+        {
+            track.hand_gap_frames = track.hand_gap_frames.saturating_add(1);
+            return EquipmentAssociationStage::GripEstablished;
+        }
+        track.contact_frames = 0;
+        track.common_motion_frames = 0;
+        track.hand_gap_frames = 0;
+        track.association_stage = if was_established {
+            EquipmentAssociationStage::Released
+        } else {
+            EquipmentAssociationStage::Unassociated
+        };
+        return track.association_stage;
+    }
+
+    track.contact_frames = track.contact_frames.saturating_add(1);
+    track.hand_gap_frames = 0;
+    if let (Some(previous_hand), Some(current_hand)) = (track.last_hand_center, hand_center) {
+        let equipment_delta = (
+            equipment_center.0 - track.center_x,
+            equipment_center.1 - track.center_y,
+        );
+        let hand_delta = (
+            current_hand.0 - previous_hand.0,
+            current_hand.1 - previous_hand.1,
+        );
+        let equipment_motion = equipment_delta.0.hypot(equipment_delta.1);
+        let hand_motion = hand_delta.0.hypot(hand_delta.1);
+        let common_motion_error =
+            (equipment_delta.0 - hand_delta.0).hypot(equipment_delta.1 - hand_delta.1);
+        let minimum_common_motion =
+            (equipment_scale * MINIMUM_COMMON_MOTION_SCALE_RATIO).max(0.001);
+        let maximum_relative_motion_error =
+            (equipment_scale * MAXIMUM_RELATIVE_MOTION_ERROR_SCALE_RATIO).max(0.001);
+        if was_established
+            && equipment_motion >= minimum_common_motion
+            && hand_motion >= minimum_common_motion
+            && common_motion_error > maximum_relative_motion_error
+        {
+            track.contact_frames = 0;
+            track.common_motion_frames = 0;
+            track.association_stage = EquipmentAssociationStage::Conflict;
+            return track.association_stage;
+        }
+        if equipment_motion >= minimum_common_motion
+            && hand_motion >= minimum_common_motion
+            && common_motion_error <= maximum_relative_motion_error
+        {
+            track.common_motion_frames = track.common_motion_frames.saturating_add(1);
+        }
+    }
+    track.association_stage =
+        if track.contact_frames >= MINIMUM_CONTACT_FRAMES && track.common_motion_frames > 0 {
+            EquipmentAssociationStage::GripEstablished
+        } else {
+            EquipmentAssociationStage::ContactCandidate
+        };
+    track.association_stage
+}
+
+fn contact_hand_is_sufficient(kind: EquipmentKind, hand: EquipmentHand) -> bool {
+    match kind {
+        EquipmentKind::BarbellShaft => hand == EquipmentHand::Both,
+        EquipmentKind::Dumbbell | EquipmentKind::MachineHandle => hand != EquipmentHand::Unknown,
+        EquipmentKind::WeightPlate => false,
+    }
+}
+
+fn associated_hand_center(
+    held_by: EquipmentHand,
+    canonical: &[CanonicalLandmark],
+) -> Option<(f32, f32)> {
+    let left = reliable_point(canonical.get(9));
+    let right = reliable_point(canonical.get(10));
+    match held_by {
+        EquipmentHand::Left => left,
+        EquipmentHand::Right => right,
+        EquipmentHand::Both => {
+            let (left, right) = (left?, right?);
+            Some(((left.0 + right.0) * 0.5, (left.1 + right.1) * 0.5))
+        }
+        EquipmentHand::Unknown => None,
     }
 }
 
@@ -465,17 +562,6 @@ fn cannot_judge(
 fn valid_observation(observation: EquipmentObservation) -> bool {
     observation.score.is_finite()
         && observation.score >= MINIMUM_OBSERVATION_SCORE
-        && observation
-            .uncertainty_px
-            .is_none_or(|value| value.is_finite() && value >= 0.0)
-        && valid_rect(observation.bbox)
-        && observation.axis.is_none_or(EquipmentAxis2d::is_valid)
-}
-
-fn valid_predicted_observation(observation: EquipmentObservation) -> bool {
-    observation.score.is_finite()
-        && observation.score > 0.0
-        && observation.score <= 1.0
         && observation
             .uncertainty_px
             .is_none_or(|value| value.is_finite() && value >= 0.0)
@@ -543,29 +629,6 @@ fn hand_association(
         (None, Some(right)) if right <= maximum_distance => EquipmentHand::Right,
         _ => EquipmentHand::Unknown,
     }
-}
-
-fn rigid_bar_matches_reliable_hands(
-    observation: EquipmentObservation,
-    canonical: &[CanonicalLandmark],
-) -> bool {
-    if observation.kind != EquipmentKind::BarbellShaft {
-        return true;
-    }
-    let (Some(left), Some(right)) = (
-        reliable_point(canonical.get(9)),
-        reliable_point(canonical.get(10)),
-    ) else {
-        return true;
-    };
-    // Generic detector boxes do not claim a measured rigid axis. Preserve
-    // their established subject-association/pose-repair path; the stricter
-    // bilateral wrist check applies only when an axis is actually asserted.
-    let Some(axis) = observation.axis else {
-        return true;
-    };
-    equipment_distance_to_axis(axis, left) <= MAXIMUM_RIGID_BAR_HAND_DISTANCE
-        && equipment_distance_to_axis(axis, right) <= MAXIMUM_RIGID_BAR_HAND_DISTANCE
 }
 
 fn equipment_distance_to_point(observation: EquipmentObservation, point: (f32, f32)) -> f32 {

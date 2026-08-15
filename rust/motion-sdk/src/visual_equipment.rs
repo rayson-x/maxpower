@@ -38,16 +38,13 @@ pub struct BarbellAxisObservation {
 }
 
 impl BarbellAxisObservation {
-    /// Image measurements and bounded temporal predictions both remain visible
-    /// in canonical equipment provenance. Pose-derived fusion stays private so
-    /// one pose source cannot be counted twice as pose + equipment. Downstream
-    /// fusion must keep `Predicted` non-judgeable and may only attach it to a
-    /// track that was previously established by an independent measurement.
+    /// Only an independent current image measurement is canonical equipment.
+    /// Prediction and pose bridges are display continuity and cannot enter
+    /// subject association, Rep, Rule, Reference, or accuracy evidence.
     pub fn equipment_observation(self) -> Option<EquipmentObservation> {
         let source = match self.source {
             BarbellAxisSource::Measured => EquipmentSource::Geometry,
-            BarbellAxisSource::Predicted => EquipmentSource::Predicted,
-            BarbellAxisSource::Fused => return None,
+            BarbellAxisSource::Predicted | BarbellAxisSource::Fused => return None,
         };
         Some(EquipmentObservation {
             proposal_id: self.proposal_id,
@@ -77,6 +74,15 @@ impl BarbellAxisObservation {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarbellAxisFrameEvidence {
+    /// Best bounded visual/display track for rendering only.
+    pub display_axis: Option<BarbellAxisObservation>,
+    /// All independent same-frame image candidates. Association consumes this
+    /// set so wrists can select among geometry without changing that geometry.
+    pub raw_observations: Vec<EquipmentObservation>,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ShaftCandidate {
     x1: f32,
@@ -85,6 +91,7 @@ struct ShaftCandidate {
     slope: f32,
     score: f32,
     wrist_axis_support: f32,
+    uncertainty_px: f32,
     source: BarbellAxisSource,
 }
 
@@ -106,12 +113,8 @@ pub struct BarbellAxisVisualTracker {
     x1: f32,
     x2: f32,
     confidence: f32,
+    uncertainty_px: f32,
     missed: u8,
-    wrist_offset_y: f32,
-    calibration_samples: u16,
-    calibration_min_y: f32,
-    calibration_max_y: f32,
-    wrist_fusion_ready: bool,
 }
 
 impl BarbellAxisVisualTracker {
@@ -127,20 +130,40 @@ impl BarbellAxisVisualTracker {
         if schema != PoseSchemaId::Halpe26 {
             return Err(VisualEquipmentError::UnsupportedPoseSchema);
         }
-        Ok(self.process_halpe26(luma, width, height, timestamp_ms, subjects))
+        Ok(self
+            .process_frame_halpe26(luma, width, height, timestamp_ms, subjects)
+            .display_axis)
     }
 
-    fn process_halpe26(
+    pub fn process_frame(
+        &mut self,
+        schema: PoseSchemaId,
+        luma: &[u8],
+        width: usize,
+        height: usize,
+        timestamp_ms: u64,
+        subjects: &[PoseCandidate],
+    ) -> Result<BarbellAxisFrameEvidence, VisualEquipmentError> {
+        if schema != PoseSchemaId::Halpe26 {
+            return Err(VisualEquipmentError::UnsupportedPoseSchema);
+        }
+        Ok(self.process_frame_halpe26(luma, width, height, timestamp_ms, subjects))
+    }
+
+    fn process_frame_halpe26(
         &mut self,
         luma: &[u8],
         width: usize,
         height: usize,
         timestamp_ms: u64,
         subjects: &[PoseCandidate],
-    ) -> Option<BarbellAxisObservation> {
+    ) -> BarbellAxisFrameEvidence {
         if width < 8 || height < 8 || luma.len() != width.saturating_mul(height) {
             self.reset();
-            return None;
+            return BarbellAxisFrameEvidence {
+                display_axis: None,
+                raw_observations: Vec::new(),
+            };
         }
         if self.width != width || self.height != height {
             self.reset();
@@ -150,30 +173,32 @@ impl BarbellAxisVisualTracker {
         if self.background.is_empty() {
             self.background = luma.iter().map(|value| f32::from(*value)).collect();
         }
-        let mut candidates = if subjects.is_empty() {
-            Vec::new()
-        } else {
-            detect_shaft_candidates(luma, &self.background, width, height, subjects)
-        };
-        if self.wrist_fusion_ready
-            && let Some(fused) = calibrated_wrist_shaft(
-                subjects,
-                width,
-                height,
-                self.wrist_offset_y,
-                self.initialized.then_some(self.y_center + self.velocity_y),
-            )
-        {
-            candidates.push(fused);
-        }
+        // Raw shaft geometry is an image measurement. Pose may define a broad
+        // person search region, but wrists never create, reject, rotate, or
+        // crop the measured segment. Contact is evaluated later by the
+        // EquipmentFusionEngine's temporal association lifecycle.
+        let candidates = detect_shaft_candidates(luma, &self.background, width, height, subjects);
+        let raw_observations = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| {
+                candidate_observation(
+                    timestamp_ms.saturating_mul(16).saturating_add(index as u64),
+                    *candidate,
+                    width,
+                    height,
+                )
+                .equipment_observation()
+            })
+            .collect();
         let result = self.update(timestamp_ms, &candidates);
-        if let Some(axis) = result.filter(|axis| axis.source == BarbellAxisSource::Measured) {
-            self.update_wrist_calibration(subjects, axis);
-        }
         for (background, value) in self.background.iter_mut().zip(luma) {
             *background = *background * 0.99 + f32::from(*value) * 0.01;
         }
-        result
+        BarbellAxisFrameEvidence {
+            display_axis: result,
+            raw_observations,
+        }
     }
 
     pub fn reset(&mut self) {
@@ -242,6 +267,9 @@ impl BarbellAxisVisualTracker {
         }
         self.initialized = true;
         self.confidence = measurement_confidence;
+        self.uncertainty_px = selected
+            .uncertainty_px
+            .max(((1.0 - measurement_confidence) * 12.0).max(1.0));
         self.missed = 0;
         Some(self.observation(timestamp_ms, selected.source))
     }
@@ -254,6 +282,7 @@ impl BarbellAxisVisualTracker {
         self.y_center += self.velocity_y;
         self.velocity_y *= 0.85;
         self.confidence *= 0.72;
+        self.uncertainty_px = (self.uncertainty_px * 1.35 + 1.0).min(32.0);
         self.missed += 1;
         (self.confidence >= 0.16)
             .then(|| self.observation(timestamp_ms, BarbellAxisSource::Predicted))
@@ -275,44 +304,32 @@ impl BarbellAxisVisualTracker {
             x2: bounded_x2 / self.width as f32,
             y2: y2 / self.height as f32,
             center_y: self.y_center / self.height as f32,
-            uncertainty_px: ((1.0 - self.confidence) * 12.0).max(1.0),
+            uncertainty_px: self.uncertainty_px.max(1.0),
         }
     }
+}
 
-    fn update_wrist_calibration(
-        &mut self,
-        subjects: &[PoseCandidate],
-        measured: BarbellAxisObservation,
-    ) {
-        let Some(wrist_axis) = closest_bilateral_wrist_axis(
-            subjects,
-            self.width,
-            self.height,
-            measured.center_y * self.height as f32,
-        ) else {
-            return;
-        };
-        let measured_y = measured.center_y * self.height as f32;
-        let offset = measured_y - wrist_axis.center_y;
-        if offset.abs() > self.height as f32 * 0.16 {
-            return;
-        }
-        if self.calibration_samples == 0 {
-            self.wrist_offset_y = offset;
-            self.calibration_min_y = measured_y;
-            self.calibration_max_y = measured_y;
-            self.calibration_samples = 1;
-            return;
-        }
-        if (offset - self.wrist_offset_y).abs() > self.height as f32 * 0.075 {
-            return;
-        }
-        self.wrist_offset_y = self.wrist_offset_y * 0.82 + offset * 0.18;
-        self.calibration_min_y = self.calibration_min_y.min(measured_y);
-        self.calibration_max_y = self.calibration_max_y.max(measured_y);
-        self.calibration_samples = self.calibration_samples.saturating_add(1);
-        self.wrist_fusion_ready = self.calibration_samples >= 3
-            && self.calibration_max_y - self.calibration_min_y >= self.height as f32 * 0.10;
+fn candidate_observation(
+    proposal_id: u64,
+    candidate: ShaftCandidate,
+    width: usize,
+    height: usize,
+) -> BarbellAxisObservation {
+    let normalized_x1 = (candidate.x1 / width as f32).clamp(0.0, 1.0);
+    let normalized_x2 = (candidate.x2 / width as f32).clamp(0.0, 1.0);
+    let normalized_center_y = (candidate.center_y / height as f32).clamp(0.0, 1.0);
+    let y1 = (normalized_center_y + candidate.slope * (normalized_x1 - 0.5)).clamp(0.0, 1.0);
+    let y2 = (normalized_center_y + candidate.slope * (normalized_x2 - 0.5)).clamp(0.0, 1.0);
+    BarbellAxisObservation {
+        proposal_id,
+        source: candidate.source,
+        confidence: candidate.score.clamp(0.0, 1.0),
+        x1: normalized_x1,
+        y1,
+        x2: normalized_x2,
+        y2,
+        center_y: normalized_center_y,
+        uncertainty_px: candidate.uncertainty_px,
     }
 }
 
@@ -324,8 +341,6 @@ fn detect_shaft_candidates(
     subjects: &[PoseCandidate],
 ) -> Vec<ShaftCandidate> {
     let (search_top, search_bottom) = pose_search_context(subjects, height);
-    let wrist_xs = reliable_wrist_xs(subjects);
-    let wrist_pairs = reliable_wrist_pairs(subjects);
     let x_step = if width >= 480 { 2 } else { 1 };
     let maximum_gap = ((width as f32 * 0.012).round() as usize).max(6);
     let mut candidates = Vec::new();
@@ -395,30 +410,19 @@ fn detect_shaft_candidates(
             let cohesion = (coverage / span.max(f32::EPSILON)).clamp(0.0, 1.0);
             let edge_strength = (edge_total / support_count as f32 / 145.0).clamp(0.0, 1.0);
             let motion = (motion_total / support_count as f32 / 30.0).clamp(0.0, 1.0);
-            let wrist_support = interval_wrist_support(&merged, &wrist_xs, width);
-            let wrist_axis_support =
-                line_wrist_axis_support(center_y as f32, slope, &wrist_pairs, width, height);
-            // When both hands are reliable, a rigid bar candidate must pass
-            // close to both of them. Length, edge strength, and tracker
-            // continuity may rank plausible shafts, but they must never let a
-            // rack or background line override the action's hand geometry.
-            if has_reliable_bilateral_wrists(&wrist_pairs) && wrist_axis_support < 0.30 {
-                continue;
-            }
-            let score = 0.20 * (coverage / 0.56).clamp(0.0, 1.0)
-                + 0.12 * (span / 0.78).clamp(0.0, 1.0)
-                + 0.14 * motion
-                + 0.10 * edge_strength
-                + 0.08 * cohesion
-                + 0.08 * wrist_support
-                + 0.28 * wrist_axis_support;
+            let score = 0.30 * (coverage / 0.56).clamp(0.0, 1.0)
+                + 0.20 * (span / 0.78).clamp(0.0, 1.0)
+                + 0.22 * motion
+                + 0.16 * edge_strength
+                + 0.12 * cohesion;
             candidates.push(ShaftCandidate {
                 x1: x1 as f32,
                 x2: x2 as f32,
                 center_y: center_y as f32,
                 slope,
                 score,
-                wrist_axis_support,
+                wrist_axis_support: 0.0,
+                uncertainty_px: 2.0 + (1.0 - cohesion) * 8.0,
                 source: BarbellAxisSource::Measured,
             });
         }
@@ -456,214 +460,16 @@ fn pose_search_context(subjects: &[PoseCandidate], height: usize) -> (usize, usi
     }
     let minimum = shoulder_y.iter().copied().fold(f32::INFINITY, f32::min);
     let maximum = shoulder_y.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let wrist_y = subjects
+    let top = minimum - 0.38;
+    let body_bottom = subjects
         .iter()
-        .flat_map(|subject| [subject.observations.get(9), subject.observations.get(10)])
-        .flatten()
-        .filter(|point| point.visibility >= 0.2 && point.y.is_finite())
-        .map(|point| point.y)
-        .collect::<Vec<_>>();
-    let wrist_minimum = wrist_y.iter().copied().fold(f32::INFINITY, f32::min);
-    let wrist_maximum = wrist_y.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let top = if wrist_minimum.is_finite() {
-        (minimum - 0.38).min(wrist_minimum - 0.12)
-    } else {
-        minimum - 0.38
-    };
-    let bottom = if wrist_maximum.is_finite() {
-        (maximum + 0.20).max(wrist_maximum + 0.12)
-    } else {
-        maximum + 0.20
-    };
+        .map(|subject| subject.bbox.y + subject.bbox.height)
+        .fold(0.68, f32::max);
+    let bottom = (maximum + 0.20).max(body_bottom);
     (
         (top.clamp(0.0, 1.0) * height as f32).round() as usize,
         (bottom.clamp(0.0, 1.0) * height as f32).round() as usize,
     )
-}
-
-fn reliable_wrist_xs(subjects: &[PoseCandidate]) -> Vec<f32> {
-    subjects
-        .iter()
-        .flat_map(|subject| [subject.observations.get(9), subject.observations.get(10)])
-        .flatten()
-        .filter(|point| point.visibility >= 0.12 && point.x.is_finite())
-        .map(|point| point.x)
-        .collect()
-}
-
-#[derive(Clone, Copy, Debug)]
-struct WristPoint {
-    x: f32,
-    y: f32,
-    confidence: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct WristPair {
-    left: Option<WristPoint>,
-    right: Option<WristPoint>,
-}
-
-fn has_reliable_bilateral_wrists(pairs: &[WristPair]) -> bool {
-    pairs.iter().any(|pair| {
-        pair.left.is_some_and(|point| point.confidence >= 0.50)
-            && pair.right.is_some_and(|point| point.confidence >= 0.50)
-    })
-}
-
-fn reliable_wrist_pairs(subjects: &[PoseCandidate]) -> Vec<WristPair> {
-    subjects
-        .iter()
-        .filter_map(|subject| {
-            let point = |index: usize| {
-                subject.observations.get(index).and_then(|point| {
-                    (point.visibility >= 0.12 && point.x.is_finite() && point.y.is_finite())
-                        .then_some(WristPoint {
-                            x: point.x,
-                            y: point.y,
-                            confidence: point.visibility,
-                        })
-                })
-            };
-            let pair = WristPair {
-                left: point(9),
-                right: point(10),
-            };
-            (pair.left.is_some() || pair.right.is_some()).then_some(pair)
-        })
-        .collect()
-}
-
-#[derive(Clone, Copy, Debug)]
-struct BilateralWristAxis {
-    left_x: f32,
-    right_x: f32,
-    center_y: f32,
-    slope: f32,
-    confidence: f32,
-}
-
-fn bilateral_wrist_axes(
-    subjects: &[PoseCandidate],
-    width: usize,
-    height: usize,
-) -> Vec<BilateralWristAxis> {
-    reliable_wrist_pairs(subjects)
-        .into_iter()
-        .filter_map(|pair| {
-            let (left, right) = (pair.left?, pair.right?);
-            let confidence = left.confidence.min(right.confidence);
-            let left_x = left.x * width as f32;
-            let right_x = right.x * width as f32;
-            let dx = right_x - left_x;
-            if confidence < 0.50 || dx.abs() < width as f32 * 0.16 {
-                return None;
-            }
-            let left_y = left.y * height as f32;
-            let right_y = right.y * height as f32;
-            Some(BilateralWristAxis {
-                left_x,
-                right_x,
-                center_y: (left_y + right_y) * 0.5,
-                slope: ((right_y - left_y) / dx).clamp(-0.15, 0.15),
-                confidence,
-            })
-        })
-        .collect()
-}
-
-fn closest_bilateral_wrist_axis(
-    subjects: &[PoseCandidate],
-    width: usize,
-    height: usize,
-    target_y: f32,
-) -> Option<BilateralWristAxis> {
-    bilateral_wrist_axes(subjects, width, height)
-        .into_iter()
-        .min_by(|left, right| {
-            (left.center_y - target_y)
-                .abs()
-                .total_cmp(&(right.center_y - target_y).abs())
-        })
-}
-
-fn calibrated_wrist_shaft(
-    subjects: &[PoseCandidate],
-    width: usize,
-    height: usize,
-    wrist_offset_y: f32,
-    predicted_y: Option<f32>,
-) -> Option<ShaftCandidate> {
-    bilateral_wrist_axes(subjects, width, height)
-        .into_iter()
-        .map(|axis| {
-            let center_y = axis.center_y + wrist_offset_y;
-            let extension = (axis.right_x - axis.left_x).abs() * 0.32;
-            let continuity = predicted_y.map_or(0.65, |predicted| {
-                gaussian((center_y - predicted).abs() / height as f32, 0.11)
-            });
-            ShaftCandidate {
-                x1: axis.left_x.min(axis.right_x) - extension,
-                x2: axis.left_x.max(axis.right_x) + extension,
-                center_y,
-                slope: axis.slope,
-                score: (0.52 + axis.confidence * 0.12 + continuity * 0.08).clamp(0.0, 0.72),
-                wrist_axis_support: 1.0,
-                source: BarbellAxisSource::Fused,
-            }
-        })
-        .max_by(|left, right| left.score.total_cmp(&right.score))
-}
-
-fn line_wrist_axis_support(
-    center_y: f32,
-    slope: f32,
-    pairs: &[WristPair],
-    width: usize,
-    height: usize,
-) -> f32 {
-    if pairs.is_empty() {
-        return 0.45;
-    }
-    pairs
-        .iter()
-        .map(|pair| {
-            let residual = |point: WristPoint| {
-                let x = point.x * width as f32;
-                let line_y = center_y + slope * (x - width as f32 * 0.5);
-                (point.y * height as f32 - line_y).abs() / height as f32
-            };
-            match (pair.left, pair.right) {
-                (Some(left), Some(right)) => {
-                    // A held shaft should pass close to both hands. Scoring by
-                    // the worse hand prevents a rack or mirror line that only
-                    // intersects one arm from winning.
-                    gaussian(residual(left).max(residual(right)), 0.075)
-                }
-                (Some(point), None) | (None, Some(point)) => {
-                    gaussian(residual(point), 0.060) * 0.72
-                }
-                (None, None) => 0.0,
-            }
-        })
-        .fold(0.0, f32::max)
-}
-
-fn interval_wrist_support(intervals: &[Interval], wrist_xs: &[f32], width: usize) -> f32 {
-    if wrist_xs.is_empty() {
-        return 0.5;
-    }
-    let tolerance = width as f32 * 0.055;
-    let supported = wrist_xs
-        .iter()
-        .filter(|normalized_x| {
-            let x = **normalized_x * width as f32;
-            intervals.iter().any(|interval| {
-                x >= interval.start as f32 - tolerance && x <= interval.end as f32 + tolerance
-            })
-        })
-        .count();
-    supported as f32 / wrist_xs.len() as f32
 }
 
 fn merge_intervals(intervals: &[Interval], maximum_gap: usize) -> Vec<Interval> {
