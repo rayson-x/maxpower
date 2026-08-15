@@ -19,14 +19,16 @@ use maxpower_motion_sdk::{
     PoseSchemaId, RecordingOutputAdapter, ReferenceComparisonKind, SessionConfig,
     SetExecutionContext, SetIntent, SubjectPolicy, TimestampUnit, TraceNodeKind,
     VideoFrameContract, VideoRecognitionContext, WorkoutAssessmentContext,
+    bind_runtime_profile_to_action_plan, current_action_motion_assessment_profiles_v12,
     current_bodyweight_assessment_profiles_v1, current_cable_assessment_profiles_v1,
     current_dual_dumbbell_assessment_profiles_v1, current_machine_assessment_profiles_v1,
     current_motion_assessment_catalog_v3, current_motion_assessment_catalog_v7,
     current_motion_assessment_catalog_v8, current_motion_assessment_catalog_v9,
     current_motion_assessment_catalog_v10, current_motion_assessment_catalog_v11,
     current_motion_assessment_catalog_v12, current_rigid_bar_assessment_profiles_v1,
-    equipment_fused_rigid_bar_assessment_profiles_v2, install_compiled_action_motion_semantics,
-    rigid_bar_track_supports_turnaround, wrist_constrained_rigid_bar_assessment_profiles_v3,
+    equipment_fused_rigid_bar_assessment_profiles_v2, install_action_motion_runtime_profile,
+    install_compiled_action_motion_semantics, rigid_bar_track_supports_turnaround,
+    wrist_constrained_rigid_bar_assessment_profiles_v3,
 };
 use serde::Serialize;
 
@@ -3576,7 +3578,7 @@ fn every_current_rigid_bar_context_produces_rep_quality_and_a_causal_trace() {
 
 #[test]
 fn v12_report_executes_the_bound_motion_plan_instead_of_wrist_proxy_semantics() {
-    let binding = wrist_constrained_rigid_bar_assessment_profiles_v3()
+    let binding = current_action_motion_assessment_profiles_v12()
         .into_iter()
         .find(|binding| {
             binding.action_id == "barbell_bench_press"
@@ -3646,9 +3648,10 @@ fn v12_report_executes_the_bound_motion_plan_instead_of_wrist_proxy_semantics() 
     assert!(
         assessment.features.iter().any(|feature| {
             feature.feature_id == "motion_relation:torso_support_stability"
-                && feature.status == maxpower_motion_sdk::MotionFeatureStatus::CannotJudge
+                && feature.status == maxpower_motion_sdk::MotionFeatureStatus::Observed
+                && feature.value.is_some()
         }),
-        "an unevaluated semantic relation is retained as typed cannot_judge, not invented as acceptable"
+        "the plan-declared segment-angle operator executes on canonical pose evidence"
     );
     let task_rule = report
         .trace
@@ -3754,19 +3757,27 @@ fn an_external_action_asset_runs_the_real_set_lifecycle_without_a_rust_action_br
             bundle_id: "asset_only_floor_press/front-oblique-right/v1".into(),
             leaf_action_id: "asset_only_floor_press".into(),
         });
-    install_compiled_action_motion_semantics(
-        &mut catalog,
-        "asset_only_floor_press/front-oblique-right/v1",
-        &plan,
-    );
-
-    let profile = wrist_constrained_rigid_bar_assessment_profiles_v3()
+    let mut profile = wrist_constrained_rigid_bar_assessment_profiles_v3()
         .into_iter()
         .find(|binding| {
             binding.action_id == "barbell_bench_press"
                 && binding.capture_view == AssessmentCaptureView::FrontObliqueRight
         })
         .expect("provider profile");
+    profile.action_id = "asset_only_floor_press".into();
+    profile.profile = bind_runtime_profile_to_action_plan(profile.profile, &plan);
+    install_action_motion_runtime_profile(
+        &mut catalog,
+        "asset_only_floor_press/front-oblique-right/v1",
+        &profile.profile,
+        &plan,
+    );
+    install_compiled_action_motion_semantics(
+        &mut catalog,
+        "asset_only_floor_press/front-oblique-right/v1",
+        &plan,
+    );
+
     let source_capture_id = "fixture:external-asset-lifecycle";
     let (packets, closure) = canonical_packets_for(&profile, source_capture_id);
     let mut engine = ExecutionAssessmentEngine::configure(

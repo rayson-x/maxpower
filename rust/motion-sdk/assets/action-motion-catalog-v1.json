@@ -10983,8 +10983,8 @@
           "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
         },
         {
-          "relationId": "knee_extension_relation",
-          "role": "stability_relation",
+          "relationId": "knee_extension_coordination",
+          "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
             {
@@ -11000,6 +11000,24 @@
             {
               "source": "left_ankle",
               "valueType": "point2d",
+              "unit": "normalized_image"
+            }
+          ],
+          "outputType": "scalar",
+          "unit": "radians",
+          "scope": "rep",
+          "required": false,
+          "identityDefining": false,
+          "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
+        },
+        {
+          "relationId": "torso_load_relation_stability",
+          "role": "stability_relation",
+          "operatorId": "segment_angle",
+          "inputs": [
+            {
+              "source": "shoulder_hip_axis",
+              "valueType": "segment2d",
               "unit": "normalized_image"
             }
           ],
@@ -11086,7 +11104,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "8c9363d9fa89c697"
+      "contentHash": "2cbc6dbec2034eed"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -11149,8 +11167,8 @@
           "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
         },
         {
-          "relationId": "knee_extension_relation",
-          "role": "stability_relation",
+          "relationId": "knee_extension_coordination",
+          "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
             {
@@ -11166,6 +11184,24 @@
             {
               "source": "left_ankle",
               "valueType": "point2d",
+              "unit": "normalized_image"
+            }
+          ],
+          "outputType": "scalar",
+          "unit": "radians",
+          "scope": "rep",
+          "required": false,
+          "identityDefining": false,
+          "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
+        },
+        {
+          "relationId": "torso_load_relation_stability",
+          "role": "stability_relation",
+          "operatorId": "segment_angle",
+          "inputs": [
+            {
+              "source": "shoulder_hip_axis",
+              "valueType": "segment2d",
               "unit": "normalized_image"
             }
           ],
@@ -11252,7 +11288,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "eb890fdf85bb57e8"
+      "contentHash": "baf95d2836fdb432"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -11315,8 +11351,8 @@
           "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
         },
         {
-          "relationId": "knee_extension_relation",
-          "role": "stability_relation",
+          "relationId": "knee_extension_coordination",
+          "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
             {
@@ -11332,6 +11368,24 @@
             {
               "source": "left_ankle",
               "valueType": "point2d",
+              "unit": "normalized_image"
+            }
+          ],
+          "outputType": "scalar",
+          "unit": "radians",
+          "scope": "rep",
+          "required": false,
+          "identityDefining": false,
+          "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
+        },
+        {
+          "relationId": "torso_load_relation_stability",
+          "role": "stability_relation",
+          "operatorId": "segment_angle",
+          "inputs": [
+            {
+              "source": "shoulder_hip_axis",
+              "valueType": "segment2d",
               "unit": "normalized_image"
             }
           ],
@@ -11418,7 +11472,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "a5c429af25420d26"
+      "contentHash": "0ac103ac15a77d4c"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -11481,8 +11535,8 @@
           "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
         },
         {
-          "relationId": "knee_extension_relation",
-          "role": "stability_relation",
+          "relationId": "knee_extension_coordination",
+          "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
             {
@@ -11498,6 +11552,24 @@
             {
               "source": "left_ankle",
               "valueType": "point2d",
+              "unit": "normalized_image"
+            }
+          ],
+          "outputType": "scalar",
+          "unit": "radians",
+          "scope": "rep",
+          "required": false,
+          "identityDefining": false,
+          "semanticStatement": "肩、髋、膝与负载的离地和锁定顺序；负载保持接近身体。"
+        },
+        {
+          "relationId": "torso_load_relation_stability",
+          "role": "stability_relation",
+          "operatorId": "segment_angle",
+          "inputs": [
+            {
+              "source": "shoulder_hip_axis",
+              "valueType": "segment2d",
               "unit": "normalized_image"
             }
           ],
@@ -11584,7 +11656,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "202c0837d9bb83a9"
+      "contentHash": "5a7cb70559d52ac3"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -11619,7 +11691,7 @@
           "semanticStatement": "髋屈伸主导负载下降与上升；躯干—大腿夹角显著变化。；膝角稳定、杠铃靠近腿部"
         },
         {
-          "relationId": "hip_extension_coordination",
+          "relationId": "hip_hinge_coordination",
           "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
@@ -11647,7 +11719,7 @@
           "semanticStatement": "髋、肩和负载反转一致；负载靠近腿部。"
         },
         {
-          "relationId": "knee_extension_relation",
+          "relationId": "knee_angle_stability",
           "role": "stability_relation",
           "operatorId": "joint_angle",
           "inputs": [
@@ -11750,7 +11822,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "180e35abfa1c240f"
+      "contentHash": "63b980348d779266"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -11785,7 +11857,7 @@
           "semanticStatement": "髋屈伸主导负载下降与上升；躯干—大腿夹角显著变化。；导轨路径，不套自由杠铃水平漂移规则"
         },
         {
-          "relationId": "hip_extension_coordination",
+          "relationId": "hip_hinge_coordination",
           "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
@@ -11813,7 +11885,7 @@
           "semanticStatement": "髋、肩和负载反转一致；负载靠近腿部。"
         },
         {
-          "relationId": "knee_extension_relation",
+          "relationId": "knee_angle_stability",
           "role": "stability_relation",
           "operatorId": "joint_angle",
           "inputs": [
@@ -11916,7 +11988,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "a430dbf79cc4bb0d"
+      "contentHash": "de51eb745bd8506c"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -11951,7 +12023,7 @@
           "semanticStatement": "髋屈伸主导负载下降与上升；躯干—大腿夹角显著变化。；左右负载独立但髋反转共识"
         },
         {
-          "relationId": "hip_extension_coordination",
+          "relationId": "hip_hinge_coordination",
           "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
@@ -11979,7 +12051,7 @@
           "semanticStatement": "髋、肩和负载反转一致；负载靠近腿部。"
         },
         {
-          "relationId": "knee_extension_relation",
+          "relationId": "knee_angle_stability",
           "role": "stability_relation",
           "operatorId": "joint_angle",
           "inputs": [
@@ -12082,7 +12154,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "c1ac890cde9ae7d0"
+      "contentHash": "3d4b473fba5bf4c5"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -12117,7 +12189,7 @@
           "semanticStatement": "髋屈伸主导负载下降与上升；躯干—大腿夹角显著变化。；支撑腿、游离腿和骨盆旋转必须追踪"
         },
         {
-          "relationId": "hip_extension_coordination",
+          "relationId": "hip_hinge_coordination",
           "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
@@ -12145,7 +12217,7 @@
           "semanticStatement": "髋、肩和负载反转一致；负载靠近腿部。"
         },
         {
-          "relationId": "knee_extension_relation",
+          "relationId": "knee_angle_stability",
           "role": "stability_relation",
           "operatorId": "joint_angle",
           "inputs": [
@@ -12248,7 +12320,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "3c3ca64667b0c9ec"
+      "contentHash": "5c9947c54b74a151"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",
@@ -12283,7 +12355,7 @@
           "semanticStatement": "髋屈伸主导负载下降与上升；躯干—大腿夹角显著变化。；拉索手柄相对髋的路径"
         },
         {
-          "relationId": "hip_extension_coordination",
+          "relationId": "hip_hinge_coordination",
           "role": "coordinated_motion",
           "operatorId": "joint_angle",
           "inputs": [
@@ -12311,7 +12383,7 @@
           "semanticStatement": "髋、肩和负载反转一致；负载靠近腿部。"
         },
         {
-          "relationId": "knee_extension_relation",
+          "relationId": "knee_angle_stability",
           "role": "stability_relation",
           "operatorId": "joint_angle",
           "inputs": [
@@ -12414,7 +12486,7 @@
         "rear_right_45"
       ],
       "admittedViews": [],
-      "contentHash": "c3a1010baf7c14fa"
+      "contentHash": "1c7470ab4e1905b1"
     },
     {
       "schemaVersion": "maxpower.action-motion-definition/v1",

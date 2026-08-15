@@ -158,9 +158,15 @@ function reviewedFamilyRoleSpecs(familyId) {
     roleSpec('torso_inclination_stability', 'stability_relation', 'segment_angle', [segment('shoulder_hip_axis')], 'radians'),
     roleSpec('shoulder_path_substitution', 'substitution_guard', 'point_displacement', [point('shoulder_midpoint')], 'local_scale_ratio'),
   ];
-  if (['M11', 'M12'].includes(familyId)) return [
+  if (familyId === 'M11') return [
     roleSpec('hip_extension_coordination', 'coordinated_motion', 'joint_angle', hip(), 'radians'),
-    roleSpec('knee_extension_relation', 'stability_relation', 'joint_angle', knee(), 'radians'),
+    roleSpec('knee_extension_coordination', 'coordinated_motion', 'joint_angle', knee(), 'radians'),
+    roleSpec('torso_load_relation_stability', 'stability_relation', 'segment_angle', [segment('shoulder_hip_axis')], 'radians'),
+    roleSpec('shoulder_hip_timing_substitution', 'substitution_guard', 'relative_distance', [point('shoulder_midpoint'), point('hip_midpoint')], 'local_scale_ratio'),
+  ];
+  if (familyId === 'M12') return [
+    roleSpec('hip_hinge_coordination', 'coordinated_motion', 'joint_angle', hip(), 'radians'),
+    roleSpec('knee_angle_stability', 'stability_relation', 'joint_angle', knee(), 'radians'),
     roleSpec('shoulder_hip_timing_substitution', 'substitution_guard', 'relative_distance', [point('shoulder_midpoint'), point('hip_midpoint')], 'local_scale_ratio'),
   ];
   if (['M13', 'M14'].includes(familyId)) return [
@@ -247,9 +253,14 @@ const definitions = leafRows.map((row) => {
     executableLeaf: true,
     relations: [
       relation('task_primary', 'task_primary', `${family.required_motion ?? ''}；${override.trim()}`, true, true, sourceName, familyId),
-      { ...familyRoleSpecs[0], semanticStatement: family.coordinated_motion ?? '' },
-      { ...familyRoleSpecs[1], semanticStatement: family.stability_relations ?? '' },
-      { ...familyRoleSpecs[2], semanticStatement: family.substitution_relations ?? '' },
+      ...familyRoleSpecs.map((spec) => ({
+        ...spec,
+        semanticStatement: spec.role === 'coordinated_motion'
+          ? (family.coordinated_motion ?? '')
+          : spec.role === 'stability_relation'
+            ? (family.stability_relations ?? '')
+            : (family.substitution_relations ?? ''),
+      })),
     ],
     tracks: [
       { trackId: 'task_primary_track', source: sourceName.replace('_center', ''), role: 'primary', required: true, identityDefining: true },

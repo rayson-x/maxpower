@@ -112,6 +112,10 @@ fn reviewed_catalog_materializes_all_248_complete_leaf_definitions() {
         relation.relation_id == "hip_extension_coordination"
             && relation.role == MotionRole::CoordinatedMotion
     }));
+    assert!(deadlift.relations.iter().any(|relation| {
+        relation.relation_id == "knee_extension_coordination"
+            && relation.role == MotionRole::CoordinatedMotion
+    }));
     assert_ne!(
         row.relations
             .iter()

@@ -901,6 +901,7 @@ struct PacketEvidenceSummary {
     local_state: String,
     channel_agreement: LocalChannelAgreement,
     equipment_observed: bool,
+    canonical_pose: Vec<crate::CanonicalLandmark>,
 }
 
 struct ActiveSet {
@@ -1485,6 +1486,7 @@ impl ExecutionAssessmentEngine {
             local_state,
             channel_agreement: packet.local_motion_coordinate.channel_agreement,
             equipment_observed,
+            canonical_pose: packet.canonical.clone(),
         });
         Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
     }
@@ -1495,8 +1497,35 @@ impl ExecutionAssessmentEngine {
             .as_mut()
             .expect("Rep provenance validated against an active set");
         debug_assert!(active.rep_ids.insert(rep.rep_id));
-        let rep_ref = rep_reference(&rep, subject_epoch);
-        let (features, range_value) = feature_facts(active, &rep);
+        let mut rep_ref = rep_reference(&rep, subject_epoch);
+        let (mut features, range_value) = feature_facts(active, &rep, subject_epoch);
+        let required_primary_observed = active.motion_plan.as_ref().is_none_or(|plan| {
+            plan.relations
+                .iter()
+                .filter(|relation| {
+                    relation.role == crate::MotionRole::TaskPrimary
+                        && relation.judgeability == crate::FeatureJudgeability::RequiredForRep
+                })
+                .all(|relation| {
+                    features.iter().any(|feature| {
+                        feature.feature_id == format!("motion_relation:{}", relation.relation_id)
+                            && feature.status == MotionFeatureStatus::Observed
+                            && feature.value.is_some()
+                    })
+                })
+        });
+        if rep.disposition == RepDisposition::Confirmed && !required_primary_observed {
+            rep_ref.disposition = "needs_review".into();
+            if let Some(disposition) = features
+                .iter_mut()
+                .find(|feature| feature.feature_id == "rep_disposition")
+            {
+                disposition.categorical_value = Some("needsreview".into());
+                disposition
+                    .provenance
+                    .push("action_observation_plan:required_task_primary_unavailable".into());
+            }
+        }
         let load_unit = declared_load_unit(&active.context);
         let comparisons = compare_features(
             &features,
@@ -1594,7 +1623,7 @@ impl ExecutionAssessmentEngine {
         }
         active.reps.push(rep_ref.clone());
         active.rep_assessments.push(SealedRepAssessment {
-            rep: rep_ref,
+            rep: rep_ref.clone(),
             features,
             comparisons,
             dimension_findings: evaluated_rules
@@ -1605,12 +1634,13 @@ impl ExecutionAssessmentEngine {
         });
         // Reference policy is compare-before-update: this Rep was evaluated
         // against only the prior set prefix and becomes reference afterwards.
-        let range_is_observed = active.rep_assessments.last().is_some_and(|assessment| {
-            assessment.features.iter().any(|feature| {
-                feature.feature_id == active.program.range_feature_id
-                    && feature.status == MotionFeatureStatus::Observed
-            })
-        });
+        let range_is_observed = rep_ref.disposition == "confirmed"
+            && active.rep_assessments.last().is_some_and(|assessment| {
+                assessment.features.iter().any(|feature| {
+                    feature.feature_id == active.program.range_feature_id
+                        && feature.status == MotionFeatureStatus::Observed
+                })
+            });
         if let Some(value) = range_value.filter(|_| range_is_observed) {
             active.prefix_range_values.push(ReferenceSample {
                 value,
@@ -2235,8 +2265,16 @@ fn compile_action_motion_plans(
             plan.rep_boundary.turnaround.as_str(),
             plan.rep_boundary.return_boundary.as_str(),
         ];
-        let semantic_conflict = recognition.content.get("repBoundary")
-            != Some(&serde_json::to_value(&plan.rep_boundary).expect("serializable boundary"))
+        let runtime_profile_conflict = plan.capability
+            == crate::ActionPlanCapability::FullExecutable
+            && recognition
+                .content
+                .get("runtimeMotionPlanHash")
+                .and_then(serde_json::Value::as_str)
+                != Some(plan.plan_hash.as_str());
+        let semantic_conflict = runtime_profile_conflict
+            || recognition.content.get("repBoundary")
+                != Some(&serde_json::to_value(&plan.rep_boundary).expect("serializable boundary"))
             || execution.content.get("phaseOrder") != Some(&serde_json::json!(expected_phases))
             || execution.content.get("taskEndpoints")
                 != Some(&serde_json::json!(expected_endpoints))
@@ -3212,6 +3250,197 @@ fn plan_primary_trajectory_metrics(
     )
 }
 
+fn measured_pose_point(
+    canonical: &[crate::CanonicalLandmark],
+    source: &str,
+) -> Option<([f32; 2], f32, f32)> {
+    let landmark = |index: usize| {
+        let value = canonical.get(index)?;
+        (value.source == crate::LandmarkSource::Measured && value.canonical_confidence >= 0.5)
+            .then_some((
+                [value.x?, value.y?],
+                value.canonical_confidence,
+                value.uncertainty.unwrap_or(0.0),
+            ))
+    };
+    let midpoint = |left: usize, right: usize| {
+        let (left, left_confidence, left_uncertainty) = landmark(left)?;
+        let (right, right_confidence, right_uncertainty) = landmark(right)?;
+        Some((
+            [(left[0] + right[0]) * 0.5, (left[1] + right[1]) * 0.5],
+            left_confidence.min(right_confidence),
+            left_uncertainty.max(right_uncertainty),
+        ))
+    };
+    match source {
+        "left_shoulder" => landmark(5),
+        "right_shoulder" => landmark(6),
+        "left_elbow" => landmark(7),
+        "right_elbow" => landmark(8),
+        "left_wrist" => landmark(9),
+        "right_wrist" => landmark(10),
+        "left_hip" => landmark(11),
+        "right_hip" => landmark(12),
+        "left_knee" => landmark(13),
+        "right_knee" => landmark(14),
+        "left_ankle" => landmark(15),
+        "right_ankle" => landmark(16),
+        "shoulder_midpoint" => midpoint(5, 6),
+        "hip_midpoint" => midpoint(11, 12),
+        _ => None,
+    }
+}
+
+fn measured_pose_segment(
+    canonical: &[crate::CanonicalLandmark],
+    source: &str,
+) -> Option<([f32; 2], [f32; 2], f32, f32)> {
+    let (from, to) = match source {
+        "shoulder_axis" => ("left_shoulder", "right_shoulder"),
+        "hip_axis" => ("left_hip", "right_hip"),
+        "upper_arm" => ("left_shoulder", "left_elbow"),
+        "thigh" => ("left_hip", "left_knee"),
+        "shin" => ("left_knee", "left_ankle"),
+        "shoulder_hip_axis" => ("shoulder_midpoint", "hip_midpoint"),
+        _ => return None,
+    };
+    let (from, from_confidence, from_uncertainty) = measured_pose_point(canonical, from)?;
+    let (to, to_confidence, to_uncertainty) = measured_pose_point(canonical, to)?;
+    Some((
+        from,
+        to,
+        from_confidence.min(to_confidence),
+        from_uncertainty.max(to_uncertainty),
+    ))
+}
+
+fn body_scale(canonical: &[crate::CanonicalLandmark]) -> Option<f32> {
+    let (left, _, _) = measured_pose_point(canonical, "left_shoulder")?;
+    let (right, _, _) = measured_pose_point(canonical, "right_shoulder")?;
+    let shoulder_span = ((left[0] - right[0]).powi(2) + (left[1] - right[1]).powi(2)).sqrt();
+    (shoulder_span > f32::EPSILON).then_some(shoulder_span)
+}
+
+fn angle_at(first: [f32; 2], joint: [f32; 2], third: [f32; 2]) -> Option<f32> {
+    let a = [first[0] - joint[0], first[1] - joint[1]];
+    let b = [third[0] - joint[0], third[1] - joint[1]];
+    let denominator = (a[0].hypot(a[1])) * (b[0].hypot(b[1]));
+    (denominator > f32::EPSILON).then(|| {
+        ((a[0] * b[0] + a[1] * b[1]) / denominator)
+            .clamp(-1.0, 1.0)
+            .acos()
+    })
+}
+
+fn pose_relation_metrics(
+    active: &ActiveSet,
+    rep: &SealedRep,
+    subject_epoch: u64,
+    relation: &crate::CompiledMotionRelation,
+) -> (Option<f32>, f32, f32, f32) {
+    let packets = active
+        .packets
+        .iter()
+        .filter(|packet| {
+            packet.subject_epoch == subject_epoch
+                && packet.frame_id >= rep.start_frame_id
+                && packet.frame_id <= rep.end_frame_id
+        })
+        .collect::<Vec<_>>();
+    if packets.is_empty() {
+        return (None, 0.0, 0.0, 1.0);
+    }
+    let mut scalar_values = Vec::new();
+    let mut point_values = Vec::new();
+    let mut confidences = Vec::new();
+    let mut uncertainties = Vec::new();
+    for packet in &packets {
+        let canonical = packet.canonical_pose.as_slice();
+        let observation = match relation.operator_id.as_str() {
+            "point_displacement" => relation.inputs.first().and_then(|input| {
+                let (point, confidence, uncertainty) =
+                    measured_pose_point(canonical, &input.source)?;
+                let scale = body_scale(canonical)?;
+                Some((
+                    None,
+                    Some([point[0] / scale, point[1] / scale]),
+                    confidence,
+                    uncertainty,
+                ))
+            }),
+            "segment_angle" => relation.inputs.first().and_then(|input| {
+                let (from, to, confidence, uncertainty) =
+                    measured_pose_segment(canonical, &input.source)?;
+                Some((
+                    Some((to[1] - from[1]).atan2(to[0] - from[0])),
+                    None,
+                    confidence,
+                    uncertainty,
+                ))
+            }),
+            "joint_angle" => (relation.inputs.len() == 3).then_some(()).and_then(|_| {
+                let (first, first_confidence, first_uncertainty) =
+                    measured_pose_point(canonical, &relation.inputs[0].source)?;
+                let (joint, joint_confidence, joint_uncertainty) =
+                    measured_pose_point(canonical, &relation.inputs[1].source)?;
+                let (third, third_confidence, third_uncertainty) =
+                    measured_pose_point(canonical, &relation.inputs[2].source)?;
+                Some((
+                    Some(angle_at(first, joint, third)?),
+                    None,
+                    first_confidence.min(joint_confidence).min(third_confidence),
+                    first_uncertainty
+                        .max(joint_uncertainty)
+                        .max(third_uncertainty),
+                ))
+            }),
+            "relative_distance" => (relation.inputs.len() == 2).then_some(()).and_then(|_| {
+                let (first, first_confidence, first_uncertainty) =
+                    measured_pose_point(canonical, &relation.inputs[0].source)?;
+                let (second, second_confidence, second_uncertainty) =
+                    measured_pose_point(canonical, &relation.inputs[1].source)?;
+                let scale = body_scale(canonical)?;
+                Some((
+                    Some(((first[0] - second[0]).hypot(first[1] - second[1])) / scale),
+                    None,
+                    first_confidence.min(second_confidence),
+                    first_uncertainty.max(second_uncertainty),
+                ))
+            }),
+            _ => None,
+        };
+        if let Some((scalar, point, confidence, uncertainty)) = observation {
+            if let Some(value) = scalar {
+                scalar_values.push(value);
+            }
+            if let Some(value) = point {
+                point_values.push(value);
+            }
+            confidences.push(confidence);
+            uncertainties.push(uncertainty);
+        }
+    }
+    let value = if let Some(first) = point_values.first().copied() {
+        point_values
+            .iter()
+            .map(|point| (point[0] - first[0]).hypot(point[1] - first[1]))
+            .reduce(f32::max)
+    } else if scalar_values.is_empty() {
+        None
+    } else {
+        Some(
+            scalar_values.iter().copied().reduce(f32::max).unwrap()
+                - scalar_values.iter().copied().reduce(f32::min).unwrap(),
+        )
+    };
+    (
+        value,
+        confidences.len() as f32 / packets.len() as f32,
+        confidences.into_iter().reduce(f32::min).unwrap_or(0.0),
+        uncertainties.into_iter().reduce(f32::max).unwrap_or(1.0),
+    )
+}
+
 fn trajectory_metrics(
     endpoints: Option<&crate::NormalizedRepEndpointEvidence>,
     channel: fn(&crate::LocalMotionCoordinateEvidence) -> Option<crate::LocalTrajectoryChannel>,
@@ -3235,7 +3464,11 @@ fn trajectory_metrics(
     )
 }
 
-fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>, Option<f32>) {
+fn feature_facts(
+    active: &ActiveSet,
+    rep: &SealedRep,
+    subject_epoch: u64,
+) -> (Vec<MotionFeatureFact>, Option<f32>) {
     let source_range = EvidenceSourceRange {
         source_capture_id: active.context.video_context.source_capture_id.clone(),
         start_frame_id: rep.start_frame_id,
@@ -3480,16 +3713,14 @@ fn feature_facts(active: &ActiveSet, rep: &SealedRep) -> (Vec<MotionFeatureFact>
     if let Some(plan) = active.motion_plan.as_ref() {
         for relation in &plan.relations {
             let feature_id = format!("motion_relation:{}", relation.relation_id);
-            let is_primary = relation.role == crate::MotionRole::TaskPrimary;
-            let (value, coverage, confidence, uncertainty) = if is_primary {
-                (
-                    range_value,
-                    trajectory_coverage,
-                    trajectory_confidence,
-                    trajectory_uncertainty,
-                )
-            } else {
-                (None, 0.0, 0.0, 1.0)
+            let (value, coverage, confidence, uncertainty) = match relation.operator_id.as_str() {
+                "equipment_axis_displacement" => (
+                    equipment_range,
+                    equipment_coverage,
+                    equipment_confidence,
+                    equipment_uncertainty,
+                ),
+                _ => pose_relation_metrics(active, rep, subject_epoch, relation),
             };
             facts.push(numeric_feature(
                 &feature_id,
@@ -6155,6 +6386,55 @@ pub fn current_motion_assessment_catalog_v11() -> ExecutionAssessmentBundleCatal
     catalog
 }
 
+/// Exact-context runtime profiles whose immutable identity includes the
+/// ActionObservationPlan hash. Hosts use this provider output for MotionSession
+/// whenever they select the v12 assessment catalog.
+pub fn current_action_motion_assessment_profiles_v12() -> Vec<RigidBarAssessmentProfileBinding> {
+    let motion_catalog = crate::reviewed_action_motion_catalog_v1()
+        .expect("embedded reviewed action-motion catalog must be valid");
+    let bindings: Vec<ActionMotionBundleBinding> = serde_json::from_slice(include_bytes!(
+        "../assets/current-context-motion-bindings-v12.json"
+    ))
+    .expect("embedded current-context motion bindings must be valid");
+    let leaves = bindings
+        .iter()
+        .map(|binding| (binding.bundle_id.as_str(), binding.leaf_action_id.as_str()))
+        .collect::<HashMap<_, _>>();
+    let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+    let rigid = wrist_constrained_rigid_bar_assessment_profiles_v3();
+    let families = current_cable_assessment_profiles_v1()
+        .into_iter()
+        .chain(current_machine_assessment_profiles_v1())
+        .chain(current_dual_dumbbell_assessment_profiles_v1())
+        .chain(current_bodyweight_assessment_profiles_v1())
+        .map(|binding| RigidBarAssessmentProfileBinding {
+            action_id: binding.action_id,
+            capture_view: binding.capture_view,
+            profile: binding.profile,
+            local_coordinate_strategy: binding.local_coordinate_strategy,
+        });
+    rigid
+        .into_iter()
+        .chain(families)
+        .filter_map(|mut binding| {
+            let bundle_id = format!(
+                "{}/{}/v1",
+                binding.action_id,
+                binding.capture_view.catalog_slug()
+            );
+            let leaf = leaves.get(bundle_id.as_str())?;
+            let definition = motion_catalog.definition(leaf)?;
+            let plan = compiler
+                .compile(definition, action_motion_view(binding.capture_view))
+                .ok()?;
+            (plan.capability == crate::ActionPlanCapability::FullExecutable).then(|| {
+                binding.profile = bind_runtime_profile_to_action_plan(binding.profile, &plan);
+                binding
+            })
+        })
+        .collect()
+}
+
 /// Unified action-semantics successor. Every existing exact context binds a
 /// reviewed leaf ActionMotionDefinition and must pass the generic exact-view
 /// compiler before an executable Bundle can be configured.
@@ -6172,6 +6452,19 @@ pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatal
         .map(|binding| (binding.bundle_id.as_str(), binding.leaf_action_id.as_str()))
         .collect::<HashMap<_, _>>();
     let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+    let runtime_profiles = current_action_motion_assessment_profiles_v12()
+        .into_iter()
+        .map(|binding| {
+            (
+                format!(
+                    "{}/{}/v1",
+                    binding.action_id,
+                    binding.capture_view.catalog_slug()
+                ),
+                binding.profile,
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let bundle_ids = catalog
         .bundles
         .iter()
@@ -6196,6 +6489,9 @@ pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatal
                 action_motion_view(bundle.exact_context.capture_view),
             )
             .expect("reviewed v12 binding resolves to a capability plan");
+        if let Some(profile) = runtime_profiles.get(&bundle_id) {
+            install_action_motion_runtime_profile(&mut catalog, &bundle_id, profile, &plan);
+        }
         install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
         let bundle = catalog
             .bundles
@@ -6305,6 +6601,63 @@ pub fn install_compiled_action_motion_semantics(
             _ => unreachable!("only semantic execution assets are bound"),
         }
     }
+    catalog.bundles[bundle_index] = catalog.bundles[bundle_index].clone().with_computed_hash();
+}
+
+/// Freezes one numeric RecognitionProfile to one compiled action plan. The
+/// plan hash becomes part of the profile identity and therefore of every
+/// MotionPacket/Rep emitted by MotionSession.
+pub fn bind_runtime_profile_to_action_plan(
+    mut profile: crate::ExerciseProfile,
+    plan: &crate::ActionObservationPlan,
+) -> crate::ExerciseProfile {
+    profile.identity = format!("{}/action-plan-{}", profile.identity, plan.plan_hash);
+    profile.content_hash = profile.computed_content_hash();
+    profile
+}
+
+/// Installs the exact plan-bound RecognitionProfile expected from upstream
+/// MotionSession. Assessment configuration and packet provenance then reject
+/// an unbound or differently bound profile before any conclusion is emitted.
+pub fn install_action_motion_runtime_profile(
+    catalog: &mut ExecutionAssessmentBundleCatalog,
+    bundle_id: &str,
+    profile: &crate::ExerciseProfile,
+    plan: &crate::ActionObservationPlan,
+) {
+    let bundle_index = catalog
+        .bundles
+        .iter()
+        .position(|bundle| bundle.bundle_id == bundle_id)
+        .expect("action-motion Bundle exists");
+    let asset_id = catalog.bundles[bundle_index]
+        .lineage
+        .recognition_profile
+        .id
+        .clone();
+    let asset = catalog
+        .installed_assets
+        .iter_mut()
+        .find(|asset| asset.id == asset_id && asset.kind == AssessmentAssetKind::RecognitionProfile)
+        .expect("recognition profile asset exists");
+    let content = asset
+        .content
+        .as_object_mut()
+        .expect("recognition profile content is an object");
+    content.insert(
+        "runtimeProfileIdentity".into(),
+        serde_json::json!(profile.identity),
+    );
+    content.insert(
+        "runtimeProfileHash".into(),
+        serde_json::json!(format!("{:016x}", profile.content_hash)),
+    );
+    content.insert(
+        "runtimeMotionPlanHash".into(),
+        serde_json::json!(plan.plan_hash),
+    );
+    *asset = asset.clone().with_computed_hash();
+    catalog.bundles[bundle_index].lineage.recognition_profile = asset.reference();
     catalog.bundles[bundle_index] = catalog.bundles[bundle_index].clone().with_computed_hash();
 }
 

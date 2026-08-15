@@ -10584,7 +10584,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/conventional_barbell_deadlift/v1",
-      "definitionHash": "8c9363d9fa89c697",
+      "definitionHash": "2cbc6dbec2034eed",
       "actionId": "conventional_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10607,7 +10607,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/conventional_barbell_deadlift/v1",
-      "definitionHash": "8c9363d9fa89c697",
+      "definitionHash": "2cbc6dbec2034eed",
       "actionId": "conventional_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10630,7 +10630,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/conventional_barbell_deadlift/v1",
-      "definitionHash": "8c9363d9fa89c697",
+      "definitionHash": "2cbc6dbec2034eed",
       "actionId": "conventional_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10653,7 +10653,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/conventional_barbell_deadlift/v1",
-      "definitionHash": "8c9363d9fa89c697",
+      "definitionHash": "2cbc6dbec2034eed",
       "actionId": "conventional_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10676,7 +10676,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/conventional_barbell_deadlift/v1",
-      "definitionHash": "8c9363d9fa89c697",
+      "definitionHash": "2cbc6dbec2034eed",
       "actionId": "conventional_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10699,7 +10699,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/conventional_barbell_deadlift/v1",
-      "definitionHash": "8c9363d9fa89c697",
+      "definitionHash": "2cbc6dbec2034eed",
       "actionId": "conventional_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10722,7 +10722,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/sumo_barbell_deadlift/v1",
-      "definitionHash": "eb890fdf85bb57e8",
+      "definitionHash": "baf95d2836fdb432",
       "actionId": "sumo_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10745,7 +10745,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/sumo_barbell_deadlift/v1",
-      "definitionHash": "eb890fdf85bb57e8",
+      "definitionHash": "baf95d2836fdb432",
       "actionId": "sumo_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10768,7 +10768,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/sumo_barbell_deadlift/v1",
-      "definitionHash": "eb890fdf85bb57e8",
+      "definitionHash": "baf95d2836fdb432",
       "actionId": "sumo_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10791,7 +10791,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/sumo_barbell_deadlift/v1",
-      "definitionHash": "eb890fdf85bb57e8",
+      "definitionHash": "baf95d2836fdb432",
       "actionId": "sumo_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10814,7 +10814,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/sumo_barbell_deadlift/v1",
-      "definitionHash": "eb890fdf85bb57e8",
+      "definitionHash": "baf95d2836fdb432",
       "actionId": "sumo_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10837,7 +10837,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/sumo_barbell_deadlift/v1",
-      "definitionHash": "eb890fdf85bb57e8",
+      "definitionHash": "baf95d2836fdb432",
       "actionId": "sumo_barbell_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10860,7 +10860,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/trap_bar_deadlift/v1",
-      "definitionHash": "a5c429af25420d26",
+      "definitionHash": "0ac103ac15a77d4c",
       "actionId": "trap_bar_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10883,7 +10883,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/trap_bar_deadlift/v1",
-      "definitionHash": "a5c429af25420d26",
+      "definitionHash": "0ac103ac15a77d4c",
       "actionId": "trap_bar_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10906,7 +10906,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/trap_bar_deadlift/v1",
-      "definitionHash": "a5c429af25420d26",
+      "definitionHash": "0ac103ac15a77d4c",
       "actionId": "trap_bar_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10929,7 +10929,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/trap_bar_deadlift/v1",
-      "definitionHash": "a5c429af25420d26",
+      "definitionHash": "0ac103ac15a77d4c",
       "actionId": "trap_bar_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10952,7 +10952,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/trap_bar_deadlift/v1",
-      "definitionHash": "a5c429af25420d26",
+      "definitionHash": "0ac103ac15a77d4c",
       "actionId": "trap_bar_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10975,7 +10975,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/trap_bar_deadlift/v1",
-      "definitionHash": "a5c429af25420d26",
+      "definitionHash": "0ac103ac15a77d4c",
       "actionId": "trap_bar_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -10998,7 +10998,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_machine_deadlift/v1",
-      "definitionHash": "202c0837d9bb83a9",
+      "definitionHash": "5a7cb70559d52ac3",
       "actionId": "smith_machine_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -11021,7 +11021,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_machine_deadlift/v1",
-      "definitionHash": "202c0837d9bb83a9",
+      "definitionHash": "5a7cb70559d52ac3",
       "actionId": "smith_machine_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -11044,7 +11044,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_machine_deadlift/v1",
-      "definitionHash": "202c0837d9bb83a9",
+      "definitionHash": "5a7cb70559d52ac3",
       "actionId": "smith_machine_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -11067,7 +11067,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_machine_deadlift/v1",
-      "definitionHash": "202c0837d9bb83a9",
+      "definitionHash": "5a7cb70559d52ac3",
       "actionId": "smith_machine_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -11090,7 +11090,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_machine_deadlift/v1",
-      "definitionHash": "202c0837d9bb83a9",
+      "definitionHash": "5a7cb70559d52ac3",
       "actionId": "smith_machine_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -11113,7 +11113,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_machine_deadlift/v1",
-      "definitionHash": "202c0837d9bb83a9",
+      "definitionHash": "5a7cb70559d52ac3",
       "actionId": "smith_machine_deadlift",
       "exactIdentity": {
         "movementFamily": "M11",
@@ -11136,7 +11136,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/barbell_romanian_deadlift/v1",
-      "definitionHash": "180e35abfa1c240f",
+      "definitionHash": "63b980348d779266",
       "actionId": "barbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11159,7 +11159,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/barbell_romanian_deadlift/v1",
-      "definitionHash": "180e35abfa1c240f",
+      "definitionHash": "63b980348d779266",
       "actionId": "barbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11182,7 +11182,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/barbell_romanian_deadlift/v1",
-      "definitionHash": "180e35abfa1c240f",
+      "definitionHash": "63b980348d779266",
       "actionId": "barbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11205,7 +11205,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/barbell_romanian_deadlift/v1",
-      "definitionHash": "180e35abfa1c240f",
+      "definitionHash": "63b980348d779266",
       "actionId": "barbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11228,7 +11228,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/barbell_romanian_deadlift/v1",
-      "definitionHash": "180e35abfa1c240f",
+      "definitionHash": "63b980348d779266",
       "actionId": "barbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11251,7 +11251,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/barbell_romanian_deadlift/v1",
-      "definitionHash": "180e35abfa1c240f",
+      "definitionHash": "63b980348d779266",
       "actionId": "barbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11274,7 +11274,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_romanian_deadlift/v1",
-      "definitionHash": "a430dbf79cc4bb0d",
+      "definitionHash": "de51eb745bd8506c",
       "actionId": "smith_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11297,7 +11297,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_romanian_deadlift/v1",
-      "definitionHash": "a430dbf79cc4bb0d",
+      "definitionHash": "de51eb745bd8506c",
       "actionId": "smith_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11320,7 +11320,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_romanian_deadlift/v1",
-      "definitionHash": "a430dbf79cc4bb0d",
+      "definitionHash": "de51eb745bd8506c",
       "actionId": "smith_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11343,7 +11343,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_romanian_deadlift/v1",
-      "definitionHash": "a430dbf79cc4bb0d",
+      "definitionHash": "de51eb745bd8506c",
       "actionId": "smith_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11366,7 +11366,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_romanian_deadlift/v1",
-      "definitionHash": "a430dbf79cc4bb0d",
+      "definitionHash": "de51eb745bd8506c",
       "actionId": "smith_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11389,7 +11389,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/smith_romanian_deadlift/v1",
-      "definitionHash": "a430dbf79cc4bb0d",
+      "definitionHash": "de51eb745bd8506c",
       "actionId": "smith_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11412,7 +11412,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/double_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "c1ac890cde9ae7d0",
+      "definitionHash": "3d4b473fba5bf4c5",
       "actionId": "double_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11435,7 +11435,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/double_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "c1ac890cde9ae7d0",
+      "definitionHash": "3d4b473fba5bf4c5",
       "actionId": "double_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11458,7 +11458,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/double_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "c1ac890cde9ae7d0",
+      "definitionHash": "3d4b473fba5bf4c5",
       "actionId": "double_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11481,7 +11481,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/double_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "c1ac890cde9ae7d0",
+      "definitionHash": "3d4b473fba5bf4c5",
       "actionId": "double_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11504,7 +11504,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/double_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "c1ac890cde9ae7d0",
+      "definitionHash": "3d4b473fba5bf4c5",
       "actionId": "double_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11527,7 +11527,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/double_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "c1ac890cde9ae7d0",
+      "definitionHash": "3d4b473fba5bf4c5",
       "actionId": "double_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11550,7 +11550,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/single_leg_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "3c3ca64667b0c9ec",
+      "definitionHash": "5c9947c54b74a151",
       "actionId": "single_leg_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11573,7 +11573,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/single_leg_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "3c3ca64667b0c9ec",
+      "definitionHash": "5c9947c54b74a151",
       "actionId": "single_leg_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11596,7 +11596,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/single_leg_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "3c3ca64667b0c9ec",
+      "definitionHash": "5c9947c54b74a151",
       "actionId": "single_leg_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11619,7 +11619,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/single_leg_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "3c3ca64667b0c9ec",
+      "definitionHash": "5c9947c54b74a151",
       "actionId": "single_leg_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11642,7 +11642,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/single_leg_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "3c3ca64667b0c9ec",
+      "definitionHash": "5c9947c54b74a151",
       "actionId": "single_leg_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11665,7 +11665,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/single_leg_dumbbell_romanian_deadlift/v1",
-      "definitionHash": "3c3ca64667b0c9ec",
+      "definitionHash": "5c9947c54b74a151",
       "actionId": "single_leg_dumbbell_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11688,7 +11688,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/cable_romanian_deadlift/v1",
-      "definitionHash": "c3a1010baf7c14fa",
+      "definitionHash": "1c7470ab4e1905b1",
       "actionId": "cable_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11711,7 +11711,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/cable_romanian_deadlift/v1",
-      "definitionHash": "c3a1010baf7c14fa",
+      "definitionHash": "1c7470ab4e1905b1",
       "actionId": "cable_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11734,7 +11734,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/cable_romanian_deadlift/v1",
-      "definitionHash": "c3a1010baf7c14fa",
+      "definitionHash": "1c7470ab4e1905b1",
       "actionId": "cable_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11757,7 +11757,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/cable_romanian_deadlift/v1",
-      "definitionHash": "c3a1010baf7c14fa",
+      "definitionHash": "1c7470ab4e1905b1",
       "actionId": "cable_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11780,7 +11780,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/cable_romanian_deadlift/v1",
-      "definitionHash": "c3a1010baf7c14fa",
+      "definitionHash": "1c7470ab4e1905b1",
       "actionId": "cable_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",
@@ -11803,7 +11803,7 @@
     },
     {
       "definitionId": "maxpower/action-motion/cable_romanian_deadlift/v1",
-      "definitionHash": "c3a1010baf7c14fa",
+      "definitionHash": "1c7470ab4e1905b1",
       "actionId": "cable_romanian_deadlift",
       "exactIdentity": {
         "movementFamily": "M12",

@@ -5,9 +5,9 @@
   "definitionAsset": {
     "catalogId": "maxpower/reviewed-action-motion-leaves/v1",
     "leafCount": 248,
-    "sha256": "fa3efe23cc47807f2ead59ea65de633b461369cafb9792d6dab28415c259c8e5",
+    "sha256": "7059c4c791501afc4a4932ddbd49c1ceee1eff03993f68fe9f89f979e9371bf4",
     "reviewedFamilyCount": 30,
-    "distinctStructuredRelationGraphs": 45,
+    "distinctStructuredRelationGraphs": 46,
     "note": "Task, coordination, stability, and substitution roles are structured by reviewed movement family; prose is explanatory and is not the executable relation itself."
   },
   "planResolution": {
@@ -19,7 +19,7 @@
   },
   "exactLeafViewMatrix": {
     "path": "rust/motion-sdk/assets/action-motion-capability-matrix-v1.json",
-    "sha256": "f75b737ec63c31726ee081f822821c7bf8e41249b7aef7161aa507a35ff4e907",
+    "sha256": "d5c3456d4bfb7d0e0e24b1bfe197eed43b293d46df295d499f9fceb07a92563f",
     "recordCount": 1525,
     "fullPlanCompiled": 11,
     "unsupportedEquipmentCatalogOnly": 1030,
