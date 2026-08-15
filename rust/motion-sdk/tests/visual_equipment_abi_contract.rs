@@ -3,8 +3,9 @@ use maxpower_motion_sdk::web_abi::{
     motion_sdk_close, motion_sdk_commit_candidate, motion_sdk_copy_packet,
     motion_sdk_copy_visual_equipment_luma, motion_sdk_detect_barbell_axis,
     motion_sdk_detect_visual_equipment, motion_sdk_packet_len, motion_sdk_process_multi,
-    motion_sdk_reset, motion_sdk_set_landmark, motion_sdk_set_pose_schema,
-    motion_sdk_visual_barbell_axis_number, motion_sdk_visual_barbell_axis_source,
+    motion_sdk_reset, motion_sdk_select_visual_action_context, motion_sdk_set_landmark,
+    motion_sdk_set_pose_schema, motion_sdk_set_profile, motion_sdk_visual_barbell_axis_number,
+    motion_sdk_visual_barbell_axis_source,
 };
 use std::sync::Mutex;
 
@@ -28,12 +29,19 @@ fn visual_equipment_abi_rejects_blazepose_before_allocating_a_coco_indexed_frame
 }
 
 #[test]
-fn shared_visual_abi_runs_dumbbell_and_machine_pixels_without_host_geometry() {
+fn shared_visual_abi_runs_the_action_plan_bound_dumbbell_provider_without_host_geometry() {
     let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
-    for (mode, expected_kind) in [(2, 2_u8), (3, 3_u8)] {
+    for (mode, expected_kind) in [(2, 2_u8)] {
         assert_eq!(motion_sdk_close(), 0);
         assert_eq!(motion_sdk_reset(320, 240, 1), 0);
         assert_eq!(motion_sdk_set_pose_schema(1), 0);
+        assert_eq!(motion_sdk_set_profile(115), 0);
+        let action = b"seated_dumbbell_shoulder_press";
+        // SAFETY: `action` is a stable UTF-8 byte slice for this call.
+        assert_eq!(
+            unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+            0,
+        );
         submit_compact_frame(1_000, mode, &vec![28; 320 * 240]);
 
         let mut object = vec![28; 320 * 240];
@@ -99,6 +107,13 @@ fn native_visual_abi_runs_the_shared_detector_before_the_same_multi_frame() {
     let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
     assert_eq!(motion_sdk_reset(WIDTH as u32, HEIGHT as u32, 1), 0);
     assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    assert_eq!(motion_sdk_set_profile(109), 0);
+    let action = b"flat_barbell_bench_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+        0,
+    );
     assert_eq!(motion_sdk_begin_multi(1_000, 0), 0);
     assert_eq!(
         motion_sdk_begin_candidate(1, 0, 0.2, 0.15, 0.6, 0.82, 0.3, 0.3, 0.3, 26),
@@ -131,6 +146,60 @@ fn native_visual_abi_runs_the_shared_detector_before_the_same_multi_frame() {
     assert_eq!(motion_sdk_process_multi(), 0);
     assert_eq!(motion_sdk_visual_barbell_axis_source(), 1);
     assert!((motion_sdk_visual_barbell_axis_number(4) - 0.42).abs() < 0.025);
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
+fn caller_mode_cannot_replace_the_provider_selected_by_rust() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(320, 240, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    assert_eq!(motion_sdk_set_profile(115), 0);
+    let action = b"seated_dumbbell_shoulder_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+        0,
+    );
+    assert_eq!(motion_sdk_begin_multi(1_000, 0), 0);
+    assert_eq!(
+        motion_sdk_begin_visual_equipment_frame(320, 240, 320 * 240),
+        0
+    );
+    let luma = vec![28; 320 * 240];
+    // SAFETY: `luma` remains alive and readable for the call.
+    assert_eq!(
+        unsafe { motion_sdk_copy_visual_equipment_luma(luma.as_ptr(), luma.len()) },
+        0
+    );
+    assert_eq!(motion_sdk_detect_visual_equipment(3), -4);
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
+fn action_context_compiles_the_visual_provider_in_rust_before_pixels_arrive() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(320, 240, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    let action = b"flat_barbell_bench_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for this call.
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+        0
+    );
+    assert_eq!(motion_sdk_begin_multi(1_000, 0), 0);
+    assert_eq!(
+        motion_sdk_begin_visual_equipment_frame(320, 240, 320 * 240),
+        0
+    );
+    let luma = vec![28; 320 * 240];
+    // SAFETY: `luma` remains alive and readable for the call.
+    assert_eq!(
+        unsafe { motion_sdk_copy_visual_equipment_luma(luma.as_ptr(), luma.len()) },
+        0
+    );
+    assert_eq!(motion_sdk_detect_visual_equipment(2), -4);
+    assert_eq!(motion_sdk_detect_visual_equipment(1), 0);
     assert_eq!(motion_sdk_close(), 0);
 }
 

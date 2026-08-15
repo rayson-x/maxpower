@@ -596,7 +596,7 @@ fn small_but_coherent_multi_joint_cycle_counts_with_range_feedback() {
 }
 
 #[test]
-fn micro_gap_stays_confirmed_meaningful_gap_is_reviewed_and_long_gap_aborts() {
+fn every_bounded_weak_gap_is_reviewed_with_a_typed_frame_range_and_long_gap_aborts() {
     let wrist_y = [0.20, 0.30, 0.50, 0.70, 0.78, 0.70, 0.55, 0.35, 0.21];
     let elbow_y = [0.30, 0.35, 0.45, 0.55, 0.61, 0.57, 0.49, 0.37, 0.30];
     let mut frames = rep_frames(&wrist_y, &elbow_y);
@@ -609,8 +609,21 @@ fn micro_gap_stays_confirmed_meaningful_gap_is_reviewed_and_long_gap_aborts() {
         .flat_map(|packet| &packet.completed_reps)
         .collect::<Vec<_>>();
     assert_eq!(completed.len(), 1);
-    assert!(!completed[0].recovered_across_gap);
-    assert_eq!(completed[0].disposition, RepDisposition::Confirmed);
+    assert!(completed[0].recovered_across_gap);
+    assert_eq!(completed[0].disposition, RepDisposition::NeedsReview);
+    assert_eq!(completed[0].evidence_incidents.len(), 1);
+    assert_eq!(
+        completed[0].evidence_incidents[0].reason,
+        RepEvidenceReason::TransitionEvidenceWeak
+    );
+    assert!(
+        completed[0].evidence_incidents[0].end_frame_id
+            >= completed[0].evidence_incidents[0].start_frame_id
+    );
+    assert_eq!(
+        completed[0].evidence_incidents[0].source_lineage,
+        "measured_pose_or_local_signal"
+    );
 
     let mut review_frames = rep_frames(&wrist_y, &elbow_y);
     for index in [15, 16, 13, 14] {

@@ -48,9 +48,9 @@ after Ticket 02–05 must retain this distinction explicitly.
 
 ## Blocker and split
 
-The report schema/aggregation implementation is available, but its required
-frozen video input may not be consumed: the training-data governance audit
-fails because the registered v0.1 baseline report asset is missing. Ticket 08
-owns repair of that external governed dependency and the only permitted
-numeric v0.1b replay claim. Quality-rule calibration is independently tracked
-by Ticket 09.
+The report generator now runs the governance audit before it reads input and
+writes only to a local-private governance workspace. Its required frozen video
+input may not be consumed because the audit fails: the registered v0.1
+baseline-report asset is missing. Ticket 08 owns that external governed
+dependency; Ticket 10 owns the still-missing action×view funnel schema. Only
+after both tickets complete may this ticket make a numeric v0.1b replay claim.

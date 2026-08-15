@@ -1040,6 +1040,7 @@ impl ExerciseProfile {
         if self.state_machine_id != "ready-effort-peak-return/v1"
             && self.state_machine_id != "cycle-aligned-ready-effort-peak-return/v1"
             && !valid_cycle_aligned_dwell_state_machine(&self.state_machine_id)
+            && !valid_action_plan_topology_state_machine(&self.state_machine_id)
             && self.state_machine_id != "cycle-aligned-equipment-turnaround-down-fusion/v1"
             && self.state_machine_id != "cycle-aligned-equipment-turnaround-up-fusion/v1"
             && self.state_machine_id != "median-100ms-ready-effort-peak-return/v1"
@@ -1110,6 +1111,7 @@ impl ExerciseProfile {
 
     fn uses_alternating_state_graph(&self) -> bool {
         self.state_machine_id == "alternating-ready-effort-return/v1"
+            || action_plan_topology_id(&self.state_machine_id) == Some("alternating_cycle/v1")
     }
 
     fn uses_barbell_axis_state_graph(&self) -> bool {
@@ -1133,6 +1135,7 @@ impl ExerciseProfile {
     fn uses_cycle_aligned_boundaries(&self) -> bool {
         self.state_machine_id == "cycle-aligned-ready-effort-peak-return/v1"
             || valid_cycle_aligned_dwell_state_machine(&self.state_machine_id)
+            || valid_action_plan_topology_state_machine(&self.state_machine_id)
             || self.uses_equipment_turnaround_fusion()
             || self.state_machine_id.starts_with("cycle-aligned-median-")
             || self.state_machine_id.starts_with("stable-cycle-")
@@ -1163,7 +1166,9 @@ impl ExerciseProfile {
     }
 
     fn minimum_phase_dwell_ms(&self) -> u64 {
-        parse_cycle_aligned_dwell_ms(&self.state_machine_id).unwrap_or(CYCLE_ALIGNED_READY_DWELL_MS)
+        parse_cycle_aligned_dwell_ms(&self.state_machine_id)
+            .or_else(|| action_plan_topology_dwell_ms(&self.state_machine_id))
+            .unwrap_or(CYCLE_ALIGNED_READY_DWELL_MS)
     }
 
     fn signal_smoothing_ms(&self) -> Option<u64> {
@@ -1321,6 +1326,8 @@ const CYCLE_ALIGNED_READY_DWELL_MS: u64 = 500;
 
 const CYCLE_ALIGNED_DWELL_PREFIX: &str = "cycle-aligned-ready-effort-peak-return/dwell-";
 const CYCLE_ALIGNED_DWELL_SUFFIX: &str = "ms/v1";
+const ACTION_PLAN_TOPOLOGY_PREFIX: &str = "action-plan-topology/";
+const ACTION_PLAN_TOPOLOGY_DWELL_MARKER: &str = "/dwell-";
 
 fn parse_cycle_aligned_dwell_ms(state_machine_id: &str) -> Option<u64> {
     let value = state_machine_id
@@ -1333,6 +1340,57 @@ fn parse_cycle_aligned_dwell_ms(state_machine_id: &str) -> Option<u64> {
 
 fn valid_cycle_aligned_dwell_state_machine(state_machine_id: &str) -> bool {
     parse_cycle_aligned_dwell_ms(state_machine_id).is_some()
+}
+
+/// Builds the state-graph identity selected by an action asset.  The string is
+/// part of the frozen runtime profile hash, so a topology cannot silently
+/// collapse into the generic bilateral executor after plan compilation.
+pub(crate) fn action_plan_topology_state_machine_id(topology_id: &str, dwell_ms: u64) -> String {
+    format!("{ACTION_PLAN_TOPOLOGY_PREFIX}{topology_id}/dwell-{dwell_ms}ms/v1")
+}
+
+fn action_plan_topology_id(state_machine_id: &str) -> Option<&str> {
+    let value = state_machine_id.strip_prefix(ACTION_PLAN_TOPOLOGY_PREFIX)?;
+    let (topology_id, _dwell) = value.rsplit_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
+    topology_id.ends_with("/v1").then_some(topology_id)
+}
+
+fn action_plan_topology_dwell_ms(state_machine_id: &str) -> Option<u64> {
+    let value = state_machine_id.strip_prefix(ACTION_PLAN_TOPOLOGY_PREFIX)?;
+    let (_topology_id, dwell) = value.rsplit_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
+    let value = dwell.strip_suffix("ms/v1")?.parse::<u64>().ok()?;
+    (value > 0 && value <= 5_000).then_some(value)
+}
+
+fn valid_action_plan_topology_state_machine(state_machine_id: &str) -> bool {
+    matches!(
+        action_plan_topology_id(state_machine_id),
+        Some(
+            "bilateral_synchronous_cycle/v1"
+                | "independent_bilateral_cycle/v1"
+                | "unilateral_cycle/v1"
+                | "alternating_cycle/v1"
+                | "pose_primary_cycle/v1"
+        )
+    ) && action_plan_topology_dwell_ms(state_machine_id).is_some()
+}
+
+fn evidence_reason_source_lineage(reason: RepEvidenceReason) -> &'static str {
+    match reason {
+        RepEvidenceReason::CoordinateNotFrozen | RepEvidenceReason::CoordinateProvisional => {
+            "local_motion_coordinate"
+        }
+        RepEvidenceReason::SignalTemporarilyUnavailable
+        | RepEvidenceReason::TransitionEvidenceWeak => "measured_pose_or_local_signal",
+        RepEvidenceReason::IdentityRelationMissing
+        | RepEvidenceReason::ActionPrimaryUnavailable => "action_primary_relation",
+        RepEvidenceReason::EquipmentConsensusUnavailable
+        | RepEvidenceReason::EquipmentConsensusConflict => "subject_equipment_association",
+        RepEvidenceReason::LongContinuityLoss
+        | RepEvidenceReason::ShortContinuityRecovery
+        | RepEvidenceReason::SubjectChanged => "subject_continuity",
+        _ => "rep_topology",
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1591,6 +1649,15 @@ pub struct SealedRep {
     pub recovered_across_gap: bool,
     pub disposition: RepDisposition,
     pub evidence_reason: Option<RepEvidenceReason>,
+    /// Ordered runtime modules that actually participated in this Rep's
+    /// plan-bound calculation. Legacy profiles leave it empty; it is never a
+    /// decorative copy of an unexecuted catalog graph.
+    pub executed_algorithm_module_ids: Vec<String>,
+    /// Bounded weak-evidence incidents retained even when a complete cycle is
+    /// ultimately confirmed. This distinguishes a brief coordinate/signal
+    /// interruption from missing identity evidence and gives trace consumers
+    /// the causal frame range and source channel.
+    pub evidence_incidents: Vec<RepEvidenceIncident>,
     /// Descriptive observations about a coherent motion cycle. These never
     /// decide whether a movement exists: they explain how its measured path
     /// differs from the recognition profile so callers can give useful
@@ -1599,6 +1666,17 @@ pub struct SealedRep {
     /// Causal normalized facts captured at the three immutable Rep endpoints.
     /// This is additive shadow evidence; legacy profiles leave it absent.
     pub normalized_endpoints: Option<NormalizedRepEndpointEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepEvidenceIncident {
+    pub reason: RepEvidenceReason,
+    pub start_frame_id: u64,
+    pub end_frame_id: u64,
+    pub start_timestamp_ms: u64,
+    pub end_timestamp_ms: u64,
+    pub source_lineage: String,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -1623,7 +1701,8 @@ pub enum RepDisposition {
     Rejected,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RepEvidenceReason {
     ShortContinuityRecovery,
     LongContinuityLoss,
@@ -2772,6 +2851,7 @@ struct ActiveRep {
     /// It survives until sealing so callers can distinguish a weak transition
     /// from an actual missing identity relation.
     transient_evidence_reason: Option<RepEvidenceReason>,
+    evidence_incidents: Vec<RepEvidenceIncident>,
     active_signal: ActiveSignal,
 }
 
@@ -2834,6 +2914,70 @@ struct ActionRepFrame {
     local_coordinate: LocalMotionCoordinateEvidence,
 }
 
+/// Runtime dispatcher for the graph compiled from an exact action×view plan.
+/// It deliberately dispatches by the registered module category—not action
+/// name—and is installed with the `MotionSession` before any frame is
+/// accepted. A module graph is therefore an executable lifecycle contract,
+/// not report-only metadata.
+#[derive(Clone, Debug)]
+struct ActionExecutionPipeline {
+    module_ids: Vec<String>,
+    categories: HashSet<AlgorithmModuleCategory>,
+}
+
+impl ActionExecutionPipeline {
+    fn new(plan: &ActionObservationPlan) -> Result<Self, MotionError> {
+        let mut categories = HashSet::new();
+        let mut module_ids = Vec::with_capacity(plan.algorithm_modules.len());
+        for module in &plan.algorithm_modules {
+            if !categories.insert(module.category) {
+                return Err(MotionError::InvalidActionPlan(
+                    "compiled action plan contains duplicate execution stage",
+                ));
+            }
+            module_ids.push(module.module_id.clone());
+        }
+        for required in [
+            AlgorithmModuleCategory::PoseRelation,
+            AlgorithmModuleCategory::LocalCoordinate,
+            AlgorithmModuleCategory::RepTopology,
+            AlgorithmModuleCategory::CandidateAdmission,
+            AlgorithmModuleCategory::BoundaryRefinement,
+            AlgorithmModuleCategory::PostSealFeature,
+            AlgorithmModuleCategory::QualityRule,
+        ] {
+            if !categories.contains(&required) {
+                return Err(MotionError::InvalidActionPlan(
+                    "compiled action plan omits a required execution stage",
+                ));
+            }
+        }
+        let needs_equipment = plan.equipment_provider.is_some();
+        for required in [
+            AlgorithmModuleCategory::EquipmentObservation,
+            AlgorithmModuleCategory::EquipmentFusion,
+        ] {
+            if needs_equipment != categories.contains(&required) {
+                return Err(MotionError::InvalidActionPlan(
+                    "action plan equipment stages disagree with selected provider",
+                ));
+            }
+        }
+        Ok(Self {
+            module_ids,
+            categories,
+        })
+    }
+
+    fn runs(&self, category: AlgorithmModuleCategory) -> bool {
+        self.categories.contains(&category)
+    }
+
+    fn executed_module_ids(&self) -> Vec<String> {
+        self.module_ids.clone()
+    }
+}
+
 /// Final Rep admission owned by the compiled action plan. `RepEngine` may
 /// propose a temporally coherent candidate, but a plan-bound session emits a
 /// ConfirmedRep only when every identity-defining TaskPrimary relation has a
@@ -2842,6 +2986,7 @@ struct ActionRepFrame {
 /// without creating a second downstream Rep truth.
 struct ActionRepAuthority {
     plan: ActionObservationPlan,
+    pipeline: ActionExecutionPipeline,
     history: VecDeque<ActionRepFrame>,
 }
 
@@ -2859,8 +3004,10 @@ impl ActionRepAuthority {
                 "executable plan with required TaskPrimary is required",
             ));
         }
+        let pipeline = ActionExecutionPipeline::new(&plan)?;
         Ok(Self {
             plan,
+            pipeline,
             history: VecDeque::new(),
         })
     }
@@ -2895,7 +3042,8 @@ impl ActionRepAuthority {
         }
     }
 
-    fn admit(&self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
+    fn admit(&mut self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
+        rep.executed_algorithm_module_ids = self.pipeline.executed_module_ids();
         if rep.disposition != RepDisposition::Confirmed {
             return rep;
         }
@@ -2912,9 +3060,10 @@ impl ActionRepAuthority {
                 .try_for_each(|relation| self.validate_primary_relation(&rep, profile, relation))
         });
         match result {
-            Ok(()) => rep
-                .observation_findings
-                .push(RepObservationFinding::ActionPrimaryRelationSatisfied),
+            Ok(()) => {
+                rep.observation_findings
+                    .push(RepObservationFinding::ActionPrimaryRelationSatisfied);
+            }
             Err(reason) => {
                 rep.disposition = RepDisposition::Rejected;
                 rep.evidence_reason = Some(reason);
@@ -2924,6 +3073,9 @@ impl ActionRepAuthority {
     }
 
     fn validate_rep_consensus(&self, rep: &SealedRep) -> Result<(), RepEvidenceReason> {
+        if !self.pipeline.runs(AlgorithmModuleCategory::EquipmentFusion) {
+            return Ok(());
+        }
         let equipment_kind = self
             .plan
             .relations
@@ -3017,6 +3169,14 @@ impl ActionRepAuthority {
         enough
             .then_some(())
             .ok_or(RepEvidenceReason::EquipmentConsensusUnavailable)
+    }
+
+    fn runs(&self, category: AlgorithmModuleCategory) -> bool {
+        self.pipeline.runs(category)
+    }
+
+    fn has_equipment_provider(&self) -> bool {
+        self.plan.equipment_provider.is_some()
     }
 
     fn validate_primary_relation(
@@ -3426,6 +3586,8 @@ mod action_rep_authority_tests {
             recovered_across_gap: false,
             disposition: RepDisposition::Confirmed,
             evidence_reason: None,
+            executed_algorithm_module_ids: Vec::new(),
+            evidence_incidents: Vec::new(),
             observation_findings: Vec::new(),
             normalized_endpoints: Some(NormalizedRepEndpointEvidence {
                 coordinate_frame_id: 1,
@@ -3503,6 +3665,16 @@ mod action_rep_authority_tests {
             accepted
                 .observation_findings
                 .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
+        );
+        assert_eq!(
+            accepted.executed_algorithm_module_ids,
+            authority
+                .plan
+                .algorithm_modules
+                .iter()
+                .map(|module| module.module_id.clone())
+                .collect::<Vec<_>>(),
+            "a sealed plan-bound Rep must retain the modules that actually ran"
         );
 
         let reversed = authority.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
@@ -3998,6 +4170,8 @@ impl RepEngine {
             recovered_across_gap: active.recovered_across_gap,
             disposition,
             evidence_reason,
+            executed_algorithm_module_ids: Vec::new(),
+            evidence_incidents: active.evidence_incidents,
             observation_findings,
             normalized_endpoints,
         };
@@ -4244,6 +4418,8 @@ impl RepEngine {
             } else {
                 None
             },
+            executed_algorithm_module_ids: Vec::new(),
+            evidence_incidents: Vec::new(),
             observation_findings: findings,
             normalized_endpoints: candidate.normalized_endpoints,
         }
@@ -4271,17 +4447,26 @@ impl RepEngine {
             }
         }
         if target_state != TargetState::Locked {
-            return self.handle_gap(timestamp_ms, RepEvidenceReason::LongContinuityLoss);
+            return self.handle_gap(
+                frame_id,
+                timestamp_ms,
+                RepEvidenceReason::LongContinuityLoss,
+            );
         }
         if self.profile.uses_local_signals()
             && !local_coordinate.is_some_and(|local| local.state == LocalCoordinateState::Frozen)
         {
-            return self.handle_gap(timestamp_ms, RepEvidenceReason::CoordinateNotFrozen);
+            return self.handle_gap(
+                frame_id,
+                timestamp_ms,
+                RepEvidenceReason::CoordinateNotFrozen,
+            );
         }
         let Some((primary, secondary, torso, _repaired)) =
             profile_signal_with_local(&self.profile, canonical, local_coordinate)
         else {
             return self.handle_gap(
+                frame_id,
                 timestamp_ms,
                 RepEvidenceReason::SignalTemporarilyUnavailable,
             );
@@ -4293,7 +4478,11 @@ impl RepEngine {
         // engine until measured or topology-fused signal evidence returns;
         // predicted/weak samples must never create start/peak/end events.
         if !profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
-            return self.handle_gap(timestamp_ms, RepEvidenceReason::TransitionEvidenceWeak);
+            return self.handle_gap(
+                frame_id,
+                timestamp_ms,
+                RepEvidenceReason::TransitionEvidenceWeak,
+            );
         }
         let sample = self.signal_sample(frame_id, timestamp_ms, primary, secondary, torso);
         let (primary, secondary, torso) = (sample.primary, sample.secondary, sample.torso);
@@ -4305,7 +4494,11 @@ impl RepEngine {
                     .into_iter()
                     .collect();
             } else if let Some(active) = self.active.as_mut() {
-                if gap_duration_ms >= CONTINUITY_REVIEW_GAP_MS {
+                // A bounded interruption can retain a completed cycle, but it
+                // is never silent. The exact incident (including a one-frame
+                // coordinate/signal weakness) remains on the sealed Rep and
+                // makes formal counting reviewable rather than confirmed.
+                if gap_duration_ms > 0 {
                     active.recovered_across_gap = true;
                     self.state.recovered_across_gap = true;
                 }
@@ -4440,6 +4633,7 @@ impl RepEngine {
                         hash: hash_sample(FNV_OFFSET, start),
                         recovered_across_gap: false,
                         transient_evidence_reason: None,
+                        evidence_incidents: Vec::new(),
                         active_signal,
                     });
                     self.state.phase = RepPhase::Effort;
@@ -4743,6 +4937,7 @@ impl RepEngine {
                     hash: hash_sample(FNV_OFFSET, pending.start),
                     recovered_across_gap: false,
                     transient_evidence_reason: None,
+                    evidence_incidents: Vec::new(),
                     active_signal: pending.active_signal,
                 });
                 self.ready_history.clear();
@@ -4897,6 +5092,7 @@ impl RepEngine {
 
     fn handle_gap(
         &mut self,
+        frame_id: u64,
         timestamp_ms: u64,
         rejection_reason: RepEvidenceReason,
     ) -> Vec<SealedRep> {
@@ -4910,6 +5106,20 @@ impl RepEngine {
             active
                 .transient_evidence_reason
                 .get_or_insert(rejection_reason);
+            match active.evidence_incidents.last_mut() {
+                Some(incident) if incident.reason == rejection_reason => {
+                    incident.end_frame_id = frame_id;
+                    incident.end_timestamp_ms = timestamp_ms;
+                }
+                _ => active.evidence_incidents.push(RepEvidenceIncident {
+                    reason: rejection_reason,
+                    start_frame_id: frame_id,
+                    end_frame_id: frame_id,
+                    start_timestamp_ms: timestamp_ms,
+                    end_timestamp_ms: timestamp_ms,
+                    source_lineage: evidence_reason_source_lineage(rejection_reason).into(),
+                }),
+            }
         }
         let gap_since = *self.gap_since_ms.get_or_insert(timestamp_ms);
         if timestamp_ms.saturating_sub(gap_since) > self.profile.max_gap_ms {
@@ -6187,14 +6397,28 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             .rep_engine
             .as_mut()
             .map_or_else(Vec::new, RepEngine::finish_set);
-        outcomes.extend(terminal.into_iter().map(|rep| PendingRepOutcome {
-            subject_epoch: self.subject_epoch,
-            rep: match (&self.action_rep_authority, &profile) {
-                (Some(authority), Some(profile)) => authority.admit(rep, profile),
-                _ => rep,
-            },
-        }));
+        for rep in terminal {
+            outcomes.push(PendingRepOutcome {
+                subject_epoch: self.subject_epoch,
+                rep: self.apply_action_rep_authority(rep, profile.as_ref()),
+            });
+        }
         outcomes
+    }
+
+    /// Every terminal Rep route—including a continuity or subject-identity
+    /// rejection—must pass through the same plan-owned lifecycle. Otherwise
+    /// a rejected outcome could lose the actual module provenance merely
+    /// because it was produced outside the ordinary candidate path.
+    fn apply_action_rep_authority(
+        &mut self,
+        rep: SealedRep,
+        profile: Option<&ExerciseProfile>,
+    ) -> SealedRep {
+        match (self.action_rep_authority.as_mut(), profile) {
+            (Some(authority), Some(profile)) => authority.admit(rep, profile),
+            _ => rep,
+        }
     }
 
     /// Finishes the canonical set and retains RepEngine provenance for the
@@ -6368,6 +6592,8 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             recovered_across_gap: original.recovered_across_gap,
             disposition: original.disposition,
             evidence_reason: original.evidence_reason,
+            executed_algorithm_module_ids: original.executed_algorithm_module_ids.clone(),
+            evidence_incidents: original.evidence_incidents.clone(),
             observation_findings: original.observation_findings.clone(),
             normalized_endpoints: original.normalized_endpoints.clone(),
         })
@@ -6389,19 +6615,20 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 self.equipment_pose_constraint.reset();
                 self.local_motion_coordinate
                     .reset_for_discontinuity(LocalCoordinateReason::ObservationGap);
+                let profile = self
+                    .rep_engine
+                    .as_ref()
+                    .map(|engine| engine.profile.clone());
                 if let Some(rep_engine) = self.rep_engine.as_mut() {
-                    self.pending_outcomes.extend(
-                        rep_engine
-                            .reject_active(
-                                RepEvidenceReason::LongContinuityLoss,
-                                rep_engine.previous,
-                            )
-                            .into_iter()
-                            .map(|rep| PendingRepOutcome {
-                                subject_epoch: self.subject_epoch,
-                                rep,
-                            }),
-                    );
+                    let rejected = rep_engine
+                        .reject_active(RepEvidenceReason::LongContinuityLoss, rep_engine.previous);
+                    if let Some(rep) = rejected {
+                        let rep = self.apply_action_rep_authority(rep, profile.as_ref());
+                        self.pending_outcomes.push(PendingRepOutcome {
+                            subject_epoch: self.subject_epoch,
+                            rep,
+                        });
+                    }
                 }
             }
         }
@@ -6435,10 +6662,14 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             self.equipment_pose_constraint.reset();
             self.local_motion_coordinate
                 .reset_for_discontinuity(LocalCoordinateReason::SubjectChanged);
+            let profile = self
+                .rep_engine
+                .as_ref()
+                .map(|engine| engine.profile.clone());
             if let Some(rep_engine) = self.rep_engine.as_mut()
                 && let Some(rep) = rep_engine.reject_for_subject_change()
             {
-                completed_reps.push(rep);
+                completed_reps.push(self.apply_action_rep_authority(rep, profile.as_ref()));
                 completed_rep_subject_epochs.push(previous_subject_epoch);
             }
         }
@@ -6455,12 +6686,26 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 .unwrap_or(0);
             vec![CanonicalLandmark::unknown(0.0, None); landmark_count]
         };
-        let equipment = self.equipment_fusion.process(EquipmentFrameInput {
-            timestamp_ms: source_timestamp_ms,
-            selected_subject: selected.as_ref(),
-            canonical: &canonical,
-            equipment: &raw_equipment,
-        });
+        let action_runs_equipment_fusion =
+            self.action_rep_authority.as_ref().is_none_or(|authority| {
+                authority.has_equipment_provider()
+                    && authority.runs(AlgorithmModuleCategory::EquipmentObservation)
+                    && authority.runs(AlgorithmModuleCategory::EquipmentFusion)
+            });
+        let equipment = if action_runs_equipment_fusion {
+            self.equipment_fusion.process(EquipmentFrameInput {
+                timestamp_ms: source_timestamp_ms,
+                selected_subject: selected.as_ref(),
+                canonical: &canonical,
+                equipment: &raw_equipment,
+            })
+        } else {
+            EquipmentFrameEvidence::cannot_judge(
+                source_timestamp_ms,
+                selected.as_ref().map(|candidate| candidate.id),
+                EquipmentCannotJudgeReason::NoEquipmentObservation,
+            )
+        };
         // Preserve the independent pose observation for phase fusion.  The
         // equipment-conditioned repair is published to clients and quality
         // metrics, but must not corroborate the same equipment twice.
@@ -6530,44 +6775,44 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             rep_phase,
             RepPhase::Effort | RepPhase::Peak | RepPhase::Return
         );
-        let proposed_reps = if may_process_rep || active_rep_requires_observation {
-            self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
-                engine.process_with_equipment(
-                    frame_id,
-                    source_timestamp_ms,
-                    target.state,
-                    &phase_pose_canonical,
-                    &equipment,
-                    Some(&local_motion_coordinate),
-                )
-            })
-        } else {
-            if let Some(rep_engine) = self.rep_engine.as_mut() {
-                rep_engine.prime_barbell_ready(
-                    frame_id,
-                    source_timestamp_ms,
-                    target.state,
-                    &phase_pose_canonical,
-                    &equipment,
-                    Some(&local_motion_coordinate),
-                );
-            }
-            Vec::new()
-        };
+        let action_runs_rep_topology = self
+            .action_rep_authority
+            .as_ref()
+            .is_none_or(|authority| authority.runs(AlgorithmModuleCategory::RepTopology));
+        let proposed_reps =
+            if action_runs_rep_topology && (may_process_rep || active_rep_requires_observation) {
+                self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
+                    engine.process_with_equipment(
+                        frame_id,
+                        source_timestamp_ms,
+                        target.state,
+                        &phase_pose_canonical,
+                        &equipment,
+                        Some(&local_motion_coordinate),
+                    )
+                })
+            } else {
+                if let Some(rep_engine) = self.rep_engine.as_mut() {
+                    rep_engine.prime_barbell_ready(
+                        frame_id,
+                        source_timestamp_ms,
+                        target.state,
+                        &phase_pose_canonical,
+                        &equipment,
+                        Some(&local_motion_coordinate),
+                    );
+                }
+                Vec::new()
+            };
         let profile = self
             .rep_engine
             .as_ref()
             .map(|engine| engine.profile.clone());
-        proposed_reps
-            .into_iter()
-            .map(|rep| match (&self.action_rep_authority, &profile) {
-                (Some(authority), Some(profile)) => authority.admit(rep, profile),
-                _ => rep,
-            })
-            .for_each(|rep| {
-                completed_reps.push(rep);
-                completed_rep_subject_epochs.push(self.subject_epoch);
-            });
+        let current_subject_epoch = self.subject_epoch;
+        for rep in proposed_reps {
+            completed_reps.push(self.apply_action_rep_authority(rep, profile.as_ref()));
+            completed_rep_subject_epochs.push(current_subject_epoch);
+        }
         let rep_state = self
             .rep_engine
             .as_ref()
@@ -6628,17 +6873,18 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         self.equipment_pose_constraint.reset();
         self.local_motion_coordinate
             .reset_for_discontinuity(LocalCoordinateReason::SubjectChanged);
+        let profile = self
+            .rep_engine
+            .as_ref()
+            .map(|engine| engine.profile.clone());
         if let Some(rep_engine) = self.rep_engine.as_mut() {
-            self.pending_outcomes
-                .extend(
-                    rep_engine
-                        .reject_for_subject_change()
-                        .into_iter()
-                        .map(|rep| PendingRepOutcome {
-                            subject_epoch: previous_subject_epoch,
-                            rep,
-                        }),
-                );
+            if let Some(rep) = rep_engine.reject_for_subject_change() {
+                let rep = self.apply_action_rep_authority(rep, profile.as_ref());
+                self.pending_outcomes.push(PendingRepOutcome {
+                    subject_epoch: previous_subject_epoch,
+                    rep,
+                });
+            }
         }
         Ok(SubjectSelectionAck {
             candidate_id,
@@ -6673,10 +6919,10 @@ const BASELINE_WINDOW: usize = 15;
 const MAX_RAW_BONE_RESIDUAL: f32 = 0.45;
 const MAX_PREDICTION_MS: u64 = 150;
 const MAX_WEAK_COORDINATE_INNOVATION_RATIO: f32 = 0.08;
-// One or two dropped 20 Hz inference frames are normal on mobile and must not
-// downgrade an otherwise continuous rep. Longer recoveries remain visible for
-// review; the profile-specific max gap still rejects an actual tracking loss.
-const CONTINUITY_REVIEW_GAP_MS: u64 = 500;
+// One or two dropped 20 Hz inference frames may still preserve a complete
+// cycle, but they are emitted as typed NeedsReview evidence rather than a
+// silent formal Rep. The profile-specific max gap rejects a real tracking
+// loss.
 const BLAZEPOSE33_SKELETON_BONES: [(usize, usize); 12] = [
     (11, 12),
     (11, 13),

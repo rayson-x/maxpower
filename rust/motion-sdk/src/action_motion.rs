@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use crate::{EquipmentProviderId, EquipmentProviderRegistry, EquipmentProviderTopology};
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ActionMotionCatalog {
@@ -67,6 +69,11 @@ pub struct ActionAssetInventoryReport {
     pub catalog_id: String,
     pub leaf_action_count: usize,
     pub exact_view_count: usize,
+    /// Count of geometrically explicit exact-context refusals. This is not a
+    /// review/maturity tier: the action asset remains installed and the
+    /// compiler returns a deterministic refusal instead of borrowing a
+    /// different relation for that capture projection.
+    pub identity_unobservable_view_count: usize,
 }
 
 /// Validates that every action and declared view in the checked-in library can
@@ -83,10 +90,17 @@ pub fn validate_action_asset_inventory(
 ) -> Result<ActionAssetInventoryReport, ActionMotionError> {
     let compiler = ActionMotionCompiler::new(OperatorRegistry::standard());
     let mut expected_rows = 0_usize;
+    let mut identity_unobservable_view_count = 0_usize;
     for definition in &catalog.definitions {
         for view in &definition.supported_views {
             expected_rows += 1;
-            compiler.compile(definition, view)?;
+            match compiler.compile(definition, view) {
+                Ok(_) => {}
+                Err(ActionMotionError::IdentityRelationNotObservable { .. }) => {
+                    identity_unobservable_view_count += 1;
+                }
+                Err(error) => return Err(error),
+            }
         }
     }
 
@@ -94,6 +108,7 @@ pub fn validate_action_asset_inventory(
         catalog_id: catalog.catalog_id.clone(),
         leaf_action_count: catalog.definitions.len(),
         exact_view_count: expected_rows,
+        identity_unobservable_view_count,
     })
 }
 
@@ -321,7 +336,7 @@ impl RepTopologyProfile {
 /// A positive/negative local-axis convention is never inferred from screen
 /// pixels.  Most round-trip actions are sign-invariant; fixed signs are only
 /// legal when the exact asset explicitly declares them.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalDirectionPolicy {
     SignInvariant,
@@ -374,9 +389,14 @@ impl ViewObservationPlan {
                 && relation.identity_defining
         });
         let primary_is_declared = primary_relation.is_some_and(|relation| {
-            self.primary_relation_candidates
-                .contains(&relation.relation_id)
-                && self.rep_topology.primary_relation_id == relation.relation_id
+            let declared_primary = self
+                .primary_relation_candidates
+                .contains(&relation.relation_id);
+            let explicitly_unobservable_primary = self.primary_relation_candidates.is_empty()
+                && !self.visible_relation_ids.contains(&relation.relation_id)
+                && self.prohibited_relation_ids.contains(&relation.relation_id);
+            self.rep_topology.primary_relation_id == relation.relation_id
+                && (declared_primary || explicitly_unobservable_primary)
         });
         !self.view_id.trim().is_empty()
             && visible
@@ -425,7 +445,7 @@ pub enum MotionValueType {
 /// action ID: an ActionMotionDefinition selects a compatible module graph and
 /// parameters, while the descriptor states what evidence the module may
 /// consume and what facts it may produce.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AlgorithmModuleCategory {
     PoseRelation,
@@ -1211,6 +1231,10 @@ pub struct ActionObservationPlan {
     pub projection: ViewProjectionPlan,
     pub view_observation: ViewObservationPlan,
     pub rep_topology: RepTopologyProfile,
+    /// The only visual equipment provider permitted for this frozen exact
+    /// action context. `None` means that the identity relation is pose-only;
+    /// it does not give a host permission to choose a fallback detector.
+    pub equipment_provider: Option<EquipmentProviderRequirement>,
     pub algorithm_modules: Vec<AlgorithmModuleDescriptor>,
     pub relations: Vec<CompiledMotionRelation>,
     pub rep_consensus: RepConsensusPolicy,
@@ -1223,20 +1247,51 @@ pub struct ActionObservationPlan {
     pub plan_hash: String,
 }
 
+/// Provider selection materialized by the compiler, rather than supplied by a
+/// web/native caller. The provider itself still produces only frame-local raw
+/// observations; fusion and Rep admission remain separate runtime stages.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EquipmentProviderRequirement {
+    pub topology: EquipmentProviderTopology,
+    pub provider_id: EquipmentProviderId,
+}
+
 pub struct ActionMotionCompiler {
     registry: OperatorRegistry,
     modules: AlgorithmModuleRegistry,
+    equipment_providers: EquipmentProviderRegistry,
 }
 impl ActionMotionCompiler {
     pub fn new(registry: OperatorRegistry) -> Self {
         Self {
             registry,
             modules: AlgorithmModuleRegistry::standard(),
+            equipment_providers: EquipmentProviderRegistry::standard(),
         }
     }
 
     pub fn with_modules(registry: OperatorRegistry, modules: AlgorithmModuleRegistry) -> Self {
-        Self { registry, modules }
+        Self {
+            registry,
+            modules,
+            equipment_providers: EquipmentProviderRegistry::standard(),
+        }
+    }
+
+    /// Test and embedding seam for an explicitly installed provider registry.
+    /// A missing provider is a compile-time context refusal, never a host-side
+    /// invitation to substitute wrist or pose geometry.
+    pub fn with_modules_and_equipment_providers(
+        registry: OperatorRegistry,
+        modules: AlgorithmModuleRegistry,
+        equipment_providers: EquipmentProviderRegistry,
+    ) -> Self {
+        Self {
+            registry,
+            modules,
+            equipment_providers,
+        }
     }
     pub fn compile(
         &self,
@@ -1384,6 +1439,26 @@ impl ActionMotionCompiler {
             &view_observation.rep_topology,
             primary_relation.source_requirement,
         )?;
+        let equipment_provider = requires_measured_equipment(primary_relation)
+            .then(|| {
+                let topology =
+                    equipment_provider_topology(&definition.exact_identity.equipment_topology)
+                        .ok_or_else(|| ActionMotionError::MissingEquipmentProvider {
+                            action_id: definition.action_id.clone(),
+                            topology: definition.exact_identity.equipment_topology.clone(),
+                        })?;
+                let provider_id = self.equipment_providers.resolve(topology).ok_or_else(|| {
+                    ActionMotionError::MissingEquipmentProvider {
+                        action_id: definition.action_id.clone(),
+                        topology: definition.exact_identity.equipment_topology.clone(),
+                    }
+                })?;
+                Ok(EquipmentProviderRequirement {
+                    topology,
+                    provider_id,
+                })
+            })
+            .transpose()?;
         let provider_tracks_equipment = matches!(
             definition.exact_identity.equipment_topology.as_str(),
             "free_rigid_barbell"
@@ -1407,6 +1482,7 @@ impl ActionMotionCompiler {
             definition,
             projection,
             view_observation,
+            equipment_provider,
             algorithm_modules,
             relations,
             Some(definition.rep_boundary.turnaround.clone()),
@@ -1470,6 +1546,7 @@ fn plan(
     definition: &ActionMotionDefinition,
     projection: ViewProjectionPlan,
     view_observation: ViewObservationPlan,
+    equipment_provider: Option<EquipmentProviderRequirement>,
     algorithm_modules: Vec<AlgorithmModuleDescriptor>,
     relations: Vec<CompiledMotionRelation>,
     rep_authority: Option<String>,
@@ -1495,6 +1572,7 @@ fn plan(
         definition.computed_hash(),
         projection.projection_hash.as_str(),
         &view_observation,
+        &equipment_provider,
         &algorithm_modules,
         relations
             .iter()
@@ -1524,6 +1602,7 @@ fn plan(
         projection,
         rep_topology: view_observation.rep_topology.clone(),
         view_observation,
+        equipment_provider,
         algorithm_modules,
         relations,
         rep_consensus: definition.rep_consensus.clone(),
@@ -1536,6 +1615,33 @@ fn plan(
         plan_hash,
     }
 }
+
+fn requires_measured_equipment(relation: &CompiledMotionRelation) -> bool {
+    matches!(
+        relation.source_requirement,
+        OperatorSourceRequirement::CurrentMeasuredEquipment
+            | OperatorSourceRequirement::CurrentMeasuredMixed
+    )
+}
+
+fn equipment_provider_topology(topology: &str) -> Option<EquipmentProviderTopology> {
+    match topology {
+        "free_rigid_barbell" | "smith_guided_bar" => Some(EquipmentProviderTopology::RigidBarAxis),
+        "independent_dumbbell" => Some(EquipmentProviderTopology::IndependentDumbbells),
+        "constrained_machine_handle" => Some(EquipmentProviderTopology::ConstrainedMachineHandle),
+        "cable_handle" => Some(EquipmentProviderTopology::CableHandle),
+        "unilateral_cable_handle" => Some(EquipmentProviderTopology::UnilateralCableHandle),
+        "landmine_lever" => Some(EquipmentProviderTopology::LandminePivot),
+        "trap_bar" => Some(EquipmentProviderTopology::TrapBar),
+        "kettlebell" => Some(EquipmentProviderTopology::Kettlebell),
+        "resistance_band" => Some(EquipmentProviderTopology::ResistanceBand),
+        "weight_plate" => Some(EquipmentProviderTopology::WeightPlate),
+        "bodyweight_station" => Some(EquipmentProviderTopology::FixedSupport),
+        "none" => Some(EquipmentProviderTopology::BodyOnly),
+        _ => None,
+    }
+}
+
 fn equipment_source(source: &str) -> bool {
     source.contains("equipment")
         || source.contains("dumbbell")
@@ -1610,6 +1716,10 @@ pub enum ActionMotionError {
     },
     IdentitySourceConflict {
         relation_id: String,
+    },
+    MissingEquipmentProvider {
+        action_id: String,
+        topology: String,
     },
 }
 

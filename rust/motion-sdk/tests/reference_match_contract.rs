@@ -234,6 +234,8 @@ fn sealed_rep() -> SealedRep {
         recovered_across_gap: false,
         disposition: RepDisposition::Confirmed,
         evidence_reason: None,
+        executed_algorithm_module_ids: vec![],
+        evidence_incidents: vec![],
         observation_findings: vec![],
         normalized_endpoints: None,
     }

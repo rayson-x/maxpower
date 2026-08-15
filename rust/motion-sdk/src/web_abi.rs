@@ -39,6 +39,11 @@ struct WebRuntime {
     visual_width: usize,
     visual_height: usize,
     visual_equipment_processed: bool,
+    /// Frozen by the selected Rust profile/action contract. It survives frame
+    /// boundaries; `visual_equipment_provider` below is only the provider
+    /// armed for the current frame.
+    configured_equipment_provider: Option<super::EquipmentProviderId>,
+    selected_action_plan_hash: Option<String>,
     visual_equipment_provider: Option<super::EquipmentProviderId>,
     visual_barbell_axis: Option<super::BarbellAxisObservation>,
     subject_tracker: Option<SubjectTracker>,
@@ -89,6 +94,8 @@ impl Default for WebRuntime {
             visual_width: 0,
             visual_height: 0,
             visual_equipment_processed: false,
+            configured_equipment_provider: None,
+            selected_action_plan_hash: None,
             visual_equipment_provider: None,
             visual_barbell_axis: None,
             subject_tracker: None,
@@ -338,6 +345,8 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.visual_width = 0;
     runtime.visual_height = 0;
     runtime.visual_equipment_processed = false;
+    runtime.configured_equipment_provider = None;
+    runtime.selected_action_plan_hash = None;
     runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::DominantVisible));
@@ -394,6 +403,8 @@ pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
     runtime.visual_width = 0;
     runtime.visual_height = 0;
     runtime.visual_equipment_processed = false;
+    runtime.configured_equipment_provider = None;
+    runtime.selected_action_plan_hash = None;
     runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     runtime.last_processed_timestamp_ms = None;
@@ -754,12 +765,21 @@ pub unsafe extern "C" fn motion_sdk_copy_visual_equipment_luma(
 /// foreground subject, so mirrors/bystanders cannot contribute wrist context.
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_detect_barbell_axis() -> i32 {
-    motion_sdk_detect_visual_equipment(1)
+    let Ok(runtime) = runtime().lock() else {
+        return -1;
+    };
+    if runtime.configured_equipment_provider
+        != Some(super::EquipmentProviderId::VisualRigidBarAxisV1)
+    {
+        return -4;
+    }
+    drop(runtime);
+    motion_sdk_detect_visual_equipment(super::EquipmentProviderId::VisualRigidBarAxisV1.ffi_code())
 }
 
-/// Runs the Rust-owned visual equipment provider selected by the frozen action
-/// contract. Hosts pass the stable FFI code from `EquipmentProviderId`; they
-/// must not derive it from action names or implement a second selector.
+/// Arms the Rust-owned provider already selected by the frozen profile/action
+/// contract. `mode` is an ABI-compatibility assertion only: it must equal the
+/// provider selected by Rust and can never select or replace one.
 ///
 /// Mode: 1=rigid bar (free barbell or Smith bar), 2=independent dumbbells,
 /// 3=constrained machine handle. The host supplies pixels and pose candidates;
@@ -775,11 +795,81 @@ pub extern "C" fn motion_sdk_detect_visual_equipment(mode: u32) -> i32 {
     {
         return -2;
     }
-    runtime.visual_equipment_provider = super::EquipmentProviderId::from_ffi_code(mode);
-    if runtime.visual_equipment_provider.is_none() {
+    let Some(expected) = runtime.configured_equipment_provider else {
         return -3;
+    };
+    if super::EquipmentProviderId::from_ffi_code(mode) != Some(expected) {
+        return -4;
     }
+    runtime.visual_equipment_provider = Some(expected);
     runtime.visual_equipment_processed = true;
+    0
+}
+
+/// Compiles the caller-selected exercise context into Rust-owned visual
+/// provider selection before a set starts. `action_id` and `view_code` are
+/// context metadata, not algorithm IDs: the embedded ActionMotionDefinition
+/// chooses the provider, topology and evidence contract. Callers can only
+/// submit pixels after this succeeds.
+///
+/// View codes: 0=front, 1=rear, 2=left side, 3=right side,
+/// 4=front-left 45, 5=front-right 45, 6=rear-left 45, 7=rear-right 45.
+///
+/// # Safety
+/// `action_id` must point to `action_id_length` readable UTF-8 bytes for the
+/// duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn motion_sdk_select_visual_action_context(
+    action_id: *const u8,
+    action_id_length: usize,
+    view_code: u32,
+) -> i32 {
+    if action_id.is_null() || action_id_length == 0 || action_id_length > 256 {
+        return -1;
+    }
+    let view = match view_code {
+        0 => "front",
+        1 => "rear",
+        2 => "left_side",
+        3 => "right_side",
+        4 => "front_left_45",
+        5 => "front_right_45",
+        6 => "rear_left_45",
+        7 => "rear_right_45",
+        _ => return -2,
+    };
+    // SAFETY: the public FFI contract above guarantees a readable range.
+    let action_id = match unsafe {
+        std::str::from_utf8(std::slice::from_raw_parts(action_id, action_id_length))
+    } {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => return -3,
+    };
+    let catalog = match super::installed_action_motion_catalog_v1() {
+        Ok(catalog) => catalog,
+        Err(_) => return -4,
+    };
+    let Some(definition) = catalog.definition(action_id) else {
+        return -5;
+    };
+    let plan = match super::ActionMotionCompiler::new(super::OperatorRegistry::standard())
+        .compile(definition, view)
+    {
+        Ok(plan) => plan,
+        Err(super::ActionMotionError::IdentityRelationNotObservable { .. }) => return -6,
+        Err(_) => return -7,
+    };
+    let Ok(mut runtime) = runtime().lock() else {
+        return -8;
+    };
+    if runtime.last_processed_timestamp_ms.is_some() {
+        return -9;
+    }
+    runtime.configured_equipment_provider = plan
+        .equipment_provider
+        .as_ref()
+        .map(|provider| provider.provider_id);
+    runtime.selected_action_plan_hash = Some(plan.plan_hash);
     0
 }
 
@@ -1498,6 +1588,12 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     runtime
         .local_motion_coordinate
         .set_legacy_profile_identity(profile.as_ref().map(|value| value.identity.as_str()));
+    runtime.selected_action_plan_hash = None;
+    // A legacy profile can configure pose/Rep compatibility only. It must not
+    // implicitly select a visual-equipment implementation: hosts establish
+    // that through `motion_sdk_select_visual_action_context`, where Rust
+    // compiles the exact action plan and owns the provider decision.
+    runtime.configured_equipment_provider = None;
     runtime.rep_engine = profile.map(super::RepEngine::new);
     runtime.rep_state = super::RepStateSnapshot::default();
     runtime.completed_reps.clear();

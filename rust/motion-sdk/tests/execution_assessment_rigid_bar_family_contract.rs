@@ -3769,8 +3769,8 @@ fn every_v0_1_executable_profile_uses_the_plan_driven_local_cycle() {
         assert_eq!(
             binding.profile.state_machine_id,
             format!(
-                "cycle-aligned-ready-effort-peak-return/dwell-{}ms/v1",
-                plan.rep_topology.minimum_phase_dwell_ms
+                "action-plan-topology/{}/dwell-{}ms/v1",
+                plan.rep_topology.topology_id, plan.rep_topology.minimum_phase_dwell_ms
             )
         );
         assert!(binding.profile.identity.contains(&plan.plan_hash));

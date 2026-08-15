@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,12 +19,25 @@ const diagnosticPostPath = resolve(
   workspaceRoot,
   'post-threshold-layering-diagnostic-2026-08-15.json',
 );
-const aggregateRelative =
-  'docs/reports/visual-recognition-v0.1-threshold-layering-diagnostic-2026-08-15.json';
-const artifactRelative =
-  'docs/reports/visual-recognition-v0.1-threshold-layering-report-artifact-2026-08-15.json';
-const aggregatePath = resolve(root, aggregateRelative);
-const artifactPath = resolve(root, artifactRelative);
+const outputRelative = 'workspace/visual-recognition-v0.1/derived-reports';
+const outputRoot = resolve(governanceRoot, outputRelative);
+const aggregateRelative = `${outputRelative}/visual-recognition-v0.1-threshold-layering-diagnostic-2026-08-15.json`;
+const artifactRelative = `${outputRelative}/visual-recognition-v0.1-threshold-layering-report-artifact-2026-08-15.json`;
+const aggregatePath = resolve(governanceRoot, aggregateRelative);
+const artifactPath = resolve(governanceRoot, artifactRelative);
+
+// Never read a governed replay input merely because this script was invoked.
+// The catalog audit resolves asset IDs/admission before a local-only report
+// can be generated, and failure leaves both the source data and repository
+// reports untouched.
+const governanceAudit = spawnSync('npm', ['run', 'audit'], {
+  cwd: governanceRoot,
+  encoding: 'utf8',
+});
+if (governanceAudit.status !== 0) {
+  throw new Error(`governance audit failed; replay input was not consumed:\n${governanceAudit.stderr || governanceAudit.stdout}`);
+}
+mkdirSync(outputRoot, { recursive: true });
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const readEvaluation = (path) => {
@@ -101,6 +114,27 @@ const actionRows = Object.entries(after.buckets.byAction)
       left.action.localeCompare(right.action),
   );
 
+function actionViewFunnel(metrics, actionView) {
+  const funnel = metrics.recognitionFunnel;
+  if (!funnel || typeof funnel !== 'object') {
+    throw new Error(`${actionView} is missing the required action×view recognitionFunnel`);
+  }
+  for (const key of [
+    'rawProposal',
+    'confirmedOnly',
+    'confirmedPlusNeedsReview',
+    'rejected',
+    'rejectionReasons',
+    'candidateTruthMatches',
+    'negativeWindowFalseTriggers',
+  ]) {
+    if (!(key in funnel)) {
+      throw new Error(`${actionView} recognitionFunnel is missing ${key}`);
+    }
+  }
+  return funnel;
+}
+
 const actionViewRows = Object.entries(after.buckets.byActionView)
   .map(([actionView, metrics]) => {
     const prior = before.buckets.byActionView[actionView];
@@ -111,6 +145,8 @@ const actionViewRows = Object.entries(after.buckets.byActionView)
     if (!action || !view) {
       throw new Error(`invalid action×view bucket key ${actionView}`);
     }
+    const funnel = actionViewFunnel(metrics, actionView);
+    const beforeFunnel = actionViewFunnel(prior, `${actionView} (baseline)`);
     return {
       action,
       view,
@@ -129,6 +165,14 @@ const actionViewRows = Object.entries(after.buckets.byActionView)
       turnaroundMaeMsAfter: metrics.matchedTurnaroundMaeMs,
       endMaeMsAfter: metrics.matchedEndMaeMs,
       meanIntervalIoUAfter: metrics.matchedMeanIntervalIoU,
+      rawProposalBefore: beforeFunnel.rawProposal,
+      rawProposalAfter: funnel.rawProposal,
+      confirmedOnlyAfter: funnel.confirmedOnly,
+      confirmedPlusNeedsReviewAfter: funnel.confirmedPlusNeedsReview,
+      rejectedAfter: funnel.rejected,
+      rejectionReasonsAfter: funnel.rejectionReasons,
+      candidateTruthMatchesAfter: funnel.candidateTruthMatches,
+      negativeWindowFalseTriggersAfter: funnel.negativeWindowFalseTriggers,
     };
   })
   .sort(

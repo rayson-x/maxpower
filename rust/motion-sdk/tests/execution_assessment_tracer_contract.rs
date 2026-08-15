@@ -589,25 +589,49 @@ fn configured_feature_program_cannot_override_motion_authority_or_use_raw_landma
     ));
 
     let mut invalid = visual_recognition_baseline_catalog_v0_1();
+    let feature_asset_id = invalid
+        .bundles
+        .iter()
+        .find(|bundle| bundle.bundle_id == "barbell_bench_press/front-oblique-left/v1")
+        .expect("tracer bundle")
+        .lineage
+        .feature_program
+        .id
+        .clone();
+    let motion_authority = invalid
+        .installed_assets
+        .iter()
+        .find(|asset| asset.id == feature_asset_id)
+        .and_then(|asset| asset.content.get("motionAuthority"))
+        .cloned()
+        .expect("baseline feature program retains its motion authority");
     replace_feature_program(
         &mut invalid,
         serde_json::json!({
             "features": ["raw_landmark_10_y"],
             "boundedFacts": true,
             "deliveryStage": "invalid_test_program",
+            "motionAuthority": motion_authority,
         }),
     );
-    assert!(matches!(
-        maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
-            invalid,
-            WorkoutAssessmentContext {
-                workout_session_id: "invalid-feature-program".into(),
-            },
+    let result = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
+        invalid,
+        WorkoutAssessmentContext {
+            workout_session_id: "invalid-feature-program".into(),
+        },
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("raw landmarks must not configure an executable Bundle"),
+    };
+    assert!(
+        matches!(
+            error,
+            maxpower_motion_sdk::AssessmentConfigurationError::InvalidActionMotionPlan { .. }
+                | maxpower_motion_sdk::AssessmentConfigurationError::InvalidExecutableBundleProgram { .. }
         ),
-        Err(
-            maxpower_motion_sdk::AssessmentConfigurationError::InvalidExecutableBundleProgram { .. }
-        )
-    ));
+        "raw landmarks must be rejected before executable assessment, got {error:?}"
+    );
 }
 
 #[test]

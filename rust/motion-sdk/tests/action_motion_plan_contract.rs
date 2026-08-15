@@ -233,11 +233,12 @@ fn row_and_deadlift_encode_different_joint_and_substitution_causality() {
 }
 
 #[test]
-fn every_installed_leaf_and_declared_view_compiles_without_runtime_review_tiers() {
+fn installed_leafs_keep_all_assets_but_refuse_geometrically_invalid_exact_views() {
     let inventory = installed_action_asset_inventory_v1()
         .expect("the complete action library must compile through one runtime path");
     assert_eq!(inventory.leaf_action_count, 248);
     assert_eq!(inventory.exact_view_count, 1_984);
+    assert!(inventory.identity_unobservable_view_count > 0);
     let registry = visual_recognition_baseline_registry_v0_1()
         .expect("the runtime registry must accept the structurally complete library");
     assert_eq!(registry.inventory(), &inventory);
@@ -245,8 +246,8 @@ fn every_installed_leaf_and_declared_view_compiles_without_runtime_review_tiers(
     let catalog = installed_action_motion_catalog_v1().unwrap();
     let runtime = registry.runtime_catalog();
     assert_eq!(runtime.action_definitions.len(), 248);
-    assert_eq!(runtime.bundles.len(), 1_984);
-    assert_eq!(runtime.action_motion_bindings.len(), 1_984);
+    assert!(runtime.bundles.len() < 1_984);
+    assert_eq!(runtime.bundles.len(), runtime.action_motion_bindings.len());
     ExecutionAssessmentEngine::configure(
         runtime.clone(),
         WorkoutAssessmentContext {
@@ -262,7 +263,7 @@ fn every_installed_leaf_and_declared_view_compiles_without_runtime_review_tiers(
             .iter()
             .find(|candidate| candidate.action_id == definition.action_id)
             .unwrap_or_else(|| panic!("{} is absent from the runtime", definition.action_id));
-        assert_eq!(installed.supported_views.len(), 8);
+        assert!(installed.supported_views.len() <= 8);
         for view_binding in &installed.supported_views {
             assert!(runtime.bundles.iter().any(|bundle| {
                 bundle.bundle_id == view_binding.bundle_id
@@ -275,9 +276,13 @@ fn every_installed_leaf_and_declared_view_compiles_without_runtime_review_tiers(
             }));
         }
         for view in &definition.supported_views {
-            compiler
-                .compile(definition, view)
-                .unwrap_or_else(|error| panic!("{} / {view}: {error:?}", definition.action_id));
+            match compiler.compile(definition, view) {
+                Ok(_) => {}
+                Err(maxpower_motion_sdk::ActionMotionError::IdentityRelationNotObservable {
+                    ..
+                }) => {}
+                Err(error) => panic!("{} / {view}: {error:?}", definition.action_id),
+            }
         }
     }
 }
@@ -348,10 +353,10 @@ fn changing_the_view_topology_changes_the_preseal_runtime_plan() {
     assert_eq!(
         runtime_binding.profile.state_machine_id,
         format!(
-            "cycle-aligned-ready-effort-peak-return/dwell-{}ms/v1",
-            runtime_plan.rep_topology.minimum_phase_dwell_ms
+            "action-plan-topology/{}/dwell-{}ms/v1",
+            runtime_plan.rep_topology.topology_id, runtime_plan.rep_topology.minimum_phase_dwell_ms
         ),
-        "the action × view phase dwell must constrain the pre-seal state graph"
+        "the exact topology and its phase dwell must select the pre-seal state graph"
     );
 }
 
@@ -369,6 +374,13 @@ fn an_equipment_primary_plan_selects_a_closed_module_graph_with_independent_fusi
         .collect::<Vec<_>>();
     assert!(ids.contains(&"equipment_observation"));
     assert!(ids.contains(&"equipment_fusion"));
+    assert_eq!(
+        plan.equipment_provider
+            .as_ref()
+            .map(|provider| provider.provider_id.as_str()),
+        Some("visual_rigid_bar_axis_v1"),
+        "the compiler, not a host mode flag, chooses the equipment provider"
+    );
     let topology = plan
         .algorithm_modules
         .iter()
@@ -418,17 +430,10 @@ fn module_registry_rejects_unregistered_or_duplicate_module_contracts() {
 fn equipment_topology_never_changes_or_downgrades_the_declared_primary_relation() {
     let mut catalog = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
     catalog.definitions[0].exact_identity.equipment_topology = "cable_handle".into();
-    let plan = ActionMotionCompiler::new(OperatorRegistry::standard())
+    let error = ActionMotionCompiler::new(OperatorRegistry::standard())
         .compile(&catalog.definitions[0], "front_right_45")
-        .expect("installed action semantics compile without a runtime review tier");
-    let primary = plan
-        .relations
-        .iter()
-        .find(|relation| relation.role == MotionRole::TaskPrimary)
-        .unwrap();
-    assert_eq!(primary.operator_id, "equipment_axis_displacement");
-    assert_eq!(primary.inputs[0].source, "equipment_axis_center");
-    assert!(plan.rep_authority.is_some());
+        .expect_err("an equipment-primary relation requires a matching Rust provider");
+    assert!(format!("{error:?}").contains("MissingEquipmentProvider"));
 }
 
 #[test]

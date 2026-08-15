@@ -652,7 +652,7 @@ impl ActionAssetRegistry {
                 bundle_id,
                 binding.local_coordinate_strategy,
             );
-            install_action_motion_equipment_strategy(&mut working, bundle_id);
+            install_action_motion_equipment_strategy(&mut working, bundle_id, plan);
         }
         working.catalog_id = format!(
             "{}/package-{}-{}",
@@ -912,6 +912,10 @@ pub struct SealedRepReference {
     pub turnaround_source: String,
     pub end_timestamp_ms: u64,
     pub canonical_slice_hash: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub executed_algorithm_module_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_incidents: Vec<crate::RepEvidenceIncident>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1241,6 +1245,7 @@ pub enum AssessmentRuntimeError {
     DuplicateSetId,
     InvalidRepProvenance,
     ConfirmedRepMissingActionPrimary,
+    RepAlgorithmPipelineMismatch,
     InvalidTraceGraph,
 }
 
@@ -1891,6 +1896,24 @@ impl ExecutionAssessmentEngine {
             .as_mut()
             .expect("Rep provenance validated against an active set");
         debug_assert!(active.rep_ids.insert(rep.rep_id));
+        if let Some(plan) = active.motion_plan.as_ref() {
+            let expected_module_ids = plan
+                .algorithm_modules
+                .iter()
+                .map(|module| module.module_id.as_str())
+                .collect::<Vec<_>>();
+            let executed_module_ids = rep
+                .executed_algorithm_module_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            // This verifies the actual pre-seal pipeline that authored this
+            // Rep, rather than trusting a plan hash or appending decorative
+            // modules only when building the assessment trace.
+            if executed_module_ids != expected_module_ids {
+                return Err(AssessmentRuntimeError::RepAlgorithmPipelineMismatch);
+            }
+        }
         let rep_ref = rep_reference(&rep, subject_epoch);
         let (features, range_value) = feature_facts(active, &rep, subject_epoch);
         let required_primary_observed = active.motion_plan.as_ref().is_none_or(|plan| {
@@ -1938,13 +1961,15 @@ impl ExecutionAssessmentEngine {
             node_id: rep_node.clone(),
             kind: TraceNodeKind::RepBoundary,
             summary: format!(
-                "RepEngine sealed Rep {} from {} to {} ms; turnaround {} ms came from {}; disposition {:?}.",
+                "RepEngine sealed Rep {} from {} to {} ms; turnaround {} ms came from {}; disposition {:?}; executed modules [{}]; bounded evidence incidents [{}].",
                 rep.rep_id,
                 rep.start_timestamp_ms,
                 rep.end_timestamp_ms,
                 rep.peak_timestamp_ms,
                 turnaround_source(&rep),
                 rep.disposition
+                ,rep.executed_algorithm_module_ids.join(", "),
+                rep.evidence_incidents.iter().map(|incident| format!("{:?}@{}-{}:{}", incident.reason, incident.start_timestamp_ms, incident.end_timestamp_ms, incident.source_lineage)).collect::<Vec<_>>().join(", "),
             ),
             source_ids: source_ids.clone(),
             input_node_ids: active
@@ -2677,6 +2702,8 @@ fn motion_authority(plan: &crate::ActionObservationPlan) -> serde_json::Value {
         "definitionHash": plan.definition_hash,
         "projectionHash": plan.projection.projection_hash,
         "planHash": plan.plan_hash,
+        "equipmentProvider": plan.equipment_provider,
+        "algorithmModules": plan.algorithm_modules,
         "taskPrimaryRelationIds": plan.relations.iter().filter(|relation| relation.role == crate::MotionRole::TaskPrimary).map(|relation| relation.relation_id.clone()).collect::<Vec<_>>(),
         "repConsensus": plan.rep_consensus,
         "repBoundary": plan.rep_boundary,
@@ -2740,6 +2767,10 @@ fn action_motion_view(view: AssessmentCaptureView) -> &'static str {
 fn compile_catalog_programs(
     catalog: &ExecutionAssessmentBundleCatalog,
 ) -> Result<HashMap<String, CompiledAssessmentProgram>, AssessmentConfigurationError> {
+    // The compiled exact context owns provider selection. Bundle equipment
+    // semantics remain context metadata and cannot be used as a client-side
+    // detector selector.
+    let motion_plans = compile_action_motion_plans(catalog)?;
     let assets = catalog
         .installed_assets
         .iter()
@@ -2900,7 +2931,14 @@ fn compile_catalog_programs(
         }
         let expected_evidence_policy =
             equipment_evidence_policy(bundle.exact_context.equipment_semantics);
-        let expected_provider_id = equipment_provider_id(bundle.exact_context.equipment_semantics);
+        let expected_provider_id = motion_plans
+            .get(&bundle.bundle_id)
+            .and_then(|plan| {
+                plan.equipment_provider
+                    .as_ref()
+                    .map(|provider| provider.provider_id)
+            })
+            .or_else(|| equipment_provider_id(bundle.exact_context.equipment_semantics));
         let expected_provider_id_str = expected_provider_id.map(crate::EquipmentProviderId::as_str);
         if local
             .content
@@ -6797,10 +6835,18 @@ pub fn compile_plan_driven_runtime_binding(
         bundle.exact_context.action_id,
         bundle.exact_context.capture_view.catalog_slug(),
     );
-    let profile = bind_runtime_profile_to_action_plan(
-        crate::ExerciseProfile::rigid_bar_provisional(&identity, initializer),
-        &plan,
+    let mut profile = crate::ExerciseProfile::rigid_bar_provisional(&identity, initializer);
+    // The topology is not a report label. It selects the state graph that the
+    // RepEngine runs before any candidate can be sealed. `alternating` has a
+    // distinct primary/secondary progression path; the other supported
+    // round-trip topologies retain their own immutable executor identity and
+    // compatible signal choice.
+    profile.state_machine_id = crate::action_plan_topology_state_machine_id(
+        &topology.topology_id,
+        topology.minimum_phase_dwell_ms,
     );
+    profile.content_hash = profile.computed_content_hash();
+    let profile = bind_runtime_profile_to_action_plan(profile, &plan);
     RigidBarAssessmentProfileBinding {
         action_id: bundle.exact_context.action_id.clone(),
         capture_view: bundle.exact_context.capture_view,
@@ -6862,11 +6908,47 @@ pub fn visual_recognition_baseline_catalog_v0_1() -> ExecutionAssessmentBundleCa
         "../assets/visual-recognition-v0.1-context-motion-bindings.json"
     ))
     .expect("embedded current-context motion bindings must be valid");
-    let binding_by_bundle = bindings
-        .iter()
-        .map(|binding| (binding.bundle_id.as_str(), binding.leaf_action_id.as_str()))
-        .collect::<HashMap<_, _>>();
     let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+    // An embedded historical context can legitimately become an exact-view
+    // refusal when the motion asset says that this projection cannot express
+    // its identity relation. Keep the definition in the catalog, but do not
+    // leave an executable Bundle behind for a pose or wrist substitute.
+    let source_bundles = catalog
+        .bundles
+        .iter()
+        .map(|bundle| (bundle.bundle_id.as_str(), bundle))
+        .collect::<HashMap<_, _>>();
+    let mut executable_bindings = Vec::new();
+    let mut refused_bundle_ids = HashSet::new();
+    for binding in bindings {
+        let bundle = source_bundles
+            .get(binding.bundle_id.as_str())
+            .expect("every embedded v0_1 binding has a Bundle");
+        let definition = motion_catalog
+            .definition(&binding.leaf_action_id)
+            .expect("every embedded v0_1 binding has an installed leaf");
+        match compiler.compile(
+            definition,
+            action_motion_view(bundle.exact_context.capture_view),
+        ) {
+            Ok(_) => executable_bindings.push(binding),
+            Err(crate::ActionMotionError::IdentityRelationNotObservable { .. }) => {
+                refused_bundle_ids.insert(bundle.bundle_id.clone());
+            }
+            Err(error) => {
+                panic!("embedded v0_1 binding must compile or refuse its exact view: {error:?}")
+            }
+        }
+    }
+    catalog
+        .bundles
+        .retain(|bundle| !refused_bundle_ids.contains(&bundle.bundle_id));
+    catalog.action_motion_bindings = executable_bindings;
+    let binding_by_bundle = catalog
+        .action_motion_bindings
+        .iter()
+        .map(|binding| (binding.bundle_id.clone(), binding.leaf_action_id.clone()))
+        .collect::<HashMap<_, _>>();
     let runtime_profiles = visual_recognition_baseline_profiles_v0_1()
         .into_iter()
         .map(|binding| {
@@ -6886,23 +6968,23 @@ pub fn visual_recognition_baseline_catalog_v0_1() -> ExecutionAssessmentBundleCa
         .map(|bundle| bundle.bundle_id.clone())
         .collect::<Vec<_>>();
     for bundle_id in bundle_ids {
-        let bundle = catalog
-            .bundles
-            .iter()
-            .find(|bundle| bundle.bundle_id == bundle_id)
-            .expect("v0_1 Bundle exists");
-        let leaf_action_id = binding_by_bundle
-            .get(bundle.bundle_id.as_str())
-            .copied()
-            .expect("every v0_1 Bundle has an explicit installed leaf binding");
+        let (leaf_action_id, capture_view) = {
+            let bundle = catalog
+                .bundles
+                .iter()
+                .find(|bundle| bundle.bundle_id == bundle_id)
+                .expect("v0_1 Bundle exists");
+            let leaf_action_id = binding_by_bundle
+                .get(&bundle.bundle_id)
+                .cloned()
+                .expect("every v0_1 Bundle has an explicit installed leaf binding");
+            (leaf_action_id, bundle.exact_context.capture_view)
+        };
         let definition = motion_catalog
-            .definition(leaf_action_id)
+            .definition(&leaf_action_id)
             .expect("v0_1 leaf binding exists in installed catalog");
         let plan = compiler
-            .compile(
-                definition,
-                action_motion_view(bundle.exact_context.capture_view),
-            )
+            .compile(definition, action_motion_view(capture_view))
             .expect("installed v0_1 binding resolves to an observation plan");
         if let Some(binding) = runtime_profiles.get(&bundle_id) {
             install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
@@ -6917,13 +6999,13 @@ pub fn visual_recognition_baseline_catalog_v0_1() -> ExecutionAssessmentBundleCa
                 &bundle_id,
                 binding.local_coordinate_strategy,
             );
+            install_action_motion_equipment_strategy(&mut catalog, &bundle_id, &plan);
         } else {
             install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
         }
     }
-    assert_eq!(bindings.len(), catalog.bundles.len());
+    assert_eq!(catalog.action_motion_bindings.len(), catalog.bundles.len());
     catalog.action_motion_catalog = Some(motion_catalog);
-    catalog.action_motion_bindings = bindings;
     catalog
 }
 
@@ -7009,6 +7091,21 @@ fn install_action_library(
                 definition.action_id,
                 capture_view.catalog_slug()
             );
+            let plan = match compiler.compile(&definition, view_id) {
+                Ok(plan) => plan,
+                // The asset remains in the catalog, but this exact projection
+                // has explicitly declared its identity relation unobservable.
+                // Do not install a pose/wrist substitute Bundle.
+                Err(crate::ActionMotionError::IdentityRelationNotObservable { .. }) => {
+                    continue;
+                }
+                Err(error) => {
+                    return Err(ActionAssetRegistryError::PlanCompilation(format!(
+                        "{} / {view_id}: {error:?}",
+                        definition.action_id
+                    )));
+                }
+            };
             view_bindings.push(ActionViewBinding {
                 capture_view,
                 bundle_id: bundle_id.clone(),
@@ -7020,13 +7117,6 @@ fn install_action_library(
             {
                 continue;
             }
-
-            let plan = compiler.compile(&definition, view_id).map_err(|error| {
-                ActionAssetRegistryError::PlanCompilation(format!(
-                    "{} / {view_id}: {error:?}",
-                    definition.action_id
-                ))
-            })?;
             let mut bundle = prototype.clone();
             bundle.bundle_id = bundle_id.clone();
             bundle.exact_context = AssessmentExactContext {
@@ -7072,7 +7162,7 @@ fn install_action_library(
                 &bundle_id,
                 runtime.local_coordinate_strategy,
             );
-            install_action_motion_equipment_strategy(&mut catalog, &bundle_id);
+            install_action_motion_equipment_strategy(&mut catalog, &bundle_id, &plan);
         }
 
         if let Some(installed) = catalog
@@ -7800,6 +7890,7 @@ pub fn install_action_motion_local_strategy(
 fn install_action_motion_equipment_strategy(
     catalog: &mut ExecutionAssessmentBundleCatalog,
     bundle_id: &str,
+    plan: &crate::ActionObservationPlan,
 ) {
     let bundle_index = catalog
         .bundles
@@ -7809,7 +7900,10 @@ fn install_action_motion_equipment_strategy(
     let semantics = catalog.bundles[bundle_index]
         .exact_context
         .equipment_semantics;
-    let provider_id = equipment_provider_id(semantics).map(crate::EquipmentProviderId::as_str);
+    let provider_id = plan
+        .equipment_provider
+        .as_ref()
+        .map(|provider| provider.provider_id.as_str());
     let lineage = catalog.bundles[bundle_index].lineage.clone();
     for (kind, asset_id) in [
         (
@@ -7891,6 +7985,8 @@ fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
         turnaround_source: turnaround_source(rep).into(),
         end_timestamp_ms: rep.end_timestamp_ms,
         canonical_slice_hash: format!("{:016x}", rep.canonical_slice_hash),
+        executed_algorithm_module_ids: rep.executed_algorithm_module_ids.clone(),
+        evidence_incidents: rep.evidence_incidents.clone(),
     }
 }
 

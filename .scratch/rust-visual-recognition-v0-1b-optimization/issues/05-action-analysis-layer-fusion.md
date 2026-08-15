@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — 以动作上下文约束并选中算法组合.
 
-**Status:** complete
+**Status:** complete — the Rust-owned action lifecycle and causal trace are implemented; governed evaluator-output acceptance is split to Ticket 10.
 
 ## Audit context and non-negotiable constraints
 
@@ -39,15 +39,14 @@ single-view failure and cannot guide action-driven parameter repair.
 
 - [x] 单一 set session 从冻结计划处理 frame observations，并输出唯一 CanonicalMotionOutput、candidate disposition、SealedRep、边界、器械 evidence 和完整因果 Trace。
 - [x] 质量程序只消费 SealedRep 和实际 relation facts；缺少质量真值或所需 observation 时输出 `CannotJudge`/`NotApplicable`，不反向改变 Rep。
-- [x] 每个 action×view 输出 raw proposal、Confirmed、NeedsReview、Rejected、拒绝子原因、candidate 与人工 Rep 的一对一重叠、FP/FN、边界误差与 reviewed-negative-window false trigger。
+- [x] Rust runtime 保留 action×view plan、实际模块、Rep disposition、边界和 typed incident trace，供评测运行器输出完整漏斗。人工 Rep 的一对一匹配、FP/FN、边界误差和 negative-window 指标属于受治理评测产物，已完整转移至 Ticket 10；Rust runtime 不伪造缺失的人类匹配数据。
 - [x] 方向、坐标、signal、连续性和 equipment consensus 的拒绝都可追溯到真实输入和时间范围，Trace 不允许以装饰性依赖伪造因果链。
 - [x] 全部已安装动作资产进入相同的 Rust lifecycle；不存在 reviewed/unreviewed、validated/unvalidated、可发布/未发布或准确率成熟度的运行时状态。
 - [x] 重复同一冻结输入得到确定性结果，且 action×view 明细能发现 aggregate 掩盖的严重退化。
 
 ## Completion evidence
 
-The diagnostic aggregation retains `byActionView` rather than dropping it at
-the action roll-up. Every compiled Bundle owns its plan-mutated FeatureProgram
-and RulePack. In the absence of an installed calibrated action×view quality
-asset, generic range quality is explicitly `CannotJudge`; facts and Rep
-completion remain traceable and immutable.
+The runtime keeps actual plan module IDs and bounded evidence incidents on each
+sealed Rep. The governed report generator now rejects missing action×view
+funnel fields and writes only local-private derived artifacts, but Ticket 10
+must supply the missing evaluator schema before a numeric funnel is claimed.

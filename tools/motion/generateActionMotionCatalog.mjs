@@ -190,16 +190,44 @@ function topologyParameters(familyId, laterality, equipmentTopology, viewId) {
 function viewObservationPlan(viewId, relations, familyId, laterality, equipmentTopology) {
   const sideView = ['left_side', 'right_side'].includes(viewId);
   const oblique = viewId.includes('45');
+  const taskPrimary = relations.find((candidate) => candidate.role === 'task_primary');
+  if (!taskPrimary) throw new Error(`missing task primary for view plan ${viewId}`);
+  const primaryUsesRigidAxis = taskPrimary.inputs.some((input) => input.source === 'equipment_axis_center');
+  const primaryUsesPairedIndependentLoads = taskPrimary.inputs.some((input) => input.source === 'dumbbell_center')
+    && ['bilateral_synchronous', 'independent_bilateral'].includes(laterality);
+  const primaryUsesPairedMachineHandles = taskPrimary.inputs.some((input) => input.source === 'machine_handle_center')
+    && ['bilateral_synchronous', 'independent_bilateral'].includes(laterality);
+  // A bilateral primary relation may designate a left landmark as its stable
+  // representation while still be observed through its right counterpart.
+  // That naming convention is not evidence that a right-side camera cannot
+  // observe the relation. Only a truly unilateral, named-side primary has no
+  // declared mirrored counterpart to use in that projection.
+  const primaryUsesContralateralNamedJoint = laterality === 'unilateral'
+    && viewId === 'right_side'
+    && taskPrimary.inputs.some((input) => input.source.startsWith('left_'));
+  // This is a geometric observation contract, not a maturity label. A
+  // camera looking down the bar axis cannot express its required 2-D axis
+  // displacement; a side-on paired-dumbbell view cannot establish both
+  // independent load centers. The caller receives a typed exact-context
+  // refusal instead of running a pose/wrist substitute.
+  const primaryVisible = !(sideView && (
+    primaryUsesRigidAxis
+    || primaryUsesPairedIndependentLoads
+    || primaryUsesPairedMachineHandles
+    || primaryUsesContralateralNamedJoint
+  ));
   const visibleRelationIds = relations
-    .filter((candidate) => !sideView || candidate.role !== 'substitution_guard')
+    .filter((candidate) => {
+      if (candidate.relationId === taskPrimary.relationId) return primaryVisible;
+      return !sideView || candidate.role !== 'substitution_guard';
+    })
     .map((candidate) => candidate.relationId);
   const prohibitedRelationIds = relations
     .filter((candidate) => !visibleRelationIds.includes(candidate.relationId))
     .map((candidate) => candidate.relationId);
-  const taskPrimary = relations.find((candidate) => candidate.role === 'task_primary');
-  if (!taskPrimary) throw new Error(`missing task primary for view plan ${viewId}`);
   const risks = [
     ...(sideView ? ['contralateral_joint_occlusion', 'depth_foreshortening'] : []),
+    ...(!primaryVisible ? ['identity_primary_projection_collapse'] : []),
     ...(oblique ? ['asymmetric_projective_scale'] : []),
     ...(['free_rigid_barbell', 'smith_guided_bar'].includes(equipmentTopology) ? ['equipment_background_confusion'] : []),
   ];
@@ -207,9 +235,9 @@ function viewObservationPlan(viewId, relations, familyId, laterality, equipmentT
     viewId,
     visibleRelationIds,
     prohibitedRelationIds,
-    prohibitedSignalSources: [],
+    prohibitedSignalSources: primaryVisible ? [] : taskPrimary.inputs.map((input) => input.source),
     occlusionRisks: risks,
-    primaryRelationCandidates: [taskPrimary.relationId],
+    primaryRelationCandidates: primaryVisible ? [taskPrimary.relationId] : [],
     sideObservability: sideView
       ? 'near_side_projected'
       : laterality === 'bilateral_rigid' || laterality === 'independent_bilateral'
