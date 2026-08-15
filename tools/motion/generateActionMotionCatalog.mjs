@@ -4,7 +4,6 @@ import { dirname, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '../..');
 const sourcePath = resolve(root, 'docs/research/2026-08-15-expanded-action-motion-definitions.md');
 const outputPath = resolve(root, 'rust/motion-sdk/assets/action-motion-catalog-v1.json');
-const matrixOutputPath = resolve(root, 'rust/motion-sdk/assets/action-motion-capability-matrix-v1.json');
 const source = readFileSync(sourcePath, 'utf8');
 
 const families = new Map();
@@ -93,38 +92,162 @@ function exactSupport(posture, binding, equipmentTopology) {
   return 'self_supported';
 }
 
-const FRONTAL_VIEWS = ['front', 'rear', 'front_left_45', 'front_right_45', 'rear_left_45', 'rear_right_45'];
-const SAGITTAL_VIEWS = ['left_side', 'right_side', 'front_left_45', 'front_right_45', 'rear_left_45', 'rear_right_45'];
-const FAMILY_CANDIDATE_VIEWS = {
-  M01: SAGITTAL_VIEWS, M02: SAGITTAL_VIEWS, M03: SAGITTAL_VIEWS, M04: FRONTAL_VIEWS,
-  M05: FRONTAL_VIEWS, M06: FRONTAL_VIEWS, M07: SAGITTAL_VIEWS,
-  M08: ['front', ...SAGITTAL_VIEWS], M09: ['front', ...SAGITTAL_VIEWS],
-  M10: ['front', ...SAGITTAL_VIEWS], M11: SAGITTAL_VIEWS, M12: SAGITTAL_VIEWS,
-  M13: SAGITTAL_VIEWS, M14: SAGITTAL_VIEWS, M15: ['front', 'front_left_45', 'front_right_45'],
-  M16: ['front', ...SAGITTAL_VIEWS], M17: ['front', ...FRONTAL_VIEWS], M18: SAGITTAL_VIEWS,
-  M19: ['front', 'front_left_45', 'front_right_45'], M20: ['front', ...SAGITTAL_VIEWS],
-  M21: ['front', 'front_left_45', 'front_right_45'], M22: FRONTAL_VIEWS, M23: FRONTAL_VIEWS,
-  M24: ['front', ...SAGITTAL_VIEWS], M25: ['front', ...SAGITTAL_VIEWS],
-  M26: ['front', ...SAGITTAL_VIEWS], M27: SAGITTAL_VIEWS,
-  M28: ['front', 'rear', ...SAGITTAL_VIEWS], M29: SAGITTAL_VIEWS, M30: FRONTAL_VIEWS,
-};
+function repConsensus(laterality, equipmentTopology) {
+  const mode = equipmentTopology === 'free_rigid_barbell' || equipmentTopology === 'smith_guided_bar'
+    ? 'shared_rigid'
+    : laterality === 'independent_bilateral'
+      ? 'independent_bilateral'
+      : laterality === 'unilateral'
+        ? 'unilateral'
+        : laterality === 'alternating'
+          ? 'alternating'
+          : 'bilateral_synchronous';
+  const requiredSides = mode === 'independent_bilateral' || mode === 'bilateral_synchronous'
+    ? ['left', 'right']
+    : mode === 'unilateral' || mode === 'alternating'
+      ? ['one_stable_active_side']
+      : ['shared'];
+  return {
+    mode,
+    requiredPrimaryTracks: ['task_primary_track'],
+    requiredSides,
+    minimumObservedFrames: 3,
+    conflictPolicy: 'reject_confirmed_rep',
+  };
+}
 
-function primarySource(equipmentTopology, actionId) {
+const ALL_CAPTURE_VIEWS = [
+  'front',
+  'rear',
+  'left_side',
+  'right_side',
+  'front_left_45',
+  'front_right_45',
+  'rear_left_45',
+  'rear_right_45',
+];
+
+const SDK_TRACKED_EQUIPMENT = new Set([
+  'free_rigid_barbell',
+  'smith_guided_bar',
+  'independent_dumbbell',
+  'constrained_machine_handle',
+]);
+
+// These are semantic action-family defaults materialized into every exact
+// action × view asset. They intentionally live in generated data rather than
+// a Rust action-name switch. Values are provisional candidate parameters,
+// not quality standards; the replay/acceptance protocol owns their tuning.
+function topologyParameters(familyId, laterality, equipmentTopology, viewId) {
+  const lowerBody = ['M08', 'M09', 'M10', 'M11', 'M12', 'M13', 'M14'].includes(familyId);
+  const smallArmPath = ['M22', 'M23', 'M24', 'M25', 'M26', 'M28', 'M29'].includes(familyId);
+  const topologyId = laterality === 'alternating'
+    ? 'alternating_cycle/v1'
+    : laterality === 'unilateral'
+      ? 'unilateral_cycle/v1'
+      : laterality === 'independent_bilateral'
+        ? 'independent_bilateral_cycle/v1'
+        : equipmentTopology === 'none' || equipmentTopology === 'bodyweight_station'
+          ? 'pose_primary_cycle/v1'
+          : 'bilateral_synchronous_cycle/v1';
+  const base = lowerBody
+    ? { start: 45, excursion: 130, hysteresis: 45, return: 85, ready: 35, dwell: 300, gap: 900, minDuration: 500, maxDuration: 9000 }
+    : smallArmPath
+      ? { start: 35, excursion: 100, hysteresis: 35, return: 70, ready: 28, dwell: 250, gap: 650, minDuration: 350, maxDuration: 6500 }
+      : { start: 50, excursion: 140, hysteresis: 50, return: 80, ready: 35, dwell: 300, gap: 750, minDuration: 400, maxDuration: 8000 };
+  const depthSensitive = ['left_side', 'right_side'].includes(viewId);
+  const oblique = viewId.includes('45');
+  const adjustment = depthSensitive ? -5 : oblique ? -3 : 0;
+  const algorithmModuleIds = [
+    'pose_relation',
+    'local_coordinate',
+    ...(SDK_TRACKED_EQUIPMENT.has(equipmentTopology)
+      ? ['equipment_observation', 'equipment_fusion']
+      : []),
+    'rep_topology',
+    'candidate_admission',
+    'boundary_refinement',
+    'post_seal_feature',
+    'quality_rule',
+  ];
+  return {
+    topologyId,
+    primaryRelationId: 'task_primary',
+    algorithmModuleIds,
+    directionPolicy: 'sign_invariant',
+    startThresholdMilli: base.start + adjustment,
+    minimumExcursionMilli: base.excursion + adjustment,
+    turnaroundHysteresisMilli: base.hysteresis + adjustment,
+    returnToleranceMilli: base.return,
+    readyToleranceMilli: base.ready,
+    minimumPhaseDwellMs: base.dwell,
+    maximumGapMs: base.gap,
+    minimumRepDurationMs: base.minDuration,
+    maximumRepDurationMs: base.maxDuration,
+  };
+}
+
+function viewObservationPlan(viewId, relations, familyId, laterality, equipmentTopology) {
+  const sideView = ['left_side', 'right_side'].includes(viewId);
+  const oblique = viewId.includes('45');
+  const visibleRelationIds = relations
+    .filter((candidate) => !sideView || candidate.role !== 'substitution_guard')
+    .map((candidate) => candidate.relationId);
+  const prohibitedRelationIds = relations
+    .filter((candidate) => !visibleRelationIds.includes(candidate.relationId))
+    .map((candidate) => candidate.relationId);
+  const taskPrimary = relations.find((candidate) => candidate.role === 'task_primary');
+  if (!taskPrimary) throw new Error(`missing task primary for view plan ${viewId}`);
+  const risks = [
+    ...(sideView ? ['contralateral_joint_occlusion', 'depth_foreshortening'] : []),
+    ...(oblique ? ['asymmetric_projective_scale'] : []),
+    ...(['free_rigid_barbell', 'smith_guided_bar'].includes(equipmentTopology) ? ['equipment_background_confusion'] : []),
+  ];
+  return {
+    viewId,
+    visibleRelationIds,
+    prohibitedRelationIds,
+    prohibitedSignalSources: [],
+    occlusionRisks: risks,
+    primaryRelationCandidates: [taskPrimary.relationId],
+    sideObservability: sideView
+      ? 'near_side_projected'
+      : laterality === 'bilateral_rigid' || laterality === 'independent_bilateral'
+        ? 'bilateral_projected'
+        : 'selected_side_projected',
+    equipmentObservability: SDK_TRACKED_EQUIPMENT.has(equipmentTopology)
+      ? 'independent_visual_observation_required'
+      : 'not_required_for_primary',
+    supportObservability: sideView ? 'partial_projected' : 'projected',
+    localAxisPolicy: 'action_local_sign_invariant_round_trip',
+    dimensionAvailability: visibleRelationIds,
+    repTopology: topologyParameters(familyId, laterality, equipmentTopology, viewId),
+  };
+}
+
+function bodyPrimarySource(familyId) {
+  if (['M01', 'M02', 'M03', 'M04', 'M06', 'M07'].includes(familyId)) return 'left_wrist';
+  if (familyId === 'M05') return 'shoulder_midpoint';
+  if (['M08', 'M09', 'M10', 'M11', 'M12', 'M13', 'M14', 'M30'].includes(familyId)) return 'hip_midpoint';
+  if (['M15', 'M16', 'M17', 'M18', 'M19', 'M20', 'M21', 'M22', 'M23', 'M24', 'M25', 'M26'].includes(familyId)) return 'left_wrist';
+  if (familyId === 'M27' || familyId === 'M28') return 'left_ankle';
+  return 'shoulder_midpoint';
+}
+
+function primarySource(equipmentTopology, actionId, familyId) {
   if (actionId === 'band_assisted_pull_up') return 'shoulder_midpoint';
   if (actionId === 'resistance_band_lateral_walk') return 'hip_midpoint';
   if (equipmentTopology === 'free_rigid_barbell' || equipmentTopology === 'smith_guided_bar') return 'equipment_axis_center';
   if (equipmentTopology === 'independent_dumbbell') return 'dumbbell_center';
   if (equipmentTopology === 'constrained_machine_handle') return 'machine_handle_center';
-  if (!['none', 'bodyweight_station'].includes(equipmentTopology)) return 'equipment_axis_center';
-  return 'shoulder_midpoint';
+  return bodyPrimarySource(familyId);
 }
 
 function relation(relationId, role, semanticStatement, required, identityDefining, source, familyId) {
-  const axialRotation = identityDefining && (familyId === 'M21' || familyId === 'M24');
   return {
     relationId,
     role,
-    operatorId: axialRotation ? 'axial_rotation' : source.startsWith('equipment_') || source.includes('dumbbell') || source.includes('machine_handle') ? 'equipment_axis_displacement' : 'point_displacement',
+    operatorId: source.startsWith('equipment_') || source.includes('dumbbell') || source.includes('machine_handle') ? 'equipment_axis_displacement' : 'point_displacement',
     inputs: [{ source, valueType: 'point2d', unit: 'normalized_image' }],
     outputType: 'scalar',
     unit: 'local_scale_ratio',
@@ -222,55 +345,52 @@ const definitions = leafRows.map((row) => {
   const family = families.get(familyId);
   if (!family) throw new Error(`missing family for ${actionId}: ${rawBinding}`);
   const equipmentTopology = topology(rawBinding, actionId);
-  const sourceName = primarySource(equipmentTopology, actionId);
+  const sourceName = primarySource(equipmentTopology, actionId, familyId);
   const posture = exactPosture(actionId, rawBinding, familyId);
   const laterality = exactLaterality(actionId, rawBinding, equipmentTopology);
   const support = exactSupport(posture, rawBinding, equipmentTopology);
-  const admittedViewsByAction = {
-    flat_barbell_bench_press: ['front', 'front_left_45', 'front_right_45'],
-    pronated_barbell_row: ['front', 'front_left_45', 'front_right_45', 'rear_left_45', 'rear_right_45'],
-    seated_linked_machine_chest_press: ['front', 'front_right_45'],
-    seated_barbell_shoulder_press: ['front'],
-    standard_push_up: ['rear_right_45'],
-    wide_pronated_lat_pulldown: ['rear', 'rear_left_45'],
-    pronated_pull_up: ['rear_left_45'],
-    seated_bilateral_cable_row: ['front_left_45', 'rear_left_45', 'right_side'],
-    standing_straight_arm_pulldown: ['front_left_45', 'front_right_45'],
-    standing_bilateral_dumbbell_lateral_raise: ['front'],
-    linked_machine_rear_delt_row: ['front'],
-    single_arm_cable_lateral_raise: ['front_left_45', 'rear_right_45'],
-    seated_arnold_press: ['front'],
-    standing_arnold_press: ['front'],
-  };
-  const admittedViews = admittedViewsByAction[actionId] ?? [];
-  const supportedViews = [...new Set([...(FAMILY_CANDIDATE_VIEWS[familyId] ?? []), ...admittedViews])];
+  const supportedViews = ALL_CAPTURE_VIEWS;
   const familyRoleSpecs = reviewedFamilyRoleSpecs(familyId);
+  const relations = [
+    relation('task_primary', 'task_primary', `${family.required_motion ?? ''}；${override.trim()}`, true, true, sourceName, familyId),
+    ...(equipmentTopology === 'smith_guided_bar' ? [{
+      relationId: 'smith_guide_path',
+      role: 'context_anchor',
+      operatorId: 'constrained_path_deviation',
+      inputs: [point('equipment_axis_center')],
+      outputType: 'scalar',
+      unit: 'local_scale_ratio',
+      scope: 'rep',
+      required: true,
+      identityDefining: true,
+      semanticStatement: 'the observed rigid bar center remains expressed relative to the declared Smith guide path',
+    }] : []),
+    ...familyRoleSpecs.map((spec) => ({
+      ...spec,
+      semanticStatement: spec.role === 'coordinated_motion'
+        ? (family.coordinated_motion ?? '')
+        : spec.role === 'stability_relation'
+          ? (family.stability_relations ?? '')
+          : (family.substitution_relations ?? ''),
+    })),
+  ];
   const definition = {
     schemaVersion: 'maxpower.action-motion-definition/v1',
     definitionId: `maxpower/action-motion/${actionId}/v1`,
     actionId,
     exactIdentity: { movementFamily: familyId, posture, support, equipmentTopology, laterality, setup: rawBinding.trim() },
     executableLeaf: true,
-    relations: [
-      relation('task_primary', 'task_primary', `${family.required_motion ?? ''}；${override.trim()}`, true, true, sourceName, familyId),
-      ...familyRoleSpecs.map((spec) => ({
-        ...spec,
-        semanticStatement: spec.role === 'coordinated_motion'
-          ? (family.coordinated_motion ?? '')
-          : spec.role === 'stability_relation'
-            ? (family.stability_relations ?? '')
-            : (family.substitution_relations ?? ''),
-      })),
-    ],
+    relations,
     tracks: [
-      { trackId: 'task_primary_track', source: sourceName.replace('_center', ''), role: 'primary', required: true, identityDefining: true },
-      { trackId: 'pose_corroboration', source: 'pose', role: 'corroborating', required: false, identityDefining: false },
+      { trackId: 'task_primary_track', source: sourceName.replace('_center', ''), role: 'primary', required: true, identityDefining: true, sideScope: laterality },
+      { trackId: 'pose_corroboration', source: 'pose', role: 'corroborating', required: false, identityDefining: false, sideScope: laterality },
     ],
-    repBoundary: { activation: equipmentTopology === 'none' || equipmentTopology === 'bodyweight_station' ? 'pose_ready' : 'grip_established', start: 'declared_start_endpoint_departure', turnaround: family.rep_boundary ?? 'declared_effort_endpoint_reversal', return: 'declared_start_endpoint_return', release: equipmentTopology === 'none' || equipmentTopology === 'bodyweight_station' ? 'set_closure' : 'grip_released' },
+    repConsensus: repConsensus(laterality, equipmentTopology),
+    repBoundary: { activation: SDK_TRACKED_EQUIPMENT.has(equipmentTopology) ? 'grip_established' : 'pose_ready', start: 'declared_start_endpoint_departure', turnaround: family.rep_boundary ?? 'declared_effort_endpoint_reversal', return: 'declared_start_endpoint_return', release: SDK_TRACKED_EQUIPMENT.has(equipmentTopology) ? 'grip_released' : 'set_closure' },
     phases: [{ phaseId: 'outbound', from: 'start', to: 'turnaround' }, { phaseId: 'return', from: 'turnaround', to: 'return' }],
     allowedClaims: ['task_completion', 'range_of_motion', 'phase_control', 'trajectory_control', 'support_stability', 'substitution_control'],
     supportedViews,
-    admittedViews,
+    viewObservationPlans: supportedViews.map((viewId) => viewObservationPlan(viewId, relations, familyId, laterality, equipmentTopology)),
     contentHash: '',
   };
   let hash = 0xcbf29ce484222325n;
@@ -285,41 +405,4 @@ const definitions = leafRows.map((row) => {
 const catalog = { schemaVersion: 'maxpower.action-motion-catalog/v1', catalogId: 'maxpower/reviewed-action-motion-leaves/v1', definitions };
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, `${JSON.stringify(catalog, null, 2)}\n`);
-const runtimeSupportedTopologies = new Set(['free_rigid_barbell', 'smith_guided_bar', 'none', 'bodyweight_station']);
-const matrix = definitions.flatMap((definition) => definition.supportedViews.map((view) => {
-  const primary = definition.tracks.find((track) => track.role === 'primary' && track.identityDefining);
-  const requiredEquipment = primary && ['equipment_axis', 'machine_handle', 'dumbbell', 'bar_axis'].some((token) => primary.source.includes(token));
-  const unsupportedEquipment = requiredEquipment && !runtimeSupportedTopologies.has(definition.exactIdentity.equipmentTopology);
-  const admittedView = definition.admittedViews.includes(view);
-  const missingIdentityOperator = definition.relations.some((relation) => relation.required && relation.identityDefining && relation.operatorId === 'axial_rotation');
-  let capabilityState = 'full_plan_compiled';
-  let refusalReason = null;
-  if (unsupportedEquipment) {
-    capabilityState = 'unsupported_equipment_catalog_only';
-    refusalReason = `runtime adapter unavailable for ${definition.exactIdentity.equipmentTopology}`;
-  } else if (!admittedView) {
-    capabilityState = 'admissible_visual_refusal';
-    refusalReason = 'exact view lacks admitted observability evidence';
-  } else if (missingIdentityOperator) {
-    capabilityState = 'admissible_visual_refusal';
-    refusalReason = 'identity-defining axial rotation operator unavailable';
-  }
-  return {
-    definitionId: definition.definitionId,
-    definitionHash: definition.contentHash,
-    actionId: definition.actionId,
-    exactIdentity: definition.exactIdentity,
-    captureView: view,
-    viewAdmission: admittedView ? 'known_video_regression_context' : 'semantic_candidate_only',
-    definitionComplete: true,
-    capabilityState,
-    planResult: capabilityState === 'full_plan_compiled' ? 'compiled_not_lifecycle_validated' : 'refused',
-    repLifecycle: 'not_validated_for_this_exact_leaf_view',
-    qualityDimensions: 'not_validated_for_this_exact_leaf_view',
-    causalTrace: 'not_validated_for_this_exact_leaf_view',
-    userOpen: false,
-    refusalReason,
-  };
-}));
-writeFileSync(matrixOutputPath, `${JSON.stringify({ schemaVersion: 'maxpower.action-motion-capability-matrix/v1', catalogId: catalog.catalogId, records: matrix }, null, 2)}\n`);
-console.log(JSON.stringify({ families: families.size, leaves: definitions.length, matrixRecords: matrix.length, outputPath, matrixOutputPath }));
+console.log(JSON.stringify({ families: families.size, leaves: definitions.length, viewsPerLeaf: ALL_CAPTURE_VIEWS.length, outputPath }));

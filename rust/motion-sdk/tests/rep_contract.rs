@@ -1,11 +1,11 @@
 use std::sync::{Arc, atomic::AtomicUsize};
 
 use maxpower_motion_sdk::{
-    AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseMaturity,
-    ExerciseProfile, ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter, FrameLease,
-    MotionSession, MovementDirection, PoseObservation, PoseSchemaId, RecordingOutputAdapter,
-    RepBoundaryRevision, RepDisposition, RepEvidenceReason, RepObservationFinding, RepPhase,
-    SessionConfig, SetLifecycle, SubjectPolicy,
+    AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseProfile,
+    ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter, FrameLease, MotionSession,
+    MovementDirection, PoseObservation, PoseSchemaId, RecordingOutputAdapter, RepBoundaryRevision,
+    RepDisposition, RepEvidenceReason, RepObservationFinding, RepPhase, SessionConfig,
+    SetLifecycle, SubjectPolicy,
 };
 
 fn config() -> SessionConfig {
@@ -63,7 +63,6 @@ fn full_multi_joint_cycle_seals_one_immutable_rep_with_shared_boundaries() {
     assert_eq!(rep.end_frame_id, 8);
     assert!(rep.canonical_slice_hash != 0);
     assert_eq!(rep.revision, 0);
-    assert_eq!(rep.profile_maturity, "provisional");
     assert!(rep.quality_verdict.is_none());
     assert_eq!(packets.last().unwrap().rep_state.phase, RepPhase::Ready);
 
@@ -349,7 +348,6 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
     let mut profile = ExerciseProfile {
         identity: "test-elbow-flexion/front/bilateral/bodyweight/v1".into(),
         content_hash: 0,
-        maturity: ExerciseMaturity::Provisional,
         schema: PoseSchemaId::BlazePose33,
         coordinate_unit: "image-angle-deg".into(),
         state_machine_id: "ready-effort-peak-return/v1".into(),
@@ -461,6 +459,52 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
             .sum::<usize>(),
         2,
         "auto direction must not turn one return into an opposite-direction rep",
+    );
+}
+
+#[test]
+fn a_plan_selected_phase_dwell_rejects_a_fast_round_trip_before_confirming_volume() {
+    let wrist_y = [
+        0.20, 0.22, 0.30, 0.45, 0.65, 0.78, 0.75, 0.60, 0.40, 0.25, 0.21, 0.20, 0.20, 0.20, 0.20,
+        0.20, 0.20,
+    ];
+    let elbow_y = [
+        0.30, 0.31, 0.36, 0.43, 0.53, 0.60, 0.59, 0.51, 0.41, 0.33, 0.30, 0.30, 0.30, 0.30, 0.30,
+        0.30, 0.30,
+    ];
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        config(),
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::sequence(rep_frames(&wrist_y, &elbow_y)),
+        output.clone(),
+    )
+    .unwrap();
+    let mut profile = ExerciseProfile::lat_pulldown_provisional();
+    profile.state_machine_id = "cycle-aligned-ready-effort-peak-return/dwell-650ms/v1".into();
+    profile.content_hash = profile.computed_content_hash();
+    session.install_exercise_profile(profile).unwrap();
+
+    let releases = Arc::new(AtomicUsize::new(0));
+    for frame in 0..wrist_y.len() as u64 {
+        session
+            .offer(FrameLease::fixture(
+                frame,
+                frame * 100,
+                Arc::clone(&releases),
+            ))
+            .unwrap();
+    }
+    let packets = output.packets();
+    let reps = packets
+        .iter()
+        .flat_map(|packet| packet.completed_reps.iter())
+        .collect::<Vec<_>>();
+    assert_eq!(reps.len(), 1);
+    assert_eq!(reps[0].disposition, RepDisposition::Rejected);
+    assert_eq!(
+        reps[0].evidence_reason,
+        Some(RepEvidenceReason::IncompleteCycle)
     );
 }
 
@@ -583,6 +627,12 @@ fn micro_gap_stays_confirmed_meaningful_gap_is_reviewed_and_long_gap_aborts() {
         reviewed_outcomes[0].disposition,
         RepDisposition::NeedsReview
     );
+    assert_eq!(
+        reviewed_outcomes[0].evidence_reason,
+        Some(RepEvidenceReason::SignalTemporarilyUnavailable),
+        "a bounded signal interruption remains auditable rather than being
+         collapsed into the legacy RequiredJointLoss label"
+    );
 
     let mut long_frames = rep_frames(&wrist_y, &elbow_y);
     for frame in &mut long_frames[4..8] {
@@ -599,7 +649,7 @@ fn micro_gap_stays_confirmed_meaningful_gap_is_reviewed_and_long_gap_aborts() {
     assert_eq!(long_outcomes[0].disposition, RepDisposition::Rejected);
     assert_eq!(
         long_outcomes[0].evidence_reason,
-        Some(RepEvidenceReason::RequiredJointLoss),
+        Some(RepEvidenceReason::SignalTemporarilyUnavailable),
     );
     assert!(long.last().unwrap().rep_state.partial_attempts >= 1);
 }

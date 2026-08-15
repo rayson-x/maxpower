@@ -8,11 +8,12 @@ use std::{
 use maxpower_motion_sdk::{
     AdapterCapabilities, AssessmentEmission, AssessmentEvent, ContractVersion, DiagnosticLevel,
     EquipmentAttributes, EquipmentAxis2d, EquipmentKind, EquipmentObservation, EquipmentSource,
-    ExerciseProfile, FrameLease, FrameObservations, FrameRotation, InferenceAdapter, MotionError,
-    MotionSession, NormalizedRect, PoseCandidate, PoseObservation, PoseObservationContract,
+    FrameLease, FrameObservations, FrameRotation, InferenceAdapter, MotionError, MotionSession,
+    NormalizedRect, PoseCandidate, PoseObservation, PoseObservationContract,
     RecordingOutputAdapter, SessionConfig, SetExecutionContext, SetIntent, SubjectPolicy,
     TimestampUnit, TraceNodeKind, VideoFrameContract, VideoRecognitionContext,
-    WorkoutAssessmentContext, current_motion_assessment_catalog_v2,
+    WorkoutAssessmentContext, visual_recognition_baseline_catalog_v0_1,
+    visual_recognition_baseline_profiles_v0_1,
 };
 
 fn replace_feature_program(
@@ -169,11 +170,21 @@ fn canonical_bench_packets() -> (
         output.clone(),
     )
     .expect("motion session");
+    let binding = visual_recognition_baseline_profiles_v0_1()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "barbell_bench_press"
+                && binding.capture_view
+                    == maxpower_motion_sdk::AssessmentCaptureView::FrontObliqueLeft
+        })
+        .expect("v0.1 bench front-left binding");
     session
-        .install_exercise_profile(
-            ExerciseProfile::barbell_bench_press_touched_benchmark_front_left_provisional(),
+        .install_exercise_profile_with_action_plan(
+            binding.profile,
+            binding.local_coordinate_strategy,
+            binding.motion_plan.expect("compiled action plan"),
         )
-        .expect("profile");
+        .expect("plan-bound profile");
     session.begin_set();
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..progress.len() as u64 {
@@ -223,7 +234,7 @@ fn video_context() -> VideoRecognitionContext {
 #[test]
 fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
     let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
-        current_motion_assessment_catalog_v2(),
+        visual_recognition_baseline_catalog_v0_1(),
         WorkoutAssessmentContext {
             workout_session_id: "workout-tracer".into(),
         },
@@ -422,14 +433,27 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
     assert_eq!(
         range_rule.input_node_ids,
         [
-            format!("rep:{first_rep_id}:comparison:local_primary_excursion"),
-            format!("rep:{first_rep_id}:comparison:local_return_error"),
+            format!("rep:{first_rep_id}:comparison:authorization_range_of_motion"),
+            format!("rep:{first_rep_id}:comparison:motion_relation:task_primary"),
         ],
-        "a rule must depend only on the facts it actually evaluated"
+        "the abstention depends on its authorization fact and task-primary gate"
     );
-    for (dimension, feature_id) in [
-        ("task_completion", "rep_disposition"),
-        ("phase_control", "authorization_phase_control"),
+    for (dimension, expected_inputs) in [
+        (
+            "task_completion",
+            vec![
+                format!("rep:{first_rep_id}:comparison:motion_relation:task_primary"),
+                format!("rep:{first_rep_id}:comparison:rep_disposition"),
+            ],
+        ),
+        (
+            "phase_control",
+            vec![
+                format!("rep:{first_rep_id}:comparison:authorization_phase_control"),
+                format!("rep:{first_rep_id}:comparison:motion_relation:elbow_press_coordination"),
+                format!("rep:{first_rep_id}:comparison:motion_relation:task_primary"),
+            ],
+        ),
     ] {
         let rule = report
             .trace
@@ -438,9 +462,8 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
             .find(|node| node.node_id == format!("rep:{first_rep_id}:rule:{dimension}"))
             .expect("typed categorical rule node");
         assert_eq!(
-            rule.input_node_ids,
-            [format!("rep:{first_rep_id}:comparison:{feature_id}")],
-            "Rep disposition and Bundle authorization must be evaluated facts, not decorative edges"
+            rule.input_node_ids, expected_inputs,
+            "TaskPrimary, Rep disposition and Bundle authorization must be evaluated facts, not decorative edges"
         );
     }
 
@@ -456,7 +479,7 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
 #[test]
 fn same_workout_reference_is_read_before_the_current_set_is_published() {
     let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure_for_subject(
-        current_motion_assessment_catalog_v2(),
+        visual_recognition_baseline_catalog_v0_1(),
         WorkoutAssessmentContext {
             workout_session_id: "workout-reference-order".into(),
         },
@@ -531,8 +554,8 @@ fn same_workout_reference_is_read_before_the_current_set_is_published() {
 }
 
 #[test]
-fn configured_feature_program_controls_facts_and_rejects_raw_landmark_operators() {
-    let mut catalog = current_motion_assessment_catalog_v2();
+fn configured_feature_program_cannot_override_motion_authority_or_use_raw_landmarks() {
+    let mut catalog = visual_recognition_baseline_catalog_v0_1();
     replace_feature_program(
         &mut catalog,
         serde_json::json!({
@@ -544,6 +567,7 @@ fn configured_feature_program_controls_facts_and_rejects_raw_landmark_operators(
                 "phase_duration_ratio",
                 "local_primary_excursion",
                 "local_return_error",
+                "authorization_range_of_motion",
                 "authorization_phase_control",
                 "authorization_support_stability",
                 "authorization_bilateral_coordination",
@@ -554,49 +578,17 @@ fn configured_feature_program_controls_facts_and_rejects_raw_landmark_operators(
             "deliveryStage": "test_program",
         }),
     );
-    let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
-        catalog,
-        WorkoutAssessmentContext {
-            workout_session_id: "feature-program".into(),
-        },
-    )
-    .expect("valid bounded feature program");
-    engine
-        .advance(AssessmentEvent::SetStarted(SetExecutionContext {
-            set_id: "set-feature-program".into(),
-            set_ordinal: 1,
-            video_context: video_context(),
-            intent: SetIntent::Working,
-            planned_load: None,
-            performed_load: None,
-        }))
-        .expect("start");
-    let (packets, closure) = canonical_bench_packets();
-    for packet in packets {
-        engine
-            .advance(AssessmentEvent::CanonicalPacketObserved(Box::new(packet)))
-            .expect("packet");
-    }
-    engine
-        .advance(AssessmentEvent::CanonicalSetClosureObserved(Box::new(
-            closure,
-        )))
-        .expect("closure");
-    let AssessmentEmission::SealedSetAssessment(report) = engine
-        .advance(AssessmentEvent::SetFinished)
-        .expect("report")
-    else {
-        panic!("sealed report");
-    };
-    assert!(report.rep_assessments.iter().all(|rep| {
-        rep.features.len() == 12
-            && !rep
-                .features
-                .iter()
-                .any(|feature| feature.feature_id == "equipment_primary_excursion")
-    }));
+    assert!(matches!(
+        maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
+            catalog,
+            WorkoutAssessmentContext {
+                workout_session_id: "feature-program".into(),
+            },
+        ),
+        Err(maxpower_motion_sdk::AssessmentConfigurationError::InvalidActionMotionPlan { .. })
+    ));
 
-    let mut invalid = current_motion_assessment_catalog_v2();
+    let mut invalid = visual_recognition_baseline_catalog_v0_1();
     replace_feature_program(
         &mut invalid,
         serde_json::json!({
@@ -620,7 +612,7 @@ fn configured_feature_program_controls_facts_and_rejects_raw_landmark_operators(
 
 #[test]
 fn executable_bundle_rejects_duplicate_features_and_equipment_semantic_drift() {
-    let mut duplicate_features = current_motion_assessment_catalog_v2();
+    let mut duplicate_features = visual_recognition_baseline_catalog_v0_1();
     let feature_asset_id = duplicate_features
         .bundles
         .iter()
@@ -654,7 +646,7 @@ fn executable_bundle_rejects_duplicate_features_and_equipment_semantic_drift() {
         )
     ));
 
-    let mut semantic_drift = current_motion_assessment_catalog_v2();
+    let mut semantic_drift = visual_recognition_baseline_catalog_v0_1();
     let execution_asset_id = semantic_drift
         .bundles
         .iter()
@@ -859,11 +851,21 @@ fn governed_real_bench_video_runs_the_same_public_tracer_seam() {
         output.clone(),
     )
     .expect("real replay session");
+    let binding = visual_recognition_baseline_profiles_v0_1()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "barbell_bench_press"
+                && binding.capture_view
+                    == maxpower_motion_sdk::AssessmentCaptureView::FrontObliqueLeft
+        })
+        .expect("v0.1 bench front-left binding");
     session
-        .install_exercise_profile(
-            ExerciseProfile::barbell_bench_press_touched_benchmark_front_left_provisional(),
+        .install_exercise_profile_with_action_plan(
+            binding.profile,
+            binding.local_coordinate_strategy,
+            binding.motion_plan.expect("compiled action plan"),
         )
-        .expect("profile");
+        .expect("plan-bound profile");
     session.begin_set();
     let releases = Arc::new(AtomicUsize::new(0));
     for (frame_id, timestamp) in frame_ids.into_iter().zip(timestamps) {
@@ -888,7 +890,7 @@ fn governed_real_bench_video_runs_the_same_public_tracer_seam() {
     )));
 
     let mut engine = maxpower_motion_sdk::ExecutionAssessmentEngine::configure(
-        current_motion_assessment_catalog_v2(),
+        visual_recognition_baseline_catalog_v0_1(),
         WorkoutAssessmentContext {
             workout_session_id: "governed-real-tracer".into(),
         },

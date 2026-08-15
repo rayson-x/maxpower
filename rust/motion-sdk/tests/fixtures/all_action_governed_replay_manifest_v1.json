@@ -1,7 +1,7 @@
 {
   "schemaVersion": "maxpower-governed-replay-manifest/v1",
-  "bundleId": "current-all-action-known-video-regression/v1",
-  "assembledInputSha256": "03c497531ed0f921b2d11779024419c5de1ffa7936a339b8bea8a7744a7cd126",
+  "bundleId": "visual-recognition-v0.1-known-video-regression",
+  "assembledInputSha256": "c809664df9b7c0cddd71ea28e7b19bdf0d11106686c3e43a5d431ad03363289e",
   "assembledInput": {
     "task": "known_video_rep_counting_regression",
     "sourceAssets": [
@@ -51,13 +51,13 @@
           "failure_review"
         ],
         "selectedFields": [
-          "video pixels for ExecutionContract-authorized rigid-bar contexts"
+          "video pixels for ExecutionContract-authorized visual equipment providers"
         ]
       }
     ],
     "equipmentVideoSourceManifest": {
-      "path": "rust/motion-sdk/tests/fixtures/rigid_bar_video_sources_v1.json",
-      "sha256": "4cfcb733c8f0c34bf8ebcdd2f13071db938742c20831cb8fb8f0b29d6b091f58"
+      "path": "rust/motion-sdk/tests/fixtures/visual_recognition_v0_1_video_sources.json",
+      "sha256": "0ed5f59f06e1cf99aef6e84b253739738dc49c39f10cafee05e964475f5dd6b2"
     },
     "exclusions": {
       "path": "catalog/exclusions.json",
@@ -73,73 +73,17 @@
     },
     "splitPolicy": "known_participant_known_video_regression_only",
     "modelConfiguration": {
-      "assessmentCatalogId": "maxpower/current-all-family-assessment/v7",
+      "assessmentCatalogId": "maxpower/visual-recognition-baseline/v0.1",
       "poseRuntimeId": "rtmpose-m",
       "poseSchema": "halpe26/v1",
       "packetContract": "1.10",
-      "equipmentProvider": "maxpower_motion_sdk::BarbellAxisVisualTracker",
+      "equipmentProvider": "maxpower_motion_sdk::EquipmentProviderRegistry",
       "equipmentActivationAuthority": "ExecutionContract",
       "countedDispositions": [
         "confirmed",
         "needs_review"
       ],
       "boundaryPolicy": "predicted_start_within_3000ms_and_end_within_1500ms_of_human_rep_range"
-    },
-    "expectedStructuralResult": {
-      "resolvedRecordCount": 54,
-      "governanceExcludedRecordCount": 1,
-      "replayedRecordCount": 53,
-      "recordsWithNonRejectedRep": 50,
-      "recordsWithBoundaryAlignment": 50,
-      "packetCount": 15879,
-      "localStates": {
-        "Uninitialized": 745,
-        "Provisional": 197,
-        "Learning": 320,
-        "Frozen": 10954,
-        "Degraded": 3663
-      },
-      "poseChannelFrames": 8546,
-      "equipmentChannelFrames": 3305,
-      "fusionStates": {
-        "Agreement": 1362,
-        "CannotJudge": 7243,
-        "Conflict": 255,
-        "EquipmentOnly": 254,
-        "PoseOnly": 6765
-      },
-      "dimensionStates": {
-        "TaskCompletion/ObservedAcceptable": 25,
-        "TaskCompletion/ObservedDeviation": 26,
-        "TaskCompletion/CannotJudge": 2,
-        "RangeOfMotion/ObservedAcceptable": 22,
-        "RangeOfMotion/ObservedDeviation": 7,
-        "RangeOfMotion/CannotJudge": 24,
-        "PhaseControl/CannotJudge": 53,
-        "SupportStability/CannotJudge": 53,
-        "BilateralCoordination/CannotJudge": 53,
-        "TrajectoryControl/CannotJudge": 53,
-        "StandardVariantCompatibility/CannotJudge": 53,
-        "ObservationConfidence/ObservedAcceptable": 34,
-        "ObservationConfidence/CannotJudge": 19
-      },
-      "referenceKinds": {
-        "SelfGeometry": 557,
-        "SetPrefix": 337,
-        "NoReference": 7040
-      },
-      "equipmentProvider": {
-        "requestedRecordCount": 18,
-        "availableRecordCount": 18,
-        "decodedFrameCount": 18410,
-        "trackerOutputFrameCount": 5665,
-        "canonicalObservationFrameCount": 4685,
-        "measuredFrameCount": 4605,
-        "predictedFrameCount": 80,
-        "poseFusedFrameCount": 980
-      },
-      "traceCompleteReportCount": 53,
-      "typedRefusalCount": 0
     },
     "sourceGroups": [
       {

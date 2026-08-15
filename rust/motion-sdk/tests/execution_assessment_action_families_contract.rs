@@ -1,55 +1,17 @@
 use std::collections::HashSet;
 
 use maxpower_motion_sdk::{
-    AssessmentAssetKind, AssessmentBundleCapability, AssessmentCaptureView,
-    AssessmentEquipmentSemantics, ExecutionAssessmentEngine, LocalEquipmentMode, LocalPoseAnchor,
-    WorkoutAssessmentContext, current_bodyweight_assessment_profiles_v1,
-    current_cable_assessment_profiles_v1, current_dual_dumbbell_assessment_profiles_v1,
-    current_machine_assessment_profiles_v1, current_motion_assessment_catalog_v4,
-    current_motion_assessment_catalog_v5, current_motion_assessment_catalog_v6,
-    current_motion_assessment_catalog_v7,
+    AssessmentAssetKind, AssessmentCaptureView, AssessmentEquipmentSemantics,
+    ExecutionAssessmentEngine, LocalEquipmentMode, LocalPoseAnchor, WorkoutAssessmentContext,
+    current_bodyweight_assessment_profiles_v1, current_cable_assessment_profiles_v1,
+    current_dual_dumbbell_assessment_profiles_v1, current_machine_assessment_profiles_v1,
+    visual_recognition_baseline_catalog_v0_1,
 };
-
-fn executable_contexts(version: u8) -> usize {
-    let catalog = match version {
-        4 => current_motion_assessment_catalog_v4(),
-        5 => current_motion_assessment_catalog_v5(),
-        6 => current_motion_assessment_catalog_v6(),
-        7 => current_motion_assessment_catalog_v7(),
-        _ => unreachable!(),
-    };
-    ExecutionAssessmentEngine::configure(
-        catalog.clone(),
-        WorkoutAssessmentContext {
-            workout_session_id: format!("family-v{version}"),
-        },
-    )
-    .expect("every promoted Bundle must compile atomically");
-    catalog
-        .bundles
-        .iter()
-        .filter(|bundle| bundle.capability == AssessmentBundleCapability::Executable)
-        .count()
-}
-
-#[test]
-fn family_catalogs_open_only_after_their_dependency_wave() {
-    assert_eq!(executable_contexts(4), 18);
-    assert_eq!(executable_contexts(5), 21);
-    assert_eq!(executable_contexts(6), 22);
-    assert_eq!(executable_contexts(7), 24);
-}
 
 #[test]
 fn all_current_exact_contexts_have_distinct_executable_lineage() {
-    let catalog = current_motion_assessment_catalog_v7();
+    let catalog = visual_recognition_baseline_catalog_v0_1();
     assert_eq!(catalog.bundles.len(), 24);
-    assert!(
-        catalog
-            .bundles
-            .iter()
-            .all(|bundle| bundle.capability == AssessmentBundleCapability::Executable)
-    );
     let bundle_hashes = catalog
         .bundles
         .iter()
@@ -119,7 +81,7 @@ fn action_family_strategies_preserve_their_actual_evidence_semantics() {
 
 #[test]
 fn v7_exact_context_matrix_keeps_equipment_and_view_contracts() {
-    let catalog = current_motion_assessment_catalog_v7();
+    let catalog = visual_recognition_baseline_catalog_v0_1();
     let expected = [
         (
             "lat_pulldown",
@@ -167,17 +129,17 @@ fn v7_exact_context_matrix_keeps_equipment_and_view_contracts() {
             })
             .expect("exact context");
         assert_eq!(bundle.exact_context.equipment_semantics, equipment);
-        assert_eq!(bundle.capability, AssessmentBundleCapability::Executable);
     }
 }
 
 #[test]
-fn machine_chest_press_owns_press_then_return_semantics() {
-    let catalog = current_motion_assessment_catalog_v5();
-    for bundle in catalog.bundles.iter().filter(|bundle| {
-        bundle.exact_context.action_id == "machine_chest_press"
-            && bundle.capability == AssessmentBundleCapability::Executable
-    }) {
+fn machine_chest_press_uses_its_installed_motion_plan_semantics() {
+    let catalog = visual_recognition_baseline_catalog_v0_1();
+    for bundle in catalog
+        .bundles
+        .iter()
+        .filter(|bundle| bundle.exact_context.action_id == "machine_chest_press")
+    {
         let contract = catalog
             .installed_assets
             .iter()
@@ -185,18 +147,22 @@ fn machine_chest_press_owns_press_then_return_semantics() {
             .expect("machine execution contract");
         assert_eq!(
             contract.content["phaseOrder"],
-            serde_json::json!(["concentric_press", "eccentric_return"])
+            serde_json::json!(["outbound", "return"])
         );
         assert_eq!(
             contract.content["taskEndpoints"],
-            serde_json::json!(["retracted_start", "visible_extension", "returned_retracted"])
+            serde_json::json!([
+                "declared_start_endpoint_departure",
+                "手柄靠近身体端 → 推出端 → 返回靠近身体端。",
+                "declared_start_endpoint_return"
+            ])
         );
     }
 }
 
 #[test]
 fn dual_load_bundle_fails_closed_without_declared_bilateral_thresholds() {
-    let mut catalog = current_motion_assessment_catalog_v6();
+    let mut catalog = visual_recognition_baseline_catalog_v0_1();
     let bundle_index = catalog
         .bundles
         .iter()

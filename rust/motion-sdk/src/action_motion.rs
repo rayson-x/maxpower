@@ -51,10 +51,50 @@ impl ActionMotionCatalog {
     }
 }
 
-/// Reviewed 30-family / 248-leaf catalog materialized by the repository
+/// Installed 30-family / 248-leaf catalog materialized by the repository
 /// generator. The generated asset is read identically by native and WASM.
-pub fn reviewed_action_motion_catalog_v1() -> Result<ActionMotionCatalog, ActionMotionError> {
+pub fn installed_action_motion_catalog_v1() -> Result<ActionMotionCatalog, ActionMotionError> {
     ActionMotionCatalog::from_json(include_str!("../assets/action-motion-catalog-v1.json"))
+}
+
+/// Structural inventory of the action library installed in this SDK build.
+///
+/// This deliberately contains no review, validation-maturity, accuracy or
+/// release state. Those are properties of the external data/release workflow,
+/// not action semantics consumed by the runtime.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActionAssetInventoryReport {
+    pub catalog_id: String,
+    pub leaf_action_count: usize,
+    pub exact_view_count: usize,
+}
+
+/// Validates that every action and declared view in the checked-in library can
+/// produce the same executable plan shape used at runtime. The SDK does not
+/// consume a capability/admission matrix.
+pub fn installed_action_asset_inventory_v1() -> Result<ActionAssetInventoryReport, ActionMotionError>
+{
+    let catalog = installed_action_motion_catalog_v1()?;
+    validate_action_asset_inventory(&catalog)
+}
+
+pub fn validate_action_asset_inventory(
+    catalog: &ActionMotionCatalog,
+) -> Result<ActionAssetInventoryReport, ActionMotionError> {
+    let compiler = ActionMotionCompiler::new(OperatorRegistry::standard());
+    let mut expected_rows = 0_usize;
+    for definition in &catalog.definitions {
+        for view in &definition.supported_views {
+            expected_rows += 1;
+            compiler.compile(definition, view)?;
+        }
+    }
+
+    Ok(ActionAssetInventoryReport {
+        catalog_id: catalog.catalog_id.clone(),
+        leaf_action_count: catalog.definitions.len(),
+        exact_view_count: expected_rows,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -67,12 +107,16 @@ pub struct ActionMotionDefinition {
     pub executable_leaf: bool,
     pub relations: Vec<MotionRelationDefinition>,
     pub tracks: Vec<MotionTrackDefinition>,
+    pub rep_consensus: RepConsensusPolicy,
     pub rep_boundary: RepBoundarySemantics,
     pub phases: Vec<PhaseSemantics>,
     pub allowed_claims: Vec<String>,
     pub supported_views: Vec<String>,
-    #[serde(default)]
-    pub admitted_views: Vec<String>,
+    /// Exact action × view evidence authority.  This is deliberately asset
+    /// data, rather than an inference from an operator being compiled: an
+    /// operator can exist while its identity relation is occluded or
+    /// semantically meaningless in one projection.
+    pub view_observation_plans: Vec<ViewObservationPlan>,
     pub content_hash: String,
 }
 
@@ -86,7 +130,7 @@ impl ActionMotionDefinition {
         semantic.content_hash.clear();
         stable_hash(&semantic)
     }
-    fn validate(&self) -> Result<(), ActionMotionError> {
+    pub(crate) fn validate(&self) -> Result<(), ActionMotionError> {
         let complete_identity = [
             &self.definition_id,
             &self.action_id,
@@ -142,6 +186,13 @@ impl ActionMotionDefinition {
             .tracks
             .iter()
             .all(|track| !track.track_id.trim().is_empty() && !track.source.trim().is_empty());
+        let complete_consensus = self.rep_consensus.minimum_observed_frames > 0
+            && !self.rep_consensus.required_primary_tracks.is_empty()
+            && self
+                .rep_consensus
+                .required_primary_tracks
+                .iter()
+                .all(|track_id| track_ids.contains(track_id.as_str()));
         let required_roles = [
             MotionRole::TaskPrimary,
             MotionRole::CoordinatedMotion,
@@ -165,6 +216,19 @@ impl ActionMotionDefinition {
                     && !phase.from.trim().is_empty()
                     && !phase.to.trim().is_empty()
             });
+        let view_plans_are_complete = self.view_observation_plans.len()
+            == self.supported_views.len()
+            && self.supported_views.iter().all(|view| {
+                self.view_observation_plans
+                    .iter()
+                    .filter(|plan| &plan.view_id == view)
+                    .count()
+                    == 1
+            })
+            && self
+                .view_observation_plans
+                .iter()
+                .all(|plan| plan.validate(&relation_ids, &self.relations));
         if self.schema_version != "maxpower.action-motion-definition/v1"
             || !self.executable_leaf
             || !complete_identity
@@ -173,11 +237,13 @@ impl ActionMotionDefinition {
             || !complete_boundary
             || !complete_relations
             || !complete_tracks
+            || !complete_consensus
             || !required_roles
             || !unique_nonempty_lists
             || self.phases.is_empty()
             || self.allowed_claims.is_empty()
             || self.supported_views.is_empty()
+            || !view_plans_are_complete
         {
             return Err(ActionMotionError::DefinitionBuildFailure {
                 action_id: self.action_id.clone(),
@@ -185,6 +251,142 @@ impl ActionMotionDefinition {
             });
         }
         Ok(())
+    }
+}
+
+/// The action-specific topology parameters consumed by the RepEngine before
+/// a candidate is sealed.  Amplitudes use milli local-scale units so action
+/// assets remain deterministic and equality/hashable across native and WASM.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepTopologyProfile {
+    pub topology_id: String,
+    pub primary_relation_id: String,
+    /// Modules selected by this exact action × view topology.  The compiler
+    /// verifies this graph before a runtime profile can be installed; actions
+    /// never acquire hidden action-name branches in the module registry.
+    pub algorithm_module_ids: Vec<String>,
+    pub direction_policy: LocalDirectionPolicy,
+    pub start_threshold_milli: u16,
+    pub minimum_excursion_milli: u16,
+    pub turnaround_hysteresis_milli: u16,
+    pub return_tolerance_milli: u16,
+    pub ready_tolerance_milli: u16,
+    pub minimum_phase_dwell_ms: u64,
+    pub maximum_gap_ms: u64,
+    pub minimum_rep_duration_ms: u64,
+    pub maximum_rep_duration_ms: u64,
+}
+
+impl RepTopologyProfile {
+    pub fn start_threshold(&self) -> f32 {
+        f32::from(self.start_threshold_milli) / 1_000.0
+    }
+    pub fn minimum_excursion(&self) -> f32 {
+        f32::from(self.minimum_excursion_milli) / 1_000.0
+    }
+    pub fn turnaround_hysteresis(&self) -> f32 {
+        f32::from(self.turnaround_hysteresis_milli) / 1_000.0
+    }
+    pub fn return_tolerance(&self) -> f32 {
+        f32::from(self.return_tolerance_milli) / 1_000.0
+    }
+
+    fn is_complete(&self) -> bool {
+        !self.topology_id.trim().is_empty()
+            && !self.primary_relation_id.trim().is_empty()
+            && !self.algorithm_module_ids.is_empty()
+            && self
+                .algorithm_module_ids
+                .iter()
+                .all(|module_id| !module_id.trim().is_empty())
+            && self
+                .algorithm_module_ids
+                .iter()
+                .collect::<HashSet<_>>()
+                .len()
+                == self.algorithm_module_ids.len()
+            && self.start_threshold_milli > 0
+            && self.minimum_excursion_milli >= self.start_threshold_milli
+            && self.turnaround_hysteresis_milli > 0
+            && self.return_tolerance_milli > 0
+            && self.ready_tolerance_milli > 0
+            && self.minimum_phase_dwell_ms > 0
+            && self.maximum_gap_ms > 0
+            && self.minimum_rep_duration_ms >= self.minimum_phase_dwell_ms
+            && self.maximum_rep_duration_ms > self.minimum_rep_duration_ms
+    }
+}
+
+/// A positive/negative local-axis convention is never inferred from screen
+/// pixels.  Most round-trip actions are sign-invariant; fixed signs are only
+/// legal when the exact asset explicitly declares them.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalDirectionPolicy {
+    SignInvariant,
+    PreparationToEffortPositive,
+    PreparationToEffortNegative,
+}
+
+/// View-specific observation contract.  It records what may become evidence,
+/// what must not be used, and which candidate topology is permitted for this
+/// exact projection.  It is a semantic projection contract, not an accuracy
+/// or release tier.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewObservationPlan {
+    pub view_id: String,
+    pub visible_relation_ids: Vec<String>,
+    #[serde(default)]
+    pub prohibited_relation_ids: Vec<String>,
+    #[serde(default)]
+    pub prohibited_signal_sources: Vec<String>,
+    #[serde(default)]
+    pub occlusion_risks: Vec<String>,
+    pub primary_relation_candidates: Vec<String>,
+    pub side_observability: String,
+    pub equipment_observability: String,
+    pub support_observability: String,
+    pub local_axis_policy: String,
+    #[serde(default)]
+    pub dimension_availability: Vec<String>,
+    pub rep_topology: RepTopologyProfile,
+}
+
+impl ViewObservationPlan {
+    fn validate(
+        &self,
+        relation_ids: &HashSet<&str>,
+        relations: &[MotionRelationDefinition],
+    ) -> bool {
+        let known_relation = |relation_id: &String| relation_ids.contains(relation_id.as_str());
+        let visible = self.visible_relation_ids.iter().all(known_relation)
+            && !self.visible_relation_ids.is_empty();
+        let prohibited = self.prohibited_relation_ids.iter().all(known_relation)
+            && self
+                .prohibited_relation_ids
+                .iter()
+                .all(|relation_id| !self.visible_relation_ids.contains(relation_id));
+        let primary_relation = relations.iter().find(|relation| {
+            relation.role == MotionRole::TaskPrimary
+                && relation.required
+                && relation.identity_defining
+        });
+        let primary_is_declared = primary_relation.is_some_and(|relation| {
+            self.primary_relation_candidates
+                .contains(&relation.relation_id)
+                && self.rep_topology.primary_relation_id == relation.relation_id
+        });
+        !self.view_id.trim().is_empty()
+            && visible
+            && prohibited
+            && primary_is_declared
+            && !self.side_observability.trim().is_empty()
+            && !self.equipment_observability.trim().is_empty()
+            && !self.support_observability.trim().is_empty()
+            && !self.local_axis_policy.trim().is_empty()
+            && self.rep_topology.is_complete()
     }
 }
 
@@ -217,6 +419,481 @@ pub enum MotionValueType {
     Segment2d,
     Scalar,
     Category,
+}
+
+/// A reusable runtime algorithm contract.  It is intentionally independent of
+/// action ID: an ActionMotionDefinition selects a compatible module graph and
+/// parameters, while the descriptor states what evidence the module may
+/// consume and what facts it may produce.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AlgorithmModuleCategory {
+    PoseRelation,
+    LocalCoordinate,
+    RepTopology,
+    CandidateAdmission,
+    BoundaryRefinement,
+    EquipmentObservation,
+    EquipmentFusion,
+    PostSealFeature,
+    QualityRule,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactMissingPolicy {
+    RefusePlan,
+    CannotJudge,
+    NeedsReview,
+    RejectCandidate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactConflictPolicy {
+    RefusePlan,
+    PreserveChannels,
+    RejectCandidate,
+    CannotJudge,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AlgorithmFactContract {
+    pub fact_id: String,
+    pub value_type: MotionValueType,
+    pub required: bool,
+    /// A fact may only be consumed for recognition or quality when it carries
+    /// the complete causal evidence envelope.  This is checked at plan
+    /// compilation so a numeric value cannot silently become judgeable.
+    pub evidence: FactEvidenceContract,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FactEvidenceContract {
+    pub source_lineage: bool,
+    pub event_clock: bool,
+    pub causal_age: bool,
+    pub coverage: bool,
+    pub confidence: bool,
+    pub uncertainty: bool,
+}
+
+impl FactEvidenceContract {
+    fn complete() -> Self {
+        Self {
+            source_lineage: true,
+            event_clock: true,
+            causal_age: true,
+            coverage: true,
+            confidence: true,
+            uncertainty: true,
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.source_lineage
+            && self.event_clock
+            && self.causal_age
+            && self.coverage
+            && self.confidence
+            && self.uncertainty
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AlgorithmModuleDescriptor {
+    pub module_id: String,
+    pub version: String,
+    pub category: AlgorithmModuleCategory,
+    pub applicable_topologies: Vec<String>,
+    pub required_inputs: Vec<AlgorithmFactContract>,
+    pub produced_facts: Vec<AlgorithmFactContract>,
+    pub maximum_causal_age_ms: u64,
+    pub missing_policy: FactMissingPolicy,
+    pub conflict_policy: FactConflictPolicy,
+    pub parameter_schema: String,
+    pub latency_budget_ms: u64,
+    pub allowed_conclusions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AlgorithmModuleRegistry {
+    descriptors: HashMap<String, AlgorithmModuleDescriptor>,
+}
+
+impl AlgorithmModuleRegistry {
+    pub fn empty() -> Self {
+        Self {
+            descriptors: HashMap::new(),
+        }
+    }
+
+    pub fn from_descriptors(
+        descriptors: Vec<AlgorithmModuleDescriptor>,
+    ) -> Result<Self, ActionMotionError> {
+        let mut registry = Self::empty();
+        for descriptor in descriptors {
+            registry.register(descriptor)?;
+        }
+        Ok(registry)
+    }
+
+    pub fn register(
+        &mut self,
+        descriptor: AlgorithmModuleDescriptor,
+    ) -> Result<(), ActionMotionError> {
+        if descriptor.module_id.trim().is_empty()
+            || descriptor.version.trim().is_empty()
+            || descriptor.applicable_topologies.is_empty()
+            || descriptor.parameter_schema.trim().is_empty()
+            || descriptor.latency_budget_ms == 0
+            || descriptor.maximum_causal_age_ms > descriptor.latency_budget_ms
+            || descriptor.produced_facts.is_empty()
+            || descriptor
+                .required_inputs
+                .iter()
+                .chain(descriptor.produced_facts.iter())
+                .any(|fact| fact.fact_id.trim().is_empty() || !fact.evidence.is_complete())
+        {
+            return Err(ActionMotionError::InvalidAlgorithmModuleContract {
+                module_id: descriptor.module_id,
+            });
+        }
+        if self.descriptors.contains_key(&descriptor.module_id) {
+            return Err(ActionMotionError::DuplicateAlgorithmModule {
+                module_id: descriptor.module_id,
+            });
+        }
+        self.descriptors
+            .insert(descriptor.module_id.clone(), descriptor);
+        Ok(())
+    }
+
+    pub fn standard() -> Self {
+        let descriptor =
+            |module_id: &str,
+             category,
+             applicable_topologies: &[&str],
+             required_inputs: &[(&str, MotionValueType)],
+             produced_facts: &[(&str, MotionValueType)],
+             maximum_causal_age_ms,
+             missing_policy,
+             conflict_policy,
+             allowed_conclusions: &[&str]| AlgorithmModuleDescriptor {
+                module_id: module_id.into(),
+                version: "v1".into(),
+                category,
+                applicable_topologies: applicable_topologies
+                    .iter()
+                    .map(|value| (*value).into())
+                    .collect(),
+                required_inputs: required_inputs
+                    .iter()
+                    .map(|(fact_id, value_type)| AlgorithmFactContract {
+                        fact_id: (*fact_id).into(),
+                        value_type: *value_type,
+                        required: true,
+                        evidence: FactEvidenceContract::complete(),
+                    })
+                    .collect(),
+                produced_facts: produced_facts
+                    .iter()
+                    .map(|(fact_id, value_type)| AlgorithmFactContract {
+                        fact_id: (*fact_id).into(),
+                        value_type: *value_type,
+                        required: true,
+                        evidence: FactEvidenceContract::complete(),
+                    })
+                    .collect(),
+                maximum_causal_age_ms,
+                missing_policy,
+                conflict_policy,
+                parameter_schema: format!("maxpower.algorithm-module/{module_id}/v1"),
+                latency_budget_ms: maximum_causal_age_ms.max(16),
+                allowed_conclusions: allowed_conclusions
+                    .iter()
+                    .map(|value| (*value).into())
+                    .collect(),
+            };
+        let topology_ids = [
+            "bilateral_synchronous_cycle/v1",
+            "independent_bilateral_cycle/v1",
+            "unilateral_cycle/v1",
+            "alternating_cycle/v1",
+            "pose_primary_cycle/v1",
+            "hold_interval/v1",
+            "locomotion_step_cycle/v1",
+            "multi_stage_cycle/v1",
+        ];
+        let values = vec![
+            descriptor(
+                "pose_relation",
+                AlgorithmModuleCategory::PoseRelation,
+                &topology_ids,
+                &[("canonical_pose", MotionValueType::Point2d)],
+                &[("pose_relation", MotionValueType::Scalar)],
+                0,
+                FactMissingPolicy::CannotJudge,
+                FactConflictPolicy::PreserveChannels,
+                &[],
+            ),
+            descriptor(
+                "local_coordinate",
+                AlgorithmModuleCategory::LocalCoordinate,
+                &topology_ids,
+                &[("pose_relation", MotionValueType::Scalar)],
+                &[("local_coordinate", MotionValueType::Scalar)],
+                0,
+                FactMissingPolicy::NeedsReview,
+                FactConflictPolicy::PreserveChannels,
+                &[],
+            ),
+            descriptor(
+                "equipment_observation",
+                AlgorithmModuleCategory::EquipmentObservation,
+                &topology_ids,
+                &[("raw_equipment", MotionValueType::Point2d)],
+                &[("equipment_geometry", MotionValueType::Point2d)],
+                0,
+                FactMissingPolicy::CannotJudge,
+                FactConflictPolicy::PreserveChannels,
+                &[],
+            ),
+            descriptor(
+                "equipment_fusion",
+                AlgorithmModuleCategory::EquipmentFusion,
+                &topology_ids,
+                &[
+                    ("pose_relation", MotionValueType::Scalar),
+                    ("equipment_geometry", MotionValueType::Point2d),
+                ],
+                &[("subject_equipment_association", MotionValueType::Category)],
+                180,
+                FactMissingPolicy::CannotJudge,
+                FactConflictPolicy::PreserveChannels,
+                &[],
+            ),
+            descriptor(
+                "rep_topology",
+                AlgorithmModuleCategory::RepTopology,
+                &topology_ids,
+                &[("local_coordinate", MotionValueType::Scalar)],
+                &[("raw_rep_candidate", MotionValueType::Category)],
+                250,
+                FactMissingPolicy::NeedsReview,
+                FactConflictPolicy::RejectCandidate,
+                &[],
+            ),
+            descriptor(
+                "candidate_admission",
+                AlgorithmModuleCategory::CandidateAdmission,
+                &topology_ids,
+                &[("raw_rep_candidate", MotionValueType::Category)],
+                &[("sealed_rep", MotionValueType::Category)],
+                250,
+                FactMissingPolicy::RejectCandidate,
+                FactConflictPolicy::RejectCandidate,
+                &["confirmed_rep", "needs_review", "rejected_candidate"],
+            ),
+            descriptor(
+                "boundary_refinement",
+                AlgorithmModuleCategory::BoundaryRefinement,
+                &topology_ids,
+                &[("sealed_rep", MotionValueType::Category)],
+                &[("causal_rep_boundary", MotionValueType::Scalar)],
+                250,
+                FactMissingPolicy::CannotJudge,
+                FactConflictPolicy::PreserveChannels,
+                &[],
+            ),
+            descriptor(
+                "post_seal_feature",
+                AlgorithmModuleCategory::PostSealFeature,
+                &topology_ids,
+                &[("sealed_rep", MotionValueType::Category)],
+                &[("rep_feature", MotionValueType::Scalar)],
+                0,
+                FactMissingPolicy::CannotJudge,
+                FactConflictPolicy::PreserveChannels,
+                &[],
+            ),
+            descriptor(
+                "quality_rule",
+                AlgorithmModuleCategory::QualityRule,
+                &topology_ids,
+                &[("rep_feature", MotionValueType::Scalar)],
+                &[("dimension_conclusion", MotionValueType::Category)],
+                0,
+                FactMissingPolicy::CannotJudge,
+                FactConflictPolicy::CannotJudge,
+                &["cannot_judge", "not_applicable", "observed_fact"],
+            ),
+        ];
+        Self::from_descriptors(values)
+            .expect("the built-in algorithm-module registry must be internally valid")
+    }
+
+    pub fn descriptor(&self, module_id: &str) -> Option<&AlgorithmModuleDescriptor> {
+        self.descriptors.get(module_id)
+    }
+
+    fn compile_graph(
+        &self,
+        topology: &RepTopologyProfile,
+        source_requirement: OperatorSourceRequirement,
+    ) -> Result<Vec<AlgorithmModuleDescriptor>, ActionMotionError> {
+        let needs_equipment = matches!(
+            source_requirement,
+            OperatorSourceRequirement::CurrentMeasuredEquipment
+                | OperatorSourceRequirement::CurrentMeasuredMixed
+        );
+        let mandatory_modules = [
+            "pose_relation",
+            "local_coordinate",
+            "rep_topology",
+            "candidate_admission",
+            "boundary_refinement",
+            "post_seal_feature",
+            "quality_rule",
+        ];
+        for module_id in mandatory_modules {
+            if !topology
+                .algorithm_module_ids
+                .iter()
+                .any(|id| id == module_id)
+            {
+                return Err(ActionMotionError::RequiredAlgorithmModuleNotSelected {
+                    topology_id: topology.topology_id.clone(),
+                    module_id: module_id.into(),
+                });
+            }
+        }
+        if needs_equipment {
+            for module_id in ["equipment_observation", "equipment_fusion"] {
+                if !topology
+                    .algorithm_module_ids
+                    .iter()
+                    .any(|id| id == module_id)
+                {
+                    return Err(ActionMotionError::RequiredAlgorithmModuleNotSelected {
+                        topology_id: topology.topology_id.clone(),
+                        module_id: module_id.into(),
+                    });
+                }
+            }
+        }
+        let mut selected = topology
+            .algorithm_module_ids
+            .iter()
+            .map(|module_id| {
+                self.descriptor(module_id).cloned().ok_or_else(|| {
+                    ActionMotionError::MissingAlgorithmModule {
+                        module_id: module_id.clone(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for descriptor in &mut selected {
+            if !descriptor
+                .applicable_topologies
+                .iter()
+                .any(|candidate| candidate == &topology.topology_id)
+            {
+                return Err(ActionMotionError::IncompatibleAlgorithmTopology {
+                    module_id: descriptor.module_id.clone(),
+                    topology_id: topology.topology_id.clone(),
+                });
+            }
+            if descriptor.module_id == "rep_topology" && needs_equipment {
+                descriptor.required_inputs.push(AlgorithmFactContract {
+                    fact_id: "subject_equipment_association".into(),
+                    value_type: MotionValueType::Category,
+                    required: true,
+                    evidence: FactEvidenceContract::complete(),
+                });
+            }
+        }
+        let mut all_producers = HashMap::<String, MotionValueType>::new();
+        for descriptor in &selected {
+            for output in descriptor
+                .produced_facts
+                .iter()
+                .filter(|output| output.required)
+            {
+                if all_producers
+                    .insert(output.fact_id.clone(), output.value_type)
+                    .is_some()
+                {
+                    return Err(ActionMotionError::DuplicateAlgorithmFactProducer {
+                        fact_id: output.fact_id.clone(),
+                    });
+                }
+            }
+        }
+        let mut produced = HashMap::<String, MotionValueType>::new();
+        let roots = HashMap::from([
+            ("canonical_pose".to_string(), MotionValueType::Point2d),
+            ("raw_equipment".to_string(), MotionValueType::Point2d),
+        ]);
+        let mut graph = Vec::with_capacity(selected.len());
+        while !selected.is_empty() {
+            let ready_index = selected.iter().position(|descriptor| {
+                descriptor
+                    .required_inputs
+                    .iter()
+                    .filter(|input| input.required)
+                    .all(|input| {
+                        produced
+                            .get(&input.fact_id)
+                            .or_else(|| roots.get(&input.fact_id))
+                            == Some(&input.value_type)
+                    })
+            });
+            if let Some(index) = ready_index {
+                let descriptor = selected.remove(index);
+                for output in descriptor
+                    .produced_facts
+                    .iter()
+                    .filter(|output| output.required)
+                {
+                    produced.insert(output.fact_id.clone(), output.value_type);
+                }
+                graph.push(descriptor);
+                continue;
+            }
+            let descriptor = &selected[0];
+            let missing = descriptor
+                .required_inputs
+                .iter()
+                .filter(|input| input.required)
+                .find(|input| {
+                    !roots.contains_key(&input.fact_id)
+                        && !all_producers.contains_key(&input.fact_id)
+                });
+            if let Some(input) = missing {
+                return Err(ActionMotionError::AlgorithmFactHasNoProducer {
+                    module_id: descriptor.module_id.clone(),
+                    fact_id: input.fact_id.clone(),
+                });
+            }
+            return Err(ActionMotionError::AlgorithmDependencyCycle {
+                module_ids: selected
+                    .iter()
+                    .map(|descriptor| descriptor.module_id.clone())
+                    .collect(),
+            });
+        }
+        Ok(graph)
+    }
+}
+
+impl Default for AlgorithmModuleRegistry {
+    fn default() -> Self {
+        Self::standard()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -260,6 +937,33 @@ pub struct MotionTrackDefinition {
     pub role: TrackRole,
     pub required: bool,
     pub identity_defining: bool,
+    pub side_scope: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepConsensusMode {
+    SharedRigid,
+    BilateralSynchronous,
+    IndependentBilateral,
+    Unilateral,
+    Alternating,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RepConflictPolicy {
+    RejectConfirmedRep,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepConsensusPolicy {
+    pub mode: RepConsensusMode,
+    pub required_primary_tracks: Vec<String>,
+    pub required_sides: Vec<String>,
+    pub minimum_observed_frames: u8,
+    pub conflict_policy: RepConflictPolicy,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -469,29 +1173,6 @@ pub struct ChannelClockPolicy {
     pub maximum_causal_age_ms: u64,
     pub missing_frame_policy: MissingFramePolicy,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ActionPlanCapability {
-    FullExecutable,
-    PoseSupportedLimited,
-    UnsupportedEquipmentCatalogOnly,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ActionCapabilityState {
-    FullPlanCompiled,
-    PoseSupportedLimitedSuccess,
-    UnsupportedEquipmentCatalogOnly,
-    AdmissibleVisualRefusal,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ActionCapabilityRecord {
-    pub action_id: String,
-    pub equipment_topology: String,
-    pub capture_view: String,
-    pub state: ActionCapabilityState,
-    pub detail: Option<String>,
-}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ViewProjectedRelation {
     pub relation_id: String,
@@ -527,9 +1208,12 @@ pub struct ActionObservationPlan {
     pub definition_id: String,
     pub definition_hash: String,
     pub capture_view: String,
-    pub capability: ActionPlanCapability,
     pub projection: ViewProjectionPlan,
+    pub view_observation: ViewObservationPlan,
+    pub rep_topology: RepTopologyProfile,
+    pub algorithm_modules: Vec<AlgorithmModuleDescriptor>,
     pub relations: Vec<CompiledMotionRelation>,
+    pub rep_consensus: RepConsensusPolicy,
     pub channels: Vec<ChannelClockPolicy>,
     pub rep_boundary: RepBoundarySemantics,
     pub phases: Vec<PhaseSemantics>,
@@ -541,10 +1225,18 @@ pub struct ActionObservationPlan {
 
 pub struct ActionMotionCompiler {
     registry: OperatorRegistry,
+    modules: AlgorithmModuleRegistry,
 }
 impl ActionMotionCompiler {
     pub fn new(registry: OperatorRegistry) -> Self {
-        Self { registry }
+        Self {
+            registry,
+            modules: AlgorithmModuleRegistry::standard(),
+        }
+    }
+
+    pub fn with_modules(registry: OperatorRegistry, modules: AlgorithmModuleRegistry) -> Self {
+        Self { registry, modules }
     }
     pub fn compile(
         &self,
@@ -557,46 +1249,46 @@ impl ActionMotionCompiler {
             .iter()
             .any(|declared| declared == view)
         {
-            return Err(ActionMotionError::PlanRefusal {
+            return Err(ActionMotionError::UnsupportedView {
                 action_id: definition.action_id.clone(),
-                detail: "exact view is not declared".into(),
+                view: view.into(),
             });
         }
-        let projection = project_definition(definition, view, &self.registry);
-        let required_equipment = definition.tracks.iter().any(|track| {
-            track.required && track.identity_defining && equipment_source(&track.source)
-        });
-        let supported_topology = matches!(
-            definition.exact_identity.equipment_topology.as_str(),
-            "free_rigid_barbell" | "smith_guided_bar" | "none" | "bodyweight_station"
-        );
-        if required_equipment && !supported_topology {
-            return Ok(plan(
-                definition,
-                projection,
-                ActionPlanCapability::UnsupportedEquipmentCatalogOnly,
-                Vec::new(),
-                None,
-                definition.allowed_claims.clone(),
-            ));
-        }
-        if !definition
-            .admitted_views
+        let view_observation = definition
+            .view_observation_plans
             .iter()
-            .any(|admitted| admitted == view)
-        {
-            return Err(ActionMotionError::PlanRefusal {
+            .find(|candidate| candidate.view_id == view)
+            .ok_or_else(|| ActionMotionError::MissingViewObservationPlan {
                 action_id: definition.action_id.clone(),
-                detail: "exact view lacks admitted observability evidence".into(),
-            });
-        }
+                view: view.into(),
+            })?
+            .clone();
+        let projection = project_definition(definition, view, &view_observation);
         let mut relations = Vec::new();
         for relation in &definition.relations {
+            let is_visible = view_observation
+                .visible_relation_ids
+                .contains(&relation.relation_id);
+            let uses_prohibited_signal = relation.inputs.iter().any(|input| {
+                view_observation
+                    .prohibited_signal_sources
+                    .contains(&input.source)
+            });
+            if (!is_visible || uses_prohibited_signal)
+                && relation.required
+                && relation.identity_defining
+            {
+                return Err(ActionMotionError::IdentityRelationNotObservable {
+                    action_id: definition.action_id.clone(),
+                    view: view.into(),
+                    relation_id: relation.relation_id.clone(),
+                });
+            }
             let Some(contract) = self.registry.contracts.get(&relation.operator_id) else {
                 if relation.required && relation.identity_defining {
-                    return Err(ActionMotionError::PlanRefusal {
+                    return Err(ActionMotionError::MissingOperator {
                         action_id: definition.action_id.clone(),
-                        detail: format!("missing operator {}", relation.operator_id),
+                        operator_id: relation.operator_id.clone(),
                     });
                 }
                 continue;
@@ -646,7 +1338,7 @@ impl ActionMotionCompiler {
                 source_requirement: contract.source_requirement,
                 coverage_policy: contract.coverage_policy,
                 confidence_policy: contract.confidence_policy,
-                judgeability: if relation.required && relation.identity_defining {
+                judgeability: if relation.required && relation.identity_defining && is_visible {
                     FeatureJudgeability::RequiredForRep
                 } else {
                     FeatureJudgeability::DimensionScopedCannotJudge
@@ -661,30 +1353,61 @@ impl ActionMotionCompiler {
                     .any(|compiled| compiled.relation_id == source.relation_id)
         });
         if missing_required {
-            return Err(ActionMotionError::PlanRefusal {
+            return Err(ActionMotionError::DefinitionBuildFailure {
                 action_id: definition.action_id.clone(),
                 detail: "identity-defining relation is not computable".into(),
             });
         }
-        let capability = if supported_topology {
-            ActionPlanCapability::FullExecutable
+        let primary_relation = relations
+            .iter()
+            .find(|relation| {
+                relation.role == MotionRole::TaskPrimary
+                    && relation.judgeability == FeatureJudgeability::RequiredForRep
+            })
+            .ok_or_else(|| ActionMotionError::IdentityRelationNotObservable {
+                action_id: definition.action_id.clone(),
+                view: view.into(),
+                relation_id: view_observation.rep_topology.primary_relation_id.clone(),
+            })?;
+        if primary_relation.relation_id != view_observation.rep_topology.primary_relation_id
+            || !view_observation
+                .primary_relation_candidates
+                .contains(&primary_relation.relation_id)
+        {
+            return Err(ActionMotionError::TopologyPrimaryConflict {
+                action_id: definition.action_id.clone(),
+                view: view.into(),
+                relation_id: primary_relation.relation_id.clone(),
+            });
+        }
+        let algorithm_modules = self.modules.compile_graph(
+            &view_observation.rep_topology,
+            primary_relation.source_requirement,
+        )?;
+        let provider_tracks_equipment = matches!(
+            definition.exact_identity.equipment_topology.as_str(),
+            "free_rigid_barbell"
+                | "smith_guided_bar"
+                | "independent_dumbbell"
+                | "constrained_machine_handle"
+                | "none"
+                | "bodyweight_station"
+        );
+        let cannot_judge_dimensions = if provider_tracks_equipment {
+            Vec::new()
         } else {
-            ActionPlanCapability::PoseSupportedLimited
-        };
-        let cannot_judge_dimensions = if capability == ActionPlanCapability::PoseSupportedLimited {
             definition
                 .allowed_claims
                 .iter()
                 .filter(|claim| claim.contains("trajectory") || claim.contains("equipment"))
                 .cloned()
                 .collect()
-        } else {
-            Vec::new()
         };
         Ok(plan(
             definition,
             projection,
-            capability,
+            view_observation,
+            algorithm_modules,
             relations,
             Some(definition.rep_boundary.turnaround.clone()),
             cannot_judge_dimensions,
@@ -692,69 +1415,26 @@ impl ActionMotionCompiler {
     }
 }
 
-pub fn reviewed_action_capability_matrix_v1()
--> Result<Vec<ActionCapabilityRecord>, ActionMotionError> {
-    let catalog = reviewed_action_motion_catalog_v1()?;
-    let compiler = ActionMotionCompiler::new(OperatorRegistry::standard());
-    catalog
-        .definitions
-        .iter()
-        .map(|definition| {
-            let view = definition
-                .admitted_views
-                .first()
-                .or_else(|| definition.supported_views.first())
-                .expect("validated view")
-                .clone();
-            match compiler.compile(definition, &view) {
-                Ok(plan) => Ok(ActionCapabilityRecord {
-                    action_id: definition.action_id.clone(),
-                    equipment_topology: definition.exact_identity.equipment_topology.clone(),
-                    capture_view: view,
-                    state: match plan.capability {
-                        ActionPlanCapability::FullExecutable => {
-                            ActionCapabilityState::FullPlanCompiled
-                        }
-                        ActionPlanCapability::PoseSupportedLimited => {
-                            ActionCapabilityState::PoseSupportedLimitedSuccess
-                        }
-                        ActionPlanCapability::UnsupportedEquipmentCatalogOnly => {
-                            ActionCapabilityState::UnsupportedEquipmentCatalogOnly
-                        }
-                    },
-                    detail: None,
-                }),
-                Err(ActionMotionError::PlanRefusal { detail, .. }) => Ok(ActionCapabilityRecord {
-                    action_id: definition.action_id.clone(),
-                    equipment_topology: definition.exact_identity.equipment_topology.clone(),
-                    capture_view: view,
-                    state: ActionCapabilityState::AdmissibleVisualRefusal,
-                    detail: Some(detail),
-                }),
-                Err(error) => Err(error),
-            }
-        })
-        .collect()
-}
-
 fn project_definition(
     definition: &ActionMotionDefinition,
     view: &str,
-    registry: &OperatorRegistry,
+    observation: &ViewObservationPlan,
 ) -> ViewProjectionPlan {
     let relations = definition
         .relations
         .iter()
         .map(|relation| {
-            let observable = registry.contracts.contains_key(&relation.operator_id);
+            let observable = observation
+                .visible_relation_ids
+                .contains(&relation.relation_id);
             ViewProjectedRelation {
                 relation_id: relation.relation_id.clone(),
                 semantic_role: relation.role,
                 observable,
                 refusal_reason: (!observable).then(|| {
                     format!(
-                        "operator {} is unavailable in exact view {view}",
-                        relation.operator_id
+                        "relation {} is not declared observable in exact view {view}",
+                        relation.relation_id
                     )
                 }),
             }
@@ -775,6 +1455,7 @@ fn project_definition(
                 )
             })
             .collect::<Vec<_>>(),
+        observation,
     ));
     ViewProjectionPlan {
         definition_id: definition.definition_id.clone(),
@@ -788,7 +1469,8 @@ fn project_definition(
 fn plan(
     definition: &ActionMotionDefinition,
     projection: ViewProjectionPlan,
-    capability: ActionPlanCapability,
+    view_observation: ViewObservationPlan,
+    algorithm_modules: Vec<AlgorithmModuleDescriptor>,
     relations: Vec<CompiledMotionRelation>,
     rep_authority: Option<String>,
     cannot_judge_dimensions: Vec<String>,
@@ -812,7 +1494,8 @@ fn plan(
         definition.definition_id.as_str(),
         definition.computed_hash(),
         projection.projection_hash.as_str(),
-        format!("{capability:?}"),
+        &view_observation,
+        &algorithm_modules,
         relations
             .iter()
             .map(|relation| {
@@ -828,6 +1511,7 @@ fn plan(
             .collect::<Vec<_>>(),
         &rep_authority,
         &cannot_judge_dimensions,
+        &definition.rep_consensus,
         &definition.rep_boundary,
         &definition.phases,
         &definition.allowed_claims,
@@ -837,9 +1521,12 @@ fn plan(
         definition_id: definition.definition_id.clone(),
         definition_hash: definition.computed_hash(),
         capture_view,
-        capability,
         projection,
+        rep_topology: view_observation.rep_topology.clone(),
+        view_observation,
+        algorithm_modules,
         relations,
+        rep_consensus: definition.rep_consensus.clone(),
         channels,
         rep_boundary: definition.rep_boundary.clone(),
         phases: definition.phases.clone(),
@@ -862,11 +1549,68 @@ pub enum ActionMotionError {
     UnsupportedCatalog,
     DuplicateLeaf(String),
     DuplicateOperator,
-    InvalidDefinitionHash { definition_id: String },
-    DefinitionBuildFailure { action_id: String, detail: String },
-    PlanRefusal { action_id: String, detail: String },
-    OperatorTypeMismatch { relation_id: String },
-    IdentitySourceConflict { relation_id: String },
+    InvalidDefinitionHash {
+        definition_id: String,
+    },
+    DefinitionBuildFailure {
+        action_id: String,
+        detail: String,
+    },
+    UnsupportedView {
+        action_id: String,
+        view: String,
+    },
+    MissingViewObservationPlan {
+        action_id: String,
+        view: String,
+    },
+    IdentityRelationNotObservable {
+        action_id: String,
+        view: String,
+        relation_id: String,
+    },
+    TopologyPrimaryConflict {
+        action_id: String,
+        view: String,
+        relation_id: String,
+    },
+    MissingAlgorithmModule {
+        module_id: String,
+    },
+    RequiredAlgorithmModuleNotSelected {
+        topology_id: String,
+        module_id: String,
+    },
+    DuplicateAlgorithmModule {
+        module_id: String,
+    },
+    InvalidAlgorithmModuleContract {
+        module_id: String,
+    },
+    IncompatibleAlgorithmTopology {
+        module_id: String,
+        topology_id: String,
+    },
+    AlgorithmFactHasNoProducer {
+        module_id: String,
+        fact_id: String,
+    },
+    DuplicateAlgorithmFactProducer {
+        fact_id: String,
+    },
+    AlgorithmDependencyCycle {
+        module_ids: Vec<String>,
+    },
+    MissingOperator {
+        action_id: String,
+        operator_id: String,
+    },
+    OperatorTypeMismatch {
+        relation_id: String,
+    },
+    IdentitySourceConflict {
+        relation_id: String,
+    },
 }
 
 fn stable_hash<T: Serialize>(value: &T) -> String {

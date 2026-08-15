@@ -157,7 +157,6 @@ fn sealed(start: u64, peak: u64, end: u64) -> SealedRep {
         canonical_slice_hash: 1,
         profile_identity: ExerciseProfile::lat_pulldown_provisional().identity,
         profile_hash: ExerciseProfile::lat_pulldown_provisional().content_hash,
-        profile_maturity: "provisional",
         quality_verdict: None,
         recovered_across_gap: false,
         disposition: RepDisposition::Confirmed,

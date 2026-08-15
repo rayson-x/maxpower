@@ -17,6 +17,11 @@ pub const EXECUTION_ASSESSMENT_BUNDLE_SCHEMA: &str = "maxpower.execution-assessm
 pub const EXECUTION_ASSESSMENT_CATALOG_SCHEMA: &str =
     "maxpower.execution-assessment-bundle-catalog/v1";
 pub const ACTION_DEFINITION_SCHEMA: &str = "maxpower.action-definition/v1";
+pub const ACTION_ASSET_PACKAGE_SCHEMA: &str = "maxpower.action-asset-package/v1";
+pub const QUALITY_RULE_ASSET_PACKAGE_SCHEMA: &str = "maxpower.quality-rule-asset-package/v1";
+pub const VISUAL_RECOGNITION_BASELINE_VERSION: &str = "0.1.0";
+pub const VISUAL_RECOGNITION_BASELINE_CATALOG_ID: &str =
+    "maxpower/visual-recognition-baseline/v0.1";
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -72,34 +77,6 @@ pub enum AssessmentEquipmentSemantics {
     TwoIndependentDumbbells,
     BodyOnly,
     FixedSupport,
-}
-
-/// Frozen Rust-provider equipment capability compiled from the exact-context
-/// ExecutionContract and its EquipmentAdapter. Hosts submit context and raw
-/// frames; they must neither infer an activation plan from action names nor
-/// provide a second recognition implementation.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AssessmentEquipmentRecognitionMode {
-    RustVisualRigidBarAxis,
-    ProviderUnavailableCableOrMovingHandle,
-    ProviderUnavailableUnilateralCableHandle,
-    ProviderUnavailableConstrainedMachineLever,
-    ProviderUnavailableTwoIndependentDumbbells,
-    DisabledBodyOnly,
-    DisabledFixedSupport,
-}
-
-impl AssessmentEquipmentRecognitionMode {
-    /// Whether this SDK build owns an executable producer for the mode.
-    pub fn is_provider_available(self) -> bool {
-        matches!(self, Self::RustVisualRigidBarAxis)
-    }
-
-    /// Whether the Rust provider needs a luma plane in addition to pose input.
-    pub fn requires_visual_frame(self) -> bool {
-        matches!(self, Self::RustVisualRigidBarAxis)
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -208,7 +185,7 @@ impl ActionDefinition {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssessmentAssetKind {
     RecognitionProfile,
@@ -306,19 +283,11 @@ impl AssessmentBundleLineage {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AssessmentBundleCapability {
-    ContextResolutionOnly,
-    Executable,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionAssessmentBundle {
     pub schema_version: String,
     pub bundle_id: String,
-    pub capability: AssessmentBundleCapability,
     pub exact_context: AssessmentExactContext,
     pub lineage: AssessmentBundleLineage,
     /// Lower-case fixed-width FNV-1a over this structure with an empty hash.
@@ -358,6 +327,462 @@ pub struct ExecutionAssessmentBundleCatalog {
 pub struct ActionMotionBundleBinding {
     pub bundle_id: String,
     pub leaf_action_id: String,
+}
+
+/// One exact-view runtime binding in a data-installed action package. The
+/// preset supplies numeric/runtime policies only; action semantics are always
+/// regenerated from `definition` and cannot be inherited from it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActionAssetContextPackage {
+    pub capture_view: AssessmentCaptureView,
+    pub runtime_preset_bundle_id: String,
+    pub runtime_preset_bundle_hash: String,
+}
+
+/// The complete external interface for adding an executable action that uses
+/// existing Rust operators and equipment adapters. Callers do not assemble or
+/// mutate Bundle internals.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActionAssetPackage {
+    pub schema_version: String,
+    pub package_id: String,
+    pub definition: crate::ActionMotionDefinition,
+    pub contexts: Vec<ActionAssetContextPackage>,
+    pub content_hash: String,
+}
+
+impl ActionAssetPackage {
+    pub fn with_computed_hash(mut self) -> Self {
+        self.content_hash.clear();
+        self.content_hash = hash_serialized(&self);
+        self
+    }
+
+    fn computed_content_hash(&self) -> String {
+        let mut semantic = self.clone();
+        semantic.content_hash.clear();
+        hash_serialized(&semantic)
+    }
+}
+
+/// Opaque offline artifact lineage retained for traceability. Rust verifies
+/// identity and hashes but does not interpret review, maturity or release
+/// status and never trains from these references at runtime.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QualityRuleSourceRef {
+    pub asset_id: String,
+    pub version: String,
+    pub content_hash: String,
+}
+
+/// Exact-context quality assets delivered after offline training/calibration.
+/// The action and Rep semantics remain owned by ActionMotionDefinition; this
+/// package may only replace quality computation, comparison and aggregation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QualityRuleAssetPackage {
+    pub schema_version: String,
+    pub package_id: String,
+    pub action_id: String,
+    pub capture_view: AssessmentCaptureView,
+    pub bundle_id: String,
+    pub expected_bundle_hash: String,
+    pub feature_program: AssessmentAsset,
+    pub reference_policy: AssessmentAsset,
+    pub rule_pack: AssessmentAsset,
+    pub set_aggregation_policy: AssessmentAsset,
+    pub source_lineage: Vec<QualityRuleSourceRef>,
+    pub content_hash: String,
+}
+
+impl QualityRuleAssetPackage {
+    pub fn with_computed_hash(mut self) -> Self {
+        self.content_hash.clear();
+        self.content_hash = hash_serialized(&self);
+        self
+    }
+
+    fn computed_content_hash(&self) -> String {
+        let mut semantic = self.clone();
+        semantic.content_hash.clear();
+        hash_serialized(&semantic)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QualityRuleInstallationReceipt {
+    pub package_id: String,
+    pub bundle_id: String,
+    pub previous_bundle_hash: String,
+    pub installed_bundle_hash: String,
+    pub installed_asset_hashes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActionAssetRegistrationReceipt {
+    pub package_id: String,
+    pub action_id: String,
+    pub definition_hash: String,
+    pub bundle_ids: Vec<String>,
+    pub plan_hashes: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ActionAssetRegistryError {
+    InvalidPackage(String),
+    DuplicatePackage(String),
+    DuplicateAction(String),
+    UnknownRuntimePreset(String),
+    IncompatibleRuntimePreset(String),
+    PlanCompilation(String),
+    CatalogValidation(AssessmentConfigurationError),
+    InventoryValidation(crate::ActionMotionError),
+}
+
+/// Deep in-process module for action registration. It validates and compiles
+/// on a clone, then commits the complete catalog atomically only after the
+/// normal engine configuration validators accept the result.
+#[derive(Clone, Debug)]
+pub struct ActionAssetRegistry {
+    runtime_catalog: ExecutionAssessmentBundleCatalog,
+    inventory: crate::ActionAssetInventoryReport,
+    installed_package_ids: HashSet<String>,
+}
+
+impl ActionAssetRegistry {
+    pub fn inventory(&self) -> &crate::ActionAssetInventoryReport {
+        &self.inventory
+    }
+
+    pub fn runtime_catalog(&self) -> &ExecutionAssessmentBundleCatalog {
+        &self.runtime_catalog
+    }
+
+    pub fn into_runtime_catalog(self) -> ExecutionAssessmentBundleCatalog {
+        self.runtime_catalog
+    }
+
+    pub fn register_json(
+        &mut self,
+        package_json: &str,
+    ) -> Result<ActionAssetRegistrationReceipt, ActionAssetRegistryError> {
+        let package: ActionAssetPackage = serde_json::from_str(package_json).map_err(|error| {
+            ActionAssetRegistryError::InvalidPackage(format!("invalid package JSON: {error}"))
+        })?;
+        self.register(package)
+    }
+
+    pub fn register(
+        &mut self,
+        package: ActionAssetPackage,
+    ) -> Result<ActionAssetRegistrationReceipt, ActionAssetRegistryError> {
+        validate_action_asset_package(&package, &self.runtime_catalog)?;
+        if self.installed_package_ids.contains(&package.package_id) {
+            return Err(ActionAssetRegistryError::DuplicatePackage(
+                package.package_id,
+            ));
+        }
+        if self
+            .runtime_catalog
+            .action_motion_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.definition(&package.definition.action_id))
+            .is_some_and(|installed| installed.content_hash != package.definition.content_hash)
+        {
+            return Err(ActionAssetRegistryError::DuplicateAction(
+                package.definition.action_id,
+            ));
+        }
+
+        let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+        let mut working = self.runtime_catalog.clone();
+        let mut bundle_ids = Vec::new();
+        let mut plans = Vec::new();
+        let equipment_semantics = equipment_semantics_for_motion_definition(&package.definition)?;
+        let laterality_mode = laterality_for_motion_definition(&package.definition);
+        let first_context = package.contexts.first().ok_or_else(|| {
+            ActionAssetRegistryError::InvalidPackage(
+                "an executable package requires at least one runtime context".into(),
+            )
+        })?;
+        let pose_contract = working
+            .bundles
+            .iter()
+            .find(|bundle| bundle.bundle_id == first_context.runtime_preset_bundle_id)
+            .map(|bundle| bundle.exact_context.pose_contract.clone())
+            .ok_or_else(|| {
+                ActionAssetRegistryError::UnknownRuntimePreset(
+                    first_context.runtime_preset_bundle_id.clone(),
+                )
+            })?;
+        let executable_presets = compile_catalog_programs(&working)
+            .map_err(ActionAssetRegistryError::CatalogValidation)?;
+
+        for context in &package.contexts {
+            let preset = working
+                .bundles
+                .iter()
+                .find(|bundle| bundle.bundle_id == context.runtime_preset_bundle_id)
+                .cloned()
+                .ok_or_else(|| {
+                    ActionAssetRegistryError::UnknownRuntimePreset(
+                        context.runtime_preset_bundle_id.clone(),
+                    )
+                })?;
+            if !executable_presets.contains_key(&preset.bundle_id)
+                || preset.content_hash != context.runtime_preset_bundle_hash
+                || preset.exact_context.pose_contract != pose_contract
+            {
+                return Err(ActionAssetRegistryError::IncompatibleRuntimePreset(
+                    context.runtime_preset_bundle_id.clone(),
+                ));
+            }
+            let view = action_motion_view(context.capture_view);
+            let plan = compiler
+                .compile(&package.definition, view)
+                .map_err(|error| ActionAssetRegistryError::PlanCompilation(format!("{error:?}")))?;
+            let bundle_id = format!(
+                "{}/{}/v1",
+                package.definition.action_id,
+                context.capture_view.catalog_slug()
+            );
+            if working
+                .bundles
+                .iter()
+                .any(|bundle| bundle.bundle_id == bundle_id)
+            {
+                return Err(ActionAssetRegistryError::DuplicateAction(
+                    package.definition.action_id.clone(),
+                ));
+            }
+            let mut bundle = preset;
+            bundle.bundle_id = bundle_id.clone();
+            bundle.exact_context = AssessmentExactContext {
+                action_id: package.definition.action_id.clone(),
+                variation_id: "standard_variant".into(),
+                equipment_semantics,
+                laterality_mode,
+                capture_view: context.capture_view,
+                pose_contract: pose_contract.clone(),
+            };
+            bundle.lineage = clone_package_lineage_assets(
+                &mut working,
+                &bundle.lineage,
+                &bundle_id,
+                &package.package_id,
+                &context.runtime_preset_bundle_id,
+                &context.runtime_preset_bundle_hash,
+            )?;
+            bundle = bundle.with_computed_hash();
+            working.bundles.push(bundle);
+            working
+                .action_motion_bindings
+                .push(ActionMotionBundleBinding {
+                    bundle_id: bundle_id.clone(),
+                    leaf_action_id: package.definition.action_id.clone(),
+                });
+            bundle_ids.push(bundle_id);
+            plans.push(plan);
+        }
+
+        let action_definition = ActionDefinition {
+            schema_version: ACTION_DEFINITION_SCHEMA.into(),
+            action_definition_id: format!("{}/runtime-action-definition/v1", package.package_id),
+            action_id: package.definition.action_id.clone(),
+            default_variation_id: "standard_variant".into(),
+            equipment_semantics,
+            laterality_mode,
+            pose_contract,
+            supported_views: package
+                .contexts
+                .iter()
+                .zip(&bundle_ids)
+                .map(|(context, bundle_id)| ActionViewBinding {
+                    capture_view: context.capture_view,
+                    bundle_id: bundle_id.clone(),
+                })
+                .collect(),
+            content_hash: String::new(),
+        }
+        .with_computed_hash();
+        if let Some(installed) = working
+            .action_definitions
+            .iter_mut()
+            .find(|definition| definition.action_id == package.definition.action_id)
+        {
+            installed
+                .supported_views
+                .extend(action_definition.supported_views);
+            installed
+                .supported_views
+                .sort_by_key(|binding| binding.capture_view.catalog_slug());
+            installed
+                .supported_views
+                .dedup_by_key(|binding| binding.capture_view);
+            *installed = installed.clone().with_computed_hash();
+        } else {
+            working.action_definitions.push(action_definition);
+        }
+        let motion_catalog = working.action_motion_catalog.as_mut().ok_or_else(|| {
+            ActionAssetRegistryError::InvalidPackage(
+                "runtime catalog has no ActionMotionCatalog".into(),
+            )
+        })?;
+        if motion_catalog
+            .definition(&package.definition.action_id)
+            .is_none()
+        {
+            motion_catalog.definitions.push(package.definition.clone());
+        }
+
+        for (bundle_id, plan) in bundle_ids.iter().zip(&plans) {
+            let runtime_bundle = working
+                .bundles
+                .iter()
+                .find(|bundle| bundle.bundle_id == *bundle_id)
+                .expect("new package Bundle is installed");
+            let binding = compile_plan_driven_runtime_binding(runtime_bundle, plan.clone());
+            install_compiled_action_motion_semantics(&mut working, bundle_id, plan);
+            install_action_motion_runtime_profile(&mut working, bundle_id, &binding.profile, plan);
+            install_action_motion_local_strategy(
+                &mut working,
+                bundle_id,
+                binding.local_coordinate_strategy,
+            );
+            install_action_motion_equipment_strategy(&mut working, bundle_id);
+        }
+        working.catalog_id = format!(
+            "{}/package-{}-{}",
+            self.runtime_catalog.catalog_id, package.package_id, package.content_hash
+        );
+
+        validate_catalog(&working).map_err(ActionAssetRegistryError::CatalogValidation)?;
+        let programs = compile_catalog_programs(&working)
+            .map_err(ActionAssetRegistryError::CatalogValidation)?;
+        if bundle_ids
+            .iter()
+            .any(|bundle_id| !programs.contains_key(bundle_id))
+        {
+            return Err(ActionAssetRegistryError::InvalidPackage(
+                "installed action package did not produce an executable assessment program".into(),
+            ));
+        }
+        compile_action_motion_plans(&working)
+            .map_err(ActionAssetRegistryError::CatalogValidation)?;
+
+        self.runtime_catalog = working;
+        self.installed_package_ids
+            .insert(package.package_id.clone());
+        Ok(ActionAssetRegistrationReceipt {
+            package_id: package.package_id,
+            action_id: package.definition.action_id,
+            definition_hash: package.definition.content_hash,
+            bundle_ids,
+            plan_hashes: plans.into_iter().map(|plan| plan.plan_hash).collect(),
+        })
+    }
+
+    pub fn install_quality_rules_json(
+        &mut self,
+        package_json: &str,
+    ) -> Result<QualityRuleInstallationReceipt, ActionAssetRegistryError> {
+        let package: QualityRuleAssetPackage =
+            serde_json::from_str(package_json).map_err(|error| {
+                ActionAssetRegistryError::InvalidPackage(format!(
+                    "invalid quality-rule package JSON: {error}"
+                ))
+            })?;
+        self.install_quality_rules(package)
+    }
+
+    pub fn install_quality_rules(
+        &mut self,
+        package: QualityRuleAssetPackage,
+    ) -> Result<QualityRuleInstallationReceipt, ActionAssetRegistryError> {
+        validate_quality_rule_asset_package(&package, &self.runtime_catalog)?;
+        if self.installed_package_ids.contains(&package.package_id) {
+            return Err(ActionAssetRegistryError::DuplicatePackage(
+                package.package_id,
+            ));
+        }
+
+        let mut working = self.runtime_catalog.clone();
+        let bundle_index = working
+            .bundles
+            .iter()
+            .position(|bundle| bundle.bundle_id == package.bundle_id)
+            .ok_or_else(|| {
+                ActionAssetRegistryError::InvalidPackage(format!(
+                    "quality-rule package references unknown Bundle {}",
+                    package.bundle_id
+                ))
+            })?;
+        let previous_bundle_hash = working.bundles[bundle_index].content_hash.clone();
+        for asset in [
+            package.feature_program.clone(),
+            package.reference_policy.clone(),
+            package.rule_pack.clone(),
+            package.set_aggregation_policy.clone(),
+        ] {
+            if working
+                .installed_assets
+                .iter()
+                .any(|installed| installed.id == asset.id)
+            {
+                return Err(ActionAssetRegistryError::InvalidPackage(format!(
+                    "quality-rule asset id {} is already installed",
+                    asset.id
+                )));
+            }
+            working.installed_assets.push(asset);
+        }
+        working.bundles[bundle_index].lineage.feature_program = package.feature_program.reference();
+        working.bundles[bundle_index].lineage.reference_policy =
+            package.reference_policy.reference();
+        working.bundles[bundle_index].lineage.rule_pack = package.rule_pack.reference();
+        working.bundles[bundle_index].lineage.set_aggregation_policy =
+            package.set_aggregation_policy.reference();
+        working.bundles[bundle_index] = working.bundles[bundle_index].clone().with_computed_hash();
+        working.catalog_id = format!(
+            "{}/quality-rules-{}-{}",
+            self.runtime_catalog.catalog_id, package.package_id, package.content_hash
+        );
+
+        validate_catalog(&working).map_err(ActionAssetRegistryError::CatalogValidation)?;
+        let programs = compile_catalog_programs(&working)
+            .map_err(ActionAssetRegistryError::CatalogValidation)?;
+        if programs.len() != working.bundles.len() {
+            return Err(ActionAssetRegistryError::InvalidPackage(
+                "quality-rule package made an installed Bundle non-executable".into(),
+            ));
+        }
+        compile_action_motion_plans(&working)
+            .map_err(ActionAssetRegistryError::CatalogValidation)?;
+
+        let installed_bundle_hash = working.bundles[bundle_index].content_hash.clone();
+        let installed_asset_hashes = [
+            &package.feature_program,
+            &package.reference_policy,
+            &package.rule_pack,
+            &package.set_aggregation_policy,
+        ]
+        .into_iter()
+        .map(|asset| asset.content_hash.clone())
+        .collect();
+        self.runtime_catalog = working;
+        self.installed_package_ids
+            .insert(package.package_id.clone());
+        Ok(QualityRuleInstallationReceipt {
+            package_id: package.package_id,
+            bundle_id: package.bundle_id,
+            previous_bundle_hash,
+            installed_bundle_hash,
+            installed_asset_hashes,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -409,13 +834,13 @@ pub struct ResolvedAssessmentContext {
     pub action_id: String,
     pub variation_id: String,
     pub equipment_semantics: AssessmentEquipmentSemantics,
-    pub equipment_recognition_mode: AssessmentEquipmentRecognitionMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equipment_provider_id: Option<crate::EquipmentProviderId>,
     pub laterality_mode: AssessmentLateralityMode,
     pub observed_active_side: Option<AnatomicalSide>,
     pub capture_view: AssessmentCaptureView,
     pub bundle_id: String,
     pub bundle_hash: String,
-    pub bundle_capability: AssessmentBundleCapability,
     pub bundle_lineage: AssessmentBundleLineage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub motion_definition_id: Option<String>,
@@ -815,6 +1240,7 @@ pub enum AssessmentRuntimeError {
     PacketLineageChangedDuringSet,
     DuplicateSetId,
     InvalidRepProvenance,
+    ConfirmedRepMissingActionPrimary,
     InvalidTraceGraph,
 }
 
@@ -827,7 +1253,7 @@ struct CompiledAssessmentProgram {
     phase_names: [String; 2],
     task_endpoints: [String; 3],
     local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
-    equipment_recognition_mode: AssessmentEquipmentRecognitionMode,
+    equipment_provider_id: Option<crate::EquipmentProviderId>,
     reference_order: Vec<ReferenceComparisonKind>,
     range_deviation_ratio: f32,
     minimum_feature_confidence: f32,
@@ -1223,13 +1649,12 @@ impl ExecutionAssessmentEngine {
             action_id: definition.action_id,
             variation_id,
             equipment_semantics: definition.equipment_semantics,
-            equipment_recognition_mode: equipment_recognition_mode(definition.equipment_semantics),
+            equipment_provider_id: equipment_provider_id(definition.equipment_semantics),
             laterality_mode: definition.laterality_mode,
             observed_active_side: None,
             capture_view,
             bundle_id: bundle.bundle_id.clone(),
             bundle_hash: bundle.content_hash.clone(),
-            bundle_capability: bundle.capability,
             bundle_lineage: bundle.lineage.clone(),
             motion_definition_id: motion_plan.as_ref().map(|plan| plan.definition_id.clone()),
             motion_definition_hash: motion_plan
@@ -1237,45 +1662,20 @@ impl ExecutionAssessmentEngine {
                 .map(|plan| plan.definition_hash.clone()),
             observation_plan_hash: motion_plan.as_ref().map(|plan| plan.plan_hash.clone()),
         };
-        let program = self
-            .programs
-            .get(&bundle.bundle_id)
-            .cloned()
-            .unwrap_or_else(|| CompiledAssessmentProgram {
-                runtime_profile_identity: String::new(),
-                runtime_profile_hash: 0,
-                feature_ids: Vec::new(),
-                range_feature_id: "local_primary_excursion".into(),
-                phase_names: ["first_phase".into(), "second_phase".into()],
-                task_endpoints: ["start".into(), "turnaround".into(), "return".into()],
-                local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
-                    capture_view: crate::LocalCoarseView::Front,
-                    preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortDown,
-                    equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
-                    pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
-                },
-                equipment_recognition_mode: equipment_recognition_mode(
-                    definition.equipment_semantics,
-                ),
-                reference_order: vec![
-                    ReferenceComparisonKind::SetPrefix,
-                    ReferenceComparisonKind::SameWorkoutPriorSet,
-                ],
-                range_deviation_ratio: 0.20,
-                minimum_feature_confidence: 0.50,
-                late_set_window: 2,
-                minimum_persistent_reps: 2,
-                bilateral_difference_threshold: 0.15,
-                bilateral_timing_difference_threshold_ms: 150.0,
-                rep_rules: Vec::new(),
-                set_rules: Vec::new(),
-            });
+        let Some(program) = self.programs.get(&bundle.bundle_id).cloned() else {
+            return Ok(AssessmentEmission::TypedRefusal(TypedAssessmentRefusal {
+                reason: AssessmentRefusalReason::BundleNotExecutable,
+                video_context: context.video_context,
+                detail: "the installed exact-context Bundle is structurally incomplete and has no executable assessment program"
+                    .into(),
+            }));
+        };
         let prior_workout_range_values = self
             .workout_range_references
             .get(&bundle.bundle_id)
             .cloned()
             .unwrap_or_default();
-        resolved_context.equipment_recognition_mode = program.equipment_recognition_mode;
+        resolved_context.equipment_provider_id = program.equipment_provider_id;
         self.active_set = Some(ActiveSet {
             context,
             resolved_context,
@@ -1307,11 +1707,6 @@ impl ExecutionAssessmentEngine {
         frame_id: u64,
         timestamp_ms: u64,
     ) -> Result<AssessmentEmission, AssessmentRuntimeError> {
-        if self.active_set.as_ref().is_some_and(|active| {
-            active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly
-        }) {
-            return self.bundle_not_executable_refusal();
-        }
         let _ = (frame_id, timestamp_ms);
         Err(AssessmentRuntimeError::CanonicalPacketRequired)
     }
@@ -1349,11 +1744,6 @@ impl ExecutionAssessmentEngine {
         &mut self,
         packet: MotionPacket,
     ) -> Result<AssessmentEmission, AssessmentRuntimeError> {
-        if self.active_set.as_ref().is_some_and(|active| {
-            active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly
-        }) {
-            return self.bundle_not_executable_refusal();
-        }
         if self
             .active_set
             .as_ref()
@@ -1491,14 +1881,18 @@ impl ExecutionAssessmentEngine {
         Ok(AssessmentEmission::LiveMotionFacts(self.live_facts()))
     }
 
-    fn assess_rep(&mut self, rep: SealedRep, subject_epoch: u64) {
+    fn assess_rep(
+        &mut self,
+        rep: SealedRep,
+        subject_epoch: u64,
+    ) -> Result<(), AssessmentRuntimeError> {
         let active = self
             .active_set
             .as_mut()
             .expect("Rep provenance validated against an active set");
         debug_assert!(active.rep_ids.insert(rep.rep_id));
-        let mut rep_ref = rep_reference(&rep, subject_epoch);
-        let (mut features, range_value) = feature_facts(active, &rep, subject_epoch);
+        let rep_ref = rep_reference(&rep, subject_epoch);
+        let (features, range_value) = feature_facts(active, &rep, subject_epoch);
         let required_primary_observed = active.motion_plan.as_ref().is_none_or(|plan| {
             plan.relations
                 .iter()
@@ -1515,16 +1909,7 @@ impl ExecutionAssessmentEngine {
                 })
         });
         if rep.disposition == RepDisposition::Confirmed && !required_primary_observed {
-            rep_ref.disposition = "needs_review".into();
-            if let Some(disposition) = features
-                .iter_mut()
-                .find(|feature| feature.feature_id == "rep_disposition")
-            {
-                disposition.categorical_value = Some("needsreview".into());
-                disposition
-                    .provenance
-                    .push("action_observation_plan:required_task_primary_unavailable".into());
-            }
+            return Err(AssessmentRuntimeError::ConfirmedRepMissingActionPrimary);
         }
         let load_unit = declared_load_unit(&active.context);
         let comparisons = compare_features(
@@ -1652,6 +2037,7 @@ impl ExecutionAssessmentEngine {
                 load_unit,
             });
         }
+        Ok(())
     }
 
     fn observe_set_closure(
@@ -1662,9 +2048,6 @@ impl ExecutionAssessmentEngine {
             .active_set
             .as_ref()
             .ok_or(AssessmentRuntimeError::NoActiveSet)?;
-        if active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly {
-            return self.bundle_not_executable_refusal();
-        }
         if active.packets.is_empty() {
             return Err(AssessmentRuntimeError::CanonicalPacketRequired);
         }
@@ -1723,7 +2106,7 @@ impl ExecutionAssessmentEngine {
             }
         }
         for (rep, subject_epoch) in completed_reps {
-            self.assess_rep(rep, subject_epoch);
+            self.assess_rep(rep, subject_epoch)?;
         }
         self.active_set
             .as_mut()
@@ -1764,13 +2147,6 @@ impl ExecutionAssessmentEngine {
                 .map(Box::new)
                 .map(AssessmentEmission::SealedSetAssessment)
                 .ok_or(AssessmentRuntimeError::NoActiveSet);
-        }
-        if self.active_set.as_ref().is_some_and(|active| {
-            active.bundle.capability == AssessmentBundleCapability::ContextResolutionOnly
-        }) {
-            let refusal = self.bundle_not_executable_refusal();
-            self.active_set = None;
-            return refusal;
         }
         if self
             .active_set
@@ -1936,19 +2312,6 @@ impl ExecutionAssessmentEngine {
         Ok(AssessmentEmission::SealedSetAssessment(Box::new(
             assessment,
         )))
-    }
-
-    fn bundle_not_executable_refusal(&self) -> Result<AssessmentEmission, AssessmentRuntimeError> {
-        let active = self
-            .active_set
-            .as_ref()
-            .ok_or(AssessmentRuntimeError::NoActiveSet)?;
-        Ok(AssessmentEmission::TypedRefusal(TypedAssessmentRefusal {
-            reason: AssessmentRefusalReason::BundleNotExecutable,
-            video_context: active.context.video_context.clone(),
-            detail: "this exact context currently supports Bundle resolution only; frame execution and quality reporting are not enabled"
-                .into(),
-        }))
     }
 
     fn finish_workout(&mut self) -> Result<AssessmentEmission, AssessmentRuntimeError> {
@@ -2232,6 +2595,8 @@ fn compile_action_motion_plans(
         for reference in [
             &bundle.lineage.recognition_profile,
             &bundle.lineage.execution_contract,
+            &bundle.lineage.local_coordinate_strategy,
+            &bundle.lineage.equipment_adapter,
             &bundle.lineage.feature_program,
             &bundle.lineage.rule_pack,
         ] {
@@ -2265,19 +2630,21 @@ fn compile_action_motion_plans(
             plan.rep_boundary.turnaround.as_str(),
             plan.rep_boundary.return_boundary.as_str(),
         ];
-        let runtime_profile_conflict = plan.capability
-            == crate::ActionPlanCapability::FullExecutable
-            && recognition
-                .content
-                .get("runtimeMotionPlanHash")
-                .and_then(serde_json::Value::as_str)
-                != Some(plan.plan_hash.as_str());
+        let runtime_profile_conflict = recognition
+            .content
+            .get("runtimeMotionPlanHash")
+            .and_then(serde_json::Value::as_str)
+            != Some(plan.plan_hash.as_str());
         let semantic_conflict = runtime_profile_conflict
             || recognition.content.get("repBoundary")
                 != Some(&serde_json::to_value(&plan.rep_boundary).expect("serializable boundary"))
             || execution.content.get("phaseOrder") != Some(&serde_json::json!(expected_phases))
             || execution.content.get("taskEndpoints")
                 != Some(&serde_json::json!(expected_endpoints))
+            || execution.content.get("repConsensus")
+                != Some(
+                    &serde_json::to_value(&plan.rep_consensus).expect("serializable Rep consensus"),
+                )
             || feature.content.get("motionRelations") != Some(&motion_relation_authority(&plan))
             || rules.content.get("semanticRuleRoles") != Some(&motion_rule_role_authority(&plan));
         if semantic_conflict {
@@ -2286,15 +2653,6 @@ fn compile_action_motion_plans(
                 detail:
                     "executable assets conflict with the ActionMotionDefinition semantic authority"
                         .into(),
-            });
-        }
-        if plan.capability != crate::ActionPlanCapability::FullExecutable
-            && bundle.capability == AssessmentBundleCapability::Executable
-        {
-            return Err(AssessmentConfigurationError::InvalidActionMotionPlan {
-                bundle_id: binding.bundle_id.clone(),
-                detail: "an executable Bundle cannot bypass the motion plan capability boundary"
-                    .into(),
             });
         }
         if plans.insert(binding.bundle_id.clone(), plan).is_some() {
@@ -2320,6 +2678,7 @@ fn motion_authority(plan: &crate::ActionObservationPlan) -> serde_json::Value {
         "projectionHash": plan.projection.projection_hash,
         "planHash": plan.plan_hash,
         "taskPrimaryRelationIds": plan.relations.iter().filter(|relation| relation.role == crate::MotionRole::TaskPrimary).map(|relation| relation.relation_id.clone()).collect::<Vec<_>>(),
+        "repConsensus": plan.rep_consensus,
         "repBoundary": plan.rep_boundary,
         "phases": plan.phases,
         "allowedClaims": plan.allowed_claims,
@@ -2388,7 +2747,12 @@ fn compile_catalog_programs(
         .collect::<HashMap<_, _>>();
     let mut programs = HashMap::new();
     for bundle in &catalog.bundles {
-        if bundle.capability != AssessmentBundleCapability::Executable {
+        let has_runtime_program = assets
+            .get(bundle.lineage.recognition_profile.id.as_str())
+            .and_then(|asset| asset.content.get("runtimeProfileIdentity"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|identity| !identity.trim().is_empty());
+        if !has_runtime_program {
             continue;
         }
         let read_asset = |reference: &AssessmentAssetRef| {
@@ -2484,10 +2848,25 @@ fn compile_catalog_programs(
                 ));
             }
         };
+        let expected_equipment_mode = match local
+            .content
+            .get("primaryEvidenceChannel")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some("pose") => crate::LocalEquipmentMode::PoseOnly,
+            Some("equipment") | None => {
+                local_equipment_mode(bundle.exact_context.equipment_semantics)
+            }
+            _ => {
+                return Err(invalid(
+                    "LocalCoordinateStrategy primary evidence channel is unsupported",
+                ));
+            }
+        };
         let local_coordinate_strategy = crate::LocalMotionCoordinateStrategy {
             capture_view: expected_local_view,
             preparation_to_effort,
-            equipment_mode: local_equipment_mode(bundle.exact_context.equipment_semantics),
+            equipment_mode: expected_equipment_mode,
             pose_anchor: local_pose_anchor(bundle.exact_context.equipment_semantics),
         };
         if local
@@ -2521,10 +2900,8 @@ fn compile_catalog_programs(
         }
         let expected_evidence_policy =
             equipment_evidence_policy(bundle.exact_context.equipment_semantics);
-        let equipment_recognition_mode =
-            equipment_recognition_mode(bundle.exact_context.equipment_semantics);
-        let equipment_recognition_mode_id =
-            equipment_recognition_mode_id(equipment_recognition_mode);
+        let expected_provider_id = equipment_provider_id(bundle.exact_context.equipment_semantics);
+        let expected_provider_id_str = expected_provider_id.map(crate::EquipmentProviderId::as_str);
         if local
             .content
             .get("coordinateSpace")
@@ -2537,14 +2914,14 @@ fn compile_catalog_programs(
                 != Some(expected_evidence_policy)
             || execution
                 .content
-                .get("equipmentRecognitionMode")
+                .get("equipmentProviderId")
                 .and_then(serde_json::Value::as_str)
-                != Some(equipment_recognition_mode_id)
+                != expected_provider_id_str
             || equipment
                 .content
-                .get("runtimeAdapter")
+                .get("providerId")
                 .and_then(serde_json::Value::as_str)
-                != Some(equipment_recognition_mode_id)
+                != expected_provider_id_str
             || equipment
                 .content
                 .get("conflictPolicy")
@@ -2630,6 +3007,7 @@ fn compile_catalog_programs(
                                 | "pose_primary_excursion"
                                 | "bilateral_endpoint_difference"
                                 | "bilateral_turnaround_timing_difference"
+                                | "authorization_range_of_motion"
                                 | "authorization_phase_control"
                                 | "authorization_support_stability"
                                 | "authorization_bilateral_coordination"
@@ -2953,7 +3331,7 @@ fn compile_catalog_programs(
                 phase_names,
                 task_endpoints,
                 local_coordinate_strategy,
-                equipment_recognition_mode,
+                equipment_provider_id: expected_provider_id,
                 reference_order,
                 range_deviation_ratio,
                 minimum_feature_confidence,
@@ -2987,52 +3365,31 @@ fn equipment_semantics_id(value: AssessmentEquipmentSemantics) -> &'static str {
     }
 }
 
-fn equipment_recognition_mode(
+fn equipment_provider_id(
     value: AssessmentEquipmentSemantics,
-) -> AssessmentEquipmentRecognitionMode {
-    match value {
+) -> Option<crate::EquipmentProviderId> {
+    let topology = match value {
         AssessmentEquipmentSemantics::RigidBarAxis => {
-            AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis
+            crate::EquipmentProviderTopology::RigidBarAxis
         }
         AssessmentEquipmentSemantics::CableOrMovingHandle => {
-            AssessmentEquipmentRecognitionMode::ProviderUnavailableCableOrMovingHandle
+            crate::EquipmentProviderTopology::CableHandle
         }
         AssessmentEquipmentSemantics::UnilateralCableHandle => {
-            AssessmentEquipmentRecognitionMode::ProviderUnavailableUnilateralCableHandle
+            crate::EquipmentProviderTopology::UnilateralCableHandle
         }
         AssessmentEquipmentSemantics::ConstrainedMachineLever => {
-            AssessmentEquipmentRecognitionMode::ProviderUnavailableConstrainedMachineLever
+            crate::EquipmentProviderTopology::ConstrainedMachineHandle
         }
         AssessmentEquipmentSemantics::TwoIndependentDumbbells => {
-            AssessmentEquipmentRecognitionMode::ProviderUnavailableTwoIndependentDumbbells
+            crate::EquipmentProviderTopology::IndependentDumbbells
         }
-        AssessmentEquipmentSemantics::BodyOnly => {
-            AssessmentEquipmentRecognitionMode::DisabledBodyOnly
-        }
+        AssessmentEquipmentSemantics::BodyOnly => crate::EquipmentProviderTopology::BodyOnly,
         AssessmentEquipmentSemantics::FixedSupport => {
-            AssessmentEquipmentRecognitionMode::DisabledFixedSupport
+            crate::EquipmentProviderTopology::FixedSupport
         }
-    }
-}
-
-fn equipment_recognition_mode_id(value: AssessmentEquipmentRecognitionMode) -> &'static str {
-    match value {
-        AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis => "rust_visual_rigid_bar_axis",
-        AssessmentEquipmentRecognitionMode::ProviderUnavailableCableOrMovingHandle => {
-            "provider_unavailable_cable_or_moving_handle"
-        }
-        AssessmentEquipmentRecognitionMode::ProviderUnavailableUnilateralCableHandle => {
-            "provider_unavailable_unilateral_cable_handle"
-        }
-        AssessmentEquipmentRecognitionMode::ProviderUnavailableConstrainedMachineLever => {
-            "provider_unavailable_constrained_machine_lever"
-        }
-        AssessmentEquipmentRecognitionMode::ProviderUnavailableTwoIndependentDumbbells => {
-            "provider_unavailable_two_independent_dumbbells"
-        }
-        AssessmentEquipmentRecognitionMode::DisabledBodyOnly => "disabled_body_only",
-        AssessmentEquipmentRecognitionMode::DisabledFixedSupport => "disabled_fixed_support",
-    }
+    };
+    crate::standard_equipment_provider(topology)
 }
 
 fn local_coarse_view(view: AssessmentCaptureView) -> Option<crate::LocalCoarseView> {
@@ -3069,6 +3426,7 @@ fn local_pose_anchor(value: AssessmentEquipmentSemantics) -> crate::LocalPoseAnc
         AssessmentEquipmentSemantics::BodyOnly | AssessmentEquipmentSemantics::FixedSupport => {
             crate::LocalPoseAnchor::ShoulderMidpoint
         }
+        AssessmentEquipmentSemantics::ConstrainedMachineLever => crate::LocalPoseAnchor::RightWrist,
         _ => crate::LocalPoseAnchor::WristMidpoint,
     }
 }
@@ -3086,6 +3444,8 @@ fn local_equipment_mode_id(value: crate::LocalEquipmentMode) -> &'static str {
 fn local_pose_anchor_id(value: crate::LocalPoseAnchor) -> &'static str {
     match value {
         crate::LocalPoseAnchor::WristMidpoint => "wristmidpoint",
+        crate::LocalPoseAnchor::LeftWrist => "leftwrist",
+        crate::LocalPoseAnchor::RightWrist => "rightwrist",
         crate::LocalPoseAnchor::ShoulderMidpoint => "shouldermidpoint",
     }
 }
@@ -3464,6 +3824,35 @@ fn trajectory_metrics(
     )
 }
 
+fn constrained_path_metrics(
+    endpoints: Option<&crate::NormalizedRepEndpointEvidence>,
+) -> (Option<f32>, f32, f32, f32) {
+    let Some(endpoints) = endpoints else {
+        return (None, 0.0, 0.0, 1.0);
+    };
+    let (Some(start), Some(turn), Some(end)) = (
+        endpoints.start_anchor.equipment,
+        endpoints.primary_turnaround.equipment,
+        endpoints.end_return.equipment,
+    ) else {
+        return (None, 0.0, 0.0, 1.0);
+    };
+    let minimum = start
+        .cross_axis_displacement
+        .min(turn.cross_axis_displacement)
+        .min(end.cross_axis_displacement);
+    let maximum = start
+        .cross_axis_displacement
+        .max(turn.cross_axis_displacement)
+        .max(end.cross_axis_displacement);
+    (
+        Some(maximum - minimum),
+        start.coverage.min(turn.coverage).min(end.coverage),
+        start.confidence.min(turn.confidence).min(end.confidence),
+        start.uncertainty.max(turn.uncertainty).max(end.uncertainty),
+    )
+}
+
 fn feature_facts(
     active: &ActiveSet,
     rep: &SealedRep,
@@ -3720,6 +4109,7 @@ fn feature_facts(
                     equipment_confidence,
                     equipment_uncertainty,
                 ),
+                "constrained_path_deviation" => constrained_path_metrics(endpoints),
                 _ => pose_relation_metrics(active, rep, subject_epoch, relation),
             };
             facts.push(numeric_feature(
@@ -4182,12 +4572,16 @@ fn evaluate_rep_rules(
                     | AssessmentDimension::BilateralCoordination => &[
                         crate::MotionRole::TaskPrimary,
                         crate::MotionRole::CoordinatedMotion,
+                        crate::MotionRole::TechniqueConstraint,
                     ],
                     AssessmentDimension::SupportStability => {
                         &[crate::MotionRole::StabilityRelation]
                     }
                     AssessmentDimension::StandardVariantCompatibility => {
-                        &[crate::MotionRole::SubstitutionGuard]
+                        &[
+                            crate::MotionRole::SubstitutionGuard,
+                            crate::MotionRole::TechniqueConstraint,
+                        ]
                     }
                     AssessmentDimension::ObservationConfidence => {
                         &[crate::MotionRole::TaskPrimary]
@@ -4201,6 +4595,32 @@ fn evaluate_rep_rules(
                 );
                 feature_dependencies.sort();
                 feature_dependencies.dedup();
+            }
+            let unavailable_relations = feature_dependencies
+                .iter()
+                .filter(|feature_id| feature_id.starts_with("motion_relation:"))
+                .filter(|feature_id| {
+                    comparisons
+                        .iter()
+                        .find(|comparison| comparison.feature_id == feature_id.as_str())
+                        .is_none_or(|comparison| comparison.observed_value.is_none())
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut conclusion = conclusion;
+            if !unavailable_relations.is_empty()
+                && conclusion.state != AssessmentConclusionState::NotApplicable
+            {
+                conclusion.state = AssessmentConclusionState::CannotJudge;
+                conclusion.summary = format!(
+                    "The action plan relation evidence required for {} was unavailable.",
+                    conclusion.dimension.as_str()
+                );
+                conclusion.reason = Some("motion_relation_unavailable".into());
+                conclusion.confidence = 0.0;
+                conclusion.evidence.extend(unavailable_relations);
+                conclusion.evidence.sort();
+                conclusion.evidence.dedup();
             }
             EvaluatedRepRule {
                 conclusion,
@@ -4264,6 +4684,55 @@ fn aggregate_set_patterns(active: &ActiveSet) -> Vec<SetPatternFact> {
             }
         })
         .collect::<Vec<_>>();
+    for dimension in AssessmentDimension::ALL {
+        let deviations = active
+            .rep_assessments
+            .iter()
+            .filter(|assessment| {
+                assessment.dimension_findings.iter().any(|finding| {
+                    finding.dimension == dimension
+                        && finding.state == AssessmentConclusionState::ObservedDeviation
+                })
+            })
+            .map(|assessment| assessment.rep.rep_id)
+            .collect::<Vec<_>>();
+        if deviations.is_empty() {
+            continue;
+        }
+        let persistent = deviations.len() >= active.program.minimum_persistent_reps;
+        let late_start = active
+            .reps
+            .len()
+            .saturating_sub(active.program.late_set_window);
+        let late_rep_ids = active.reps[late_start..]
+            .iter()
+            .map(|rep| rep.rep_id)
+            .collect::<HashSet<_>>();
+        let late_only = deviations
+            .iter()
+            .all(|rep_id| late_rep_ids.contains(rep_id));
+        patterns.push(SetPatternFact {
+            pattern_id: format!(
+                "{}{}_{}",
+                if late_only { "late_set_" } else { "" },
+                if persistent { "persistent" } else { "isolated" },
+                dimension.as_str(),
+            ),
+            summary: format!(
+                "{} {} deviation(s) appeared{}.",
+                deviations.len(),
+                dimension.as_str(),
+                if late_only {
+                    " in the late-set window"
+                } else {
+                    ""
+                },
+            ),
+            supporting_rep_ids: deviations,
+            evidence_dimensions: vec![dimension],
+            confidence: if persistent { 0.85 } else { 0.65 },
+        });
+    }
     if let (Some(first), Some(last)) = (active.packets.first(), active.packets.last()) {
         let equipment_observed = active
             .packets
@@ -4321,6 +4790,45 @@ fn aggregate_set_patterns(active: &ActiveSet) -> Vec<SetPatternFact> {
                     .into(),
                 supporting_rep_ids: ranges[split..].iter().map(|(rep_id, _)| *rep_id).collect(),
                 evidence_dimensions: vec![AssessmentDimension::RangeOfMotion],
+                confidence: 0.75,
+            });
+        }
+    }
+    let phase_durations = active
+        .rep_assessments
+        .iter()
+        .filter_map(|rep| {
+            rep.features
+                .iter()
+                .find(|feature| feature.feature_id == "cycle_duration")
+                .and_then(|feature| feature.value)
+                .map(|value| (rep.rep.rep_id, value))
+        })
+        .collect::<Vec<_>>();
+    let late_phase_window = active.program.late_set_window.min(phase_durations.len());
+    if phase_durations.len() > late_phase_window && late_phase_window > 0 {
+        let split = phase_durations.len() - late_phase_window;
+        let earlier = phase_durations[..split]
+            .iter()
+            .map(|(_, value)| *value)
+            .sum::<f32>()
+            / split as f32;
+        let late = phase_durations[split..]
+            .iter()
+            .map(|(_, value)| *value)
+            .sum::<f32>()
+            / late_phase_window as f32;
+        if late > earlier {
+            patterns.push(SetPatternFact {
+                pattern_id: "late_set_phase_duration_increase".into(),
+                summary: format!(
+                    "Late-set mean cycle duration ({late:.0} ms) exceeded the earlier set prefix ({earlier:.0} ms); this is a descriptive slowdown pattern, not a correctness threshold."
+                ),
+                supporting_rep_ids: phase_durations[split..]
+                    .iter()
+                    .map(|(rep_id, _)| *rep_id)
+                    .collect(),
+                evidence_dimensions: vec![AssessmentDimension::PhaseControl],
                 confidence: 0.75,
             });
         }
@@ -4566,7 +5074,7 @@ fn builtin_asset(kind: AssessmentAssetKind, id: String) -> AssessmentAsset {
 }
 
 /// Versioned recognition context catalog for the currently governed motion set.
-pub fn current_motion_assessment_catalog_v1() -> ExecutionAssessmentBundleCatalog {
+fn assemble_pose_catalog() -> ExecutionAssessmentBundleCatalog {
     use AssessmentCaptureView as View;
     use AssessmentEquipmentSemantics as Equipment;
 
@@ -4672,7 +5180,6 @@ pub fn current_motion_assessment_catalog_v1() -> ExecutionAssessmentBundleCatalo
                     ExecutionAssessmentBundle {
                         schema_version: EXECUTION_ASSESSMENT_BUNDLE_SCHEMA.into(),
                         bundle_id: bundle_id.clone(),
-                        capability: AssessmentBundleCapability::ContextResolutionOnly,
                         exact_context: AssessmentExactContext {
                             action_id: (*action_id).into(),
                             variation_id: "standard_variant".into(),
@@ -4765,175 +5272,13 @@ pub fn current_motion_assessment_catalog_v1() -> ExecutionAssessmentBundleCatalo
 /// First executable catalog. Ticket 02 promotes one exact governed context;
 /// every other binding remains an explicit context-resolution capability until
 /// its action-family ticket supplies a compatible RecognitionProfile.
-pub fn current_motion_assessment_catalog_v2() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v1();
-    catalog.catalog_id = "maxpower/current-motion-assessment/v2".into();
-    let target_bundle_id = "barbell_bench_press/front-oblique-left/v1";
-    let target = catalog
-        .bundles
-        .iter()
-        .find(|bundle| bundle.bundle_id == target_bundle_id)
-        .expect("built-in bench front-oblique-left bundle")
-        .clone();
-    let profile =
-        crate::ExerciseProfile::barbell_bench_press_touched_benchmark_front_left_provisional();
-    let programs = [
-        (
-            target.lineage.recognition_profile.id.clone(),
-            serde_json::json!({
-                "runtimeProfileIdentity": profile.identity,
-                "runtimeProfileHash": format!("{:016x}", profile.content_hash),
-                "maturity": profile.maturity.as_str(),
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.execution_contract.id.clone(),
-            serde_json::json!({
-                "phaseOrder": ["eccentric", "concentric"],
-                "taskEndpoints": ["locked_out_start", "visible_bottom_turnaround", "returned_lockout"],
-                "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
-                "equipmentSemantics": "rigid_bar_axis",
-                "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.local_coordinate_strategy.id.clone(),
-            serde_json::json!({
-                "requireNormalizedEndpoints": true,
-                "coordinateSpace": "causal_set_local_camera_plane",
-                "captureView": "front-oblique-left",
-                "preparationToEffortDirection": "down",
-                "equipmentMode": "rigidbaraxis",
-                "poseAnchor": "wristmidpoint",
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.equipment_adapter.id.clone(),
-            serde_json::json!({
-                "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
-                "runtimeAdapter": "rust_visual_rigid_bar_axis",
-                "conflictPolicy": "abstain_fused_preserve_channels",
-                "poseFallback": "preserve_as_independent_channel",
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.feature_program.id.clone(),
-            serde_json::json!({
-                "features": [
-                    "cycle_duration",
-                    "rep_disposition",
-                    "first_phase_duration",
-                    "second_phase_duration",
-                    "phase_duration_ratio",
-                    "local_primary_excursion",
-                    "local_return_error",
-                    "equipment_primary_excursion",
-                    "pose_primary_excursion",
-                    "authorization_phase_control",
-                    "authorization_support_stability",
-                    "authorization_bilateral_coordination",
-                    "authorization_trajectory_control",
-                    "authorization_standard_variant_compatibility"
-                ],
-                "boundedFacts": true,
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.reference_policy.id.clone(),
-            serde_json::json!({
-                "order": ["self_geometry", "set_prefix", "same_workout_prior_set"],
-                "compareBeforeUpdate": true,
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.rule_pack.id.clone(),
-            serde_json::json!({
-                "rangeFeatureId": "local_primary_excursion",
-                "rangeDeviationRatio": 0.20,
-                "minimumFeatureConfidence": 0.50,
-                "missingEvidence": "cannot_judge",
-                "repRules": [
-                    {"dimension": "task_completion", "operator": "rep_disposition", "featureId": "rep_disposition"},
-                    {"dimension": "range_of_motion", "operator": "reference_lower_bound", "featureId": "local_primary_excursion", "returnFeatureId": "local_return_error", "maximumReturnError": 0.15},
-                    {"dimension": "phase_control", "operator": "abstain", "featureIds": ["authorization_phase_control"], "reason": "no_governed_phase_quality_threshold"},
-                    {"dimension": "support_stability", "operator": "abstain", "featureIds": ["authorization_support_stability"], "reason": "support_stability_not_observed_by_tracer_contract"},
-                    {"dimension": "bilateral_coordination", "operator": "abstain", "featureIds": ["authorization_bilateral_coordination"], "reason": "anatomical_endpoint_mapping_not_required_by_tracer_contract"},
-                    {"dimension": "trajectory_control", "operator": "abstain", "featureIds": ["authorization_trajectory_control"], "reason": "no_governed_trajectory_quality_corridor"},
-                    {"dimension": "standard_variant_compatibility", "operator": "abstain", "featureIds": ["authorization_standard_variant_compatibility"], "reason": "no_human_standard_variant_truth"},
-                    {"dimension": "observation_confidence", "operator": "features_available", "featureIds": ["local_primary_excursion"]}
-                ],
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-        (
-            target.lineage.set_aggregation_policy.id.clone(),
-            serde_json::json!({
-                "lateSetWindow": 2,
-                "minimumPersistentReps": 2,
-                "setRules": [
-                    {"dimension": "task_completion", "operator": "rollup_rep_dimension"},
-                    {"dimension": "range_of_motion", "operator": "late_set_persistence"},
-                    {"dimension": "phase_control", "operator": "rollup_rep_dimension"},
-                    {"dimension": "support_stability", "operator": "rollup_rep_dimension"},
-                    {"dimension": "bilateral_coordination", "operator": "rollup_rep_dimension"},
-                    {"dimension": "trajectory_control", "operator": "rollup_rep_dimension"},
-                    {"dimension": "standard_variant_compatibility", "operator": "rollup_rep_dimension"},
-                    {"dimension": "observation_confidence", "operator": "rollup_rep_dimension"}
-                ],
-                "deliveryStage": "ticket_02_first_complete_tracer",
-            }),
-        ),
-    ];
-    for (asset_id, content) in programs {
-        let asset = catalog
-            .installed_assets
-            .iter_mut()
-            .find(|asset| asset.id == asset_id)
-            .expect("built-in executable asset");
-        asset.content = content;
-        *asset = asset.clone().with_computed_hash();
-    }
-    let installed = catalog
-        .installed_assets
-        .iter()
-        .map(|asset| (asset.id.clone(), asset.reference()))
-        .collect::<HashMap<_, _>>();
-    for bundle in &mut catalog.bundles {
-        let lineage = &mut bundle.lineage;
-        for reference in [
-            &mut lineage.recognition_profile,
-            &mut lineage.execution_contract,
-            &mut lineage.local_coordinate_strategy,
-            &mut lineage.equipment_adapter,
-            &mut lineage.feature_program,
-            &mut lineage.reference_policy,
-            &mut lineage.rule_pack,
-            &mut lineage.set_aggregation_policy,
-        ] {
-            if let Some(updated) = installed.get(&reference.id) {
-                *reference = updated.clone();
-            }
-        }
-        if bundle.bundle_id == target_bundle_id {
-            bundle.capability = AssessmentBundleCapability::Executable;
-        }
-        *bundle = bundle.clone().with_computed_hash();
-    }
-    catalog
-}
-
 #[derive(Clone, Debug)]
 pub struct RigidBarAssessmentProfileBinding {
     pub action_id: String,
     pub capture_view: AssessmentCaptureView,
     pub profile: crate::ExerciseProfile,
     pub local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
+    pub motion_plan: Option<crate::ActionObservationPlan>,
 }
 
 /// The currently governed rigid-bar action/view matrix. Profiles are
@@ -4982,6 +5327,7 @@ pub fn current_rigid_bar_assessment_profiles_v1() -> Vec<RigidBarAssessmentProfi
                 equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
                 pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
             },
+            motion_plan: None,
         }
     })
     .collect()
@@ -5040,6 +5386,7 @@ pub fn equipment_fused_rigid_bar_assessment_profiles_v2() -> Vec<RigidBarAssessm
                 equipment_mode: crate::LocalEquipmentMode::RigidBarAxis,
                 pose_anchor: crate::LocalPoseAnchor::WristMidpoint,
             },
+            motion_plan: None,
         }
     })
     .collect()
@@ -5080,8 +5427,8 @@ fn rigid_bar_profile_initializer(
                  return_hysteresis,
                  ready_tolerance,
                  max_gap_ms,
-                 min_rep_duration_ms,
-                 max_rep_duration_ms| crate::RigidBarProfileInitializer {
+                 min_rep_duration_ms: u64,
+                 max_rep_duration_ms: u64| crate::RigidBarProfileInitializer {
         primary_signal,
         secondary_signal,
         direction,
@@ -5089,6 +5436,7 @@ fn rigid_bar_profile_initializer(
         minimum_amplitude,
         return_hysteresis,
         ready_tolerance,
+        minimum_phase_dwell_ms: (min_rep_duration_ms / 2_u64).max(1_u64),
         max_gap_ms,
         min_rep_duration_ms,
         max_rep_duration_ms,
@@ -5253,8 +5601,8 @@ fn executable_bundle_asset(
 /// Ticket 03 executable catalog for the current rigid-bar action family.
 /// Each exact action/view Bundle owns a complete immutable asset lineage even
 /// when two contexts currently select the same generic feature operators.
-pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v1();
+fn assemble_rigid_bar_catalog() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = assemble_pose_catalog();
     catalog.catalog_id = "maxpower/current-rigid-bar-assessment/v3".into();
 
     for binding in current_rigid_bar_assessment_profiles_v1() {
@@ -5278,7 +5626,6 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
                 serde_json::json!({
                     "runtimeProfileIdentity": binding.profile.identity,
                     "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
-                    "maturity": binding.profile.maturity.as_str(),
                     "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
                     "evidenceScope": "governed_known_video_rep_counting_initializer",
                     "deliveryStage": delivery_stage,
@@ -5292,7 +5639,7 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
                     "taskEndpoints": task_endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": "rigid_bar_axis",
-                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "equipmentProviderId": "visual_rigid_bar_axis_v1",
                     "deliveryStage": delivery_stage,
                 }),
             ),
@@ -5319,7 +5666,7 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
                 "equipment-adapter",
                 serde_json::json!({
                     "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
-                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "providerId": "visual_rigid_bar_axis_v1",
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel",
                     "deliveryStage": delivery_stage,
@@ -5409,7 +5756,6 @@ pub fn current_motion_assessment_catalog_v3() -> ExecutionAssessmentBundleCatalo
             rule_pack: references[6].clone(),
             set_aggregation_policy: references[7].clone(),
         };
-        bundle.capability = AssessmentBundleCapability::Executable;
         *bundle = bundle.clone().with_computed_hash();
     }
     catalog
@@ -5581,8 +5927,8 @@ fn action_family_profile_initializer(
                  minimum_amplitude,
                  return_hysteresis,
                  ready_tolerance,
-                 min_rep_duration_ms,
-                 max_rep_duration_ms| crate::RigidBarProfileInitializer {
+                 min_rep_duration_ms: u64,
+                 max_rep_duration_ms: u64| crate::RigidBarProfileInitializer {
         primary_signal,
         secondary_signal,
         direction,
@@ -5590,6 +5936,7 @@ fn action_family_profile_initializer(
         minimum_amplitude,
         return_hysteresis,
         ready_tolerance,
+        minimum_phase_dwell_ms: (min_rep_duration_ms / 2_u64).max(1_u64),
         max_gap_ms: 700,
         min_rep_duration_ms,
         max_rep_duration_ms,
@@ -5843,7 +6190,6 @@ fn promote_action_family(
                 serde_json::json!({
                     "runtimeProfileIdentity": binding.profile.identity,
                     "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
-                    "maturity": binding.profile.maturity.as_str(),
                     "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
                     "evidenceScope": "governed_known_video_rep_counting_initializer",
                     "deliveryStage": delivery_stage,
@@ -5856,7 +6202,7 @@ fn promote_action_family(
                     "phaseOrder": phases, "taskEndpoints": endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": equipment_semantics_id(semantics), "deliveryStage": delivery_stage,
-                    "equipmentRecognitionMode": equipment_recognition_mode_id(equipment_recognition_mode(semantics)),
+                    "equipmentProviderId": equipment_provider_id(semantics).map(crate::EquipmentProviderId::as_str),
                 }),
             ),
             (
@@ -5876,7 +6222,7 @@ fn promote_action_family(
                 "equipment-adapter",
                 serde_json::json!({
                     "evidencePolicy": equipment_evidence_policy(semantics),
-                    "runtimeAdapter": equipment_recognition_mode_id(equipment_recognition_mode(semantics)),
+                    "providerId": equipment_provider_id(semantics).map(crate::EquipmentProviderId::as_str),
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel", "deliveryStage": delivery_stage,
                 }),
@@ -5947,42 +6293,41 @@ fn promote_action_family(
             rule_pack: references[6].clone(),
             set_aggregation_policy: references[7].clone(),
         };
-        bundle.capability = AssessmentBundleCapability::Executable;
         *bundle = bundle.clone().with_computed_hash();
     }
     catalog
 }
 
-pub fn current_motion_assessment_catalog_v4() -> ExecutionAssessmentBundleCatalog {
+fn assemble_cable_catalog() -> ExecutionAssessmentBundleCatalog {
     promote_action_family(
-        current_motion_assessment_catalog_v3(),
+        assemble_rigid_bar_catalog(),
         "maxpower/current-cable-assessment/v4",
         "ticket_04_cable_family",
         current_cable_assessment_profiles_v1(),
     )
 }
 
-pub fn current_motion_assessment_catalog_v5() -> ExecutionAssessmentBundleCatalog {
+fn assemble_machine_catalog() -> ExecutionAssessmentBundleCatalog {
     promote_action_family(
-        current_motion_assessment_catalog_v4(),
+        assemble_cable_catalog(),
         "maxpower/current-machine-assessment/v5",
         "ticket_05_machine_family",
         current_machine_assessment_profiles_v1(),
     )
 }
 
-pub fn current_motion_assessment_catalog_v6() -> ExecutionAssessmentBundleCatalog {
+fn assemble_dual_dumbbell_catalog() -> ExecutionAssessmentBundleCatalog {
     promote_action_family(
-        current_motion_assessment_catalog_v5(),
+        assemble_machine_catalog(),
         "maxpower/current-dual-dumbbell-assessment/v6",
         "ticket_06_dual_dumbbell_family",
         current_dual_dumbbell_assessment_profiles_v1(),
     )
 }
 
-pub fn current_motion_assessment_catalog_v7() -> ExecutionAssessmentBundleCatalog {
+fn assemble_bodyweight_catalog() -> ExecutionAssessmentBundleCatalog {
     promote_action_family(
-        current_motion_assessment_catalog_v6(),
+        assemble_dual_dumbbell_catalog(),
         "maxpower/current-all-family-assessment/v7",
         "ticket_07_bodyweight_family",
         current_bodyweight_assessment_profiles_v1(),
@@ -5993,8 +6338,8 @@ pub fn current_motion_assessment_catalog_v7() -> ExecutionAssessmentBundleCatalo
 /// action-family catalog. Only the four assets that own Rep boundary meaning
 /// are replaced; FeatureProgram, ReferencePolicy, RulePack, and Set aggregation
 /// remain byte-identical to their v7 lineage.
-pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v7();
+fn assemble_equipment_turnaround_catalog() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = assemble_bodyweight_catalog();
     catalog.catalog_id = "maxpower/current-equipment-fused-assessment/v8".into();
     let delivery_stage = "ticket_08_equipment_primary_rep_boundaries";
     for binding in equipment_fused_rigid_bar_assessment_profiles_v2() {
@@ -6044,7 +6389,6 @@ pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalo
                 serde_json::json!({
                     "runtimeProfileIdentity": binding.profile.identity,
                     "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
-                    "maturity": binding.profile.maturity.as_str(),
                     "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
                     "evidenceScope": "known_video_equipment_fusion_feasibility",
                     "deliveryStage": delivery_stage,
@@ -6058,7 +6402,7 @@ pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalo
                     "taskEndpoints": task_endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": "rigid_bar_axis",
-                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "equipmentProviderId": "visual_rigid_bar_axis_v1",
                     "repBoundaryAuthority": "pose_cycle_equipment_turnaround_fused",
                     "deliveryStage": delivery_stage,
                 }),
@@ -6081,7 +6425,7 @@ pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalo
                 "equipment-adapter",
                 serde_json::json!({
                     "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
-                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "providerId": "visual_rigid_bar_axis_v1",
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel",
                     "repBoundaryAuthority": "pose_cycle_equipment_turnaround_fused",
@@ -6112,10 +6456,10 @@ pub fn current_motion_assessment_catalog_v8() -> ExecutionAssessmentBundleCatalo
 /// a shaft inside the pose-guided search corridor and the canonical equipment
 /// layer must associate that axis with both reliable wrists before it can
 /// relocate a Rep turnaround.
-pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v8();
+fn assemble_subject_constraint_catalog() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = assemble_equipment_turnaround_catalog();
     catalog.catalog_id = "maxpower/current-wrist-constrained-equipment-assessment/v9".into();
-    let delivery_stage = "wrist_constrained_rigid_bar_fusion_v9";
+    let delivery_stage = "subject_constrained_ticket_03_rigid_bar_family";
     for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
         let bundle_id = format!(
             "{}/{}/v1",
@@ -6163,7 +6507,6 @@ pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalo
                 serde_json::json!({
                     "runtimeProfileIdentity": binding.profile.identity,
                     "runtimeProfileHash": format!("{:016x}", binding.profile.content_hash),
-                    "maturity": binding.profile.maturity.as_str(),
                     "initializerEvidenceAssetId": "personal-human-rep-ranges-v2",
                     "evidenceScope": "known_video_wrist_constrained_equipment_fusion_feasibility",
                     "deliveryStage": delivery_stage,
@@ -6177,7 +6520,7 @@ pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalo
                     "taskEndpoints": task_endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": "rigid_bar_axis",
-                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "equipmentProviderId": "visual_rigid_bar_axis_v1",
                     "equipmentConstraintPolicy": "pose_guided_visual_axis_bilateral_wrist_required",
                     "repBoundaryAuthority": "pose_cycle_wrist_constrained_equipment_turnaround_fused",
                     "deliveryStage": delivery_stage,
@@ -6203,7 +6546,7 @@ pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalo
                 serde_json::json!({
                     "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
                     "wristConstraintPolicy": "visual_axis_near_both_reliable_wrists",
-                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "providerId": "visual_rigid_bar_axis_v1",
                     "conflictPolicy": "abstain_fused_preserve_channels",
                     "poseFallback": "preserve_as_independent_channel",
                     "rawCandidatePolicy": "diagnostic_only_until_canonical_association",
@@ -6236,10 +6579,10 @@ pub fn current_motion_assessment_catalog_v9() -> ExecutionAssessmentBundleCatalo
 /// extent, and pose-derived geometry may bridge display continuity only after
 /// visual calibration. All motion consumers share the canonical turnaround
 /// eligibility rule instead of applying per-surface score products.
-pub fn current_motion_assessment_catalog_v10() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v9();
+fn assemble_grip_validated_catalog() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = assemble_subject_constraint_catalog();
     catalog.catalog_id = "maxpower/current-grip-validated-equipment-assessment/v10".into();
-    let delivery_stage = "grip_validated_rigid_bar_continuity_v10";
+    let delivery_stage = "grip_validated_ticket_03_rigid_bar_family";
     for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
         let (phase_order, task_endpoints): ([&str; 2], [&str; 3]) = match binding.action_id.as_str()
         {
@@ -6289,7 +6632,7 @@ pub fn current_motion_assessment_catalog_v10() -> ExecutionAssessmentBundleCatal
                     "taskEndpoints": task_endpoints,
                     "dimensions": AssessmentDimension::ALL.map(AssessmentDimension::as_str),
                     "equipmentSemantics": "rigid_bar_axis",
-                    "equipmentRecognitionMode": "rust_visual_rigid_bar_axis",
+                    "equipmentProviderId": "visual_rigid_bar_axis_v1",
                     "equipmentConstraintPolicy": "visual_edge_measured_bilateral_wrist_bounded",
                     "axisExtentSemantics": "validated_grip_supported_axis_not_physical_bar_length",
                     "displayContinuity": "calibrated_pose_bridge_or_bounded_prediction_non_judgeable",
@@ -6304,7 +6647,7 @@ pub fn current_motion_assessment_catalog_v10() -> ExecutionAssessmentBundleCatal
                     "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
                     "visualMeasurementPolicy": "visual_axis_with_bilateral_grip_validation",
                     "wristConstraintPolicy": "visual_axis_near_both_reliable_wrists",
-                    "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                    "providerId": "visual_rigid_bar_axis_v1",
                     "visualTrackerAlgorithm": "grip_validated_axis_extent_v2",
                     "maximumWristAxisResidual": 0.06,
                     "maximumCanonicalHandDistance": 0.065,
@@ -6341,10 +6684,10 @@ pub fn current_motion_assessment_catalog_v10() -> ExecutionAssessmentBundleCatal
 /// may consume only the latest causal pose context within 180 ms; canonical
 /// packets do not invent a new pose observation for those equipment-only
 /// frames.
-pub fn current_motion_assessment_catalog_v11() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v10();
+fn assemble_multirate_catalog() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = assemble_grip_validated_catalog();
     catalog.catalog_id = "maxpower/current-multirate-equipment-assessment/v11".into();
-    let delivery_stage = "multirate_grip_validated_rigid_bar_v11";
+    let delivery_stage = "multirate_ticket_03_rigid_bar_family";
     for binding in wrist_constrained_rigid_bar_assessment_profiles_v3() {
         let bundle_id = format!(
             "{}/{}/v1",
@@ -6363,7 +6706,7 @@ pub fn current_motion_assessment_catalog_v11() -> ExecutionAssessmentBundleCatal
                 "evidencePolicy": "independent_subject_associated_rigid_bar_axis",
                 "visualMeasurementPolicy": "visual_axis_with_bilateral_grip_validation",
                 "wristConstraintPolicy": "visual_axis_near_both_reliable_wrists",
-                "runtimeAdapter": "rust_visual_rigid_bar_axis",
+                "providerId": "visual_rigid_bar_axis_v1",
                 "visualTrackerAlgorithm": "grip_validated_multirate_axis_v3",
                 "inputCadence": "every_timestamped_video_frame",
                 "poseConstraintCadence": "latest_causal_pose_max_age_180ms",
@@ -6388,63 +6731,135 @@ pub fn current_motion_assessment_catalog_v11() -> ExecutionAssessmentBundleCatal
 
 /// Exact-context runtime profiles whose immutable identity includes the
 /// ActionObservationPlan hash. Hosts use this provider output for MotionSession
-/// whenever they select the v12 assessment catalog.
-pub fn current_action_motion_assessment_profiles_v12() -> Vec<RigidBarAssessmentProfileBinding> {
-    let motion_catalog = crate::reviewed_action_motion_catalog_v1()
-        .expect("embedded reviewed action-motion catalog must be valid");
+/// whenever they select the v0_1 assessment catalog.
+pub fn compile_plan_driven_runtime_binding(
+    bundle: &ExecutionAssessmentBundle,
+    plan: crate::ActionObservationPlan,
+) -> RigidBarAssessmentProfileBinding {
+    use crate::{ExerciseSignal, ExerciseSignalKind, MovementDirection};
+
+    let task_primary_is_pose = plan.relations.iter().any(|relation| {
+        relation.role == crate::MotionRole::TaskPrimary
+            && relation.source_requirement == crate::OperatorSourceRequirement::CurrentMeasuredPose
+    });
+    let equipment_mode = if task_primary_is_pose {
+        crate::LocalEquipmentMode::PoseOnly
+    } else {
+        local_equipment_mode(bundle.exact_context.equipment_semantics)
+    };
+    let primary_signal_kind = match equipment_mode {
+        crate::LocalEquipmentMode::PoseOnly | crate::LocalEquipmentMode::FixedSupport => {
+            ExerciseSignalKind::LocalPoseAlongAxisProgress
+        }
+        crate::LocalEquipmentMode::MovingHandle
+        | crate::LocalEquipmentMode::TwoIndependentDumbbells
+            if plan.rep_consensus.mode == crate::RepConsensusMode::IndependentBilateral =>
+        {
+            ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
+        }
+        crate::LocalEquipmentMode::RigidBarAxis
+        | crate::LocalEquipmentMode::MovingHandle
+        | crate::LocalEquipmentMode::TwoIndependentDumbbells => {
+            ExerciseSignalKind::LocalObservedAlongAxisProgress
+        }
+    };
+
+    // Candidate segmentation is configured by the frozen exact action × view
+    // topology asset.  It is deliberately separate from quality thresholds:
+    // this is the plan that produces the candidate, not post-seal decoration.
+    let topology = &plan.rep_topology;
+    let direction = match topology.direction_policy {
+        crate::LocalDirectionPolicy::SignInvariant => MovementDirection::Auto,
+        crate::LocalDirectionPolicy::PreparationToEffortPositive => MovementDirection::Increasing,
+        crate::LocalDirectionPolicy::PreparationToEffortNegative => MovementDirection::Decreasing,
+    };
+    let initializer = crate::RigidBarProfileInitializer {
+        primary_signal: ExerciseSignal {
+            kind: primary_signal_kind,
+            landmarks: Vec::new(),
+        },
+        secondary_signal: ExerciseSignal {
+            kind: primary_signal_kind,
+            landmarks: Vec::new(),
+        },
+        direction,
+        start_amplitude: topology.start_threshold(),
+        minimum_amplitude: topology.minimum_excursion(),
+        return_hysteresis: topology.turnaround_hysteresis(),
+        ready_tolerance: f32::from(topology.ready_tolerance_milli) / 1_000.0,
+        minimum_phase_dwell_ms: topology.minimum_phase_dwell_ms,
+        max_gap_ms: topology.maximum_gap_ms,
+        min_rep_duration_ms: topology.minimum_rep_duration_ms,
+        max_rep_duration_ms: topology.maximum_rep_duration_ms,
+    };
+    let identity = format!(
+        "{}/{}/plan-driven-local-cycle/v0.1",
+        bundle.exact_context.action_id,
+        bundle.exact_context.capture_view.catalog_slug(),
+    );
+    let profile = bind_runtime_profile_to_action_plan(
+        crate::ExerciseProfile::rigid_bar_provisional(&identity, initializer),
+        &plan,
+    );
+    RigidBarAssessmentProfileBinding {
+        action_id: bundle.exact_context.action_id.clone(),
+        capture_view: bundle.exact_context.capture_view,
+        profile,
+        local_coordinate_strategy: crate::LocalMotionCoordinateStrategy {
+            capture_view: local_coarse_view(bundle.exact_context.capture_view)
+                .expect("installed exact view has a local coordinate projection"),
+            // The estimator learns the actual camera-plane departure vector;
+            // this is only a deterministic sign seed. Rep admission validates
+            // departure + opposite return, so screen up/down is not action
+            // semantics and cannot be hard-coded by action name.
+            preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortUp,
+            equipment_mode,
+            pose_anchor: local_pose_anchor(bundle.exact_context.equipment_semantics),
+        },
+        motion_plan: Some(plan),
+    }
+}
+
+pub fn visual_recognition_baseline_profiles_v0_1() -> Vec<RigidBarAssessmentProfileBinding> {
+    let motion_catalog = crate::installed_action_motion_catalog_v1()
+        .expect("embedded action-motion catalog must be valid");
     let bindings: Vec<ActionMotionBundleBinding> = serde_json::from_slice(include_bytes!(
-        "../assets/current-context-motion-bindings-v12.json"
+        "../assets/visual-recognition-v0.1-context-motion-bindings.json"
     ))
     .expect("embedded current-context motion bindings must be valid");
-    let leaves = bindings
-        .iter()
-        .map(|binding| (binding.bundle_id.as_str(), binding.leaf_action_id.as_str()))
-        .collect::<HashMap<_, _>>();
     let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
-    let rigid = wrist_constrained_rigid_bar_assessment_profiles_v3();
-    let families = current_cable_assessment_profiles_v1()
+    let context_catalog = assemble_pose_catalog();
+    let bundles = context_catalog
+        .bundles
+        .iter()
+        .map(|bundle| (bundle.bundle_id.as_str(), bundle))
+        .collect::<HashMap<_, _>>();
+    bindings
         .into_iter()
-        .chain(current_machine_assessment_profiles_v1())
-        .chain(current_dual_dumbbell_assessment_profiles_v1())
-        .chain(current_bodyweight_assessment_profiles_v1())
-        .map(|binding| RigidBarAssessmentProfileBinding {
-            action_id: binding.action_id,
-            capture_view: binding.capture_view,
-            profile: binding.profile,
-            local_coordinate_strategy: binding.local_coordinate_strategy,
-        });
-    rigid
-        .into_iter()
-        .chain(families)
-        .filter_map(|mut binding| {
-            let bundle_id = format!(
-                "{}/{}/v1",
-                binding.action_id,
-                binding.capture_view.catalog_slug()
-            );
-            let leaf = leaves.get(bundle_id.as_str())?;
-            let definition = motion_catalog.definition(leaf)?;
+        .filter_map(|binding| {
+            let bundle = bundles.get(binding.bundle_id.as_str())?;
+            let definition = motion_catalog.definition(&binding.leaf_action_id)?;
             let plan = compiler
-                .compile(definition, action_motion_view(binding.capture_view))
+                .compile(
+                    definition,
+                    action_motion_view(bundle.exact_context.capture_view),
+                )
                 .ok()?;
-            (plan.capability == crate::ActionPlanCapability::FullExecutable).then(|| {
-                binding.profile = bind_runtime_profile_to_action_plan(binding.profile, &plan);
-                binding
-            })
+            Some(compile_plan_driven_runtime_binding(bundle, plan))
         })
         .collect()
 }
 
 /// Unified action-semantics successor. Every existing exact context binds a
-/// reviewed leaf ActionMotionDefinition and must pass the generic exact-view
+/// installed leaf ActionMotionDefinition and must pass the generic exact-view
 /// compiler before an executable Bundle can be configured.
-pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatalog {
-    let mut catalog = current_motion_assessment_catalog_v11();
-    catalog.catalog_id = "maxpower/current-action-motion-assessment/v12".into();
-    let motion_catalog = crate::reviewed_action_motion_catalog_v1()
-        .expect("embedded reviewed action-motion catalog must be valid");
+pub fn visual_recognition_baseline_catalog_v0_1() -> ExecutionAssessmentBundleCatalog {
+    let mut catalog = assemble_multirate_catalog();
+    catalog.catalog_id = VISUAL_RECOGNITION_BASELINE_CATALOG_ID.into();
+    let motion_catalog = crate::installed_action_motion_catalog_v1()
+        .expect("embedded action-motion catalog must be valid");
     let bindings: Vec<ActionMotionBundleBinding> = serde_json::from_slice(include_bytes!(
-        "../assets/current-context-motion-bindings-v12.json"
+        "../assets/visual-recognition-v0.1-context-motion-bindings.json"
     ))
     .expect("embedded current-context motion bindings must be valid");
     let binding_by_bundle = bindings
@@ -6452,7 +6867,7 @@ pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatal
         .map(|binding| (binding.bundle_id.as_str(), binding.leaf_action_id.as_str()))
         .collect::<HashMap<_, _>>();
     let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
-    let runtime_profiles = current_action_motion_assessment_profiles_v12()
+    let runtime_profiles = visual_recognition_baseline_profiles_v0_1()
         .into_iter()
         .map(|binding| {
             (
@@ -6461,7 +6876,7 @@ pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatal
                     binding.action_id,
                     binding.capture_view.catalog_slug()
                 ),
-                binding.profile,
+                binding,
             )
         })
         .collect::<HashMap<_, _>>();
@@ -6475,38 +6890,522 @@ pub fn current_motion_assessment_catalog_v12() -> ExecutionAssessmentBundleCatal
             .bundles
             .iter()
             .find(|bundle| bundle.bundle_id == bundle_id)
-            .expect("v12 Bundle exists");
+            .expect("v0_1 Bundle exists");
         let leaf_action_id = binding_by_bundle
             .get(bundle.bundle_id.as_str())
             .copied()
-            .expect("every v12 Bundle has an explicit reviewed leaf binding");
+            .expect("every v0_1 Bundle has an explicit installed leaf binding");
         let definition = motion_catalog
             .definition(leaf_action_id)
-            .expect("v12 leaf binding exists in reviewed catalog");
+            .expect("v0_1 leaf binding exists in installed catalog");
         let plan = compiler
             .compile(
                 definition,
                 action_motion_view(bundle.exact_context.capture_view),
             )
-            .expect("reviewed v12 binding resolves to a capability plan");
-        if let Some(profile) = runtime_profiles.get(&bundle_id) {
-            install_action_motion_runtime_profile(&mut catalog, &bundle_id, profile, &plan);
-        }
-        install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
-        let bundle = catalog
-            .bundles
-            .iter_mut()
-            .find(|candidate| candidate.bundle_id == bundle_id)
-            .expect("motion-authority Bundle remains installed");
-        if plan.capability != crate::ActionPlanCapability::FullExecutable {
-            bundle.capability = AssessmentBundleCapability::ContextResolutionOnly;
-            *bundle = bundle.clone().with_computed_hash();
+            .expect("installed v0_1 binding resolves to an observation plan");
+        if let Some(binding) = runtime_profiles.get(&bundle_id) {
+            install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
+            install_action_motion_runtime_profile(
+                &mut catalog,
+                &bundle_id,
+                &binding.profile,
+                &plan,
+            );
+            install_action_motion_local_strategy(
+                &mut catalog,
+                &bundle_id,
+                binding.local_coordinate_strategy,
+            );
+        } else {
+            install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
         }
     }
     assert_eq!(bindings.len(), catalog.bundles.len());
     catalog.action_motion_catalog = Some(motion_catalog);
     catalog.action_motion_bindings = bindings;
     catalog
+}
+
+/// Loads and audits the complete installed action inventory, then exposes the
+/// current executable runtime catalog through the same registration module
+/// used for future data-installed actions.
+pub fn visual_recognition_baseline_registry_v0_1()
+-> Result<ActionAssetRegistry, ActionAssetRegistryError> {
+    let inventory = crate::installed_action_asset_inventory_v1()
+        .map_err(ActionAssetRegistryError::InventoryValidation)?;
+    let runtime_catalog = install_action_library(visual_recognition_baseline_catalog_v0_1())?;
+    validate_catalog(&runtime_catalog).map_err(ActionAssetRegistryError::CatalogValidation)?;
+    let programs = compile_catalog_programs(&runtime_catalog)
+        .map_err(ActionAssetRegistryError::CatalogValidation)?;
+    if programs.len() != runtime_catalog.bundles.len() {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "installed action library contains a structurally incomplete runtime Bundle".into(),
+        ));
+    }
+    compile_action_motion_plans(&runtime_catalog)
+        .map_err(ActionAssetRegistryError::CatalogValidation)?;
+    let motion_catalog = runtime_catalog
+        .action_motion_catalog
+        .as_ref()
+        .expect("v0_1 runtime always owns the installed motion catalog");
+    if motion_catalog.definitions.len() != inventory.leaf_action_count {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "runtime action library differs from the structurally audited catalog".into(),
+        ));
+    }
+    Ok(ActionAssetRegistry {
+        runtime_catalog,
+        inventory,
+        installed_package_ids: HashSet::new(),
+    })
+}
+
+/// Materializes every action/view definition shipped in the SDK through one
+/// generic runtime template. The template supplies only numeric cycle and
+/// quality defaults; the compiled ActionMotionDefinition replaces all action,
+/// view, laterality, equipment and causal semantics before configuration.
+fn install_action_library(
+    mut catalog: ExecutionAssessmentBundleCatalog,
+) -> Result<ExecutionAssessmentBundleCatalog, ActionAssetRegistryError> {
+    let definitions = catalog
+        .action_motion_catalog
+        .as_ref()
+        .ok_or_else(|| {
+            ActionAssetRegistryError::InvalidPackage(
+                "runtime catalog has no installed action library".into(),
+            )
+        })?
+        .definitions
+        .clone();
+    let executable_presets =
+        compile_catalog_programs(&catalog).map_err(ActionAssetRegistryError::CatalogValidation)?;
+    let prototype = catalog
+        .bundles
+        .iter()
+        .find(|bundle| executable_presets.contains_key(&bundle.bundle_id))
+        .cloned()
+        .ok_or_else(|| {
+            ActionAssetRegistryError::InvalidPackage(
+                "runtime catalog has no generic executable preset".into(),
+            )
+        })?;
+    let compiler = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard());
+    let pose_contract = prototype.exact_context.pose_contract.clone();
+
+    for definition in definitions {
+        let equipment_semantics = equipment_semantics_for_motion_definition(&definition)?;
+        let laterality_mode = laterality_for_motion_definition(&definition);
+        let mut view_bindings = Vec::new();
+        for view_id in &definition.supported_views {
+            let capture_view = AssessmentCaptureView::from_alias(view_id).ok_or_else(|| {
+                ActionAssetRegistryError::InvalidPackage(format!(
+                    "{} declares unknown capture view {view_id}",
+                    definition.action_id
+                ))
+            })?;
+            let bundle_id = format!(
+                "{}/{}/v1",
+                definition.action_id,
+                capture_view.catalog_slug()
+            );
+            view_bindings.push(ActionViewBinding {
+                capture_view,
+                bundle_id: bundle_id.clone(),
+            });
+            if catalog
+                .bundles
+                .iter()
+                .any(|bundle| bundle.bundle_id == bundle_id)
+            {
+                continue;
+            }
+
+            let plan = compiler.compile(&definition, view_id).map_err(|error| {
+                ActionAssetRegistryError::PlanCompilation(format!(
+                    "{} / {view_id}: {error:?}",
+                    definition.action_id
+                ))
+            })?;
+            let mut bundle = prototype.clone();
+            bundle.bundle_id = bundle_id.clone();
+            bundle.exact_context = AssessmentExactContext {
+                action_id: definition.action_id.clone(),
+                variation_id: "standard_variant".into(),
+                equipment_semantics,
+                laterality_mode,
+                capture_view,
+                pose_contract: pose_contract.clone(),
+            };
+            bundle.lineage = clone_package_lineage_assets(
+                &mut catalog,
+                &prototype.lineage,
+                &bundle_id,
+                "embedded-action-library-v1",
+                &prototype.bundle_id,
+                &prototype.content_hash,
+            )?;
+            bundle = bundle.with_computed_hash();
+            catalog.bundles.push(bundle);
+            catalog
+                .action_motion_bindings
+                .push(ActionMotionBundleBinding {
+                    bundle_id: bundle_id.clone(),
+                    leaf_action_id: definition.action_id.clone(),
+                });
+
+            let runtime_bundle = catalog
+                .bundles
+                .iter()
+                .find(|bundle| bundle.bundle_id == bundle_id)
+                .expect("new action library Bundle exists");
+            let runtime = compile_plan_driven_runtime_binding(runtime_bundle, plan.clone());
+            install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
+            install_action_motion_runtime_profile(
+                &mut catalog,
+                &bundle_id,
+                &runtime.profile,
+                &plan,
+            );
+            install_action_motion_local_strategy(
+                &mut catalog,
+                &bundle_id,
+                runtime.local_coordinate_strategy,
+            );
+            install_action_motion_equipment_strategy(&mut catalog, &bundle_id);
+        }
+
+        if let Some(installed) = catalog
+            .action_definitions
+            .iter_mut()
+            .find(|candidate| candidate.action_id == definition.action_id)
+        {
+            installed.supported_views.extend(view_bindings);
+            installed
+                .supported_views
+                .sort_by_key(|binding| binding.capture_view.catalog_slug());
+            installed
+                .supported_views
+                .dedup_by_key(|binding| binding.capture_view);
+            *installed = installed.clone().with_computed_hash();
+        } else {
+            catalog.action_definitions.push(
+                ActionDefinition {
+                    schema_version: ACTION_DEFINITION_SCHEMA.into(),
+                    action_definition_id: format!(
+                        "{}/runtime-action-definition/v1",
+                        definition.definition_id
+                    ),
+                    action_id: definition.action_id,
+                    default_variation_id: "standard_variant".into(),
+                    equipment_semantics,
+                    laterality_mode,
+                    pose_contract: pose_contract.clone(),
+                    supported_views: view_bindings,
+                    content_hash: String::new(),
+                }
+                .with_computed_hash(),
+            );
+        }
+    }
+
+    // The v0_1 catalog is the numeric/runtime prototype for the installed action
+    // library. Do not expose its historical aliases beside the leaf assets:
+    // one installed leaf and exact view must resolve to exactly one runtime
+    // definition and Bundle.
+    let leaf_action_ids = catalog
+        .action_motion_catalog
+        .as_ref()
+        .expect("installed action library remains present")
+        .definitions
+        .iter()
+        .map(|definition| definition.action_id.clone())
+        .collect::<HashSet<_>>();
+    let exact_bundle_ids = catalog
+        .action_motion_bindings
+        .iter()
+        .filter_map(|binding| {
+            let bundle = catalog
+                .bundles
+                .iter()
+                .find(|bundle| bundle.bundle_id == binding.bundle_id)?;
+            (leaf_action_ids.contains(&binding.leaf_action_id)
+                && binding.leaf_action_id == bundle.exact_context.action_id)
+                .then(|| binding.bundle_id.clone())
+        })
+        .collect::<HashSet<_>>();
+    catalog
+        .action_motion_bindings
+        .retain(|binding| exact_bundle_ids.contains(&binding.bundle_id));
+    catalog
+        .bundles
+        .retain(|bundle| exact_bundle_ids.contains(&bundle.bundle_id));
+    catalog
+        .action_definitions
+        .retain(|definition| leaf_action_ids.contains(&definition.action_id));
+    let referenced_asset_ids = catalog
+        .bundles
+        .iter()
+        .flat_map(|bundle| bundle.lineage.assets())
+        .map(|(asset, _)| asset.id.clone())
+        .collect::<HashSet<_>>();
+    catalog
+        .installed_assets
+        .retain(|asset| referenced_asset_ids.contains(&asset.id));
+
+    catalog.catalog_id = "maxpower/installed-action-library-runtime/v1".into();
+    validate_catalog(&catalog).map_err(ActionAssetRegistryError::CatalogValidation)?;
+    compile_action_motion_plans(&catalog).map_err(ActionAssetRegistryError::CatalogValidation)?;
+    Ok(catalog)
+}
+
+fn validate_action_asset_package(
+    package: &ActionAssetPackage,
+    runtime_catalog: &ExecutionAssessmentBundleCatalog,
+) -> Result<(), ActionAssetRegistryError> {
+    if package.schema_version != ACTION_ASSET_PACKAGE_SCHEMA
+        || package.package_id.trim().is_empty()
+        || package.content_hash != package.computed_content_hash()
+    {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "package schema, identity or content hash is invalid".into(),
+        ));
+    }
+    package
+        .definition
+        .validate()
+        .map_err(ActionAssetRegistryError::InventoryValidation)?;
+    if package.definition.content_hash != package.definition.computed_hash() {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "motion definition content hash is invalid".into(),
+        ));
+    }
+    if runtime_catalog.action_motion_catalog.is_none() || package.contexts.is_empty() {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "an executable action package requires a unified runtime and at least one context"
+                .into(),
+        ));
+    }
+    let mut context_views = HashSet::new();
+    for context in &package.contexts {
+        let view = action_motion_view(context.capture_view);
+        if context.runtime_preset_bundle_id.trim().is_empty()
+            || !is_fixed_hash(&context.runtime_preset_bundle_hash)
+            || !package
+                .definition
+                .supported_views
+                .iter()
+                .any(|candidate| candidate == view)
+        {
+            return Err(ActionAssetRegistryError::InvalidPackage(format!(
+                "context {} is not declared by the action definition",
+                view
+            )));
+        }
+        if !context_views.insert(view) {
+            return Err(ActionAssetRegistryError::InvalidPackage(format!(
+                "duplicate exact view {view}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_quality_rule_asset_package(
+    package: &QualityRuleAssetPackage,
+    runtime_catalog: &ExecutionAssessmentBundleCatalog,
+) -> Result<(), ActionAssetRegistryError> {
+    if package.schema_version != QUALITY_RULE_ASSET_PACKAGE_SCHEMA
+        || package.package_id.trim().is_empty()
+        || package.action_id.trim().is_empty()
+        || package.bundle_id.trim().is_empty()
+        || !is_fixed_hash(&package.expected_bundle_hash)
+        || package.content_hash != package.computed_content_hash()
+    {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "quality-rule package schema, identity or content hash is invalid".into(),
+        ));
+    }
+    let bundle = runtime_catalog
+        .bundles
+        .iter()
+        .find(|bundle| bundle.bundle_id == package.bundle_id)
+        .ok_or_else(|| {
+            ActionAssetRegistryError::InvalidPackage(
+                "quality-rule package references an unknown Bundle".into(),
+            )
+        })?;
+    if bundle.content_hash != package.expected_bundle_hash
+        || bundle.exact_context.action_id != package.action_id
+        || bundle.exact_context.capture_view != package.capture_view
+    {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "quality-rule package exact context or expected Bundle hash is stale".into(),
+        ));
+    }
+    if package.source_lineage.is_empty()
+        || package.source_lineage.iter().any(|source| {
+            source.asset_id.trim().is_empty()
+                || source.version.trim().is_empty()
+                || source.content_hash.trim().is_empty()
+        })
+    {
+        return Err(ActionAssetRegistryError::InvalidPackage(
+            "quality-rule package requires versioned offline source lineage".into(),
+        ));
+    }
+    let expected_lineage =
+        serde_json::to_value(&package.source_lineage).expect("quality lineage serializes");
+    let assets = [
+        (
+            &package.feature_program,
+            AssessmentAssetKind::FeatureProgram,
+        ),
+        (
+            &package.reference_policy,
+            AssessmentAssetKind::ReferencePolicy,
+        ),
+        (&package.rule_pack, AssessmentAssetKind::RulePack),
+        (
+            &package.set_aggregation_policy,
+            AssessmentAssetKind::SetAggregationPolicy,
+        ),
+    ];
+    let mut asset_ids = HashSet::new();
+    for (asset, expected_kind) in assets {
+        if asset.kind != expected_kind
+            || asset.id.trim().is_empty()
+            || asset.schema_version != "v1"
+            || asset.content_hash != asset.computed_content_hash()
+            || !asset_ids.insert(asset.id.as_str())
+            || asset.content.get("sourceLineage") != Some(&expected_lineage)
+        {
+            return Err(ActionAssetRegistryError::InvalidPackage(format!(
+                "quality-rule asset {} has invalid kind, hash or source lineage",
+                asset.id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn equipment_semantics_for_motion_definition(
+    definition: &crate::ActionMotionDefinition,
+) -> Result<AssessmentEquipmentSemantics, ActionAssetRegistryError> {
+    match definition.exact_identity.equipment_topology.as_str() {
+        "free_rigid_barbell" | "smith_guided_bar" => Ok(AssessmentEquipmentSemantics::RigidBarAxis),
+        "independent_dumbbell" => Ok(AssessmentEquipmentSemantics::TwoIndependentDumbbells),
+        "constrained_machine_handle" => Ok(AssessmentEquipmentSemantics::ConstrainedMachineLever),
+        "cable_handle" => {
+            if definition.exact_identity.laterality == "unilateral"
+                || definition.exact_identity.laterality == "alternating"
+            {
+                Ok(AssessmentEquipmentSemantics::UnilateralCableHandle)
+            } else {
+                Ok(AssessmentEquipmentSemantics::CableOrMovingHandle)
+            }
+        }
+        "none" => Ok(AssessmentEquipmentSemantics::BodyOnly),
+        "bodyweight_station" => Ok(AssessmentEquipmentSemantics::FixedSupport),
+        // These loads remain part of the exact action identity, while the
+        // current runtime counts from declared body/joint relations. This is
+        // not permission to synthesize equipment geometry from wrists.
+        "generic_single_free_load"
+        | "kettlebell"
+        | "landmine_lever"
+        | "resistance_band"
+        | "trap_bar"
+        | "weight_plate" => Ok(AssessmentEquipmentSemantics::BodyOnly),
+        topology => Err(ActionAssetRegistryError::InvalidPackage(format!(
+            "unknown equipment topology {topology}"
+        ))),
+    }
+}
+
+fn laterality_for_motion_definition(
+    definition: &crate::ActionMotionDefinition,
+) -> AssessmentLateralityMode {
+    match definition.exact_identity.laterality.as_str() {
+        "unilateral" | "alternating" => AssessmentLateralityMode::ObservedActiveSide,
+        _ => AssessmentLateralityMode::Bilateral,
+    }
+}
+
+fn clone_package_lineage_assets(
+    catalog: &mut ExecutionAssessmentBundleCatalog,
+    source_lineage: &AssessmentBundleLineage,
+    bundle_id: &str,
+    package_id: &str,
+    runtime_preset_bundle_id: &str,
+    runtime_preset_bundle_hash: &str,
+) -> Result<AssessmentBundleLineage, ActionAssetRegistryError> {
+    let mut cloned = HashMap::new();
+    for (reference, kind) in source_lineage.assets() {
+        let source = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == reference.id && asset.kind == kind)
+            .cloned()
+            .ok_or_else(|| ActionAssetRegistryError::UnknownRuntimePreset(reference.id.clone()))?;
+        let mut asset = source;
+        asset.id = format!(
+            "{bundle_id}/package-{}/{}/v1",
+            package_id,
+            assessment_asset_kind_slug(kind)
+        );
+        let content = asset.content.as_object_mut().ok_or_else(|| {
+            ActionAssetRegistryError::InvalidPackage(format!(
+                "preset asset {} is not an object",
+                reference.id
+            ))
+        })?;
+        content.insert(
+            "sourceRuntimePresetAssetId".into(),
+            serde_json::json!(reference.id),
+        );
+        content.insert("actionAssetPackageId".into(), serde_json::json!(package_id));
+        content.insert(
+            "runtimePresetBundleId".into(),
+            serde_json::json!(runtime_preset_bundle_id),
+        );
+        content.insert(
+            "runtimePresetBundleHash".into(),
+            serde_json::json!(runtime_preset_bundle_hash),
+        );
+        asset = asset.with_computed_hash();
+        let cloned_reference = asset.reference();
+        catalog.installed_assets.push(asset);
+        cloned.insert(kind, cloned_reference);
+    }
+    let get = |kind| {
+        cloned
+            .get(&kind)
+            .expect("every lineage asset kind was cloned")
+            .clone()
+    };
+    Ok(AssessmentBundleLineage {
+        recognition_profile: get(AssessmentAssetKind::RecognitionProfile),
+        execution_contract: get(AssessmentAssetKind::ExecutionContract),
+        local_coordinate_strategy: get(AssessmentAssetKind::LocalCoordinateStrategy),
+        equipment_adapter: get(AssessmentAssetKind::EquipmentAdapter),
+        feature_program: get(AssessmentAssetKind::FeatureProgram),
+        reference_policy: get(AssessmentAssetKind::ReferencePolicy),
+        rule_pack: get(AssessmentAssetKind::RulePack),
+        set_aggregation_policy: get(AssessmentAssetKind::SetAggregationPolicy),
+    })
+}
+
+fn assessment_asset_kind_slug(kind: AssessmentAssetKind) -> &'static str {
+    match kind {
+        AssessmentAssetKind::RecognitionProfile => "recognition-profile",
+        AssessmentAssetKind::ExecutionContract => "execution-contract",
+        AssessmentAssetKind::LocalCoordinateStrategy => "local-coordinate-strategy",
+        AssessmentAssetKind::EquipmentAdapter => "equipment-adapter",
+        AssessmentAssetKind::FeatureProgram => "feature-program",
+        AssessmentAssetKind::ReferencePolicy => "reference-policy",
+        AssessmentAssetKind::RulePack => "rule-pack",
+        AssessmentAssetKind::SetAggregationPolicy => "set-aggregation-policy",
+    }
 }
 
 /// Materializes the compiled action definition into the executable semantic
@@ -6522,6 +7421,87 @@ pub fn install_compiled_action_motion_semantics(
         .iter()
         .position(|bundle| bundle.bundle_id == bundle_id)
         .expect("motion-authority Bundle exists");
+    // Legacy assets can be shared by several exact views. Every executable
+    // field that the compiled plan changes gets an immutable exact-context
+    // copy first; otherwise a later action/view installation could overwrite
+    // an earlier plan while leaving its Bundle hash superficially valid.
+    for kind in [
+        AssessmentAssetKind::RecognitionProfile,
+        AssessmentAssetKind::ExecutionContract,
+        AssessmentAssetKind::LocalCoordinateStrategy,
+        AssessmentAssetKind::EquipmentAdapter,
+        AssessmentAssetKind::FeatureProgram,
+        AssessmentAssetKind::RulePack,
+    ] {
+        let old_reference = match kind {
+            AssessmentAssetKind::RecognitionProfile => catalog.bundles[bundle_index]
+                .lineage
+                .recognition_profile
+                .clone(),
+            AssessmentAssetKind::ExecutionContract => catalog.bundles[bundle_index]
+                .lineage
+                .execution_contract
+                .clone(),
+            AssessmentAssetKind::LocalCoordinateStrategy => catalog.bundles[bundle_index]
+                .lineage
+                .local_coordinate_strategy
+                .clone(),
+            AssessmentAssetKind::EquipmentAdapter => catalog.bundles[bundle_index]
+                .lineage
+                .equipment_adapter
+                .clone(),
+            AssessmentAssetKind::FeatureProgram => catalog.bundles[bundle_index]
+                .lineage
+                .feature_program
+                .clone(),
+            AssessmentAssetKind::RulePack => {
+                catalog.bundles[bundle_index].lineage.rule_pack.clone()
+            }
+            _ => unreachable!("only plan-owned assets are cloned"),
+        };
+        let mut asset = catalog
+            .installed_assets
+            .iter()
+            .find(|asset| asset.id == old_reference.id && asset.kind == kind)
+            .expect("shared plan input asset exists")
+            .clone();
+        let slug = match kind {
+            AssessmentAssetKind::RecognitionProfile => "recognition-profile",
+            AssessmentAssetKind::ExecutionContract => "execution-contract",
+            AssessmentAssetKind::LocalCoordinateStrategy => "local-coordinate-strategy",
+            AssessmentAssetKind::EquipmentAdapter => "equipment-adapter",
+            AssessmentAssetKind::FeatureProgram => "feature-program",
+            AssessmentAssetKind::RulePack => "rule-pack",
+            _ => unreachable!("only plan-owned assets are cloned"),
+        };
+        asset.id = format!("{bundle_id}/action-plan/{slug}/{}", plan.plan_hash);
+        asset = asset.with_computed_hash();
+        let reference = asset.reference();
+        catalog.installed_assets.push(asset);
+        match kind {
+            AssessmentAssetKind::RecognitionProfile => {
+                catalog.bundles[bundle_index].lineage.recognition_profile = reference
+            }
+            AssessmentAssetKind::ExecutionContract => {
+                catalog.bundles[bundle_index].lineage.execution_contract = reference
+            }
+            AssessmentAssetKind::LocalCoordinateStrategy => {
+                catalog.bundles[bundle_index]
+                    .lineage
+                    .local_coordinate_strategy = reference
+            }
+            AssessmentAssetKind::EquipmentAdapter => {
+                catalog.bundles[bundle_index].lineage.equipment_adapter = reference
+            }
+            AssessmentAssetKind::FeatureProgram => {
+                catalog.bundles[bundle_index].lineage.feature_program = reference
+            }
+            AssessmentAssetKind::RulePack => {
+                catalog.bundles[bundle_index].lineage.rule_pack = reference
+            }
+            _ => unreachable!("only plan-owned assets are cloned"),
+        }
+    }
     let lineage = catalog.bundles[bundle_index].lineage.clone();
     let targets = [
         (
@@ -6531,6 +7511,14 @@ pub fn install_compiled_action_motion_semantics(
         (
             AssessmentAssetKind::ExecutionContract,
             lineage.execution_contract.id,
+        ),
+        (
+            AssessmentAssetKind::LocalCoordinateStrategy,
+            lineage.local_coordinate_strategy.id,
+        ),
+        (
+            AssessmentAssetKind::EquipmentAdapter,
+            lineage.equipment_adapter.id,
         ),
         (
             AssessmentAssetKind::FeatureProgram,
@@ -6579,12 +7567,91 @@ pub fn install_compiled_action_motion_semantics(
                         &plan.rep_boundary.return_boundary,
                     ]),
                 );
+                content.insert(
+                    "repConsensus".into(),
+                    serde_json::to_value(&plan.rep_consensus).expect("Rep consensus serializes"),
+                );
+            }
+            AssessmentAssetKind::LocalCoordinateStrategy => {
+                content.insert(
+                    "repSignal".into(),
+                    serde_json::json!("observed_primary_path_cycle"),
+                );
+                content.insert(
+                    "primaryEvidenceChannel".into(),
+                    serde_json::json!(if plan.relations.iter().any(|relation| {
+                        relation.role == crate::MotionRole::TaskPrimary
+                            && relation.source_requirement
+                                == crate::OperatorSourceRequirement::CurrentMeasuredPose
+                    }) {
+                        "pose"
+                    } else {
+                        "equipment"
+                    }),
+                );
+                content.insert(
+                    "directionPolicy".into(),
+                    serde_json::json!("observed_departure_then_opposite_return"),
+                );
+            }
+            AssessmentAssetKind::EquipmentAdapter => {
+                content.insert(
+                    "requiredPrimarySources".into(),
+                    serde_json::json!(
+                        plan.relations
+                            .iter()
+                            .filter(|relation| {
+                                relation.role == crate::MotionRole::TaskPrimary
+                                    && relation.judgeability
+                                        == crate::FeatureJudgeability::RequiredForRep
+                            })
+                            .flat_map(|relation| &relation.inputs)
+                            .map(|input| &input.source)
+                            .collect::<Vec<_>>()
+                    ),
+                );
+                content.insert(
+                    "repEligibility".into(),
+                    serde_json::json!("compiled_rep_consensus_only"),
+                );
             }
             AssessmentAssetKind::FeatureProgram => {
                 content.insert("motionRelations".into(), motion_relation_authority(plan));
+                let features = content
+                    .get_mut("features")
+                    .and_then(serde_json::Value::as_array_mut)
+                    .expect("compiled FeatureProgram has features");
+                if !features
+                    .iter()
+                    .any(|feature| feature.as_str() == Some("authorization_range_of_motion"))
+                {
+                    features.push(serde_json::json!("authorization_range_of_motion"));
+                }
             }
             AssessmentAssetKind::RulePack => {
                 content.insert("semanticRuleRoles".into(), motion_rule_role_authority(plan));
+                let rules = content
+                    .get_mut("repRules")
+                    .and_then(serde_json::Value::as_array_mut)
+                    .expect("compiled RulePack has rep rules");
+                let range_rule = rules
+                    .iter_mut()
+                    .find(|rule| {
+                        rule.get("dimension").and_then(serde_json::Value::as_str)
+                            == Some("range_of_motion")
+                    })
+                    .expect("compiled RulePack classifies range of motion");
+                // The plan supplies Rep topology, not a calibrated quality
+                // standard.  Until a versioned action × view RulePack with
+                // human quality truth is installed, a numeric excursion stays
+                // an observable fact and cannot become an acceptable/deviant
+                // quality verdict.
+                *range_rule = serde_json::json!({
+                    "dimension": "range_of_motion",
+                    "operator": "abstain",
+                    "featureIds": ["authorization_range_of_motion"],
+                    "reason": "no_governed_action_view_range_quality_rule"
+                });
             }
             _ => unreachable!("only semantic execution assets are bound"),
         }
@@ -6596,6 +7663,10 @@ pub fn install_compiled_action_motion_semantics(
                 bundle.lineage.recognition_profile = reference
             }
             AssessmentAssetKind::ExecutionContract => bundle.lineage.execution_contract = reference,
+            AssessmentAssetKind::LocalCoordinateStrategy => {
+                bundle.lineage.local_coordinate_strategy = reference
+            }
+            AssessmentAssetKind::EquipmentAdapter => bundle.lineage.equipment_adapter = reference,
             AssessmentAssetKind::FeatureProgram => bundle.lineage.feature_program = reference,
             AssessmentAssetKind::RulePack => bundle.lineage.rule_pack = reference,
             _ => unreachable!("only semantic execution assets are bound"),
@@ -6661,8 +7732,148 @@ pub fn install_action_motion_runtime_profile(
     catalog.bundles[bundle_index] = catalog.bundles[bundle_index].clone().with_computed_hash();
 }
 
+/// Materializes the plan-selected local runtime seam into the exact Bundle.
+/// This keeps the SDK profile and the assessment compiler on one strategy;
+/// clients cannot substitute their own action-specific coordinate semantics.
+pub fn install_action_motion_local_strategy(
+    catalog: &mut ExecutionAssessmentBundleCatalog,
+    bundle_id: &str,
+    strategy: crate::LocalMotionCoordinateStrategy,
+) {
+    let bundle_index = catalog
+        .bundles
+        .iter()
+        .position(|bundle| bundle.bundle_id == bundle_id)
+        .expect("action-motion Bundle exists");
+    let asset_id = catalog.bundles[bundle_index]
+        .lineage
+        .local_coordinate_strategy
+        .id
+        .clone();
+    let asset = catalog
+        .installed_assets
+        .iter_mut()
+        .find(|asset| {
+            asset.id == asset_id && asset.kind == AssessmentAssetKind::LocalCoordinateStrategy
+        })
+        .expect("local-coordinate asset exists");
+    let content = asset
+        .content
+        .as_object_mut()
+        .expect("local-coordinate content is an object");
+    content.insert(
+        "captureView".into(),
+        serde_json::json!(
+            catalog.bundles[bundle_index]
+                .exact_context
+                .capture_view
+                .catalog_slug()
+        ),
+    );
+    content.insert(
+        "preparationToEffortDirection".into(),
+        serde_json::json!(direction_id(strategy.preparation_to_effort)),
+    );
+    content.insert(
+        "equipmentMode".into(),
+        serde_json::json!(local_equipment_mode_id(strategy.equipment_mode)),
+    );
+    content.insert(
+        "poseAnchor".into(),
+        serde_json::json!(local_pose_anchor_id(strategy.pose_anchor)),
+    );
+    content.insert(
+        "coordinateSpace".into(),
+        serde_json::json!("causal_set_local_camera_plane"),
+    );
+    content.insert("requireNormalizedEndpoints".into(), serde_json::json!(true));
+    *asset = asset.clone().with_computed_hash();
+    catalog.bundles[bundle_index]
+        .lineage
+        .local_coordinate_strategy = asset.reference();
+    catalog.bundles[bundle_index] = catalog.bundles[bundle_index].clone().with_computed_hash();
+}
+
+/// Rebinds provider-facing asset fields to the exact action identity after a
+/// numeric runtime preset has been cloned. Presets never grant action support
+/// and never carry review state; they only seed generic thresholds.
+fn install_action_motion_equipment_strategy(
+    catalog: &mut ExecutionAssessmentBundleCatalog,
+    bundle_id: &str,
+) {
+    let bundle_index = catalog
+        .bundles
+        .iter()
+        .position(|bundle| bundle.bundle_id == bundle_id)
+        .expect("action-motion Bundle exists");
+    let semantics = catalog.bundles[bundle_index]
+        .exact_context
+        .equipment_semantics;
+    let provider_id = equipment_provider_id(semantics).map(crate::EquipmentProviderId::as_str);
+    let lineage = catalog.bundles[bundle_index].lineage.clone();
+    for (kind, asset_id) in [
+        (
+            AssessmentAssetKind::ExecutionContract,
+            lineage.execution_contract.id,
+        ),
+        (
+            AssessmentAssetKind::EquipmentAdapter,
+            lineage.equipment_adapter.id,
+        ),
+    ] {
+        let asset = catalog
+            .installed_assets
+            .iter_mut()
+            .find(|asset| asset.id == asset_id && asset.kind == kind)
+            .expect("action-motion equipment asset exists");
+        let content = asset
+            .content
+            .as_object_mut()
+            .expect("action-motion equipment asset is an object");
+        match kind {
+            AssessmentAssetKind::ExecutionContract => {
+                content.insert(
+                    "equipmentSemantics".into(),
+                    serde_json::json!(equipment_semantics_id(semantics)),
+                );
+                content.insert("equipmentProviderId".into(), serde_json::json!(provider_id));
+            }
+            AssessmentAssetKind::EquipmentAdapter => {
+                content.insert(
+                    "evidencePolicy".into(),
+                    serde_json::json!(equipment_evidence_policy(semantics)),
+                );
+                content.insert("providerId".into(), serde_json::json!(provider_id));
+                content.insert(
+                    "conflictPolicy".into(),
+                    serde_json::json!("abstain_fused_preserve_channels"),
+                );
+                content.insert(
+                    "poseFallback".into(),
+                    serde_json::json!("preserve_as_independent_channel"),
+                );
+            }
+            _ => unreachable!(),
+        }
+        *asset = asset.clone().with_computed_hash();
+        let reference = asset.reference();
+        match kind {
+            AssessmentAssetKind::ExecutionContract => {
+                catalog.bundles[bundle_index].lineage.execution_contract = reference
+            }
+            AssessmentAssetKind::EquipmentAdapter => {
+                catalog.bundles[bundle_index].lineage.equipment_adapter = reference
+            }
+            _ => unreachable!(),
+        }
+    }
+    catalog.bundles[bundle_index] = catalog.bundles[bundle_index].clone().with_computed_hash();
+}
+
 pub fn current_motion_assessment_catalog() -> ExecutionAssessmentBundleCatalog {
-    current_motion_assessment_catalog_v12()
+    visual_recognition_baseline_registry_v0_1()
+        .expect("embedded action assets must form one complete registry")
+        .into_runtime_catalog()
 }
 
 fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
@@ -6793,7 +8004,7 @@ mod tests {
 
     #[test]
     fn catalog_hash_and_duplicate_context_validation_fail_closed() {
-        let mut stale_catalog = current_motion_assessment_catalog_v1();
+        let mut stale_catalog = assemble_pose_catalog();
         let stale_id = stale_catalog.bundles[0].bundle_id.clone();
         stale_catalog.bundles[0].lineage.rule_pack.id = "changed".into();
         assert_eq!(
@@ -6809,7 +8020,7 @@ mod tests {
             })
         );
 
-        let mut duplicate_catalog = current_motion_assessment_catalog_v1();
+        let mut duplicate_catalog = assemble_pose_catalog();
         let original_context = duplicate_catalog.bundles[0].exact_context.clone();
         let mut duplicate = duplicate_catalog.bundles[0].clone();
         duplicate.bundle_id = "duplicate-context/v1".into();

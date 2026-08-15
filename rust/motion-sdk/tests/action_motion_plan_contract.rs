@@ -1,9 +1,10 @@
 use maxpower_motion_sdk::{
-    ActionMotionCatalog, ActionMotionCompiler, ActionPlanCapability, AssessmentAssetKind,
-    ExecutionAssessmentEngine, FeatureJudgeability, MotionEvidenceChannel, MotionRole,
-    OperatorRegistry, OperatorSourceRequirement, WorkoutAssessmentContext,
-    current_motion_assessment_catalog_v12, reviewed_action_capability_matrix_v1,
-    reviewed_action_motion_catalog_v1,
+    ACTION_ASSET_PACKAGE_SCHEMA, ActionAssetContextPackage, ActionAssetPackage,
+    ActionMotionCatalog, ActionMotionCompiler, AlgorithmModuleRegistry, AssessmentAssetKind,
+    AssessmentCaptureView, ExecutionAssessmentEngine, FeatureJudgeability, MotionEvidenceChannel,
+    MotionRole, OperatorRegistry, OperatorSourceRequirement, WorkoutAssessmentContext,
+    installed_action_asset_inventory_v1, installed_action_motion_catalog_v1,
+    visual_recognition_baseline_catalog_v0_1, visual_recognition_baseline_registry_v0_1,
 };
 
 const ASSET_ONLY_ACTION: &str = include_str!("fixtures/asset_only_action_motion_catalog_v1.json");
@@ -23,7 +24,6 @@ fn an_unknown_action_asset_compiles_without_an_action_name_branch() {
     let plan = ActionMotionCompiler::new(OperatorRegistry::standard())
         .compile(definition, "front_right_45")
         .expect("generic operators can compile the external action");
-    assert_eq!(plan.capability, ActionPlanCapability::FullExecutable);
     assert!(
         plan.channels
             .iter()
@@ -53,8 +53,32 @@ fn an_unknown_action_asset_compiles_without_an_action_name_branch() {
 }
 
 #[test]
+fn action_package_registration_is_atomic_when_a_runtime_preset_is_invalid() {
+    let external = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
+    let mut registry = visual_recognition_baseline_registry_v0_1().unwrap();
+    let package = ActionAssetPackage {
+        schema_version: ACTION_ASSET_PACKAGE_SCHEMA.into(),
+        package_id: "invalid-atomic-package".into(),
+        definition: external.definitions[0].clone(),
+        contexts: vec![ActionAssetContextPackage {
+            capture_view: AssessmentCaptureView::FrontObliqueRight,
+            runtime_preset_bundle_id: "missing/runtime/preset".into(),
+            runtime_preset_bundle_hash: "0000000000000000".into(),
+        }],
+        content_hash: String::new(),
+    }
+    .with_computed_hash();
+    let before = registry.runtime_catalog().clone();
+    let error = registry
+        .register(package)
+        .expect_err("an unknown preset must reject the complete package");
+    assert!(format!("{error:?}").contains("UnknownRuntimePreset"));
+    assert_eq!(registry.runtime_catalog(), &before);
+}
+
+#[test]
 fn current_24_context_catalog_cannot_bypass_leaf_motion_plans() {
-    let catalog = current_motion_assessment_catalog_v12();
+    let catalog = visual_recognition_baseline_catalog_v0_1();
     assert_eq!(catalog.bundles.len(), 24);
     assert_eq!(catalog.action_motion_bindings.len(), 24);
     ExecutionAssessmentEngine::configure(
@@ -67,8 +91,52 @@ fn current_24_context_catalog_cannot_bypass_leaf_motion_plans() {
 }
 
 #[test]
+fn an_untrained_range_rule_is_materialized_as_cannot_judge_not_quality() {
+    let catalog = visual_recognition_baseline_catalog_v0_1();
+    let bundle = catalog
+        .bundles
+        .first()
+        .expect("the baseline owns exact action/view bundles");
+    let rule_pack = catalog
+        .installed_assets
+        .iter()
+        .find(|asset| asset.id == bundle.lineage.rule_pack.id)
+        .expect("bundle rule pack");
+    let rule = rule_pack
+        .content
+        .get("repRules")
+        .and_then(serde_json::Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|rule| {
+            rule.get("dimension").and_then(serde_json::Value::as_str) == Some("range_of_motion")
+        })
+        .unwrap();
+    assert_eq!(
+        rule.get("operator").and_then(serde_json::Value::as_str),
+        Some("abstain")
+    );
+    assert_eq!(
+        rule.get("reason").and_then(serde_json::Value::as_str),
+        Some("no_governed_action_view_range_quality_rule")
+    );
+    let feature_program_ids = catalog
+        .bundles
+        .iter()
+        .map(|bundle| bundle.lineage.feature_program.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let rule_pack_ids = catalog
+        .bundles
+        .iter()
+        .map(|bundle| bundle.lineage.rule_pack.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(feature_program_ids.len(), catalog.bundles.len());
+    assert_eq!(rule_pack_ids.len(), catalog.bundles.len());
+}
+
+#[test]
 fn reviewed_catalog_materializes_all_248_complete_leaf_definitions() {
-    let catalog = reviewed_action_motion_catalog_v1()
+    let catalog = installed_action_motion_catalog_v1()
         .expect("reviewed asset must pass completeness and hash admission");
     assert_eq!(catalog.definitions.len(), 248);
     assert!(
@@ -128,54 +196,88 @@ fn reviewed_catalog_materializes_all_248_complete_leaf_definitions() {
             .collect::<Vec<_>>(),
         "row hip motion is substitution evidence while deadlift hip extension is task coordination",
     );
-    let matrix = reviewed_action_capability_matrix_v1()
-        .expect("every complete leaf resolves to capability or admissible view refusal");
-    assert_eq!(matrix.len(), 248);
-    assert!(matrix.iter().all(|record| !record.action_id.is_empty()));
 }
 
 #[test]
-fn exact_leaf_view_matrix_matches_the_rust_compiler_without_opening_unvalidated_actions() {
-    let catalog = reviewed_action_motion_catalog_v1().unwrap();
-    let matrix: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "../assets/action-motion-capability-matrix-v1.json"
-    ))
-    .expect("generated exact leaf-view matrix");
-    let records = matrix["records"].as_array().expect("matrix records");
-    assert_eq!(
-        records.len(),
-        catalog
-            .definitions
+fn row_and_deadlift_encode_different_joint_and_substitution_causality() {
+    let catalog = installed_action_motion_catalog_v1().expect("installed catalog");
+    let row = catalog
+        .definition("pronated_barbell_row")
+        .expect("row leaf");
+    let deadlift = catalog
+        .definition("conventional_barbell_deadlift")
+        .expect("deadlift leaf");
+    assert!(row.relations.iter().any(|relation| {
+        relation.relation_id == "hip_drive_substitution"
+            && relation.role == MotionRole::SubstitutionGuard
+    }));
+    assert!(
+        !row.relations
             .iter()
-            .map(|definition| definition.supported_views.len())
-            .sum::<usize>()
+            .any(|relation| relation.relation_id == "hip_extension_coordination")
     );
+    assert!(deadlift.relations.iter().any(|relation| {
+        relation.relation_id == "hip_extension_coordination"
+            && relation.role == MotionRole::CoordinatedMotion
+    }));
+    assert!(deadlift.relations.iter().any(|relation| {
+        relation.relation_id == "knee_extension_coordination"
+            && relation.role == MotionRole::CoordinatedMotion
+    }));
+    assert!(
+        !deadlift
+            .relations
+            .iter()
+            .any(|relation| relation.relation_id == "hip_drive_substitution")
+    );
+}
+
+#[test]
+fn every_installed_leaf_and_declared_view_compiles_without_runtime_review_tiers() {
+    let inventory = installed_action_asset_inventory_v1()
+        .expect("the complete action library must compile through one runtime path");
+    assert_eq!(inventory.leaf_action_count, 248);
+    assert_eq!(inventory.exact_view_count, 1_984);
+    let registry = visual_recognition_baseline_registry_v0_1()
+        .expect("the runtime registry must accept the structurally complete library");
+    assert_eq!(registry.inventory(), &inventory);
+
+    let catalog = installed_action_motion_catalog_v1().unwrap();
+    let runtime = registry.runtime_catalog();
+    assert_eq!(runtime.action_definitions.len(), 248);
+    assert_eq!(runtime.bundles.len(), 1_984);
+    assert_eq!(runtime.action_motion_bindings.len(), 1_984);
+    ExecutionAssessmentEngine::configure(
+        runtime.clone(),
+        WorkoutAssessmentContext {
+            workout_session_id: "complete-action-library-runtime".into(),
+        },
+    )
+    .expect("every installed action/view Bundle must compile into the assessment runtime");
     let compiler = ActionMotionCompiler::new(OperatorRegistry::standard());
     for definition in &catalog.definitions {
+        assert_eq!(definition.supported_views.len(), 8);
+        let installed = runtime
+            .action_definitions
+            .iter()
+            .find(|candidate| candidate.action_id == definition.action_id)
+            .unwrap_or_else(|| panic!("{} is absent from the runtime", definition.action_id));
+        assert_eq!(installed.supported_views.len(), 8);
+        for view_binding in &installed.supported_views {
+            assert!(runtime.bundles.iter().any(|bundle| {
+                bundle.bundle_id == view_binding.bundle_id
+                    && bundle.exact_context.action_id == definition.action_id
+                    && bundle.exact_context.capture_view == view_binding.capture_view
+            }));
+            assert!(runtime.action_motion_bindings.iter().any(|binding| {
+                binding.bundle_id == view_binding.bundle_id
+                    && binding.leaf_action_id == definition.action_id
+            }));
+        }
         for view in &definition.supported_views {
-            let record = records
-                .iter()
-                .find(|record| {
-                    record["actionId"] == definition.action_id && record["captureView"] == *view
-                })
-                .expect("every leaf-view has one matrix record");
-            let expected = match compiler.compile(definition, view) {
-                Ok(plan) if plan.capability == ActionPlanCapability::FullExecutable => {
-                    "full_plan_compiled"
-                }
-                Ok(plan)
-                    if plan.capability == ActionPlanCapability::UnsupportedEquipmentCatalogOnly =>
-                {
-                    "unsupported_equipment_catalog_only"
-                }
-                Ok(_) | Err(_) => "admissible_visual_refusal",
-            };
-            assert_eq!(record["capabilityState"], expected);
-            assert_eq!(record["userOpen"], false);
-            assert_eq!(
-                record["repLifecycle"],
-                "not_validated_for_this_exact_leaf_view"
-            );
+            compiler
+                .compile(definition, view)
+                .unwrap_or_else(|error| panic!("{} / {view}: {error:?}", definition.action_id));
         }
     }
 }
@@ -192,29 +294,151 @@ fn a_view_cannot_replace_an_identity_defining_equipment_motion_with_wrists() {
 }
 
 #[test]
-fn unsupported_required_equipment_is_catalog_only_not_pose_fallback() {
+fn an_exact_view_refuses_when_its_primary_relation_is_not_declared_visible() {
+    let mut catalog = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
+    let view = catalog.definitions[0]
+        .view_observation_plans
+        .iter_mut()
+        .find(|plan| plan.view_id == "front_right_45")
+        .unwrap();
+    view.visible_relation_ids
+        .retain(|relation| relation != "load_press");
+
+    let error = ActionMotionCompiler::new(OperatorRegistry::standard())
+        .compile(&catalog.definitions[0], "front_right_45")
+        .expect_err("an identity relation cannot be implied by an installed operator");
+    assert!(format!("{error:?}").contains("IdentityRelationNotObservable"));
+}
+
+#[test]
+fn changing_the_view_topology_changes_the_preseal_runtime_plan() {
+    let catalog = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
+    let definition = &catalog.definitions[0];
+    let initial = ActionMotionCompiler::new(OperatorRegistry::standard())
+        .compile(definition, "front_right_45")
+        .unwrap();
+    assert_eq!(initial.rep_topology.primary_relation_id, "load_press");
+    assert_eq!(initial.rep_topology.minimum_excursion_milli, 140);
+    assert_eq!(
+        initial.view_observation.rep_topology, initial.rep_topology,
+        "the exact-view topology is part of the frozen executable plan"
+    );
+
+    let runtime_binding = maxpower_motion_sdk::visual_recognition_baseline_profiles_v0_1()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "barbell_bench_press"
+                && binding.capture_view == AssessmentCaptureView::Front
+        })
+        .expect("installed exact context");
+    let runtime_plan = runtime_binding.motion_plan.as_ref().unwrap();
+    assert_eq!(
+        runtime_binding.profile.start_amplitude,
+        runtime_plan.rep_topology.start_threshold(),
+        "the candidate engine must consume the topology asset, not a global fallback"
+    );
+    assert_eq!(
+        runtime_binding.profile.min_primary_amplitude,
+        runtime_plan.rep_topology.minimum_excursion(),
+    );
+    assert_eq!(
+        runtime_binding.profile.max_gap_ms,
+        runtime_plan.rep_topology.maximum_gap_ms,
+    );
+    assert_eq!(
+        runtime_binding.profile.state_machine_id,
+        format!(
+            "cycle-aligned-ready-effort-peak-return/dwell-{}ms/v1",
+            runtime_plan.rep_topology.minimum_phase_dwell_ms
+        ),
+        "the action × view phase dwell must constrain the pre-seal state graph"
+    );
+}
+
+#[test]
+fn an_equipment_primary_plan_selects_a_closed_module_graph_with_independent_fusion() {
+    let catalog = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
+    let definition = &catalog.definitions[0];
+    let plan = ActionMotionCompiler::new(OperatorRegistry::standard())
+        .compile(definition, "front_right_45")
+        .expect("the exact plan selects the registered module graph");
+    let ids = plan
+        .algorithm_modules
+        .iter()
+        .map(|module| module.module_id.as_str())
+        .collect::<Vec<_>>();
+    assert!(ids.contains(&"equipment_observation"));
+    assert!(ids.contains(&"equipment_fusion"));
+    let topology = plan
+        .algorithm_modules
+        .iter()
+        .find(|module| module.module_id == "rep_topology")
+        .unwrap();
+    assert!(topology.required_inputs.iter().any(|fact| {
+        fact.fact_id == "subject_equipment_association"
+            && fact.evidence.source_lineage
+            && fact.evidence.event_clock
+            && fact.evidence.causal_age
+            && fact.evidence.coverage
+            && fact.evidence.confidence
+            && fact.evidence.uncertainty
+    }));
+
+    let mut missing_fusion = definition.clone();
+    missing_fusion.view_observation_plans[0]
+        .rep_topology
+        .algorithm_module_ids
+        .retain(|id| id != "equipment_fusion");
+    let error = ActionMotionCompiler::new(OperatorRegistry::standard())
+        .compile(&missing_fusion, "front_right_45")
+        .expect_err("an equipment primary cannot omit independent fusion");
+    assert!(format!("{error:?}").contains("RequiredAlgorithmModuleNotSelected"));
+}
+
+#[test]
+fn module_registry_rejects_unregistered_or_duplicate_module_contracts() {
+    let catalog = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
+    let definition = &catalog.definitions[0];
+    let error = ActionMotionCompiler::with_modules(
+        OperatorRegistry::standard(),
+        AlgorithmModuleRegistry::empty(),
+    )
+    .compile(definition, "front_right_45")
+    .expect_err("a selected module must be registered");
+    assert!(format!("{error:?}").contains("MissingAlgorithmModule"));
+
+    let standard = AlgorithmModuleRegistry::standard();
+    let duplicate = standard.descriptor("pose_relation").unwrap().clone();
+    let error = AlgorithmModuleRegistry::from_descriptors(vec![duplicate.clone(), duplicate])
+        .expect_err("a module identity cannot declare a second semantic contract");
+    assert!(format!("{error:?}").contains("DuplicateAlgorithmModule"));
+}
+
+#[test]
+fn equipment_topology_never_changes_or_downgrades_the_declared_primary_relation() {
     let mut catalog = ActionMotionCatalog::from_json(ASSET_ONLY_ACTION).unwrap();
     catalog.definitions[0].exact_identity.equipment_topology = "cable_handle".into();
     let plan = ActionMotionCompiler::new(OperatorRegistry::standard())
         .compile(&catalog.definitions[0], "front_right_45")
-        .expect("a complete definition resolves to an explicit capability state");
-    assert_eq!(
-        plan.capability,
-        ActionPlanCapability::UnsupportedEquipmentCatalogOnly
-    );
-    assert!(plan.rep_authority.is_none());
+        .expect("installed action semantics compile without a runtime review tier");
+    let primary = plan
+        .relations
+        .iter()
+        .find(|relation| relation.role == MotionRole::TaskPrimary)
+        .unwrap();
+    assert_eq!(primary.operator_id, "equipment_axis_displacement");
+    assert_eq!(primary.inputs[0].source, "equipment_axis_center");
+    assert!(plan.rep_authority.is_some());
 }
 
 #[test]
 fn executable_assets_cannot_redefine_plan_phase_semantics_even_with_valid_hashes() {
-    let mut catalog = current_motion_assessment_catalog_v12();
+    let mut catalog = visual_recognition_baseline_catalog_v0_1();
     let bundle_index = catalog
         .bundles
         .iter()
-        .position(|bundle| {
-            bundle.capability == maxpower_motion_sdk::AssessmentBundleCapability::Executable
-        })
-        .expect("v12 retains at least one executable exact context");
+        .position(|_| true)
+        .expect("v0_1 retains at least one executable exact context");
     let asset_id = catalog.bundles[bundle_index]
         .lineage
         .execution_contract

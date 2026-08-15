@@ -13,12 +13,50 @@
       {"relationId":"press_coordination","role":"coordinated_motion","operatorId":"point_displacement","inputs":[{"source":"shoulder_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"shoulder motion corroborates the load path"},
       {"relationId":"hip_substitution","role":"substitution_guard","operatorId":"point_displacement","inputs":[{"source":"hip_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"large hip motion is retained as substitution evidence"}
     ],
-    "tracks": [{"trackId":"bar_axis","source":"equipment_axis","role":"primary","required":true,"identityDefining":true}],
+    "tracks": [{"trackId":"bar_axis","source":"equipment_axis","role":"primary","required":true,"identityDefining":true,"sideScope":"bilateral_rigid"}],
+    "repConsensus": {"mode":"shared_rigid","requiredPrimaryTracks":["bar_axis"],"requiredSides":["shared"],"minimumObservedFrames":3,"conflictPolicy":"reject_confirmed_rep"},
     "repBoundary": {"activation":"grip_established","start":"load_lowered_from_ready","turnaround":"lowest_load_reversal","return":"load_returns_ready","release":"grip_released"},
     "phases": [{"phaseId":"eccentric","from":"start","to":"turnaround"},{"phaseId":"concentric","from":"turnaround","to":"return"}],
     "allowedClaims": ["task_completion","range_of_motion","phase_control","support_stability"],
     "supportedViews": ["front_right_45"],
-    "admittedViews": ["front_right_45"],
+    "viewObservationPlans": [{
+      "viewId": "front_right_45",
+      "visibleRelationIds": ["load_press", "torso_stability", "press_coordination", "hip_substitution"],
+      "prohibitedRelationIds": [],
+      "prohibitedSignalSources": [],
+      "occlusionRisks": ["depth_foreshortening"],
+      "primaryRelationCandidates": ["load_press"],
+      "sideObservability": "bilateral_projected",
+      "equipmentObservability": "independent_visual_observation_required",
+      "supportObservability": "projected",
+      "localAxisPolicy": "action_local_sign_invariant_round_trip",
+      "dimensionAvailability": ["load_press", "torso_stability", "press_coordination", "hip_substitution"],
+      "repTopology": {
+        "topologyId": "bilateral_synchronous_cycle/v1",
+        "primaryRelationId": "load_press",
+        "algorithmModuleIds": [
+          "pose_relation",
+          "local_coordinate",
+          "equipment_observation",
+          "equipment_fusion",
+          "rep_topology",
+          "candidate_admission",
+          "boundary_refinement",
+          "post_seal_feature",
+          "quality_rule"
+        ],
+        "directionPolicy": "sign_invariant",
+        "startThresholdMilli": 50,
+        "minimumExcursionMilli": 140,
+        "turnaroundHysteresisMilli": 50,
+        "returnToleranceMilli": 80,
+        "readyToleranceMilli": 35,
+        "minimumPhaseDwellMs": 300,
+        "maximumGapMs": 750,
+        "minimumRepDurationMs": 400,
+        "maximumRepDurationMs": 8000
+      }
+    }],
     "contentHash": ""
   }]
 }

@@ -5,12 +5,11 @@ use std::{
 
 use maxpower_motion_sdk::{
     AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, EquipmentAttributes,
-    EquipmentKind, EquipmentObservation, EquipmentSource, ExerciseMaturity, ExerciseProfile,
-    ExerciseSignal, ExerciseSignalKind, FrameLease, FrameObservations, InferenceAdapter,
-    InferenceResult, MotionError, MotionSession, MovementDirection, NormalizedRect,
-    PROFILE_CAP_CANONICAL_LANDMARKS, PROFILE_CAP_SUBJECT_LOCK, PoseCandidate, PoseObservation,
-    PoseSchemaId, RecordingOutputAdapter, RepDisposition, RepObservationFinding, SessionConfig,
-    SubjectPolicy,
+    EquipmentKind, EquipmentObservation, EquipmentSource, ExerciseProfile, ExerciseSignal,
+    ExerciseSignalKind, FrameLease, FrameObservations, InferenceAdapter, InferenceResult,
+    MotionError, MotionSession, MovementDirection, NormalizedRect, PROFILE_CAP_CANONICAL_LANDMARKS,
+    PROFILE_CAP_SUBJECT_LOCK, PoseCandidate, PoseObservation, PoseSchemaId, RecordingOutputAdapter,
+    RepDisposition, RepObservationFinding, SessionConfig, SubjectPolicy,
 };
 
 #[derive(Clone)]
@@ -103,7 +102,6 @@ fn front_bench_equipment_profile() -> ExerciseProfile {
     let mut profile = ExerciseProfile {
         identity: "barbell-bench-press/front/bilateral/barbell/equipment-primary-test-v1".into(),
         content_hash: 0,
-        maturity: ExerciseMaturity::Provisional,
         schema: PoseSchemaId::Halpe26,
         coordinate_unit: "image-angle-deg".into(),
         state_machine_id: "barbell-axis-primary-ready-effort-return/v1".into(),
@@ -267,8 +265,15 @@ fn raw_bar_cannot_finish_an_active_rep_after_hand_equipment_disagreement() {
             .iter()
             .any(|packet| packet.equipment.tracks.iter().any(|track| {
                 track.association_stage == maxpower_motion_sdk::EquipmentAssociationStage::Conflict
+                    || track.association_stage
+                        == maxpower_motion_sdk::EquipmentAssociationStage::Released
                     || track.held_by != maxpower_motion_sdk::EquipmentHand::Both
-            }))
+            })),
+        "equipment lifecycle must publish the disagreement: {:#?}",
+        packets
+            .iter()
+            .map(|packet| &packet.equipment.tracks)
+            .collect::<Vec<_>>()
     );
     let terminal = session.finish_set();
     assert!(

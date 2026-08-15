@@ -13,6 +13,13 @@ use crate::{
 
 const FREEZE_MINIMUM_SAMPLES: usize = 3;
 const FREEZE_MINIMUM_NORMALIZED_PROGRESS: f32 = 0.024;
+// A point track is much easier to disturb during setup than a rigid shaft.
+// Do not freeze its sign from one small wrist/shoulder correction; wait until
+// the first movement-sized departure is visible and make that causal
+// preparation-to-effort excursion positive in the local frame.
+const POINT_FREEZE_MINIMUM_NORMALIZED_PROGRESS: f32 = 0.06;
+const POINT_FREEZE_MINIMUM_SAMPLES: usize = 5;
+const POINT_FREEZE_MINIMUM_RECENT_STEP: f32 = 0.02;
 const LONG_GAP_MS: u64 = 1_000;
 const CHANNEL_AGREEMENT_TOLERANCE: f32 = 0.20;
 const CHANNEL_MINIMUM_CONFIDENCE: f32 = 0.50;
@@ -98,6 +105,8 @@ pub enum LocalEquipmentMode {
 pub enum LocalPoseAnchor {
     #[default]
     WristMidpoint,
+    LeftWrist,
+    RightWrist,
     ShoulderMidpoint,
 }
 
@@ -219,6 +228,8 @@ struct FrozenLocalCoordinateFrame {
     cross: [f32; 2],
     preparation_bar_axis: [f32; 2],
     equipment_origin: [f32; 2],
+    anatomical_left_equipment_origin: Option<[f32; 2]>,
+    anatomical_right_equipment_origin: Option<[f32; 2]>,
     pose_origin: Option<[f32; 2]>,
     scale: f32,
     equipment_scale_px: f32,
@@ -280,6 +291,8 @@ pub(crate) struct LocalMotionCoordinateEstimator {
     last_timestamp_ms: Option<u64>,
     axes: Vec<EquipmentAxis2d>,
     centers: Vec<[f32; 2]>,
+    anatomical_left_equipment_centers: Vec<[f32; 2]>,
+    anatomical_right_equipment_centers: Vec<[f32; 2]>,
     pose_origins: Vec<[f32; 2]>,
     frozen_frame: Option<FrozenLocalCoordinateFrame>,
     baseline_axis_angle: Option<f32>,
@@ -545,6 +558,8 @@ impl LocalMotionCoordinateEstimator {
                     cross: motion_cross,
                     preparation_bar_axis: frozen_cross,
                     equipment_origin: preparation_origin,
+                    anatomical_left_equipment_origin: None,
+                    anatomical_right_equipment_origin: None,
                     pose_origin: preparation_pose_origin,
                     scale,
                     equipment_scale_px: axis_projected_length_px(
@@ -710,7 +725,26 @@ impl LocalMotionCoordinateEstimator {
             })
             .collect::<Vec<_>>();
         tracks.sort_by_key(|track| track.track_id);
-        let equipment_point = if tracks.is_empty() {
+        let preferred_track = match self.pose_anchor {
+            LocalPoseAnchor::LeftWrist => tracks
+                .iter()
+                .find(|track| track.held_by == EquipmentHand::Left),
+            LocalPoseAnchor::RightWrist => tracks
+                .iter()
+                .find(|track| track.held_by == EquipmentHand::Right),
+            LocalPoseAnchor::WristMidpoint | LocalPoseAnchor::ShoulderMidpoint => None,
+        };
+        let anatomical_left_equipment_point = tracks
+            .iter()
+            .find(|track| track.held_by == EquipmentHand::Left)
+            .map(|track| [track.center_x, track.center_y]);
+        let anatomical_right_equipment_point = tracks
+            .iter()
+            .find(|track| track.held_by == EquipmentHand::Right)
+            .map(|track| [track.center_x, track.center_y]);
+        let equipment_point = if let Some(track) = preferred_track {
+            Some([track.center_x, track.center_y])
+        } else if tracks.is_empty() {
             None
         } else {
             Some([
@@ -720,6 +754,12 @@ impl LocalMotionCoordinateEstimator {
         };
         if equipment_point.is_some() {
             self.equipment_samples = self.equipment_samples.saturating_add(1);
+        }
+        if let Some(point) = anatomical_left_equipment_point {
+            self.anatomical_left_equipment_centers.push(point);
+        }
+        if let Some(point) = anatomical_right_equipment_point {
+            self.anatomical_right_equipment_centers.push(point);
         }
         if pose_point.is_some() {
             self.pose_samples = self.pose_samples.saturating_add(1);
@@ -756,17 +796,41 @@ impl LocalMotionCoordinateEstimator {
             };
             let baseline_count = self.centers.len().saturating_sub(1).max(1);
             let origin = median_point(&self.centers[..baseline_count]).unwrap_or(self.centers[0]);
-            let progress = dot(sub(driving_point, origin), prior).abs() / scale;
-            if self.centers.len() >= FREEZE_MINIMUM_SAMPLES
-                && progress >= FREEZE_MINIMUM_NORMALIZED_PROGRESS
+            // Freeze from the observed preparation departure, including a
+            // horizontal or oblique path. The action/view prior only fixes the
+            // sign of the learned axis; it must not make an otherwise clear
+            // primary path unobservable because it is nearly orthogonal.
+            let offset = sub(driving_point, origin);
+            let progress = offset[0].hypot(offset[1]) / scale;
+            let recent_step = self
+                .centers
+                .get(self.centers.len().saturating_sub(2))
+                .map(|previous| sub(driving_point, *previous))
+                .map(|offset| offset[0].hypot(offset[1]) / scale)
+                .unwrap_or(0.0);
+            if self.centers.len() >= POINT_FREEZE_MINIMUM_SAMPLES
+                && progress >= POINT_FREEZE_MINIMUM_NORMALIZED_PROGRESS
+                && recent_step >= POINT_FREEZE_MINIMUM_RECENT_STEP
             {
                 let primary =
-                    robust_path_direction(&self.centers, origin, prior, scale).unwrap_or(prior);
+                    observed_effort_direction(&self.centers, origin, prior, scale).unwrap_or(prior);
                 self.frozen_frame = Some(FrozenLocalCoordinateFrame {
                     primary,
                     cross: [primary[1], -primary[0]],
                     preparation_bar_axis: [primary[1], -primary[0]],
                     equipment_origin: origin,
+                    anatomical_left_equipment_origin: median_point(
+                        &self.anatomical_left_equipment_centers[..self
+                            .anatomical_left_equipment_centers
+                            .len()
+                            .saturating_sub(1)],
+                    ),
+                    anatomical_right_equipment_origin: median_point(
+                        &self.anatomical_right_equipment_centers[..self
+                            .anatomical_right_equipment_centers
+                            .len()
+                            .saturating_sub(1)],
+                    ),
                     pose_origin: median_point(
                         &self.pose_origins[..self.pose_origins.len().saturating_sub(1)],
                     ),
@@ -830,7 +894,16 @@ impl LocalMotionCoordinateEstimator {
                         (track.observation_score * track.association_confidence).clamp(0.0, 1.0);
                     trajectory_channel(
                         [track.center_x, track.center_y],
-                        origin,
+                        match hand {
+                            EquipmentHand::Left => self
+                                .frozen_frame
+                                .and_then(|frame| frame.anatomical_left_equipment_origin),
+                            EquipmentHand::Right => self
+                                .frozen_frame
+                                .and_then(|frame| frame.anatomical_right_equipment_origin),
+                            EquipmentHand::Both | EquipmentHand::Unknown => None,
+                        }
+                        .unwrap_or(origin),
                         primary,
                         cross,
                         scale,
@@ -1118,8 +1191,15 @@ fn measured_pose_anchor(
 ) -> Option<[f32; 2]> {
     match anchor {
         LocalPoseAnchor::WristMidpoint => measured_pair_midpoint(canonical, 9, 10),
+        LocalPoseAnchor::LeftWrist => measured_single_point(canonical, 9),
+        LocalPoseAnchor::RightWrist => measured_single_point(canonical, 10),
         LocalPoseAnchor::ShoulderMidpoint => measured_pair_midpoint(canonical, 5, 6),
     }
+}
+
+fn measured_single_point(canonical: &[CanonicalLandmark], index: usize) -> Option<[f32; 2]> {
+    let landmark = canonical.get(index)?;
+    independent_measured(landmark).then_some([landmark.x?, landmark.y?])
 }
 
 fn measured_pair_midpoint(
@@ -1141,6 +1221,8 @@ fn measured_pose_anchor_confidence(
 ) -> f32 {
     let (left, right) = match anchor {
         LocalPoseAnchor::WristMidpoint => (9, 10),
+        LocalPoseAnchor::LeftWrist => (9, 9),
+        LocalPoseAnchor::RightWrist => (10, 10),
         LocalPoseAnchor::ShoulderMidpoint => (5, 6),
     };
     canonical
@@ -1261,13 +1343,14 @@ fn sub(left: [f32; 2], right: [f32; 2]) -> [f32; 2] {
     [left[0] - right[0], left[1] - right[1]]
 }
 
-/// Estimate the first causal excursion without allowing preparation jitter to
-/// dictate the direction. The preparation-normal prior only fixes the sign;
-/// the returned vector retains the observed image-plane path.
+/// Estimate the first causal effort excursion without allowing preparation
+/// jitter to dictate the direction. Image axes have no intrinsic sign, so the
+/// observed preparation-to-effort departure defines positive local progress;
+/// the view prior is only a fallback before a usable path exists.
 fn robust_path_direction(
     samples: &[[f32; 2]],
     origin: [f32; 2],
-    sign_prior: [f32; 2],
+    fallback_prior: [f32; 2],
     scale: f32,
 ) -> Option<[f32; 2]> {
     if !scale.is_finite() || scale <= f32::EPSILON {
@@ -1283,36 +1366,55 @@ fn robust_path_direction(
     if excursions.is_empty() {
         return None;
     }
-    let mut direction = median_point(&excursions)?;
-    if dot(direction, sign_prior) < 0.0 {
-        direction = [-direction[0], -direction[1]];
-    }
-    normalized(direction)
+    median_point(&excursions)
+        .and_then(normalized)
+        .or(Some(fallback_prior))
 }
 
-/// Blend the action prior with independently observed equipment and pose
-/// paths. Equipment has the strongest weight for barbell phase, while pose is
-/// only allowed to corroborate the direction; neither channel is copied into
-/// the other channel's evidence.
+/// A point topology has no independent shaft orientation. Once setup jitter
+/// is excluded, the first observed movement-sized departure is the causal
+/// preparation-to-effort direction and therefore positive local progress.
+fn observed_effort_direction(
+    samples: &[[f32; 2]],
+    origin: [f32; 2],
+    fallback_prior: [f32; 2],
+    scale: f32,
+) -> Option<[f32; 2]> {
+    if !scale.is_finite() || scale <= f32::EPSILON {
+        return None;
+    }
+    samples
+        .iter()
+        .rev()
+        .copied()
+        .map(|sample| sub(sample, origin))
+        .filter(|offset| offset[0].is_finite() && offset[1].is_finite())
+        .filter(|offset| {
+            offset[0].hypot(offset[1]) / scale >= POINT_FREEZE_MINIMUM_NORMALIZED_PROGRESS
+        })
+        .next()
+        .and_then(normalized)
+        .or(Some(fallback_prior))
+}
+
+/// Blend independently observed equipment and pose paths. The measured
+/// equipment departure owns the sign of a rigid-bar effort axis; a screen/view
+/// prior cannot reverse it. Pose may corroborate that direction but is never
+/// copied into equipment evidence.
 fn combined_motion_axis(
     prior: [f32; 2],
     equipment_path: Option<[f32; 2]>,
     pose_path: Option<[f32; 2]>,
 ) -> [f32; 2] {
-    let mut estimate = [prior[0] * 0.30, prior[1] * 0.30];
-    if let Some(path) = equipment_path {
-        estimate[0] += path[0] * 0.55;
-        estimate[1] += path[1] * 0.55;
+    if let Some(equipment) = equipment_path {
+        let mut estimate = equipment;
+        if let Some(pose) = pose_path.filter(|pose| dot(*pose, equipment) > 0.0) {
+            estimate[0] = equipment[0] * 0.85 + pose[0] * 0.15;
+            estimate[1] = equipment[1] * 0.85 + pose[1] * 0.15;
+        }
+        return normalized(estimate).unwrap_or(equipment);
     }
-    if let Some(path) = pose_path.filter(|path| dot(*path, prior) > 0.0) {
-        estimate[0] += path[0] * 0.15;
-        estimate[1] += path[1] * 0.15;
-    }
-    let mut axis = normalized(estimate).unwrap_or(prior);
-    if dot(axis, prior) < 0.0 {
-        axis = [-axis[0], -axis[1]];
-    }
-    axis
+    pose_path.and_then(normalized).unwrap_or(prior)
 }
 
 fn normalized(vector: [f32; 2]) -> Option<[f32; 2]> {
@@ -1494,12 +1596,46 @@ mod tests {
         estimator.begin_set();
         estimator.observe(0, Some(7), &pose(0.40), &no_equipment(0));
         estimator.observe(100, Some(7), &pose(0.41), &no_equipment(100));
-        let evidence = estimator.observe(200, Some(7), &pose(0.52), &no_equipment(200));
+        estimator.observe(200, Some(7), &pose(0.40), &no_equipment(200));
+        estimator.observe(300, Some(7), &pose(0.40), &no_equipment(300));
+        let evidence = estimator.observe(400, Some(7), &pose(0.52), &no_equipment(400));
         assert_eq!(evidence.state, super::LocalCoordinateState::Frozen);
         assert!(evidence.pose.is_some());
+        assert!(evidence.pose.unwrap().along_axis_progress > 0.0);
         assert!(evidence.equipment.is_none());
         assert!(evidence.equipment_track_ids.is_empty());
         assert_eq!(evidence.channel_agreement, LocalChannelAgreement::PoseOnly);
+    }
+
+    #[test]
+    fn point_strategy_does_not_freeze_on_setup_jitter_or_stale_offset() {
+        let mut estimator = LocalMotionCoordinateEstimator::new(720, 1280);
+        estimator.set_strategy(Some(LocalMotionCoordinateStrategy {
+            capture_view: LocalCoarseView::RearObliqueRight,
+            preparation_to_effort: LocalActionAxisDirection::PreparationToEffortUp,
+            equipment_mode: LocalEquipmentMode::PoseOnly,
+            pose_anchor: LocalPoseAnchor::ShoulderMidpoint,
+        }));
+        estimator.begin_set();
+        for (timestamp_ms, shoulder_y) in [
+            (0, 0.40),
+            (100, 0.39),
+            (200, 0.41),
+            (300, 0.41),
+            (400, 0.41),
+            (500, 0.41),
+        ] {
+            let evidence = estimator.observe(
+                timestamp_ms,
+                Some(7),
+                &pose(shoulder_y),
+                &no_equipment(timestamp_ms),
+            );
+            assert_ne!(evidence.state, super::LocalCoordinateState::Frozen);
+        }
+        let effort = estimator.observe(600, Some(7), &pose(0.52), &no_equipment(600));
+        assert_eq!(effort.state, super::LocalCoordinateState::Frozen);
+        assert!(effort.pose.unwrap().along_axis_progress > 0.0);
     }
 
     #[test]
@@ -1512,18 +1648,24 @@ mod tests {
             pose_anchor: LocalPoseAnchor::ShoulderMidpoint,
         }));
         estimator.begin_set();
-        estimator.observe(0, Some(7), &pose(0.40), &no_equipment(0));
-        estimator.observe(100, Some(7), &pose(0.41), &no_equipment(100));
+        for timestamp_ms in [0, 100, 200, 300] {
+            estimator.observe(
+                timestamp_ms,
+                Some(7),
+                &pose(0.40),
+                &no_equipment(timestamp_ms),
+            );
+        }
         assert_eq!(
             estimator
-                .observe(200, Some(7), &pose(0.52), &no_equipment(200))
+                .observe(400, Some(7), &pose(0.52), &no_equipment(400))
                 .state,
             super::LocalCoordinateState::Frozen
         );
         let mut scale_jump = pose(0.54);
         scale_jump[5] = CanonicalLandmark::measured(0.49, 0.54, 0.0, 0.95);
         scale_jump[6] = CanonicalLandmark::measured(0.51, 0.54, 0.0, 0.95);
-        let evidence = estimator.observe(300, Some(7), &scale_jump, &no_equipment(300));
+        let evidence = estimator.observe(500, Some(7), &scale_jump, &no_equipment(500));
         assert_eq!(evidence.state, super::LocalCoordinateState::Degraded);
         assert_eq!(
             evidence.reason,
@@ -1596,7 +1738,7 @@ mod tests {
             pose_anchor: LocalPoseAnchor::ShoulderMidpoint,
         }));
         estimator.begin_set();
-        for (index, shoulder_y) in [0.55, 0.54, 0.40].into_iter().enumerate() {
+        for (index, shoulder_y) in [0.55, 0.55, 0.55, 0.55, 0.40].into_iter().enumerate() {
             let mut frame = pose(shoulder_y);
             frame[9] = CanonicalLandmark::measured(0.4, 0.25, 0.0, 0.95);
             frame[10] = CanonicalLandmark::measured(0.6, 0.25, 0.0, 0.95);
@@ -1606,7 +1748,7 @@ mod tests {
                 &frame,
                 &no_equipment(index as u64 * 100),
             );
-            if index == 2 {
+            if index == 4 {
                 assert_eq!(evidence.state, super::LocalCoordinateState::Frozen);
                 assert!(evidence.pose.is_some());
                 assert!(evidence.equipment.is_none());

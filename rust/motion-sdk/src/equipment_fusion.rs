@@ -220,6 +220,11 @@ struct PrivateTrack {
     center_y: f32,
     last_timestamp_ms: u64,
     association_stage: EquipmentAssociationStage,
+    /// Compact independent loads keep the anatomical side established by
+    /// temporal contact. A later frame in which both wrists are nearby is
+    /// ambiguous evidence, not permission to rewrite the track as `Both` or
+    /// swap it with the contralateral load.
+    held_by: EquipmentHand,
     contact_frames: u8,
     common_motion_frames: u8,
     last_hand_center: Option<(f32, f32)>,
@@ -331,7 +336,7 @@ impl EquipmentFusionEngine {
         accepted.sort_by(|left, right| right.0.score.total_cmp(&left.0.score));
         let mut claimed_tracks = HashSet::new();
         let mut output = Vec::with_capacity(accepted.len());
-        for (observation, association_confidence, held_by) in accepted {
+        for (observation, association_confidence, observed_held_by) in accepted {
             let (center_x, center_y) = observation.bbox.center();
             let track_index = self
                 .tracks
@@ -342,30 +347,47 @@ impl EquipmentFusionEngine {
                 })
                 .filter_map(|(index, track)| {
                     let distance = (track.center_x - center_x).hypot(track.center_y - center_y);
-                    (distance <= MAXIMUM_TRACK_CENTER_DISTANCE).then_some((index, distance))
+                    let side_compatible =
+                        compact_side_compatible(observation.kind, track.held_by, observed_held_by);
+                    (distance <= MAXIMUM_TRACK_CENTER_DISTANCE && side_compatible)
+                        .then_some((index, distance))
                 })
                 .min_by(|left, right| left.1.total_cmp(&right.1))
                 .map(|(index, _)| index);
-            let hand_center = associated_hand_center(held_by, input.canonical);
-            let (track_id, association_stage) = if let Some(index) = track_index {
+            let (track_id, held_by, association_stage) = if let Some(index) = track_index {
                 claimed_tracks.insert(index);
                 let track = &mut self.tracks[index];
-                let association_stage = update_association_stage(
-                    track,
-                    held_by,
-                    hand_center,
-                    (center_x, center_y),
-                    observation.bbox.width.hypot(observation.bbox.height),
-                );
+                let (held_by, side_conflict) =
+                    resolve_compact_track_hand(track.kind, track.held_by, observed_held_by);
+                let hand_center = associated_hand_center(held_by, input.canonical);
+                let association_stage = if side_conflict {
+                    track.contact_frames = 0;
+                    track.common_motion_frames = 0;
+                    track.association_stage = EquipmentAssociationStage::Conflict;
+                    track.association_stage
+                } else {
+                    update_association_stage(
+                        track,
+                        held_by,
+                        hand_center,
+                        (center_x, center_y),
+                        observation.bbox.width.hypot(observation.bbox.height),
+                    )
+                };
                 track.center_x = center_x;
                 track.center_y = center_y;
                 track.last_timestamp_ms = input.timestamp_ms;
                 track.last_hand_center = hand_center;
-                (track.track_id, association_stage)
+                if held_by != EquipmentHand::Unknown {
+                    track.held_by = held_by;
+                }
+                (track.track_id, track.held_by, association_stage)
             } else {
                 let track_id = self.next_track_id;
                 self.next_track_id = self.next_track_id.saturating_add(1);
-                let association_stage = initial_association_stage(held_by, observation.kind);
+                let association_stage =
+                    initial_association_stage(observed_held_by, observation.kind);
+                let hand_center = associated_hand_center(observed_held_by, input.canonical);
                 self.tracks.push(PrivateTrack {
                     track_id,
                     kind: observation.kind,
@@ -373,6 +395,7 @@ impl EquipmentFusionEngine {
                     center_y,
                     last_timestamp_ms: input.timestamp_ms,
                     association_stage,
+                    held_by: observed_held_by,
                     contact_frames: u8::from(
                         association_stage == EquipmentAssociationStage::ContactCandidate,
                     ),
@@ -381,7 +404,7 @@ impl EquipmentFusionEngine {
                     hand_gap_frames: 0,
                 });
                 claimed_tracks.insert(self.tracks.len() - 1);
-                (track_id, association_stage)
+                (track_id, observed_held_by, association_stage)
             };
             output.push(EquipmentTrackEvidence {
                 track_id,
@@ -440,6 +463,43 @@ impl EquipmentFusionEngine {
             rejected_low_confidence_or_invalid_count,
             rejected_outside_subject_count,
         }
+    }
+}
+
+fn compact_side_compatible(
+    kind: EquipmentKind,
+    track_hand: EquipmentHand,
+    observed_hand: EquipmentHand,
+) -> bool {
+    if !matches!(kind, EquipmentKind::Dumbbell | EquipmentKind::MachineHandle) {
+        return true;
+    }
+    !matches!(
+        (track_hand, observed_hand),
+        (EquipmentHand::Left, EquipmentHand::Right) | (EquipmentHand::Right, EquipmentHand::Left)
+    )
+}
+
+fn resolve_compact_track_hand(
+    kind: EquipmentKind,
+    track_hand: EquipmentHand,
+    observed_hand: EquipmentHand,
+) -> (EquipmentHand, bool) {
+    if !matches!(kind, EquipmentKind::Dumbbell | EquipmentKind::MachineHandle) {
+        return (observed_hand, false);
+    }
+    match (track_hand, observed_hand) {
+        (EquipmentHand::Left, EquipmentHand::Both)
+        | (EquipmentHand::Left, EquipmentHand::Unknown) => (EquipmentHand::Left, false),
+        (EquipmentHand::Right, EquipmentHand::Both)
+        | (EquipmentHand::Right, EquipmentHand::Unknown) => (EquipmentHand::Right, false),
+        (EquipmentHand::Left, EquipmentHand::Right)
+        | (EquipmentHand::Right, EquipmentHand::Left) => (track_hand, true),
+        (EquipmentHand::Both, EquipmentHand::Left | EquipmentHand::Right)
+        | (EquipmentHand::Unknown, EquipmentHand::Left | EquipmentHand::Right) => {
+            (observed_hand, false)
+        }
+        _ => (observed_hand, false),
     }
 }
 

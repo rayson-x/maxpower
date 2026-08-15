@@ -21,7 +21,6 @@ pub const CANDIDATE_FIELD_CONTINUITY_COLOR: u32 = 10;
 pub const CANDIDATE_FIELD_SWITCH_THRESHOLD: u32 = 12;
 pub const CANDIDATE_FIELD_SWITCH_CONFIRM_MS: u32 = 13;
 
-#[derive(Default)]
 struct WebRuntime {
     engine: Option<ContinuityEngine>,
     equipment_fusion: super::EquipmentFusionEngine,
@@ -35,11 +34,12 @@ struct WebRuntime {
     equipment_observations: Vec<super::EquipmentObservation>,
     equipment_output: Option<super::EquipmentFrameEvidence>,
     local_motion_coordinate: super::LocalMotionCoordinateEstimator,
-    visual_equipment_tracker: super::BarbellAxisVisualTracker,
+    equipment_providers: super::EquipmentProviderRegistry,
     visual_luma: Vec<u8>,
     visual_width: usize,
     visual_height: usize,
     visual_equipment_processed: bool,
+    visual_equipment_provider: Option<super::EquipmentProviderId>,
     visual_barbell_axis: Option<super::BarbellAxisObservation>,
     subject_tracker: Option<SubjectTracker>,
     target: Option<TargetSnapshot>,
@@ -67,6 +67,58 @@ struct WebRuntime {
     simulated_baseline_binding: Option<(String, u64)>,
     simulated_baseline_state: ReferenceRuntimeState,
     frame_history: Vec<super::CanonicalFrameSample>,
+}
+
+impl Default for WebRuntime {
+    fn default() -> Self {
+        Self {
+            engine: None,
+            equipment_fusion: super::EquipmentFusionEngine::new(),
+            pose_schema: super::PoseSchemaId::default(),
+            timestamp_ms: 0,
+            last_processed_timestamp_ms: None,
+            observations: Vec::new(),
+            output: Vec::new(),
+            candidates: Vec::new(),
+            candidate_meta: None,
+            equipment_observations: Vec::new(),
+            equipment_output: None,
+            local_motion_coordinate: super::LocalMotionCoordinateEstimator::default(),
+            equipment_providers: super::EquipmentProviderRegistry::standard(),
+            visual_luma: Vec::new(),
+            visual_width: 0,
+            visual_height: 0,
+            visual_equipment_processed: false,
+            visual_equipment_provider: None,
+            visual_barbell_axis: None,
+            subject_tracker: None,
+            target: None,
+            subject_epoch: 0,
+            scheduler: None,
+            frame_id: 0,
+            rep_engine: None,
+            rep_state: super::RepStateSnapshot::default(),
+            set_gate: super::SetGate::default(),
+            completed_reps: Vec::new(),
+            pending_outcomes: Vec::new(),
+            packet_bytes: Vec::new(),
+            sequence_id: String::new(),
+            sequence_buffer: Vec::new(),
+            profile_identity_buffer: Vec::new(),
+            reference_context_buffer: Vec::new(),
+            reference_profile_buffer: Vec::new(),
+            reference_profile: None,
+            reference_context: None,
+            reference_exercise_profile_binding: None,
+            reference_state: ReferenceRuntimeState::default(),
+            simulated_baseline_buffer: Vec::new(),
+            simulated_baseline: None,
+            simulated_baseline_context: None,
+            simulated_baseline_binding: None,
+            simulated_baseline_state: ReferenceRuntimeState::default(),
+            frame_history: Vec::new(),
+        }
+    }
 }
 
 impl Default for super::PoseSchemaId {
@@ -281,11 +333,12 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     runtime.equipment_observations.clear();
     runtime.equipment_output = None;
     runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new(width, height);
-    runtime.visual_equipment_tracker.reset();
+    runtime.equipment_providers.reset();
     runtime.visual_luma.clear();
     runtime.visual_width = 0;
     runtime.visual_height = 0;
     runtime.visual_equipment_processed = false;
+    runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     runtime.subject_tracker = Some(SubjectTracker::new(SubjectPolicy::DominantVisible));
     runtime.target = None;
@@ -336,11 +389,12 @@ pub extern "C" fn motion_sdk_set_pose_schema(schema: u32) -> i32 {
     runtime.equipment_observations.clear();
     runtime.equipment_output = None;
     runtime.local_motion_coordinate = super::LocalMotionCoordinateEstimator::new(width, height);
-    runtime.visual_equipment_tracker.reset();
+    runtime.equipment_providers.reset();
     runtime.visual_luma.clear();
     runtime.visual_width = 0;
     runtime.visual_height = 0;
     runtime.visual_equipment_processed = false;
+    runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     runtime.last_processed_timestamp_ms = None;
     0
@@ -469,6 +523,7 @@ pub extern "C" fn motion_sdk_begin_frame(
     runtime.equipment_output = None;
     runtime.visual_luma.clear();
     runtime.visual_equipment_processed = false;
+    runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     0
 }
@@ -560,6 +615,7 @@ pub extern "C" fn motion_sdk_begin_multi(timestamp_low: u32, timestamp_high: u32
     runtime.equipment_output = None;
     runtime.visual_luma.clear();
     runtime.visual_equipment_processed = false;
+    runtime.visual_equipment_provider = None;
     runtime.visual_barbell_axis = None;
     0
 }
@@ -698,6 +754,18 @@ pub unsafe extern "C" fn motion_sdk_copy_visual_equipment_luma(
 /// foreground subject, so mirrors/bystanders cannot contribute wrist context.
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_detect_barbell_axis() -> i32 {
+    motion_sdk_detect_visual_equipment(1)
+}
+
+/// Runs the Rust-owned visual equipment provider selected by the frozen action
+/// contract. Hosts pass the stable FFI code from `EquipmentProviderId`; they
+/// must not derive it from action names or implement a second selector.
+///
+/// Mode: 1=rigid bar (free barbell or Smith bar), 2=independent dumbbells,
+/// 3=constrained machine handle. The host supplies pixels and pose candidates;
+/// it never supplies measured equipment geometry for these provider modes.
+#[unsafe(no_mangle)]
+pub extern "C" fn motion_sdk_detect_visual_equipment(mode: u32) -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
         return -1;
     };
@@ -706,6 +774,10 @@ pub extern "C" fn motion_sdk_detect_barbell_axis() -> i32 {
         || runtime.candidate_meta.is_some()
     {
         return -2;
+    }
+    runtime.visual_equipment_provider = super::EquipmentProviderId::from_ffi_code(mode);
+    if runtime.visual_equipment_provider.is_none() {
+        return -3;
     }
     runtime.visual_equipment_processed = true;
     0
@@ -917,7 +989,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
             .as_mut()
             .and_then(super::RepEngine::reject_for_subject_change);
         runtime.pending_outcomes.extend(subject_change_outcome);
-        runtime.visual_equipment_tracker.reset();
+        runtime.equipment_providers.reset();
         runtime
             .local_motion_coordinate
             .reset_for_discontinuity(super::LocalCoordinateReason::SubjectChanged);
@@ -944,19 +1016,34 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     };
     if runtime.visual_equipment_processed && !runtime.visual_luma.is_empty() {
         let visual_subjects = selected.as_ref().map_or(&[][..], std::slice::from_ref);
-        let mut visual_tracker = std::mem::take(&mut runtime.visual_equipment_tracker);
-        let frame_evidence = match visual_tracker.process_frame(
-            runtime.pose_schema,
-            &runtime.visual_luma,
-            runtime.visual_width,
-            runtime.visual_height,
-            timestamp_ms,
-            visual_subjects,
+        let Some(provider_id) = runtime.visual_equipment_provider else {
+            return -5;
+        };
+        let WebRuntime {
+            equipment_providers,
+            pose_schema,
+            visual_luma,
+            visual_width,
+            visual_height,
+            ..
+        } = &mut *runtime;
+        let frame_evidence = match equipment_providers.process_frame(
+            provider_id,
+            super::EquipmentProviderFrameInput {
+                schema: *pose_schema,
+                luma: visual_luma,
+                width: *visual_width,
+                height: *visual_height,
+                timestamp_ms,
+                subjects: visual_subjects,
+            },
         ) {
             Ok(evidence) => evidence,
-            Err(super::VisualEquipmentError::UnsupportedPoseSchema) => return -4,
+            Err(super::EquipmentProviderProcessError::Visual(
+                super::VisualEquipmentError::UnsupportedPoseSchema,
+            )) => return -4,
+            Err(super::EquipmentProviderProcessError::UnknownProvider(_)) => return -5,
         };
-        runtime.visual_equipment_tracker = visual_tracker;
         runtime.visual_barbell_axis = frame_evidence.display_axis;
         runtime
             .equipment_observations
@@ -1470,7 +1557,7 @@ pub extern "C" fn motion_sdk_set_profile_identity_byte(index: u32, value: u32) -
 pub extern "C" fn motion_sdk_install_profile(
     hash_low: u32,
     hash_high: u32,
-    maturity: u32,
+    _legacy_maturity: u32,
     schema: u32,
     coordinate_unit: u32,
     state_machine: u32,
@@ -1499,10 +1586,6 @@ pub extern "C" fn motion_sdk_install_profile(
     let Ok(identity) = String::from_utf8(std::mem::take(&mut runtime.profile_identity_buffer))
     else {
         return -4;
-    };
-    let maturity = match maturity {
-        0 => super::ExerciseMaturity::Provisional,
-        _ => return -5,
     };
     let schema = match schema {
         0 => super::PoseSchemaId::BlazePose33,
@@ -1558,6 +1641,8 @@ pub extern "C" fn motion_sdk_install_profile(
         9 => Some(super::ExerciseSignalKind::LocalDynamicBarAngle),
         10 => Some(super::ExerciseSignalKind::LocalChannelAgreement),
         11 => Some(super::ExerciseSignalKind::LocalObservability),
+        12 => Some(super::ExerciseSignalKind::LocalPoseAlongAxisProgress),
+        13 => Some(super::ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress),
         _ => None,
     };
     let joints = |first: u32, second: u32, third: u32| {
@@ -1575,7 +1660,6 @@ pub extern "C" fn motion_sdk_install_profile(
     let profile = super::ExerciseProfile {
         identity,
         content_hash: (u64::from(hash_high) << 32) | u64::from(hash_low),
-        maturity,
         schema,
         coordinate_unit: coordinate_unit.into(),
         state_machine_id: state_machine_id.into(),

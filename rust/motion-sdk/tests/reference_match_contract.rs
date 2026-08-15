@@ -230,7 +230,6 @@ fn sealed_rep() -> SealedRep {
         canonical_slice_hash: 123,
         profile_identity: "lat_pulldown".into(),
         profile_hash: 456,
-        profile_maturity: "provisional",
         quality_verdict: None,
         recovered_across_gap: false,
         disposition: RepDisposition::Confirmed,

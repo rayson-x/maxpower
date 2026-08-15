@@ -24,6 +24,112 @@ pub enum VisualEquipmentError {
     UnsupportedPoseSchema,
 }
 
+/// Compact equipment whose current image position is represented by a
+/// measured bounding box rather than a fabricated rigid axis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PointEquipmentMode {
+    Dumbbell,
+    MachineHandle,
+}
+
+impl PointEquipmentMode {
+    fn kind(self) -> EquipmentKind {
+        match self {
+            Self::Dumbbell => EquipmentKind::Dumbbell,
+            Self::MachineHandle => EquipmentKind::MachineHandle,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointEquipmentFrameEvidence {
+    /// Independent current-frame image measurements. Wrist landmarks do not
+    /// enter detection, scoring or geometry; they are consumed only by
+    /// `EquipmentFusionEngine` after this provider returns.
+    pub raw_observations: Vec<EquipmentObservation>,
+}
+
+/// Cross-platform luma provider for one/two compact user-contact loads.
+///
+/// This intentionally publishes frame-local geometry only. Stable identity,
+/// anatomical side, contact and grip are separate temporal association facts
+/// owned by `EquipmentFusionEngine`.
+pub struct PointEquipmentVisualTracker {
+    mode: PointEquipmentMode,
+    width: usize,
+    height: usize,
+    background: Vec<f32>,
+}
+
+impl PointEquipmentVisualTracker {
+    pub const fn new(mode: PointEquipmentMode) -> Self {
+        Self {
+            mode,
+            width: 0,
+            height: 0,
+            background: Vec::new(),
+        }
+    }
+
+    pub fn process_frame(
+        &mut self,
+        schema: PoseSchemaId,
+        luma: &[u8],
+        width: usize,
+        height: usize,
+        timestamp_ms: u64,
+        subjects: &[PoseCandidate],
+    ) -> Result<PointEquipmentFrameEvidence, VisualEquipmentError> {
+        if schema != PoseSchemaId::Halpe26 {
+            return Err(VisualEquipmentError::UnsupportedPoseSchema);
+        }
+        if width < 8 || height < 8 || luma.len() != width.saturating_mul(height) {
+            self.reset_image_state();
+            return Ok(PointEquipmentFrameEvidence {
+                raw_observations: Vec::new(),
+            });
+        }
+        if self.width != width || self.height != height {
+            self.reset_image_state();
+            self.width = width;
+            self.height = height;
+        }
+        let had_background = !self.background.is_empty();
+        if !had_background {
+            self.background = luma.iter().map(|value| f32::from(*value)).collect();
+        }
+        let mut raw_observations = detect_compact_equipment(
+            self.mode.kind(),
+            luma,
+            &self.background,
+            had_background,
+            width,
+            height,
+            timestamp_ms,
+            subjects,
+        );
+        let maximum = match self.mode {
+            PointEquipmentMode::Dumbbell => 2,
+            PointEquipmentMode::MachineHandle => 2,
+        };
+        raw_observations.truncate(maximum);
+        for (background, value) in self.background.iter_mut().zip(luma) {
+            *background = *background * 0.985 + f32::from(*value) * 0.015;
+        }
+        Ok(PointEquipmentFrameEvidence { raw_observations })
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::new(self.mode);
+    }
+
+    fn reset_image_state(&mut self) {
+        self.width = 0;
+        self.height = 0;
+        self.background.clear();
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BarbellAxisObservation {
     pub proposal_id: u64,
@@ -431,7 +537,7 @@ fn detect_shaft_candidates(
     let mut kept: Vec<ShaftCandidate> = Vec::new();
     for candidate in candidates {
         if kept.iter().any(|prior| {
-            (prior.center_y - candidate.center_y).abs() <= 4.0
+            (prior.center_y - candidate.center_y).abs() <= 8.0
                 && (prior.slope - candidate.slope).abs() <= 0.051
         }) {
             continue;
@@ -490,6 +596,194 @@ fn merge_intervals(intervals: &[Interval], maximum_gap: usize) -> Vec<Interval> 
     }
     output.push(current);
     output
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CompactComponent {
+    left: usize,
+    top: usize,
+    right: usize,
+    bottom: usize,
+    pixels: usize,
+    contrast_sum: f32,
+    motion_sum: f32,
+}
+
+fn detect_compact_equipment(
+    kind: EquipmentKind,
+    luma: &[u8],
+    background: &[f32],
+    had_background: bool,
+    width: usize,
+    height: usize,
+    timestamp_ms: u64,
+    subjects: &[PoseCandidate],
+) -> Vec<EquipmentObservation> {
+    let regions = if subjects.is_empty() {
+        vec![(0usize, 0usize, width - 1, height - 1)]
+    } else {
+        subjects
+            .iter()
+            .map(|subject| {
+                let margin_x = subject.bbox.width * 0.20;
+                let margin_y = subject.bbox.height * 0.12;
+                (
+                    (((subject.bbox.x - margin_x).clamp(0.0, 1.0) * width as f32) as usize)
+                        .min(width - 1),
+                    (((subject.bbox.y - margin_y).clamp(0.0, 1.0) * height as f32) as usize)
+                        .min(height - 1),
+                    ((((subject.bbox.x + subject.bbox.width + margin_x).clamp(0.0, 1.0)
+                        * width as f32) as usize)
+                        .min(width - 1)),
+                    ((((subject.bbox.y + subject.bbox.height + margin_y).clamp(0.0, 1.0)
+                        * height as f32) as usize)
+                        .min(height - 1)),
+                )
+            })
+            .collect()
+    };
+    let mut mask = vec![false; width * height];
+    for (left, top, right, bottom) in regions {
+        for y in top.max(2)..=bottom.min(height - 3) {
+            for x in left.max(2)..=right.min(width - 3) {
+                let index = y * width + x;
+                let horizontal =
+                    (i16::from(luma[index - 2]) - i16::from(luma[index + 2])).unsigned_abs() as f32;
+                let vertical = (i16::from(luma[index - 2 * width])
+                    - i16::from(luma[index + 2 * width]))
+                .unsigned_abs() as f32;
+                let motion = (f32::from(luma[index]) - background[index]).abs();
+                // A current image edge is always required. Background motion
+                // increases confidence but can never create geometry alone.
+                mask[index] = horizontal.max(vertical) >= 34.0
+                    && (!had_background || motion >= 10.0 || horizontal.max(vertical) >= 72.0);
+            }
+        }
+    }
+    // Close small internal gaps without expanding outside observed edge
+    // neighborhoods. This groups the two rims of a compact object while
+    // retaining its image-measured extent.
+    let original = mask.clone();
+    for y in 2..height - 2 {
+        for x in 2..width - 2 {
+            let index = y * width + x;
+            if original[index] {
+                continue;
+            }
+            let horizontal_bridge = original[index - 2] && original[index + 2];
+            let vertical_bridge = original[index - 2 * width] && original[index + 2 * width];
+            if horizontal_bridge || vertical_bridge {
+                mask[index] = true;
+            }
+        }
+    }
+    let mut visited = vec![false; width * height];
+    let mut components = Vec::new();
+    for index in 0..mask.len() {
+        if !mask[index] || visited[index] {
+            continue;
+        }
+        let mut stack = vec![index];
+        visited[index] = true;
+        let mut component = CompactComponent {
+            left: width,
+            top: height,
+            right: 0,
+            bottom: 0,
+            pixels: 0,
+            contrast_sum: 0.0,
+            motion_sum: 0.0,
+        };
+        while let Some(current) = stack.pop() {
+            let x = current % width;
+            let y = current / width;
+            component.left = component.left.min(x);
+            component.top = component.top.min(y);
+            component.right = component.right.max(x);
+            component.bottom = component.bottom.max(y);
+            component.pixels += 1;
+            let horizontal = if x >= 2 && x + 2 < width {
+                (i16::from(luma[current - 2]) - i16::from(luma[current + 2])).unsigned_abs() as f32
+            } else {
+                0.0
+            };
+            let vertical = if y >= 2 && y + 2 < height {
+                (i16::from(luma[current - 2 * width]) - i16::from(luma[current + 2 * width]))
+                    .unsigned_abs() as f32
+            } else {
+                0.0
+            };
+            component.contrast_sum += horizontal.max(vertical);
+            component.motion_sum += (f32::from(luma[current]) - background[current]).abs();
+            for (next_x, next_y) in [
+                (x.wrapping_sub(1), y),
+                (x + 1, y),
+                (x, y.wrapping_sub(1)),
+                (x, y + 1),
+            ] {
+                if next_x >= width || next_y >= height {
+                    continue;
+                }
+                let next = next_y * width + next_x;
+                if mask[next] && !visited[next] {
+                    visited[next] = true;
+                    stack.push(next);
+                }
+            }
+        }
+        let component_width = component.right.saturating_sub(component.left) + 1;
+        let component_height = component.bottom.saturating_sub(component.top) + 1;
+        let normalized_width = component_width as f32 / width as f32;
+        let normalized_height = component_height as f32 / height as f32;
+        let aspect = component_width as f32 / component_height.max(1) as f32;
+        let fill = component.pixels as f32 / (component_width * component_height) as f32;
+        if component.pixels >= 8
+            && (0.008..=0.28).contains(&normalized_width)
+            && (0.008..=0.28).contains(&normalized_height)
+            && (0.18..=5.5).contains(&aspect)
+            && fill >= 0.05
+        {
+            components.push(component);
+        }
+    }
+    components.sort_by(|left, right| {
+        compact_component_score(right, had_background)
+            .total_cmp(&compact_component_score(left, had_background))
+    });
+    components
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, component)| {
+            let score = compact_component_score(&component, had_background);
+            (score >= 0.50).then_some(EquipmentObservation {
+                proposal_id: timestamp_ms.saturating_mul(16).saturating_add(index as u64),
+                kind,
+                bbox: NormalizedRect::new(
+                    component.left as f32 / width as f32,
+                    component.top as f32 / height as f32,
+                    (component.right.saturating_sub(component.left) + 1) as f32 / width as f32,
+                    (component.bottom.saturating_sub(component.top) + 1) as f32 / height as f32,
+                ),
+                axis: None,
+                score,
+                uncertainty_px: Some((2.0 + (1.0 - score) * 10.0).max(1.0)),
+                source: EquipmentSource::Geometry,
+                attributes: EquipmentAttributes::default(),
+            })
+        })
+        .collect()
+}
+
+fn compact_component_score(component: &CompactComponent, had_background: bool) -> f32 {
+    let contrast =
+        (component.contrast_sum / component.pixels.max(1) as f32 / 120.0).clamp(0.0, 1.0);
+    let motion = (component.motion_sum / component.pixels.max(1) as f32 / 45.0).clamp(0.0, 1.0);
+    let geometry = (component.pixels as f32 / 36.0).clamp(0.0, 1.0);
+    if had_background {
+        (contrast * 0.45 + motion * 0.40 + geometry * 0.15).clamp(0.0, 1.0)
+    } else {
+        (contrast * 0.72 + geometry * 0.28).clamp(0.0, 1.0)
+    }
 }
 
 fn gaussian(distance: f32, sigma: f32) -> f32 {

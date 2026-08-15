@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "maxpower.visual-recognition-evaluation-protocol/v0.1",
+  "evaluationId": "visual-recognition-v0.1-known-video-baseline-2026-08-15",
+  "protocolSha256": "6deb6e3b8b0b782adf73ce49cb0484c66912abb041961b25b101378949195457",
+  "protocol": {
+    "evaluationScope": "known_participant_known_video_regression",
+    "generalizationClaimAllowed": false,
+    "replayManifest": {
+      "path": "rust/motion-sdk/tests/fixtures/all_action_governed_replay_manifest_v1.json",
+      "sha256": "e8dd9405900b110d25f029591f73058aecd8a1fa68fdb91d436bfdd4dc2c69be",
+      "assembledInputSha256": "c809664df9b7c0cddd71ea28e7b19bdf0d11106686c3e43a5d431ad03363289e"
+    },
+    "videoSourceManifest": {
+      "path": "rust/motion-sdk/tests/fixtures/visual_recognition_v0_1_video_sources.json",
+      "sha256": "0ed5f59f06e1cf99aef6e84b253739738dc49c39f10cafee05e964475f5dd6b2",
+      "semanticSha256": "36f6a3b69ea2d7dc7e9d88d95fb4c73734b11993944960b82ad8d74a2fc2d7f6"
+    },
+    "modelConfiguration": {
+      "sdkVersion": "0.1.0",
+      "assessmentCatalogId": "maxpower/visual-recognition-baseline/v0.1",
+      "poseRuntimeId": "rtmpose-m",
+      "poseSchema": "halpe26/v1",
+      "packetContract": "1.10",
+      "equipmentProvider": "maxpower_motion_sdk::EquipmentProviderRegistry",
+      "equipmentActivationAuthority": "ExecutionContract",
+      "repBoundaryAuthority": "action_observation_plan_task_primary_and_required_relations",
+      "countedDispositions": [
+        "confirmed",
+        "needs_review"
+      ]
+    },
+    "truthReveal": "all_predictions_hashed_before_human_ranges_are_loaded",
+    "matchingPolicy": {
+      "algorithm": "monotonic_start_end_dynamic_programming",
+      "candidateEligibility": "interval_iou_gte_0.10_or_both_boundaries_within_1500ms",
+      "minimumIntervalIoU": 0.1,
+      "candidateBoundaryToleranceMs": 1500,
+      "strictBoundaryAlignment": "interval_iou_gte_0.60_and_both_boundaries_within_500ms",
+      "strictMinimumIntervalIoU": 0.6,
+      "strictStartEndToleranceMs": 500,
+      "negativeWindowFalseTrigger": "predicted_rep_midpoint_inside_reviewed_negative_window"
+    },
+    "humanSupervision": {
+      "assetId": "personal-human-rep-ranges-v2",
+      "consumedForTasks": [
+        "rep_counting",
+        "rep_segmentation",
+        "negative_window_rejection"
+      ],
+      "selectedFields": [
+        "sourceCaptureId",
+        "exerciseId",
+        "capturePosition",
+        "expectedCount",
+        "segments[].startMs",
+        "segments[].endMs",
+        "reviewedNegativeWindows[].startMs",
+        "reviewedNegativeWindows[].endMs"
+      ]
+    },
+    "forbiddenClaims": [
+      "held_out_accuracy",
+      "unseen_user_generalization",
+      "equipment_track_accuracy",
+      "technique_quality_accuracy",
+      "production_promotion"
+    ],
+    "output": {
+      "path": "workspace/visual-recognition-v0.1/full-known-video-evaluation.json",
+      "schemaVersion": "maxpower.visual-recognition-known-video-evaluation/v0.1"
+    }
+  }
+}

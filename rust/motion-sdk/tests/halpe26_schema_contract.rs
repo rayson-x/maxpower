@@ -3,8 +3,7 @@ use maxpower_motion_sdk::web_abi::{
     motion_sdk_reset, motion_sdk_set_pose_schema, motion_sdk_set_profile_identity_byte,
 };
 use maxpower_motion_sdk::{
-    ExerciseMaturity, ExerciseProfile, ExerciseSignal, ExerciseSignalKind, MovementDirection,
-    PoseSchemaId,
+    ExerciseProfile, ExerciseSignal, ExerciseSignalKind, MovementDirection, PoseSchemaId,
 };
 use std::sync::Mutex;
 
@@ -14,7 +13,6 @@ fn profile_with_joints(joints: [usize; 2]) -> ExerciseProfile {
     let mut profile = ExerciseProfile {
         identity: "halpe-contract/front/bilateral/bodyweight/v1".into(),
         content_hash: 0,
-        maturity: ExerciseMaturity::Provisional,
         schema: PoseSchemaId::Halpe26,
         coordinate_unit: "image-normalized-y".into(),
         state_machine_id: "ready-effort-peak-return/v1".into(),

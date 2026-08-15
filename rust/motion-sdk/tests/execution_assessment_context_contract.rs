@@ -1,18 +1,17 @@
 use maxpower_motion_sdk::{
-    AssessmentAssetKind, AssessmentBundleCapability, AssessmentCaptureView,
-    AssessmentConfigurationError, AssessmentEmission, AssessmentEquipmentRecognitionMode,
+    AssessmentAssetKind, AssessmentCaptureView, AssessmentConfigurationError, AssessmentEmission,
     AssessmentEquipmentSemantics, AssessmentEvent, AssessmentLateralityMode,
-    AssessmentRefusalReason, DeclaredLoad, ExecutionAssessmentEngine, FrameRotation,
-    PoseObservationContract, SetExecutionContext, SetIntent, TimestampUnit, VideoFrameContract,
-    VideoRecognitionContext, WorkoutAssessmentContext, current_motion_assessment_catalog_v1,
-    current_motion_assessment_catalog_v7,
+    AssessmentRefusalReason, DeclaredLoad, EquipmentProviderId, ExecutionAssessmentEngine,
+    FrameRotation, PoseObservationContract, SetExecutionContext, SetIntent, TimestampUnit,
+    VideoFrameContract, VideoRecognitionContext, WorkoutAssessmentContext,
+    visual_recognition_baseline_catalog_v0_1,
 };
 use serde::Deserialize;
 
 #[test]
 fn annotated_video_context_derives_equipment_and_freezes_one_bundle_before_frames() {
     let mut engine = ExecutionAssessmentEngine::configure(
-        current_motion_assessment_catalog_v1(),
+        visual_recognition_baseline_catalog_v0_1(),
         WorkoutAssessmentContext {
             workout_session_id: "workout-1".into(),
         },
@@ -40,18 +39,12 @@ fn annotated_video_context_derives_equipment_and_freezes_one_bundle_before_frame
         AssessmentEquipmentSemantics::RigidBarAxis
     );
     assert_eq!(
-        resolved.equipment_recognition_mode,
-        AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis,
+        resolved.equipment_provider_id,
+        Some(EquipmentProviderId::VisualRigidBarAxisV1),
         "the frozen ExecutionContract must activate the Rust bar-axis adapter"
     );
-    assert!(resolved.equipment_recognition_mode.is_provider_available());
-    assert!(resolved.equipment_recognition_mode.requires_visual_frame());
     assert_eq!(resolved.variation_id, "standard_variant");
     assert_eq!(resolved.bundle_id, "barbell_bench_press/front/v1");
-    assert_eq!(
-        resolved.bundle_capability,
-        AssessmentBundleCapability::ContextResolutionOnly
-    );
     assert_eq!(
         resolved.bundle_lineage.feature_program.kind,
         AssessmentAssetKind::FeatureProgram
@@ -63,29 +56,22 @@ fn annotated_video_context_derives_equipment_and_freezes_one_bundle_before_frame
 }
 
 #[test]
-fn selected_action_contract_is_the_only_equipment_provider_capability_source() {
-    for (action_id, capture_position, expected_mode, provider_available) in [
+fn selected_action_contract_is_the_only_equipment_provider_source() {
+    for (action_id, capture_position, expected_provider) in [
         (
             "barbell_bench_press",
             "front",
-            AssessmentEquipmentRecognitionMode::RustVisualRigidBarAxis,
-            true,
+            Some(EquipmentProviderId::VisualRigidBarAxisV1),
         ),
         (
             "lateral_raise",
             "front",
-            AssessmentEquipmentRecognitionMode::ProviderUnavailableTwoIndependentDumbbells,
-            false,
+            Some(EquipmentProviderId::VisualIndependentDumbbellsV1),
         ),
-        (
-            "push_up",
-            "rearRight45",
-            AssessmentEquipmentRecognitionMode::DisabledBodyOnly,
-            false,
-        ),
+        ("push_up", "rearRight45", None),
     ] {
         let mut engine = ExecutionAssessmentEngine::configure(
-            current_motion_assessment_catalog_v7(),
+            visual_recognition_baseline_catalog_v0_1(),
             WorkoutAssessmentContext {
                 workout_session_id: format!("equipment-plan-{action_id}"),
             },
@@ -102,21 +88,13 @@ fn selected_action_contract_is_the_only_equipment_provider_capability_source() {
             panic!("selected action must resolve a live context")
         };
         let resolved = facts.resolved_context.expect("resolved equipment plan");
-        assert_eq!(resolved.equipment_recognition_mode, expected_mode);
-        assert_eq!(
-            resolved.equipment_recognition_mode.is_provider_available(),
-            provider_available
-        );
-        assert_eq!(
-            resolved.equipment_recognition_mode.requires_visual_frame(),
-            provider_available
-        );
+        assert_eq!(resolved.equipment_provider_id, expected_provider);
     }
 }
 
 #[test]
 fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_mistyped() {
-    let mut orphaned = current_motion_assessment_catalog_v1();
+    let mut orphaned = visual_recognition_baseline_catalog_v0_1();
     let mut orphan = orphaned.bundles[0].clone();
     orphan.bundle_id = "unknown_action/front/v1".into();
     orphan.exact_context.action_id = "unknown_action".into();
@@ -132,20 +110,7 @@ fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_
         Err(AssessmentConfigurationError::OrphanBundle { .. })
     ));
 
-    let mut premature = current_motion_assessment_catalog_v1();
-    premature.bundles[0].capability = AssessmentBundleCapability::Executable;
-    premature.bundles[0] = premature.bundles[0].clone().with_computed_hash();
-    assert!(matches!(
-        ExecutionAssessmentEngine::configure(
-            premature,
-            WorkoutAssessmentContext {
-                workout_session_id: "workout-premature-execution".into(),
-            },
-        ),
-        Err(AssessmentConfigurationError::InvalidExecutableBundleProgram { .. })
-    ));
-
-    let mut missing = current_motion_assessment_catalog_v1();
+    let mut missing = visual_recognition_baseline_catalog_v0_1();
     missing.bundles[0]
         .lineage
         .local_coordinate_strategy
@@ -162,7 +127,7 @@ fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_
         Err(AssessmentConfigurationError::IncompleteBundleLineage { .. })
     ));
 
-    let mut mistyped = current_motion_assessment_catalog_v1();
+    let mut mistyped = visual_recognition_baseline_catalog_v0_1();
     mistyped.bundles[0].lineage.feature_program.kind = AssessmentAssetKind::RulePack;
     mistyped.bundles[0] = mistyped.bundles[0].clone().with_computed_hash();
     assert!(matches!(
@@ -175,7 +140,7 @@ fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_
         Err(AssessmentConfigurationError::InvalidBundleAssetReference { .. })
     ));
 
-    let mut unknown = current_motion_assessment_catalog_v1();
+    let mut unknown = visual_recognition_baseline_catalog_v0_1();
     unknown.bundles[0].lineage.feature_program.id = "unknown/features/v1".into();
     unknown.bundles[0] = unknown.bundles[0].clone().with_computed_hash();
     assert!(matches!(
@@ -188,7 +153,7 @@ fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_
         Err(AssessmentConfigurationError::UnknownBundleAssetReference { .. })
     ));
 
-    let mut tampered_content = current_motion_assessment_catalog_v1();
+    let mut tampered_content = visual_recognition_baseline_catalog_v0_1();
     tampered_content.installed_assets[0].content = serde_json::json!({"tampered": true});
     assert!(matches!(
         ExecutionAssessmentEngine::configure(
@@ -200,7 +165,7 @@ fn bundle_installation_fails_before_frames_when_atomic_lineage_is_incomplete_or_
         Err(AssessmentConfigurationError::InvalidCatalogAsset { .. })
     ));
 
-    let mut incompatible = current_motion_assessment_catalog_v1();
+    let mut incompatible = visual_recognition_baseline_catalog_v0_1();
     incompatible.bundles[0].lineage.rule_pack.schema_version = "v999".into();
     incompatible.bundles[0] = incompatible.bundles[0].clone().with_computed_hash();
     assert!(matches!(
@@ -234,7 +199,7 @@ fn unsupported_action_and_view_are_typed_refusals_without_starting_a_set() {
         ),
     ] {
         let mut engine = ExecutionAssessmentEngine::configure(
-            current_motion_assessment_catalog_v1(),
+            visual_recognition_baseline_catalog_v0_1(),
             WorkoutAssessmentContext {
                 workout_session_id: format!("workout-{action}-{view}"),
             },
@@ -254,7 +219,7 @@ fn unsupported_action_and_view_are_typed_refusals_without_starting_a_set() {
     }
 
     let mut engine = ExecutionAssessmentEngine::configure(
-        current_motion_assessment_catalog_v1(),
+        visual_recognition_baseline_catalog_v0_1(),
         WorkoutAssessmentContext {
             workout_session_id: "workout-pose-contract".into(),
         },
@@ -277,7 +242,7 @@ fn unsupported_action_and_view_are_typed_refusals_without_starting_a_set() {
 #[test]
 fn active_set_refuses_context_mutation_and_keeps_the_frozen_bundle() {
     let mut engine = ExecutionAssessmentEngine::configure(
-        current_motion_assessment_catalog_v1(),
+        visual_recognition_baseline_catalog_v0_1(),
         WorkoutAssessmentContext {
             workout_session_id: "workout-frozen".into(),
         },
@@ -353,40 +318,6 @@ fn active_set_refuses_context_mutation_and_keeps_the_frozen_bundle() {
         facts.resolved_context.expect("frozen context").bundle_id,
         "barbell_bench_press/front/v1"
     );
-}
-
-#[test]
-fn context_resolution_only_bundles_cannot_claim_frame_or_report_execution() {
-    let mut engine = ExecutionAssessmentEngine::configure(
-        current_motion_assessment_catalog_v1(),
-        WorkoutAssessmentContext {
-            workout_session_id: "workout-resolution-only".into(),
-        },
-    )
-    .expect("catalog configures");
-    engine
-        .advance(AssessmentEvent::SetStarted(set_context(
-            "capture-resolution-only",
-            "barbell_bench_press",
-            "front",
-        )))
-        .expect("context resolves");
-
-    for event in [
-        AssessmentEvent::CanonicalFrameObserved {
-            frame_id: 1,
-            timestamp_ms: 10,
-        },
-        AssessmentEvent::SetFinished,
-    ] {
-        let emission = engine
-            .advance(event)
-            .expect("unimplemented execution is a typed product refusal");
-        let AssessmentEmission::TypedRefusal(refusal) = emission else {
-            panic!("expected a typed capability refusal")
-        };
-        assert_eq!(refusal.reason, AssessmentRefusalReason::BundleNotExecutable);
-    }
 }
 
 /// Local-private governed input:
@@ -465,7 +396,7 @@ fn all_54_governed_records_resolve_through_the_public_engine_seam() {
 
     for (index, record) in dataset.records.iter().enumerate() {
         let mut engine = ExecutionAssessmentEngine::configure(
-            current_motion_assessment_catalog_v1(),
+            visual_recognition_baseline_catalog_v0_1(),
             WorkoutAssessmentContext {
                 workout_session_id: format!("governed-record-{index}"),
             },
@@ -636,7 +567,7 @@ fn current_action_library_resolves_every_governed_action_view_to_equipment_seman
 
     for (index, (action, alias, expected_view, expected_equipment)) in cases.iter().enumerate() {
         let mut engine = ExecutionAssessmentEngine::configure(
-            current_motion_assessment_catalog_v1(),
+            visual_recognition_baseline_catalog_v0_1(),
             WorkoutAssessmentContext {
                 workout_session_id: format!("workout-{index}"),
             },

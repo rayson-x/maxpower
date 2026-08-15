@@ -4,6 +4,7 @@ mod action_motion;
 mod barbell_phase;
 mod equipment_fusion;
 mod equipment_pose_constraint;
+mod equipment_provider;
 mod execution_assessment;
 mod execution_assessment_engine;
 mod local_motion_coordinate;
@@ -15,6 +16,7 @@ pub mod web_abi;
 
 pub use action_motion::*;
 pub use equipment_fusion::*;
+pub use equipment_provider::*;
 pub use execution_assessment::*;
 pub use execution_assessment_engine::*;
 pub use local_motion_coordinate::*;
@@ -267,6 +269,8 @@ pub enum MotionError {
     ProfileAlreadyActive,
     ProfileInstallAfterFrames,
     InvalidExerciseProfile(&'static str),
+    ActionPlanRequired,
+    InvalidActionPlan(&'static str),
     InvalidRepRevision(&'static str),
     RepProfileMismatch,
 }
@@ -475,21 +479,6 @@ pub struct PacketLineage {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExerciseMaturity {
-    Provisional,
-    Calibrated,
-}
-
-impl ExerciseMaturity {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Provisional => "provisional",
-            Self::Calibrated => "calibrated",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MovementDirection {
     Increasing,
     Decreasing,
@@ -510,7 +499,21 @@ pub enum ExerciseSignalKind {
     LandmarkHorizontalDistance,
     LandmarkVerticalDistance,
     PairedLandmarkDistanceSum,
+    /// Pose-anchor progress in the learned action-local coordinate frame.
+    /// This is deliberately distinct from equipment progress so pose-only
+    /// actions cannot be armed by an absent or synthetic equipment channel.
+    LocalPoseAlongAxisProgress,
+    /// Candidate-segmentation signal that prefers a current measured
+    /// equipment channel and otherwise uses an independently measured pose
+    /// channel in the same frozen local frame. Final action admission still
+    /// validates the ActionObservationPlan's required source; this signal can
+    /// propose a cycle but can never turn pose into equipment evidence.
+    LocalObservedAlongAxisProgress,
     LocalAlongAxisProgress,
+    /// Mean progress of two independently tracked, anatomically associated
+    /// equipment channels. Both sides must be measured; one wrist/handle can
+    /// never stand in for an independent-bilateral action.
+    LocalIndependentBilateralAlongAxisProgress,
     LocalCrossAxisDisplacement,
     LocalEndpointRelativeProgress,
     LocalDynamicBarAngle,
@@ -552,13 +555,13 @@ pub const PROFILE_CAP_SUBJECT_LOCK: u32 = 1 << 1;
 const PROFILE_REQUIRED_CAPABILITIES: u32 =
     PROFILE_CAP_CANONICAL_LANDMARKS | PROFILE_CAP_SUBJECT_LOCK;
 
-/// Validated data profile consumed by the generic rep state machine. Adding an
+/// Versioned data profile consumed by the generic rep state machine. Adding an
 /// exercise is data-only when the movement can be represented by these gates.
+/// Review, accuracy and release maturity are intentionally not runtime fields.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExerciseProfile {
     pub identity: String,
     pub content_hash: u64,
-    pub maturity: ExerciseMaturity,
     pub schema: PoseSchemaId,
     pub coordinate_unit: String,
     pub state_machine_id: String,
@@ -584,6 +587,7 @@ pub(crate) struct RigidBarProfileInitializer {
     pub minimum_amplitude: f32,
     pub return_hysteresis: f32,
     pub ready_tolerance: f32,
+    pub minimum_phase_dwell_ms: u64,
     pub max_gap_ms: u64,
     pub min_rep_duration_ms: u64,
     pub max_rep_duration_ms: u64,
@@ -640,7 +644,6 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: "march-in-place/front/bilateral/bodyweight/v1".into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::BlazePose33,
             coordinate_unit: "torso-normalized-distance".into(),
             state_machine_id: "alternating-ready-effort-return/v1".into(),
@@ -680,7 +683,6 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: "side-step-touch/front/bilateral/bodyweight/v1".into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::BlazePose33,
             coordinate_unit: "torso-normalized-distance".into(),
             state_machine_id: "alternating-ready-effort-return/v1".into(),
@@ -709,7 +711,6 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: "step-jack/front/bilateral/bodyweight/v1".into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::BlazePose33,
             coordinate_unit: "torso-normalized-distance".into(),
             state_machine_id: "alternating-ready-effort-return/v1".into(),
@@ -738,7 +739,6 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: "lat-pulldown/rear/bilateral/cable/v1".into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::BlazePose33,
             coordinate_unit: "image-normalized-y".into(),
             state_machine_id: "ready-effort-peak-return/v1".into(),
@@ -774,7 +774,6 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: "seated-shoulder-press/front-left-45/bilateral/dumbbell/v1".into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::BlazePose33,
             coordinate_unit: "image-normalized-y".into(),
             state_machine_id: "ready-effort-peak-return/v1".into(),
@@ -832,7 +831,7 @@ impl ExerciseProfile {
         )
     }
 
-    /// Frozen known-video tracer profile. Its name and maturity deliberately
+    /// Frozen known-video tracer profile. Its identity deliberately
     /// prevent callers from mistaking a touched-benchmark feasibility profile
     /// for source-independent production recognition.
     pub fn barbell_bench_press_touched_benchmark_front_left_provisional() -> Self {
@@ -841,7 +840,6 @@ impl ExerciseProfile {
                 "barbell_bench_press/frontLeft45/bilateral/barbell/touched-benchmark-provisional-v1"
                     .into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::Halpe26,
             coordinate_unit: "image-angle-deg".into(),
             state_machine_id: "barbell-axis-primary-ready-effort-return/v1".into(),
@@ -881,10 +879,12 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: identity.into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::Halpe26,
             coordinate_unit: coordinate_unit.into(),
-            state_machine_id: "cycle-aligned-ready-effort-peak-return/v1".into(),
+            state_machine_id: format!(
+                "cycle-aligned-ready-effort-peak-return/dwell-{}ms/v1",
+                initializer.minimum_phase_dwell_ms
+            ),
             required_capabilities: PROFILE_REQUIRED_CAPABILITIES,
             primary_signal: initializer.primary_signal,
             secondary_signal: initializer.secondary_signal,
@@ -945,7 +945,6 @@ impl ExerciseProfile {
         Self::with_computed_hash(Self {
             identity: identity.into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::Halpe26,
             coordinate_unit: "set-normalized-local-motion".into(),
             state_machine_id: state_machine_id.into(),
@@ -991,13 +990,6 @@ impl ExerciseProfile {
             hash = fnv_bytes(hash, [0]);
         }
         hash = fnv_bytes(hash, self.required_capabilities.to_le_bytes());
-        hash = fnv_bytes(
-            hash,
-            [match self.maturity {
-                ExerciseMaturity::Provisional => 0,
-                ExerciseMaturity::Calibrated => 1,
-            }],
-        );
         hash = fnv_bytes(hash, [self.schema.hash_code()]);
         hash = fnv_bytes(
             hash,
@@ -1047,6 +1039,7 @@ impl ExerciseProfile {
         }
         if self.state_machine_id != "ready-effort-peak-return/v1"
             && self.state_machine_id != "cycle-aligned-ready-effort-peak-return/v1"
+            && !valid_cycle_aligned_dwell_state_machine(&self.state_machine_id)
             && self.state_machine_id != "cycle-aligned-equipment-turnaround-down-fusion/v1"
             && self.state_machine_id != "cycle-aligned-equipment-turnaround-up-fusion/v1"
             && self.state_machine_id != "median-100ms-ready-effort-peak-return/v1"
@@ -1072,11 +1065,6 @@ impl ExerciseProfile {
         if self.required_capabilities != PROFILE_REQUIRED_CAPABILITIES {
             return Err(MotionError::InvalidExerciseProfile(
                 "required capabilities mismatch",
-            ));
-        }
-        if self.maturity != ExerciseMaturity::Provisional {
-            return Err(MotionError::InvalidExerciseProfile(
-                "calibrated profile requires an evidence manifest",
             ));
         }
         let schema_landmark_count = self.schema.landmark_count();
@@ -1144,6 +1132,7 @@ impl ExerciseProfile {
 
     fn uses_cycle_aligned_boundaries(&self) -> bool {
         self.state_machine_id == "cycle-aligned-ready-effort-peak-return/v1"
+            || valid_cycle_aligned_dwell_state_machine(&self.state_machine_id)
             || self.uses_equipment_turnaround_fusion()
             || self.state_machine_id.starts_with("cycle-aligned-median-")
             || self.state_machine_id.starts_with("stable-cycle-")
@@ -1171,6 +1160,10 @@ impl ExerciseProfile {
             "stable-cycle-200ms-ready-effort-peak-return/v1" => Some(200),
             _ => None,
         }
+    }
+
+    fn minimum_phase_dwell_ms(&self) -> u64 {
+        parse_cycle_aligned_dwell_ms(&self.state_machine_id).unwrap_or(CYCLE_ALIGNED_READY_DWELL_MS)
     }
 
     fn signal_smoothing_ms(&self) -> Option<u64> {
@@ -1205,6 +1198,9 @@ impl ExerciseSignalKind {
             Self::LocalDynamicBarAngle => 9,
             Self::LocalChannelAgreement => 10,
             Self::LocalObservability => 11,
+            Self::LocalPoseAlongAxisProgress => 12,
+            Self::LocalIndependentBilateralAlongAxisProgress => 13,
+            Self::LocalObservedAlongAxisProgress => 14,
         }
     }
 }
@@ -1218,7 +1214,10 @@ impl ExerciseSignal {
             ExerciseSignalKind::LandmarkHorizontalDistance => 2..=2,
             ExerciseSignalKind::LandmarkVerticalDistance => 2..=2,
             ExerciseSignalKind::PairedLandmarkDistanceSum => 4..=4,
-            ExerciseSignalKind::LocalAlongAxisProgress
+            ExerciseSignalKind::LocalPoseAlongAxisProgress
+            | ExerciseSignalKind::LocalObservedAlongAxisProgress
+            | ExerciseSignalKind::LocalAlongAxisProgress
+            | ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
             | ExerciseSignalKind::LocalCrossAxisDisplacement
             | ExerciseSignalKind::LocalEndpointRelativeProgress
             | ExerciseSignalKind::LocalDynamicBarAngle
@@ -1265,7 +1264,10 @@ impl ExerciseSignalKind {
     const fn is_local(self) -> bool {
         matches!(
             self,
-            Self::LocalAlongAxisProgress
+            Self::LocalPoseAlongAxisProgress
+                | Self::LocalObservedAlongAxisProgress
+                | Self::LocalAlongAxisProgress
+                | Self::LocalIndependentBilateralAlongAxisProgress
                 | Self::LocalCrossAxisDisplacement
                 | Self::LocalEndpointRelativeProgress
                 | Self::LocalDynamicBarAngle
@@ -1316,6 +1318,22 @@ const SET_PAUSE_IDLE_MS: u64 = 1_500;
 /// crossing on the way back. Keep a short causal look-behind window so the
 /// sealed timestamp can point at that extremum without using a future frame.
 const CYCLE_ALIGNED_READY_DWELL_MS: u64 = 500;
+
+const CYCLE_ALIGNED_DWELL_PREFIX: &str = "cycle-aligned-ready-effort-peak-return/dwell-";
+const CYCLE_ALIGNED_DWELL_SUFFIX: &str = "ms/v1";
+
+fn parse_cycle_aligned_dwell_ms(state_machine_id: &str) -> Option<u64> {
+    let value = state_machine_id
+        .strip_prefix(CYCLE_ALIGNED_DWELL_PREFIX)?
+        .strip_suffix(CYCLE_ALIGNED_DWELL_SUFFIX)?
+        .parse::<u64>()
+        .ok()?;
+    (value > 0 && value <= 5_000).then_some(value)
+}
+
+fn valid_cycle_aligned_dwell_state_machine(state_machine_id: &str) -> bool {
+    parse_cycle_aligned_dwell_ms(state_machine_id).is_some()
+}
 
 #[derive(Clone, Debug)]
 struct SetGate {
@@ -1450,6 +1468,23 @@ impl SetGate {
                     self.previous_primary = None;
                     return false;
                 }
+                // A local-motion profile cannot become observable until its
+                // coordinate frame has frozen from a real, movement-sized
+                // preparation departure. MotionSession primes that frozen
+                // sample immediately before this call, so it is already the
+                // causal ready anchor. Waiting for another static arming
+                // window would consume the entire first Rep as calibration.
+                if profile.is_some_and(|profile| {
+                    profile.uses_local_signals() && !profile.uses_barbell_axis_state_graph()
+                }) && local_coordinate
+                    .is_some_and(|local| local.state == LocalCoordinateState::Frozen)
+                {
+                    self.state.lifecycle = SetLifecycle::Active;
+                    self.arming_since_ms = None;
+                    self.stable_since_ms = None;
+                    self.previous_primary = primary;
+                    return false;
+                }
                 let arming_since = *self.arming_since_ms.get_or_insert(timestamp_ms);
                 if let (Some(previous), Some(current)) = (self.previous_primary, primary) {
                     if (current - previous).abs() >= resume_delta {
@@ -1552,7 +1587,6 @@ pub struct SealedRep {
     pub canonical_slice_hash: u64,
     pub profile_identity: String,
     pub profile_hash: u64,
-    pub profile_maturity: &'static str,
     pub quality_verdict: Option<String>,
     pub recovered_across_gap: bool,
     pub disposition: RepDisposition,
@@ -1597,9 +1631,20 @@ pub enum RepEvidenceReason {
     IncompleteCycle,
     AntiInterferenceFilter,
     DurationExceeded,
+    /// Legacy compatibility code. New runtime paths must use one of the
+    /// concrete coordinate/signal/identity outcomes below.
     RequiredJointLoss,
     CoordinateProvisional,
+    CoordinateNotFrozen,
+    SignalTemporarilyUnavailable,
+    TransitionEvidenceWeak,
+    IdentityRelationMissing,
     LocalTrajectoryChannelConflict,
+    ActionPrimaryUnavailable,
+    ActionPrimaryDirectionMismatch,
+    ActionPrimaryIncompleteReturn,
+    EquipmentConsensusUnavailable,
+    EquipmentConsensusConflict,
 }
 
 /// Profile-relative observations attached to a sealed movement. They are not
@@ -1607,6 +1652,7 @@ pub enum RepEvidenceReason {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RepObservationFinding {
     PrimaryRangeBelowExpectation,
+    ActionPrimaryRelationSatisfied,
     SecondaryRangeBelowExpectation,
     CycleFasterThanExpected,
     /// At least the turnaround boundary was established by the
@@ -1869,10 +1915,6 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         bytes.extend_from_slice(&rep.revision.to_le_bytes());
-        bytes.push(match rep.profile_maturity {
-            "provisional" => 0,
-            _ => 1,
-        });
         let mut flags = 0_u8;
         if rep.quality_verdict.is_some() {
             flags |= 1;
@@ -2200,7 +2242,16 @@ fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
         RepEvidenceReason::DurationExceeded => 6,
         RepEvidenceReason::RequiredJointLoss => 7,
         RepEvidenceReason::CoordinateProvisional => 8,
+        RepEvidenceReason::CoordinateNotFrozen => 15,
+        RepEvidenceReason::SignalTemporarilyUnavailable => 16,
+        RepEvidenceReason::TransitionEvidenceWeak => 17,
+        RepEvidenceReason::IdentityRelationMissing => 18,
         RepEvidenceReason::LocalTrajectoryChannelConflict => 9,
+        RepEvidenceReason::ActionPrimaryUnavailable => 10,
+        RepEvidenceReason::ActionPrimaryDirectionMismatch => 11,
+        RepEvidenceReason::ActionPrimaryIncompleteReturn => 12,
+        RepEvidenceReason::EquipmentConsensusUnavailable => 13,
+        RepEvidenceReason::EquipmentConsensusConflict => 14,
     }
 }
 
@@ -2221,6 +2272,10 @@ fn rep_observation_findings_flags(findings: &[RepObservationFinding]) -> u8 {
                 // existing pose/equipment conflict bit; QLT1 retains the
                 // exact local-trajectory finding and explanation.
                 RepObservationFinding::LocalTrajectoryChannelConflict => 1 << 6,
+                // Additive plan-authority success is preserved in the
+                // structured finding list; the legacy one-byte flags format
+                // has no remaining bit and must not alias success to a fault.
+                RepObservationFinding::ActionPrimaryRelationSatisfied => 0,
             }
     })
 }
@@ -2713,6 +2768,10 @@ struct ActiveRep {
     peak_secondary_amplitude: f32,
     hash: u64,
     recovered_across_gap: bool,
+    /// The first bounded interruption that made this candidate less certain.
+    /// It survives until sealing so callers can distinguish a weak transition
+    /// from an actual missing identity relation.
+    transient_evidence_reason: Option<RepEvidenceReason>,
     active_signal: ActiveSignal,
 }
 
@@ -2764,6 +2823,854 @@ struct RepEngine {
     local_evidence_history: VecDeque<(u64, u64, LocalMotionCoordinateEvidence)>,
     equipment_turnaround_history: VecDeque<EquipmentTurnaroundSample>,
     finalized_outcomes: Option<Vec<SealedRep>>,
+}
+
+#[derive(Clone)]
+struct ActionRepFrame {
+    frame_id: u64,
+    timestamp_ms: u64,
+    canonical: Vec<CanonicalLandmark>,
+    equipment: EquipmentFrameEvidence,
+    local_coordinate: LocalMotionCoordinateEvidence,
+}
+
+/// Final Rep admission owned by the compiled action plan. `RepEngine` may
+/// propose a temporally coherent candidate, but a plan-bound session emits a
+/// ConfirmedRep only when every identity-defining TaskPrimary relation has a
+/// measured, correctly directed excursion and return in the same causal
+/// window. This keeps candidate segmentation and action identity separate
+/// without creating a second downstream Rep truth.
+struct ActionRepAuthority {
+    plan: ActionObservationPlan,
+    history: VecDeque<ActionRepFrame>,
+}
+
+const ACTION_ENDPOINT_EVIDENCE_WINDOW_MS: u64 = 250;
+
+impl ActionRepAuthority {
+    fn new(plan: ActionObservationPlan) -> Result<Self, MotionError> {
+        if plan.rep_authority.is_none()
+            || !plan.relations.iter().any(|relation| {
+                relation.role == MotionRole::TaskPrimary
+                    && relation.judgeability == FeatureJudgeability::RequiredForRep
+            })
+        {
+            return Err(MotionError::InvalidActionPlan(
+                "executable plan with required TaskPrimary is required",
+            ));
+        }
+        Ok(Self {
+            plan,
+            history: VecDeque::new(),
+        })
+    }
+
+    fn begin_set(&mut self) {
+        self.history.clear();
+    }
+
+    fn observe(
+        &mut self,
+        frame_id: u64,
+        timestamp_ms: u64,
+        canonical: &[CanonicalLandmark],
+        equipment: &EquipmentFrameEvidence,
+        local_coordinate: &LocalMotionCoordinateEvidence,
+        retention_ms: u64,
+    ) {
+        self.history.push_back(ActionRepFrame {
+            frame_id,
+            timestamp_ms,
+            canonical: canonical.to_vec(),
+            equipment: equipment.clone(),
+            local_coordinate: local_coordinate.clone(),
+        });
+        let oldest = timestamp_ms.saturating_sub(retention_ms);
+        while self
+            .history
+            .front()
+            .is_some_and(|frame| frame.timestamp_ms < oldest)
+        {
+            self.history.pop_front();
+        }
+    }
+
+    fn admit(&self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
+        if rep.disposition != RepDisposition::Confirmed {
+            return rep;
+        }
+        let result = self.validate_rep_consensus(&rep).and_then(|_| {
+            // Rep admission is intentionally limited to action identity.
+            // Coordinated-motion, stability and substitution relations
+            // remain dimension-scoped evidence for assessment; missing or
+            // deviating auxiliary evidence must not erase a completed
+            // identity-defining primary cycle.
+            self.plan
+                .relations
+                .iter()
+                .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
+                .try_for_each(|relation| self.validate_primary_relation(&rep, profile, relation))
+        });
+        match result {
+            Ok(()) => rep
+                .observation_findings
+                .push(RepObservationFinding::ActionPrimaryRelationSatisfied),
+            Err(reason) => {
+                rep.disposition = RepDisposition::Rejected;
+                rep.evidence_reason = Some(reason);
+            }
+        }
+        rep
+    }
+
+    fn validate_rep_consensus(&self, rep: &SealedRep) -> Result<(), RepEvidenceReason> {
+        let equipment_kind = self
+            .plan
+            .relations
+            .iter()
+            .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
+            .flat_map(|relation| &relation.inputs)
+            .find_map(|input| match input.source.as_str() {
+                "equipment_axis_center" => Some(EquipmentKind::BarbellShaft),
+                "dumbbell_center" => Some(EquipmentKind::Dumbbell),
+                "machine_handle_center" => Some(EquipmentKind::MachineHandle),
+                _ => None,
+            });
+        let Some(equipment_kind) = equipment_kind else {
+            return Ok(());
+        };
+        let frames = self.history.iter().filter(|frame| {
+            frame.frame_id >= rep.start_frame_id && frame.frame_id <= rep.end_frame_id
+        });
+        let minimum = usize::from(self.plan.rep_consensus.minimum_observed_frames);
+        let mut left_counts = HashMap::<u64, usize>::new();
+        let mut right_counts = HashMap::<u64, usize>::new();
+        let mut shared_counts = HashMap::<u64, usize>::new();
+        let mut conflicts = HashSet::new();
+        for frame in frames {
+            let matching = frame
+                .equipment
+                .tracks
+                .iter()
+                .filter(|track| track.kind == equipment_kind)
+                .collect::<Vec<_>>();
+            for track in &matching {
+                if matches!(
+                    track.association_stage,
+                    EquipmentAssociationStage::Conflict | EquipmentAssociationStage::Released
+                ) {
+                    conflicts.insert(track.track_id);
+                }
+            }
+            for track in matching.into_iter().filter(|track| {
+                track.judgeable_path
+                    && track.source != EquipmentSource::Predicted
+                    && track.association_stage == EquipmentAssociationStage::GripEstablished
+            }) {
+                match track.held_by {
+                    EquipmentHand::Left => {
+                        *left_counts.entry(track.track_id).or_default() += 1;
+                    }
+                    EquipmentHand::Right => {
+                        *right_counts.entry(track.track_id).or_default() += 1;
+                    }
+                    EquipmentHand::Both => {
+                        *shared_counts.entry(track.track_id).or_default() += 1;
+                    }
+                    EquipmentHand::Unknown => {}
+                }
+            }
+        }
+        let best = |counts: &HashMap<u64, usize>| {
+            counts
+                .iter()
+                .filter(|(track_id, _)| !conflicts.contains(track_id))
+                .max_by_key(|(_, count)| *count)
+                .map(|(track_id, count)| (*track_id, *count))
+        };
+        let shared = best(&shared_counts);
+        let left = best(&left_counts);
+        let right = best(&right_counts);
+        let enough = match self.plan.rep_consensus.mode {
+            RepConsensusMode::SharedRigid => shared.is_some_and(|(_, count)| count >= minimum),
+            RepConsensusMode::BilateralSynchronous => {
+                shared.is_some_and(|(_, count)| count >= minimum)
+                    || left.zip(right).is_some_and(
+                        |((left_id, left_count), (right_id, right_count))| {
+                            left_id != right_id && left_count >= minimum && right_count >= minimum
+                        },
+                    )
+            }
+            RepConsensusMode::IndependentBilateral => {
+                left.zip(right)
+                    .is_some_and(|((left_id, left_count), (right_id, right_count))| {
+                        left_id != right_id && left_count >= minimum && right_count >= minimum
+                    })
+            }
+            RepConsensusMode::Unilateral | RepConsensusMode::Alternating => match (left, right) {
+                (Some((_, left_count)), None) => left_count >= minimum,
+                (None, Some((_, right_count))) => right_count >= minimum,
+                (Some(_), Some(_)) => return Err(RepEvidenceReason::EquipmentConsensusConflict),
+                (None, None) => false,
+            },
+        };
+        enough
+            .then_some(())
+            .ok_or(RepEvidenceReason::EquipmentConsensusUnavailable)
+    }
+
+    fn validate_primary_relation(
+        &self,
+        rep: &SealedRep,
+        profile: &ExerciseProfile,
+        relation: &CompiledMotionRelation,
+    ) -> Result<(), RepEvidenceReason> {
+        match relation.operator_id.as_str() {
+            "equipment_axis_displacement" | "point_displacement" => {
+                self.validate_local_cycle(rep, relation.source_requirement)
+            }
+            "constrained_path_deviation" => self.validate_constrained_path(rep),
+            "joint_angle" | "segment_angle" | "relative_distance" => {
+                self.validate_scalar_cycle(rep, profile, relation)
+            }
+            _ => Err(RepEvidenceReason::IdentityRelationMissing),
+        }
+    }
+
+    fn validate_constrained_path(&self, rep: &SealedRep) -> Result<(), RepEvidenceReason> {
+        let endpoints = rep
+            .normalized_endpoints
+            .as_ref()
+            .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+        for endpoint in [
+            &endpoints.start_anchor,
+            &endpoints.primary_turnaround,
+            &endpoints.end_return,
+        ] {
+            let channel = endpoint
+                .equipment
+                .filter(|channel| {
+                    channel.provenance == LocalChannelProvenance::EquipmentMeasured
+                        && channel.cross_axis_displacement.is_finite()
+                })
+                .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+            let _observed_deviation = channel.cross_axis_displacement;
+        }
+        Ok(())
+    }
+
+    fn validate_local_cycle(
+        &self,
+        rep: &SealedRep,
+        requirement: OperatorSourceRequirement,
+    ) -> Result<(), RepEvidenceReason> {
+        let endpoints = rep
+            .normalized_endpoints
+            .as_ref()
+            .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+        let channel = |evidence: &LocalMotionCoordinateEvidence| {
+            measured_local_channel_for_requirement(evidence, requirement)
+        };
+        let channel_near =
+            |timestamp_ms| self.measured_local_channel_near(rep, timestamp_ms, requirement);
+        let validate = |start: LocalTrajectoryChannel,
+                        turn: LocalTrajectoryChannel,
+                        end: LocalTrajectoryChannel| {
+            let departure = turn.along_axis_progress - start.along_axis_progress;
+            let returning = end.along_axis_progress - turn.along_axis_progress;
+            let required_excursion = self
+                .plan
+                .rep_topology
+                .minimum_excursion()
+                .max((start.uncertainty + turn.uncertainty).max(f32::EPSILON));
+            if departure.abs() <= required_excursion {
+                return Err(RepEvidenceReason::ActionPrimaryDirectionMismatch);
+            }
+            let direction_matches_contract = match self.plan.rep_topology.direction_policy {
+                LocalDirectionPolicy::SignInvariant => true,
+                LocalDirectionPolicy::PreparationToEffortPositive => departure > 0.0,
+                LocalDirectionPolicy::PreparationToEffortNegative => departure < 0.0,
+            };
+            if !direction_matches_contract {
+                return Err(RepEvidenceReason::ActionPrimaryDirectionMismatch);
+            }
+            if departure * returning >= 0.0
+                || (end.along_axis_progress - start.along_axis_progress).abs()
+                    > self.plan.rep_topology.return_tolerance()
+            {
+                return Err(RepEvidenceReason::ActionPrimaryIncompleteReturn);
+            }
+            Ok(())
+        };
+        if self.plan.rep_consensus.mode == RepConsensusMode::IndependentBilateral
+            && requirement == OperatorSourceRequirement::CurrentMeasuredEquipment
+        {
+            let selectors: [fn(&LocalMotionCoordinateEvidence) -> Option<LocalTrajectoryChannel>;
+                2] = [
+                |evidence: &LocalMotionCoordinateEvidence| evidence.anatomical_left_equipment,
+                |evidence: &LocalMotionCoordinateEvidence| evidence.anatomical_right_equipment,
+            ];
+            for select in selectors {
+                let measured = |evidence: &LocalMotionCoordinateEvidence| {
+                    select(evidence).filter(|value| {
+                        value.provenance == LocalChannelProvenance::EquipmentMeasured
+                            && value.confidence >= 0.5
+                            && value.coverage > 0.0
+                    })
+                };
+                validate(
+                    measured(&endpoints.start_anchor)
+                        .or_else(|| {
+                            self.measured_independent_equipment_channel_near(
+                                rep,
+                                rep.start_timestamp_ms,
+                                select,
+                            )
+                        })
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+                    measured(&endpoints.primary_turnaround)
+                        .or_else(|| {
+                            self.measured_independent_equipment_channel_near(
+                                rep,
+                                rep.peak_timestamp_ms,
+                                select,
+                            )
+                        })
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+                    measured(&endpoints.end_return)
+                        .or_else(|| {
+                            self.measured_independent_equipment_channel_near(
+                                rep,
+                                rep.end_timestamp_ms,
+                                select,
+                            )
+                        })
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+                )?;
+            }
+            return Ok(());
+        }
+        validate(
+            channel(&endpoints.start_anchor)
+                .or_else(|| channel_near(rep.start_timestamp_ms))
+                .ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+            channel(&endpoints.primary_turnaround)
+                .or_else(|| channel_near(rep.peak_timestamp_ms))
+                .ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+            channel(&endpoints.end_return)
+                .or_else(|| channel_near(rep.end_timestamp_ms))
+                .ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+        )
+    }
+
+    fn measured_local_channel_near(
+        &self,
+        rep: &SealedRep,
+        timestamp_ms: u64,
+        requirement: OperatorSourceRequirement,
+    ) -> Option<LocalTrajectoryChannel> {
+        self.history
+            .iter()
+            .filter(|frame| {
+                frame.timestamp_ms >= rep.start_timestamp_ms
+                    && frame.timestamp_ms <= rep.end_timestamp_ms
+                    && frame.timestamp_ms.abs_diff(timestamp_ms)
+                        <= ACTION_ENDPOINT_EVIDENCE_WINDOW_MS
+            })
+            .filter_map(|frame| {
+                measured_local_channel_for_requirement(&frame.local_coordinate, requirement)
+                    .map(|channel| (frame.timestamp_ms.abs_diff(timestamp_ms), channel))
+            })
+            .min_by_key(|(distance_ms, _)| *distance_ms)
+            .map(|(_, channel)| channel)
+    }
+
+    fn measured_independent_equipment_channel_near(
+        &self,
+        rep: &SealedRep,
+        timestamp_ms: u64,
+        select: fn(&LocalMotionCoordinateEvidence) -> Option<LocalTrajectoryChannel>,
+    ) -> Option<LocalTrajectoryChannel> {
+        self.history
+            .iter()
+            .filter(|frame| {
+                frame.timestamp_ms >= rep.start_timestamp_ms
+                    && frame.timestamp_ms <= rep.end_timestamp_ms
+                    && frame.timestamp_ms.abs_diff(timestamp_ms)
+                        <= ACTION_ENDPOINT_EVIDENCE_WINDOW_MS
+            })
+            .filter_map(|frame| {
+                select(&frame.local_coordinate)
+                    .filter(|channel| {
+                        channel.provenance == LocalChannelProvenance::EquipmentMeasured
+                            && channel.confidence >= 0.5
+                            && channel.coverage > 0.0
+                    })
+                    .map(|channel| (frame.timestamp_ms.abs_diff(timestamp_ms), channel))
+            })
+            .min_by_key(|(distance_ms, _)| *distance_ms)
+            .map(|(_, channel)| channel)
+    }
+
+    fn validate_scalar_cycle(
+        &self,
+        rep: &SealedRep,
+        profile: &ExerciseProfile,
+        relation: &CompiledMotionRelation,
+    ) -> Result<(), RepEvidenceReason> {
+        let value = |frame_id| {
+            self.history
+                .iter()
+                .find(|frame| frame.frame_id == frame_id)
+                .and_then(|frame| relation_scalar(profile.schema, relation, &frame.canonical))
+        };
+        let start = value(rep.start_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+        let turn = value(rep.peak_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+        let end = value(rep.end_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+        let effort = turn - start;
+        let returning = end - turn;
+        if effort.abs() <= f32::EPSILON {
+            return Err(RepEvidenceReason::ActionPrimaryDirectionMismatch);
+        }
+        if effort * returning >= 0.0 || (end - start).abs() >= effort.abs() {
+            return Err(RepEvidenceReason::ActionPrimaryIncompleteReturn);
+        }
+        Ok(())
+    }
+}
+
+fn measured_local_channel_for_requirement(
+    evidence: &LocalMotionCoordinateEvidence,
+    requirement: OperatorSourceRequirement,
+) -> Option<LocalTrajectoryChannel> {
+    let measured = |channel: Option<LocalTrajectoryChannel>, expected| {
+        channel.filter(|value| {
+            value.provenance == expected && value.confidence >= 0.5 && value.coverage > 0.0
+        })
+    };
+    match requirement {
+        OperatorSourceRequirement::CurrentMeasuredEquipment => measured(
+            evidence.equipment,
+            LocalChannelProvenance::EquipmentMeasured,
+        ),
+        OperatorSourceRequirement::CurrentMeasuredPose => {
+            measured(evidence.pose, LocalChannelProvenance::PoseMeasured)
+        }
+        OperatorSourceRequirement::CurrentMeasuredMixed => (evidence.channel_agreement
+            == LocalChannelAgreement::Agreement)
+            .then(|| {
+                measured(
+                    evidence.equipment,
+                    LocalChannelProvenance::EquipmentMeasured,
+                )
+            })
+            .flatten(),
+    }
+}
+
+fn named_landmark_index(schema: PoseSchemaId, source: &str) -> Option<usize> {
+    match schema {
+        PoseSchemaId::Halpe26 => match source {
+            "left_shoulder" => Some(5),
+            "right_shoulder" => Some(6),
+            "left_elbow" => Some(7),
+            "right_elbow" => Some(8),
+            "left_wrist" => Some(9),
+            "right_wrist" => Some(10),
+            "left_hip" => Some(11),
+            "right_hip" => Some(12),
+            "left_knee" => Some(13),
+            "right_knee" => Some(14),
+            "left_ankle" => Some(15),
+            "right_ankle" => Some(16),
+            _ => None,
+        },
+        PoseSchemaId::BlazePose33 => match source {
+            "left_shoulder" => Some(11),
+            "right_shoulder" => Some(12),
+            "left_elbow" => Some(13),
+            "right_elbow" => Some(14),
+            "left_wrist" => Some(15),
+            "right_wrist" => Some(16),
+            "left_hip" => Some(23),
+            "right_hip" => Some(24),
+            "left_knee" => Some(25),
+            "right_knee" => Some(26),
+            "left_ankle" => Some(27),
+            "right_ankle" => Some(28),
+            _ => None,
+        },
+    }
+}
+
+fn named_landmark_xy(
+    schema: PoseSchemaId,
+    source: &str,
+    canonical: &[CanonicalLandmark],
+) -> Option<(f32, f32)> {
+    let midpoint = |left, right| {
+        let left = landmark_xy(named_landmark_index(schema, left)?, canonical)?;
+        let right = landmark_xy(named_landmark_index(schema, right)?, canonical)?;
+        Some(((left.0 + right.0) * 0.5, (left.1 + right.1) * 0.5))
+    };
+    match source {
+        "shoulder_midpoint" => midpoint("left_shoulder", "right_shoulder"),
+        "hip_midpoint" => midpoint("left_hip", "right_hip"),
+        _ => landmark_xy(named_landmark_index(schema, source)?, canonical),
+    }
+}
+
+fn relation_scalar(
+    schema: PoseSchemaId,
+    relation: &CompiledMotionRelation,
+    canonical: &[CanonicalLandmark],
+) -> Option<f32> {
+    match relation.operator_id.as_str() {
+        "joint_angle" if relation.inputs.len() == 3 => joint_angle_degrees(
+            named_landmark_xy(schema, &relation.inputs[0].source, canonical)?,
+            named_landmark_xy(schema, &relation.inputs[1].source, canonical)?,
+            named_landmark_xy(schema, &relation.inputs[2].source, canonical)?,
+        ),
+        "relative_distance" if relation.inputs.len() == 2 => {
+            let first = named_landmark_xy(schema, &relation.inputs[0].source, canonical)?;
+            let second = named_landmark_xy(schema, &relation.inputs[1].source, canonical)?;
+            Some((first.0 - second.0).hypot(first.1 - second.1))
+        }
+        "segment_angle" if relation.inputs.len() == 1 => {
+            let (from, to) = match relation.inputs[0].source.as_str() {
+                "shoulder_axis" => ("left_shoulder", "right_shoulder"),
+                "hip_axis" => ("left_hip", "right_hip"),
+                "upper_arm" => ("left_shoulder", "left_elbow"),
+                "thigh" => ("left_hip", "left_knee"),
+                "shin" => ("left_knee", "left_ankle"),
+                "shoulder_hip_axis" => ("shoulder_midpoint", "hip_midpoint"),
+                _ => return None,
+            };
+            let from = named_landmark_xy(schema, from, canonical)?;
+            let to = named_landmark_xy(schema, to, canonical)?;
+            Some((to.1 - from.1).atan2(to.0 - from.0).to_degrees())
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod action_rep_authority_tests {
+    use super::*;
+
+    fn pose_with_elbow_angle(angle_degrees: f32) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        let angle = angle_degrees.to_radians();
+        for (shoulder, elbow, wrist, x) in [(5, 7, 9, 0.35), (6, 8, 10, 0.65)] {
+            pose[shoulder] = CanonicalLandmark::measured(x, 0.30, 0.0, 0.99);
+            pose[elbow] = CanonicalLandmark::measured(x, 0.45, 0.0, 0.99);
+            pose[wrist] = CanonicalLandmark::measured(
+                x + angle.sin() * 0.15,
+                0.45 - angle.cos() * 0.15,
+                0.0,
+                0.99,
+            );
+        }
+        pose
+    }
+
+    fn local_endpoint(progress: f32) -> LocalMotionCoordinateEvidence {
+        LocalMotionCoordinateEvidence {
+            state: LocalCoordinateState::Frozen,
+            confidence: 0.95,
+            equipment: Some(LocalTrajectoryChannel {
+                along_axis_progress: progress,
+                cross_axis_displacement: 0.0,
+                confidence: 0.95,
+                coverage: 1.0,
+                uncertainty: 0.01,
+                provenance: LocalChannelProvenance::EquipmentMeasured,
+            }),
+            channel_agreement: LocalChannelAgreement::EquipmentOnly,
+            ..LocalMotionCoordinateEvidence::default()
+        }
+    }
+
+    fn pose_only_endpoint(progress: f32) -> LocalMotionCoordinateEvidence {
+        LocalMotionCoordinateEvidence {
+            state: LocalCoordinateState::Frozen,
+            confidence: 0.95,
+            pose: Some(LocalTrajectoryChannel {
+                along_axis_progress: progress,
+                cross_axis_displacement: 0.0,
+                confidence: 0.95,
+                coverage: 1.0,
+                uncertainty: 0.01,
+                provenance: LocalChannelProvenance::PoseMeasured,
+            }),
+            channel_agreement: LocalChannelAgreement::PoseOnly,
+            ..LocalMotionCoordinateEvidence::default()
+        }
+    }
+
+    fn rep(profile: &ExerciseProfile, turn: f32, end: f32) -> SealedRep {
+        SealedRep {
+            rep_id: 1,
+            start_frame_id: 1,
+            start_timestamp_ms: 100,
+            peak_frame_id: 2,
+            peak_timestamp_ms: 200,
+            turnaround_confirmed_timestamp_ms: 250,
+            end_frame_id: 3,
+            end_timestamp_ms: 300,
+            revision: 0,
+            canonical_slice_hash: 1,
+            profile_identity: profile.identity.clone(),
+            profile_hash: profile.content_hash,
+            quality_verdict: None,
+            recovered_across_gap: false,
+            disposition: RepDisposition::Confirmed,
+            evidence_reason: None,
+            observation_findings: Vec::new(),
+            normalized_endpoints: Some(NormalizedRepEndpointEvidence {
+                coordinate_frame_id: 1,
+                start_anchor: local_endpoint(0.0),
+                primary_turnaround: local_endpoint(turn),
+                end_return: local_endpoint(end),
+                anatomical_left_turnaround_timestamp_ms: None,
+                anatomical_right_turnaround_timestamp_ms: None,
+            }),
+        }
+    }
+
+    fn gripped_bar(frame_id: u64) -> EquipmentFrameEvidence {
+        EquipmentFrameEvidence {
+            timestamp_ms: frame_id * 100,
+            subject_candidate_id: Some(1),
+            status: EquipmentFrameStatus::Observed,
+            tracks: vec![EquipmentTrackEvidence {
+                track_id: 1,
+                proposal_id: frame_id,
+                subject_candidate_id: 1,
+                kind: EquipmentKind::BarbellShaft,
+                bbox: NormalizedRect::new(0.2, 0.4, 0.6, 0.02),
+                axis: Some(EquipmentAxis2d {
+                    x1: 0.2,
+                    y1: 0.41,
+                    x2: 0.8,
+                    y2: 0.41,
+                }),
+                center_x: 0.5,
+                center_y: 0.41,
+                observation_score: 0.95,
+                association_confidence: 0.95,
+                uncertainty_px: Some(2.0),
+                source: EquipmentSource::Geometry,
+                held_by: EquipmentHand::Both,
+                association_stage: EquipmentAssociationStage::GripEstablished,
+                judgeable_path: true,
+            }],
+            rejected_reflection_count: 0,
+            rejected_static_count: 0,
+            rejected_low_confidence_or_invalid_count: 0,
+            rejected_outside_subject_count: 0,
+        }
+    }
+
+    #[test]
+    fn plan_authority_accepts_a_sign_invariant_round_trip_and_requires_return() {
+        let binding = crate::visual_recognition_baseline_profiles_v0_1()
+            .into_iter()
+            .find(|binding| {
+                binding.action_id == "barbell_bench_press"
+                    && binding.capture_view == crate::AssessmentCaptureView::Front
+            })
+            .expect("v0.1 bench binding");
+        let plan = binding.motion_plan.clone().expect("compiled plan");
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        for (frame_id, angle) in [(1, 160.0), (2, 80.0), (3, 158.0)] {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_elbow_angle(angle),
+                equipment: gripped_bar(frame_id),
+                local_coordinate: local_endpoint(match frame_id {
+                    1 => 0.0,
+                    2 => 0.8,
+                    _ => 0.05,
+                }),
+            });
+        }
+
+        let accepted = authority.admit(rep(&binding.profile, 0.8, 0.05), &binding.profile);
+        assert_eq!(accepted.disposition, RepDisposition::Confirmed);
+        assert!(
+            accepted
+                .observation_findings
+                .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
+        );
+
+        let reversed = authority.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
+        assert_eq!(reversed.disposition, RepDisposition::Confirmed);
+        assert!(
+            reversed
+                .observation_findings
+                .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied),
+            "mirroring or an inverted local axis cannot change a complete round trip"
+        );
+
+        let mut fixed_direction_plan = binding.motion_plan.clone().unwrap();
+        fixed_direction_plan.rep_topology.direction_policy =
+            LocalDirectionPolicy::PreparationToEffortPositive;
+        let mut fixed_direction =
+            ActionRepAuthority::new(fixed_direction_plan).expect("fixed direction plan");
+        fixed_direction.history = authority.history.clone();
+        let rejected = fixed_direction.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
+        assert_eq!(rejected.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            rejected.evidence_reason,
+            Some(RepEvidenceReason::ActionPrimaryDirectionMismatch)
+        );
+
+        let incomplete = authority.admit(rep(&binding.profile, 0.8, 0.9), &binding.profile);
+        assert_eq!(incomplete.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            incomplete.evidence_reason,
+            Some(RepEvidenceReason::ActionPrimaryIncompleteReturn)
+        );
+
+        authority.history.clear();
+        for (frame_id, angle) in [(1, 160.0), (2, 80.0), (3, 158.0)] {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_elbow_angle(angle),
+                equipment: EquipmentFrameEvidence::cannot_judge(
+                    frame_id * 100,
+                    Some(1),
+                    EquipmentCannotJudgeReason::NoEquipmentObservation,
+                ),
+                local_coordinate: pose_only_endpoint(match frame_id {
+                    1 => 0.0,
+                    2 => 0.8,
+                    _ => 0.05,
+                }),
+            });
+        }
+        let wrists_only = authority.admit(rep(&binding.profile, 0.8, 0.05), &binding.profile);
+        assert_eq!(wrists_only.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            wrists_only.evidence_reason,
+            Some(RepEvidenceReason::EquipmentConsensusUnavailable)
+        );
+    }
+
+    #[test]
+    fn optional_coordinated_joint_is_evidence_not_a_rep_admission_gate() {
+        let binding = crate::visual_recognition_baseline_profiles_v0_1()
+            .into_iter()
+            .find(|binding| {
+                binding.action_id == "barbell_bench_press"
+                    && binding.capture_view == crate::AssessmentCaptureView::Front
+            })
+            .expect("v0.1 bench binding");
+        let plan = binding.motion_plan.clone().expect("compiled plan");
+        let coordinated_joint = plan
+            .relations
+            .iter()
+            .find(|relation| relation.role == MotionRole::CoordinatedMotion)
+            .expect("bench coordination evidence");
+        assert_eq!(
+            coordinated_joint.judgeability,
+            FeatureJudgeability::DimensionScopedCannotJudge
+        );
+
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        for (frame_id, angle) in [(1, 160.0), (2, 100.0), (3, 80.0)] {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_elbow_angle(angle),
+                equipment: gripped_bar(frame_id),
+                local_coordinate: local_endpoint(match frame_id {
+                    1 => 0.0,
+                    2 => 0.8,
+                    _ => 0.05,
+                }),
+            });
+        }
+
+        let admitted = authority.admit(rep(&binding.profile, 0.8, 0.05), &binding.profile);
+        assert_eq!(admitted.disposition, RepDisposition::Confirmed);
+        assert_eq!(admitted.evidence_reason, None);
+        assert!(
+            admitted
+                .observation_findings
+                .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
+        );
+    }
+
+    #[test]
+    fn plan_authority_confirms_pose_boundaries_from_nearby_measured_equipment() {
+        let binding = crate::visual_recognition_baseline_profiles_v0_1()
+            .into_iter()
+            .find(|binding| {
+                binding.action_id == "barbell_bench_press"
+                    && binding.capture_view == crate::AssessmentCaptureView::Front
+            })
+            .expect("v0.1 bench binding");
+        let plan = binding.motion_plan.clone().expect("compiled plan");
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+
+        for (frame_id, timestamp_ms, angle, progress, measured_equipment) in [
+            (10, 100, 160.0, 0.00, false),
+            (11, 140, 150.0, 0.02, true),
+            (19, 190, 90.0, 0.78, true),
+            (20, 200, 80.0, 0.80, false),
+            (21, 210, 90.0, 0.79, true),
+            (29, 290, 150.0, 0.06, true),
+            (30, 300, 158.0, 0.05, false),
+        ] {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms,
+                canonical: pose_with_elbow_angle(angle),
+                equipment: if measured_equipment {
+                    gripped_bar(frame_id)
+                } else {
+                    EquipmentFrameEvidence::cannot_judge(
+                        timestamp_ms,
+                        Some(1),
+                        EquipmentCannotJudgeReason::NoEquipmentObservation,
+                    )
+                },
+                local_coordinate: if measured_equipment {
+                    local_endpoint(progress)
+                } else {
+                    pose_only_endpoint(progress)
+                },
+            });
+        }
+
+        let mut candidate = rep(&binding.profile, 0.80, 0.05);
+        candidate.start_frame_id = 10;
+        candidate.start_timestamp_ms = 100;
+        candidate.peak_frame_id = 20;
+        candidate.peak_timestamp_ms = 200;
+        candidate.end_frame_id = 30;
+        candidate.end_timestamp_ms = 300;
+        candidate.normalized_endpoints = Some(NormalizedRepEndpointEvidence {
+            coordinate_frame_id: 1,
+            start_anchor: pose_only_endpoint(0.0),
+            primary_turnaround: pose_only_endpoint(0.8),
+            end_return: pose_only_endpoint(0.05),
+            anatomical_left_turnaround_timestamp_ms: None,
+            anatomical_right_turnaround_timestamp_ms: None,
+        });
+
+        let accepted = authority.admit(candidate, &binding.profile);
+        assert_eq!(accepted.disposition, RepDisposition::Confirmed);
+        assert!(
+            accepted
+                .observation_findings
+                .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
+        );
+    }
 }
 
 impl RepEngine {
@@ -3087,7 +3994,6 @@ impl RepEngine {
             canonical_slice_hash: hash_sample(active.hash, end),
             profile_identity: self.profile.identity.clone(),
             profile_hash: self.profile.content_hash,
-            profile_maturity: self.profile.maturity.as_str(),
             quality_verdict: None,
             recovered_across_gap: active.recovered_across_gap,
             disposition,
@@ -3160,9 +4066,18 @@ impl RepEngine {
     fn seal_active(&mut self, end: RepSample) -> Option<SealedRep> {
         let active = self.active.take()?;
         let duration_ms = end.timestamp_ms.saturating_sub(active.start.timestamp_ms);
+        let phase_dwell_satisfied = !self.profile.uses_cycle_aligned_boundaries()
+            || (active
+                .peak
+                .timestamp_ms
+                .saturating_sub(active.start.timestamp_ms)
+                >= self.profile.minimum_phase_dwell_ms()
+                && end.timestamp_ms.saturating_sub(active.peak.timestamp_ms)
+                    >= self.profile.minimum_phase_dwell_ms());
         let minimum_evidence = active.peak_amplitude >= self.minimum_observable_primary()
             && active.peak_secondary_amplitude >= self.minimum_observable_secondary()
-            && duration_ms >= self.minimum_observable_duration_ms();
+            && duration_ms >= self.minimum_observable_duration_ms()
+            && phase_dwell_satisfied;
         if !minimum_evidence {
             return Some(self.finish_active(
                 active,
@@ -3189,9 +4104,11 @@ impl RepEngine {
         } else {
             RepDisposition::Confirmed
         };
-        let evidence_reason = active
-            .recovered_across_gap
-            .then_some(RepEvidenceReason::ShortContinuityRecovery);
+        let evidence_reason = active.recovered_across_gap.then(|| {
+            active
+                .transient_evidence_reason
+                .unwrap_or(RepEvidenceReason::ShortContinuityRecovery)
+        });
         Some(self.finish_active(active, end, disposition, evidence_reason, findings))
     }
 
@@ -3315,7 +4232,6 @@ impl RepEngine {
             canonical_slice_hash: candidate.path_hash,
             profile_identity: self.profile.identity.clone(),
             profile_hash: self.profile.content_hash,
-            profile_maturity: self.profile.maturity.as_str(),
             quality_verdict: None,
             recovered_across_gap: false,
             disposition,
@@ -3357,10 +4273,18 @@ impl RepEngine {
         if target_state != TargetState::Locked {
             return self.handle_gap(timestamp_ms, RepEvidenceReason::LongContinuityLoss);
         }
+        if self.profile.uses_local_signals()
+            && !local_coordinate.is_some_and(|local| local.state == LocalCoordinateState::Frozen)
+        {
+            return self.handle_gap(timestamp_ms, RepEvidenceReason::CoordinateNotFrozen);
+        }
         let Some((primary, secondary, torso, _repaired)) =
             profile_signal_with_local(&self.profile, canonical, local_coordinate)
         else {
-            return self.handle_gap(timestamp_ms, RepEvidenceReason::RequiredJointLoss);
+            return self.handle_gap(
+                timestamp_ms,
+                RepEvidenceReason::SignalTemporarilyUnavailable,
+            );
         };
         // Short-horizon prediction remains useful to keep the canonical
         // skeleton visually continuous, but it is not a new observation. In
@@ -3369,7 +4293,7 @@ impl RepEngine {
         // engine until measured or topology-fused signal evidence returns;
         // predicted/weak samples must never create start/peak/end events.
         if !profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
-            return self.handle_gap(timestamp_ms, RepEvidenceReason::RequiredJointLoss);
+            return self.handle_gap(timestamp_ms, RepEvidenceReason::TransitionEvidenceWeak);
         }
         let sample = self.signal_sample(frame_id, timestamp_ms, primary, secondary, torso);
         let (primary, secondary, torso) = (sample.primary, sample.secondary, sample.torso);
@@ -3515,6 +4439,7 @@ impl RepEngine {
                         peak_secondary_amplitude: secondary_amplitude,
                         hash: hash_sample(FNV_OFFSET, start),
                         recovered_across_gap: false,
+                        transient_evidence_reason: None,
                         active_signal,
                     });
                     self.state.phase = RepPhase::Effort;
@@ -3586,7 +4511,7 @@ impl RepEngine {
                         }
                         let pending = self.pending_ready.expect("pending cycle ready");
                         if sample.timestamp_ms.saturating_sub(pending.since_ms)
-                            < CYCLE_ALIGNED_READY_DWELL_MS
+                            < self.profile.minimum_phase_dwell_ms()
                         {
                             self.previous = Some(sample);
                             return sealed;
@@ -3817,6 +4742,7 @@ impl RepEngine {
                     peak_secondary_amplitude: pending.peak_secondary_amplitude,
                     hash: hash_sample(FNV_OFFSET, pending.start),
                     recovered_across_gap: false,
+                    transient_evidence_reason: None,
                     active_signal: pending.active_signal,
                 });
                 self.ready_history.clear();
@@ -3979,6 +4905,11 @@ impl RepEngine {
             self.pending_return_since_ms = None;
             self.pending_ready = None;
             return Vec::new();
+        }
+        if let Some(active) = self.active.as_mut() {
+            active
+                .transient_evidence_reason
+                .get_or_insert(rejection_reason);
         }
         let gap_since = *self.gap_since_ms.get_or_insert(timestamp_ms);
         if timestamp_ms.saturating_sub(gap_since) > self.profile.max_gap_ms {
@@ -4234,10 +5165,11 @@ fn profile_signal_transition_eligible(
         .into_iter()
         .all(|signal| {
             if signal.kind.is_local() {
-                return measure_signal(profile.schema, signal, canonical, local_coordinate)
-                    .is_some_and(|measurement| {
-                        measurement.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
-                    });
+                return local_coordinate.is_some_and(|local| {
+                    measure_signal(profile.schema, signal, canonical, Some(local)).is_some_and(
+                        |measurement| measurement.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE,
+                    )
+                });
             }
             signal.landmarks.iter().all(|&index| {
                 canonical.get(index).is_some_and(|landmark| {
@@ -4257,9 +5189,9 @@ fn profile_signal_transition_eligible(
 #[cfg(test)]
 mod rep_signal_observation_trust_tests {
     use super::{
-        CanonicalLandmark, ContinuityReason, ExerciseMaturity, ExerciseProfile, ExerciseSignal,
-        ExerciseSignalKind, LandmarkSource, MovementDirection, PROFILE_REQUIRED_CAPABILITIES,
-        PoseSchemaId, RepEngine, TargetState,
+        CanonicalLandmark, ContinuityReason, ExerciseProfile, ExerciseSignal, ExerciseSignalKind,
+        LandmarkSource, MovementDirection, PROFILE_REQUIRED_CAPABILITIES, PoseSchemaId, RepEngine,
+        TargetState,
     };
 
     fn elbow_point(angle_degrees: f32, mirrored: bool) -> (f32, f32) {
@@ -4312,7 +5244,6 @@ mod rep_signal_observation_trust_tests {
         let mut profile = ExerciseProfile {
             identity: "barbell-bench-press/front/bilateral/barbell/test-signal-trust-v1".into(),
             content_hash: 0,
-            maturity: ExerciseMaturity::Provisional,
             schema: PoseSchemaId::Halpe26,
             coordinate_unit: "image-angle-deg".into(),
             state_machine_id: "cycle-aligned-ready-effort-peak-return/v1".into(),
@@ -4439,7 +5370,10 @@ fn measure_signal(
             };
             Some((distance(first, second)? + distance(third, fourth)?) / scale)
         }
-        ExerciseSignalKind::LocalAlongAxisProgress
+        ExerciseSignalKind::LocalPoseAlongAxisProgress
+        | ExerciseSignalKind::LocalObservedAlongAxisProgress
+        | ExerciseSignalKind::LocalAlongAxisProgress
+        | ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
         | ExerciseSignalKind::LocalCrossAxisDisplacement
         | ExerciseSignalKind::LocalEndpointRelativeProgress
         | ExerciseSignalKind::LocalDynamicBarAngle
@@ -4460,9 +5394,29 @@ fn measure_local_signal(
         return None;
     }
     match kind {
+        ExerciseSignalKind::LocalPoseAlongAxisProgress => {
+            let channel = local.pose?;
+            local_channel_measurement(channel, channel.along_axis_progress)
+        }
+        ExerciseSignalKind::LocalObservedAlongAxisProgress => local
+            .equipment
+            .and_then(|channel| local_channel_measurement(channel, channel.along_axis_progress))
+            .or_else(|| {
+                let channel = local.pose?;
+                local_channel_measurement(channel, channel.along_axis_progress)
+            }),
         ExerciseSignalKind::LocalAlongAxisProgress => {
             let channel = local.equipment?;
             local_channel_measurement(channel, channel.along_axis_progress)
+        }
+        ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress => {
+            let left = local.anatomical_left_equipment?;
+            let right = local.anatomical_right_equipment?;
+            let reliability = local_channel_reliability(left).min(local_channel_reliability(right));
+            SignalMeasurement::new(
+                (left.along_axis_progress + right.along_axis_progress) * 0.5,
+                reliability,
+            )
         }
         ExerciseSignalKind::LocalCrossAxisDisplacement => {
             let channel = local.equipment?;
@@ -4589,6 +5543,8 @@ mod local_profile_signal_consumption_tests {
             state: LocalCoordinateState::Frozen,
             reason: None,
             equipment: Some(channel),
+            anatomical_left_equipment: Some(channel),
+            anatomical_right_equipment: Some(channel),
             pose: (kind == ExerciseSignalKind::LocalChannelAgreement).then_some(channel),
             endpoint_one_progress: Some(progress),
             endpoint_two_progress: Some(progress),
@@ -4688,6 +5644,7 @@ mod local_profile_signal_consumption_tests {
     fn every_named_local_signal_can_drive_the_real_rep_engine() {
         for kind in [
             ExerciseSignalKind::LocalAlongAxisProgress,
+            ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress,
             ExerciseSignalKind::LocalCrossAxisDisplacement,
             ExerciseSignalKind::LocalEndpointRelativeProgress,
             ExerciseSignalKind::LocalDynamicBarAngle,
@@ -5113,6 +6070,7 @@ pub struct MotionSession<I: InferenceAdapter, O: OutputAdapter> {
     equipment_pose_constraint: equipment_pose_constraint::EquipmentPoseConstraintEngine,
     local_motion_coordinate: LocalMotionCoordinateEstimator,
     rep_engine: Option<RepEngine>,
+    action_rep_authority: Option<ActionRepAuthority>,
     set_gate: SetGate,
     pending_outcomes: Vec<PendingRepOutcome>,
     assessment_outcomes: Vec<PendingRepOutcome>,
@@ -5182,6 +6140,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 image_height_px,
             ),
             rep_engine: None,
+            action_rep_authority: None,
             set_gate: SetGate::replay_active(),
             pending_outcomes: Vec::new(),
             assessment_outcomes: Vec::new(),
@@ -5198,6 +6157,9 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         self.local_motion_coordinate.begin_set();
         if let Some(rep_engine) = self.rep_engine.as_mut() {
             rep_engine.begin_set();
+        }
+        if let Some(authority) = self.action_rep_authority.as_mut() {
+            authority.begin_set();
         }
     }
 
@@ -5217,16 +6179,21 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         self.set_gate.finish();
         self.local_motion_coordinate.finish_set();
         let mut outcomes = std::mem::take(&mut self.pending_outcomes);
-        outcomes.extend(
-            self.rep_engine
-                .as_mut()
-                .map_or_else(Vec::new, RepEngine::finish_set)
-                .into_iter()
-                .map(|rep| PendingRepOutcome {
-                    subject_epoch: self.subject_epoch,
-                    rep,
-                }),
-        );
+        let profile = self
+            .rep_engine
+            .as_ref()
+            .map(|engine| engine.profile.clone());
+        let terminal = self
+            .rep_engine
+            .as_mut()
+            .map_or_else(Vec::new, RepEngine::finish_set);
+        outcomes.extend(terminal.into_iter().map(|rep| PendingRepOutcome {
+            subject_epoch: self.subject_epoch,
+            rep: match (&self.action_rep_authority, &profile) {
+                (Some(authority), Some(profile)) => authority.admit(rep, profile),
+                _ => rep,
+            },
+        }));
         outcomes
     }
 
@@ -5286,7 +6253,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         &mut self,
         profile: ExerciseProfile,
     ) -> Result<(), MotionError> {
-        self.install_exercise_profile_internal(profile, None)
+        self.install_exercise_profile_internal(profile, None, false)
     }
 
     pub fn install_exercise_profile_with_local_strategy(
@@ -5294,19 +6261,44 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         profile: ExerciseProfile,
         strategy: LocalMotionCoordinateStrategy,
     ) -> Result<(), MotionError> {
-        self.install_exercise_profile_internal(profile, Some(strategy))
+        self.install_exercise_profile_internal(profile, Some(strategy), false)
+    }
+
+    /// Installs the only executable path for a profile bound to an
+    /// ActionObservationPlan. The plan owns final Rep admission; the numeric
+    /// profile supplies separately versioned provisional calibration only.
+    pub fn install_exercise_profile_with_action_plan(
+        &mut self,
+        profile: ExerciseProfile,
+        strategy: LocalMotionCoordinateStrategy,
+        plan: ActionObservationPlan,
+    ) -> Result<(), MotionError> {
+        let suffix = format!("/action-plan-{}", plan.plan_hash);
+        if !profile.identity.ends_with(&suffix) {
+            return Err(MotionError::InvalidActionPlan(
+                "profile identity is not bound to this action plan",
+            ));
+        }
+        let authority = ActionRepAuthority::new(plan)?;
+        self.install_exercise_profile_internal(profile, Some(strategy), true)?;
+        self.action_rep_authority = Some(authority);
+        Ok(())
     }
 
     fn install_exercise_profile_internal(
         &mut self,
         profile: ExerciseProfile,
         strategy: Option<LocalMotionCoordinateStrategy>,
+        action_plan_supplied: bool,
     ) -> Result<(), MotionError> {
         if self.accepted_frames != 0 {
             return Err(MotionError::ProfileInstallAfterFrames);
         }
         if self.rep_engine.is_some() {
             return Err(MotionError::ProfileAlreadyActive);
+        }
+        if profile.identity.contains("/action-plan-") && !action_plan_supplied {
+            return Err(MotionError::ActionPlanRequired);
         }
         profile.validate()?;
         if let Some(strategy) = strategy {
@@ -5369,7 +6361,6 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             canonical_slice_hash: revision.canonical_slice_hash,
             profile_identity: original.profile_identity.clone(),
             profile_hash: original.profile_hash,
-            profile_maturity: original.profile_maturity,
             // A boundary edit invalidates any old derived verdict. The matcher
             // may compute new evidence for this revision without mutating the
             // historical algorithm result.
@@ -5480,6 +6471,18 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             &phase_pose_canonical,
             &equipment,
         );
+        if let (Some(authority), Some(rep_engine)) =
+            (self.action_rep_authority.as_mut(), self.rep_engine.as_ref())
+        {
+            authority.observe(
+                frame_id,
+                source_timestamp_ms,
+                &phase_pose_canonical,
+                &equipment,
+                &local_motion_coordinate,
+                rep_engine.profile.max_rep_duration_ms + rep_engine.profile.max_gap_ms,
+            );
+        }
         if self
             .rep_engine
             .as_ref()
@@ -5527,7 +6530,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             rep_phase,
             RepPhase::Effort | RepPhase::Peak | RepPhase::Return
         );
-        if may_process_rep || active_rep_requires_observation {
+        let proposed_reps = if may_process_rep || active_rep_requires_observation {
             self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
                 engine.process_with_equipment(
                     frame_id,
@@ -5550,12 +6553,21 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 );
             }
             Vec::new()
-        }
-        .into_iter()
-        .for_each(|rep| {
-            completed_reps.push(rep);
-            completed_rep_subject_epochs.push(self.subject_epoch);
-        });
+        };
+        let profile = self
+            .rep_engine
+            .as_ref()
+            .map(|engine| engine.profile.clone());
+        proposed_reps
+            .into_iter()
+            .map(|rep| match (&self.action_rep_authority, &profile) {
+                (Some(authority), Some(profile)) => authority.admit(rep, profile),
+                _ => rep,
+            })
+            .for_each(|rep| {
+                completed_reps.push(rep);
+                completed_rep_subject_epochs.push(self.subject_epoch);
+            });
         let rep_state = self
             .rep_engine
             .as_ref()

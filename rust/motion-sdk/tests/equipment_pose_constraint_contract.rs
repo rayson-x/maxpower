@@ -5,12 +5,11 @@ use std::{
 
 use maxpower_motion_sdk::{
     AdapterCapabilities, ContinuityMode, ContinuityReason, ContractVersion, DiagnosticLevel,
-    EquipmentAttributes, EquipmentKind, EquipmentObservation, EquipmentSource, ExerciseMaturity,
-    ExerciseProfile, ExerciseSignal, ExerciseSignalKind, FrameLease, FrameObservations,
-    InferenceAdapter, InferenceResult, LandmarkSource, MotionError, MotionSession,
-    MovementDirection, NormalizedRect, PROFILE_CAP_CANONICAL_LANDMARKS, PROFILE_CAP_SUBJECT_LOCK,
-    PoseCandidate, PoseObservation, PoseSchemaId, RecordingOutputAdapter, SessionConfig,
-    SubjectPolicy,
+    EquipmentAttributes, EquipmentKind, EquipmentObservation, EquipmentSource, ExerciseProfile,
+    ExerciseSignal, ExerciseSignalKind, FrameLease, FrameObservations, InferenceAdapter,
+    InferenceResult, LandmarkSource, MotionError, MotionSession, MovementDirection, NormalizedRect,
+    PROFILE_CAP_CANONICAL_LANDMARKS, PROFILE_CAP_SUBJECT_LOCK, PoseCandidate, PoseObservation,
+    PoseSchemaId, RecordingOutputAdapter, SessionConfig, SubjectPolicy,
 };
 
 #[derive(Clone)]
@@ -28,7 +27,6 @@ fn front_bench_equipment_profile() -> ExerciseProfile {
     let mut profile = ExerciseProfile {
         identity: "barbell-bench-press/front/bilateral/barbell/equipment-pose-test-v1".into(),
         content_hash: 0,
-        maturity: ExerciseMaturity::Provisional,
         schema: PoseSchemaId::Halpe26,
         coordinate_unit: "image-angle-deg".into(),
         state_machine_id: "barbell-axis-primary-ready-effort-return/v1".into(),
