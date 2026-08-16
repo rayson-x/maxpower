@@ -98,10 +98,12 @@ test("Gateway routes a product alias upstream, normalizes usage and hides provid
 
 test("Gateway consumes OpenAI SSE chunks and settles usage from the terminal usage chunk", async () => {
   const encoder = new TextEncoder();
+  let upstreamBody: Record<string, unknown> = {};
   const provider = new OpenAiCompatibleLlmProviderAdapter({
     routes: routes(),
-    fetch: async () =>
-      new Response(
+    fetch: async (_url, init) => {
+      upstreamBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(
         new ReadableStream<Uint8Array>({
           start(controller) {
             controller.enqueue(
@@ -118,7 +120,8 @@ test("Gateway consumes OpenAI SSE chunks and settles usage from the terminal usa
           },
         }),
         { status: 200, headers: { "content-type": "text/event-stream" } },
-      ),
+      );
+    },
   });
   const entitlements = new InMemoryLlmEntitlementAdapter({
     alice: { availableCredits: 100 },
@@ -136,6 +139,8 @@ test("Gateway consumes OpenAI SSE chunks and settles usage from the terminal usa
     request: {
       model: "maxpower/coach-v1",
       stream: true,
+      tools: [{ type: "function", function: { name: "read_plan", parameters: {} } }],
+      tool_choice: { type: "function", function: { name: "read_plan" } },
       messages: [],
     },
   });
@@ -146,6 +151,7 @@ test("Gateway consumes OpenAI SSE chunks and settles usage from the terminal usa
   assert.equal(chunks.length, 3);
   assert.ok(chunks.every((chunk) => chunk.model === "maxpower-cloud"));
   assert.equal(JSON.stringify(chunks).includes("tool_calls"), true);
+  assert.deepEqual(upstreamBody.tool_choice, { type: "function", function: { name: "read_plan" } });
   assert.equal(usage.usage[0]?.totalTokens, 15);
   assert.equal(usage.usage[0]?.chargedCredits, 1);
   assert.equal(entitlements.account("alice")?.availableCredits, 99);
@@ -295,3 +301,82 @@ async function collect(chunks: AsyncIterable<OpenAiObject>): Promise<readonly Op
   for await (const chunk of chunks) collected.push(chunk);
   return collected;
 }
+
+test("a slow upstream stream survives past the header timeout as long as chunks keep arriving", async () => {
+  const encoder = new TextEncoder();
+  // The first chunk arrives after the 50ms header timeout; the second after an
+  // additional 300ms idle gap that stays inside the 800ms stream idle budget.
+  const provider = new OpenAiCompatibleLlmProviderAdapter({
+    routes: routes(),
+    timeoutMs: 50,
+    streamIdleTimeoutMs: 800,
+    streamOverallTimeoutMs: 5_000,
+    fetch: async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            controller.enqueue(
+              encoder.encode('data: {"id":"vendor","model":"vendor-coach-model","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"slow"}}]}\n\n'),
+            );
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            controller.enqueue(
+              encoder.encode('data: {"id":"vendor","model":"vendor-coach-model","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}\n\ndata: [DONE]\n\n'),
+            );
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  const gateway = new LlmGateway({
+    provider,
+    entitlements: new InMemoryLlmEntitlementAdapter({ alice: { availableCredits: 100 } }),
+    usage: new InMemoryLlmUsageAdapter(),
+    fingerprintSecret: "provider-slow-stream-fingerprint",
+  });
+  const result = await gateway.invoke(principal("alice"), {
+    idempotencyKey: "provider-slow-stream-1",
+    request: { model: "maxpower/coach-v1", stream: true, messages: [] },
+  });
+  assert.equal(result.kind, "stream");
+  if (result.kind !== "stream") return;
+  const chunks = await collect(result.chunks);
+  assert.equal(chunks.length, 2);
+});
+
+test("a stalled upstream stream is aborted after the idle timeout", async () => {
+  const encoder = new TextEncoder();
+  const provider = new OpenAiCompatibleLlmProviderAdapter({
+    routes: routes(),
+    timeoutMs: 50,
+    streamIdleTimeoutMs: 120,
+    streamOverallTimeoutMs: 5_000,
+    fetch: async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          async start(controller) {
+            controller.enqueue(
+              encoder.encode('data: {"id":"vendor","model":"vendor-coach-model","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"stuck"}}]}\n\n'),
+            );
+            // Never produce another chunk; the idle timeout must end this.
+            await new Promise((resolve) => setTimeout(resolve, 3_000));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  const gateway = new LlmGateway({
+    provider,
+    entitlements: new InMemoryLlmEntitlementAdapter({ alice: { availableCredits: 100 } }),
+    usage: new InMemoryLlmUsageAdapter(),
+    fingerprintSecret: "provider-stalled-stream-fingerprint",
+  });
+  const result = await gateway.invoke(principal("alice"), {
+    idempotencyKey: "provider-stalled-stream-1",
+    request: { model: "maxpower/coach-v1", stream: true, messages: [] },
+  });
+  assert.equal(result.kind, "stream");
+  if (result.kind !== "stream") return;
+  await assert.rejects(collect(result.chunks));
+});

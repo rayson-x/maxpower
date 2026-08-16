@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 1 课 · 规划链路与追踪链路</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<div class="lesson">
+
+<div class="lesson-kicker">MaxPower 内部机制 · 第 1 课</div>
+<h1>两条链路：计划怎么编出来，行为怎么被追踪</h1>
+<p class="subtitle">读完后你能回答：一份计划每一步查了哪条知识？agent 的每个动作在哪里留下了痕迹？出问题时从哪查起？</p>
+
+<p>先立住一个总框架：MaxPower 的 agent <b>不是一个大模型在自由发挥</b>。大模型（LLM）只负责"听懂你"和"说人话"；所有决定——练什么、几组几次、多重——都由<b>确定性引擎</b>按知识库里的规则算出来。这节课拆解的两条链路，一条是"决定怎么产生"（规划链路），一条是"决定怎么被看见"（追踪链路）。</p>
+
+<div class="callout">
+<span class="label">核心心智模型</span>
+知识库是<b>菜谱</b>，引擎是<b>做菜的流程</b>，LLM 是<b>服务员</b>——负责听懂你要什么、告诉你菜为什么这么做。服务员不改菜谱。
+</div>
+
+<h2><span class="sec-num">SECTION A</span>规划链路：七个环节</h2>
+
+<p>以你为例：增肌目标、每周 3 天、每次 75 分钟、有力量数据、刚填完表。</p>
+
+<div class="step">
+<div class="n">1</div>
+<div>
+<h3>需求结构化</h3>
+<p>你的表单变成一个结构化需求对象：目标、经验、时间、器械、力量基线、限制。缺关键信息（比如有没有伤）就追问，<b>不猜</b>。</p>
+<p class="verify"><b>验证点</b> 系统提示词里写明"缺失就说缺什么"，且 values 不来自模型编造</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">2</div>
+<div>
+<h3>定骨架（查策略集）</h3>
+<p>引擎查《训练编排策略集》：3 天/周 → <b>全身分化 ×3</b>（每肌群每周练 3 次，满足"每肌群每周至少两次"的证据）；课内走主项-辅助-孤立三层（主项永远先行）。</p>
+<p class="verify"><b>依据</b> 等训练量下分化无优劣（<a href="https://pubmed.ncbi.nlm.nih.gov/38595233/">Ramos-Campo 2024</a>）→ 按可执行性分配；ACSM 2026 频率结论</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">3</div>
+<div>
+<h3>定剂量（周量目标）</h3>
+<p>查周量规则：增肌起步每肌群每周 4-8 直接组（默认 6）。3 天全身 → 每肌群每次 2 个直接组。<b>不是</b>拍脑袋的"3 动作 × 2 组"——组数是从周量目标反推出来的。</p>
+<p class="verify"><b>依据</b> Schoenfeld 2017 剂量反应 + ACSM 2026 的 ~10 组群体信号（标注为"群体信号不是个人下限"）</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">4</div>
+<div>
+<h3>时长估算（不裁剪）</h3>
+<p>75 分钟输入产生完整推荐 + 预计时长（标注为估算）。时间明显不够时给你"完整版/精简版"两个档位选，<b>系统不替你砍内容</b>。</p>
+<p class="verify"><b>设计决定</b> 时间是建议的输入，不是计划的闸门（你 2026-08-11 拍板）</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">5</div>
+<div>
+<h3>逐动作安排</h3>
+<p>从动作库（379 个变式）选动作：硬过滤（你不能做的、器械没有的）→ 软评分（历史表现、偏好、连续性）。然后查规则包定细节：次数区间（主项 6-10 / 辅助 10-15）、RIR 区间（无历史 → 校准 4-5）、负荷（你的力量数据做保守锚点，<b>或标 unknown 去试重，绝不猜公斤数</b>）。</p>
+<p class="verify"><b>依据</b> 力竭非必要（Grgic 2022 / Refalo 2023）；校准语义 TP-LOAD-CAL-001</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">6</div>
+<div>
+<h3>出提案 + 推理链（PlanTrace）</h3>
+<p>计划先生成<b>提案</b>，同时产出 PlannerTrace：每一步查了哪条规则、每个动作为什么被选中/被过滤、周量账本、逐项 diff。<b>没有 trace 的计划不允许提交。</b></p>
+<p class="verify"><b>验证点</b> 确认时系统强制检查 trace 存在（plan_trace_missing 拒提交）</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">7</div>
+<div>
+<h3>确认 → 执行 → 演化</h3>
+<p>你确认（或修改后确认）计划才生效；你的每处修改被记录为"水平证据"。训练中每组确认的实际重量/次数/RIR 回流成历史，下一次编排就用真实表现：负荷按上次锚定、RIR 切到工作区间 2-4、双进阶开始生效。</p>
+<p class="verify"><b>验证点</b> 完成一场训练后重算计划，有实质变化才出新版本（diff 非空）</p>
+</div>
+</div>
+
+<h2><span class="sec-num">SECTION B</span>追踪链路：五个环节</h2>
+
+<p>规划链路每一步发生时，追踪链路在平行地记录。</p>
+
+<div class="step">
+<div class="n">1</div>
+<div>
+<h3>事件产生</h3>
+<p>每次行动（一次对话、一次工具调用、一次规划、一次过滤拦截）都产生一条结构化事件：<code>traceId = runId</code>（这次行动）、<code>sessionId</code>（长会话）、类型、决策码、引用、时间戳。只含元数据，<b>不含你的对话文本</b>。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">2</div>
+<div>
+<h3>双写</h3>
+<p>事件同时写两个地方：本地 JSONL 文件（debug 模式，轮转保留）+ 远程日志服务（可插拔适配器：CloudWatch / SLS / OTLP，部署配置切换，不写死）。远程需要你显式授权，默认关。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">3</div>
+<div>
+<h3>崩溃窗口回填</h3>
+<p>先落账（事实进账本）后写 trace。如果进程在两者之间死掉，启动时 reconcile 会从账本投影把丢失的事件幂等补回来——<b>已提交的事实，trace 不会漏</b>。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">4</div>
+<div>
+<h3>离线补发</h3>
+<p>远程写不进去时事件进 outbox 队列（账本内持久化），恢复后补发，按事件 id 去重——<b>不重不丢</b>。</p>
+</div>
+</div>
+
+<div class="step">
+<div class="n">5</div>
+<div>
+<h3>按短码反查</h3>
+<p>你报错时给出短码（traceId 前 8 位 + sessionId 前 4 位），就能拉出完整链路：这个计划当时看到了什么输入、查了哪条规则、哪一步出了偏差。</p>
+</div>
+</div>
+
+<h2><span class="sec-num">SECTION C</span>两条链路的关系</h2>
+
+<div class="figure">规划链路：  需求 → 骨架 → 剂量 → 时长 → 动作 → 提案 → 确认 → 执行 → 演化
+                │     │     │     │     │     │     │      │      │
+追踪链路：      evt   evt   evt   evt   evt   evt   evt    evt    evt
+                └──────────── 同一个 traceId（一次行动）────────────┘
+<div class="figcap">图 1：规划链路的每一步都产生 trace 事件；同一行动共享 traceId，可整链反查。</div>
+</div>
+
+<h2><span class="sec-num">SECTION D</span>检验一下</h2>
+
+<div class="quiz" data-answer="b">
+<p class="q">1 · 用户说"帮我把卧推换成上斜"，agent 应该：</p>
+<label><input type="radio" name="q1" value="a">直接修改计划并把重量也复制过去</label>
+<label><input type="radio" name="q1" value="b">先查动作库校验，引擎评估后出提案，用户确认才生效</label>
+<label><input type="radio" name="q1" value="c">告诉用户请去计划编辑器手动修改</label>
+<div class="feedback"></div>
+</div>
+
+<div class="quiz" data-answer="b">
+<p class="q">2 · 你完成了一场训练，计划接下来会怎样？</p>
+<label><input type="radio" name="q2" value="a">永远不变，除非我手动改目标</label>
+<label><input type="radio" name="q2" value="b">历史更新后重算，有实质变化才出新版本</label>
+<label><input type="radio" name="q2" value="c">每次都生成一份全新计划覆盖旧的</label>
+<div class="feedback"></div>
+</div>
+
+<div class="quiz" data-answer="c">
+<p class="q">3 · 进程在"事实落账后、trace 写入前"崩溃，这条 trace 会：</p>
+<label><input type="radio" name="q3" value="a">永久丢失，链路出现缺口</label>
+<label><input type="radio" name="q3" value="b">变成重复事件写两次</label>
+<label><input type="radio" name="q3" value="c">启动时从账本投影幂等回填</label>
+<div class="feedback"></div>
+</div>
+
+<div class="quiz" data-answer="a">
+<p class="q">4 · 75 分钟×每周 3 天的增肌新用户，计划应该是：</p>
+<label><input type="radio" name="q4" value="a">全身 ×3 天，每肌群每周约 6 组，每课 4-6 个动作</label>
+<label><input type="radio" name="q4" value="b">推拉腿分化，每肌群每周练 1 次</label>
+<label><input type="radio" name="q4" value="c">3 个动作各 2 组，6-12 次</label>
+<div class="feedback"></div>
+</div>
+
+<h2><span class="sec-num">SECTION E</span>延伸与追问</h2>
+
+<p class="src">本课一手来源：<a href="https://pubmed.ncbi.nlm.nih.gov/41843416/">ACSM 2026 立场文件</a>（频率/量/强度结论）与仓库内 <code>.scratch/plan-pipeline-observability/PRD.md</code>（实现规格）。术语以 <code>CONTEXT.md</code> 为准。</p>
+
+<div class="callout know">
+<span class="label">追问你的 agent</span>
+任何不清楚的环节都可以直接问，比如："为什么 3 天要选全身而不是推拉腿？""双进阶具体怎么触发？""trace 里的决策码都有哪些值？"——agent 可以按 trace 和知识页逐条展开。
+</div>
+
+<div class="footer-note">第 1 课完 · 参考速查：<a href="../reference/pipeline-glossary.html">链路术语表</a> · 下一课预告：规则包怎么在组间实时做进阶判断</div>
+
+</div>
+<script>
+document.querySelectorAll('.quiz').forEach((quiz) => {
+  const answer = quiz.dataset.answer;
+  const feedback = quiz.querySelector('.feedback');
+  quiz.querySelectorAll('input').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.value === answer) {
+        feedback.textContent = '✓ 正确';
+        feedback.className = 'feedback ok';
+      } else {
+        feedback.textContent = '✗ 再想想——回到对应环节看一眼';
+        feedback.className = 'feedback bad';
+      }
+    });
+  });
+});
+</script>
+</body>
+</html>

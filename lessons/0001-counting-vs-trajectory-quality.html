@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>为什么完整但不标准的动作仍然要计数</title>
+  <link rel="stylesheet" href="../assets/teaching.css" />
+</head>
+<body>
+<main>
+  <h1>为什么完整但不标准的动作仍然要计数</h1>
+  <p class="lead">系统只保存一条 canonical 轨迹，但必须回答两个不同的问题：它是不是一次动作？这次动作做得怎么样？</p>
+
+  <div class="flow">
+    <section class="card"><strong>1 · 识别</strong>轨迹是否形成准备→发力→极值→还原的完整周期？</section>
+    <section class="card"><strong>2 · 封存</strong>把同一段 canonical frames 封存为不可变的 RepTrajectory。</section>
+    <section class="card"><strong>3 · 比较</strong>用同一条轨迹与匹配动作、机位和器械的参考走廊比较。</section>
+  </div>
+
+  <h2>高位下拉的三个实际情况</h2>
+  <ul>
+    <li><strong>标准完整 rep：</strong>计数 1，轨迹比较显示接近参考。</li>
+    <li><strong>耸肩但完整 rep：</strong>仍计数 1，同时指出肩部或躯干轨迹偏离。若直接不计数，用户只会以为系统漏识别，得不到纠正。</li>
+    <li><strong>只拉一小段又放回：</strong>轨迹未达到动作 profile 的完整周期，标记 partial，不计入正式次数。</li>
+  </ul>
+
+  <p class="warning"><strong>关键区别：</strong>“不标准”描述质量；“不完整”描述动作是否成立。二者可能同时发生，但不能用同一个阈值混为一谈。</p>
+
+  <h2>为什么仍然只需要一条轨迹</h2>
+  <p>状态机不是第二套数据。它只是同一条轨迹当前所在阶段的标签。参考比较也不会重新提取骨架，而是读取相同的 <code>canonical_range</code>。因此渲染、计数、录像和反馈仍然共享同一真源。</p>
+
+  <h2>一分钟检验</h2>
+  <p>想象用户做了 8 次高位下拉，其中第 6 次耸肩但完成了完整上下周期。系统应该告诉用户什么？先自己回答，再展开下面的建议。</p>
+  <details class="answer">
+    <summary>查看建议答案</summary>
+    <p>总次数仍为 8；第 6 次标记为轨迹偏离，并指出偏离阶段和证据。如果第 6 次只有半程，则总次数为 7，另记录一次 partial attempt。</p>
+  </details>
+
+  <h2>继续阅读</h2>
+  <p>动作分段与质量评估在研究中也被视为相关但不同的目标。可阅读 <a href="https://openaccess.thecvf.com/content_CVPR_2019/html/Abu_Farha_MS-TCN_Multi-Stage_Temporal_Convolutional_Network_for_Action_Segmentation_CVPR_2019_paper.html">MS-TCN 动作分段论文</a>，以及 <a href="https://openaccess.thecvf.com/content_CVPR_2019/html/Parmar_What_and_How_Well_You_Performed_A_Multitask_Learning_Approach_CVPR_2019_paper.html">动作识别与质量评估多任务论文</a>。</p>
+  <p>如果任何例子仍不清楚，请继续问我；下一步可以直接用你的一组真实训练录像逐帧演示。</p>
+</main>
+</body>
+</html>

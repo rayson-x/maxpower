@@ -10,3 +10,5 @@ export * from "./rollingEnergyAdjustment";
 export * from "./AdaptivePlanning";
 export { CurrentStagePlanningModule } from "./CurrentStagePlanningModule";
 export * from "./PlanOutcome";
+export * from "./MuscleWeekReview";
+export * from "./recoveryWindows";

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>MaxPower 已标注录像 · 离线骨架提取</title>
+    <style>
+      body { background:#07110f; color:#d8eee4; font:13px/1.6 ui-monospace,Menlo,monospace; padding:20px; }
+      button { background:#174631; color:#e6fff0; border:1px solid #69df9f; padding:8px 14px; font:inherit; cursor:pointer; }
+      button:disabled { opacity:.55; cursor:wait; }
+      pre { background:#020807; padding:12px; max-height:65vh; overflow:auto; }
+      video { width:360px; max-height:240px; background:#000; }
+    </style>
+  </head>
+  <body>
+    <h3>已标注录像 · 离线骨架提取</h3>
+    <p>只用于生成训练 sidecar；标注页仍保持纯人工模式。主体用跨帧位置、尺度、体段几何和外观动态跟踪；禁止把 MediaPipe 的帧内候选下标当作身份。</p>
+    <button id="run">开始离线提取</button>
+    <video id="video" muted playsinline></video>
+    <canvas id="crop" hidden></canvas>
+    <pre id="log"></pre>
+    <script type="module">
+      import { trackDynamicSubject } from "/harness/dynamic-subject-track.mjs";
+
+      const MODEL = "/models/pose_landmarker_heavy.task";
+      const STEP_MS = 50;
+      const ARCHIVE_ROOT = "/archives/confirmed-captures";
+      const SAVE_ENDPOINT = "http://127.0.0.1:4317/api/annotation-inbox/archive-pose-fixture";
+      const params = new URLSearchParams(location.search);
+      const requestedIds = new Set((params.get("ids") ?? "").split(",").filter(Boolean));
+      const roiTop = Math.max(0, Math.min(.75, Number(params.get("roiTop") ?? 0)));
+      const video = document.getElementById("video");
+      const cropCanvas = document.getElementById("crop");
+      const cropContext = cropCanvas.getContext("2d", { alpha: false });
+      const logEl = document.getElementById("log");
+      const runButton = document.getElementById("run");
+      const log = (message) => {
+        logEl.textContent += `${message}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+      const mapLandmark = (landmark) => ({
+        x: +landmark.x.toFixed(6),
+        y: +landmark.y.toFixed(6),
+        z: +landmark.z.toFixed(6),
+        visibility: +(landmark.visibility ?? 0).toFixed(4),
+      });
+      const mapImageLandmark = (landmark) => ({
+        ...mapLandmark(landmark),
+        y: +(roiTop + landmark.y * (1 - roiTop)).toFixed(6),
+      });
+      const landmarkBounds = (landmarks) => {
+        const visible = landmarks.filter((landmark) => Number.isFinite(landmark.x) && Number.isFinite(landmark.y) && landmark.visibility >= .2);
+        if (!visible.length) return { x: 0, y: 0, width: 0, height: 0 };
+        const xs = visible.map((landmark) => landmark.x), ys = visible.map((landmark) => landmark.y);
+        const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
+        const right = Math.min(1, Math.max(...xs)), bottom = Math.min(1, Math.max(...ys));
+        return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
+      };
+      const seekTo = (timeSec) => new Promise((resolve) => {
+        const done = () => { video.removeEventListener("seeked", done); resolve(); };
+        video.addEventListener("seeked", done);
+        video.currentTime = timeSec;
+      });
+      const loadVideo = (src) => new Promise((resolve, reject) => {
+        video.onloadedmetadata = resolve;
+        video.onerror = () => reject(new Error(`视频加载失败: ${src}`));
+        video.src = src;
+      });
+      const angle = (a, b, c) => {
+        if (!a || !b || !c || Math.min(a.visibility ?? 0, b.visibility ?? 0, c.visibility ?? 0) < .35) return null;
+        const ux = a.x - b.x, uy = a.y - b.y, vx = c.x - b.x, vy = c.y - b.y;
+        const denominator = Math.hypot(ux, uy) * Math.hypot(vx, vy);
+        if (denominator < 1e-6) return null;
+        return Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / denominator))) * 180 / Math.PI;
+      };
+      const candidatePose = (frame, index) => frame?.candidates[index] ?? null;
+      const closestAngle = (frames, candidateIndex, timestampMs, triplet) => {
+        let best = null;
+        let bestDistance = Infinity;
+        for (const frame of frames) {
+          const distance = Math.abs(frame.timestampMs - timestampMs);
+          if (distance > 350 || distance >= bestDistance) continue;
+          const pose = candidatePose(frame, candidateIndex);
+          const value = pose ? angle(...triplet.map((index) => pose.landmarks[index])) : null;
+          if (value === null) continue;
+          best = value;
+          bestDistance = distance;
+        }
+        return best;
+      };
+      const repAmplitude = (frames, candidateIndex, segment) => {
+        return [[11, 13, 15], [12, 14, 16]].map(([shoulder, elbow, wrist]) => {
+          const triplet = [shoulder, elbow, wrist];
+          const values = [segment.startMs, segment.extremeMs, segment.endMs]
+            .map((timestampMs) => closestAngle(frames, candidateIndex, timestampMs, triplet));
+          return values.some((value) => value === null) ? null : Math.abs(values[1] - (values[0] + values[2]) / 2);
+        }).filter((value) => value !== null).sort((left, right) => right - left)[0] ?? null;
+      };
+      const chooseSubject = (frames, segments) => {
+        const candidateCount = Math.max(0, ...frames.map((frame) => frame.candidates.length));
+        const scores = Array.from({ length: candidateCount }, (_, candidateIndex) => {
+          const amplitudes = segments.map((segment) => repAmplitude(frames, candidateIndex, segment)).filter((value) => value !== null);
+          const visibleFrames = frames.filter((frame) => {
+            const pose = candidatePose(frame, candidateIndex);
+            return pose && [11, 12, 13, 14, 15, 16].filter((index) => (pose.landmarks[index]?.visibility ?? 0) >= .35).length >= 3;
+          }).length;
+          amplitudes.sort((left, right) => left - right);
+          const medianAmplitude = amplitudes.length ? amplitudes[Math.floor(amplitudes.length / 2)] : 0;
+          return {
+            candidateIndex,
+            validRepCount: amplitudes.length,
+            visibleRatio: frames.length ? visibleFrames / frames.length : 0,
+            medianElbowAmplitudeDeg: medianAmplitude,
+            score: amplitudes.length * 100 + medianAmplitude + (frames.length ? visibleFrames / frames.length : 0) * 20,
+          };
+        }).sort((left, right) => right.score - left.score);
+        if (!scores[0] || scores[0].visibleRatio === 0) throw new Error("整段视频没有可用的人体候选");
+        return { selected: scores[0], scores };
+      };
+      let feedTimestampMs = 0;
+      async function extract(landmarker, entry) {
+        const labels = await fetch(`${ARCHIVE_ROOT}/${entry.labels}`).then((response) => response.json());
+        await loadVideo(`${ARCHIVE_ROOT}/${entry.video}`);
+        if (roiTop > 0) {
+          cropCanvas.width = video.videoWidth;
+          cropCanvas.height = Math.max(1, Math.round(video.videoHeight * (1 - roiTop)));
+        }
+        const frames = [];
+        for (let timeSec = 0; timeSec < video.duration; timeSec += STEP_MS / 1000) {
+          await seekTo(timeSec);
+          feedTimestampMs += STEP_MS;
+          let inferenceSource = video;
+          if (roiTop > 0) {
+            const sourceY = Math.round(video.videoHeight * roiTop);
+            cropContext.drawImage(
+              video,
+              0, sourceY, video.videoWidth, video.videoHeight - sourceY,
+              0, 0, cropCanvas.width, cropCanvas.height,
+            );
+            inferenceSource = cropCanvas;
+          }
+          const result = landmarker.detectForVideo(inferenceSource, feedTimestampMs);
+          frames.push({
+            timestampMs: Math.round(timeSec * 1000),
+            candidates: result.landmarks.map((landmarks, index) => ({
+              landmarks: landmarks.map(roiTop > 0 ? mapImageLandmark : mapLandmark),
+              worldLandmarks: (result.worldLandmarks[index] ?? []).map(mapLandmark),
+            })),
+          });
+        }
+        feedTimestampMs += 1000;
+        const fixedSelection = chooseSubject(frames, labels.labels ?? []);
+        const dynamicSelection = trackDynamicSubject(frames);
+        const poses = frames.map((frame, frameIndex) => {
+          const candidateIndex = dynamicSelection.candidateIndexes[frameIndex];
+          const pose = candidateIndex >= 0 ? frame.candidates[candidateIndex] : null;
+          return {
+            timestampMs: frame.timestampMs,
+            landmarks: pose?.landmarks ?? [],
+            worldLandmarks: pose?.worldLandmarks ?? [],
+            image: { widthPx: video.videoWidth, heightPx: video.videoHeight, mirrored: false },
+          };
+        });
+        const fixture = {
+          video: entry.video.split("/").at(-1),
+          durationSec: +video.duration.toFixed(3),
+          stepMs: STEP_MS,
+          model: `mediapipe:${MODEL};subject=dynamic-viterbi-v1;roiTop=${roiTop}`,
+          poses,
+        };
+        const response = await fetch(SAVE_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ captureId: entry.id, fixture }),
+        });
+        if (!response.ok) throw new Error(`sidecar 写入失败 ${response.status}: ${await response.text()}`);
+        return {
+          captureId: entry.id,
+          frameCount: poses.length,
+          poseFrameCount: poses.filter((pose) => pose.landmarks.length > 0).length,
+          subjectSelection: { dynamic: dynamicSelection.diagnostics, legacyFixed: fixedSelection.selected },
+        };
+      }
+      async function run() {
+        runButton.disabled = true;
+        window.__ARCHIVE_POSE_BATCH_DONE__ = false;
+        try {
+          const manifest = await fetch(`${ARCHIVE_ROOT}/manifest.json`).then((response) => response.json());
+          const entries = manifest.captures.filter((entry) => requestedIds.size === 0 || requestedIds.has(entry.id));
+          if (!entries.length) throw new Error("没有匹配的归档视频");
+          const { FilesetResolver, PoseLandmarker } = await import("/vendor/vision_bundle.mjs");
+          const vision = await FilesetResolver.forVisionTasks("/wasm");
+          const options = (delegate) => ({
+            baseOptions: { modelAssetPath: MODEL, delegate },
+            runningMode: "VIDEO",
+            numPoses: 4,
+            minPoseDetectionConfidence: .45,
+            minPosePresenceConfidence: .45,
+            minTrackingConfidence: .45,
+          });
+          let landmarker;
+          try { landmarker = await PoseLandmarker.createFromOptions(vision, options("GPU")); }
+          catch { landmarker = await PoseLandmarker.createFromOptions(vision, options("CPU")); }
+          const results = [];
+          log(`开始：${entries.length} 条录像`);
+          for (const entry of entries) {
+            log(`提取 ${entry.id} …`);
+            const result = await extract(landmarker, entry);
+            results.push(result);
+            log(`  ${result.poseFrameCount}/${result.frameCount} 帧；动态换位 ${result.subjectSelection.dynamic.indexSwitchCount}；拒绝跳帧 ${result.subjectSelection.dynamic.gapFrameCount}；旧固定 #${result.subjectSelection.legacyFixed.candidateIndex}`);
+          }
+          landmarker.close();
+          window.__ARCHIVE_POSE_BATCH_RESULT__ = results;
+          window.__ARCHIVE_POSE_BATCH_DONE__ = true;
+          log("完成：sidecar 已逐条写入归档。");
+        } catch (error) {
+          window.__ARCHIVE_POSE_BATCH_ERROR__ = String(error);
+          window.__ARCHIVE_POSE_BATCH_DONE__ = true;
+          log(`失败：${error}`);
+        } finally {
+          runButton.disabled = false;
+        }
+      }
+      runButton.addEventListener("click", run);
+      if (params.get("autorun") === "1") void run();
+    </script>
+  </body>
+</html>

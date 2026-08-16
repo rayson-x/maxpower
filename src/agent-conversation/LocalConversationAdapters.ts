@@ -3,11 +3,13 @@ import type { TimelineFact } from "../coach/domain";
 import type { RecordModule } from "../records";
 import { createManualMealObservation, type NutrientId, type NutrientUnit } from "../nutrition";
 import { buildTimelineCorrectionRequest } from "../product/timelineCorrection";
+
 import { CurrentStagePlanningModule } from "../planning";
 import type {
   ConversationExplicitRecord,
   PiAgentConversationDependencies,
 } from "./PiAgentConversationModule";
+
 
 /**
  * The production adapter between the Pi conversation and local product
@@ -222,6 +224,7 @@ export function createLocalConversationAdapters(input: {
             }
           : passages;
       },
+      read: ({ passageId }) => kernel.readInstalledKnowledgePassage({ passageId }),
     },
     memory: {
       upsertConversationSummary: async ({ userId, conversationId, runId, content, idempotencyKey }) => {

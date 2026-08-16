@@ -1,0 +1,312 @@
+{
+  "schemaVersion": "maxpower.visual-recognition-threshold-layering-diagnostic/v0.1",
+  "generatedOn": "2026-08-15",
+  "evaluationClass": "known_participant_known_video_regression",
+  "generalizationClaimAllowed": false,
+  "decision": "recall_blocked_by_rep_admission_semantics",
+  "source": {
+    "baselineEvaluationSha256": "902d6f008044c240ed9eba98f05b3ec739cf0e59c0c013f88b74220ffa51f035",
+    "postFixEvaluationSha256": "eb54166d4846b9b8f4e78ef2cf54c80b379b0d733e21fad59d3dace6e401e557",
+    "diagnosticEvaluationSha256": "ef20d5815543661728476c7876bc491fcee1765ebd65928e5771aff5e8fa022b",
+    "protocolSha256": "6deb6e3b8b0b782adf73ce49cb0484c66912abb041961b25b101378949195457",
+    "repeatRunCoreResultMatched": true
+  },
+  "dataQuality": {
+    "assetContractChecks": "passed",
+    "duplicateExactContextKeyCount": 0,
+    "evaluatedRecordCount": 53,
+    "evaluatedUniqueSourceCaptureCount": 49,
+    "expectedRepCount": 455,
+    "governanceExcludedRecordCount": 1,
+    "humanRangeCount": 455,
+    "labelRecordCount": 54,
+    "poseSidecarJoinCoverage": 1,
+    "resolvedRecordCount": 54,
+    "reviewedNegativeWindowCount": 237
+  },
+  "before": {
+    "candidatePrecision": 0.5,
+    "candidateRecall": 0.03296703296703297,
+    "exactSetAndAllBoundariesAlignedRate": 0,
+    "exactSetAndAllBoundariesAlignedRecordCount": 0,
+    "exactSetRate": 0,
+    "exactSetRecordCount": 0,
+    "falsePositiveCount": 15,
+    "matchedEndMaeMs": 814.8,
+    "matchedMeanIntervalIoU": 0.33757276248239293,
+    "matchedRepCount": 15,
+    "matchedStartMaeMs": 721.8,
+    "missedCount": 440,
+    "predictedRepCount": 30,
+    "recordCount": 53,
+    "reviewedNegativeWindowFalseTriggerCount": 3,
+    "strictBoundaryAlignedRate": 0.002197802197802198,
+    "strictBoundaryAlignedRepCount": 1,
+    "truthRepCount": 455
+  },
+  "after": {
+    "candidatePrecision": 0.5161290322580645,
+    "candidateRecall": 0.035164835164835165,
+    "exactSetAndAllBoundariesAlignedRate": 0,
+    "exactSetAndAllBoundariesAlignedRecordCount": 0,
+    "exactSetRate": 0,
+    "exactSetRecordCount": 0,
+    "falsePositiveCount": 15,
+    "matchedEndMaeMs": 834.125,
+    "matchedMeanIntervalIoU": 0.32953906566757957,
+    "matchedRepCount": 16,
+    "matchedStartMaeMs": 700.5625,
+    "missedCount": 439,
+    "predictedRepCount": 31,
+    "recordCount": 53,
+    "reviewedNegativeWindowFalseTriggerCount": 3,
+    "strictBoundaryAlignedRate": 0.002197802197802198,
+    "strictBoundaryAlignedRepCount": 1,
+    "truthRepCount": 455
+  },
+  "delta": {
+    "predictedRepCount": 1,
+    "matchedRepCount": 1,
+    "falsePositiveCount": 0,
+    "missedCount": -1,
+    "candidatePrecision": 0.016129032258064502,
+    "candidateRecall": 0.002197802197802197,
+    "matchedStartMaeMs": -21.237499999999955,
+    "matchedEndMaeMs": 19.325000000000045,
+    "matchedMeanIntervalIoU": -0.008033696814813363
+  },
+  "candidateAdmission": {
+    "candidateCount": 194,
+    "confirmedCount": 26,
+    "needsReviewCount": 5,
+    "rejectedCount": 163,
+    "rejectionRate": 0.8402061855670103,
+    "rejectionReasons": [
+      {
+        "reason": "ActionPrimaryDirectionMismatch",
+        "count": 97,
+        "shareOfCandidates": 0.5,
+        "shareOfRejected": 0.5950920245398773
+      },
+      {
+        "reason": "RequiredJointLoss",
+        "count": 34,
+        "shareOfCandidates": 0.17525773195876287,
+        "shareOfRejected": 0.2085889570552147
+      },
+      {
+        "reason": "EquipmentConsensusUnavailable",
+        "count": 22,
+        "shareOfCandidates": 0.1134020618556701,
+        "shareOfRejected": 0.13496932515337423
+      },
+      {
+        "reason": "LongContinuityLoss",
+        "count": 6,
+        "shareOfCandidates": 0.030927835051546393,
+        "shareOfRejected": 0.03680981595092025
+      },
+      {
+        "reason": "IncompleteCycle",
+        "count": 3,
+        "shareOfCandidates": 0.015463917525773196,
+        "shareOfRejected": 0.018404907975460124
+      },
+      {
+        "reason": "DurationExceeded",
+        "count": 1,
+        "shareOfCandidates": 0.005154639175257732,
+        "shareOfRejected": 0.006134969325153374
+      }
+    ]
+  },
+  "byAction": [
+    {
+      "action": "single_arm_cable_lateral_raise",
+      "truthReps": 68,
+      "predictedBefore": 30,
+      "predictedAfter": 30,
+      "matchedBefore": 15,
+      "matchedAfter": 15,
+      "precisionAfter": 0.5,
+      "recallAfter": 0.22058823529411764
+    },
+    {
+      "action": "rear_delt_fly",
+      "truthReps": 50,
+      "predictedBefore": 0,
+      "predictedAfter": 1,
+      "matchedBefore": 0,
+      "matchedAfter": 1,
+      "precisionAfter": 1,
+      "recallAfter": 0.02
+    },
+    {
+      "action": "barbell_bench_press",
+      "truthReps": 46,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "barbell_row",
+      "truthReps": 58,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "lat_pulldown",
+      "truthReps": 28,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "lateral_raise",
+      "truthReps": 65,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "machine_chest_press",
+      "truthReps": 29,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "pull_up",
+      "truthReps": 5,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "push_up",
+      "truthReps": 14,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "seated_row",
+      "truthReps": 24,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "seated_shoulder_press",
+      "truthReps": 44,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    },
+    {
+      "action": "straight_arm_pulldown",
+      "truthReps": 24,
+      "predictedBefore": 0,
+      "predictedAfter": 0,
+      "matchedBefore": 0,
+      "matchedAfter": 0,
+      "precisionAfter": null,
+      "recallAfter": 0
+    }
+  ],
+  "observationPipeline": {
+    "poseInputRateHz": 9.742624391146187,
+    "equipmentVisualProcessingRateHz": 29.665246007768665,
+    "equipmentTrackerOutputRateHz": 29.402244281398357,
+    "equipmentTrackerOutputFrames": 30520,
+    "localEquipmentChannelFrames": 1289,
+    "fusionStates": {
+      "Agreement": 1085,
+      "CannotJudge": 10164,
+      "EquipmentOnly": 3,
+      "PoseOnly": 4627
+    },
+    "localStates": {
+      "Degraded": 4561,
+      "Frozen": 6558,
+      "Learning": 791,
+      "Provisional": 475,
+      "Uninitialized": 3494
+    },
+    "rigidBarPredictedRepCount": 0,
+    "equipmentFusedTurnaroundCount": 0
+  },
+  "qualityOutput": {
+    "dimensionStates": {
+      "BilateralCoordination/CannotJudge": 53,
+      "ObservationConfidence/CannotJudge": 40,
+      "ObservationConfidence/ObservedAcceptable": 13,
+      "PhaseControl/CannotJudge": 53,
+      "RangeOfMotion/CannotJudge": 47,
+      "RangeOfMotion/ObservedAcceptable": 4,
+      "RangeOfMotion/ObservedDeviation": 2,
+      "StandardVariantCompatibility/CannotJudge": 53,
+      "SupportStability/CannotJudge": 53,
+      "TaskCompletion/CannotJudge": 41,
+      "TaskCompletion/ObservedDeviation": 12,
+      "TrajectoryControl/CannotJudge": 53
+    },
+    "accuracyStatus": "not_evaluable_no_human_quality_truth"
+  },
+  "diagnosis": [
+    {
+      "priority": 1,
+      "finding": "ActionPrimaryDirectionMismatch rejects half of all sealed Rep candidates and 59.5% of rejected candidates.",
+      "interpretation": "The local-coordinate validator requires a positive endpoint delta after Rep segmentation. That duplicates direction judgement and conflates real wrong-way motion with axis-sign or sampled-boundary disagreement."
+    },
+    {
+      "priority": 2,
+      "finding": "RequiredJointLoss accounts for 34 rejected candidates even though the reason also covers coordinates that are not Frozen or signals that are temporarily ineligible.",
+      "interpretation": "The current reason is overloaded; it does not prove an anatomical joint was actually lost and prevents calibrated NeedsReview handling."
+    },
+    {
+      "priority": 3,
+      "finding": "The equipment provider emits 30,520 track frames, but only 1,289 frames enter the local equipment channel and no rigid-bar Rep is produced.",
+      "interpretation": "Throughput is adequate. The bottleneck is subject/grip association, canonical local evidence and consensus admission—not FPS."
+    }
+  ],
+  "recommendedSequence": [
+    "Make TaskPrimary cycle validation sign-stable: validate departure-turnaround-return topology in the action-local frame, or bind an explicit expected sign from the action definition; do not require an arbitrary positive endpoint delta after segmentation.",
+    "Split RequiredJointLoss into typed CoordinateNotFrozen, SignalUnavailable and TransitionEvidenceWeak outcomes; bounded uncertainty becomes NeedsReview while true identity-relation loss remains Rejected.",
+    "Keep equipment observations independent from wrists, but improve continuous subject/grip association so measured tracks can enter the canonical local channel and Rep consensus.",
+    "Re-run this exact governed benchmark after each isolated change. Protect precision and reviewed-negative-window triggers while first recovering candidate retention, then boundary accuracy, then quality calibration."
+  ],
+  "limitations": [
+    "This is a known-participant, known-video regression set and cannot support a generalization claim.",
+    "There is no admitted human truth for equipment tracks, turnaround points or technique-quality conclusions, so their accuracy remains not evaluable.",
+    "The baseline fixture intentionally remains immutable; the ignored replay test reports a baseline-delta assertion after producing the complete post-fix output."
+  ]
+}

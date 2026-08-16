@@ -284,6 +284,7 @@
     .section-head h3 { margin: 0; font-size: 15px; }
     .section-head span { color: var(--muted); font: 700 9px/1 var(--mono); }
     .review-card { border: 1px solid var(--line); background: var(--panel); margin-bottom: 10px; padding: 13px; }
+    .review-card.known-gap { border-style: dashed; opacity: .78; }
     .card-lead { display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: 10px; align-items: center; }
     .card-number { width: 28px; height: 28px; display: grid; place-items: center; background: var(--acid); color: var(--ink); font: 1000 11px/1 var(--mono); }
     .review-card h3 { margin: 0; font-size: 13px; line-height: 1.35; }
@@ -297,10 +298,16 @@
     .verdict.selected.incorrect { border-color: var(--coral); background: rgba(255,104,72,.12); color: var(--coral); }
     .verdict.selected.cannot_judge { border-color: var(--amber); background: rgba(255,216,74,.12); color: var(--amber); }
     .field span { display: block; margin: 0 0 5px 2px; color: var(--muted); font: 700 8px/1 var(--mono); }
-    .field input { width: 100%; border: 1px solid var(--line); background: #080b09; color: var(--paper); padding: 9px 8px; font: 600 10px/1 var(--mono); outline: 0; }
-    .field input:focus { border-color: var(--cyan); }
+    .field input, .field select { width: 100%; min-height: 38px; border: 1px solid var(--line); background: #080b09; color: var(--paper); padding: 9px 8px; font: 600 10px/1.25 var(--mono); outline: 0; }
+    .field input:focus, .field select:focus { border-color: var(--cyan); }
+    .full-field { grid-column: 1 / -1; }
+    .clear-decision { grid-column: 1 / -1; justify-self: end; border: 0; background: transparent; color: var(--muted); padding: 3px 0; font: 700 8px/1 var(--mono); cursor: pointer; }
+    .clear-decision:hover { color: var(--coral); }
     .conclusion-head { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; }
     .dimension { display: block; margin-bottom: 6px; color: var(--cyan); font: 800 8px/1 var(--mono); letter-spacing: .08em; }
+    .review-priority { display: inline-block; margin-left: 7px; padding: 3px 5px; border: 1px solid currentColor; font: 800 7px/1 var(--mono); letter-spacing: 0; }
+    .review-priority.core { color: var(--acid); }
+    .review-priority.optional { color: var(--muted); }
     .confidence { align-self: start; color: var(--acid); font: 900 16px/1 var(--mono); }
     .conclusion-copy { display: grid; gap: 5px; }
     .conclusion-copy-zh { color: var(--paper); font-size: 14px; line-height: 1.45; }
@@ -310,12 +317,14 @@
     .conclusion-state.observed_deviation { color: var(--coral); border-color: var(--coral); }
     .conclusion-state.observed_acceptable { color: var(--green); border-color: var(--green); }
     .conclusion-state.cannot_judge { color: var(--amber); border-color: var(--amber); }
+    .conclusion-state.not_applicable { color: var(--muted); border-color: var(--muted); }
     .conclusion-reason { display: grid; gap: 3px; margin-top: 8px !important; padding-left: 9px; border-left: 2px solid var(--line-strong); }
     .conclusion-reason span:first-child { color: var(--paper); font-family: var(--sans); font-size: 10px; }
     .conclusion-reason span:last-child { color: var(--muted); font-size: 8px; }
     .translation-missing .conclusion-copy-zh, .conclusion-reason.translation-missing span:first-child { color: var(--amber); }
     .evidence-list { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
     .evidence-list code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--muted); background: #080b09; padding: 5px 6px; font: 600 8px/1 var(--mono); }
+    .review-hint { margin-top: 9px !important; color: var(--cyan) !important; }
     .empty { padding: 20px; border: 1px dashed var(--line); text-align: center; }
     .muted { color: var(--muted); }
 
@@ -500,12 +509,12 @@
             <div id="endpointReviews"></div>
           </section>
           <section class="review-section">
-            <div class="section-head"><h3>质量结论</h3><span>逐条判断</span></div>
+            <div class="section-head"><h3>质量结论</h3><span>核心必审 · 已知缺口可选</span></div>
             <div id="conclusionReviews"></div>
           </section>
 
           <footer class="review-status">
-            <div class="progress-head"><span>浏览器本地审核进度</span><span id="reviewProgressText">0 / 0</span></div>
+            <div class="progress-head"><span>浏览器本地审核进度</span><span id="reviewProgressText">核心 0 / 0</span></div>
             <div class="progress-track"><b id="reviewProgressBar"></b></div>
             <div id="qualityNotice" class="notice">审核会自动保存到此浏览器；只有“导出审核 JSON”才会生成正式文件。</div>
           </footer>

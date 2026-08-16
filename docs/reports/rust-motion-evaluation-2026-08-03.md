@@ -1,6 +1,6 @@
 # Rust Motion SDK canonical sidecar 兼容性评估
 
-生成时间：2026-08-03T19:51:11.363Z
+生成时间：2026-08-07T19:56:56.973Z
 
 ## 结论
 
@@ -10,9 +10,9 @@
 
 |范围|组数|真值 rep|Raw trigger|Rust sealed|Precision|Recall|F1|Exact count|Raw/产品负窗 FP|
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-|全部支持动作|10|72|79|51|82.4%|58.3%|68.3%|20.0%|20/8|
-|Held-out|3|22|26|20|85.0%|77.3%|81.0%|66.7%|4/2|
-|Challenge|1|6|9|5|100.0%|83.3%|90.9%|0.0%|3/0|
+|全部支持动作|10|72|76|34|94.1%|44.4%|60.4%|20.0%|17/1|
+|Held-out|3|22|26|17|94.1%|72.7%|82.1%|33.3%|4/0|
+|Challenge|1|6|9|0|0.0%|0.0%|0.0%|0.0%|3/0|
 
 ## 边界
 
@@ -26,13 +26,13 @@
 
 |Capture|动作|机位|Profile|人工|TS|Raw|Rust sealed|首次 Rust/人工分叉 ms|
 |---|---|---|---|---:|---:|---:|---:|---:|
-|field-capture-2026-08-02T18-41-05-284Z|lat_pulldown|rear|lat-pulldown/rear/bilateral/cable/v1|8|8|9|8|4748|
+|field-capture-2026-08-02T18-41-05-284Z|lat_pulldown|rear|lat-pulldown/rear/bilateral/cable/v1|8|8|9|7|4748|
 |field-capture-2026-08-02T18-41-55-780Z|lat_pulldown|rearLeft45|lat-pulldown/rear-left-45/bilateral/cable/v1|8|9|10|8|4466|
-|field-capture-2026-08-02T18-44-00-128Z|lat_pulldown|rearLeft45|lat-pulldown/rear-left-45/bilateral/cable/v1|6|6|9|5|7925|
-|field-capture-2026-08-02T18-46-52-295Z|lat_pulldown|rearLeft45|lat-pulldown/rear-left-45/bilateral/cable/v1|6|7|8|7|5573|
-|field-capture-2026-08-03T07-57-28-214Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|12|14|13|13|1334|
-|field-capture-2026-08-03T07-59-35-213Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|6|7|7|4|567|
-|field-capture-2026-08-03T08-04-11-681Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|5|6|1|1|867|
-|field-capture-2026-08-03T08-09-44-714Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|3|3|1|1|667|
-|field-capture-2026-08-03T08-15-35-147Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|8|10|1|1|500|
-|field-capture-2026-08-03T09-03-30-328Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|10|1|20|3|3349|
+|field-capture-2026-08-02T18-44-00-128Z|lat_pulldown|rearLeft45|lat-pulldown/rear-left-45/bilateral/cable/v1|6|6|9|0|6526|
+|field-capture-2026-08-02T18-46-52-295Z|lat_pulldown|rearLeft45|lat-pulldown/rear-left-45/bilateral/cable/v1|6|7|8|6|5573|
+|field-capture-2026-08-03T07-57-28-214Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|12|14|13|3|1334|
+|field-capture-2026-08-03T07-59-35-213Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|6|7|7|2|5046|
+|field-capture-2026-08-03T08-04-11-681Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|5|6|2|0|6949|
+|field-capture-2026-08-03T08-09-44-714Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|3|3|1|0|9816|
+|field-capture-2026-08-03T08-15-35-147Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|8|10|1|0|6472|
+|field-capture-2026-08-03T09-03-30-328Z|seated_shoulder_press|front|seated-shoulder-press/front/bilateral/dumbbell/v1|10|1|16|8|3349|

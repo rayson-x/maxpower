@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "maxpower-real-halpe26-cross-platform-runtime-parity/v1",
+  "status": "passed_available_runtimes",
+  "scope": "Rust canonical bridge parity from frozen real YOLOX-box + RTMPose Halpe-26 observations",
+  "productionPromotion": false,
+  "fixture": {
+    "sourceType": "personal_real_video",
+    "captureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+    "exerciseId": "barbell_bench_press",
+    "capturePosition": "front",
+    "scene": "wall mirror and gym bystanders visible",
+    "sourceVideo": "public/archives/confirmed-captures/chest/b8af1ab860d6bbb43cd3f2cadc71506c.mp4",
+    "sourceVideoSha256": "61bbd730286bb7591ff03961cab6feeb40d4a1ef9a085f57da9849beaeb9d60e",
+    "path": "tools/motion-sdk/fixtures/front-bench-mirror-halpe26-multi-candidate-v1.json",
+    "sha256": "1d9a6daf4d1e363547b822ac02923b91f2f58b0210c2bd7fcd2e76f9d9cd70fb",
+    "frameCount": 14,
+    "multiCandidateFrameCount": 5,
+    "maximumCandidateCount": 5,
+    "timeRangeMs": [
+      20500,
+      21800
+    ],
+    "missingPointPolicy": "no synthesis, no candidate mixing, raw finite RTMPose observations only"
+  },
+  "oracle": {
+    "owner": "rust-motion-sdk native C ABI",
+    "path": "tools/motion-sdk/fixtures/front-bench-mirror-halpe26-multi-candidate-v1.rust-oracle.json",
+    "sha256": "9fda66e0102ec938ac1029bb4a92b38c79869e04f0c11827599cd4c18aca95e3",
+    "packetCount": 14,
+    "packetContract": "MOTN/1.6",
+    "publishedAngleQuantizationDegrees": 0.001,
+    "angleQuantizationReason": "native and WebAssembly libm acos/hypot differed by up to 0.0001 degrees for identical canonical points; only client-facing angle serialization is quantized"
+  },
+  "identity": {
+    "selectedCandidateId": 0,
+    "selectedCandidateFrameCount": 14,
+    "wrongSubjectSwitchCount": 0,
+    "mirrorOrBystanderSubstitutionCount": 0
+  },
+  "platforms": {
+    "web": {
+      "status": "passed",
+      "runtime": "node_webassembly_using_web_client_session_wrapper",
+      "matchedPacketCount": 14,
+      "totalPacketCount": 14,
+      "byteExact": true,
+      "wasmPath": "public/motion-sdk/maxpower_motion_sdk.wasm",
+      "wasmSha256": "747f420986c339d66241e1b4b00735d6e6adcf5bf9103fb3c478585da82642fd",
+      "test": "tools/motion-sdk/realHalpe26BridgeParity.test.ts"
+    },
+    "android": {
+      "status": "passed",
+      "runtime": "physical_device",
+      "device": "PHK110",
+      "os": "Android 15",
+      "abi": "arm64-v8a",
+      "matchedPacketCount": 14,
+      "totalPacketCount": 14,
+      "byteExact": true,
+      "rustLibrarySha256": "221f7ab02c04d319ea5a8df5f758205c4af95600c6795f875a3b50e9a9b979fd",
+      "test": "modules/pose-camera/android/src/androidTest/java/expo/modules/posecamera/MotionNativeRealHalpe26ParityTest.kt",
+      "testResult": "modules/pose-camera/android/build/outputs/androidTest-results/connected/debug/TEST-PHK110 - 15-_pose-camera-.xml",
+      "testResultSha256": "2e39b02253f41afdadb973da7036508c57665eb1ce8fe3e71cf2e420370707ed",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0
+    },
+    "ios": {
+      "status": "passed",
+      "runtime": "simulator",
+      "device": "iPhone 17 Pro",
+      "os": "iOS 26.5 Simulator",
+      "abi": "arm64-apple-ios-sim",
+      "matchedPacketCount": 14,
+      "totalPacketCount": 14,
+      "byteExact": true,
+      "rustLibrarySha256": "7ee5b2bf75bc9b6bc285a129fbed98e551840c9c7a509fe6beece23d27934450",
+      "harness": "tools/motion-sdk/ios/RealHalpe26BridgeParity.mm",
+      "runner": "tools/motion-sdk/run-ios-real-halpe26-bridge-parity.sh",
+      "result": "PASS ios-simulator real Halpe-26 bridge parity: 14/14 frames"
+    }
+  },
+  "verified": [
+    "Halpe-26 index and finite-point bridge contract",
+    "candidate metadata packing",
+    "Rust subject selection remains on the exercising person",
+    "canonical point sources/confidence and joint-angle packet payload",
+    "WebAssembly, Android JNI and iOS Objective-C bridge produce the same 14 MOTN packets"
+  ],
+  "notVerifiedByThisReport": [
+    "same source pixels produce numerically identical YOLOX and RTMPose outputs on every client",
+    "iOS physical-device execution",
+    "camera/replay UI rendering parity",
+    "real-device sustained latency, memory, battery or thermal limits",
+    "rep-count or timeline generalization",
+    "technique standardness, compensation or training-effect accuracy"
+  ],
+  "remainingGaps": [
+    "run the same source video through each platform's native YOLOX and RTMPose pre/post-processing and compare raw candidates",
+    "repeat Rust bridge parity on a physical iOS device",
+    "measure end-to-end latency and thermal stability on physical Android and iOS devices",
+    "keep personal timeline and MM-Fit exact-count gates red until they independently reach 95 percent",
+    "collect dual-reviewed technique and compensation gold labels before training coach-quality judgements"
+  ]
+}

@@ -1,0 +1,264 @@
+{
+  "schemaVersion": "maxpower-personal-recognition-profile-diagnostic/v2",
+  "generatedAt": "2026-08-10T22:43:20+08:00",
+  "decision": {
+    "status": "research_candidate_not_promoted",
+    "personalExactSetGoalPassed": false,
+    "requiredExactSetSourceCaptureCount": 50,
+    "actualExactSetSourceCaptureCount": 44,
+    "actualStrictExactSourceCaptureCount": 41,
+    "productionPromotion": false,
+    "reason": "The in-sample candidate reaches 44/50 exact source-video set counts and 41/50 strict boundary-exact source videos. It does not meet the requested 50/50 replay goal or an independent held-out promotion gate."
+  },
+  "recognitionFramework": {
+    "poseBackend": {
+      "name": "MediaPipe Pose Landmarker Heavy",
+      "schema": "BlazePose33",
+      "role": "Produces raw frame observations and visibility; it does not count repetitions."
+    },
+    "canonicalRuntime": {
+      "name": "MaxPower Rust Motion SDK",
+      "role": "Locks the subject, rejects outliers, fuses kinematically valid weak arm observations, predicts short gaps, preserves unknown joints, and seals repetitions.",
+      "maximumPredictionMs": 150,
+      "landmarkSources": [
+        "measured",
+        "fused",
+        "predicted",
+        "unknown"
+      ]
+    },
+    "profileRole": "Selects exact-context kinematic signals, direction, amplitude, hysteresis, gap and duration gates for the ready-effort-peak-return state machine. It does not generate skeleton coordinates or classify arbitrary actions."
+  },
+  "poseDriftDiagnosis": {
+    "rootCause": "Large visual jumps begin in raw MediaPipe observations under supine perspective, occlusion, out-of-frame body parts and body-adjacent limbs. Rust landmark ordering is not corrupted.",
+    "benchSpotCheck": {
+      "captureId": "a51c8a692c2a5a5b40cda482065cc6d5",
+      "rawUpperBodyVisibleRatio": 0.4398,
+      "canonicalUsableRatioAfterLowGainFusionApprox": 0.599,
+      "interpretation": "Bone-constrained fusion recovers some usable joints but not a complete, separable cycle signal."
+    },
+    "reviewFrameSpotCheck": {
+      "captureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+      "timestampMs": 14550,
+      "finding": "The raw elbow visibility is below 0.5. Rust marks the corresponding short-gap result predicted rather than accepting the raw jump as measured."
+    },
+    "alternativePoseExperiment": {
+      "model": "local RTMPose-M SimCC ONNX",
+      "result": "The inspected rear single-arm frame still produced incorrect elbow topology; a tight crop reduced score further. This model is not currently a verified replacement."
+    },
+    "weakFusionExperiment": {
+      "result": "Low-gain fusion improves landmark availability. Raising the gain worsened full-video replay and was reverted.",
+      "conclusion": "Long-lived weak coordinates cannot safely be treated as reliable measurements merely because RGB is human-readable."
+    }
+  },
+  "predictionPolicy": {
+    "implemented": [
+      "High-confidence isolated outlier rejection",
+      "Bone-length-constrained weak elbow and wrist fusion",
+      "Timestamp-based velocity prediction for gaps no longer than 150 ms",
+      "Unknown fallback and clean reacquisition"
+    ],
+    "unsafe": "Unbounded multi-second extrapolation would hallucinate a plausible skeleton, hide model failure and create false repetitions.",
+    "nextAlgorithm": "A separately authorized masked temporal estimator may use action context, bone constraints, velocity, acceleration and prior-repetition phase, but must publish uncertainty and retain an unknown/reacquisition path."
+  },
+  "personalCorpus": {
+    "sourceCaptureCount": 50,
+    "evaluationWindowCount": 54,
+    "contextSplitSourceCaptureCount": 4,
+    "expectedSetRepCount": 465,
+    "strongPerRepBoundaryCount": 464,
+    "countOnlyRepCount": 1,
+    "partitionStatus": "legacy_unpartitioned",
+    "annotationIssues": [
+      {
+        "captureId": "field-capture-2026-08-02T18-19-26-633Z",
+        "expectedCount": 10,
+        "strongBoundaryCount": 9,
+        "reason": "One group-count repetition has no human start/turning-point/end boundary."
+      },
+      {
+        "count": 3,
+        "reason": "Three labels contain a degenerate equal phase timestamp."
+      }
+    ],
+    "interpretation": "All personal metrics are in-sample golden replay diagnostics, not unseen-user accuracy."
+  },
+  "personalReplay": {
+    "parent": {
+      "sourceCaptureCount": 50,
+      "evaluationWindowCount": 54,
+      "exactSetCountSourceCaptureCount": 40,
+      "strictExactSourceCaptureCount": 39,
+      "predictedRepCount": 462,
+      "matchedRepCount": 451,
+      "matchedRecall": 0.9719827586206896,
+      "matchedPrecision": 0.9761904761904762,
+      "absoluteCountError": 11
+    },
+    "candidate": {
+      "sourceCaptureCount": 50,
+      "evaluationWindowCount": 54,
+      "exactSetCountWindowCount": 48,
+      "exactSetCountSourceCaptureCount": 44,
+      "exactSetCountSourceRatio": 0.88,
+      "strictExactWindowCount": 44,
+      "strictExactSourceCaptureCount": 41,
+      "strictExactSourceRatio": 0.82,
+      "expectedSetRepCount": 465,
+      "strongTruthRepCount": 464,
+      "predictedRepCount": 461,
+      "matchedRepCount": 449,
+      "matchedRecall": 0.9676724137931034,
+      "matchedPrecision": 0.9739696312364425,
+      "absoluteCountError": 12
+    },
+    "delta": {
+      "exactSetCountSourceCaptureCount": 4,
+      "exactSetCountPercentagePoints": 8,
+      "strictExactSourceCaptureCount": 2,
+      "strictExactPercentagePoints": 4,
+      "matchedRepCount": -2,
+      "matchedRecallPercentagePoints": -0.43103448275862,
+      "matchedPrecisionPercentagePoints": -0.22208428615177,
+      "absoluteCountError": 1
+    },
+    "strictDefinition": "A source passes strict replay only when the summed predicted count equals summed expected count and every available human boundary across all context windows is matched."
+  },
+  "remainingPersonalFailures": {
+    "strictSourceCaptureCount": 9,
+    "exactSetCountFailureSourceCaptureCount": 6,
+    "groups": [
+      {
+        "bucket": "barbell_bench_press/front",
+        "strictSourceFailures": 2,
+        "setCountSourceFailures": 1,
+        "results": [
+          "a51c8a692c2a5a5b40cda482065cc6d5: expected 4, predicted 6, matched 3",
+          "b8af1ab860d6bbb43cd3f2cadc71506c: expected 8, predicted 8, matched 6"
+        ]
+      },
+      {
+        "bucket": "barbell_row/rearRight45",
+        "strictSourceFailures": 1,
+        "setCountSourceFailures": 1,
+        "result": "expected 10, strong truth 9, predicted 8, matched 8"
+      },
+      {
+        "bucket": "push_up/rearRight45",
+        "strictSourceFailures": 1,
+        "setCountSourceFailures": 0,
+        "result": "expected/predicted 14, but one missed and one false-positive boundary"
+      },
+      {
+        "bucket": "rear_delt_fly/front",
+        "strictSourceFailures": 1,
+        "setCountSourceFailures": 1,
+        "result": "expected 15, predicted/matched 10, needs-review 14"
+      },
+      {
+        "bucket": "single_arm_cable_lateral_raise/rearRight45",
+        "strictSourceFailures": 3,
+        "setCountSourceFailures": 3,
+        "result": "Three rear blocks are 8->9 matched 8, 8->7 matched 6, and 8->9 matched 7."
+      },
+      {
+        "bucket": "straight_arm_pulldown/frontLeft45",
+        "strictSourceFailures": 1,
+        "setCountSourceFailures": 0,
+        "result": "expected/predicted 8, but one missed and one false-positive boundary"
+      }
+    ]
+  },
+  "smoothedStateGraphExperiment": {
+    "status": "reverted_stop_condition",
+    "windowMs": 200,
+    "improvedBucket": "single_arm_cable_lateral_raise/frontLeft45",
+    "improvement": "3/4 to 4/4 strict evaluation windows and 33/34 to 34/34 matched boundaries",
+    "sourceVideoExactSetImprovement": 0,
+    "noImprovementBuckets": [
+      "barbell_bench_press/front",
+      "rear_delt_fly/front",
+      "single_arm_cable_lateral_raise/rearRight45",
+      "barbell_row/rearRight45",
+      "push_up/rearRight45",
+      "straight_arm_pulldown/frontLeft45"
+    ],
+    "reasonReverted": "An opt-in state graph required a new Rust ABI state-machine code. The handoff requires stopping for explicit user authorization before Rust ABI changes."
+  },
+  "mmFitFrozenSetCountReplay": {
+    "poseDomain": "mmfit_openpose18_mapped",
+    "supervision": "set_count",
+    "aggregate": {
+      "clipCount": 616,
+      "truthRepCount": 6160,
+      "predictedRepCount": 5852,
+      "exactSetRatio": 0.7906,
+      "meanAbsoluteCountError": 0.5974,
+      "offByOneRatio": 0.9156
+    },
+    "bySplit": {
+      "train": { "clipCount": 301, "exactSetRatio": 0.7874, "meanAbsoluteCountError": 0.6611 },
+      "validation": { "clipCount": 86, "exactSetRatio": 0.8488, "meanAbsoluteCountError": 0.4767 },
+      "test": { "clipCount": 90, "exactSetRatio": 0.8889, "meanAbsoluteCountError": 0.1778 },
+      "unseen_test": { "clipCount": 139, "exactSetRatio": 0.6978, "meanAbsoluteCountError": 0.8058 }
+    },
+    "interpretation": "Official MM-Fit set-count metrics on mapped OpenPose/COCO pose; not per-rep phase or MediaPipe Heavy RGB accuracy."
+  },
+  "mmFitRgbTrain": {
+    "subjects": ["w01", "w02", "w03", "w04", "w06", "w07", "w08", "w16", "w17", "w18"],
+    "fileCount": 10,
+    "remainingBytes": 0,
+    "officialSizeAndMd5Verification": "passed",
+    "validationTestUnseenDownloadedByThisTask": false
+  },
+  "promotionBlockers": [
+    "Personal exact source-video set count is 44/50, below the requested 50/50 goal.",
+    "Personal strict replay is 41/50 and includes boundary regressions despite improved exact-set coverage.",
+    "Personal data lacks structured subject/session groups and remains legacy_unpartitioned.",
+    "No independent held-out personal subject/session set proves >=95% unseen generalization.",
+    "MM-Fit labels are set-count weak supervision and frozen metrics remain in mapped OpenPose domain.",
+    "One capture has expected count 10 but only 9 human boundaries; three labels have degenerate phase timestamps.",
+    "Continuing the successful temporal-smoothing direction requires explicit authorization for Rust ABI/runtime work."
+  ],
+  "artifacts": {
+    "personalGoldenApprovals": {
+      "path": "data/training/personal-golden-approvals-v2.json",
+      "sha256": "8268cf964184e08934d2fcfb409255f986bec0d7014223e48ed094c2d3067c8f"
+    },
+    "personalGoldenSegmentation": {
+      "path": "data/training/personal-golden-segmentation-v2.json",
+      "sha256": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727"
+    },
+    "candidateProfile": {
+      "path": "data/workflows/motion-profile/personal-golden-v2/run-2026-08-10/candidates/final-personal-v2-candidate.json",
+      "sha256": "eb3898dd8456b515dbdc37f9e7bf571cc5d9caa90e41eeb7563635384b91cc5a"
+    },
+    "candidateReplay": {
+      "path": "data/workflows/motion-profile/personal-golden-v2/run-2026-08-10/diagnostics/final-personal-v2-replay.json",
+      "sha256": "302e272c4f7b343b9fd2b24da88a1178c656996792900fdb05919d14adc004e2"
+    },
+    "mmFitReplay": {
+      "path": "docs/reports/mmfit-full-616-validation-gated-benchmark-2026-08-10.json",
+      "sha256": "393500a15574678a2aa5a76de057c41fda2604762ace9c767a3498d19e8d1be6"
+    },
+    "productionProfile": {
+      "path": "public/archives/confirmed-captures/recognition-profiles.json",
+      "sha256": "2efd51c414eaa5c575b9cacc87680bf29f04fc262b290154a211ec88e127c877",
+      "modified": false
+    }
+  },
+  "verification": {
+    "passed": 126,
+    "failed": 0,
+    "suites": [
+      { "name": "Rust continuity, rep and web contracts", "passed": 25 },
+      { "name": "TypeScript canonical continuity", "passed": 10 },
+      { "name": "Recognition profile tools", "passed": 5 },
+      { "name": "Recognition review", "passed": 5 },
+      { "name": "Personal golden preparation", "passed": 3 },
+      { "name": "Motion profile workflow", "passed": 22 },
+      { "name": "External fitness data and MM-Fit", "passed": 56 }
+    ],
+    "mmFitRgbDryRun": "split=train files=10 remaining_bytes=0"
+  }
+}

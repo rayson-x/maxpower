@@ -16,25 +16,14 @@ import type { PlannedSessionData } from "../coach/domain";
  */
 
 /**
- * 各肌群的恢复窗口（天）。大肌群/高负荷动作恢复更慢。
- * 产品规则（D 级）；具体数值待认证体系方法论调研结果校准。
+ * 肌群恢复窗口（天）。
+ *
+ * 2026-08-16 文献裁决后，按肌群大小二分被反证并废除；统一取版本化恢复窗
+ * 政策的默认档（moderate_familiar 48–72h → 2 天，组均值）。剂量/熟悉度分档
+ * 见 planning/recoveryWindows.ts 的 RECOVERY_WINDOW_POLICY；本检查继续只检测
+ * 直接肌群，协同重叠由恢复上下文的残差阈值提示负责，两层不混。
  */
-const RECOVERY_DAYS: Readonly<Record<string, number>> = {
-  quadriceps: 2,
-  hamstrings: 2,
-  glutes: 2,
-  back: 2,
-  chest: 2,
-  deltoids: 1,
-  lateral_deltoid: 1,
-  rear_deltoid: 1,
-  biceps: 1,
-  triceps: 1,
-  core: 1,
-};
-
-/** 默认恢复窗口（未列出的肌群）。 */
-const DEFAULT_RECOVERY_DAYS = 1;
+const DEFAULT_RECOVERY_DAYS = 2;
 
 export interface RecoveryConflict {
   muscle: string;
@@ -89,7 +78,7 @@ export function recoveryIntervalConflicts(input: {
   for (const session of ordered) {
     for (const muscle of directMusclesOf(session)) {
       const previous = lastTrained.get(muscle);
-      const required = RECOVERY_DAYS[muscle] ?? DEFAULT_RECOVERY_DAYS;
+      const required = DEFAULT_RECOVERY_DAYS;
       if (previous) {
         const gap = daysBetween(previous.date, session.scheduledFor);
         if (gap >= 0 && gap < required) {

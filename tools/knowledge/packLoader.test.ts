@@ -17,7 +17,7 @@ test("无数据包时使用内置包", () => {
 test("合法数据包覆盖内置包", () => {
   const load = loadKnowledgePack(builtinJson());
   assert.equal(load.source, "installed");
-  assert.equal(load.pack.exerciseCatalog.variants.length, 379);
+  assert.equal(load.pack.exerciseCatalog.variants.length, 385);
 });
 
 test("签名不符的数据包回退内置包并记录原因", () => {

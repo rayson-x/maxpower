@@ -13,6 +13,8 @@ const {
   coordinateEvidenceSummary,
   coordinateStatusSummary,
   coordinateStatusText,
+  correctionSelection,
+  conclusionReviewPriority,
   createWorkspace,
   dimensionLabel,
   draftStorageKey,
@@ -28,6 +30,7 @@ const {
   syncExistingDecisionDraft,
   restoreLocalDraft,
   saveLocalDraft,
+  structuredConclusionCorrection,
   trajectoryUntil,
 } = require("./qualityReviewApp.js");
 
@@ -200,6 +203,56 @@ test("current Rust eight-dimension keys render with Chinese review labels", () =
     trajectory_control: "轨迹控制",
     standard_variant_compatibility: "标准变式兼容性",
     observation_confidence: "观测可信度",
+  });
+});
+
+test("known unimplemented abstentions stay reviewable without inflating core progress", () => {
+  const release = fixtureRelease();
+  const conclusion = release.items[0].proposal.reps[0].conclusions[0];
+  conclusion.conclusionId = "support-gap";
+  conclusion.dimension = "support_stability";
+  conclusion.state = "cannot_judge";
+  assert.equal(conclusionReviewPriority(conclusion), "known_gap");
+
+  const workspace = createWorkspace(release, {
+    reviewerId: "owner",
+    reviewerRole: "owner_observation",
+  });
+  assert.deepEqual(workspace.progress(), {
+    decided: 0,
+    total: 4,
+    coreDecided: 0,
+    coreTotal: 3,
+    optionalDecided: 0,
+    optionalTotal: 1,
+  });
+  workspace.review("item-a").setDecision({
+    target: { kind: "conclusion", repId: "rep-1", conclusionId: "support-gap" },
+    verdict: "correct",
+    correctedValue: null,
+  });
+  assert.equal(workspace.progress().coreDecided, 0);
+  assert.equal(workspace.progress().optionalDecided, 1);
+});
+
+test("conclusion corrections use a typed expected state and issue code", () => {
+  assert.deepEqual(structuredConclusionCorrection("observed_deviation", "local_coordinate_wrong"), {
+    schemaVersion: "maxpower-motion-quality-correction/v1",
+    expectedState: "observed_deviation",
+    issueCode: "local_coordinate_wrong",
+  });
+  assert.equal(structuredConclusionCorrection("", ""), null);
+  assert.deepEqual(correctionSelection({
+    schemaVersion: "maxpower-motion-quality-correction/v1",
+    expectedState: "not_applicable",
+    issueCode: "conclusion_state_wrong",
+  }), {
+    expectedState: "not_applicable",
+    issueCode: "conclusion_state_wrong",
+  });
+  assert.deepEqual(correctionSelection({ state: "cannot_judge", reason: "legacy_reason" }), {
+    expectedState: "cannot_judge",
+    issueCode: "legacy_reason",
   });
 });
 

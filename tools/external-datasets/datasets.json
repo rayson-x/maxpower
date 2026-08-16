@@ -91,6 +91,67 @@
         "annotation/valid.csv",
         "annotation/test.csv"
       ]
+    },
+    {
+      "id": "exercises-dataset-hasaneyldrm",
+      "homepage": "https://github.com/hasaneyldrm/exercises-dataset",
+      "codeRepository": "https://github.com/hasaneyldrm/exercises-dataset",
+      "snapshot": {
+        "ref": "main",
+        "commit": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+        "commitDate": "2026-07-16T06:50:40Z",
+        "retrievedAt": "2026-08-16",
+        "files": [
+          {
+            "path": "data/exercises.json",
+            "bytes": 17391530,
+            "sha256": "656634224b8977b99a6d765470ee123260d4979715eaa4e7c0b7c8bb0d79f93d"
+          },
+          {
+            "path": "data/exercises.schema.json",
+            "bytes": 5143,
+            "sha256": "33fb14b439c68e12365e14a0759006c40564646ac27084efe1f2e956804b2d49"
+          }
+        ],
+        "excludedPaths": [
+          "images/",
+          "videos/"
+        ],
+        "excludedReason": "Media is Gym visual property under separate terms that restrict AI/generative use; the repo grants no media rights beyond those terms."
+      },
+      "license": {
+        "nonMediaData": "MIT (names, categories, body parts, equipment, target, muscle groups, multilingual instructions)",
+        "media": "Gym visual Terms & Conditions, redistribution by written permission only, 180x180 with attribution; not MIT",
+        "effectiveLocalPolicy": "text/metadata only; images and GIFs are never downloaded, displayed, or fed to training/annotation/generative pipelines"
+      },
+      "recordCount": 1324,
+      "fields": [
+        "id",
+        "name",
+        "category",
+        "body_part",
+        "equipment",
+        "muscle_group",
+        "target",
+        "secondary_muscles",
+        "instructions",
+        "instruction_steps",
+        "created_at"
+      ],
+      "languages": [
+        "en",
+        "es",
+        "it",
+        "tr",
+        "ru",
+        "zh",
+        "hi",
+        "pl",
+        "ko",
+        "fr"
+      ],
+      "role": "candidate_exercise_metadata_source",
+      "notes": "Candidate-only input for exercise concept review. Records enter the MaxPower ExerciseVariant knowledge layer only after license, naming, equipment, exact-variant, and muscle-role review. Muscle vocabulary granularity is inconsistent across fields (e.g. quads/quadriceps, delts/shoulders, abs/core) and secondary_muscles may repeat the muscle_group value; ontology mapping must be reviewed per variant."
     }
   ]
 }

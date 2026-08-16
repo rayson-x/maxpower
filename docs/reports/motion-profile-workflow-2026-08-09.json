@@ -1,0 +1,1386 @@
+{
+  "schemaVersion": "maxpower-motion-profile-workflow-report/v3",
+  "generatedAt": "2026-08-10T19:08:35.717Z",
+  "runId": "80f5e0ae5b0e4e1a980bcf21",
+  "status": "not_promotable",
+  "outcome": {
+    "improved": true,
+    "selfImproved": true,
+    "mmfitImprovedWithoutExactSetRegression": true,
+    "promotion": "not_promotable",
+    "evidenceIndependence": "self tuning is legacy/in-sample; self challenge is frozen but not subject-independent; MM-Fit uses official subject splits with weak set_count labels",
+    "selfReplayPolicies": {
+      "compatibilityBaseline": "compatibility_replay",
+      "productParentAndCandidate": "product_set"
+    }
+  },
+  "target95": {
+    "selfTuningInSamplePerRep": {
+      "passed": true,
+      "matchedRecall": 0.9761904761904762,
+      "matchedPrecision": 0.9761904761904762,
+      "independent": false
+    },
+    "selfFrozenEndToEndPerRep": {
+      "passed": false,
+      "matchedRecall": 0.7640449438202247,
+      "matchedPrecision": 0.9315068493150684,
+      "independent": false
+    },
+    "selfChallengePerRep": {
+      "passed": false,
+      "matchedRecall": 0.574468085106383,
+      "matchedPrecision": 0.8709677419354839,
+      "independent": false
+    },
+    "mmfitUnseenExactSet": {
+      "passed": false,
+      "exactRatio": 0.6978,
+      "supervision": "set_count",
+      "observationDomain": "mmfit_openpose18_mapped"
+    },
+    "promotionPassed": false
+  },
+  "nativeCandidateDiscovery": {
+    "status": "complete",
+    "poseDomain": "mmfit_mediapipe33_heavy_cpu",
+    "clipCount": 301,
+    "corpusSha256": "ee7b4e95a553c6d315cca3d50031b8ba0fcf17ab4f2ada3976a8e10a36e5e1ce",
+    "trainOnly": true,
+    "frozenIndependentEvaluationAvailable": false
+  },
+  "nativeTrainingDiagnostics": {
+    "artifactPath": "data/workflows/motion-profile/recognition-corpus-v1/80f5e0ae5b0e4e1a980bcf21/candidates/mmfit-rolling-training.json",
+    "researchOnly": true,
+    "independent": false,
+    "coverage": {
+      "totalClipCount": 616,
+      "candidateDiscoveryClipCount": 301,
+      "trainedBucketCount": 14,
+      "acceptedBucketCount": 5,
+      "evaluatedClipCount": 589
+    },
+    "validationGatedMappedAggregate": {
+      "baseline": {
+        "clipCount": 589,
+        "truthRepCount": 5891,
+        "predictedRepCount": 5072,
+        "meanAbsoluteCountError": 1.4177,
+        "exactCountRatio": 0.6604,
+        "offByOneRatio": 0.8031,
+        "overcountClipCount": 6
+      },
+      "selectedAfterValidationGate": {
+        "clipCount": 589,
+        "truthRepCount": 5891,
+        "predictedRepCount": 5624,
+        "meanAbsoluteCountError": 0.5484,
+        "exactCountRatio": 0.8115,
+        "offByOneRatio": 0.9185,
+        "overcountClipCount": 21
+      }
+    },
+    "pushUpBuckets": [
+      {
+        "bucketId": "push_up/body-orientation-front",
+        "status": "skipped",
+        "candidateDiscoveryClipCount": 0,
+        "validationClipCount": 0,
+        "trainSelectedCandidateId": null,
+        "acceptedCandidateId": null,
+        "validationGateStatus": null,
+        "trainMetrics": null,
+        "reason": "Insufficient isolated candidate-discovery evidence (need train>=8); validation safeguards never substitute for training clips."
+      },
+      {
+        "bucketId": "push_up/body-orientation-oblique45",
+        "status": "trained",
+        "candidateDiscoveryClipCount": 16,
+        "validationClipCount": 6,
+        "trainSelectedCandidateId": "secondary-side-direction-auto-fast",
+        "acceptedCandidateId": "secondary-side-direction-auto-fast",
+        "validationGateStatus": "passed",
+        "trainMetrics": {
+          "clipCount": 16,
+          "truthRepCount": 160,
+          "predictedRepCount": 160,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "reason": null
+      },
+      {
+        "bucketId": "push_up/body-orientation-side",
+        "status": "skipped",
+        "candidateDiscoveryClipCount": 6,
+        "validationClipCount": 3,
+        "trainSelectedCandidateId": null,
+        "acceptedCandidateId": null,
+        "validationGateStatus": null,
+        "trainMetrics": null,
+        "reason": "Insufficient isolated candidate-discovery evidence (need train>=8); validation safeguards never substitute for training clips."
+      },
+      {
+        "bucketId": "push_up/body-orientation-unknown",
+        "status": "trained",
+        "candidateDiscoveryClipCount": 10,
+        "validationClipCount": 0,
+        "trainSelectedCandidateId": "direction-auto-fast",
+        "acceptedCandidateId": null,
+        "validationGateStatus": "unavailable",
+        "trainMetrics": {
+          "clipCount": 10,
+          "truthRepCount": 100,
+          "predictedRepCount": 100,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "reason": null
+      }
+    ]
+  },
+  "diagnosis": {
+    "fixedAlgorithmDefect": "Explicit product sets could remain in Arming forever because frame-to-frame pose jitter reset the 500 ms stability timer. SetGate now retains the stable fast path and activates after a bounded 2,000 ms observable arming interval.",
+    "fixedEvaluationDefect": "MM-Fit frozen replay previously requested a front-view initializer for every exercise, silently excluding 320 of 616 labeled sets whose registered initializer uses another view. Replay now resolves each exercise at its recommended capture position and evaluates all 616 official sets.",
+    "residualEndToEndErrors": {
+      "missedTruthReps": 21,
+      "unmatchedPredictedReps": 5,
+      "allMissesAreChallenge": false,
+      "tuningUnmatchedPredictedReps": 1,
+      "challengeUnmatchedPredictedReps": 4
+    },
+    "unsupportedByCurrentAlgorithm": {
+      "captures": 3,
+      "labeledReps": 16,
+      "bucket": "barbell_bench_press|front",
+      "rawVideoHumanVisibility": "confirmed_clear",
+      "cause": "The exact front-view profile is absent, so these captures never enter the Rust counter. Upstream MediaPipe Heavy also assigns very low elbow/wrist confidence in the supine view despite clear RGB evidence; the current canonical signal gate discards those coordinates.",
+      "metricTreatment": "end_to_end_algorithm_failure; predicted_count=0; all labeled reps remain in the denominator"
+    },
+    "remainingCauses": [
+      "The push-up setup before the annotated set contains one complete kinematic cycle, so pose-only inference cannot distinguish it without a trustworthy set-start event or explicit negative semantics.",
+      "Native MM-Fit push-up clips are top-to-top while the simulated initializer is bottom-to-bottom; a fixed increasing direction therefore counted 31/32 clips exactly one low. The research grid now tests Rust auto direction, which locks from pose motion without reading the set-count label.",
+      "A native Heavy squat clip exposed side occlusion: one knee signal was nearly static while the opposite knee carried all ten cycles. The research grid now tests Rust's existing per-cycle visible-side graph instead of requiring bilateral motion.",
+      "The three front-view bench captures are algorithm-coverage failures, not bad recordings: no exact profile resolves and all 16 labeled reps now count as misses in end-to-end metrics.",
+      "Among contexts that do resolve a profile, all five residual missed truth reps are in challenge captures with endpoint dropout, phase offset, or observation gaps; challenge evidence remains frozen and cannot tune parameters.",
+      "Negative-window predictions and unmatched false positives are separate metrics: an early phase prediction can fall in an inter-rep window yet still one-to-one match the following labeled peak."
+    ]
+  },
+  "sources": {
+    "selfCaptures": 11,
+    "selfRepCount": 89,
+    "mmfitSets": 616,
+    "mmfitRepCount": 6160
+  },
+  "admissionSummary": {
+    "total": 627,
+    "byDisposition": {
+      "challenge_regression_only": 7,
+      "candidate_discovery_and_regression": 4,
+      "frozen_evaluation": 315,
+      "weak_candidate_discovery": 301
+    },
+    "blockers": [
+      "self data: legacy_unpartitioned",
+      "MM-Fit license: research-only policy pending formal review"
+    ]
+  },
+  "splitSummary": {
+    "total": 627,
+    "bySplit": {
+      "legacy_unpartitioned": 11,
+      "unseen_test": 139,
+      "train": 301,
+      "test": 90,
+      "validation": 86
+    },
+    "leakageChecks": [
+      "same sourceSequenceId has one split",
+      "MM-Fit official subject split preserved",
+      "self data remains legacy_unpartitioned"
+    ]
+  },
+  "baseline": {
+    "parent": {
+      "selfPerRep": {
+        "sampleCount": 11,
+        "truthCount": 89,
+        "predictedCount": 79,
+        "exactRatio": 0.1818,
+        "meanAbsoluteError": 2.5455,
+        "offByOneRatio": 0.3636,
+        "matchedRepCount": 61,
+        "matchedRecall": 0.6853932584269663,
+        "matchedPrecision": 0.7721518987341772,
+        "falsePositiveRepCount": 18,
+        "negativeWindowFalsePositiveCount": 21,
+        "meanAbsolutePeakErrorMs": 681.0327868852459,
+        "needsReviewOutcomeCount": 19,
+        "rejectedOutcomeCount": 41,
+        "unavailableCaptureCount": 3,
+        "exactCaptureCount": 2,
+        "fullyMatchedCaptureCount": 0
+      },
+      "mmfitSetCount": {
+        "sampleCount": 301,
+        "truthCount": 2999,
+        "predictedCount": 2596,
+        "exactRatio": 0.6512,
+        "meanAbsoluteError": 1.3854,
+        "offByOneRatio": 0.814,
+        "split": "train",
+        "domain": "mmfit_openpose18_mapped"
+      }
+    },
+    "candidate": {
+      "selfPerRep": {
+        "sampleCount": 11,
+        "truthCount": 89,
+        "predictedCount": 79,
+        "exactRatio": 0.1818,
+        "meanAbsoluteError": 2.5455,
+        "offByOneRatio": 0.3636,
+        "matchedRepCount": 61,
+        "matchedRecall": 0.6853932584269663,
+        "matchedPrecision": 0.7721518987341772,
+        "falsePositiveRepCount": 18,
+        "negativeWindowFalsePositiveCount": 21,
+        "meanAbsolutePeakErrorMs": 681.0327868852459,
+        "needsReviewOutcomeCount": 19,
+        "rejectedOutcomeCount": 41,
+        "unavailableCaptureCount": 3,
+        "exactCaptureCount": 2,
+        "fullyMatchedCaptureCount": 0
+      },
+      "mmfitSetCount": {
+        "sampleCount": 301,
+        "truthCount": 2999,
+        "predictedCount": 2596,
+        "exactRatio": 0.6512,
+        "meanAbsoluteError": 1.3854,
+        "offByOneRatio": 0.814,
+        "split": "train",
+        "domain": "mmfit_openpose18_mapped"
+      }
+    },
+    "selfByAdmission": {
+      "tuningEligible": {
+        "parent": {
+          "sampleCount": 4,
+          "truthCount": 42,
+          "predictedCount": 44,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0.25,
+          "matchedRepCount": 34,
+          "matchedRecall": 0.8095238095238095,
+          "matchedPrecision": 0.7727272727272727,
+          "falsePositiveRepCount": 10,
+          "negativeWindowFalsePositiveCount": 13,
+          "meanAbsolutePeakErrorMs": 647.0588235294117,
+          "needsReviewOutcomeCount": 14,
+          "rejectedOutcomeCount": 27,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 4,
+          "truthCount": 42,
+          "predictedCount": 44,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0.25,
+          "matchedRepCount": 34,
+          "matchedRecall": 0.8095238095238095,
+          "matchedPrecision": 0.7727272727272727,
+          "falsePositiveRepCount": 10,
+          "negativeWindowFalsePositiveCount": 13,
+          "meanAbsolutePeakErrorMs": 647.0588235294117,
+          "needsReviewOutcomeCount": 14,
+          "rejectedOutcomeCount": 27,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      "challenge": {
+        "parent": {
+          "sampleCount": 7,
+          "truthCount": 47,
+          "predictedCount": 35,
+          "exactRatio": 0.2857,
+          "meanAbsoluteError": 2.8571,
+          "offByOneRatio": 0.4286,
+          "matchedRepCount": 27,
+          "matchedRecall": 0.574468085106383,
+          "matchedPrecision": 0.7714285714285715,
+          "falsePositiveRepCount": 8,
+          "negativeWindowFalsePositiveCount": 8,
+          "meanAbsolutePeakErrorMs": 723.8148148148148,
+          "needsReviewOutcomeCount": 5,
+          "rejectedOutcomeCount": 14,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 2,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 7,
+          "truthCount": 47,
+          "predictedCount": 35,
+          "exactRatio": 0.2857,
+          "meanAbsoluteError": 2.8571,
+          "offByOneRatio": 0.4286,
+          "matchedRepCount": 27,
+          "matchedRecall": 0.574468085106383,
+          "matchedPrecision": 0.7714285714285715,
+          "falsePositiveRepCount": 8,
+          "negativeWindowFalsePositiveCount": 8,
+          "meanAbsolutePeakErrorMs": 723.8148148148148,
+          "needsReviewOutcomeCount": 5,
+          "rejectedOutcomeCount": 14,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 2,
+          "fullyMatchedCaptureCount": 0
+        }
+      }
+    },
+    "selfByBucket": [
+      {
+        "bucketId": "machine_chest_press|front",
+        "admission": "challenge",
+        "parent": {
+          "sampleCount": 3,
+          "truthCount": 21,
+          "predictedCount": 22,
+          "exactRatio": 0.6667,
+          "meanAbsoluteError": 0.3333,
+          "offByOneRatio": 1,
+          "matchedRepCount": 18,
+          "matchedRecall": 0.8571428571428571,
+          "matchedPrecision": 0.8181818181818182,
+          "falsePositiveRepCount": 4,
+          "negativeWindowFalsePositiveCount": 3,
+          "meanAbsolutePeakErrorMs": 658.4444444444445,
+          "needsReviewOutcomeCount": 2,
+          "rejectedOutcomeCount": 6,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 2,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 3,
+          "truthCount": 21,
+          "predictedCount": 22,
+          "exactRatio": 0.6667,
+          "meanAbsoluteError": 0.3333,
+          "offByOneRatio": 1,
+          "matchedRepCount": 18,
+          "matchedRecall": 0.8571428571428571,
+          "matchedPrecision": 0.8181818181818182,
+          "falsePositiveRepCount": 4,
+          "negativeWindowFalsePositiveCount": 3,
+          "meanAbsolutePeakErrorMs": 658.4444444444445,
+          "needsReviewOutcomeCount": 2,
+          "rejectedOutcomeCount": 6,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 2,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|frontRight45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 15,
+          "predictedCount": 12,
+          "exactRatio": 0,
+          "meanAbsoluteError": 3,
+          "offByOneRatio": 0,
+          "matchedRepCount": 10,
+          "matchedRecall": 0.6666666666666666,
+          "matchedPrecision": 0.8333333333333334,
+          "falsePositiveRepCount": 2,
+          "negativeWindowFalsePositiveCount": 4,
+          "meanAbsolutePeakErrorMs": 1073.6,
+          "needsReviewOutcomeCount": 10,
+          "rejectedOutcomeCount": 14,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 15,
+          "predictedCount": 12,
+          "exactRatio": 0,
+          "meanAbsoluteError": 3,
+          "offByOneRatio": 0,
+          "matchedRepCount": 10,
+          "matchedRecall": 0.6666666666666666,
+          "matchedPrecision": 0.8333333333333334,
+          "falsePositiveRepCount": 2,
+          "negativeWindowFalsePositiveCount": 4,
+          "meanAbsolutePeakErrorMs": 1073.6,
+          "needsReviewOutcomeCount": 10,
+          "rejectedOutcomeCount": 14,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "machine_chest_press|frontRight45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 8,
+          "predictedCount": 10,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0,
+          "matchedRepCount": 7,
+          "matchedRecall": 0.875,
+          "matchedPrecision": 0.7,
+          "falsePositiveRepCount": 3,
+          "negativeWindowFalsePositiveCount": 3,
+          "meanAbsolutePeakErrorMs": 850.1428571428571,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 1,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 8,
+          "predictedCount": 10,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0,
+          "matchedRepCount": 7,
+          "matchedRecall": 0.875,
+          "matchedPrecision": 0.7,
+          "falsePositiveRepCount": 3,
+          "negativeWindowFalsePositiveCount": 3,
+          "meanAbsolutePeakErrorMs": 850.1428571428571,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 1,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|frontRight45",
+        "admission": "challenge",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 10,
+          "predictedCount": 13,
+          "exactRatio": 0,
+          "meanAbsoluteError": 3,
+          "offByOneRatio": 0,
+          "matchedRepCount": 9,
+          "matchedRecall": 0.9,
+          "matchedPrecision": 0.6923076923076923,
+          "falsePositiveRepCount": 4,
+          "negativeWindowFalsePositiveCount": 5,
+          "meanAbsolutePeakErrorMs": 854.5555555555555,
+          "needsReviewOutcomeCount": 3,
+          "rejectedOutcomeCount": 8,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 10,
+          "predictedCount": 13,
+          "exactRatio": 0,
+          "meanAbsoluteError": 3,
+          "offByOneRatio": 0,
+          "matchedRepCount": 9,
+          "matchedRecall": 0.9,
+          "matchedPrecision": 0.6923076923076923,
+          "falsePositiveRepCount": 4,
+          "negativeWindowFalsePositiveCount": 5,
+          "meanAbsolutePeakErrorMs": 854.5555555555555,
+          "needsReviewOutcomeCount": 3,
+          "rejectedOutcomeCount": 8,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|front",
+        "admission": "challenge",
+        "parent": {
+          "sampleCount": 3,
+          "truthCount": 16,
+          "predictedCount": 0,
+          "exactRatio": 0,
+          "meanAbsoluteError": 5.3333,
+          "offByOneRatio": 0,
+          "matchedRepCount": 0,
+          "matchedRecall": 0,
+          "matchedPrecision": null,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": null,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 0,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 3,
+          "truthCount": 16,
+          "predictedCount": 0,
+          "exactRatio": 0,
+          "meanAbsoluteError": 5.3333,
+          "offByOneRatio": 0,
+          "matchedRepCount": 0,
+          "matchedRecall": 0,
+          "matchedPrecision": null,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": null,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 0,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "push_up|rearRight45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 14,
+          "predictedCount": 16,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0,
+          "matchedRepCount": 14,
+          "matchedRecall": 1,
+          "matchedPrecision": 0.875,
+          "falsePositiveRepCount": 2,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 130.35714285714286,
+          "needsReviewOutcomeCount": 1,
+          "rejectedOutcomeCount": 5,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 14,
+          "predictedCount": 16,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0,
+          "matchedRepCount": 14,
+          "matchedRecall": 1,
+          "matchedPrecision": 0.875,
+          "falsePositiveRepCount": 2,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 130.35714285714286,
+          "needsReviewOutcomeCount": 1,
+          "rejectedOutcomeCount": 5,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|frontLeft45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 5,
+          "predictedCount": 6,
+          "exactRatio": 0,
+          "meanAbsoluteError": 1,
+          "offByOneRatio": 1,
+          "matchedRepCount": 3,
+          "matchedRecall": 0.6,
+          "matchedPrecision": 0.5,
+          "falsePositiveRepCount": 3,
+          "negativeWindowFalsePositiveCount": 4,
+          "meanAbsolutePeakErrorMs": 1162.6666666666667,
+          "needsReviewOutcomeCount": 3,
+          "rejectedOutcomeCount": 7,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 5,
+          "predictedCount": 6,
+          "exactRatio": 0,
+          "meanAbsoluteError": 1,
+          "offByOneRatio": 1,
+          "matchedRepCount": 3,
+          "matchedRecall": 0.6,
+          "matchedPrecision": 0.5,
+          "falsePositiveRepCount": 3,
+          "negativeWindowFalsePositiveCount": 4,
+          "meanAbsolutePeakErrorMs": 1162.6666666666667,
+          "needsReviewOutcomeCount": 3,
+          "rejectedOutcomeCount": 7,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      }
+    ],
+    "bySplit": {
+      "train": {
+        "parent": {
+          "sampleCount": 301,
+          "truthCount": 2999,
+          "predictedCount": 2596,
+          "exactRatio": 0.6512,
+          "meanAbsoluteError": 1.3854,
+          "offByOneRatio": 0.814,
+          "split": "train",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 301,
+          "truthCount": 2999,
+          "predictedCount": 2596,
+          "exactRatio": 0.6512,
+          "meanAbsoluteError": 1.3854,
+          "offByOneRatio": 0.814,
+          "split": "train",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      },
+      "validation": {
+        "parent": {
+          "sampleCount": 86,
+          "truthCount": 858,
+          "predictedCount": 736,
+          "exactRatio": 0.6628,
+          "meanAbsoluteError": 1.4651,
+          "offByOneRatio": 0.7791,
+          "split": "validation",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 86,
+          "truthCount": 858,
+          "predictedCount": 736,
+          "exactRatio": 0.6628,
+          "meanAbsoluteError": 1.4651,
+          "offByOneRatio": 0.7791,
+          "split": "validation",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      },
+      "test": {
+        "parent": {
+          "sampleCount": 90,
+          "truthCount": 904,
+          "predictedCount": 856,
+          "exactRatio": 0.7778,
+          "meanAbsoluteError": 0.5333,
+          "offByOneRatio": 0.9,
+          "split": "test",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 90,
+          "truthCount": 904,
+          "predictedCount": 856,
+          "exactRatio": 0.7778,
+          "meanAbsoluteError": 0.5333,
+          "offByOneRatio": 0.9,
+          "split": "test",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      },
+      "unseen_test": {
+        "parent": {
+          "sampleCount": 139,
+          "truthCount": 1399,
+          "predictedCount": 1113,
+          "exactRatio": 0.5396,
+          "meanAbsoluteError": 2.0719,
+          "offByOneRatio": 0.741,
+          "split": "unseen_test",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 139,
+          "truthCount": 1399,
+          "predictedCount": 1113,
+          "exactRatio": 0.5396,
+          "meanAbsoluteError": 2.0719,
+          "offByOneRatio": 0.741,
+          "split": "unseen_test",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      }
+    },
+    "notApplicable": [
+      {
+        "metric": "mmfit_per_rep_precision_recall",
+        "reason": "MM-Fit has set_count supervision only; repBounds is intentionally empty"
+      }
+    ]
+  },
+  "frozenEvaluation": {
+    "parent": {
+      "selfPerRep": {
+        "sampleCount": 11,
+        "truthCount": 89,
+        "predictedCount": 74,
+        "exactRatio": 0.2727,
+        "meanAbsoluteError": 2.8182,
+        "offByOneRatio": 0.3636,
+        "matchedRepCount": 60,
+        "matchedRecall": 0.6741573033707865,
+        "matchedPrecision": 0.8108108108108109,
+        "falsePositiveRepCount": 14,
+        "negativeWindowFalsePositiveCount": 18,
+        "meanAbsolutePeakErrorMs": 577.7833333333333,
+        "needsReviewOutcomeCount": 25,
+        "rejectedOutcomeCount": 35,
+        "unavailableCaptureCount": 3,
+        "exactCaptureCount": 3,
+        "fullyMatchedCaptureCount": 0
+      },
+      "mmfitSetCount": {
+        "sampleCount": 301,
+        "truthCount": 2999,
+        "predictedCount": 2596,
+        "exactRatio": 0.6512,
+        "meanAbsoluteError": 1.3854,
+        "offByOneRatio": 0.814,
+        "split": "train",
+        "domain": "mmfit_openpose18_mapped"
+      }
+    },
+    "candidate": {
+      "selfPerRep": {
+        "sampleCount": 11,
+        "truthCount": 89,
+        "predictedCount": 73,
+        "exactRatio": 0.7273,
+        "meanAbsoluteError": 1.4545,
+        "offByOneRatio": 0.7273,
+        "matchedRepCount": 68,
+        "matchedRecall": 0.7640449438202247,
+        "matchedPrecision": 0.9315068493150684,
+        "falsePositiveRepCount": 5,
+        "negativeWindowFalsePositiveCount": 6,
+        "meanAbsolutePeakErrorMs": 495.4117647058824,
+        "needsReviewOutcomeCount": 3,
+        "rejectedOutcomeCount": 71,
+        "unavailableCaptureCount": 3,
+        "exactCaptureCount": 8,
+        "fullyMatchedCaptureCount": 3
+      },
+      "mmfitSetCount": {
+        "sampleCount": 301,
+        "truthCount": 2999,
+        "predictedCount": 2826,
+        "exactRatio": 0.7841,
+        "meanAbsoluteError": 0.6611,
+        "offByOneRatio": 0.907,
+        "split": "train",
+        "domain": "mmfit_openpose18_mapped"
+      }
+    },
+    "selfByAdmission": {
+      "tuningEligible": {
+        "parent": {
+          "sampleCount": 4,
+          "truthCount": 42,
+          "predictedCount": 40,
+          "exactRatio": 0,
+          "meanAbsoluteError": 3,
+          "offByOneRatio": 0.25,
+          "matchedRepCount": 33,
+          "matchedRecall": 0.7857142857142857,
+          "matchedPrecision": 0.825,
+          "falsePositiveRepCount": 7,
+          "negativeWindowFalsePositiveCount": 11,
+          "meanAbsolutePeakErrorMs": 458.3030303030303,
+          "needsReviewOutcomeCount": 20,
+          "rejectedOutcomeCount": 24,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 4,
+          "truthCount": 42,
+          "predictedCount": 42,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 41,
+          "matchedRecall": 0.9761904761904762,
+          "matchedPrecision": 0.9761904761904762,
+          "falsePositiveRepCount": 1,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 347.4878048780488,
+          "needsReviewOutcomeCount": 1,
+          "rejectedOutcomeCount": 57,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 4,
+          "fullyMatchedCaptureCount": 3
+        }
+      },
+      "challenge": {
+        "parent": {
+          "sampleCount": 7,
+          "truthCount": 47,
+          "predictedCount": 34,
+          "exactRatio": 0.4286,
+          "meanAbsoluteError": 2.7143,
+          "offByOneRatio": 0.4286,
+          "matchedRepCount": 27,
+          "matchedRecall": 0.574468085106383,
+          "matchedPrecision": 0.7941176470588235,
+          "falsePositiveRepCount": 7,
+          "negativeWindowFalsePositiveCount": 7,
+          "meanAbsolutePeakErrorMs": 723.8148148148148,
+          "needsReviewOutcomeCount": 5,
+          "rejectedOutcomeCount": 11,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 3,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 7,
+          "truthCount": 47,
+          "predictedCount": 31,
+          "exactRatio": 0.5714,
+          "meanAbsoluteError": 2.2857,
+          "offByOneRatio": 0.5714,
+          "matchedRepCount": 27,
+          "matchedRecall": 0.574468085106383,
+          "matchedPrecision": 0.8709677419354839,
+          "falsePositiveRepCount": 4,
+          "negativeWindowFalsePositiveCount": 4,
+          "meanAbsolutePeakErrorMs": 720.0370370370371,
+          "needsReviewOutcomeCount": 2,
+          "rejectedOutcomeCount": 14,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 4,
+          "fullyMatchedCaptureCount": 0
+        }
+      }
+    },
+    "selfByBucket": [
+      {
+        "bucketId": "machine_chest_press|front",
+        "admission": "challenge",
+        "parent": {
+          "sampleCount": 3,
+          "truthCount": 21,
+          "predictedCount": 21,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 18,
+          "matchedRecall": 0.8571428571428571,
+          "matchedPrecision": 0.8571428571428571,
+          "falsePositiveRepCount": 3,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 658.4444444444445,
+          "needsReviewOutcomeCount": 2,
+          "rejectedOutcomeCount": 3,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 3,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 3,
+          "truthCount": 21,
+          "predictedCount": 21,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 18,
+          "matchedRecall": 0.8571428571428571,
+          "matchedPrecision": 0.8571428571428571,
+          "falsePositiveRepCount": 3,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 658.4444444444445,
+          "needsReviewOutcomeCount": 2,
+          "rejectedOutcomeCount": 3,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 3,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|frontRight45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 15,
+          "predictedCount": 11,
+          "exactRatio": 0,
+          "meanAbsoluteError": 4,
+          "offByOneRatio": 0,
+          "matchedRepCount": 11,
+          "matchedRecall": 0.7333333333333333,
+          "matchedPrecision": 1,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": 208,
+          "needsReviewOutcomeCount": 16,
+          "rejectedOutcomeCount": 12,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 15,
+          "predictedCount": 15,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 15,
+          "matchedRecall": 1,
+          "matchedPrecision": 1,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": 294.6,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 18,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 1,
+          "fullyMatchedCaptureCount": 1
+        }
+      },
+      {
+        "bucketId": "machine_chest_press|frontRight45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 8,
+          "predictedCount": 6,
+          "exactRatio": 0,
+          "meanAbsoluteError": 2,
+          "offByOneRatio": 0,
+          "matchedRepCount": 6,
+          "matchedRecall": 0.75,
+          "matchedPrecision": 1,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": 165,
+          "needsReviewOutcomeCount": 1,
+          "rejectedOutcomeCount": 2,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 8,
+          "predictedCount": 8,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 8,
+          "matchedRecall": 1,
+          "matchedPrecision": 1,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": 180.125,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 14,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 1,
+          "fullyMatchedCaptureCount": 1
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|frontRight45",
+        "admission": "challenge",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 10,
+          "predictedCount": 13,
+          "exactRatio": 0,
+          "meanAbsoluteError": 3,
+          "offByOneRatio": 0,
+          "matchedRepCount": 9,
+          "matchedRecall": 0.9,
+          "matchedPrecision": 0.6923076923076923,
+          "falsePositiveRepCount": 4,
+          "negativeWindowFalsePositiveCount": 5,
+          "meanAbsolutePeakErrorMs": 854.5555555555555,
+          "needsReviewOutcomeCount": 3,
+          "rejectedOutcomeCount": 8,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 10,
+          "predictedCount": 10,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 9,
+          "matchedRecall": 0.9,
+          "matchedPrecision": 0.9,
+          "falsePositiveRepCount": 1,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 843.2222222222222,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 11,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 1,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|front",
+        "admission": "challenge",
+        "parent": {
+          "sampleCount": 3,
+          "truthCount": 16,
+          "predictedCount": 0,
+          "exactRatio": 0,
+          "meanAbsoluteError": 5.3333,
+          "offByOneRatio": 0,
+          "matchedRepCount": 0,
+          "matchedRecall": 0,
+          "matchedPrecision": null,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": null,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 0,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 3,
+          "truthCount": 16,
+          "predictedCount": 0,
+          "exactRatio": 0,
+          "meanAbsoluteError": 5.3333,
+          "offByOneRatio": 0,
+          "matchedRepCount": 0,
+          "matchedRecall": 0,
+          "matchedPrecision": null,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": null,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 0,
+          "unavailableCaptureCount": 3,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "push_up|rearRight45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 14,
+          "predictedCount": 19,
+          "exactRatio": 0,
+          "meanAbsoluteError": 5,
+          "offByOneRatio": 0,
+          "matchedRepCount": 14,
+          "matchedRecall": 1,
+          "matchedPrecision": 0.7368421052631579,
+          "falsePositiveRepCount": 5,
+          "negativeWindowFalsePositiveCount": 9,
+          "meanAbsolutePeakErrorMs": 690.2142857142857,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 1,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 14,
+          "predictedCount": 14,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 13,
+          "matchedRecall": 0.9285714285714286,
+          "matchedPrecision": 0.9285714285714286,
+          "falsePositiveRepCount": 1,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 537.0769230769231,
+          "needsReviewOutcomeCount": 1,
+          "rejectedOutcomeCount": 12,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 1,
+          "fullyMatchedCaptureCount": 0
+        }
+      },
+      {
+        "bucketId": "barbell_bench_press|frontLeft45",
+        "admission": "tuningEligible",
+        "parent": {
+          "sampleCount": 1,
+          "truthCount": 5,
+          "predictedCount": 4,
+          "exactRatio": 0,
+          "meanAbsoluteError": 1,
+          "offByOneRatio": 1,
+          "matchedRepCount": 2,
+          "matchedRecall": 0.4,
+          "matchedPrecision": 0.5,
+          "falsePositiveRepCount": 2,
+          "negativeWindowFalsePositiveCount": 2,
+          "meanAbsolutePeakErrorMs": 1091.5,
+          "needsReviewOutcomeCount": 3,
+          "rejectedOutcomeCount": 9,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 0,
+          "fullyMatchedCaptureCount": 0
+        },
+        "candidate": {
+          "sampleCount": 1,
+          "truthCount": 5,
+          "predictedCount": 5,
+          "exactRatio": 1,
+          "meanAbsoluteError": 0,
+          "offByOneRatio": 1,
+          "matchedRepCount": 5,
+          "matchedRecall": 1,
+          "matchedPrecision": 1,
+          "falsePositiveRepCount": 0,
+          "negativeWindowFalsePositiveCount": 0,
+          "meanAbsolutePeakErrorMs": 281,
+          "needsReviewOutcomeCount": 0,
+          "rejectedOutcomeCount": 13,
+          "unavailableCaptureCount": 0,
+          "exactCaptureCount": 1,
+          "fullyMatchedCaptureCount": 1
+        }
+      }
+    ],
+    "bySplit": {
+      "train": {
+        "parent": {
+          "sampleCount": 301,
+          "truthCount": 2999,
+          "predictedCount": 2596,
+          "exactRatio": 0.6512,
+          "meanAbsoluteError": 1.3854,
+          "offByOneRatio": 0.814,
+          "split": "train",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 301,
+          "truthCount": 2999,
+          "predictedCount": 2826,
+          "exactRatio": 0.7841,
+          "meanAbsoluteError": 0.6611,
+          "offByOneRatio": 0.907,
+          "split": "train",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      },
+      "validation": {
+        "parent": {
+          "sampleCount": 86,
+          "truthCount": 858,
+          "predictedCount": 736,
+          "exactRatio": 0.6628,
+          "meanAbsoluteError": 1.4651,
+          "offByOneRatio": 0.7791,
+          "split": "validation",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 86,
+          "truthCount": 858,
+          "predictedCount": 823,
+          "exactRatio": 0.8488,
+          "meanAbsoluteError": 0.4767,
+          "offByOneRatio": 0.9535,
+          "split": "validation",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      },
+      "test": {
+        "parent": {
+          "sampleCount": 90,
+          "truthCount": 904,
+          "predictedCount": 856,
+          "exactRatio": 0.7778,
+          "meanAbsoluteError": 0.5333,
+          "offByOneRatio": 0.9,
+          "split": "test",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 90,
+          "truthCount": 904,
+          "predictedCount": 896,
+          "exactRatio": 0.8889,
+          "meanAbsoluteError": 0.1778,
+          "offByOneRatio": 0.9667,
+          "split": "test",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      },
+      "unseen_test": {
+        "parent": {
+          "sampleCount": 139,
+          "truthCount": 1399,
+          "predictedCount": 1113,
+          "exactRatio": 0.5396,
+          "meanAbsoluteError": 2.0719,
+          "offByOneRatio": 0.741,
+          "split": "unseen_test",
+          "domain": "mmfit_openpose18_mapped"
+        },
+        "candidate": {
+          "sampleCount": 139,
+          "truthCount": 1399,
+          "predictedCount": 1309,
+          "exactRatio": 0.6978,
+          "meanAbsoluteError": 0.8058,
+          "offByOneRatio": 0.8777,
+          "split": "unseen_test",
+          "domain": "mmfit_openpose18_mapped"
+        }
+      }
+    },
+    "notApplicable": [
+      {
+        "metric": "mmfit_per_rep_precision_recall",
+        "reason": "MM-Fit has set_count supervision only; repBounds is intentionally empty"
+      }
+    ]
+  },
+  "blockers": [
+    "self data: legacy_unpartitioned",
+    "MM-Fit license: research-only policy pending formal review",
+    "legacy_unpartitioned self data blocks promotable proposal"
+  ],
+  "nextData": [
+    "为每个 exact exercise/view bucket 采集带 subject_id、session_id、device_id 的独立用户 holdout",
+    "保留现有 3 条正面杠铃卧推/16 rep 作为冻结算法回归：原始 RGB 中人体、双臂、手腕和杠铃清楚可见；修复仰卧机位姿态信号恢复与 exact-context profile 覆盖，不要求用户重录",
+    "为俯卧撑录制前准备动作增加明确 set-start 事件或单独负样本；当前准备阶段含一个与真 rep 同形的完整周期",
+    "MM-Fit train RGB 与固定 MediaPipe Heavy 提取已完成；若要证明同域泛化，需另行授权并预先冻结 validation/test/unseen RGB 评测协议，本轮不下载",
+    "完成 MM-Fit research-only 许可与产品使用边界审查"
+  ],
+  "runtimeProfileArtifact": {
+    "path": "public/archives/confirmed-captures/recognition-profiles.json",
+    "sha256": "2efd51c414eaa5c575b9cacc87680bf29f04fc262b290154a211ec88e127c877",
+    "modifiedByWorkflow": false
+  },
+  "artifactHashes": {
+    "admission.json": "7833015e8ddf129793b50c8206f2343f9ea8d7a0cdb4d2e8792c11c0136846a3",
+    "baseline-evaluation.json": "c1a6da004f8af69dfd68204b6df8ae26e87c0e3dfe4b190c39a52e9d23850bad",
+    "candidates/mmfit-rolling-training.json": "fe56e2a9c54b843327a9567ecd076bb91b21198936467fa2ef656eaf553b9ac8",
+    "candidates/search-trace.json": "8875102abe59703b87747609b982432591227dc24a289beb235edeb8f7f7ae70",
+    "candidates/self-candidates.json": "facbe01f5d6f1eac0ff43b04e53f1e93a03301d4c18d57c52324a3cdd713273e",
+    "canonical-corpus/manifest.json": "bda280754c0edf598b0de83bf3cefa54328b03fe077f73e4ddb9f967d1f546c6",
+    "feature-corpus/manifest.json": "545bb73b475447331e1eec30f727728561d5105d5d15b23c60614da459722bbe",
+    "frozen-evaluation.json": "57f62ab6981d6beb3e6f987c3ad88e94ba28684eabb008d29f71e852479b6e19",
+    "inventory.json": "d804307dd48b690daa3d7041727aa3188100def7f2c532ae6c386594c3dff2d0",
+    "plan.json": "0ade660550fc35d01e51bf8a0fa8866d306493a8e9725034457adb753c9e847a",
+    "promotion-proposal.json": "f042145f4d57009d3e616b655912e0c05ac194681401c682f69009a366e34053",
+    "promotion-proposal.md": "c9a80be68d8b218d402b074030103348c32c5c7edc5385e89026e4e516562a83",
+    "self-replay-details.json": "9634cde46a5c3c4e71e0dcfff53d79642ffa3194a90e8e89ef271a2688c463b4",
+    "source-manifest.json": "a31f94b273a4f7589fea106e02b96da4b4ae0dc46c4570fe664030574f6ee4e0",
+    "split-lock.json": "e8b6d6192ecc2cbbde436142191a974721afb564a02c36ec58584795f65d7476"
+  },
+  "implementation": {
+    "algorithmChange": "Rust SetGate keeps the 500 ms stable fast path and adds a 2,000 ms noisy-arming fallback. Research-only profile search adds visible-side, push-up auto-direction, and fixed-visible-elbow candidates. MM-Fit replay resolves each exercise at its recommended initializer view so the frozen evaluation covers all 616 sets. End-to-end self metrics count unsupported profile contexts as zero-prediction algorithm failures; no ABI, MotionPacket, Android, or production-profile change.",
+    "sourceFiles": [
+      "tools/motion-profile-workflow/workflow.ts",
+      "tools/motion-profile-workflow/cli.ts",
+      "tools/motion-profile-workflow/workflow.test.ts",
+      "tools/external-fitness-data/unifiedRecognitionCorpusGate.ts",
+      "tools/external-fitness-data/unifiedRecognitionCorpusGate.test.ts",
+      "tools/external-fitness-data/rollingProfileTrainer.ts",
+      "tools/external-fitness-data/rollingProfileTrainer.test.ts",
+      "tools/external-fitness-data/extract_mmfit_rgb_pose.py",
+      "tools/external-fitness-data/test_extract_mmfit_rgb_pose.py",
+      "tools/external-fitness-data/merge_mmfit_rgb_pose_shards.py",
+      "tools/external-fitness-data/extract_mmfit_rgb_train.sh",
+      "tools/external-fitness-data/setup_mmfit_rgb_runtime.sh",
+      "tools/external-fitness-data/mmfit-rgb-runtime-requirements.txt",
+      "tools/recognition-profile/tuneExistingProfiles.ts",
+      "tools/recognition-profile/tuneExistingProfiles.test.ts",
+      "rust/motion-sdk/src/lib.rs",
+      "rust/motion-sdk/tests/rep_contract.rs"
+    ],
+    "verificationCommands": [
+      "npm run test:motion-profile-workflow",
+      "npm run test:external-fitness-data",
+      "npm run test:mmfit-rgb-extractor",
+      "npm run test:recognition-profile-tools",
+      "npm run test:rust",
+      "npm run test:motion-parity",
+      "npm run gate:recognition-corpus"
+    ],
+    "verificationResults": [
+      {
+        "command": "npm run test:motion-profile-workflow",
+        "status": "passed",
+        "result": "22/22 tests"
+      },
+      {
+        "command": "npm run test:external-fitness-data",
+        "status": "passed",
+        "result": "56/56 tests"
+      },
+      {
+        "command": "npm run test:mmfit-rgb-extractor",
+        "status": "passed",
+        "result": "6/6 tests"
+      },
+      {
+        "command": "npm run test:recognition-profile-tools",
+        "status": "passed",
+        "result": "2/2 tests"
+      },
+      {
+        "command": "npm run test:rust",
+        "status": "passed",
+        "result": "71/71 tests"
+      },
+      {
+        "command": "npm run test:motion-parity",
+        "status": "passed",
+        "result": "54 frames; coordinate tolerance 0.00001"
+      },
+      {
+        "command": "npm run gate:recognition-corpus",
+        "status": "failed_policy_gate",
+        "result": "expected non-zero because the frozen quality and promotion gates are not met"
+      }
+    ]
+  },
+  "artifactRunDirectory": "data/workflows/motion-profile/recognition-corpus-v1/80f5e0ae5b0e4e1a980bcf21/"
+}

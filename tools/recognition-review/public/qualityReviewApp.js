@@ -26,6 +26,29 @@
   const EXPORT_SCHEMA = "maxpower-motion-quality-review-release-export/v1";
   const LOCAL_DRAFT_PREFIX = "maxpower.motion-quality-review.draft/v1";
   const ENDPOINTS = ["start_anchor", "primary_turnaround", "end_return"];
+  const DEFERRED_ABSTENTION_DIMENSIONS = new Set([
+    "support_stability",
+    "bilateral_coordination",
+    "standard_variant_compatibility",
+  ]);
+  const CORRECTED_CONCLUSION_STATES = Object.freeze([
+    Object.freeze({ value: "observed_acceptable", label: "应为：观测范围内可接受" }),
+    Object.freeze({ value: "observed_deviation", label: "应为：观察到偏差" }),
+    Object.freeze({ value: "cannot_judge", label: "应为：证据不足，无法判断" }),
+    Object.freeze({ value: "not_applicable", label: "应为：当前动作/机位不适用" }),
+  ]);
+  const REVIEW_ISSUE_CODES = Object.freeze([
+    Object.freeze({ value: "rep_or_endpoint_wrong", label: "依赖的 Rep / 端点错误" }),
+    Object.freeze({ value: "pose_evidence_wrong", label: "骨架证据错误或缺失" }),
+    Object.freeze({ value: "equipment_evidence_wrong", label: "器材证据错误或缺失" }),
+    Object.freeze({ value: "local_coordinate_wrong", label: "局部坐标/归一化错误" }),
+    Object.freeze({ value: "fusion_decision_wrong", label: "融合或冲突处理错误" }),
+    Object.freeze({ value: "feature_or_threshold_wrong", label: "特征值或阈值错误" }),
+    Object.freeze({ value: "conclusion_state_wrong", label: "结论状态错误" }),
+    Object.freeze({ value: "explanation_or_limit_wrong", label: "解释、文案或限制错误" }),
+    Object.freeze({ value: "review_evidence_insufficient", label: "审核画面不足，无法确认" }),
+    Object.freeze({ value: "other", label: "其他（请写备注）" }),
+  ]);
   const HALPE26_EDGES = [
     [0, 1], [0, 2], [1, 3], [2, 4],
     [5, 7], [7, 9], [6, 8], [8, 10], [5, 6], [5, 11], [6, 12], [11, 12],
@@ -61,6 +84,53 @@
     return DIMENSION_LABELS[key] || key;
   }
 
+  function conclusionReviewPriority(conclusion) {
+    return DEFERRED_ABSTENTION_DIMENSIONS.has(conclusion?.dimension)
+      && conclusion?.state === "cannot_judge"
+      ? "known_gap"
+      : "core";
+  }
+
+  function reviewTargets(proposal) {
+    return proposal.reps.flatMap((rep) => [
+      ...ENDPOINTS.map((endpoint) => ({
+        target: { kind: "endpoint", repId: rep.repId, endpoint },
+        priority: "core",
+      })),
+      ...rep.conclusions.map((conclusion) => ({
+        target: { kind: "conclusion", repId: rep.repId, conclusionId: conclusion.conclusionId },
+        priority: conclusionReviewPriority(conclusion),
+      })),
+    ]);
+  }
+
+  function reviewTargetKey(target) {
+    return target.kind === "endpoint"
+      ? `${target.repId}\u0000endpoint\u0000${target.endpoint}`
+      : `${target.repId}\u0000conclusion\u0000${target.conclusionId}`;
+  }
+
+  function structuredConclusionCorrection(expectedState, issueCode) {
+    const normalizedState = String(expectedState || "").trim();
+    const normalizedIssue = String(issueCode || "").trim();
+    if (!normalizedState && !normalizedIssue) return null;
+    return Object.freeze({
+      schemaVersion: "maxpower-motion-quality-correction/v1",
+      expectedState: normalizedState || null,
+      issueCode: normalizedIssue || null,
+    });
+  }
+
+  function correctionSelection(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return Object.freeze({ expectedState: "", issueCode: "" });
+    }
+    return Object.freeze({
+      expectedState: String(value.expectedState ?? value.state ?? ""),
+      issueCode: String(value.issueCode ?? value.reason ?? ""),
+    });
+  }
+
   function createWorkspace(rawRelease, rawReviewer) {
     const release = freezeJson(cloneJson(normalizeRelease(rawRelease)));
     let reviewer = normalizeReviewer(rawReviewer);
@@ -80,9 +150,29 @@
       progress(itemId) {
         const items = itemId ? release.items.filter((item) => item.itemId === itemId) : release.items;
         if (itemId && items.length === 0) throw new Error(`unknown quality review item ${itemId}`);
-        const total = items.reduce((sum, item) => sum + targetCount(item.proposal), 0);
-        const decided = items.reduce((sum, item) => sum + documents.get(item.itemId).listDecisions().length, 0);
-        return Object.freeze({ decided, total });
+        const rows = items.flatMap((item) => reviewTargets(item.proposal).map((row) => ({
+          ...row,
+          itemId: item.itemId,
+        })));
+        const decisions = items.flatMap((item) => documents.get(item.itemId).listDecisions().map((decision) => ({
+          decision,
+          itemId: item.itemId,
+        })));
+        const coreRows = rows.filter((row) => row.priority === "core");
+        const decidedKeys = new Set(decisions.map(({ decision, itemId: decisionItemId }) => (
+          `${decisionItemId}\u0000${reviewTargetKey(decision.target)}`
+        )));
+        const coreDecided = coreRows.filter((row) => decidedKeys.has(
+          `${row.itemId}\u0000${reviewTargetKey(row.target)}`,
+        )).length;
+        return Object.freeze({
+          decided: decisions.length,
+          total: rows.length,
+          coreDecided,
+          coreTotal: coreRows.length,
+          optionalDecided: decisions.length - coreDecided,
+          optionalTotal: rows.length - coreRows.length,
+        });
       },
       exportJson(rawMetadata) {
         const metadata = cloneJson(requireRecord(rawMetadata, "export metadata"));
@@ -667,10 +757,6 @@
     ].filter(Boolean).join(" · ") || value.runId || value.schemaVersion || "lineage pinned";
   }
 
-  function targetCount(proposal) {
-    return proposal.reps.reduce((sum, rep) => sum + ENDPOINTS.length + rep.conclusions.length, 0);
-  }
-
   function stableJson(value) {
     return `${JSON.stringify(sortJson(value), null, 2)}\n`;
   }
@@ -835,7 +921,7 @@
         return `<button type="button" class="queue-item ${item.itemId === state.activeItemId ? "active" : ""}" data-item-id="${escapeHtml(item.itemId)}">
           <span class="queue-index">${String(index + 1).padStart(2, "0")}</span>
           <span class="queue-copy"><strong>${escapeHtml(title)}</strong><small>${escapeHtml(item.captureId)}</small></span>
-          <span class="queue-progress">${state.evidenceMode === "calibration" ? `${progress.decided}/${progress.total}` : `${benchmark?.reps?.length ?? 0} REP`}</span>
+          <span class="queue-progress">${state.evidenceMode === "calibration" ? `${progress.coreDecided}/${progress.coreTotal} 核心` : `${benchmark?.reps?.length ?? 0} REP`}</span>
         </button>`;
       }).join("");
       byId("qualityQueue").querySelectorAll("[data-item-id]").forEach((button) => {
@@ -867,12 +953,19 @@
     function renderRepTabs() {
       const reps = activeModeReps();
       byId("repTabs").innerHTML = reps.map((rep, index) => {
+        const repRows = state.evidenceMode === "calibration"
+          ? reviewTargets({ reps: [rep] })
+          : [];
         const decisions = state.evidenceMode === "calibration"
-          ? state.activeReview.listDecisions().filter((decision) => decision.target.repId === rep.repId).length
+          ? state.activeReview.listDecisions().filter((decision) => (
+            decision.target.repId === rep.repId
+            && repRows.some((row) => row.priority === "core"
+              && reviewTargetKey(row.target) === reviewTargetKey(decision.target))
+          )).length
           : 0;
-        const total = state.evidenceMode === "calibration" ? ENDPOINTS.length + rep.conclusions.length : 0;
+        const total = repRows.filter((row) => row.priority === "core").length;
         return `<button type="button" class="rep-tab ${rep.repId === state.activeRepId ? "active" : ""}" data-rep-id="${escapeHtml(rep.repId)}">
-          <span>REP ${String(index + 1).padStart(2, "0")}</span><small>${state.evidenceMode === "calibration" ? `${decisions}/${total}` : escapeHtml(rep.disposition || "frozen")}</small>
+          <span>REP ${String(index + 1).padStart(2, "0")}</span><small>${state.evidenceMode === "calibration" ? `${decisions}/${total} 核心` : escapeHtml(rep.disposition || "frozen")}</small>
         </button>`;
       }).join("");
       byId("repTabs").querySelectorAll("[data-rep-id]").forEach((button) => button.addEventListener("click", () => {
@@ -929,7 +1022,7 @@
       );
       return `<article class="review-card endpoint-card" data-kind="endpoint" data-rep-id="${escapeHtml(rep.repId)}" data-endpoint="${endpoint}">
         <div class="card-lead"><span class="card-number">${ENDPOINTS.indexOf(endpoint) + 1}</span><div><h3>${ENDPOINT_LABELS[endpoint]}</h3><p>${formatMs(occurred)} · 因果确认 ${formatMs(confirmed)}</p></div><button class="seek-chip" type="button" data-seek-ms="${occurred}">定位</button></div>
-        ${decisionControls(decision, "端点修正 ms", decision?.correctedValue?.occurredAtMs ?? "", "number")}
+        ${endpointDecisionControls(decision)}
       </article>`;
     }
 
@@ -941,22 +1034,48 @@
       const copy = QualityReviewI18n.localizeConclusionText(conclusion.text || conclusion.summary || stateValue);
       const stateCopy = QualityReviewI18n.localizeConclusionState(stateValue);
       const reason = QualityReviewI18n.localizeConclusionReason(conclusion.reason);
-      return `<article class="review-card conclusion-card" data-kind="conclusion" data-rep-id="${escapeHtml(rep.repId)}" data-conclusion-id="${escapeHtml(conclusion.conclusionId)}">
-        <div class="conclusion-head"><div><span class="dimension">${escapeHtml(dimensionLabel(conclusion.dimension))}</span><h3 class="conclusion-copy ${copy.translated ? "" : "translation-missing"}"><span class="conclusion-copy-zh" lang="zh-CN">${escapeHtml(copy.zh)}</span><span class="conclusion-copy-en" lang="en">${escapeHtml(copy.en)}</span></h3></div><span class="confidence">${formatConfidence(conclusion.confidence)}</span></div>
+      const priority = conclusionReviewPriority(conclusion);
+      return `<article class="review-card conclusion-card ${priority === "known_gap" ? "known-gap" : ""}" data-kind="conclusion" data-rep-id="${escapeHtml(rep.repId)}" data-conclusion-id="${escapeHtml(conclusion.conclusionId)}" data-review-priority="${priority}">
+        <div class="conclusion-head"><div><span class="dimension">${escapeHtml(dimensionLabel(conclusion.dimension))}${priority === "known_gap" ? '<b class="review-priority optional">当前引擎已知缺口 · 可选审核</b>' : '<b class="review-priority core">核心必审</b>'}</span><h3 class="conclusion-copy ${copy.translated ? "" : "translation-missing"}"><span class="conclusion-copy-zh" lang="zh-CN">${escapeHtml(copy.zh)}</span><span class="conclusion-copy-en" lang="en">${escapeHtml(copy.en)}</span></h3></div><span class="confidence" title="Rust 提案置信度；审核人不需要判断这个百分比是否精确">RUST ${formatConfidence(conclusion.confidence)}</span></div>
         <p class="conclusion-state ${escapeHtml(stateValue)} ${stateCopy.translated ? "" : "translation-missing"}"><span lang="zh-CN">${escapeHtml(stateCopy.zh)}</span><span class="conclusion-state-en" lang="en">${escapeHtml(stateCopy.en)}</span></p>
         ${reason.en ? `<p class="conclusion-reason ${reason.translated ? "" : "translation-missing"}"><span lang="zh-CN">${escapeHtml(reason.zh)}</span><span lang="en">${escapeHtml(reason.en)}</span></p>` : ""}
         ${evidence.length ? `<div class="evidence-list">${evidence.map((entry) => `<code>${escapeHtml(typeof entry === "string" ? entry : JSON.stringify(entry))}</code>`).join("")}</div>` : "<p class=muted>没有额外证据引用</p>"}
-        ${decisionControls(decision, "可选修正值（JSON 或文本）", correctionText(decision?.correctedValue), "text")}
+        ${conclusion.dimension === "observation_confidence" ? '<p class="review-hint">这里只审核“证据是否足以支持结论”，不要求人工判断置信度百分比是否精确。</p>' : ""}
+        ${conclusionDecisionControls(decision)}
       </article>`;
     }
 
-    function decisionControls(decision, correctionLabel, correctionValue, inputType) {
+    function verdictButtons(decision, labels) {
+      return ["correct", "incorrect", "cannot_judge"].map((verdict) => `<button type="button" class="verdict ${decision?.verdict === verdict ? `selected ${verdict}` : ""}" data-verdict="${verdict}">${labels[verdict]}</button>`).join("");
+    }
+
+    function endpointDecisionControls(decision) {
       return `<div class="decision-grid">
         <div class="verdicts" role="group" aria-label="审核结论">
-          ${["correct", "incorrect", "cannot_judge"].map((verdict) => `<button type="button" class="verdict ${decision?.verdict === verdict ? `selected ${verdict}` : ""}" data-verdict="${verdict}">${verdictLabel(verdict)}</button>`).join("")}
+          ${verdictButtons(decision, { correct: "端点正确", incorrect: "端点错误", cannot_judge: "端点无法判断" })}
         </div>
-        <label class="field"><span>${correctionLabel}</span><input class="correction-input" type="${inputType}" value="${escapeHtml(correctionValue)}" placeholder="可留空"></label>
+        <label class="field"><span>端点修正 ms</span><input class="correction-input" type="number" value="${escapeHtml(decision?.correctedValue?.occurredAtMs ?? "")}" placeholder="可留空"></label>
         <label class="field note-field"><span>审核备注</span><input class="note-input" type="text" value="${escapeHtml(decision?.note || "")}" placeholder="可选"></label>
+        ${decision ? '<button type="button" class="clear-decision" data-clear-decision>撤销本项审核</button>' : ""}
+      </div>`;
+    }
+
+    function conclusionDecisionControls(decision) {
+      const correction = correctionSelection(decision?.correctedValue);
+      const stateOptions = ['<option value="">正确状态（错误时可选）</option>', ...CORRECTED_CONCLUSION_STATES.map((entry) => (
+        `<option value="${entry.value}" ${correction.expectedState === entry.value ? "selected" : ""}>${entry.label}</option>`
+      ))].join("");
+      const issueOptions = ['<option value="">错误/无法判断原因（可选）</option>', ...REVIEW_ISSUE_CODES.map((entry) => (
+        `<option value="${entry.value}" ${correction.issueCode === entry.value ? "selected" : ""}>${entry.label}</option>`
+      ))].join("");
+      return `<div class="decision-grid conclusion-decision-grid">
+        <div class="verdicts" role="group" aria-label="审核结论">
+          ${verdictButtons(decision, { correct: "结论正确", incorrect: "结论错误", cannot_judge: "审核证据不足" })}
+        </div>
+        <label class="field"><span>正确结论状态</span><select class="correction-state">${stateOptions}</select></label>
+        <label class="field"><span>错误定位</span><select class="issue-code">${issueOptions}</select></label>
+        <label class="field note-field full-field"><span>审核备注</span><input class="note-input" type="text" value="${escapeHtml(decision?.note || "")}" placeholder="只有需要补充时填写"></label>
+        ${decision ? '<button type="button" class="clear-decision" data-clear-decision>撤销本项审核</button>' : ""}
       </div>`;
     }
 
@@ -972,7 +1091,7 @@
           state.activeReview.setDecision({
             target,
             verdict: button.dataset.verdict,
-            correctedValue: draft.correctedValue,
+            correctedValue: button.dataset.verdict === "correct" ? null : draft.correctedValue,
             note: draft.note,
           });
           persistLocalDraft();
@@ -981,16 +1100,20 @@
           renderReviewPanel();
           renderProgress();
         }));
-        card.querySelectorAll(".correction-input, .note-input").forEach((input) => {
+        card.querySelectorAll(".correction-input, .correction-state, .issue-code, .note-input").forEach((input) => {
           const syncDraft = () => {
             const target = reviewTargetForCard(card);
-            if (!state.activeReview.getDecision(target)) return;
+            const existing = state.activeReview.getDecision(target);
+            if (!existing) return;
             const draft = reviewDraftForCard(card);
             if (draft.error) {
               setNotice("端点修正必须是毫秒数", "error");
               return;
             }
-            syncExistingDecisionDraft(state.activeReview, target, draft);
+            syncExistingDecisionDraft(state.activeReview, target, {
+              ...draft,
+              correctedValue: existing.verdict === "correct" ? null : draft.correctedValue,
+            });
             persistLocalDraft();
           };
           input.addEventListener("input", syncDraft);
@@ -1001,6 +1124,15 @@
           video.pause();
           video.currentTime = Number(seek.dataset.seekMs) / 1000;
           updatePlayback();
+        });
+        const clear = card.querySelector("[data-clear-decision]");
+        if (clear) clear.addEventListener("click", () => {
+          state.activeReview.clearDecision(reviewTargetForCard(card));
+          persistLocalDraft();
+          renderQueue();
+          renderRepTabs();
+          renderReviewPanel();
+          renderProgress();
         });
       });
     }
@@ -1013,10 +1145,12 @@
 
     function reviewDraftForCard(card) {
       const correctionInput = card.querySelector(".correction-input");
+      const correctionState = card.querySelector(".correction-state");
+      const issueCode = card.querySelector(".issue-code");
       const noteInput = card.querySelector(".note-input");
       const correctedValue = card.dataset.kind === "endpoint"
-        ? (correctionInput.value.trim() ? { occurredAtMs: Math.round(Number(correctionInput.value)) } : null)
-        : parseCorrection(correctionInput.value);
+        ? (correctionInput?.value.trim() ? { occurredAtMs: Math.round(Number(correctionInput.value)) } : null)
+        : structuredConclusionCorrection(correctionState?.value, issueCode?.value);
       return {
         correctedValue,
         note: noteInput.value || null,
@@ -1028,8 +1162,8 @@
 
     function renderProgress() {
       const progress = state.workspace.progress();
-      byId("reviewProgressText").textContent = `${progress.decided} / ${progress.total}`;
-      byId("reviewProgressBar").style.width = `${progress.total ? progress.decided / progress.total * 100 : 0}%`;
+      byId("reviewProgressText").textContent = `核心 ${progress.coreDecided} / ${progress.coreTotal} · 全部 ${progress.decided} / ${progress.total}`;
+      byId("reviewProgressBar").style.width = `${progress.coreTotal ? progress.coreDecided / progress.coreTotal * 100 : 0}%`;
     }
 
     function renderTimeline() {
@@ -1441,23 +1575,6 @@
     return Number.isFinite(value) ? `${Math.round(Number(value) * 100)}%` : "—";
   }
 
-  function verdictLabel(value) {
-    if (value === "correct") return "正确";
-    if (value === "incorrect") return "错误";
-    return "无法判断";
-  }
-
-  function correctionText(value) {
-    if (value == null) return "";
-    return typeof value === "string" ? value : JSON.stringify(value);
-  }
-
-  function parseCorrection(value) {
-    const trimmed = String(value || "").trim();
-    if (!trimmed) return null;
-    try { return JSON.parse(trimmed); } catch (_) { return trimmed; }
-  }
-
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (character) => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
@@ -1471,6 +1588,8 @@
     coordinateEvidenceSummary,
     coordinateStatusSummary,
     coordinateStatusText,
+    correctionSelection,
+    conclusionReviewPriority,
     EXPORT_SCHEMA,
     EVIDENCE_LAYER_DEFINITIONS,
     evidenceLayerControlsHtml,
@@ -1489,6 +1608,7 @@
     normalizedTrajectoryUntil,
     restoreLocalDraft,
     saveLocalDraft,
+    structuredConclusionCorrection,
     syncExistingDecisionDraft,
     trajectoryUntil,
   };

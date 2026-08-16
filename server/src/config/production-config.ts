@@ -33,15 +33,6 @@ export interface ProductionConfig {
     };
     otpDelivery: { endpoint: string; bearerToken: string };
   };
-  objectStorage: {
-    endpoint: string;
-    region: string;
-    bucket: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-    forcePathStyle: boolean;
-  };
-  media: { transferExpirySeconds: number };
   llm: {
     fingerprintSecret: string;
     monthlyFreeCredits: number;
@@ -50,6 +41,14 @@ export interface ProductionConfig {
     usageRoutes: Readonly<Record<ProductAlias, UsageRouteMetadata>>;
     providerCostRoutes: Readonly<Record<ProductAlias, ProviderCostRoute>>;
   };
+  objectStorage: {
+    endpoint: string;
+    region: string;
+    bucket: string;
+    credentials?: { accessKeyId: string; secretAccessKey: string };
+    forcePathStyle: boolean;
+  };
+  media: { transferExpirySeconds: number };
   worker: { deletionPollMs: number };
 }
 
@@ -125,8 +124,11 @@ export function parseProductionWorkerConfig(
   }
   const region = required("S3_REGION");
   const bucket = required("S3_BUCKET");
-  const accessKeyId = required("S3_ACCESS_KEY_ID");
-  const secretAccessKey = required("S3_SECRET_ACCESS_KEY");
+  const accessKeyId = environment.S3_ACCESS_KEY_ID?.trim() ?? "";
+  const secretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim() ?? "";
+  if (Boolean(accessKeyId) !== Boolean(secretAccessKey)) {
+    errors.push("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be provided together");
+  }
   const forcePathStyleText = required("S3_FORCE_PATH_STYLE");
   if (forcePathStyleText !== "true" && forcePathStyleText !== "false") {
     errors.push("S3_FORCE_PATH_STYLE must be true or false");
@@ -141,8 +143,9 @@ export function parseProductionWorkerConfig(
       endpoint,
       region,
       bucket,
-      accessKeyId,
-      secretAccessKey,
+      ...(accessKeyId && secretAccessKey
+        ? { credentials: { accessKeyId, secretAccessKey } }
+        : {}),
       forcePathStyle: forcePathStyleText === "true",
     },
     media: { transferExpirySeconds },
@@ -234,8 +237,8 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
     .filter(Boolean);
   if (allowedOrigins.length === 0) errors.push("HTTP_ALLOWED_ORIGINS must not be empty");
   for (const origin of allowedOrigins) {
-    if (!isExactHttpsOrigin(origin)) {
-      errors.push("HTTP_ALLOWED_ORIGINS entries must be exact HTTPS origins");
+    if (!isAllowedCorsOrigin(origin)) {
+      errors.push("HTTP_ALLOWED_ORIGINS entries must be exact HTTPS origins or loopback HTTP origins");
     }
   }
   if (required("HTTP_TRUST_PROXY_HEADERS") !== "controlled-ingress-only") {
@@ -265,12 +268,14 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
   const appleBundleIdentifier = required("APPLE_BUNDLE_IDENTIFIER");
   const otpEndpoint = https("OTP_DELIVERY_ENDPOINT");
   const otpBearerToken = secret("OTP_DELIVERY_BEARER_TOKEN");
-
   const s3Endpoint = https("S3_ENDPOINT");
   const s3Region = required("S3_REGION");
   const s3Bucket = required("S3_BUCKET");
-  const s3AccessKeyId = secret("S3_ACCESS_KEY_ID");
-  const s3SecretAccessKey = secret("S3_SECRET_ACCESS_KEY");
+  const s3AccessKeyId = environment.S3_ACCESS_KEY_ID?.trim() ?? "";
+  const s3SecretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim() ?? "";
+  if (Boolean(s3AccessKeyId) !== Boolean(s3SecretAccessKey)) {
+    errors.push("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be provided together");
+  }
   const forcePathStyleText = required("S3_FORCE_PATH_STYLE");
   if (forcePathStyleText !== "true" && forcePathStyleText !== "false") {
     errors.push("S3_FORCE_PATH_STYLE must be true or false");
@@ -283,9 +288,9 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
   const rateLimitWindowSeconds = integer("HTTP_RATE_LIMIT_WINDOW_SECONDS");
   const deletionPollMs = integer("DELETION_WORKER_POLL_MS", 100, 60_000);
 
-  const providerEndpoint = https("LLM_PROVIDER_ENDPOINT");
-  const providerApiKey = secret("LLM_PROVIDER_API_KEY");
-  const providerId = required("LLM_PROVIDER_ID");
+  const coachProviderEndpoint = https("LLM_COACH_PROVIDER_ENDPOINT");
+  const coachProviderApiKey = secret("LLM_COACH_PROVIDER_API_KEY");
+  const coachProviderId = required("LLM_COACH_PROVIDER_ID");
   const coachModel = required("LLM_COACH_MODEL");
   const coachInputCredits = integer("LLM_COACH_INPUT_CREDITS_PER_MILLION", 0);
   const coachOutputCredits = integer("LLM_COACH_OUTPUT_CREDITS_PER_MILLION", 0);
@@ -303,40 +308,27 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
     "LLM_COACH_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION",
     0,
   );
+  const nutritionProviderEndpoint = https("LLM_NUTRITION_PROVIDER_ENDPOINT");
+  const nutritionProviderApiKey = secret("LLM_NUTRITION_PROVIDER_API_KEY");
+  const nutritionProviderId = required("LLM_NUTRITION_PROVIDER_ID");
   const nutritionModel = required("LLM_NUTRITION_MODEL");
   const nutritionInputCredits = integer("LLM_NUTRITION_INPUT_CREDITS_PER_MILLION", 0);
   const nutritionOutputCredits = integer("LLM_NUTRITION_OUTPUT_CREDITS_PER_MILLION", 0);
   const nutritionPricingVersion = required("LLM_NUTRITION_PRICING_VERSION_ID");
-  const nutritionMaxInputBytes = integer(
-    "LLM_NUTRITION_MAX_INPUT_BYTES",
-    1,
-    maxRequestBytes,
-  );
+  const nutritionMaxInputBytes = integer("LLM_NUTRITION_MAX_INPUT_BYTES", 1, maxRequestBytes);
   const nutritionMaxInputTokens = integer("LLM_NUTRITION_MAX_INPUT_TOKENS");
   const nutritionMaxOutputTokens = integer("LLM_NUTRITION_MAX_OUTPUT_TOKENS");
   const nutritionMaxImages = integer("LLM_NUTRITION_MAX_IMAGES", 0, 16);
-  const nutritionMaxImageBytes = integer(
-    "LLM_NUTRITION_MAX_IMAGE_BYTES",
-    1,
-    nutritionMaxInputBytes,
-  );
-  const nutritionProviderInputCost = integer(
-    "LLM_NUTRITION_PROVIDER_INPUT_COST_MICROS_PER_MILLION",
-    0,
-  );
-  const nutritionProviderOutputCost = integer(
-    "LLM_NUTRITION_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION",
-    0,
-  );
+  const nutritionMaxImageBytes = integer("LLM_NUTRITION_MAX_IMAGE_BYTES", 1, nutritionMaxInputBytes);
+  const nutritionProviderInputCost = integer("LLM_NUTRITION_PROVIDER_INPUT_COST_MICROS_PER_MILLION", 0);
+  const nutritionProviderOutputCost = integer("LLM_NUTRITION_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION", 0);
   const fingerprintSecret = secret("LLM_FINGERPRINT_SECRET", 32);
   const monthlyFreeCredits = integer("LLM_MONTHLY_FREE_CREDITS");
 
-  if (coachMaxInputTokens < coachMaxInputBytes) {
-    errors.push("LLM_COACH_MAX_INPUT_TOKENS must cover the maximum UTF-8 request bytes");
-  }
-  if (nutritionMaxInputTokens < nutritionMaxInputBytes) {
-    errors.push("LLM_NUTRITION_MAX_INPUT_TOKENS must cover the maximum UTF-8 request bytes");
-  }
+  // 字节预算与 token 预算正交：bytes 覆盖文件/图片等大载荷（10MB 级），
+  // tokens 是上游文本上下文与计费口径。跨字段没有恒成立的比例关系（文本 vs 图片
+  // 每 token 字节数差几个量级），integer() 的上下界已是全部 sanity。
+
   const worstCaseCredits = (
     name: string,
     maxInputTokens: number,
@@ -372,8 +364,8 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
 
   const routes: Readonly<Record<ProductAlias, OpenAiProviderRoute>> = {
     "maxpower/coach-v1": {
-      endpoint: providerEndpoint,
-      apiKey: providerApiKey,
+      endpoint: coachProviderEndpoint,
+      apiKey: coachProviderApiKey,
       model: coachModel,
       maxOutputTokens: coachMaxOutputTokens,
       inputCreditsPerMillionTokens: coachInputCredits,
@@ -382,8 +374,8 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
       outputCostMicrosPerMillionTokens: coachProviderOutputCost,
     },
     "maxpower/nutrition-vision-v1": {
-      endpoint: providerEndpoint,
-      apiKey: providerApiKey,
+      endpoint: nutritionProviderEndpoint,
+      apiKey: nutritionProviderApiKey,
       model: nutritionModel,
       maxOutputTokens: nutritionMaxOutputTokens,
       inputCreditsPerMillionTokens: nutritionInputCredits,
@@ -394,12 +386,12 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
   };
   const usageRoutes: Readonly<Record<ProductAlias, UsageRouteMetadata>> = {
     "maxpower/coach-v1": {
-      providerId,
+      providerId: coachProviderId,
       providerModel: coachModel,
       pricingVersionId: coachPricingVersion,
     },
     "maxpower/nutrition-vision-v1": {
-      providerId,
+      providerId: nutritionProviderId,
       providerModel: nutritionModel,
       pricingVersionId: nutritionPricingVersion,
     },
@@ -450,7 +442,9 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
     auth: {
       baseURL: authBaseUrl,
       secret: authSecret,
-      trustedOrigins: allowedOrigins,
+      // Local HTTP is allowed only at the API CORS boundary for development.
+      // Better Auth's browser/OAuth trust boundary remains HTTPS-only.
+      trustedOrigins: allowedOrigins.filter(isExactHttpsOrigin),
       nativeSchemes,
       phoneIdentityDomain,
       requiredTermsVersion,
@@ -467,8 +461,9 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
       endpoint: s3Endpoint,
       region: s3Region,
       bucket: s3Bucket,
-      accessKeyId: s3AccessKeyId,
-      secretAccessKey: s3SecretAccessKey,
+      ...(s3AccessKeyId && s3SecretAccessKey
+        ? { credentials: { accessKeyId: s3AccessKeyId, secretAccessKey: s3SecretAccessKey } }
+        : {}),
       forcePathStyle: forcePathStyleText === "true",
     },
     media: { transferExpirySeconds: mediaTransferExpirySeconds },
@@ -505,6 +500,21 @@ function isExactHttpsOrigin(value: string): boolean {
   try {
     const url = new URL(value);
     return url.protocol === "https:" && url.origin === value;
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedCorsOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.origin !== value) return false;
+    if (url.protocol === "https:") return true;
+    return url.protocol === "http:" && (
+      url.hostname === "localhost" ||
+      url.hostname === "127.0.0.1" ||
+      url.hostname === "[::1]"
+    );
   } catch {
     return false;
   }

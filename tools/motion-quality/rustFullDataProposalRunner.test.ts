@@ -15,6 +15,7 @@ import {
   resolveAppliedBenchPolicy,
   reviewInputEvidence,
   routeSourceFramesOnce,
+  serializeCurrentRustFrame,
 } from "./rustFullDataProposalRunner.js";
 import {
   actualProfileBundles,
@@ -345,6 +346,65 @@ test("review evidence preserves raw Halpe-26 pose and the measured oblique shaft
     y2: 0.478,
     centerY: 0.456,
   }]);
+});
+
+test("review frame serialization preserves Rust local-coordinate and fusion evidence", () => {
+  const localMotionCoordinate = {
+    schemaVersion: "maxpower-local-motion-coordinate/v1",
+    coordinateFrameId: 12,
+    state: "frozen",
+    scale: 0.42,
+    scaleSource: "bar_length",
+    reason: null,
+    equipment: {
+      alongAxisProgress: 0.3,
+      crossAxisDisplacement: -0.02,
+      confidence: 0.9,
+      coverage: 0.8,
+      uncertainty: 0.1,
+      provenance: "measured",
+    },
+    pose: {
+      alongAxisProgress: 0.29,
+      crossAxisDisplacement: -0.01,
+      confidence: 0.82,
+      coverage: 0.74,
+      uncertainty: 0.14,
+      provenance: "measured",
+    },
+    channelAgreement: "agreement",
+    endpointOneProgress: 0.28,
+    endpointTwoProgress: 0.31,
+    anatomicalLeftEndpointProgress: null,
+    anatomicalRightEndpointProgress: null,
+    rawBarAngleRadians: 0.04,
+    baselineCorrectedBarAngleRadians: 0.01,
+    confidence: 0.86,
+  };
+  const packet = {
+    sourceTimestampMs: 1_000n,
+    frameId: 12n,
+    target: { selectedCandidateId: null },
+    canonical: [],
+    localMotionCoordinate,
+    equipment: {
+      status: { kind: "observed" },
+      tracks: [],
+      rejectedReflectionCount: 0,
+      rejectedStaticCount: 0,
+      rejectedLowConfidenceOrInvalidCount: 0,
+      rejectedOutsideSubjectCount: 0,
+    },
+  } as never;
+
+  const serialized = serializeCurrentRustFrame(packet, 15n, {
+    inputPose: null,
+    inputEquipmentAxes: [],
+  }) as { localMotionCoordinate: typeof localMotionCoordinate };
+
+  assert.deepEqual(serialized.localMotionCoordinate, localMotionCoordinate);
+  assert.notEqual(serialized.localMotionCoordinate, localMotionCoordinate);
+  assert.equal(Object.isFrozen(serialized.localMotionCoordinate), true);
 });
 
 test("selected equipment-only policy preserves subject identity while withholding all 26 joints", async () => {

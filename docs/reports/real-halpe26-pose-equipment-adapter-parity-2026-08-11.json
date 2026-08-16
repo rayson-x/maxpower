@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "maxpower-real-halpe26-pose-equipment-adapter-parity/v1",
+  "generatedAt": "2026-08-11",
+  "status": "partial_android_device_pending",
+  "acceptanceEligible": false,
+  "productionPromotion": false,
+  "contract": "MOTN/1.7",
+  "fixture": {
+    "captureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+    "scene": "front barbell bench press with wall mirror and gym bystanders",
+    "frameCount": 14,
+    "poseSchema": "halpe26",
+    "equipmentObservationCount": 14,
+    "equipmentSource": "static_background_horizontal_axis_geometry_prototype",
+    "fixtureSha256": "a897dd52e93a609e9025b99d79f8e5aee6ebab0e48dff2b0e6cf2b80fc42d7f8",
+    "nativeOracleSha256": "231cbc5535cc97275a948352405f1f2a86c8f822a7606d8e12abab114b07ca00",
+    "equipmentSourceReportSha256": "b986111599ffc874b1770d6490753af0d9d2aa804d771444f119732dddbdf6dc",
+    "limitations": [
+      "not_a_trained_detector",
+      "same_development_video_as_geometry_prototype",
+      "bbox_horizontal_extent_is_contract_geometry"
+    ]
+  },
+  "platforms": {
+    "webWasm": {
+      "status": "passed",
+      "packetByteExactFrames": 14,
+      "expectedFrames": 14,
+      "equipmentSubmissionVerified": true
+    },
+    "iosSimulator": {
+      "status": "passed",
+      "packetByteExactFrames": 14,
+      "expectedFrames": 14,
+      "equipmentSubmissionVerified": true
+    },
+    "android": {
+      "status": "compile_passed_device_runtime_pending",
+      "builtAbis": [
+        "armeabi-v7a",
+        "arm64-v8a",
+        "x86",
+        "x86_64"
+      ],
+      "debugAarBuilt": true,
+      "connectedDeviceCount": 0,
+      "packetByteExactFrames": null
+    }
+  },
+  "tests": {
+    "rustUnitAndIntegrationPassed": 91,
+    "typescriptPacketAgentAnglePassed": 15,
+    "webRealFixturePassed": 3,
+    "fixtureGeneratorPassed": 3
+  },
+  "interpretation": {
+    "proved": [
+      "pose_and_equipment_observations_share_one_Rust_frame_transaction",
+      "equipment_evidence_does_not_overwrite_unknown_pose_landmarks",
+      "web_and_ios_publish_the_same_Rust_packet_for_the_frozen_observation_sequence"
+    ],
+    "notProved": [
+      "trained_equipment_detector_accuracy",
+      "android_device_runtime_parity_for_MOTN_1_7",
+      "unseen_video_phase_or_technique_accuracy",
+      "production_readiness"
+    ]
+  }
+}

@@ -46,6 +46,8 @@ export interface CoachProductProjectionInput {
   healthImportStates: readonly HealthImportState[];
   exerciseLabel: (exerciseVariantId: string) => string;
   healthLedgers: Readonly<Record<string, DailyHealthLedger>>;
+  /** The weekly muscle review: one structured report read by both UI and Agent. */
+  muscleWeek?: import("../planning").MuscleWeekReport;
 }
 
 export interface CoachProductProjection {
@@ -177,6 +179,8 @@ export interface PlanProductProjection {
   forecasts: readonly AdaptiveForecastScenario[];
   explanation?: RecommendationExplanation;
   trainingStrategy?: import("../planning").TrainingStrategy;
+  /** 本周肌群负荷复盘（相对负荷，非力量/激活观测）。 */
+  muscleWeek?: import("../planning").MuscleWeekReport;
   planningNutritionStrategy?: import("../planning").PlanningNutritionStrategy;
   recoveryStrategy?: import("../planning").RecoveryStrategy;
   nutritionTarget?: NutritionStrategyData;
@@ -443,6 +447,7 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       reasonCodes: plan?.value.reasonCodes ?? [],
       ...(plan?.value.strategySelection ? { strategySelection: plan.value.strategySelection } : {}),
       ...(plan?.value.appliedPhaseStrategy ? { appliedPhaseStrategy: plan.value.appliedPhaseStrategy } : {}),
+      ...(input.muscleWeek ? { muscleWeek: input.muscleWeek } : {}),
       ...(plan?.value.trainingStrategy ? { trainingStrategy: plan.value.trainingStrategy } : {}),
       ...(plan?.value.nutritionStrategy ? { planningNutritionStrategy: plan.value.nutritionStrategy } : {}),
       ...(plan?.value.recoveryStrategy ? { recoveryStrategy: plan.value.recoveryStrategy } : {}),

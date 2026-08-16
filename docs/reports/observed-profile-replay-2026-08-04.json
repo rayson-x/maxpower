@@ -1,0 +1,3249 @@
+{
+  "schemaVersion": "maxpower-observed-profile-replay/v1",
+  "generatedAt": "2026-08-04T10:39:17.214Z",
+  "purpose": "In-sample compatibility replay of archived canonical sidecars. Not MediaPipe inference accuracy and not an independent validation claim.",
+  "selection": [
+    "lat_pulldown",
+    "barbell_row",
+    "seated_shoulder_press",
+    "lateral_raise"
+  ],
+  "summary": {
+    "captureCount": 24,
+    "evaluatedCaptureCount": 21,
+    "unavailableCaptureCount": 3,
+    "truthRepCount": 204,
+    "predictedRepCount": 153,
+    "matchedRepCount": 128,
+    "exactCountCaptureCount": 1
+  },
+  "byExerciseAndPosition": [
+    {
+      "key": "barbell_row|rearRight45",
+      "captureCount": 2,
+      "evaluatedCaptureCount": 0,
+      "unavailableCaptureCount": 2,
+      "truthRepCount": 21,
+      "predictedRepCount": 0,
+      "matchedRepCount": 0,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "unavailable"
+      ]
+    },
+    {
+      "key": "barbell_row|front",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 1,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 10,
+      "predictedRepCount": 11,
+      "matchedRepCount": 10,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "barbell_row|frontRight45",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 1,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 10,
+      "predictedRepCount": 2,
+      "matchedRepCount": 2,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "simulated"
+      ]
+    },
+    {
+      "key": "barbell_row|rearLeft45",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 0,
+      "unavailableCaptureCount": 1,
+      "truthRepCount": 10,
+      "predictedRepCount": 0,
+      "matchedRepCount": 0,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "unavailable"
+      ]
+    },
+    {
+      "key": "barbell_row|frontLeft45",
+      "captureCount": 2,
+      "evaluatedCaptureCount": 2,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 16,
+      "predictedRepCount": 14,
+      "matchedRepCount": 13,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "lat_pulldown|rear",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 1,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 8,
+      "predictedRepCount": 7,
+      "matchedRepCount": 7,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "lat_pulldown|rearLeft45",
+      "captureCount": 3,
+      "evaluatedCaptureCount": 3,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 20,
+      "predictedRepCount": 12,
+      "matchedRepCount": 12,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "seated_shoulder_press|front",
+      "captureCount": 6,
+      "evaluatedCaptureCount": 6,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 44,
+      "predictedRepCount": 58,
+      "matchedRepCount": 35,
+      "exactCountCaptureCount": 1,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "lateral_raise|front",
+      "captureCount": 7,
+      "evaluatedCaptureCount": 7,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 65,
+      "predictedRepCount": 49,
+      "matchedRepCount": 49,
+      "exactCountCaptureCount": 0,
+      "sources": [
+        "observed"
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "captureId": "field-capture-2026-08-02T18-16-42-757Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "rearRight45",
+      "truthCount": 12,
+      "truthSegmentCount": 12,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-19-26-633Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "rearRight45",
+      "truthCount": 10,
+      "truthSegmentCount": 9,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-24-38-253Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "front",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "barbell_row/front/bilateral/observed/v1",
+      "predictedCount": 11,
+      "matchedReps": 10,
+      "missedReps": 0,
+      "falsePositiveReps": 1,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 9064,
+            "peakMs": 10171,
+            "endMs": 10462
+          },
+          {
+            "repIndex": 2,
+            "startMs": 10621,
+            "peakMs": 11507,
+            "endMs": 11894
+          },
+          {
+            "repIndex": 3,
+            "startMs": 12064,
+            "peakMs": 12818,
+            "endMs": 13095
+          },
+          {
+            "repIndex": 4,
+            "startMs": 13111,
+            "peakMs": 14118,
+            "endMs": 14193
+          },
+          {
+            "repIndex": 5,
+            "startMs": 14356,
+            "peakMs": 15351,
+            "endMs": 15375
+          },
+          {
+            "repIndex": 6,
+            "startMs": 15538,
+            "peakMs": 16536,
+            "endMs": 16846
+          },
+          {
+            "repIndex": 7,
+            "startMs": 16933,
+            "peakMs": 17861,
+            "endMs": 17951
+          },
+          {
+            "repIndex": 8,
+            "startMs": 18152,
+            "peakMs": 19050,
+            "endMs": 19295
+          },
+          {
+            "repIndex": 9,
+            "startMs": 19460,
+            "peakMs": 20272,
+            "endMs": 20502
+          },
+          {
+            "repIndex": 10,
+            "startMs": 20617,
+            "peakMs": 21524,
+            "endMs": 21712
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 6509,
+            "peakMs": 7578,
+            "endMs": 7700
+          },
+          {
+            "startMs": 9461,
+            "peakMs": 10026,
+            "endMs": 10559
+          },
+          {
+            "startMs": 10929,
+            "peakMs": 11444,
+            "endMs": 11811
+          },
+          {
+            "startMs": 12311,
+            "peakMs": 12757,
+            "endMs": 13111
+          },
+          {
+            "startMs": 13625,
+            "peakMs": 14118,
+            "endMs": 14440
+          },
+          {
+            "startMs": 14692,
+            "peakMs": 15276,
+            "endMs": 15594
+          },
+          {
+            "startMs": 15977,
+            "peakMs": 16354,
+            "endMs": 16745
+          },
+          {
+            "startMs": 17412,
+            "peakMs": 17664,
+            "endMs": 18052
+          },
+          {
+            "startMs": 18565,
+            "peakMs": 19050,
+            "endMs": 19426
+          },
+          {
+            "startMs": 19738,
+            "peakMs": 20272,
+            "endMs": 20514
+          },
+          {
+            "startMs": 21108,
+            "peakMs": 21465,
+            "endMs": 21852
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 1,
+            "peakOffsetMs": -145
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 2,
+            "peakOffsetMs": -63
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 3,
+            "peakOffsetMs": -61
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 4,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 5,
+            "peakOffsetMs": -75
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 6,
+            "peakOffsetMs": -182
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 7,
+            "peakOffsetMs": -197
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 8,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 9,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 10,
+            "peakOffsetMs": -59
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": [
+          0
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-26-54-722Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "frontRight45",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "simulated",
+      "profileIdentity": "simulated-barbell_row/frontRight45/bilateral/initializer/v1",
+      "predictedCount": 2,
+      "matchedReps": 2,
+      "missedReps": 8,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 12053,
+            "peakMs": 12956,
+            "endMs": 13511
+          },
+          {
+            "repIndex": 2,
+            "startMs": 13590,
+            "peakMs": 14238,
+            "endMs": 14767
+          },
+          {
+            "repIndex": 3,
+            "startMs": 14893,
+            "peakMs": 15710,
+            "endMs": 16169
+          },
+          {
+            "repIndex": 4,
+            "startMs": 16329,
+            "peakMs": 16939,
+            "endMs": 17392
+          },
+          {
+            "repIndex": 5,
+            "startMs": 17520,
+            "peakMs": 18096,
+            "endMs": 18598
+          },
+          {
+            "repIndex": 6,
+            "startMs": 18727,
+            "peakMs": 19445,
+            "endMs": 19772
+          },
+          {
+            "repIndex": 7,
+            "startMs": 19963,
+            "peakMs": 20512,
+            "endMs": 20936
+          },
+          {
+            "repIndex": 8,
+            "startMs": 21107,
+            "peakMs": 21787,
+            "endMs": 22214
+          },
+          {
+            "repIndex": 9,
+            "startMs": 22419,
+            "peakMs": 22929,
+            "endMs": 23386
+          },
+          {
+            "repIndex": 10,
+            "startMs": 23503,
+            "peakMs": 24139,
+            "endMs": 24622
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 16613,
+            "peakMs": 16807,
+            "endMs": 17345
+          },
+          {
+            "startMs": 21470,
+            "peakMs": 21660,
+            "endMs": 22144
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 2,
+            "predictedIndex": 0,
+            "peakOffsetMs": 1097
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 1,
+            "peakOffsetMs": 1148
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          0,
+          1,
+          3,
+          4,
+          5,
+          7,
+          8,
+          9
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-30-30-478Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "rearLeft45",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-34-19-006Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "frontLeft45",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "barbell_row/frontLeft45/bilateral/observed/v1",
+      "predictedCount": 11,
+      "matchedReps": 10,
+      "missedReps": 0,
+      "falsePositiveReps": 1,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 11120,
+            "peakMs": 12261,
+            "endMs": 12791
+          },
+          {
+            "repIndex": 2,
+            "startMs": 12961,
+            "peakMs": 13511,
+            "endMs": 14092
+          },
+          {
+            "repIndex": 3,
+            "startMs": 14247,
+            "peakMs": 14785,
+            "endMs": 15346
+          },
+          {
+            "repIndex": 4,
+            "startMs": 15578,
+            "peakMs": 16039,
+            "endMs": 16568
+          },
+          {
+            "repIndex": 5,
+            "startMs": 16846,
+            "peakMs": 17473,
+            "endMs": 18220
+          },
+          {
+            "repIndex": 6,
+            "startMs": 18376,
+            "peakMs": 18841,
+            "endMs": 19359
+          },
+          {
+            "repIndex": 7,
+            "startMs": 19535,
+            "peakMs": 20180,
+            "endMs": 20726
+          },
+          {
+            "repIndex": 8,
+            "startMs": 21020,
+            "peakMs": 21584,
+            "endMs": 22159
+          },
+          {
+            "repIndex": 9,
+            "startMs": 22385,
+            "peakMs": 22947,
+            "endMs": 23366
+          },
+          {
+            "repIndex": 10,
+            "startMs": 23718,
+            "peakMs": 24397,
+            "endMs": 25334
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 10163,
+            "peakMs": 12138,
+            "endMs": 12486
+          },
+          {
+            "startMs": 12840,
+            "peakMs": 13386,
+            "endMs": 13771
+          },
+          {
+            "startMs": 14126,
+            "peakMs": 14586,
+            "endMs": 14912
+          },
+          {
+            "startMs": 15462,
+            "peakMs": 16039,
+            "endMs": 16246
+          },
+          {
+            "startMs": 16799,
+            "peakMs": 17282,
+            "endMs": 17684
+          },
+          {
+            "startMs": 18158,
+            "peakMs": 18700,
+            "endMs": 19105
+          },
+          {
+            "startMs": 19516,
+            "peakMs": 20052,
+            "endMs": 20430
+          },
+          {
+            "startMs": 20912,
+            "peakMs": 21513,
+            "endMs": 21785
+          },
+          {
+            "startMs": 22364,
+            "peakMs": 22798,
+            "endMs": 23149
+          },
+          {
+            "startMs": 23703,
+            "peakMs": 24266,
+            "endMs": 24640
+          },
+          {
+            "startMs": 28018,
+            "peakMs": 28739,
+            "endMs": 28934
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -123
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -125
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -199
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 4,
+            "peakOffsetMs": -191
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 5,
+            "peakOffsetMs": -141
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 6,
+            "peakOffsetMs": -128
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 7,
+            "peakOffsetMs": -71
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 8,
+            "peakOffsetMs": -149
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 9,
+            "peakOffsetMs": -131
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": [
+          10
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-37-19-691Z",
+      "exerciseId": "barbell_row",
+      "capturePosition": "frontLeft45",
+      "truthCount": 6,
+      "truthSegmentCount": 6,
+      "source": "observed",
+      "profileIdentity": "barbell_row/frontLeft45/bilateral/observed/v1",
+      "predictedCount": 3,
+      "matchedReps": 3,
+      "missedReps": 3,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 12202,
+            "peakMs": 13544,
+            "endMs": 14070
+          },
+          {
+            "repIndex": 2,
+            "startMs": 14255,
+            "peakMs": 14963,
+            "endMs": 15706
+          },
+          {
+            "repIndex": 3,
+            "startMs": 15953,
+            "peakMs": 16558,
+            "endMs": 17174
+          },
+          {
+            "repIndex": 4,
+            "startMs": 17356,
+            "peakMs": 18087,
+            "endMs": 18717
+          },
+          {
+            "repIndex": 5,
+            "startMs": 18979,
+            "peakMs": 19700,
+            "endMs": 20355
+          },
+          {
+            "repIndex": 6,
+            "startMs": 20678,
+            "peakMs": 21418,
+            "endMs": 22117
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 11440,
+            "peakMs": 13420,
+            "endMs": 13762
+          },
+          {
+            "startMs": 14366,
+            "peakMs": 14893,
+            "endMs": 15227
+          },
+          {
+            "startMs": 15824,
+            "peakMs": 16405,
+            "endMs": 16775
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -124
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -70
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -153
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          3,
+          4,
+          5
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-41-05-284Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rear",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "observed",
+      "profileIdentity": "lat_pulldown/rear/bilateral/observed/v1",
+      "predictedCount": 7,
+      "matchedReps": 7,
+      "missedReps": 1,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4748,
+            "peakMs": 5890,
+            "endMs": 6581
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6875,
+            "peakMs": 7790,
+            "endMs": 8519
+          },
+          {
+            "repIndex": 3,
+            "startMs": 8806,
+            "peakMs": 9647,
+            "endMs": 10476
+          },
+          {
+            "repIndex": 4,
+            "startMs": 10758,
+            "peakMs": 11592,
+            "endMs": 12126
+          },
+          {
+            "repIndex": 5,
+            "startMs": 12442,
+            "peakMs": 13440,
+            "endMs": 13972
+          },
+          {
+            "repIndex": 6,
+            "startMs": 14176,
+            "peakMs": 15171,
+            "endMs": 15750
+          },
+          {
+            "repIndex": 7,
+            "startMs": 16070,
+            "peakMs": 16903,
+            "endMs": 17568
+          },
+          {
+            "repIndex": 8,
+            "startMs": 17795,
+            "peakMs": 18747,
+            "endMs": 19288
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 5211,
+            "peakMs": 5758,
+            "endMs": 6170
+          },
+          {
+            "startMs": 7191,
+            "peakMs": 7719,
+            "endMs": 8123
+          },
+          {
+            "startMs": 9018,
+            "peakMs": 9647,
+            "endMs": 10009
+          },
+          {
+            "startMs": 10969,
+            "peakMs": 11456,
+            "endMs": 11853
+          },
+          {
+            "startMs": 12777,
+            "peakMs": 13307,
+            "endMs": 13636
+          },
+          {
+            "startMs": 14564,
+            "peakMs": 15100,
+            "endMs": 15396
+          },
+          {
+            "startMs": 16208,
+            "peakMs": 16781,
+            "endMs": 17183
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -132
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -71
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": -136
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 4,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 5,
+            "peakOffsetMs": -71
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 6,
+            "peakOffsetMs": -122
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          7
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-41-55-780Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rearLeft45",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "observed",
+      "profileIdentity": "lat_pulldown/rearLeft45/bilateral/observed/v1",
+      "predictedCount": 4,
+      "matchedReps": 4,
+      "missedReps": 4,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4466,
+            "peakMs": 6754,
+            "endMs": 7679
+          },
+          {
+            "repIndex": 2,
+            "startMs": 7864,
+            "peakMs": 8815,
+            "endMs": 9763
+          },
+          {
+            "repIndex": 3,
+            "startMs": 9998,
+            "peakMs": 10859,
+            "endMs": 11724
+          },
+          {
+            "repIndex": 4,
+            "startMs": 12025,
+            "peakMs": 12948,
+            "endMs": 13698
+          },
+          {
+            "repIndex": 5,
+            "startMs": 13908,
+            "peakMs": 14951,
+            "endMs": 15876
+          },
+          {
+            "repIndex": 6,
+            "startMs": 16137,
+            "peakMs": 17042,
+            "endMs": 17799
+          },
+          {
+            "repIndex": 7,
+            "startMs": 17976,
+            "peakMs": 19119,
+            "endMs": 19855
+          },
+          {
+            "repIndex": 8,
+            "startMs": 20162,
+            "peakMs": 21236,
+            "endMs": 21946
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 6069,
+            "peakMs": 6632,
+            "endMs": 7086
+          },
+          {
+            "startMs": 8202,
+            "peakMs": 8815,
+            "endMs": 9143
+          },
+          {
+            "startMs": 18436,
+            "peakMs": 18984,
+            "endMs": 19394
+          },
+          {
+            "startMs": 20617,
+            "peakMs": 21166,
+            "endMs": 21561
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -122
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 2,
+            "peakOffsetMs": -135
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 3,
+            "peakOffsetMs": -70
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-44-00-128Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rearLeft45",
+      "truthCount": 6,
+      "truthSegmentCount": 6,
+      "source": "observed",
+      "profileIdentity": "lat_pulldown/rearLeft45/bilateral/observed/v1",
+      "predictedCount": 4,
+      "matchedReps": 4,
+      "missedReps": 2,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 6526,
+            "peakMs": 7577,
+            "endMs": 8299
+          },
+          {
+            "repIndex": 2,
+            "startMs": 8572,
+            "peakMs": 9833,
+            "endMs": 10707
+          },
+          {
+            "repIndex": 3,
+            "startMs": 10890,
+            "peakMs": 11996,
+            "endMs": 12668
+          },
+          {
+            "repIndex": 4,
+            "startMs": 12856,
+            "peakMs": 14036,
+            "endMs": 14644
+          },
+          {
+            "repIndex": 5,
+            "startMs": 14955,
+            "peakMs": 15919,
+            "endMs": 16725
+          },
+          {
+            "repIndex": 6,
+            "startMs": 16879,
+            "peakMs": 17895,
+            "endMs": 18469
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 6898,
+            "peakMs": 7437,
+            "endMs": 7925
+          },
+          {
+            "startMs": 9103,
+            "peakMs": 9700,
+            "endMs": 10211
+          },
+          {
+            "startMs": 11199,
+            "peakMs": 11862,
+            "endMs": 12271
+          },
+          {
+            "startMs": 13283,
+            "peakMs": 13904,
+            "endMs": 14329
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -140
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -134
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": -132
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          4,
+          5
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-02T18-46-52-295Z",
+      "exerciseId": "lat_pulldown",
+      "capturePosition": "rearLeft45",
+      "truthCount": 6,
+      "truthSegmentCount": 6,
+      "source": "observed",
+      "profileIdentity": "lat_pulldown/rearLeft45/bilateral/observed/v1",
+      "predictedCount": 4,
+      "matchedReps": 4,
+      "missedReps": 2,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 5573,
+            "peakMs": 7005,
+            "endMs": 7648
+          },
+          {
+            "repIndex": 2,
+            "startMs": 7818,
+            "peakMs": 8935,
+            "endMs": 9583
+          },
+          {
+            "repIndex": 3,
+            "startMs": 9752,
+            "peakMs": 10971,
+            "endMs": 11670
+          },
+          {
+            "repIndex": 4,
+            "startMs": 11861,
+            "peakMs": 12933,
+            "endMs": 13581
+          },
+          {
+            "repIndex": 5,
+            "startMs": 13823,
+            "peakMs": 14771,
+            "endMs": 15306
+          },
+          {
+            "repIndex": 6,
+            "startMs": 15431,
+            "peakMs": 16633,
+            "endMs": 17328
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 8276,
+            "peakMs": 8870,
+            "endMs": 9327
+          },
+          {
+            "startMs": 10333,
+            "peakMs": 10833,
+            "endMs": 11281
+          },
+          {
+            "startMs": 12198,
+            "peakMs": 12860,
+            "endMs": 13202
+          },
+          {
+            "startMs": 15976,
+            "peakMs": 16439,
+            "endMs": 16983
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 1,
+            "predictedIndex": 0,
+            "peakOffsetMs": -65
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 1,
+            "peakOffsetMs": -138
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 2,
+            "peakOffsetMs": -73
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 3,
+            "peakOffsetMs": -194
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          0,
+          4
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T07-57-28-214Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "truthCount": 12,
+      "truthSegmentCount": 12,
+      "source": "observed",
+      "profileIdentity": "seated_shoulder_press/front/bilateral/observed/v1",
+      "predictedCount": 12,
+      "matchedReps": 10,
+      "missedReps": 2,
+      "falsePositiveReps": 2,
+      "exactCount": true,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4146,
+            "peakMs": 5534,
+            "endMs": 6208
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6403,
+            "peakMs": 7568,
+            "endMs": 8377
+          },
+          {
+            "repIndex": 3,
+            "startMs": 8393,
+            "peakMs": 9601,
+            "endMs": 10236
+          },
+          {
+            "repIndex": 4,
+            "startMs": 10305,
+            "peakMs": 11335,
+            "endMs": 11967
+          },
+          {
+            "repIndex": 5,
+            "startMs": 12175,
+            "peakMs": 13268,
+            "endMs": 14232
+          },
+          {
+            "repIndex": 6,
+            "startMs": 14437,
+            "peakMs": 15135,
+            "endMs": 16039
+          },
+          {
+            "repIndex": 7,
+            "startMs": 16133,
+            "peakMs": 16902,
+            "endMs": 17720
+          },
+          {
+            "repIndex": 8,
+            "startMs": 17884,
+            "peakMs": 18802,
+            "endMs": 19603
+          },
+          {
+            "repIndex": 9,
+            "startMs": 19785,
+            "peakMs": 20869,
+            "endMs": 21527
+          },
+          {
+            "repIndex": 10,
+            "startMs": 21830,
+            "peakMs": 22736,
+            "endMs": 23253
+          },
+          {
+            "repIndex": 11,
+            "startMs": 23493,
+            "peakMs": 24536,
+            "endMs": 25158
+          },
+          {
+            "repIndex": 12,
+            "startMs": 25378,
+            "peakMs": 26470,
+            "endMs": 27778
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 834,
+            "peakMs": 4034,
+            "endMs": 5034
+          },
+          {
+            "startMs": 5601,
+            "peakMs": 6201,
+            "endMs": 6934
+          },
+          {
+            "startMs": 7668,
+            "peakMs": 8368,
+            "endMs": 8968
+          },
+          {
+            "startMs": 9635,
+            "peakMs": 10101,
+            "endMs": 10835
+          },
+          {
+            "startMs": 11335,
+            "peakMs": 12002,
+            "endMs": 12768
+          },
+          {
+            "startMs": 13435,
+            "peakMs": 13968,
+            "endMs": 14568
+          },
+          {
+            "startMs": 15135,
+            "peakMs": 15735,
+            "endMs": 16402
+          },
+          {
+            "startMs": 17002,
+            "peakMs": 17469,
+            "endMs": 18269
+          },
+          {
+            "startMs": 18969,
+            "peakMs": 19569,
+            "endMs": 20336
+          },
+          {
+            "startMs": 21002,
+            "peakMs": 21436,
+            "endMs": 22036
+          },
+          {
+            "startMs": 24736,
+            "peakMs": 25103,
+            "endMs": 25903
+          },
+          {
+            "startMs": 26836,
+            "peakMs": 28503,
+            "endMs": 29503
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 1,
+            "peakOffsetMs": 667
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 2,
+            "peakOffsetMs": 800
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 3,
+            "peakOffsetMs": 500
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 4,
+            "peakOffsetMs": 667
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 5,
+            "peakOffsetMs": 700
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 6,
+            "peakOffsetMs": 600
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 7,
+            "peakOffsetMs": 567
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 8,
+            "peakOffsetMs": 767
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 9,
+            "peakOffsetMs": 567
+          },
+          {
+            "truthIndex": 10,
+            "predictedIndex": 10,
+            "peakOffsetMs": 567
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          9,
+          11
+        ],
+        "unmatchedPredictedIndexes": [
+          0,
+          11
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T07-59-35-213Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "truthCount": 6,
+      "truthSegmentCount": 6,
+      "source": "observed",
+      "profileIdentity": "seated_shoulder_press/front/bilateral/observed/v1",
+      "predictedCount": 9,
+      "matchedReps": 4,
+      "missedReps": 2,
+      "falsePositiveReps": 5,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 5046,
+            "peakMs": 6633,
+            "endMs": 8220
+          },
+          {
+            "repIndex": 2,
+            "startMs": 8630,
+            "peakMs": 11101,
+            "endMs": 11150
+          },
+          {
+            "repIndex": 3,
+            "startMs": 11664,
+            "peakMs": 12807,
+            "endMs": 13949
+          },
+          {
+            "repIndex": 4,
+            "startMs": 14326,
+            "peakMs": 14468,
+            "endMs": 17046
+          },
+          {
+            "repIndex": 5,
+            "startMs": 17405,
+            "peakMs": 20169,
+            "endMs": 20297
+          },
+          {
+            "repIndex": 6,
+            "startMs": 20621,
+            "peakMs": 22459,
+            "endMs": 23658
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 767,
+            "peakMs": 4600,
+            "endMs": 6534
+          },
+          {
+            "startMs": 6534,
+            "peakMs": 8401,
+            "endMs": 9368
+          },
+          {
+            "startMs": 10301,
+            "peakMs": 11101,
+            "endMs": 11901
+          },
+          {
+            "startMs": 13035,
+            "peakMs": 14068,
+            "endMs": 15135
+          },
+          {
+            "startMs": 16402,
+            "peakMs": 17268,
+            "endMs": 18002
+          },
+          {
+            "startMs": 18235,
+            "peakMs": 18635,
+            "endMs": 19269
+          },
+          {
+            "startMs": 19502,
+            "peakMs": 20002,
+            "endMs": 21002
+          },
+          {
+            "startMs": 21169,
+            "peakMs": 21769,
+            "endMs": 22302
+          },
+          {
+            "startMs": 22902,
+            "peakMs": 24102,
+            "endMs": 25103
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 1,
+            "predictedIndex": 2,
+            "peakOffsetMs": 0
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 3,
+            "peakOffsetMs": 1261
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 6,
+            "peakOffsetMs": -167
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 7,
+            "peakOffsetMs": -690
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          0,
+          3
+        ],
+        "unmatchedPredictedIndexes": [
+          0,
+          1,
+          4,
+          5,
+          8
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-04-11-681Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "truthCount": 5,
+      "truthSegmentCount": 5,
+      "source": "observed",
+      "profileIdentity": "seated_shoulder_press/front/bilateral/observed/v1",
+      "predictedCount": 10,
+      "matchedReps": 5,
+      "missedReps": 0,
+      "falsePositiveReps": 5,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 6949,
+            "peakMs": 8423,
+            "endMs": 9896
+          },
+          {
+            "repIndex": 2,
+            "startMs": 10083,
+            "peakMs": 10135,
+            "endMs": 12915
+          },
+          {
+            "repIndex": 3,
+            "startMs": 13139,
+            "peakMs": 14715,
+            "endMs": 16290
+          },
+          {
+            "repIndex": 4,
+            "startMs": 17232,
+            "peakMs": 17464,
+            "endMs": 20815
+          },
+          {
+            "repIndex": 5,
+            "startMs": 21975,
+            "peakMs": 23244,
+            "endMs": 25459
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 6168,
+            "peakMs": 6568,
+            "endMs": 7834
+          },
+          {
+            "startMs": 7834,
+            "peakMs": 8568,
+            "endMs": 9168
+          },
+          {
+            "startMs": 9168,
+            "peakMs": 9601,
+            "endMs": 10668
+          },
+          {
+            "startMs": 10868,
+            "peakMs": 11335,
+            "endMs": 11968
+          },
+          {
+            "startMs": 12235,
+            "peakMs": 12902,
+            "endMs": 13968
+          },
+          {
+            "startMs": 14202,
+            "peakMs": 14835,
+            "endMs": 15535
+          },
+          {
+            "startMs": 15802,
+            "peakMs": 16469,
+            "endMs": 17702
+          },
+          {
+            "startMs": 17802,
+            "peakMs": 18569,
+            "endMs": 19669
+          },
+          {
+            "startMs": 20069,
+            "peakMs": 20869,
+            "endMs": 22469
+          },
+          {
+            "startMs": 22769,
+            "peakMs": 23436,
+            "endMs": 24169
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 1,
+            "peakOffsetMs": 145
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 2,
+            "peakOffsetMs": -534
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 5,
+            "peakOffsetMs": 120
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 6,
+            "peakOffsetMs": -995
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 9,
+            "peakOffsetMs": 192
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": [
+          0,
+          3,
+          4,
+          7,
+          8
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-09-44-714Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "truthCount": 3,
+      "truthSegmentCount": 3,
+      "source": "observed",
+      "profileIdentity": "seated_shoulder_press/front/bilateral/observed/v1",
+      "predictedCount": 5,
+      "matchedReps": 3,
+      "missedReps": 0,
+      "falsePositiveReps": 2,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 9816,
+            "peakMs": 12033,
+            "endMs": 14250
+          },
+          {
+            "repIndex": 2,
+            "startMs": 14659,
+            "peakMs": 17002,
+            "endMs": 19349
+          },
+          {
+            "repIndex": 3,
+            "startMs": 19825,
+            "peakMs": 22036,
+            "endMs": 26027
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 5934,
+            "peakMs": 7834,
+            "endMs": 11968
+          },
+          {
+            "startMs": 11968,
+            "peakMs": 12668,
+            "endMs": 13435
+          },
+          {
+            "startMs": 13435,
+            "peakMs": 14135,
+            "endMs": 15568
+          },
+          {
+            "startMs": 15902,
+            "peakMs": 16568,
+            "endMs": 17435
+          },
+          {
+            "startMs": 21069,
+            "peakMs": 22036,
+            "endMs": 23202
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 1,
+            "peakOffsetMs": 635
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 3,
+            "peakOffsetMs": -434
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 4,
+            "peakOffsetMs": 0
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": [
+          0,
+          2
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-15-35-147Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "observed",
+      "profileIdentity": "seated_shoulder_press/front/bilateral/observed/v1",
+      "predictedCount": 10,
+      "matchedReps": 5,
+      "missedReps": 3,
+      "falsePositiveReps": 5,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 6472,
+            "peakMs": 8101,
+            "endMs": 9433
+          },
+          {
+            "repIndex": 2,
+            "startMs": 9627,
+            "peakMs": 10601,
+            "endMs": 11627
+          },
+          {
+            "repIndex": 3,
+            "startMs": 11817,
+            "peakMs": 13501,
+            "endMs": 14447
+          },
+          {
+            "repIndex": 4,
+            "startMs": 14619,
+            "peakMs": 15868,
+            "endMs": 16821
+          },
+          {
+            "repIndex": 5,
+            "startMs": 17059,
+            "peakMs": 18302,
+            "endMs": 19742
+          },
+          {
+            "repIndex": 6,
+            "startMs": 19758,
+            "peakMs": 21636,
+            "endMs": 22744
+          },
+          {
+            "repIndex": 7,
+            "startMs": 22893,
+            "peakMs": 24103,
+            "endMs": 27078
+          },
+          {
+            "repIndex": 8,
+            "startMs": 27403,
+            "peakMs": 28936,
+            "endMs": 30335
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 1000,
+            "peakMs": 5201,
+            "endMs": 5334
+          },
+          {
+            "startMs": 5334,
+            "peakMs": 5801,
+            "endMs": 7367
+          },
+          {
+            "startMs": 8201,
+            "peakMs": 9101,
+            "endMs": 9934
+          },
+          {
+            "startMs": 10734,
+            "peakMs": 11935,
+            "endMs": 12835
+          },
+          {
+            "startMs": 13568,
+            "peakMs": 14768,
+            "endMs": 15302
+          },
+          {
+            "startMs": 16068,
+            "peakMs": 16968,
+            "endMs": 17602
+          },
+          {
+            "startMs": 18669,
+            "peakMs": 19869,
+            "endMs": 20869
+          },
+          {
+            "startMs": 22002,
+            "peakMs": 22802,
+            "endMs": 24836
+          },
+          {
+            "startMs": 26303,
+            "peakMs": 26903,
+            "endMs": 28203
+          },
+          {
+            "startMs": 30770,
+            "peakMs": 32037,
+            "endMs": 32170
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 2,
+            "peakOffsetMs": 1000
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 3,
+            "peakOffsetMs": 1334
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 4,
+            "peakOffsetMs": 1267
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 5,
+            "peakOffsetMs": 1100
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 7,
+            "peakOffsetMs": 1166
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          4,
+          6,
+          7
+        ],
+        "unmatchedPredictedIndexes": [
+          0,
+          1,
+          6,
+          8,
+          9
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-22-48-938Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 7,
+      "matchedReps": 7,
+      "missedReps": 1,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 3017,
+            "peakMs": 4367,
+            "endMs": 5251
+          },
+          {
+            "repIndex": 2,
+            "startMs": 5398,
+            "peakMs": 5967,
+            "endMs": 6671
+          },
+          {
+            "repIndex": 3,
+            "startMs": 6853,
+            "peakMs": 7468,
+            "endMs": 8045
+          },
+          {
+            "repIndex": 4,
+            "startMs": 9401,
+            "peakMs": 10235,
+            "endMs": 10825
+          },
+          {
+            "repIndex": 5,
+            "startMs": 11016,
+            "peakMs": 11801,
+            "endMs": 12358
+          },
+          {
+            "repIndex": 6,
+            "startMs": 13257,
+            "peakMs": 14268,
+            "endMs": 14972
+          },
+          {
+            "repIndex": 7,
+            "startMs": 15031,
+            "peakMs": 15802,
+            "endMs": 16642
+          },
+          {
+            "repIndex": 8,
+            "startMs": 16787,
+            "peakMs": 17702,
+            "endMs": 18286
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 3867,
+            "peakMs": 4301,
+            "endMs": 4667
+          },
+          {
+            "startMs": 5434,
+            "peakMs": 5867,
+            "endMs": 6201
+          },
+          {
+            "startMs": 7034,
+            "peakMs": 7434,
+            "endMs": 7734
+          },
+          {
+            "startMs": 9601,
+            "peakMs": 10168,
+            "endMs": 10568
+          },
+          {
+            "startMs": 11201,
+            "peakMs": 11635,
+            "endMs": 12035
+          },
+          {
+            "startMs": 15235,
+            "peakMs": 15702,
+            "endMs": 15969
+          },
+          {
+            "startMs": 17102,
+            "peakMs": 17635,
+            "endMs": 17935
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -66
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -34
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 4,
+            "peakOffsetMs": -166
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 5,
+            "peakOffsetMs": 1434
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 6,
+            "peakOffsetMs": -67
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          6
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-24-48-386Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 8,
+      "matchedReps": 8,
+      "missedReps": 2,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4875,
+            "peakMs": 5901,
+            "endMs": 6693
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6868,
+            "peakMs": 7468,
+            "endMs": 8237
+          },
+          {
+            "repIndex": 3,
+            "startMs": 8437,
+            "peakMs": 9101,
+            "endMs": 9891
+          },
+          {
+            "repIndex": 4,
+            "startMs": 10030,
+            "peakMs": 10735,
+            "endMs": 11329
+          },
+          {
+            "repIndex": 5,
+            "startMs": 11588,
+            "peakMs": 12435,
+            "endMs": 13181
+          },
+          {
+            "repIndex": 6,
+            "startMs": 13307,
+            "peakMs": 14302,
+            "endMs": 15047
+          },
+          {
+            "repIndex": 7,
+            "startMs": 15198,
+            "peakMs": 16002,
+            "endMs": 16879
+          },
+          {
+            "repIndex": 8,
+            "startMs": 16954,
+            "peakMs": 17802,
+            "endMs": 18552
+          },
+          {
+            "repIndex": 9,
+            "startMs": 18639,
+            "peakMs": 19402,
+            "endMs": 20100
+          },
+          {
+            "repIndex": 10,
+            "startMs": 20317,
+            "peakMs": 21803,
+            "endMs": 22588
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 5334,
+            "peakMs": 5768,
+            "endMs": 6168
+          },
+          {
+            "startMs": 8435,
+            "peakMs": 8968,
+            "endMs": 9401
+          },
+          {
+            "startMs": 10235,
+            "peakMs": 10635,
+            "endMs": 10968
+          },
+          {
+            "startMs": 11935,
+            "peakMs": 12368,
+            "endMs": 12702
+          },
+          {
+            "startMs": 13735,
+            "peakMs": 14169,
+            "endMs": 14569
+          },
+          {
+            "startMs": 15535,
+            "peakMs": 15869,
+            "endMs": 16235
+          },
+          {
+            "startMs": 18869,
+            "peakMs": 19236,
+            "endMs": 19669
+          },
+          {
+            "startMs": 21269,
+            "peakMs": 21669,
+            "endMs": 22336
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": 1500
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 2,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 3,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 4,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 5,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 6,
+            "peakOffsetMs": 1434
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 7,
+            "peakOffsetMs": -134
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          2,
+          8
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-27-17-330Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 7,
+      "truthSegmentCount": 7,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 6,
+      "matchedReps": 6,
+      "missedReps": 1,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4756,
+            "peakMs": 5834,
+            "endMs": 6313
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6443,
+            "peakMs": 7434,
+            "endMs": 8009
+          },
+          {
+            "repIndex": 3,
+            "startMs": 8097,
+            "peakMs": 9034,
+            "endMs": 9896
+          },
+          {
+            "repIndex": 4,
+            "startMs": 10194,
+            "peakMs": 11901,
+            "endMs": 12335
+          },
+          {
+            "repIndex": 5,
+            "startMs": 12799,
+            "peakMs": 13568,
+            "endMs": 14352
+          },
+          {
+            "repIndex": 6,
+            "startMs": 14811,
+            "peakMs": 15835,
+            "endMs": 16496
+          },
+          {
+            "repIndex": 7,
+            "startMs": 16975,
+            "peakMs": 18035,
+            "endMs": 18605
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 5167,
+            "peakMs": 5767,
+            "endMs": 6100
+          },
+          {
+            "startMs": 8434,
+            "peakMs": 8967,
+            "endMs": 9334
+          },
+          {
+            "startMs": 10267,
+            "peakMs": 12001,
+            "endMs": 12201
+          },
+          {
+            "startMs": 12901,
+            "peakMs": 13501,
+            "endMs": 13768
+          },
+          {
+            "startMs": 15335,
+            "peakMs": 15768,
+            "endMs": 16035
+          },
+          {
+            "startMs": 17468,
+            "peakMs": 18035,
+            "endMs": 18235
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 1,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 2,
+            "peakOffsetMs": 100
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 3,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 4,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 5,
+            "peakOffsetMs": 0
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          1
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-30-12-186Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 6,
+      "matchedReps": 6,
+      "missedReps": 4,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4718,
+            "peakMs": 5600,
+            "endMs": 6348
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6429,
+            "peakMs": 7034,
+            "endMs": 7638
+          },
+          {
+            "repIndex": 3,
+            "startMs": 7771,
+            "peakMs": 8734,
+            "endMs": 9419
+          },
+          {
+            "repIndex": 4,
+            "startMs": 9684,
+            "peakMs": 10301,
+            "endMs": 10948
+          },
+          {
+            "repIndex": 5,
+            "startMs": 11062,
+            "peakMs": 12201,
+            "endMs": 12508
+          },
+          {
+            "repIndex": 6,
+            "startMs": 13423,
+            "peakMs": 14401,
+            "endMs": 15059
+          },
+          {
+            "repIndex": 7,
+            "startMs": 15267,
+            "peakMs": 16001,
+            "endMs": 16737
+          },
+          {
+            "repIndex": 8,
+            "startMs": 16808,
+            "peakMs": 17235,
+            "endMs": 18051
+          },
+          {
+            "repIndex": 9,
+            "startMs": 18504,
+            "peakMs": 19902,
+            "endMs": 20504
+          },
+          {
+            "repIndex": 10,
+            "startMs": 20610,
+            "peakMs": 21535,
+            "endMs": 22089
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 6600,
+            "peakMs": 6967,
+            "endMs": 7301
+          },
+          {
+            "startMs": 8034,
+            "peakMs": 8167,
+            "endMs": 8834
+          },
+          {
+            "startMs": 13901,
+            "peakMs": 14268,
+            "endMs": 14601
+          },
+          {
+            "startMs": 16968,
+            "peakMs": 17202,
+            "endMs": 17902
+          },
+          {
+            "startMs": 19468,
+            "peakMs": 20002,
+            "endMs": 20169
+          },
+          {
+            "startMs": 21002,
+            "peakMs": 21335,
+            "endMs": 21802
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": 1367
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": 1133
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 2,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 3,
+            "peakOffsetMs": 1201
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 4,
+            "peakOffsetMs": 100
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 5,
+            "peakOffsetMs": -200
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          2,
+          3,
+          4,
+          7
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-34-27-223Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 12,
+      "truthSegmentCount": 12,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 9,
+      "matchedReps": 9,
+      "missedReps": 3,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4525,
+            "peakMs": 5367,
+            "endMs": 6189
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6528,
+            "peakMs": 6968,
+            "endMs": 7829
+          },
+          {
+            "repIndex": 3,
+            "startMs": 8073,
+            "peakMs": 8668,
+            "endMs": 9628
+          },
+          {
+            "repIndex": 4,
+            "startMs": 11348,
+            "peakMs": 12235,
+            "endMs": 12858
+          },
+          {
+            "repIndex": 5,
+            "startMs": 13186,
+            "peakMs": 13835,
+            "endMs": 14378
+          },
+          {
+            "repIndex": 6,
+            "startMs": 14666,
+            "peakMs": 15402,
+            "endMs": 16003
+          },
+          {
+            "repIndex": 7,
+            "startMs": 16280,
+            "peakMs": 16902,
+            "endMs": 17532
+          },
+          {
+            "repIndex": 8,
+            "startMs": 18535,
+            "peakMs": 19536,
+            "endMs": 20168
+          },
+          {
+            "repIndex": 9,
+            "startMs": 20368,
+            "peakMs": 21069,
+            "endMs": 21691
+          },
+          {
+            "repIndex": 10,
+            "startMs": 21834,
+            "peakMs": 22636,
+            "endMs": 23174
+          },
+          {
+            "repIndex": 11,
+            "startMs": 23366,
+            "peakMs": 24169,
+            "endMs": 24713
+          },
+          {
+            "repIndex": 12,
+            "startMs": 24921,
+            "peakMs": 25670,
+            "endMs": 26228
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 4734,
+            "peakMs": 5167,
+            "endMs": 5601
+          },
+          {
+            "startMs": 6434,
+            "peakMs": 6868,
+            "endMs": 7268
+          },
+          {
+            "startMs": 8101,
+            "peakMs": 8501,
+            "endMs": 8868
+          },
+          {
+            "startMs": 11668,
+            "peakMs": 12101,
+            "endMs": 12435
+          },
+          {
+            "startMs": 13268,
+            "peakMs": 13702,
+            "endMs": 14035
+          },
+          {
+            "startMs": 14868,
+            "peakMs": 15302,
+            "endMs": 15568
+          },
+          {
+            "startMs": 16469,
+            "peakMs": 16735,
+            "endMs": 17169
+          },
+          {
+            "startMs": 18935,
+            "peakMs": 19436,
+            "endMs": 19769
+          },
+          {
+            "startMs": 22136,
+            "peakMs": 22436,
+            "endMs": 22869
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -200
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -167
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": -134
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 4,
+            "peakOffsetMs": -133
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 5,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 6,
+            "peakOffsetMs": -167
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 7,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 8,
+            "peakOffsetMs": 1367
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          9,
+          10,
+          11
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-36-58-723Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 8,
+      "matchedReps": 8,
+      "missedReps": 2,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4655,
+            "peakMs": 5368,
+            "endMs": 6117
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6344,
+            "peakMs": 6968,
+            "endMs": 7585
+          },
+          {
+            "repIndex": 3,
+            "startMs": 7818,
+            "peakMs": 8401,
+            "endMs": 9186
+          },
+          {
+            "repIndex": 4,
+            "startMs": 9491,
+            "peakMs": 9868,
+            "endMs": 10521
+          },
+          {
+            "repIndex": 5,
+            "startMs": 10626,
+            "peakMs": 11468,
+            "endMs": 12107
+          },
+          {
+            "repIndex": 6,
+            "startMs": 13343,
+            "peakMs": 14035,
+            "endMs": 14606
+          },
+          {
+            "repIndex": 7,
+            "startMs": 14783,
+            "peakMs": 15502,
+            "endMs": 16161
+          },
+          {
+            "repIndex": 8,
+            "startMs": 16231,
+            "peakMs": 17069,
+            "endMs": 17612
+          },
+          {
+            "repIndex": 9,
+            "startMs": 17846,
+            "peakMs": 18536,
+            "endMs": 19063
+          },
+          {
+            "repIndex": 10,
+            "startMs": 19099,
+            "peakMs": 19969,
+            "endMs": 20516
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 4834,
+            "peakMs": 5234,
+            "endMs": 5634
+          },
+          {
+            "startMs": 6368,
+            "peakMs": 6801,
+            "endMs": 7101
+          },
+          {
+            "startMs": 7801,
+            "peakMs": 8301,
+            "endMs": 8601
+          },
+          {
+            "startMs": 9335,
+            "peakMs": 9768,
+            "endMs": 10068
+          },
+          {
+            "startMs": 10835,
+            "peakMs": 11302,
+            "endMs": 11635
+          },
+          {
+            "startMs": 13468,
+            "peakMs": 14002,
+            "endMs": 14269
+          },
+          {
+            "startMs": 14902,
+            "peakMs": 15335,
+            "endMs": 15735
+          },
+          {
+            "startMs": 16435,
+            "peakMs": 16869,
+            "endMs": 17269
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -134
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -167
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 4,
+            "peakOffsetMs": -166
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 5,
+            "peakOffsetMs": -33
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 6,
+            "peakOffsetMs": -167
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 7,
+            "peakOffsetMs": -200
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          8,
+          9
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T08-38-55-907Z",
+      "exerciseId": "lateral_raise",
+      "capturePosition": "front",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "observed",
+      "profileIdentity": "lateral_raise/front/bilateral/observed/v1",
+      "predictedCount": 5,
+      "matchedReps": 5,
+      "missedReps": 3,
+      "falsePositiveReps": 0,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 4526,
+            "peakMs": 5400,
+            "endMs": 5986
+          },
+          {
+            "repIndex": 2,
+            "startMs": 6096,
+            "peakMs": 6834,
+            "endMs": 7479
+          },
+          {
+            "repIndex": 3,
+            "startMs": 7640,
+            "peakMs": 8334,
+            "endMs": 8898
+          },
+          {
+            "repIndex": 4,
+            "startMs": 9009,
+            "peakMs": 9901,
+            "endMs": 10337
+          },
+          {
+            "repIndex": 5,
+            "startMs": 11147,
+            "peakMs": 12068,
+            "endMs": 12672
+          },
+          {
+            "repIndex": 6,
+            "startMs": 12828,
+            "peakMs": 13501,
+            "endMs": 14131
+          },
+          {
+            "repIndex": 7,
+            "startMs": 15150,
+            "peakMs": 15150,
+            "endMs": 16403
+          },
+          {
+            "repIndex": 8,
+            "startMs": 17573,
+            "peakMs": 18735,
+            "endMs": 19351
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 4833,
+            "peakMs": 5300,
+            "endMs": 5600
+          },
+          {
+            "startMs": 6400,
+            "peakMs": 6767,
+            "endMs": 7100
+          },
+          {
+            "startMs": 13001,
+            "peakMs": 13501,
+            "endMs": 13768
+          },
+          {
+            "startMs": 15468,
+            "peakMs": 15901,
+            "endMs": 16235
+          },
+          {
+            "startMs": 18202,
+            "peakMs": 18635,
+            "endMs": 19002
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": -100
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -67
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 2,
+            "peakOffsetMs": 1433
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 3,
+            "peakOffsetMs": 751
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 4,
+            "peakOffsetMs": -100
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          2,
+          3,
+          5
+        ],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "field-capture-2026-08-03T09-03-30-328Z",
+      "exerciseId": "seated_shoulder_press",
+      "capturePosition": "front",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "seated_shoulder_press/front/bilateral/observed/v1",
+      "predictedCount": 12,
+      "matchedReps": 8,
+      "missedReps": 2,
+      "falsePositiveReps": 4,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 3349,
+            "peakMs": 5290,
+            "endMs": 7231
+          },
+          {
+            "repIndex": 2,
+            "startMs": 7528,
+            "peakMs": 8427,
+            "endMs": 9325
+          },
+          {
+            "repIndex": 3,
+            "startMs": 9651,
+            "peakMs": 10801,
+            "endMs": 11621
+          },
+          {
+            "repIndex": 4,
+            "startMs": 12031,
+            "peakMs": 13095,
+            "endMs": 14159
+          },
+          {
+            "repIndex": 5,
+            "startMs": 14695,
+            "peakMs": 15609,
+            "endMs": 16523
+          },
+          {
+            "repIndex": 6,
+            "startMs": 17059,
+            "peakMs": 17964,
+            "endMs": 18869
+          },
+          {
+            "repIndex": 7,
+            "startMs": 19353,
+            "peakMs": 20024,
+            "endMs": 20695
+          },
+          {
+            "repIndex": 8,
+            "startMs": 21178,
+            "peakMs": 22257,
+            "endMs": 23335
+          },
+          {
+            "repIndex": 9,
+            "startMs": 23801,
+            "peakMs": 24706,
+            "endMs": 25610
+          },
+          {
+            "repIndex": 10,
+            "startMs": 25793,
+            "peakMs": 27047,
+            "endMs": 28301
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 2300,
+            "peakMs": 2467,
+            "endMs": 5067
+          },
+          {
+            "startMs": 6301,
+            "peakMs": 7367,
+            "endMs": 7901
+          },
+          {
+            "startMs": 8934,
+            "peakMs": 9601,
+            "endMs": 10068
+          },
+          {
+            "startMs": 10934,
+            "peakMs": 11635,
+            "endMs": 12235
+          },
+          {
+            "startMs": 13368,
+            "peakMs": 14135,
+            "endMs": 14702
+          },
+          {
+            "startMs": 15635,
+            "peakMs": 16402,
+            "endMs": 16968
+          },
+          {
+            "startMs": 18002,
+            "peakMs": 18669,
+            "endMs": 19235
+          },
+          {
+            "startMs": 20235,
+            "peakMs": 20902,
+            "endMs": 21369
+          },
+          {
+            "startMs": 23969,
+            "peakMs": 24536,
+            "endMs": 25003
+          },
+          {
+            "startMs": 25103,
+            "peakMs": 25703,
+            "endMs": 26269
+          },
+          {
+            "startMs": 26603,
+            "peakMs": 27470,
+            "endMs": 27903
+          },
+          {
+            "startMs": 28036,
+            "peakMs": 29236,
+            "endMs": 29436
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -1060
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 3,
+            "peakOffsetMs": 834
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 4,
+            "peakOffsetMs": 1040
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 5,
+            "peakOffsetMs": 793
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 6,
+            "peakOffsetMs": 705
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 7,
+            "peakOffsetMs": 878
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 8,
+            "peakOffsetMs": -170
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 10,
+            "peakOffsetMs": 423
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          0,
+          7
+        ],
+        "unmatchedPredictedIndexes": [
+          0,
+          2,
+          9,
+          11
+        ]
+      },
+      "reason": null
+    }
+  ]
+}

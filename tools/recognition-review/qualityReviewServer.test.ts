@@ -5,7 +5,6 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, test } from "node:test";
-import { gzipSync } from "node:zlib";
 
 import {
   createRecognitionReviewServer,
@@ -269,146 +268,8 @@ test("quality review rejects tampered frozen benchmark evidence even when outer 
   }
 });
 
-test("v7 alignment review exposes immutable report, pose trajectory, and range video on a separate page", async () => {
-  const root = await mkdtemp(join(tmpdir(), "maxpower-v7-alignment-review-"));
-  temporaryRoots.push(root);
-  const publicRoot = join(root, "public");
-  const videoRoot = join(root, "videos");
-  const poseRoot = join(root, "pose");
-  await Promise.all([mkdir(publicRoot), mkdir(videoRoot), mkdir(poseRoot)]);
-  const pagePath = join(publicRoot, "v7-alignment-review.html");
-  const appPath = join(publicRoot, "v7AlignmentReviewApp.js");
-  const reportPath = join(root, "v7-report.json");
-  const labelPath = join(root, "labels.json");
-  const videoPath = join(videoRoot, "capture-a.mp4");
-  const posePath = join(poseRoot, "capture-a.halpe26.json.gz");
-  const video = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]);
-  const report = {
-    schemaVersion: "maxpower-current-rust-known-video-alignment/v1",
-    reportDigest: "a".repeat(64),
-    rows: [{
-      sourceCaptureId: "capture-a",
-      contextId: "capture-a:lateral_raise:front",
-      exerciseId: "lateral_raise",
-      capturePosition: "front",
-      truthRanges: [{ startMs: 1_000, endMs: 2_000 }],
-      predictedReps: [],
-      matches: [],
-      equipmentProvider: {
-        recognitionMode: "RustVisualRigidBarAxis",
-        trackerOutputFrameCount: 1,
-        frames: [{
-          frameNumber: 30,
-          timestampMs: 1_000,
-          source: "Measured",
-          confidence: 0.92,
-          uncertaintyPx: 2.4,
-          x1: 0.2,
-          y1: 0.42,
-          x2: 0.8,
-          y2: 0.41,
-          centerY: 0.415,
-        }],
-      },
-    }],
-  };
-  const labels = {
-    records: [{
-      sourceCaptureId: "capture-a",
-      exerciseId: "lateral_raise",
-      capturePosition: "front",
-      source: { video: "capture-a.mp4", durationMs: 4_000 },
-    }],
-  };
-  const pose = {
-    captureId: "capture-a",
-    poseSchema: "halpe26",
-    source: { sha256: createHash("sha256").update(video).digest("hex") },
-    frames: [{ frameNumber: 1, timestampMs: 100, landmarks: [] }],
-  };
-  const reportBytes = Buffer.from(JSON.stringify(report));
-  const labelBytes = Buffer.from(JSON.stringify(labels));
-  await Promise.all([
-    writeFile(pagePath, "<!doctype html><title>V7 alignment</title>"),
-    writeFile(appPath, "window.V7AlignmentReviewApp = {};"),
-    writeFile(reportPath, reportBytes),
-    writeFile(labelPath, labelBytes),
-    writeFile(videoPath, video),
-    writeFile(posePath, gzipSync(Buffer.from(JSON.stringify(pose)))),
-  ]);
-  const qualityPage = join(publicRoot, "quality-review.html");
-  const qualityRelease = join(root, "quality-release.json");
-  await Promise.all([
-    writeFile(qualityPage, "<!doctype html>"),
-    writeFile(qualityRelease, "{}"),
-  ]);
-  const server = createRecognitionReviewServer(serverOptions({
-    qualityReviewPagePath: qualityPage,
-    qualityReviewReleasePath: qualityRelease,
-    qualityReviewVideoRoot: videoRoot,
-    v7AlignmentReview: {
-      pagePath,
-      appPath,
-      reportPath,
-      reportSha256: createHash("sha256").update(reportBytes).digest("hex"),
-      labelPath,
-      labelSha256: createHash("sha256").update(labelBytes).digest("hex"),
-      poseRoot,
-      videoRoot,
-    },
-  }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address() as AddressInfo;
-  const baseUrl = `http://127.0.0.1:${address.port}`;
-  try {
-    const pageResponse = await fetch(`${baseUrl}/v7-alignment-review.html`);
-    assert.equal(pageResponse.status, 200);
-    assert.match(await pageResponse.text(), /V7 alignment/u);
-    const v8PageResponse = await fetch(`${baseUrl}/v8-equipment-fusion-review.html`);
-    assert.equal(v8PageResponse.status, 200);
-    assert.match(await v8PageResponse.text(), /V7 alignment/u);
-    const v9PageResponse = await fetch(`${baseUrl}/v9-wrist-constrained-equipment-review.html`);
-    assert.equal(v9PageResponse.status, 200);
-    assert.match(await v9PageResponse.text(), /V7 alignment/u);
-    const appResponse = await fetch(`${baseUrl}/v7AlignmentReviewApp.js`);
-    assert.equal(appResponse.status, 200);
-
-    const reportResponse = await fetch(`${baseUrl}/api/review/v7-alignment`);
-    assert.equal(reportResponse.status, 200);
-    const clientReport = await reportResponse.json() as { rows: Array<Record<string, unknown>> };
-    assert.equal(clientReport.rows[0]?.videoUrl, "/media/v7-alignment?id=capture-a%3Alateral_raise%3Afront");
-    assert.equal(clientReport.rows[0]?.poseUrl, "/api/review/v7-pose?id=capture-a");
-    assert.equal(clientReport.rows[0]?.durationMs, 4_000);
-    assert.deepEqual(clientReport.rows[0]?.phaseOrder, ["concentric", "eccentric"]);
-    assert.equal(clientReport.rows[0]?.phaseContractSource, "action-contract-catalog");
-    assert.deepEqual(
-      (clientReport.rows[0]?.equipmentProvider as { frames: unknown[] }).frames,
-      report.rows[0]!.equipmentProvider.frames,
-    );
-    assert.equal(clientReport.rows[0]?.videoPath, undefined);
-
-    const poseResponse = await fetch(`${baseUrl}/api/review/v7-pose?id=capture-a`);
-    assert.equal(poseResponse.status, 200);
-    assert.equal((await poseResponse.json() as { frames: unknown[] }).frames.length, 1);
-
-    const rangeResponse = await fetch(
-      `${baseUrl}/media/v7-alignment?id=capture-a%3Alateral_raise%3Afront`,
-      { headers: { Range: "bytes=2-5" } },
-    );
-    assert.equal(rangeResponse.status, 206);
-    assert.deepEqual(Buffer.from(await rangeResponse.arrayBuffer()), Buffer.from([2, 3, 4, 5]));
-
-    await writeFile(reportPath, Buffer.from(`${JSON.stringify(report)} `));
-    const tampered = await fetch(`${baseUrl}/api/review/v7-alignment`);
-    assert.equal(tampered.status, 409);
-    assert.match((await tampered.json() as { error: string }).error, /report SHA-256 mismatch/u);
-  } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  }
-});
-
 function serverOptions(quality: Pick<RecognitionReviewServerOptions,
-  "qualityReviewPagePath" | "qualityReviewReleasePath" | "qualityReviewVideoRoot" | "v7AlignmentReview"
+  "qualityReviewPagePath" | "qualityReviewReleasePath" | "qualityReviewVideoRoot"
 >): RecognitionReviewServerOptions {
   const inert = {} as never;
   return {

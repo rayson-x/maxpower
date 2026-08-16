@@ -1,0 +1,384 @@
+
+
+<!DOCTYPE html>
+<html>
+    
+<head>
+    <meta charset="utf-8"/>
+    <title>Strong Help Center </title>
+    <meta name="viewport" content="width=device-width, maximum-scale=1"/>
+    <meta name="apple-mobile-web-app-capable" content="yes"/>
+    <meta name="format-detection" content="telephone=no">
+    <meta name="description" content="Frequently asked questions and support documentation for Strong"/>
+    <meta name="author" content="Strong"/>
+    <link rel="canonical" href="https://help.strongapp.io"/>
+    
+
+    
+        <link rel="stylesheet" href="//d3eto7onm69fcz.cloudfront.net/assets/stylesheets/launch-1785862341081.css">
+    
+    <style>
+        body { background: #ffffff; }
+        .navbar .navbar-inner { background: #172936; }
+        .navbar .nav li a, 
+        .navbar .icon-private-w  { color: #c0c0c0; }
+        .navbar .brand, 
+        .navbar .nav li a:hover, 
+        .navbar .nav li a:focus, 
+        .navbar .nav .active a, 
+        .navbar .nav .active a:hover, 
+        .navbar .nav .active a:focus  { color: #ffffff; }
+        .navbar a:hover .icon-private-w, 
+        .navbar a:focus .icon-private-w, 
+        .navbar .active a .icon-private-w, 
+        .navbar .active a:hover .icon-private-w, 
+        .navbar .active a:focus .icon-private-w { color: #ffffff; }
+        #serp-dd .result a:hover,
+        #serp-dd .result > li.active,
+        #fullArticle strong a,
+        #fullArticle a strong,
+        .collection a,
+        .contentWrapper a,
+        .most-pop-articles .popArticles a,
+        .most-pop-articles .popArticles a:hover span,
+        .category-list .category .article-count,
+        .category-list .category:hover .article-count { color: #357cb8; }
+        #fullArticle, 
+        #fullArticle p, 
+        #fullArticle ul, 
+        #fullArticle ol, 
+        #fullArticle li, 
+        #fullArticle div, 
+        #fullArticle blockquote, 
+        #fullArticle dd, 
+        #fullArticle table { color:#434547; }
+    </style>
+    
+    <link rel="apple-touch-icon-precomposed" href="//d33v4339jhl8k0.cloudfront.net/docs/assets/57baea42c697917de37cf9d3/images/5d263a84042863478674bd91/logo2.png">
+    <link rel="shortcut icon" type="image/png" href="//d33v4339jhl8k0.cloudfront.net/docs/assets/57baea42c697917de37cf9d3/images/5d13f8862c7d3a6ebd2299ee/Strong-Image-Logo.png">
+    <!--[if lt IE 9]>
+    
+        <script src="//d3eto7onm69fcz.cloudfront.net/assets/javascripts/html5shiv.min.js"></script>
+    
+    <![endif]-->
+    
+        <script type="application/ld+json">
+        {"@context":"https://schema.org","@type":"WebSite","url":"https://help.strongapp.io","potentialAction":{"@type":"SearchAction","target":"https://help.strongapp.io/search?query={query}","query-input":"required name=query"}}
+        </script>
+    
+    
+        <style>
+@import url('https://rsms.me/inter/inter.css');
+html { font-family: 'Inter', sans-serif; }
+@supports (font-variation-settings: normal) {
+  html { font-family: 'Inter var', sans-serif; }
+}
+body, input, button, select, textarea { 
+	font-family: Inter, -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol";
+/*	letter-spacing:-.024rem;  original spacing for SF / Apple System*/
+	letter-spacing:-.021rem; /* recommended via Inter. */
+	font-synthesis:none;
+	-webkit-font-smoothing:antialiased; 
+	-moz-osx-font-smoothing:grayscale;
+	direction:ltr; 
+	font-weight: 500;
+line-height: 1.5;
+}
+
+p.contentWrapper {
+       font-size: 15px;
+}
+
+p.withRelated {
+       font-size: 15px;
+}
+.nav {
+font-size: 13px
+}
+
+article#fullArticle {
+       font-size: 15px;
+}
+
+.articleList {
+font-size: 17px
+}
+
+/* hide stuff to keep the Help Center clean */
+#categoryHead .sort {
+    display: none;
+}
+
+.icon-article-doc { /* Removes the default icon*/
+display: none;
+}
+
+/* Improved padding and spacing */
+.descrip {
+padding-top: 4px;
+padding-bottom: 16px;
+}
+/*
+.contentWrapper {
+padding: 64px 62px;
+}
+*/
+
+.nav {
+	margin-bottom: 18px !important;
+}
+
+ .navbar .btn-navbar {
+	margin-top: 25px !important;
+}
+
+#mainNav .brand span {
+	display: inline-block;
+	text-indent: -9000px;
+	width: 150px;
+	height: 60px;
+	background: url(https://i.postimg.cc/QMHsVYtD/m-M0ng0e.png) no-repeat 0 0;
+	background-size: 100%;
+}
+
+h1,h2,h3,h4,h5,h6 {
+	color:#000;
+	font-weight:700 !important;
+}
+
+#fullArticle strong {
+    color: #333;
+}
+
+#docsSearch h1 {
+	color: #ffffff;
+}
+
+.articleFoot time.lu {
+    display:none;
+}
+
+#docsSearch {
+	height: 250px;
+	background: url(https://i.postimg.cc/wB7H34vx/r-Nl-XLs4.jpg) no-repeat center 100% / cover transparent;
+	border-bottom: none;
+	padding-top: 75px;
+	position: relative;
+	top: -1px;
+}
+
+</style>
+    
+</head>
+    <body>
+        <script>
+            window.onload = function() {
+                $("#searchBar input.search-query" ).focus();
+            };
+        </script>
+        
+<header id="mainNav" class="navbar">
+    <div class="navbar-inner">
+        <div class="container-fluid">
+            <a class="brand" href="/">
+            
+                <span>Strong Help Center </span>
+            
+            </a>
+            
+            <div class="nav-collapse collapse">
+                <nav role="navigation"><!-- added for accessibility -->
+                <ul class="nav">
+                    
+                    
+                    
+                    
+                </ul>
+                </nav>
+            </div><!--/.nav-collapse -->
+        </div><!--/container-->
+    </div><!--/navbar-inner-->
+</header>
+        <section id="docsSearch">
+            
+                <h1>What can we help you with today?</h1>
+            
+             
+
+<form action="/search" method="GET" id="searchBar" autocomplete="off">
+    
+                <input type="text" name="query" title="search-query" class="search-query" placeholder="Search the Knowledge Base" aria-label="Search the Knowledge Base" value="">
+                <button type="submit" aria-label="Search"><i class="icon-search lp"></i><span>Search</span></button>
+                <div id="serp-dd" style="display:none;">
+                    <ul class="result"></ul>
+                </div>
+            
+</form>
+
+        </section><!--/docsSearch-->
+        <section id="contentArea" class="container-fluid">
+            
+
+    <div id="noResults" style="display:none;">No results found</div>
+    
+        <!-- Site has only one collection -->
+        
+            
+                
+                    <section class="category-list">
+                        
+                            
+                                <a class="category" id="category-131" href="/category/131-getting-started">
+                                    <h3>Getting Started</h3>
+                                    <p>All about Strong, and how to get started.</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">9</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-165" href="/category/165-logging-a-workout">
+                                    <h3>Record a Workout with Strong</h3>
+                                    <p>The basics of recording a workout</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">16</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-150" href="/category/150-workoutsroutines">
+                                    <h3>Using Workout Templates</h3>
+                                    <p>Use Templates to save time when recording workouts.</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">6</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-96" href="/category/96-exercises">
+                                    <h3>Exercises</h3>
+                                    <p>About exercises in Strong and how to manage them.</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">6</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-233" href="/category/233-history-charts-and-metrics">
+                                    <h3>More Strong Features</h3>
+                                    <p>Information about other features of Strong.</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">11</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-129" href="/category/129-apple-watch">
+                                    <h3>Strong for Apple Watch</h3>
+                                    <p>About Strong&#x27;s Apple Watch app.</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">9</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-138" href="/category/138-integrations">
+                                    <h3>Apple Health and Other Integrations</h3>
+                                    <p>Integrate Strong with other services</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">5</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-112" href="/category/112-accounts">
+                                    <h3>Strong Accounts / Strong PRO / Refunds</h3>
+                                    <p>How to manage your Strong Account and your subscription</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">16</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                            
+                                <a class="category" id="category-128" href="/category/128-troubleshooting">
+                                    <h3>Troubleshooting</h3>
+                                    <p>Common solutions to known issues or problems</p>
+                                    <p class="article-count">                                        
+                                        
+                                            <span class="notranslate">18</span> articles
+                                                                                
+                                    </p>
+                                </a><!-- /category -->
+                            
+                        
+                    </section><!-- /category-list -->
+                
+            
+        
+    
+
+            <footer class="center">
+                
+
+<p>&copy;
+    
+        <a href="http://www.strong.app">Strong</a>
+    
+    2026. <span>Powered by <a rel="nofollow noopener noreferrer" href="https://www.helpscout.com/docs-refer/?co=Strong&utm_source=docs&utm_medium=footerlink&utm_campaign=Docs+Branding" target="_blank">Help Scout</a></span>
+    
+        
+    
+    
+</p>
+
+            </footer>
+        </section><!--/.fluid-container-->
+        
+        
+    <script src="//d3eto7onm69fcz.cloudfront.net/assets/javascripts/app4.min.js"></script>
+
+<script>
+// keep iOS links from opening safari
+if(("standalone" in window.navigator) && window.navigator.standalone){
+// If you want to prevent remote links in standalone web apps opening Mobile Safari, change 'remotes' to true
+var noddy, remotes = false;
+document.addEventListener('click', function(event) {
+noddy = event.target;
+while(noddy.nodeName !== "A" && noddy.nodeName !== "HTML") {
+noddy = noddy.parentNode;
+}
+
+if('href' in noddy && noddy.href.indexOf('http') !== -1 && (noddy.href.indexOf(document.location.host) !== -1 || remotes)){
+event.preventDefault();
+document.location.href = noddy.href;
+}
+
+},false);
+}
+</script>
+    </body>
+</html>

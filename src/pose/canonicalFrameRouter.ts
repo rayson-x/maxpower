@@ -7,7 +7,7 @@ export interface CanonicalFrameConsumers {
   analyze(frame: CanonicalPoseFrame): void;
 }
 
-/** Publishes one decoded frame instance to every product-data consumer. */
+/** Publishes one decoded frame instance to every local inference consumer. */
 export function routeCanonicalFrame(
   frame: CanonicalPoseFrame,
   consumers: CanonicalFrameConsumers,

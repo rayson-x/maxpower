@@ -1,0 +1,144 @@
+/* MaxPower 教学课程共享样式 · Tufte 风：克制、衬线正文、宽边距、注释入边 */
+:root {
+  --ink: #1a2027;
+  --paper: #faf8f4;
+  --dim: #6b7683;
+  --accent: #0f6f6a;
+  --accent-soft: #e8f3f2;
+  --warn: #b3541e;
+  --line: #ddd6c9;
+  --know: #6b4fa1;
+  --loop: #3a7d44;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Georgia, 'Songti SC', 'Noto Serif SC', serif;
+  font-size: 17px;
+  line-height: 1.85;
+}
+.lesson { max-width: 720px; margin: 0 auto; padding: 64px 28px 120px; }
+.lesson-kicker {
+  font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  font-size: 11px; letter-spacing: .3em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 18px;
+}
+h1 { font-size: 32px; font-weight: 700; line-height: 1.3; margin-bottom: 12px; letter-spacing: -.01em; }
+.subtitle { color: var(--dim); font-size: 16px; font-style: italic; margin-bottom: 48px; }
+h2 {
+  font-size: 21px; margin: 56px 0 18px; padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+h2 .sec-num { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); display: block; letter-spacing: .2em; margin-bottom: 6px; }
+h3 { font-size: 17px; margin: 28px 0 10px; }
+p { margin-bottom: 16px; }
+p b, li b { color: var(--ink); }
+code {
+  font-family: 'JetBrains Mono', monospace; font-size: 13.5px;
+  background: var(--accent-soft); color: var(--accent);
+  padding: 1px 6px; border-radius: 4px;
+}
+ul, ol { padding-left: 22px; margin-bottom: 16px; }
+li { margin-bottom: 8px; }
+table { width: 100%; border-collapse: collapse; margin: 20px 0 24px; font-size: 14.5px; }
+th { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--ink); }
+td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+
+.figure {
+  background: #fff; border: 1px solid var(--line); border-radius: 6px;
+  padding: 22px 24px; margin: 24px 0;
+  font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.75;
+  overflow-x: auto; white-space: pre;
+  box-shadow: 0 1px 4px rgba(26,32,39,.05);
+}
+.figcap { font-size: 13px; color: var(--dim); font-style: italic; margin-top: 10px; font-family: Georgia, serif; white-space: normal; }
+
+.callout {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 14px 18px; margin: 22px 0; font-size: 15.5px;
+}
+.callout.warn { border-color: var(--warn); background: #faf0e8; }
+.callout.know { border-color: var(--know); background: #f1ecf9; }
+.callout .label { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase; display: block; margin-bottom: 6px; }
+.callout .label { color: var(--accent); }
+.callout.warn .label { color: var(--warn); }
+.callout.know .label { color: var(--know); }
+
+/* 步骤卡 */
+.step {
+  display: grid; grid-template-columns: 44px 1fr; gap: 14px;
+  padding: 16px 0; border-bottom: 1px solid var(--line);
+}
+.step .n {
+  font-family: 'Unbounded', 'JetBrains Mono', monospace;
+  font-size: 22px; font-weight: 300; color: var(--accent);
+  border: 1.5px solid var(--accent); border-radius: 50%;
+  width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+}
+.step h3 { margin: 0 0 4px; font-size: 16px; }
+.step p { font-size: 14.5px; color: #3a4350; margin-bottom: 6px; }
+.step .verify { font-size: 13px; color: var(--dim); }
+.step .verify b { color: var(--loop); font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .1em; }
+
+/* 测验 */
+.quiz { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 24px; margin: 26px 0; }
+.quiz .q { font-weight: 700; margin-bottom: 14px; font-size: 16px; }
+.quiz label {
+  display: block; padding: 10px 14px; margin-bottom: 8px;
+  border: 1px solid var(--line); border-radius: 6px; cursor: pointer;
+  font-size: 14.5px; transition: border-color .15s, background .15s;
+}
+.quiz label:hover { border-color: var(--accent); }
+.quiz input { margin-right: 10px; }
+.quiz .feedback { font-size: 14px; margin-top: 10px; min-height: 22px; }
+.quiz .feedback.ok { color: var(--loop); }
+.quiz .feedback.bad { color: var(--warn); }
+
+.src { font-size: 13px; color: var(--dim); }
+.src a { color: var(--accent); }
+.footer-note { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13.5px; color: var(--dim); }
+
+/* 能力阶梯与证据链：适合跨课程复用的验收组件 */
+.claim-ladder { list-style: none; padding: 0; margin: 24px 0; counter-reset: claim; }
+.claim-ladder li {
+  counter-increment: claim; display: grid; grid-template-columns: 36px 1fr;
+  gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line);
+}
+.claim-ladder li::before {
+  content: counter(claim); width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; font-size: 12px;
+  color: var(--accent); border: 1px solid var(--accent);
+}
+.claim-ladder strong { display: block; font-size: 15px; }
+.claim-ladder span { display: block; color: var(--dim); font-size: 13.5px; margin-top: 2px; }
+.status {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-family: 'JetBrains Mono', monospace; font-size: 10.5px; letter-spacing: .06em;
+}
+.status.yes { color: #285f33; background: #e5f2e7; }
+.status.no { color: #8a3f18; background: #f8e9df; }
+.status.unknown { color: #5a467c; background: #eee8f7; }
+.evidence-chain {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  margin: 22px 0; font-family: 'JetBrains Mono', monospace; font-size: 11px;
+}
+.evidence-chain div { padding: 10px 8px; border: 1px solid var(--line); background: #fff; text-align: center; }
+.evidence-chain div + div::before { content: '→ '; color: var(--accent); }
+.audit-list { counter-reset: audit; list-style: none; padding: 0; }
+.audit-list li { counter-increment: audit; padding: 10px 0 10px 42px; position: relative; border-bottom: 1px solid var(--line); }
+.audit-list li::before {
+  content: counter(audit, decimal-leading-zero); position: absolute; left: 0; top: 12px;
+  color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 12px;
+}
+.small { font-size: 13.5px; color: var(--dim); }
+@media (max-width: 620px) {
+  .evidence-chain { grid-template-columns: 1fr 1fr; }
+}
+@media print {
+  body { background: #fff; }
+  .lesson { max-width: none; padding: 24px; }
+  a { color: inherit; text-decoration: none; }
+}

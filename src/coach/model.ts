@@ -298,6 +298,8 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
             impact: "low" | "high";
             resolution: "confirmation_required" | "auto_apply_once_eligible" | "auto_apply_eligible";
             issues: readonly string[];
+            /** 恢复类软提示：呈现为备注，永不阻断确认。 */
+            advisories: readonly string[];
           };
         };
       };
@@ -343,6 +345,9 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
       nextValidationSignals: readonly string[];
     };
     safetyBlocked: boolean;
+    /** 确定性恢复上下文（肌群本周直接组/残差负荷/恢复窗档位/叠加提示）；
+     * 无训练历史时显式 insufficient_history，不静默省略。 */
+    recoveryContext: import("../planning").RecoveryContext;
   };
   adaptivePlanProposal?: {
     status: "awaiting_confirmation" | "stale" | "applied" | "rejected" | "undone";

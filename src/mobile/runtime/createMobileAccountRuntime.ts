@@ -141,6 +141,9 @@ export async function createMobileAccountRuntime(
       ledger: appLedger,
       runtime,
       pi: cloudCoach.pi,
+      // 恢复 eval 上线门（tools/eval/recoveryCoachEval）2026-08-16 全绿：10 用例
+      // （工具选择/软建议话术/禁止声称，各含正反）CI 确定性通过，按门规翻转。
+      featureFlags: { recoveryCoachTools: true },
       ...createLocalConversationAdapters({ kernel, records }),
     });
 

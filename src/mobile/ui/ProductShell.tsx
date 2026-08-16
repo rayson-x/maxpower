@@ -460,7 +460,11 @@ export function ProductShell({ application, conversation, records, userId, incom
       }
       await hydrateCoach(session);
       await refresh();
-    })().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")))).finally(() => setCoachWorking(false));
+    })().catch((cause) => {
+      // 卡片操作失败必须留下可诊断的痕迹：用户看到的是兜底文案，真实原因进控制台。
+      console.error("coach_card_action_failed", cause instanceof Error ? cause.message : cause);
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")));
+    }).finally(() => setCoachWorking(false));
   }, [coachAttachment, coachSession, conversation, hydrateCoach, refresh, userId]);
 
   const handleCoachExpandedChange = useCallback((expanded: boolean) => {
@@ -1088,8 +1092,37 @@ function BehaviorCard({ mark, title, value, meta }: { mark: string; title: strin
   return <PanelCard style={styles.behaviorCard}><View style={styles.behaviorTop}><Text style={styles.behaviorMark}>{mark}</Text><Text style={styles.behaviorTitle}>{title}</Text></View><Text style={styles.behaviorValue}>{value}</Text><Text style={styles.behaviorMeta}>{meta}</Text></PanelCard>;
 }
 
-function PlanTrends({ application, userId, screen, onUpdated }: { application: LocalProductKernel; userId: string; screen: CoachProductProjection; onUpdated(): void }) {
-  const [feedback, setFeedback] = useState("");
+/** 周肌群复盘卡：相对负荷呈现，每条结论可展开到具体动作与确认组。 */
+function MuscleWeekCard({ report }: { report: NonNullable<CoachProductProjection["plan"]["muscleWeek"]> }) {
+  const [expanded, setExpanded] = useState<string>();
+  const muscleLabel = (muscleId: string) => {
+    const key = `mobile.muscle.${muscleId}`;
+    const translated = mobileT(key);
+    return translated === `[${key}]` ? muscleId : translated;
+  };
+  return <View style={styles.quickChoiceCard}>
+    <Text style={styles.quickChoiceTitle}>{mobileT("mobile.muscleweek.title")}</Text>
+    <Text style={styles.quickChoiceHint}>{mobileT("mobile.muscleweek.disclaimer")}</Text>
+    {report.perMuscle.length === 0 ? <Text style={styles.quickChoiceHint}>{mobileT("mobile.muscleweek.empty")}</Text> : null}
+    {report.perMuscle.map((row) => {
+      const gapKey = `mobile.muscleweek.gap.${row.targetGap}` as const;
+      const isOpen = expanded === row.muscleId;
+      return <View key={row.muscleId} style={styles.muscleRow}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${muscleLabel(row.muscleId)} ${mobileT("mobile.muscleweek.sources")}`} onPress={() => setExpanded(isOpen ? undefined : row.muscleId)} style={styles.muscleRowHeader}>
+          <Text style={styles.muscleRowTitle}>{muscleLabel(row.muscleId)}</Text>
+          <Text style={styles.muscleRowMeta}>{row.directSets} {mobileT("mobile.muscleweek.directSets")} · {mobileT(gapKey)}{row.synergistLoad > 0 ? ` · ${mobileT("mobile.muscleweek.synergistLoad")} ${row.synergistLoad}` : ""}</Text>
+        </Pressable>
+        {isOpen ? <View style={styles.muscleRowDetail}>
+          {row.contributions.map((entry, index) => <Text key={`${entry.exerciseVariantId}-${entry.date}-${index}`} style={styles.muscleRowDetailText}>{entry.date.slice(5)} · {entry.exerciseName} · {entry.sets} {mobileT("mobile.muscleweek.sets")}{entry.role === "primary_intent" ? "" : `（${mobileT("mobile.muscleweek.synergistLoad")}）`}</Text>)}
+        </View> : null}
+      </View>;
+    })}
+    {report.unknownExercises.map((entry) => <Text key={entry.exerciseVariantId} style={styles.quickChoiceHint}>{entry.exerciseName} · {entry.sets} {mobileT("mobile.muscleweek.sets")} · {mobileT("mobile.muscleweek.unknownNotCounted")}</Text>)}
+    {report.limitations.map((line) => <Text key={line} style={styles.muscleRowLimit}>{line}</Text>)}
+  </View>;
+}
+
+function PlanTrends({ application, userId, screen, onUpdated }: { application: LocalProductKernel; userId: string; screen: CoachProductProjection; onUpdated(): void }) {  const [feedback, setFeedback] = useState("");
   const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const weight = screen.progress.bodyTrends.weight[0];
@@ -1149,6 +1182,7 @@ function PlanTrends({ application, userId, screen, onUpdated }: { application: L
       </View>
       {feedbackSaved ? <Text style={styles.quickChoiceHint}>{mobileT("mobile.plan.feedback.saved")}</Text> : null}
     </View> : null}
+    {screen.plan.muscleWeek ? <MuscleWeekCard report={screen.plan.muscleWeek} /> : null}
     <SectionHeading title={mobileT("mobile.trends.energyNutrition")} meta={health.calibration.status === "calibrated" ? mobileT("mobile.trends.maintenanceRange", { min: health.calibration.maintenanceRange?.min ?? "—", max: health.calibration.maintenanceRange?.max ?? "—" }) : mobileT("mobile.trends.calibrating")} />
     <TrendChart title={mobileT("mobile.trends.dailyEnergy")} value={dailyEnergy.length ? `${Math.round(dailyEnergy.at(-1)!.value)} kcal` : "—"} meta={mobileT("mobile.trends.completeDaysOnly")} points={dailyEnergy} color={uiColors.amber} />
     <TrendChart title={mobileT("mobile.trends.weeklyEnergy")} value={weeklyEnergy.length ? `${Math.round(weeklyEnergy.at(-1)!.value)} kcal` : "—"} meta={mobileT("mobile.trends.weeklySummary")} points={weeklyEnergy} color={uiColors.safe} />
@@ -2549,7 +2583,7 @@ function WorkoutTaskEditor({
   const editableTasks = workout.frozenPrescription.tasks.filter(
     (task) => task.sets.some((set) => !completed.has(set.id)),
   );
-  const candidates = application.searchExerciseCatalog({ query, limit: 6 });
+  const candidates = application.searchExerciseCatalog({ query, limit: 6, purpose: "recommendation" });
   const selectedExercise = selectedExerciseId
     ? candidates.find((candidate) => candidate.id === selectedExerciseId) ??
       application.searchExerciseCatalog({ query: selectedExerciseId, limit: 1 })[0]
@@ -3192,6 +3226,13 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.paper },
   content: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 168, gap: 14 },
   quickChoiceCard: { backgroundColor: colors.white, borderRadius: 22, padding: 17, gap: 13, borderWidth: 1, borderColor: "rgba(22,24,29,0.055)" },
+  muscleRow: { gap: 4 },
+  muscleRowHeader: { gap: 2 },
+  muscleRowTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" },
+  muscleRowMeta: { color: colors.ink3, fontSize: 12 },
+  muscleRowDetail: { paddingLeft: 10, gap: 2 },
+  muscleRowDetailText: { color: colors.ink2, fontSize: 12 },
+  muscleRowLimit: { color: colors.ink3, fontSize: 11, lineHeight: 16 },
   quickChoiceHeading: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   quickChoiceStep: { width: 28, color: colors.limeInk, fontSize: 11, fontFamily: "monospace", fontWeight: "900", paddingTop: 3 },
   quickChoiceHeadingBody: { flex: 1 },

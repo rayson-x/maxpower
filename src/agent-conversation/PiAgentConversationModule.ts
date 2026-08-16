@@ -106,6 +106,25 @@ export interface ConversationPlanningModule {
   confirm(input: { userId: string; proposalId: string; idempotencyKey: string }): Promise<void>;
   /** Reject the formal proposal as well as its conversational card. */
   reject(input: { userId: string; proposalId: string; idempotencyKey: string }): Promise<void>;
+  /** Read-only: selected variants + sets/intent → per-muscle relative load split. */
+  estimateMuscleLoad(input: {
+    userId: string;
+    items: readonly { exerciseVariantId: string; workSets: number; effortIntent?: "low" | "moderate" | "high" }[];
+  }): Promise<{
+    readonly policy: { readonly id: string; readonly version: string };
+    readonly perMuscle: readonly { readonly muscleId: string; readonly role: string; readonly relativeLoad: number }[];
+    readonly unknownExercises: readonly string[];
+  }>;
+  /** Read-only: confirmed history + optional draft sessions → daily residuals. */
+  forecastRecovery(input: {
+    userId: string;
+    horizonDays: number;
+    draftSessions?: readonly { date: string; items: readonly { exerciseVariantId: string; workSets: number; effortIntent?: "low" | "moderate" | "high" }[] }[];
+  }): Promise<{
+    readonly policy: { readonly id: string; readonly version: string };
+    readonly start: import("../planning").RecoveryContext;
+    readonly days: readonly { readonly date: string; readonly residualBefore: Readonly<Record<string, number>>; readonly added: Readonly<Record<string, number>>; readonly residualAfter: Readonly<Record<string, number>>; readonly windowHints: readonly string[] }[];
+  }>;
 }
 
 export interface ConversationSignalModule {
@@ -130,6 +149,14 @@ export interface ConversationKnowledgeModule {
       text: string;
       passageRef?: { passageId: string; contentHash: string; citationIds: readonly string[] };
     }[];
+  };
+  /** 分层下钻：按 passageId 读 L0 原文（search 只回蒸馏层）。 */
+  read?(input: { passageId: string }): {
+    readonly kind: "found" | "unknown";
+    readonly id?: string;
+    readonly title?: string;
+    readonly text?: string;
+    readonly citationIds?: readonly string[];
   };
 }
 
@@ -232,6 +259,12 @@ export interface PiAgentConversationDependencies {
   knowledge?: ConversationKnowledgeModule;
   memory?: ConversationMemoryModule;
   capabilities?: ConversationCapabilityModule;
+  /**
+   * Experimental capabilities behind an eval gate. `recoveryCoachTools` stays
+   * off until the deterministic recovery eval suite (tools/eval/recoveryCoachEval)
+   * is green; production composition flips it only with that evidence.
+   */
+  featureFlags?: { readonly recoveryCoachTools?: boolean };
 }
 
 /**
@@ -1001,7 +1034,7 @@ export class PiAgentConversationModule {
         if (count > 12) return { block: true, reason: "conversation_tool_budget_exhausted: summarize current evidence and wait for the user" };
         const required = toolCall.name === "goal.propose_path" || toolCall.name === "coach.choose_record_only"
           ? "goal" as const
-          : toolCall.name === "plan.read_fixed_input" || toolCall.name === "plan.propose_current_stage"
+          : toolCall.name === "plan.read_fixed_input" || toolCall.name === "plan.propose_current_stage" || toolCall.name === "plan.estimate_muscle_load" || toolCall.name === "plan.forecast_recovery"
             ? "planning" as const
             : toolCall.name === "timeline.record_body_weight" || toolCall.name === "timeline.record_explicit" || toolCall.name === "timeline.correct_explicit"
               ? "record" as const
@@ -1031,8 +1064,10 @@ export class PiAgentConversationModule {
       ...(scenario === "intake" ? [this.intakeFormTool(conversationId, runId)] : []),
       ...(scenario !== "planning" && this.dependencies.goals && capabilities.goal ? [this.goalPathTool(conversationId, runId), this.recordOnlyTool(conversationId, runId)] : []),
       ...(scenario !== "intake" && this.dependencies.planning && capabilities.planning ? [this.planningInputTool(conversationId, runId), this.planCandidateTool(conversationId, runId)] : []),
+      // 恢复感知工具在 eval 门（tools/eval/recoveryCoachEval）达标前不进清单。
+      ...(scenario !== "intake" && this.dependencies.planning && capabilities.planning && this.dependencies.featureFlags?.recoveryCoachTools === true ? [this.estimateMuscleLoadTool(conversationId, runId), this.forecastRecoveryTool(conversationId, runId)] : []),
       ...(this.dependencies.records && capabilities.record ? [this.bodyWeightTool(conversationId, runId), this.explicitRecordTool(conversationId, runId), ...(this.dependencies.records.correctExplicit ? [this.correctExplicitRecordTool(conversationId, runId)] : [])] : []),
-      ...(this.dependencies.knowledge ? [this.knowledgeSearchTool(conversationId, runId)] : []),
+      ...(this.dependencies.knowledge ? [this.knowledgeSearchTool(conversationId, runId), ...(this.dependencies.knowledge.read ? [this.knowledgeReadTool(conversationId, runId)] : [])] : []),
     ];
     agent.subscribe(async (event) => this.persistAgentEvent(conversationId, runId, event));
     return agent;
@@ -1179,7 +1214,7 @@ export class PiAgentConversationModule {
     return {
       name: "knowledge.search_installed",
       label: "检索已安装知识",
-      description: "Search only installed local training, nutrition, recovery or exercise knowledge. If there is no result, say it is unknown; do not replace it with general model knowledge. This tool never looks up food composition.",
+      description: "Search only installed local training, nutrition, recovery or exercise knowledge. Returns distilled digests (section gist plus per-passage key conclusions) with passage ids; when a digest is not enough, read the full original passage with knowledge.read_passage. If there is no result, say it is unknown; do not replace it with general model knowledge. This tool never looks up food composition.",
       parameters: { type: "object", additionalProperties: false, required: ["query"], properties: { query: { type: "string", minLength: 1, maxLength: 120 }, topic: { enum: ["training", "nutrition", "recovery", "exercise"] } } },
       execute: async (_toolCallId, params) => {
         const query = typeof (params as { query?: unknown })?.query === "string" ? (params as { query: string }).query.trim() : "";
@@ -1208,11 +1243,39 @@ export class PiAgentConversationModule {
     };
   }
 
+  private knowledgeReadTool(conversationId: string, runId: string): AgentTool<any> {
+    return {
+      name: "knowledge.read_passage",
+      label: "读取知识原文段落",
+      description: "Read the full original text of one installed knowledge passage by its passage id (from knowledge.search_installed results). Use it only when the distilled digest is not enough for the answer.",
+      parameters: { type: "object", additionalProperties: false, required: ["passageId"], properties: { passageId: { type: "string", minLength: 1, maxLength: 160 } } },
+      execute: async (toolCallId, params) => {
+        const passageId = typeof (params as { passageId?: unknown })?.passageId === "string" ? (params as { passageId: string }).passageId.trim() : "";
+        if (!passageId || !this.dependencies.knowledge?.read) throw new Error("knowledge_passage_invalid");
+        const result = this.dependencies.knowledge.read({ passageId });
+        const conversation = await this.findConversationForAnyUser(conversationId);
+        if (conversation) {
+          await this.persistConversationCard(conversation, {
+            id: `knowledge-read:${stableHash({ conversationId, toolCallId })}`,
+            title: `知识原文：${result.title ?? passageId}`,
+            summary: [result.kind === "found" ? "已读取原文段落" : "未找到该段落"],
+            toolCallId,
+            conversationCard: { kind: "receipt", status: "recorded", label: "已读取知识原文", detail: result.title ?? passageId },
+          }, `conversation.knowledge-read:${conversation.id}:${toolCallId}`);
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify(result.kind === "found" ? result : { status: "unknown", passageId }) }],
+          details: { source: "installed_knowledge", runId, status: result.kind },
+        };
+      },
+    };
+  }
+
   private planCandidateTool(conversationId: string, runId: string): AgentTool<any> {
     return {
       name: "plan.propose_current_stage",
       label: "提交当前阶段计划候选",
-      description: "Submit one structured current-stage candidate after reading fixed planning input. candidate must include planRevision {id, baseRevision, goalContractRef, effectiveFrom, sessions, observationContract} and nutritionStrategy {id, goalContractRef, planRef, calorieRange, nutrientTargets}; also behaviorChanges, rationale and expectedTradeoffs. Each session must be future-only and have id, scheduledFor, tasks and a bounded duration. When a session declares stimulusSlots, every slot needs intent {movementPattern, muscleGroups, directMuscles, stability, prescriptionMode, fatigueIntent, priority} and prescription {setCount, repRange {min,max}, targetRir, rest}, and each task links its slot via stimulusSlotId with sets.length equal to that slot's prescription.setCount. observationContract must state minimumObservationDays >=7 plus requiredSignals, successConditions, progressionConditions, holdConditions, fallbackConditions and stopConditions. The fixed engine validates it. This tool does not commit a plan.",
+      description: "Submit one structured current-stage candidate after reading fixed planning input. candidate must include planRevision {id, baseRevision, goalContractRef, knowledgePins, effectiveFrom, sessions, observationContract} and nutritionStrategy {id, goalContractRef, planRef, calorieRange, nutrientTargets}; also behaviorChanges, rationale and expectedTradeoffs. goalContractRef must bind the current goal version from the fixed input; knowledgePins must be copied verbatim from the fixed input (planRevision.knowledgePins and each session's knowledgePins). calorieRange is {min:{value,unit},max:{value,unit}} but nutrientTargets is a map nutrientId -> { minimum?: number, maximum?: number, target?: number } of plain numbers (no value/unit objects). observationContract condition fields (requiredSignals/successConditions/progressionConditions/holdConditions/fallbackConditions/stopConditions) are all string arrays. Each session must be future-only and have id, scheduledFor, tasks and a bounded duration. When a session declares stimulusSlots, every slot needs intent {movementPattern, muscleGroups, directMuscles, stability, prescriptionMode, fatigueIntent, priority} and prescription {setCount, repRange {min,max}, targetRir, rest}, and each task links its slot via stimulusSlotId with sets.length equal to that slot's prescription.setCount. observationContract must state minimumObservationDays >=7. The fixed engine validates it. This tool does not commit a plan.",
       parameters: {
         type: "object", additionalProperties: false, required: ["candidate"], properties: {
           candidate: {
@@ -1269,6 +1332,73 @@ export class PiAgentConversationModule {
           content: [{ type: "text", text: result.status === "ready" ? "固定校验已通过。我把候选放在确认卡中；确认前不会写入计划。" : result.status === "applied" ? "固定校验和你的授权都允许这次小幅调整，新的 revision 已保存。" : `这个候选没有通过固定校验：${result.summary.join("；") || "plan_candidate_invalid"}。请只修正这些问题后重新提交一次。` }],
           details: { artifactId: card.id, validation: result.status, runId },
         };
+      },
+    };
+  }
+
+  /** Read-only load estimation tool: quality layer for plan composition. */
+  private estimateMuscleLoadTool(conversationId: string, runId: string): AgentTool<any> {
+    return {
+      name: "plan.estimate_muscle_load",
+      label: "估算肌群负荷",
+      description: "Read-only. Estimate per-muscle relative load (primary/synergist/stabilizer) for selected exercise variants with set counts and effort intent. Use it while composing to compare candidate exercises' muscle impact. Variants with unreviewed muscle associations are reported as unknown, never guessed.",
+      parameters: {
+        type: "object", additionalProperties: false, required: ["items"],
+        properties: {
+          items: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", additionalProperties: false, required: ["exerciseVariantId", "workSets"], properties: { exerciseVariantId: { type: "string", minLength: 1, maxLength: 160 }, workSets: { type: "integer", minimum: 0, maximum: 40 }, effortIntent: { enum: ["low", "moderate", "high"] } } } },
+        },
+      },
+      execute: async (toolCallId, params) => {
+        const conversation = await this.findConversationForAnyUser(conversationId);
+        if (!conversation || !this.dependencies.planning) throw new Error("planning_unavailable");
+        await this.assertCapability(conversation.userId, "planning");
+        const items = (params as { items?: unknown }).items;
+        if (!Array.isArray(items) || !items.length) throw new Error("estimate_items_invalid");
+        const result = await this.dependencies.planning.estimateMuscleLoad({ userId: conversation.userId, items: items as never });
+        await this.persistConversationCard(conversation, {
+          id: `estimate-load:${stableHash({ conversationId, toolCallId })}`,
+          title: "肌群负荷估算",
+          summary: result.perMuscle.slice(0, 4).map((entry) => `${entry.muscleId} ${entry.role === "primary_intent" ? "主目标" : entry.role === "secondary_intent" ? "协同" : "稳定"} ${entry.relativeLoad}`),
+          toolCallId,
+          conversationCard: { kind: "receipt", status: "recorded", label: "已估算肌群负荷", detail: result.unknownExercises.length ? `未审校关联按未知处理：${result.unknownExercises.join("、")}` : `政策版本 ${result.policy.version}` },
+        }, `conversation.estimate-load:${conversation.id}:${toolCallId}`);
+        return { content: [{ type: "text", text: JSON.stringify(result) }], details: { source: "fixed_muscle_fatigue_policy", runId } };
+      },
+    };
+  }
+
+  /** Read-only recovery forecast tool: day-by-day residual walk. */
+  private forecastRecoveryTool(conversationId: string, runId: string): AgentTool<any> {
+    return {
+      name: "plan.forecast_recovery",
+      label: "推演恢复窗口",
+      description: "Read-only. Walk confirmed history plus optional draft sessions forward and return per-day per-muscle residual load with recovery-window hints. Use it to check whether a draft session stacks load on a muscle that is still inside its group-mean window. All values are group-mean relative load, never individual recovery measurement.",
+      parameters: {
+        type: "object", additionalProperties: false, required: ["horizonDays"],
+        properties: {
+          horizonDays: { type: "integer", minimum: 1, maximum: 14 },
+          draftSessions: { type: "array", maxItems: 7, items: { type: "object", additionalProperties: false, required: ["date", "items"], properties: { date: { type: "string", pattern: "^\\d{4}-\\d{2}-\\d{2}$" }, items: { type: "array", minItems: 1, maxItems: 12, items: { type: "object", additionalProperties: false, required: ["exerciseVariantId", "workSets"], properties: { exerciseVariantId: { type: "string", minLength: 1, maxLength: 160 }, workSets: { type: "integer", minimum: 0, maximum: 40 }, effortIntent: { enum: ["low", "moderate", "high"] } } } } } } },
+        },
+      },
+      execute: async (toolCallId, params) => {
+        const conversation = await this.findConversationForAnyUser(conversationId);
+        if (!conversation || !this.dependencies.planning) throw new Error("planning_unavailable");
+        await this.assertCapability(conversation.userId, "planning");
+        const value = params as { horizonDays?: unknown; draftSessions?: unknown };
+        if (!Number.isInteger(value.horizonDays)) throw new Error("forecast_horizon_invalid");
+        const result = await this.dependencies.planning.forecastRecovery({
+          userId: conversation.userId,
+          horizonDays: value.horizonDays as number,
+          ...(Array.isArray(value.draftSessions) ? { draftSessions: value.draftSessions as never } : {}),
+        });
+        await this.persistConversationCard(conversation, {
+          id: `forecast-recovery:${stableHash({ conversationId, toolCallId })}`,
+          title: "恢复窗口推演",
+          summary: result.start.status === "insufficient_history" ? ["没有足够的训练历史；先记录几次训练再推演。"] : result.days.flatMap((day) => day.windowHints).slice(0, 4),
+          toolCallId,
+          conversationCard: { kind: "receipt", status: "recorded", label: "已推演恢复窗口", detail: `政策版本 ${result.policy.version}（组均值，非个体测量）` },
+        }, `conversation.forecast-recovery:${conversation.id}:${toolCallId}`);
+        return { content: [{ type: "text", text: JSON.stringify(result) }], details: { source: "fixed_recovery_policy", runId } };
       },
     };
   }

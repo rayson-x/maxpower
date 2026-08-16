@@ -1,0 +1,3162 @@
+{
+ "version": 1,
+ "datasetSource": {
+  "id": "source.exercise.exercises-dataset-hasaneyldrm",
+  "upstreamCommit": "7455efae",
+  "snapshotSha256": "656634224b8977b99a6d765470ee123260d4979715eaa4e7c0b7c8bb0d79f93d",
+  "license": "MIT text only; Gym visual media permanently excluded"
+ },
+ "note": "不匹配现有 33 concepts 的记录显式归档（瑜伽/颈部/前臂/耸肩/腕力/器械杂项等无对应 concept 的内容），不丢弃。",
+ "records": [
+  {
+   "datasetId": "0002",
+   "name": "45° side bend",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0006",
+   "name": "alternate heel touchers",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1368",
+   "name": "ankle circles",
+   "target": "calves",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2355",
+   "name": "arm slingers hanging bent knee legs",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2333",
+   "name": "arm slingers hanging straight legs",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3214",
+   "name": "arms apart circular toe touch (male)",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0009",
+   "name": "assisted chest dip (kneeling)",
+   "target": "pectorals",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0011",
+   "name": "assisted hanging knee raise",
+   "target": "abs",
+   "equipment": "assisted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0010",
+   "name": "assisted hanging knee raise with throw down",
+   "target": "abs",
+   "equipment": "assisted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0012",
+   "name": "assisted lying leg raise with lateral throw down",
+   "target": "abs",
+   "equipment": "assisted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0013",
+   "name": "assisted lying leg raise with throw down",
+   "target": "abs",
+   "equipment": "assisted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0014",
+   "name": "assisted motion russian twist",
+   "target": "abs",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0016",
+   "name": "assisted prone hamstring",
+   "target": "hamstrings",
+   "equipment": "assisted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0019",
+   "name": "assisted triceps dip (kneeling)",
+   "target": "triceps",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2364",
+   "name": "assisted wide-grip chest dip (kneeling)",
+   "target": "pectorals",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3220",
+   "name": "astride jumps (male)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3672",
+   "name": "back and forth step",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1314",
+   "name": "back extension on exercise ball",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3297",
+   "name": "back lever",
+   "target": "upper back",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1473",
+   "name": "backward jump",
+   "target": "quads",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0020",
+   "name": "balance board",
+   "target": "quads",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0969",
+   "name": "band alternating v-up",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0971",
+   "name": "band assisted wheel rollerout",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0980",
+   "name": "band bent-over hip extension",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0977",
+   "name": "band front lateral raise",
+   "target": "delts",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1408",
+   "name": "band hip lift",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0979",
+   "name": "band horizontal pallof press",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0984",
+   "name": "band lying hip internal rotation",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1002",
+   "name": "band lying straight leg raise",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0991",
+   "name": "band pull through",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0994",
+   "name": "band reverse wrist curl",
+   "target": "forearms",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0996",
+   "name": "band seated hip internal rotation",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1011",
+   "name": "band seated twist",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1018",
+   "name": "band shrug",
+   "target": "traps",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1003",
+   "name": "band squat row",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1008",
+   "name": "band step-up",
+   "target": "glutes",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1014",
+   "name": "band v-up",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1015",
+   "name": "band vertical pallof press",
+   "target": "abs",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1016",
+   "name": "band wrist curl",
+   "target": "forearms",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1017",
+   "name": "band y-raise",
+   "target": "delts",
+   "equipment": "band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0028",
+   "name": "barbell clean and press",
+   "target": "quads",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0035",
+   "name": "barbell decline close grip to skull press",
+   "target": "triceps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0036",
+   "name": "barbell decline wide-grip press",
+   "target": "pectorals",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0044",
+   "name": "barbell good morning",
+   "target": "hamstrings",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0048",
+   "name": "barbell incline reverse-grip press",
+   "target": "triceps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0050",
+   "name": "barbell incline shoulder raise",
+   "target": "serratus anterior",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0053",
+   "name": "barbell jump squat",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0055",
+   "name": "barbell lying close-grip press",
+   "target": "triceps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0057",
+   "name": "barbell lying extension",
+   "target": "triceps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0058",
+   "name": "barbell lying lifting (on hip)",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0063",
+   "name": "barbell narrow stance squat",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0065",
+   "name": "barbell one arm floor press",
+   "target": "triceps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0067",
+   "name": "barbell one arm snatch",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1411",
+   "name": "barbell palms down wrist curl over a bench",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1412",
+   "name": "barbell palms up wrist curl over a bench",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1751",
+   "name": "barbell pin presses",
+   "target": "triceps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0074",
+   "name": "barbell rack pull",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0079",
+   "name": "barbell revers wrist curl v. 2",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0082",
+   "name": "barbell reverse wrist curl",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0084",
+   "name": "barbell rollerout",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0083",
+   "name": "barbell rollerout from bench",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0090",
+   "name": "barbell seated good morning",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0094",
+   "name": "barbell seated twist",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0095",
+   "name": "barbell shrug",
+   "target": "traps",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0096",
+   "name": "barbell side bent v. 2",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2799",
+   "name": "barbell sitted alternate leg raise",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2800",
+   "name": "barbell sitted alternate leg raise (female)",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0100",
+   "name": "barbell skier",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0103",
+   "name": "barbell standing ab rollerout",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0104",
+   "name": "barbell standing back wrist curl",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0112",
+   "name": "barbell standing twist",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0114",
+   "name": "barbell step-up",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0115",
+   "name": "barbell stiff leg good morning",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3305",
+   "name": "barbell thruster",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0120",
+   "name": "barbell upright row",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0119",
+   "name": "barbell upright row v. 2",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0121",
+   "name": "barbell upright row v. 3",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0123",
+   "name": "barbell wide-grip upright row",
+   "target": "delts",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0126",
+   "name": "barbell wrist curl",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0125",
+   "name": "barbell wrist curl v. 2",
+   "target": "forearms",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3212",
+   "name": "basic toe touch (male)",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0128",
+   "name": "battling ropes",
+   "target": "delts",
+   "equipment": "rope",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3360",
+   "name": "bear crawl",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0129",
+   "name": "bench dip (knees bent)",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1399",
+   "name": "bench dip on floor",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0130",
+   "name": "bench hip extension",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3639",
+   "name": "bent knee lying twist (male)",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0137",
+   "name": "body-up",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3543",
+   "name": "bodyweight drop jump squat",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0138",
+   "name": "bottoms-up",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1374",
+   "name": "box jump down with one leg stabilization",
+   "target": "calves",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2466",
+   "name": "bridge - mountain climber (cross body)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1160",
+   "name": "burpee",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0870",
+   "name": "butt-ups",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0152",
+   "name": "cable concentration extension (on knee)",
+   "target": "triceps",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0155",
+   "name": "cable cross-over variation",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1260",
+   "name": "cable decline one arm press",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1261",
+   "name": "cable decline press",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0161",
+   "name": "cable forward raise",
+   "target": "delts",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0164",
+   "name": "cable front shoulder raise",
+   "target": "delts",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0168",
+   "name": "cable hip adduction",
+   "target": "adductors",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0174",
+   "name": "cable judo flip",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1265",
+   "name": "cable one arm incline press",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1266",
+   "name": "cable one arm incline press on exercise ball",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0191",
+   "name": "cable one arm lateral bent-over",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1267",
+   "name": "cable one arm press on exercise ball",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1268",
+   "name": "cable press on exercise ball",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0196",
+   "name": "cable pull through (with rope)",
+   "target": "glutes",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0204",
+   "name": "cable rear drive",
+   "target": "triceps",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0210",
+   "name": "cable reverse wrist curl",
+   "target": "forearms",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0211",
+   "name": "cable russian twists (on stability ball)",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0215",
+   "name": "cable seated rear lateral raise",
+   "target": "delts",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0216",
+   "name": "cable seated shoulder internal rotation",
+   "target": "delts",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2399",
+   "name": "cable seated twist",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0220",
+   "name": "cable shrug",
+   "target": "traps",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0222",
+   "name": "cable side bend",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1717",
+   "name": "cable squat row (with rope attachment)",
+   "target": "lats",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0224",
+   "name": "cable standing back wrist curl",
+   "target": "forearms",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0228",
+   "name": "cable standing hip extension",
+   "target": "glutes",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0230",
+   "name": "cable standing lift",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1269",
+   "name": "cable standing up straight crossovers",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0243",
+   "name": "cable twist",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0862",
+   "name": "cable twist (up-down)",
+   "target": "abs",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0244",
+   "name": "cable twisting pull",
+   "target": "lats",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1270",
+   "name": "cable upper chest crossovers",
+   "target": "pectorals",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0246",
+   "name": "cable upright row",
+   "target": "delts",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0247",
+   "name": "cable wrist curl",
+   "target": "forearms",
+   "equipment": "cable",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2963",
+   "name": "captains chair straight leg raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0251",
+   "name": "chest dip",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1430",
+   "name": "chest dip (on dip-pull-up cage)",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2462",
+   "name": "chest dip on straight bar",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0260",
+   "name": "cocoons",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1468",
+   "name": "crab twist toe touch",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0276",
+   "name": "dead bug",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0286",
+   "name": "dumbbell alternate side press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0290",
+   "name": "dumbbell bench seated press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1201",
+   "name": "dumbbell burpee",
+   "target": "cardiovascular system",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0295",
+   "name": "dumbbell clean",
+   "target": "glutes",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1731",
+   "name": "dumbbell close grip press",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0296",
+   "name": "dumbbell close-grip press",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0299",
+   "name": "dumbbell cuban press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2136",
+   "name": "dumbbell cuban press v. 2",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0303",
+   "name": "dumbbell decline hammer press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1617",
+   "name": "dumbbell decline one arm hammer press",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0305",
+   "name": "dumbbell decline shrug",
+   "target": "traps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0304",
+   "name": "dumbbell decline shrug v. 2",
+   "target": "traps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3545",
+   "name": "dumbbell incline alternate press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0316",
+   "name": "dumbbell incline breeding",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0321",
+   "name": "dumbbell incline hammer press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1618",
+   "name": "dumbbell incline hammer press on exercise ball",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1619",
+   "name": "dumbbell incline one arm hammer press",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1620",
+   "name": "dumbbell incline one arm hammer press on exercise ball",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1281",
+   "name": "dumbbell incline one arm press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1282",
+   "name": "dumbbell incline one arm press on exercise ball",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0324",
+   "name": "dumbbell incline palm-in press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1283",
+   "name": "dumbbell incline press on exercise ball",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0325",
+   "name": "dumbbell incline raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0326",
+   "name": "dumbbell incline rear lateral raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0328",
+   "name": "dumbbell incline shoulder raise",
+   "target": "serratus anterior",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0329",
+   "name": "dumbbell incline shrug",
+   "target": "traps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3542",
+   "name": "dumbbell incline t-raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1733",
+   "name": "dumbbell incline two arm extension",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3541",
+   "name": "dumbbell incline y-raise",
+   "target": "upper back",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0332",
+   "name": "dumbbell iron cross",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0337",
+   "name": "dumbbell lying extension (across face)",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1729",
+   "name": "dumbbell lying alternate extension",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0338",
+   "name": "dumbbell lying elbow press",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0863",
+   "name": "dumbbell lying external shoulder rotation",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0339",
+   "name": "dumbbell lying femoral",
+   "target": "hamstrings",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0340",
+   "name": "dumbbell lying hammer press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0341",
+   "name": "dumbbell lying one arm deltoid rear",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0343",
+   "name": "dumbbell lying one arm press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0342",
+   "name": "dumbbell lying one arm press v. 2",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0345",
+   "name": "dumbbell lying one arm rear lateral raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0347",
+   "name": "dumbbell lying pronation",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2705",
+   "name": "dumbbell lying pronation on floor",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0348",
+   "name": "dumbbell lying rear lateral raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1735",
+   "name": "dumbbell lying single extension",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0349",
+   "name": "dumbbell lying supination",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2706",
+   "name": "dumbbell lying supination on floor",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1621",
+   "name": "dumbbell one arm hammer press on exercise ball",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1290",
+   "name": "dumbbell one arm press on exercise ball",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0358",
+   "name": "dumbbell one arm reverse wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1622",
+   "name": "dumbbell one arm reverse grip press",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1415",
+   "name": "dumbbell one arm seated neutral wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3888",
+   "name": "dumbbell one arm snatch",
+   "target": "glutes",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0363",
+   "name": "dumbbell one arm upright row",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0364",
+   "name": "dumbbell one arm wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0365",
+   "name": "dumbbell over bench neutral wrist curl",
+   "target": "biceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0366",
+   "name": "dumbbell over bench one arm neutral wrist curl",
+   "target": "biceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1441",
+   "name": "dumbbell over bench one arm reverse wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0367",
+   "name": "dumbbell over bench one arm wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0368",
+   "name": "dumbbell over bench revers wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0369",
+   "name": "dumbbell over bench wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1293",
+   "name": "dumbbell press on exercise ball",
+   "target": "pectorals",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1700",
+   "name": "dumbbell push press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0376",
+   "name": "dumbbell raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0380",
+   "name": "dumbbell rear lateral raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0379",
+   "name": "dumbbell rear lateral raise (support head)",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0385",
+   "name": "dumbbell reverse wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2397",
+   "name": "dumbbell scott press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0388",
+   "name": "dumbbell seated alternate press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3546",
+   "name": "dumbbell seated alternate shoulder",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0389",
+   "name": "dumbbell seated bench extension",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0397",
+   "name": "dumbbell seated neutral wrist curl",
+   "target": "biceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0399",
+   "name": "dumbbell seated one arm rotate",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0401",
+   "name": "dumbbell seated palms up wrist curl",
+   "target": "forearms",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0406",
+   "name": "dumbbell shrug",
+   "target": "traps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0407",
+   "name": "dumbbell side bend",
+   "target": "abs",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0408",
+   "name": "dumbbell side lying one hand raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3548",
+   "name": "dumbbell single arm overhead carry",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0415",
+   "name": "dumbbell standing alternate raise",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2143",
+   "name": "dumbbell standing around world",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0423",
+   "name": "dumbbell standing one arm extension",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0424",
+   "name": "dumbbell standing one arm palm in press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0427",
+   "name": "dumbbell standing palms in press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0431",
+   "name": "dumbbell step-up",
+   "target": "glutes",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2808",
+   "name": "dumbbell sumo pull through",
+   "target": "glutes",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0436",
+   "name": "dumbbell tate press",
+   "target": "triceps",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0437",
+   "name": "dumbbell upright row",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1765",
+   "name": "dumbbell upright row (back pov)",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0438",
+   "name": "dumbbell w-press",
+   "target": "delts",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3287",
+   "name": "elbow dips",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0443",
+   "name": "elbow-to-knee",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3292",
+   "name": "elevator",
+   "target": "upper back",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1332",
+   "name": "exercise ball alternating arm ups",
+   "target": "lats",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1333",
+   "name": "exercise ball back extension with arms extended",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1334",
+   "name": "exercise ball back extension with hands behind head",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1335",
+   "name": "exercise ball back extension with knees off ground",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1336",
+   "name": "exercise ball back extension with rotation",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1744",
+   "name": "exercise ball dip",
+   "target": "triceps",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1338",
+   "name": "exercise ball hug",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1416",
+   "name": "exercise ball one leg prone lower body rotation",
+   "target": "glutes",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1343",
+   "name": "exercise ball prone leg raise",
+   "target": "spine",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0445",
+   "name": "ez barbell anti gravity press",
+   "target": "delts",
+   "equipment": "ez barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0448",
+   "name": "ez barbell decline close grip face press",
+   "target": "triceps",
+   "equipment": "ez barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2133",
+   "name": "farmers walk",
+   "target": "quads",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3303",
+   "name": "flag",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0459",
+   "name": "flutter kicks",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1472",
+   "name": "forward jump",
+   "target": "quads",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3301",
+   "name": "frog planche",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3296",
+   "name": "front lever",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3295",
+   "name": "front lever reps",
+   "target": "upper back",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3315",
+   "name": "full maltese",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3299",
+   "name": "full planche",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0466",
+   "name": "gironda sternum chin",
+   "target": "lats",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3561",
+   "name": "glute bridge march",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3193",
+   "name": "glute-ham raise",
+   "target": "hamstrings",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0467",
+   "name": "gorilla chin",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3221",
+   "name": "half knee bends (male)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3218",
+   "name": "hands clasped circular toe touch (male)",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3215",
+   "name": "hands reversed clasped circular toe touch (male)",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3302",
+   "name": "handstand",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1764",
+   "name": "hanging leg hip raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0472",
+   "name": "hanging leg raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1761",
+   "name": "hanging oblique knee raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0473",
+   "name": "hanging pike",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0474",
+   "name": "hanging straight leg hip raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0475",
+   "name": "hanging straight leg raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0476",
+   "name": "hanging straight twisting leg hip raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3636",
+   "name": "high knee against wall",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0484",
+   "name": "hip raise (bent knee)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1418",
+   "name": "hug keens to chest",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0489",
+   "name": "hyperextension",
+   "target": "spine",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0488",
+   "name": "hyperextension (on bench)",
+   "target": "spine",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3289",
+   "name": "impossible dips",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1471",
+   "name": "inchworm",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3698",
+   "name": "inchworm v. 2",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0491",
+   "name": "incline leg hip raise (leg straight)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1297",
+   "name": "isometric chest squeeze",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0500",
+   "name": "isometric wipers",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0501",
+   "name": "jack burpee",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3224",
+   "name": "jack jump (male)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2612",
+   "name": "jump rope",
+   "target": "cardiovascular system",
+   "equipment": "rope",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0514",
+   "name": "jump squat",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0513",
+   "name": "jump squat v. 2",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0517",
+   "name": "kettlebell advanced windmill",
+   "target": "abs",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0518",
+   "name": "kettlebell alternating hang clean",
+   "target": "forearms",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0520",
+   "name": "kettlebell alternating press",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0519",
+   "name": "kettlebell alternating press on floor",
+   "target": "pectorals",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0524",
+   "name": "kettlebell bent press",
+   "target": "abs",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0525",
+   "name": "kettlebell bottoms up clean from the hang position",
+   "target": "biceps",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0526",
+   "name": "kettlebell double alternating hang clean",
+   "target": "biceps",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0527",
+   "name": "kettlebell double jerk",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0528",
+   "name": "kettlebell double push press",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0529",
+   "name": "kettlebell double snatch",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0530",
+   "name": "kettlebell double windmill",
+   "target": "abs",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0531",
+   "name": "kettlebell extended range one arm press on floor",
+   "target": "pectorals",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0532",
+   "name": "kettlebell figure 8",
+   "target": "abs",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0535",
+   "name": "kettlebell hang clean",
+   "target": "hamstrings",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0537",
+   "name": "kettlebell one arm clean and jerk",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1298",
+   "name": "kettlebell one arm floor press",
+   "target": "pectorals",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0538",
+   "name": "kettlebell one arm jerk",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0540",
+   "name": "kettlebell one arm push press",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0542",
+   "name": "kettlebell one arm snatch",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0543",
+   "name": "kettlebell pirate supper legs",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0546",
+   "name": "kettlebell seated press",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0547",
+   "name": "kettlebell seesaw press",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0548",
+   "name": "kettlebell sumo high pull",
+   "target": "traps",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0549",
+   "name": "kettlebell swing",
+   "target": "glutes",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0550",
+   "name": "kettlebell thruster",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0552",
+   "name": "kettlebell two arm clean",
+   "target": "delts",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0554",
+   "name": "kettlebell windmill",
+   "target": "abs",
+   "equipment": "kettlebell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0555",
+   "name": "kick out sit",
+   "target": "hamstrings",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1420",
+   "name": "kneeling jump squat",
+   "target": "glutes",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3288",
+   "name": "korean dips",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3419",
+   "name": "l-sit on floor",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0562",
+   "name": "landmine 180",
+   "target": "abs",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3300",
+   "name": "lean planche",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2271",
+   "name": "left hook. boxing",
+   "target": "delts",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0570",
+   "name": "leg pull in flat bench",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0573",
+   "name": "lever back extension",
+   "target": "spine",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0580",
+   "name": "lever gripless shrug",
+   "target": "traps",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1439",
+   "name": "lever gripless shrug v. 2",
+   "target": "traps",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2288",
+   "name": "lever gripper hands",
+   "target": "forearms",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2286",
+   "name": "lever hip extension v. 2",
+   "target": "glutes",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0583",
+   "name": "lever kneeling twist",
+   "target": "abs",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0591",
+   "name": "lever overhand triceps dip",
+   "target": "triceps",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0593",
+   "name": "lever reverse hyperextension",
+   "target": "glutes",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2315",
+   "name": "lever rotary calf",
+   "target": "calves",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1451",
+   "name": "lever seated dip",
+   "target": "triceps",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3759",
+   "name": "lever seated good morning",
+   "target": "glutes",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0597",
+   "name": "lever seated hip abduction",
+   "target": "abductors",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0598",
+   "name": "lever seated hip adduction",
+   "target": "adductors",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0604",
+   "name": "lever shrug",
+   "target": "traps",
+   "equipment": "leverage machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0609",
+   "name": "london bridge",
+   "target": "upper back",
+   "equipment": "rope",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2312",
+   "name": "lying elbow to knee",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0620",
+   "name": "lying leg raise flat bench",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0865",
+   "name": "lying leg-hip raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1353",
+   "name": "medicine ball catch and overhead throw",
+   "target": "lats",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1302",
+   "name": "medicine ball chest pass",
+   "target": "pectorals",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1303",
+   "name": "medicine ball chest push from 3 point stance",
+   "target": "pectorals",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1304",
+   "name": "medicine ball chest push multiple response",
+   "target": "pectorals",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1305",
+   "name": "medicine ball chest push single response",
+   "target": "pectorals",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1312",
+   "name": "medicine ball chest push with run release",
+   "target": "pectorals",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1354",
+   "name": "medicine ball overhead slam",
+   "target": "upper back",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1750",
+   "name": "medicine ball supine chest throw",
+   "target": "triceps",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0628",
+   "name": "monster walk",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0630",
+   "name": "mountain climber",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1355",
+   "name": "one arm against wall",
+   "target": "lats",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0639",
+   "name": "one arm dip",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0640",
+   "name": "one arm slam (with medicine ball)",
+   "target": "abs",
+   "equipment": "medicine ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0641",
+   "name": "otis up",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3147",
+   "name": "pelvic tilt",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1422",
+   "name": "pelvic tilt into bridge",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1687",
+   "name": "posterior step to overhead reach",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0648",
+   "name": "power clean",
+   "target": "hamstrings",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1707",
+   "name": "prone twist on stability ball",
+   "target": "abs",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0650",
+   "name": "pull-in (on stability ball)",
+   "target": "abs",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1689",
+   "name": "push and pull bodyweight",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3638",
+   "name": "push to run",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3533",
+   "name": "quads",
+   "target": "quads",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3552",
+   "name": "quick feet v. 2",
+   "target": "quads",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0668",
+   "name": "rear decline bridge",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1582",
+   "name": "reclining big toe pose with rope",
+   "target": "hamstrings",
+   "equipment": "rope",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3006",
+   "name": "resistance band seated hip abduction",
+   "target": "abductors",
+   "equipment": "resistance band",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0672",
+   "name": "reverse dip",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0675",
+   "name": "reverse hyper extension (on stability ball)",
+   "target": "glutes",
+   "equipment": "stability ball",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1423",
+   "name": "reverse hyper on flat bench",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0677",
+   "name": "ring dips",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2204",
+   "name": "roller body saw",
+   "target": "abs",
+   "equipment": "roller",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2203",
+   "name": "roller seated shoulder flexor depresor retractor",
+   "target": "pectorals",
+   "equipment": "roller",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2209",
+   "name": "roller seated single leg shoulder flexor depresor retractor",
+   "target": "pectorals",
+   "equipment": "roller",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0680",
+   "name": "rope climb",
+   "target": "upper back",
+   "equipment": "rope",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0685",
+   "name": "run",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0684",
+   "name": "run (equipment)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0687",
+   "name": "russian twist",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3012",
+   "name": "scapula dips",
+   "target": "traps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3219",
+   "name": "scissor jumps (male)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0689",
+   "name": "seated leg raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1587",
+   "name": "seated wide angle pose sequence",
+   "target": "hamstrings",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3222",
+   "name": "semi squat jump (male)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3656",
+   "name": "short stride run",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3699",
+   "name": "shoulder tap",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1774",
+   "name": "side bridge hip abduction",
+   "target": "abductors",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0705",
+   "name": "side bridge v. 2",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0709",
+   "name": "side hip (on parallel bars)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0710",
+   "name": "side hip abduction",
+   "target": "abductors",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3667",
+   "name": "side lying hip adduction (male)",
+   "target": "adductors",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0720",
+   "name": "side-to-side chin",
+   "target": "lats",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3213",
+   "name": "side-to-side toe touch (male)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0730",
+   "name": "single leg platform slide",
+   "target": "hamstrings",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3361",
+   "name": "skater hops",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2142",
+   "name": "ski ergometer",
+   "target": "triceps",
+   "equipment": "skierg machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3671",
+   "name": "ski step",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3304",
+   "name": "skin the cat",
+   "target": "upper back",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0746",
+   "name": "smith back shrug",
+   "target": "traps",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0749",
+   "name": "smith bent knee good morning",
+   "target": "glutes",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0754",
+   "name": "smith decline reverse-grip press",
+   "target": "pectorals",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0756",
+   "name": "smith hip raise",
+   "target": "abs",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0758",
+   "name": "smith incline reverse-grip press",
+   "target": "pectorals",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0759",
+   "name": "smith incline shoulder raises",
+   "target": "serratus anterior",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0764",
+   "name": "smith reverse-grip press",
+   "target": "pectorals",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1426",
+   "name": "smith seated wrist curl",
+   "target": "forearms",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0767",
+   "name": "smith shrug",
+   "target": "traps",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0771",
+   "name": "smith standing back wrist curl",
+   "target": "forearms",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1396",
+   "name": "smith toe raise",
+   "target": "calves",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0775",
+   "name": "smith upright row",
+   "target": "delts",
+   "equipment": "smith machine",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0776",
+   "name": "snatch pull",
+   "target": "quads",
+   "equipment": "barbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0777",
+   "name": "spell caster",
+   "target": "abs",
+   "equipment": "dumbbell",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1362",
+   "name": "sphinx",
+   "target": "spine",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2329",
+   "name": "spine twist",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3291",
+   "name": "stalder press",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3669",
+   "name": "standing archer",
+   "target": "upper back",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1397",
+   "name": "standing calves",
+   "target": "calves",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1364",
+   "name": "standing pelvic tilt",
+   "target": "spine",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0796",
+   "name": "standing wheel rollerout",
+   "target": "abs",
+   "equipment": "wheel roller",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3223",
+   "name": "star jump (male)",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3314",
+   "name": "straddle maltese",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3298",
+   "name": "straddle planche",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1427",
+   "name": "straight leg outer hip abductor",
+   "target": "abductors",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0805",
+   "name": "suspended abdominal fallout",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3433",
+   "name": "swimmer kicks v. 2 (male)",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3318",
+   "name": "swing 360",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1753",
+   "name": "three bench dip",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2459",
+   "name": "tire flip",
+   "target": "glutes",
+   "equipment": "tire",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0814",
+   "name": "triceps dip",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0812",
+   "name": "triceps dip (bench leg)",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0813",
+   "name": "triceps dip (between benches)",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0815",
+   "name": "triceps dips floor",
+   "target": "triceps",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1466",
+   "name": "twist hip lift",
+   "target": "glutes",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2802",
+   "name": "twisted leg raise",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2801",
+   "name": "twisted leg raise (female)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3231",
+   "name": "two toe touch (male)",
+   "target": "spine",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1366",
+   "name": "upward facing dog",
+   "target": "spine",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3420",
+   "name": "v-sit on floor",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0826",
+   "name": "vertical leg raise (on parallel bars)",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0830",
+   "name": "weighted bench dip",
+   "target": "triceps",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2987",
+   "name": "weighted close grip chin-up on dip cage",
+   "target": "lats",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0866",
+   "name": "weighted hanging leg-hip raise",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0835",
+   "name": "weighted hyperextension (on stability ball)",
+   "target": "spine",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3641",
+   "name": "weighted kneeling step with swing",
+   "target": "delts",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0844",
+   "name": "weighted round arm",
+   "target": "delts",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0846",
+   "name": "weighted russian twist",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0845",
+   "name": "weighted russian twist (legs up)",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2371",
+   "name": "weighted russian twist v. 2",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0849",
+   "name": "weighted seated twist (on stability ball)",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0850",
+   "name": "weighted side bend (on stability ball)",
+   "target": "abs",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0854",
+   "name": "weighted standing hand squeeze",
+   "target": "forearms",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3313",
+   "name": "weighted straight bar dip",
+   "target": "pectorals",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0856",
+   "name": "weighted svend press",
+   "target": "pectorals",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1754",
+   "name": "weighted three bench dips",
+   "target": "triceps",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1755",
+   "name": "weighted tricep dips",
+   "target": "triceps",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1767",
+   "name": "weighted triceps dip on high parallel bars",
+   "target": "triceps",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0857",
+   "name": "wheel rollerout",
+   "target": "abs",
+   "equipment": "wheel roller",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "3637",
+   "name": "wheel run",
+   "target": "cardiovascular system",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "2363",
+   "name": "wide-grip chest dip on high parallel bars",
+   "target": "pectorals",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0858",
+   "name": "wind sprints",
+   "target": "abs",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "1428",
+   "name": "wrist circles",
+   "target": "forearms",
+   "equipment": "body weight",
+   "reason": "no_matching_concept_in_first_batch"
+  },
+  {
+   "datasetId": "0859",
+   "name": "wrist rollerer",
+   "target": "forearms",
+   "equipment": "weighted",
+   "reason": "no_matching_concept_in_first_batch"
+  }
+ ]
+}

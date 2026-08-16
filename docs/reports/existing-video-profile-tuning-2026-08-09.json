@@ -1,0 +1,591 @@
+{
+  "schemaVersion": "maxpower-existing-video-profile-tuning/v2",
+  "generatedAt": "2026-08-09T15:46:20.369Z",
+  "purpose": "In-sample diagnostic optimization against full approved videos using the explicit product set lifecycle.",
+  "promotionPassed": false,
+  "refusal": "The same captures selected these parameters; an independently held-out gate is still required.",
+  "replayPolicy": {
+    "setLifecycleMode": "preview",
+    "beginSetAtMs": 0,
+    "fullVideoNegativeContext": true,
+    "predictionFiltering": "none"
+  },
+  "summary": {
+    "captureCount": 11,
+    "exactCaptureCount": 7,
+    "truthRepCount": 89,
+    "predictedRepCount": 85,
+    "matchedRepCount": 82,
+    "matchedRecall": 0.9213483146067416,
+    "matchedPrecision": 0.9647058823529412,
+    "absoluteCountError": 6
+  },
+  "buckets": [
+    {
+      "key": "barbell_bench_press|front",
+      "status": "evaluated",
+      "sourceProfileKey": "barbell_bench_press|frontLeft45",
+      "baseline": {
+        "captureCount": 3,
+        "exactCaptureCount": 0,
+        "truthRepCount": 16,
+        "predictedRepCount": 11,
+        "matchedRepCount": 9,
+        "matchedRecall": 0.5625,
+        "matchedPrecision": 0.8181818181818182,
+        "absoluteCountError": 5
+      },
+      "tuned": {
+        "captureCount": 3,
+        "exactCaptureCount": 0,
+        "truthRepCount": 16,
+        "predictedRepCount": 11,
+        "matchedRepCount": 9,
+        "matchedRecall": 0.5625,
+        "matchedPrecision": 0.8181818181818182,
+        "absoluteCountError": 5
+      },
+      "annotatedRepNotes": [
+        {
+          "captureId": "a51c8a692c2a5a5b40cda482065cc6d5",
+          "peakMs": 35919,
+          "note": "力竭，只做了半程"
+        },
+        {
+          "captureId": "bc29e11c23f97a4b1ccaf321ba1e9db7",
+          "peakMs": 18852,
+          "note": "左边力量不如右边，明显歪了"
+        },
+        {
+          "captureId": "bc29e11c23f97a4b1ccaf321ba1e9db7",
+          "peakMs": 31699,
+          "note": "明显力竭，做了半程"
+        }
+      ],
+      "profile": {
+        "identity": "barbell_bench_press/front/bilateral/observed-tuned/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "auto",
+        "primarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            14,
+            16
+          ]
+        },
+        "secondarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            14,
+            16
+          ]
+        },
+        "startAmplitude": 17.509427921982525,
+        "minPrimaryAmplitude": 46.16121906704483,
+        "minSecondaryAmplitude": 46.16121906704483,
+        "returnHysteresis": 23.63772769467641,
+        "readyTolerance": 9.63018535709039,
+        "maxGapMs": 400,
+        "minRepDurationMs": 862,
+        "maxRepDurationMs": 5762,
+        "contentHash": "2904823452797637423"
+      },
+      "rows": [
+        {
+          "captureId": "a51c8a692c2a5a5b40cda482065cc6d5",
+          "truthCount": 4,
+          "predictedCount": 3,
+          "matchedCount": 1,
+          "falsePositiveCount": 2,
+          "needsReviewCount": 1,
+          "rejectedCount": 11,
+          "exact": false
+        },
+        {
+          "captureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+          "truthCount": 8,
+          "predictedCount": 5,
+          "matchedCount": 5,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 4,
+          "rejectedCount": 19,
+          "exact": false
+        },
+        {
+          "captureId": "bc29e11c23f97a4b1ccaf321ba1e9db7",
+          "truthCount": 4,
+          "predictedCount": 3,
+          "matchedCount": 3,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 3,
+          "rejectedCount": 10,
+          "exact": false
+        }
+      ]
+    },
+    {
+      "key": "barbell_bench_press|frontLeft45",
+      "status": "evaluated",
+      "sourceProfileKey": "barbell_bench_press|frontLeft45",
+      "baseline": {
+        "captureCount": 1,
+        "exactCaptureCount": 0,
+        "truthRepCount": 5,
+        "predictedRepCount": 4,
+        "matchedRepCount": 2,
+        "matchedRecall": 0.4,
+        "matchedPrecision": 0.5,
+        "absoluteCountError": 1
+      },
+      "tuned": {
+        "captureCount": 1,
+        "exactCaptureCount": 1,
+        "truthRepCount": 5,
+        "predictedRepCount": 5,
+        "matchedRepCount": 5,
+        "matchedRecall": 1,
+        "matchedPrecision": 1,
+        "absoluteCountError": 0
+      },
+      "annotatedRepNotes": [],
+      "profile": {
+        "identity": "barbell_bench_press/frontLeft45/bilateral/observed-tuned/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-normalized-y",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "auto",
+        "primarySignal": {
+          "kind": "landmark-y",
+          "landmarks": [
+            15
+          ]
+        },
+        "secondarySignal": {
+          "kind": "landmark-y",
+          "landmarks": [
+            16
+          ]
+        },
+        "startAmplitude": 0.02,
+        "minPrimaryAmplitude": 0.08,
+        "minSecondaryAmplitude": 0.08,
+        "returnHysteresis": 0.02,
+        "readyTolerance": 0.025,
+        "maxGapMs": 700,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 8000,
+        "contentHash": "16707190764671651617"
+      },
+      "rows": [
+        {
+          "captureId": "e963bc2e0819f5ef528561cc1260b7ef",
+          "truthCount": 5,
+          "predictedCount": 5,
+          "matchedCount": 5,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 12,
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "barbell_bench_press|frontRight45",
+      "status": "evaluated",
+      "sourceProfileKey": "barbell_bench_press|frontRight45",
+      "baseline": {
+        "captureCount": 2,
+        "exactCaptureCount": 0,
+        "truthRepCount": 25,
+        "predictedRepCount": 27,
+        "matchedRepCount": 21,
+        "matchedRecall": 0.84,
+        "matchedPrecision": 0.7777777777777778,
+        "absoluteCountError": 6
+      },
+      "tuned": {
+        "captureCount": 2,
+        "exactCaptureCount": 2,
+        "truthRepCount": 25,
+        "predictedRepCount": 25,
+        "matchedRepCount": 25,
+        "matchedRecall": 1,
+        "matchedPrecision": 1,
+        "absoluteCountError": 0
+      },
+      "annotatedRepNotes": [
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 19518,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 21888,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 24101,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 26457,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 28730,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 30946,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 33099,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 35346,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "peakMs": 37610,
+          "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+        }
+      ],
+      "profile": {
+        "identity": "barbell_bench_press/frontRight45/bilateral/observed-tuned/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-normalized-y",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "auto",
+        "primarySignal": {
+          "kind": "landmark-y",
+          "landmarks": [
+            13
+          ]
+        },
+        "secondarySignal": {
+          "kind": "landmark-y",
+          "landmarks": [
+            14
+          ]
+        },
+        "startAmplitude": 0.015,
+        "minPrimaryAmplitude": 0.06,
+        "minSecondaryAmplitude": 0.06,
+        "returnHysteresis": 0.015,
+        "readyTolerance": 0.02,
+        "maxGapMs": 700,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 8000,
+        "contentHash": "16763338557713408157"
+      },
+      "rows": [
+        {
+          "captureId": "839e233f09acd809593551b125645bf7",
+          "truthCount": 15,
+          "predictedCount": 15,
+          "matchedCount": 15,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 15,
+          "exact": true
+        },
+        {
+          "captureId": "a44741cba03352f1e689fd51276dfec5",
+          "truthCount": 10,
+          "predictedCount": 10,
+          "matchedCount": 10,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 17,
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "machine_chest_press|front",
+      "status": "evaluated",
+      "sourceProfileKey": "machine_chest_press|front",
+      "baseline": {
+        "captureCount": 3,
+        "exactCaptureCount": 0,
+        "truthRepCount": 21,
+        "predictedRepCount": 20,
+        "matchedRepCount": 17,
+        "matchedRecall": 0.8095238095238095,
+        "matchedPrecision": 0.85,
+        "absoluteCountError": 1
+      },
+      "tuned": {
+        "captureCount": 3,
+        "exactCaptureCount": 3,
+        "truthRepCount": 21,
+        "predictedRepCount": 21,
+        "matchedRepCount": 21,
+        "matchedRecall": 1,
+        "matchedPrecision": 1,
+        "absoluteCountError": 0
+      },
+      "annotatedRepNotes": [
+        {
+          "captureId": "1ffdb9483b96090c6caf40a2ca3e6c46",
+          "peakMs": 29379,
+          "note": "推了半程不到，力竭了"
+        },
+        {
+          "captureId": "b1af030833f8d7bfb61a55cfd76db4d8",
+          "peakMs": 26184,
+          "note": "明显力竭，做了半程"
+        },
+        {
+          "captureId": "d8a6e62c017a63b0aa20493301147a47",
+          "peakMs": 28701,
+          "note": "明显力竭，做了半程"
+        }
+      ],
+      "profile": {
+        "identity": "machine_chest_press/front/bilateral/observed-tuned/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-normalized-y",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "auto",
+        "primarySignal": {
+          "kind": "landmark-y",
+          "landmarks": [
+            15
+          ]
+        },
+        "secondarySignal": {
+          "kind": "landmark-y",
+          "landmarks": [
+            16
+          ]
+        },
+        "startAmplitude": 0.011000000000000001,
+        "minPrimaryAmplitude": 0.08,
+        "minSecondaryAmplitude": 0.08,
+        "returnHysteresis": 0.02,
+        "readyTolerance": 0.025,
+        "maxGapMs": 700,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 8000,
+        "contentHash": "16436090929780802678"
+      },
+      "rows": [
+        {
+          "captureId": "1ffdb9483b96090c6caf40a2ca3e6c46",
+          "truthCount": 9,
+          "predictedCount": 9,
+          "matchedCount": 9,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 8,
+          "exact": true
+        },
+        {
+          "captureId": "b1af030833f8d7bfb61a55cfd76db4d8",
+          "truthCount": 6,
+          "predictedCount": 6,
+          "matchedCount": 6,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 10,
+          "exact": true
+        },
+        {
+          "captureId": "d8a6e62c017a63b0aa20493301147a47",
+          "truthCount": 6,
+          "predictedCount": 6,
+          "matchedCount": 6,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 10,
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "machine_chest_press|frontRight45",
+      "status": "evaluated",
+      "sourceProfileKey": "machine_chest_press|frontRight45",
+      "baseline": {
+        "captureCount": 1,
+        "exactCaptureCount": 0,
+        "truthRepCount": 8,
+        "predictedRepCount": 6,
+        "matchedRepCount": 6,
+        "matchedRecall": 0.75,
+        "matchedPrecision": 1,
+        "absoluteCountError": 2
+      },
+      "tuned": {
+        "captureCount": 1,
+        "exactCaptureCount": 1,
+        "truthRepCount": 8,
+        "predictedRepCount": 8,
+        "matchedRepCount": 8,
+        "matchedRecall": 1,
+        "matchedPrecision": 1,
+        "absoluteCountError": 0
+      },
+      "annotatedRepNotes": [],
+      "profile": {
+        "identity": "machine_chest_press/frontRight45/bilateral/observed-tuned/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "auto",
+        "primarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            11,
+            13,
+            15
+          ]
+        },
+        "secondarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            14,
+            16
+          ]
+        },
+        "startAmplitude": 5,
+        "minPrimaryAmplitude": 20,
+        "minSecondaryAmplitude": 20,
+        "returnHysteresis": 5,
+        "readyTolerance": 6,
+        "maxGapMs": 700,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 8000,
+        "contentHash": "2615043310151123884"
+      },
+      "rows": [
+        {
+          "captureId": "a3fc2037d42244565c2ffce9b2b0df24",
+          "truthCount": 8,
+          "predictedCount": 8,
+          "matchedCount": 8,
+          "falsePositiveCount": 0,
+          "needsReviewCount": 0,
+          "rejectedCount": 14,
+          "exact": true
+        }
+      ]
+    },
+    {
+      "key": "push_up|rearRight45",
+      "status": "evaluated",
+      "sourceProfileKey": "push_up|rearRight45",
+      "baseline": {
+        "captureCount": 1,
+        "exactCaptureCount": 0,
+        "truthRepCount": 14,
+        "predictedRepCount": 18,
+        "matchedRepCount": 14,
+        "matchedRecall": 1,
+        "matchedPrecision": 0.7777777777777778,
+        "absoluteCountError": 4
+      },
+      "tuned": {
+        "captureCount": 1,
+        "exactCaptureCount": 0,
+        "truthRepCount": 14,
+        "predictedRepCount": 15,
+        "matchedRepCount": 14,
+        "matchedRecall": 1,
+        "matchedPrecision": 0.9333333333333333,
+        "absoluteCountError": 1
+      },
+      "annotatedRepNotes": [],
+      "profile": {
+        "identity": "push_up/rearRight45/bilateral/observed-tuned/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "increasing",
+        "primarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            14,
+            16
+          ]
+        },
+        "secondarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            14,
+            16
+          ]
+        },
+        "startAmplitude": 7.66130181354842,
+        "minPrimaryAmplitude": 21.105514637874432,
+        "minSecondaryAmplitude": 21.105514637874432,
+        "returnHysteresis": 18.80501354234612,
+        "readyTolerance": 7.66130181354842,
+        "maxGapMs": 700,
+        "minRepDurationMs": 800,
+        "maxRepDurationMs": 2262,
+        "contentHash": "2670575670314185144"
+      },
+      "rows": [
+        {
+          "captureId": "cb71ee6302a7a378d75d1dcdf30cee6a",
+          "truthCount": 14,
+          "predictedCount": 15,
+          "matchedCount": 14,
+          "falsePositiveCount": 1,
+          "needsReviewCount": 2,
+          "rejectedCount": 2,
+          "exact": false
+        }
+      ]
+    }
+  ]
+}

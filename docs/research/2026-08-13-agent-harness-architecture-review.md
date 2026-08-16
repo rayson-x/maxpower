@@ -44,7 +44,7 @@
 | `CoachToolRegistry.manifest()/invoke()` | 关闭且版本化的工具目录；严格对象解析；根据 `knowledgeToolsEnabled`/`actionToolsEnabled` 暴露能力 | **正确的能力与执行 seam**。LLM 只能提出调用，Registry 才能解释和执行。 |
 | Tool Manifest | 包含 schema、access class、execution mode、权限、风险、证据要求、输出上限 | 方向正确；下一步把“何时用/何时不用/缺什么应追问”补入 Agent 可见说明，并把运行时工具可见性按事实状态装配。 |
 | `AgentRuntime.handleToolCall()` | 持久化 input/output 状态、审计、幂等 ID；`ui.request_choice` 可暂停；工具错误可结构化返回 | **正确的工具执行与 HITL 基座**。 |
-| `createCoachApplication` + Planning Engine | 生成预览而非直接改 `PlanRevision`；确认前重新核查 trace/事实前沿；持久化 `plan_trace` | **正确的计划变更不变量**；应继续由 Engine/确认工具拥有，不能下放给 Planner Agent。 |
+| Local Product Kernel + Planning Engine | 生成预览而非直接改 `PlanRevision`；确认前重新核查 trace/事实前沿；持久化 `plan_trace` | **正确的计划变更不变量**；应继续由 Engine/确认工具拥有，不能下放给 Planner Agent。 |
 | `TraceEnvelope` 与 `ToolAuditRecord` | run/session 关联、事件顺序、匿名化、outbox、规则/工件引用 | 已有很强的可观测性基础。需要补齐 LLM/检索/验证/Planner outcome span。 |
 | `COACH_PLAYBOOK` | 已经表达“先检索后答、先提案后确认、证据不足则追问”等业务规则 | 内容方向对，但仅放在 prompt 是软约束；应拆为工具说明、验证器和 eval 规格。 |
 

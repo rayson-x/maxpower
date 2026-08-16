@@ -3,7 +3,6 @@ import { createReadStream } from "node:fs";
 import { lstat, readFile, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
-import { gunzipSync } from "node:zlib";
 
 import { BenchPhaseReviewStore } from "./benchPhaseReview";
 import { DumbbellReviewStore } from "./dumbbellReview";
@@ -12,7 +11,6 @@ import { evaluatePoseKeypoints } from "./poseKeypointEvaluation";
 import { PoseKeypointReviewStore } from "./poseKeypointReview";
 import { RecognitionReviewRepository } from "./reviewData";
 import { TechniqueReviewStore } from "./techniqueReview";
-import { ACTION_CONTRACT_CATALOG } from "../motion-quality/actionContractCatalog";
 
 export interface RecognitionReviewServerOptions {
   readonly repository: RecognitionReviewRepository;
@@ -32,16 +30,6 @@ export interface RecognitionReviewServerOptions {
   readonly qualityReviewPagePath: string;
   readonly qualityReviewReleasePath: string;
   readonly qualityReviewVideoRoot: string;
-  readonly v7AlignmentReview?: Readonly<{
-    pagePath: string;
-    appPath: string;
-    reportPath: string;
-    reportSha256: string;
-    labelPath: string;
-    labelSha256: string;
-    poseRoot: string;
-    videoRoot: string;
-  }>;
   readonly clientRealtimeAgentPagePath?: string;
   readonly clientRealtimeAgentPackPath?: string;
   readonly clientRealtimeAgentPredictionPath?: string;
@@ -58,7 +46,7 @@ export function createRecognitionReviewServer(options: RecognitionReviewServerOp
       const message = error instanceof Error ? error.message : String(error);
       const status = /not found/i.test(message)
         ? 404
-        : /stale|hash mismatch|tamper|^v7 .*sha-?256 mismatch/i.test(message)
+        : /stale|hash mismatch|tamper/i.test(message)
           ? 409
           : /invalid|requires|too long|unsupported/i.test(message)
             ? 400
@@ -124,14 +112,6 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     await serveStaticPath(response, options.qualityReviewPagePath, "text/html; charset=utf-8");
     return;
   }
-  if (request.method === "GET"
-    && (url.pathname === "/v7-alignment-review.html"
-      || url.pathname === "/v8-equipment-fusion-review.html"
-      || url.pathname === "/v9-wrist-constrained-equipment-review.html")) {
-    const review = requireV7AlignmentReviewOptions(options);
-    await serveStaticPath(response, review.pagePath, "text/html; charset=utf-8");
-    return;
-  }
   if (request.method === "GET" && url.pathname === "/client-realtime-agent.html") {
     if (!options.clientRealtimeAgentPagePath) throw new Error("client realtime agent page not found");
     const body = await readFile(options.clientRealtimeAgentPagePath);
@@ -162,17 +142,8 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     );
     return;
   }
-  if (request.method === "GET" && url.pathname === "/v7AlignmentReviewApp.js") {
-    const review = requireV7AlignmentReviewOptions(options);
-    await serveStaticPath(response, review.appPath, "text/javascript; charset=utf-8");
-    return;
-  }
   if (request.method === "GET" && url.pathname === "/api/review/quality-release") {
     sendJson(response, 200, await qualityReviewReleaseForClient(options));
-    return;
-  }
-  if (request.method === "GET" && url.pathname === "/api/review/v7-alignment") {
-    sendJson(response, 200, await v7AlignmentReportForClient(options));
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/review/index") {
@@ -377,18 +348,6 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     await serveVideoPath(request, response, videoPath);
     return;
   }
-  if (request.method === "GET" && url.pathname === "/media/v7-alignment") {
-    const contextId = url.searchParams.get("id");
-    if (!contextId) throw new Error("v7 alignment video not found");
-    await serveV7AlignmentVideo(request, response, options, contextId);
-    return;
-  }
-  if (request.method === "GET" && url.pathname === "/api/review/v7-pose") {
-    const sourceCaptureId = url.searchParams.get("id");
-    if (!sourceCaptureId) throw new Error("v7 pose observation not found");
-    await serveV7PoseObservation(response, options, sourceCaptureId);
-    return;
-  }
   if (request.method === "GET" && url.pathname === "/media/client-realtime-agent") {
     const id = url.searchParams.get("id");
     if (!id || !options.clientRealtimeAgentPackPath || !options.clientRealtimeAgentVideoRoot) {
@@ -420,315 +379,6 @@ async function route(request: IncomingMessage, response: ServerResponse, options
     return;
   }
   sendJson(response, 404, { error: "not found" });
-}
-
-type V7AlignmentReviewOptions = NonNullable<RecognitionReviewServerOptions["v7AlignmentReview"]>;
-
-interface V7AlignmentReportRow extends Record<string, unknown> {
-  readonly sourceCaptureId: string;
-  readonly contextId: string;
-  readonly exerciseId: string;
-  readonly capturePosition: string;
-  readonly equipmentProvider: V7EquipmentProvider;
-}
-
-interface V7EquipmentProvider extends Record<string, unknown> {
-  readonly recognitionMode: string;
-  readonly trackerOutputFrameCount: number;
-  readonly frames: readonly V7EquipmentFrame[];
-}
-
-interface V7EquipmentFrame extends Record<string, unknown> {
-  readonly frameNumber: number;
-  readonly timestampMs: number;
-  readonly source: "Measured" | "Predicted" | "Fused";
-  readonly confidence: number;
-  readonly uncertaintyPx: number;
-  readonly x1: number;
-  readonly y1: number;
-  readonly x2: number;
-  readonly y2: number;
-  readonly centerY: number;
-  readonly canonicalAccepted?: boolean;
-  readonly fusionEligible?: boolean;
-}
-
-interface V7AlignmentReport extends Record<string, unknown> {
-  readonly schemaVersion:
-    | "maxpower-current-rust-known-video-alignment/v1"
-    | "maxpower-current-rust-equipment-fused-known-video-alignment/v1"
-    | "maxpower-current-rust-wrist-constrained-equipment-alignment/v1";
-  readonly reportDigest: string;
-  readonly rows: readonly V7AlignmentReportRow[];
-}
-
-interface V7HumanLabelRecord extends Record<string, unknown> {
-  readonly sourceCaptureId: string;
-  readonly exerciseId: string;
-  readonly capturePosition: string;
-  readonly source: Readonly<{ video: string; durationMs?: number }>;
-}
-
-function requireV7AlignmentReviewOptions(options: RecognitionReviewServerOptions): V7AlignmentReviewOptions {
-  if (!options.v7AlignmentReview) throw new Error("v7 alignment review not found");
-  for (const [label, digest] of [
-    ["v7 alignment report", options.v7AlignmentReview.reportSha256],
-    ["v7 alignment labels", options.v7AlignmentReview.labelSha256],
-  ] as const) {
-    if (!/^[a-f0-9]{64}$/u.test(digest)) throw new Error(`${label} SHA-256 is invalid`);
-  }
-  return options.v7AlignmentReview;
-}
-
-async function readV7AlignmentSources(options: RecognitionReviewServerOptions): Promise<{
-  review: V7AlignmentReviewOptions;
-  report: V7AlignmentReport;
-  labels: readonly V7HumanLabelRecord[];
-}> {
-  const review = requireV7AlignmentReviewOptions(options);
-  await Promise.all([
-    assertFileSha256(review.reportPath, review.reportSha256, "v7 alignment report"),
-    assertFileSha256(review.labelPath, review.labelSha256, "v7 alignment labels"),
-  ]);
-  const [reportValue, labelValue] = await Promise.all([
-    readJsonFile(review.reportPath, "v7 alignment report"),
-    readJsonFile(review.labelPath, "v7 alignment labels"),
-  ]);
-  const reportRecord = requireJsonRecord(reportValue, "v7 alignment report");
-  if (reportRecord.schemaVersion !== "maxpower-current-rust-known-video-alignment/v1"
-    && reportRecord.schemaVersion !== "maxpower-current-rust-equipment-fused-known-video-alignment/v1"
-    && reportRecord.schemaVersion !== "maxpower-current-rust-wrist-constrained-equipment-alignment/v1") {
-    throw new Error("unsupported v7 alignment report schema");
-  }
-  const schemaVersion = reportRecord.schemaVersion;
-  const reportDigest = requireJsonString(reportRecord.reportDigest, "v7 alignment report digest");
-  if (!/^[a-f0-9]{64}$/u.test(reportDigest)) throw new Error("v7 alignment report digest is invalid");
-  if (!Array.isArray(reportRecord.rows) || reportRecord.rows.length === 0) {
-    throw new Error("v7 alignment report rows are invalid");
-  }
-  const contextIds = new Set<string>();
-  const rows = reportRecord.rows.map((rawRow, index): V7AlignmentReportRow => {
-    const row = requireJsonRecord(rawRow, `v7 alignment row ${index}`);
-    const contextId = requireJsonString(row.contextId, `v7 alignment row ${index} context`);
-    if (contextIds.has(contextId)) throw new Error(`v7 alignment context ${contextId} is duplicated`);
-    contextIds.add(contextId);
-    return {
-      ...row,
-      contextId,
-      sourceCaptureId: requireJsonString(row.sourceCaptureId, `v7 alignment row ${index} source`),
-      exerciseId: requireJsonString(row.exerciseId, `v7 alignment row ${index} exercise`),
-      capturePosition: requireJsonString(row.capturePosition, `v7 alignment row ${index} view`),
-      equipmentProvider: requireV7EquipmentProvider(row.equipmentProvider, index),
-    };
-  });
-  const labelRecord = requireJsonRecord(labelValue, "v7 alignment labels");
-  if (!Array.isArray(labelRecord.records)) throw new Error("v7 alignment label records are invalid");
-  const labels = labelRecord.records.map((rawLabel, index): V7HumanLabelRecord => {
-    const label = requireJsonRecord(rawLabel, `v7 alignment label ${index}`);
-    const source = requireJsonRecord(label.source, `v7 alignment label ${index} source metadata`);
-    return {
-      ...label,
-      sourceCaptureId: requireJsonString(label.sourceCaptureId, `v7 alignment label ${index} source`),
-      exerciseId: requireJsonString(label.exerciseId, `v7 alignment label ${index} exercise`),
-      capturePosition: requireJsonString(label.capturePosition, `v7 alignment label ${index} view`),
-      source: {
-        video: requireJsonString(source.video, `v7 alignment label ${index} video`),
-        ...(typeof source.durationMs === "number" ? { durationMs: source.durationMs } : {}),
-      },
-    };
-  });
-  for (const row of rows) exactV7Label(labels, row);
-  return {
-    review,
-    report: {
-      ...reportRecord,
-      schemaVersion,
-      reportDigest,
-      rows,
-    },
-    labels,
-  };
-}
-
-function requireV7EquipmentProvider(value: unknown, rowIndex: number): V7EquipmentProvider {
-  const label = `v7 alignment row ${rowIndex} equipment provider`;
-  const provider = requireJsonRecord(value, label);
-  const recognitionMode = requireJsonString(provider.recognitionMode, `${label} mode`);
-  const trackerOutputFrameCount = requireJsonNonNegativeInteger(
-    provider.trackerOutputFrameCount,
-    `${label} tracker frame count`,
-  );
-  if (!Array.isArray(provider.frames)) throw new Error(`${label} frames are invalid`);
-  let previousFrameNumber = -1;
-  let previousTimestampMs = -1;
-  const frames = provider.frames.map((valueFrame, frameIndex): V7EquipmentFrame => {
-    const frameLabel = `${label} frame ${frameIndex}`;
-    const frame = requireJsonRecord(valueFrame, frameLabel);
-    const frameNumber = requireJsonNonNegativeInteger(frame.frameNumber, `${frameLabel} number`);
-    const timestampMs = requireJsonNonNegativeInteger(frame.timestampMs, `${frameLabel} timestamp`);
-    if (frameNumber <= previousFrameNumber || timestampMs <= previousTimestampMs) {
-      throw new Error(`${label} frame order is invalid`);
-    }
-    previousFrameNumber = frameNumber;
-    previousTimestampMs = timestampMs;
-    const source = requireJsonString(frame.source, `${frameLabel} source`);
-    if (source !== "Measured" && source !== "Predicted" && source !== "Fused") {
-      throw new Error(`${frameLabel} source is invalid`);
-    }
-    const confidence = requireJsonFiniteNumber(frame.confidence, `${frameLabel} confidence`);
-    const uncertaintyPx = requireJsonFiniteNumber(frame.uncertaintyPx, `${frameLabel} uncertainty`);
-    if (confidence < 0 || confidence > 1 || uncertaintyPx < 0) {
-      throw new Error(`${frameLabel} confidence or uncertainty is invalid`);
-    }
-    for (const field of ["canonicalAccepted", "fusionEligible"] as const) {
-      if (field in frame && typeof frame[field] !== "boolean") {
-        throw new Error(`${frameLabel} ${field} is invalid`);
-      }
-    }
-    return {
-      ...frame,
-      frameNumber,
-      timestampMs,
-      source,
-      confidence,
-      uncertaintyPx,
-      x1: requireJsonFiniteNumber(frame.x1, `${frameLabel} x1`),
-      y1: requireJsonFiniteNumber(frame.y1, `${frameLabel} y1`),
-      x2: requireJsonFiniteNumber(frame.x2, `${frameLabel} x2`),
-      y2: requireJsonFiniteNumber(frame.y2, `${frameLabel} y2`),
-      centerY: requireJsonFiniteNumber(frame.centerY, `${frameLabel} center y`),
-      ...(typeof frame.canonicalAccepted === "boolean"
-        ? { canonicalAccepted: frame.canonicalAccepted }
-        : {}),
-      ...(typeof frame.fusionEligible === "boolean"
-        ? { fusionEligible: frame.fusionEligible }
-        : {}),
-    };
-  });
-  if (trackerOutputFrameCount !== frames.length) {
-    throw new Error(`${label} tracker frame count is invalid`);
-  }
-  return { ...provider, recognitionMode, trackerOutputFrameCount, frames };
-}
-
-async function readJsonFile(path: string, label: string): Promise<unknown> {
-  try {
-    return JSON.parse(await readFile(path, "utf8")) as unknown;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error(`${label} not found`);
-    if (error instanceof SyntaxError) throw new Error(`${label} is invalid JSON`);
-    throw error;
-  }
-}
-
-function exactV7Label(
-  labels: readonly V7HumanLabelRecord[],
-  row: Pick<V7AlignmentReportRow, "sourceCaptureId" | "exerciseId" | "capturePosition">,
-): V7HumanLabelRecord {
-  const matches = labels.filter((label) => label.sourceCaptureId === row.sourceCaptureId
-    && label.exerciseId === row.exerciseId
-    && label.capturePosition === row.capturePosition);
-  if (matches.length !== 1) throw new Error(`v7 alignment exact label mismatch for ${row.sourceCaptureId}`);
-  return matches[0]!;
-}
-
-async function v7AlignmentReportForClient(
-  options: RecognitionReviewServerOptions,
-): Promise<Record<string, unknown>> {
-  const { report, labels } = await readV7AlignmentSources(options);
-  return {
-    ...report,
-    rows: report.rows.map((row) => {
-      const label = exactV7Label(labels, row);
-      return {
-        ...row,
-        phaseOrder: requireV7PhaseOrder(row.exerciseId),
-        phaseContractSource: "action-contract-catalog",
-        durationMs: label.source.durationMs ?? null,
-        videoUrl: `/media/v7-alignment?id=${encodeURIComponent(row.contextId)}`,
-        poseUrl: `/api/review/v7-pose?id=${encodeURIComponent(row.sourceCaptureId)}`,
-      };
-    }),
-  };
-}
-
-function requireV7PhaseOrder(exerciseId: string): readonly ["concentric" | "eccentric", "concentric" | "eccentric"] {
-  const contract = ACTION_CONTRACT_CATALOG.find((candidate) => candidate.exerciseId === exerciseId);
-  if (!contract) throw new Error(`v7 action contract not found for ${exerciseId}`);
-  return contract.phase.order;
-}
-
-function resolveV7Path(rootPath: string, relativePath: string, label: string): string {
-  if (isAbsolute(relativePath)) throw new Error(`${label} path is invalid`);
-  const root = resolve(rootPath);
-  const path = resolve(root, relativePath);
-  if (!path.startsWith(`${root}${sep}`)) throw new Error(`${label} path is invalid`);
-  return path;
-}
-
-function v7PosePath(review: V7AlignmentReviewOptions, sourceCaptureId: string): string {
-  if (!/^[a-zA-Z0-9._-]+$/u.test(sourceCaptureId)) throw new Error("v7 pose observation id is invalid");
-  return resolveV7Path(review.poseRoot, `${sourceCaptureId}.halpe26.json.gz`, "v7 pose observation");
-}
-
-async function readV7PoseMetadata(
-  review: V7AlignmentReviewOptions,
-  sourceCaptureId: string,
-): Promise<Record<string, unknown>> {
-  const path = v7PosePath(review, sourceCaptureId);
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error("v7 pose observation not found");
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(gunzipSync(await readFile(path)).toString("utf8")) as unknown;
-  } catch (error) {
-    if (error instanceof SyntaxError) throw new Error("v7 pose observation is invalid JSON");
-    throw error;
-  }
-  const pose = requireJsonRecord(parsed, "v7 pose observation");
-  if (pose.captureId !== sourceCaptureId || pose.poseSchema !== "halpe26" || !Array.isArray(pose.frames)) {
-    throw new Error("v7 pose observation identity is invalid");
-  }
-  return pose;
-}
-
-async function serveV7PoseObservation(
-  response: ServerResponse,
-  options: RecognitionReviewServerOptions,
-  sourceCaptureId: string,
-): Promise<void> {
-  const { review, report } = await readV7AlignmentSources(options);
-  if (!report.rows.some((row) => row.sourceCaptureId === sourceCaptureId)) {
-    throw new Error("v7 pose observation not found");
-  }
-  const path = v7PosePath(review, sourceCaptureId);
-  const pose = await readV7PoseMetadata(review, sourceCaptureId);
-  const info = await lstat(path);
-  response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.setHeader("Content-Encoding", "gzip");
-  response.setHeader("Content-Length", info.size);
-  response.setHeader("X-MaxPower-Pose-Frames", String((pose.frames as unknown[]).length));
-  response.writeHead(200);
-  createReadStream(path).pipe(response);
-}
-
-async function serveV7AlignmentVideo(
-  request: IncomingMessage,
-  response: ServerResponse,
-  options: RecognitionReviewServerOptions,
-  contextId: string,
-): Promise<void> {
-  const { review, report, labels } = await readV7AlignmentSources(options);
-  const row = report.rows.find((candidate) => candidate.contextId === contextId);
-  if (!row) throw new Error("v7 alignment video not found");
-  const label = exactV7Label(labels, row);
-  const videoPath = resolveV7Path(review.videoRoot, label.source.video, "v7 alignment video");
-  const pose = await readV7PoseMetadata(review, row.sourceCaptureId);
-  const source = requireJsonRecord(pose.source, "v7 pose source");
-  const videoSha256 = requireJsonString(source.sha256, "v7 pose source video hash");
-  if (!/^[a-f0-9]{64}$/u.test(videoSha256)) throw new Error("v7 pose source video hash is invalid");
-  await assertFileSha256(videoPath, videoSha256, "v7 alignment video");
-  await serveVideoPath(request, response, videoPath);
 }
 
 interface QualityReviewReleaseItem extends Record<string, unknown> {

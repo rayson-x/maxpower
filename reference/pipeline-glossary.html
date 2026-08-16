@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>链路术语速查表</title>
+<link rel="stylesheet" href="../assets/course.css">
+<style>
+  body { font-size: 15px; }
+  .lesson { max-width: 760px; }
+  td:first-child { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="lesson">
+<div class="lesson-kicker">Reference · 速查</div>
+<h1>链路术语表</h1>
+<p class="subtitle">规划与追踪两条链路的核心概念，一页速查。以 <code>CONTEXT.md</code> 为最终权威。</p>
+
+<h2><span class="sec-num">规划链路</span>Planning</h2>
+<table>
+<tr><th>术语</th><th>含义</th></tr>
+<tr><td>策略集（Strategy Set）</td><td>编排知识库：分化模板、课内三层架构、各级课表、进阶模型。每条带标签（A/B 证据 · C 课程资料 · P 方案先例 · D 产品默认 · U 未知）</td></tr>
+<tr><td>Composer / 组装器</td><td>把"目标+经验+天数+器械"变成课表的确定性模块：周量目标 → 分化轮转 → 完整推荐+时长估算 → 逐动作安排</td></tr>
+<tr><td>分化轮转</td><td>练完一圈的肌群组合单元（全身/上下肢/PPL/三分化轮转），不是星期表；周量按真实轮转节奏换算</td></tr>
+<tr><td>周量账本</td><td>每肌群每周直接组数（weeklyDirectSets），随计划可见可断言</td></tr>
+<tr><td>Proposal / 提案</td><td>计划永远是先提案后确认；托管模式自动生效但可撤销（24h undo）</td></tr>
+<tr><td>PlanTrace</td><td>规划的推理链 artifact：输入钉、逐 slot 推理、约束事件、周量账本、逐项 diff。无 trace 不提交</td></tr>
+<tr><td>PlanRevision</td><td>不可变的计划版本；变更只产生新版本，planned/performed/observed 互不覆盖</td></tr>
+<tr><td>RIR 区间</td><td>校准 4-5（无历史）/ 工作 2-4（有历史）；标量只是兼容中点，区间才是权威</td></tr>
+<tr><td>校准阶梯</td><td>试重分支：RIR≥6 上调一档、4-5 接受、≤3 降档，最多 3 次试做</td></tr>
+<tr><td>双进阶</td><td>先加次数到上界、连续两次、再加最小器材档（≤10%）</td></tr>
+</table>
+
+<h2><span class="sec-num">追踪链路</span>Tracing</h2>
+<table>
+<tr><th>术语</th><th>含义</th></tr>
+<tr><td>traceId</td><td>一次行动的 id（= runId）：一次对话、一次规划、一次重排</td></tr>
+<tr><td>sessionId</td><td>长会话 id；跨多次行动</td></tr>
+<tr><td>TraceEnvelope</td><td>统一事件模型：kind 闭集（turn/llm/tool/guardrail/evaluator/plan/recipe/sync/error）+ 决策码 + 引用；元数据 only</td></tr>
+<tr><td>双写 sink</td><td>本地 JSONL（debug 开关）+ 远程适配器（CloudWatch/SLS/OTLP，配置可换）</td></tr>
+<tr><td>reconcile</td><td>启动时从账本投影幂等回填崩溃窗口丢失的事件</td></tr>
+<tr><td>outbox</td><td>账本内离线队列：恢复后补发，eventId 去重（at-least-once）</td></tr>
+<tr><td>错误短码</td><td>traceId 前 8 位 + sessionId 前 4 位；报错时复制即可定位全链</td></tr>
+<tr><td>dotted_order / orderKey</td><td>嵌套事件的稳定排序键</td></tr>
+</table>
+
+<h2><span class="sec-num">三种动作形态</span>Agent Actions</h2>
+<table>
+<tr><th>形态</th><th>例子</th><th>确认门槛</th></tr>
+<tr><td>① 代为操作</td><td>"帮我记录吃了X""把卧推换成上斜"</td><td>mandate 内执行（协作模式确认一次）</td></tr>
+<tr><td>② 主动提案</td><td>休息过短的下一组建议、趋势异常调整</td><td>必须用户同意才应用</td></tr>
+<tr><td>③ 场景升级</td><td>"状态没变化" → 触发重排进规划模式</td><td>提案照旧确认</td></tr>
+</table>
+
+<div class="callout">
+<span class="label">三条铁律</span>
+planned / performed / observed 永不互相覆盖 · 任何变更可补偿式撤销 · 每份计划钉住当时规则版本
+</div>
+
+<div class="footer-note">返回 <a href="../lessons/0001-plan-and-trace-pipelines.html">第 1 课</a></div>
+</div>
+</body>
+</html>

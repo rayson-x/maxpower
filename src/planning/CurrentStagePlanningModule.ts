@@ -96,19 +96,37 @@ export class CurrentStagePlanningModule {
   async reject(input: { userId: string; proposalId: string; idempotencyKey: string }): Promise<void> {
     await this.kernel.rejectAdaptivePlanCandidate(input);
   }
+
+  /** 只读负荷估算：直通 kernel 的确定性计算，零写入。 */
+  async estimateMuscleLoad(input: {
+    userId: string;
+    items: readonly { exerciseVariantId: string; workSets: number; effortIntent?: "low" | "moderate" | "high" }[];
+  }) {
+    return this.kernel.estimateMuscleLoad(input);
+  }
+
+  /** 只读恢复推演：直通 kernel 的确定性计算，零写入。 */
+  async forecastRecovery(input: {
+    userId: string;
+    horizonDays: number;
+    draftSessions?: readonly { date: string; items: readonly { exerciseVariantId: string; workSets: number; effortIntent?: "low" | "moderate" | "high" }[] }[];
+  }) {
+    return this.kernel.forecastRecovery(input);
+  }
 }
 
 function planCandidateDetails(
   candidate: AdaptivePlanCandidate,
-  validation: { status: "valid" | "invalid"; impact: "low" | "high"; resolution: "confirmation_required" | "auto_apply_once_eligible" | "auto_apply_eligible"; issues: readonly { code: string; message: string }[] },
+  validation: { status: "valid" | "invalid"; impact: "low" | "high"; resolution: "confirmation_required" | "auto_apply_once_eligible" | "auto_apply_eligible"; issues: readonly { code: string; message: string; severity: "blocking" | "advisory" }[] },
   previousPlan?: PlanRevisionData,
   previousNutrition?: NutritionStrategyData,
 ): PlanCandidateCardDetails {
   const nutrition = candidate.nutritionStrategy;
   const candidateSessions = candidate.planRevision.sessions;
-  const sessions = candidateSessions.slice(0, 7).map((session) => ({
+  const sessions = candidateSessions.slice(0, 7).map((session, index) => ({
     date: session.scheduledFor,
-    title: session.title,
+    // 模型不总会给 session.title——渲染兜底，不让 undefined 上屏。
+    title: session.title ?? `第 ${index + 1} 次训练`,
     ...(session.estimatedDuration?.unit === "minutes"
       ? { durationMinutes: session.estimatedDuration.value }
       : session.durationBudget?.unit === "minutes" ? { durationMinutes: session.durationBudget.value } : {}),
@@ -131,7 +149,8 @@ function planCandidateDetails(
       : target.target !== undefined ? `${target.target}`
         : target.minimum !== undefined ? `≥${target.minimum}`
           : target.maximum !== undefined ? `≤${target.maximum}` : "未定义";
-    return [`${id}: ${range} ${target.unit}`];
+    // 单位缺失时不上屏 undefined（模型候选偶发省略 unit）。
+    return [`${id}: ${range}${target.unit ? ` ${target.unit}` : ""}`];
   });
   const previousEnergy = previousNutrition?.calorieRange;
   const nextEnergy = nutrition?.calorieRange;
@@ -147,7 +166,7 @@ function planCandidateDetails(
     sessions,
     ...(nutrition ? {
       nutrition: {
-        ...(nutrition.calorieRange ? { calorieRange: { min: nutrition.calorieRange.min.value, max: nutrition.calorieRange.max.value, unit: "kcal" as const } } : {}),
+        ...(nutrition.calorieRange ? { calorieRange: { min: nutrition.calorieRange.min?.value ?? 0, max: nutrition.calorieRange.max?.value ?? 0, unit: "kcal" as const } } : {}),
         ...(macronutrients.length ? { macronutrients } : {}),
         ...(nutrientTargets.length ? { nutrientTargets } : {}),
         ...(nutrition.reviewWindow ? { reviewWindow: `${nutrition.reviewWindow.startsAt.slice(0, 10)} 至 ${nutrition.reviewWindow.endsAt.slice(0, 10)}，至少 ${nutrition.reviewWindow.minimumWeightObservations} 次体重记录` } : {}),
@@ -169,7 +188,8 @@ function planCandidateDetails(
       status: validation.status,
       impact: validation.impact,
       resolution: validation.resolution,
-      issues: validation.issues.map((issue) => `${issue.code}: ${issue.message}`),
+      issues: validation.issues.filter((issue) => issue.severity === "blocking").map((issue) => `${issue.code}: ${issue.message}`),
+      advisories: validation.issues.filter((issue) => issue.severity === "advisory").map((issue) => issue.message),
     },
   };
 }

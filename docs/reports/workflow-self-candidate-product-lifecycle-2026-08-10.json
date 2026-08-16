@@ -1,0 +1,1368 @@
+{
+  "schemaVersion": "maxpower-observed-profile-replay/v1",
+  "generatedAt": "2026-08-09T16:16:08.701Z",
+  "purpose": "Full-video in-sample replay through the explicit product set lifecycle. Not MediaPipe inference accuracy and not an independent validation claim.",
+  "profileArtifactPath": "/Users/Ruihan/Documents/power/maxpower/data/workflows/motion-profile/recognition-corpus-v1/6551ce62cdde39fb98b67497/candidates/self-candidates.json",
+  "replayPolicy": {
+    "setLifecycleMode": "preview",
+    "beginSetAtMs": 0,
+    "fullVideoNegativeContext": true
+  },
+  "selection": [
+    "barbell_bench_press",
+    "machine_chest_press",
+    "push_up"
+  ],
+  "summary": {
+    "captureCount": 11,
+    "evaluatedCaptureCount": 5,
+    "unavailableCaptureCount": 6,
+    "truthRepCount": 89,
+    "evaluatedTruthRepCount": 52,
+    "predictedRepCount": 62,
+    "matchedRepCount": 48,
+    "matchedRecall": 0.9230769230769231,
+    "matchedPrecision": 0.7741935483870968,
+    "exactCountCaptureCount": 1,
+    "needsReviewOutcomeCount": 4,
+    "rejectedOutcomeCount": 48
+  },
+  "byExerciseAndPosition": [
+    {
+      "key": "machine_chest_press|front",
+      "captureCount": 3,
+      "evaluatedCaptureCount": 0,
+      "unavailableCaptureCount": 3,
+      "truthRepCount": 21,
+      "evaluatedTruthRepCount": 0,
+      "predictedRepCount": 0,
+      "matchedRepCount": 0,
+      "matchedRecall": null,
+      "matchedPrecision": null,
+      "exactCountCaptureCount": 0,
+      "needsReviewOutcomeCount": 0,
+      "rejectedOutcomeCount": 0,
+      "sources": [
+        "unavailable"
+      ]
+    },
+    {
+      "key": "barbell_bench_press|frontRight45",
+      "captureCount": 2,
+      "evaluatedCaptureCount": 2,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 25,
+      "evaluatedTruthRepCount": 25,
+      "predictedRepCount": 27,
+      "matchedRepCount": 23,
+      "matchedRecall": 0.92,
+      "matchedPrecision": 0.8518518518518519,
+      "exactCountCaptureCount": 1,
+      "needsReviewOutcomeCount": 1,
+      "rejectedOutcomeCount": 31,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "machine_chest_press|frontRight45",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 1,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 8,
+      "evaluatedTruthRepCount": 8,
+      "predictedRepCount": 9,
+      "matchedRepCount": 8,
+      "matchedRecall": 1,
+      "matchedPrecision": 0.8888888888888888,
+      "exactCountCaptureCount": 0,
+      "needsReviewOutcomeCount": 1,
+      "rejectedOutcomeCount": 9,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "barbell_bench_press|front",
+      "captureCount": 3,
+      "evaluatedCaptureCount": 0,
+      "unavailableCaptureCount": 3,
+      "truthRepCount": 16,
+      "evaluatedTruthRepCount": 0,
+      "predictedRepCount": 0,
+      "matchedRepCount": 0,
+      "matchedRecall": null,
+      "matchedPrecision": null,
+      "exactCountCaptureCount": 0,
+      "needsReviewOutcomeCount": 0,
+      "rejectedOutcomeCount": 0,
+      "sources": [
+        "unavailable"
+      ]
+    },
+    {
+      "key": "push_up|rearRight45",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 1,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 14,
+      "evaluatedTruthRepCount": 14,
+      "predictedRepCount": 16,
+      "matchedRepCount": 14,
+      "matchedRecall": 1,
+      "matchedPrecision": 0.875,
+      "exactCountCaptureCount": 0,
+      "needsReviewOutcomeCount": 2,
+      "rejectedOutcomeCount": 2,
+      "sources": [
+        "observed"
+      ]
+    },
+    {
+      "key": "barbell_bench_press|frontLeft45",
+      "captureCount": 1,
+      "evaluatedCaptureCount": 1,
+      "unavailableCaptureCount": 0,
+      "truthRepCount": 5,
+      "evaluatedTruthRepCount": 5,
+      "predictedRepCount": 10,
+      "matchedRepCount": 3,
+      "matchedRecall": 0.6,
+      "matchedPrecision": 0.3,
+      "exactCountCaptureCount": 0,
+      "needsReviewOutcomeCount": 0,
+      "rejectedOutcomeCount": 6,
+      "sources": [
+        "observed"
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "captureId": "1ffdb9483b96090c6caf40a2ca3e6c46",
+      "exerciseId": "machine_chest_press",
+      "capturePosition": "front",
+      "truthCount": 9,
+      "truthSegmentCount": 9,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "needsReviewCount": null,
+      "rejectedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "839e233f09acd809593551b125645bf7",
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "frontRight45",
+      "truthCount": 15,
+      "truthSegmentCount": 15,
+      "source": "observed",
+      "profileIdentity": "barbell_bench_press/frontRight45/bilateral/workflow-candidate/v1",
+      "predictedCount": 17,
+      "needsReviewCount": 1,
+      "rejectedCount": 15,
+      "matchedReps": 13,
+      "missedReps": 2,
+      "falsePositiveReps": 4,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 8281,
+            "peakMs": 9387,
+            "endMs": 10493
+          },
+          {
+            "repIndex": 2,
+            "startMs": 10808,
+            "peakMs": 11513,
+            "endMs": 12217
+          },
+          {
+            "repIndex": 3,
+            "startMs": 12492,
+            "peakMs": 13345,
+            "endMs": 14198
+          },
+          {
+            "repIndex": 4,
+            "startMs": 14472,
+            "peakMs": 15837,
+            "endMs": 17202
+          },
+          {
+            "repIndex": 5,
+            "startMs": 17483,
+            "peakMs": 18550,
+            "endMs": 19616
+          },
+          {
+            "repIndex": 6,
+            "startMs": 19942,
+            "peakMs": 20781,
+            "endMs": 21620
+          },
+          {
+            "repIndex": 7,
+            "startMs": 21717,
+            "peakMs": 22669,
+            "endMs": 23620
+          },
+          {
+            "repIndex": 8,
+            "startMs": 23842,
+            "peakMs": 24830,
+            "endMs": 25818
+          },
+          {
+            "repIndex": 9,
+            "startMs": 26143,
+            "peakMs": 26927,
+            "endMs": 27711
+          },
+          {
+            "repIndex": 10,
+            "startMs": 27711,
+            "peakMs": 28881,
+            "endMs": 30051
+          },
+          {
+            "repIndex": 11,
+            "startMs": 30051,
+            "peakMs": 31072,
+            "endMs": 32092
+          },
+          {
+            "repIndex": 12,
+            "startMs": 32092,
+            "peakMs": 33233,
+            "endMs": 34373
+          },
+          {
+            "repIndex": 13,
+            "startMs": 34525,
+            "peakMs": 35546,
+            "endMs": 36566
+          },
+          {
+            "repIndex": 14,
+            "startMs": 36692,
+            "peakMs": 37619,
+            "endMs": 38546
+          },
+          {
+            "repIndex": 15,
+            "startMs": 38546,
+            "peakMs": 39717,
+            "endMs": 40888
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 3500,
+            "peakMs": 7300,
+            "endMs": 8350
+          },
+          {
+            "startMs": 8350,
+            "peakMs": 8500,
+            "endMs": 9000
+          },
+          {
+            "startMs": 9850,
+            "peakMs": 10450,
+            "endMs": 11050
+          },
+          {
+            "startMs": 11800,
+            "peakMs": 12450,
+            "endMs": 12900
+          },
+          {
+            "startMs": 13700,
+            "peakMs": 14300,
+            "endMs": 15850
+          },
+          {
+            "startMs": 16550,
+            "peakMs": 17400,
+            "endMs": 17950
+          },
+          {
+            "startMs": 18900,
+            "peakMs": 19850,
+            "endMs": 20500
+          },
+          {
+            "startMs": 21250,
+            "peakMs": 21900,
+            "endMs": 22400
+          },
+          {
+            "startMs": 23200,
+            "peakMs": 23650,
+            "endMs": 24350
+          },
+          {
+            "startMs": 25250,
+            "peakMs": 25850,
+            "endMs": 26400
+          },
+          {
+            "startMs": 27250,
+            "peakMs": 28000,
+            "endMs": 28900
+          },
+          {
+            "startMs": 29650,
+            "peakMs": 30200,
+            "endMs": 30950
+          },
+          {
+            "startMs": 31750,
+            "peakMs": 32200,
+            "endMs": 33050
+          },
+          {
+            "startMs": 33850,
+            "peakMs": 34450,
+            "endMs": 35200
+          },
+          {
+            "startMs": 36050,
+            "peakMs": 36500,
+            "endMs": 37300
+          },
+          {
+            "startMs": 38200,
+            "peakMs": 39100,
+            "endMs": 39500
+          },
+          {
+            "startMs": 40300,
+            "peakMs": 41750,
+            "endMs": 43950
+          }
+        ],
+        "outcomeBreakdown": [
+          {
+            "key": "confirmed:none",
+            "count": 17
+          },
+          {
+            "key": "needs_review:none",
+            "count": 1
+          },
+          {
+            "key": "rejected:incomplete_cycle",
+            "count": 14
+          },
+          {
+            "key": "rejected:anti_interference_filter",
+            "count": 1
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 1,
+            "peakOffsetMs": -887
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 3,
+            "peakOffsetMs": 937
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 4,
+            "peakOffsetMs": 955
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 5,
+            "peakOffsetMs": -1150
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 6,
+            "peakOffsetMs": -931
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 7,
+            "peakOffsetMs": -769
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 9,
+            "peakOffsetMs": 1020
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 10,
+            "peakOffsetMs": 1073
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 11,
+            "peakOffsetMs": 1319
+          },
+          {
+            "truthIndex": 10,
+            "predictedIndex": 12,
+            "peakOffsetMs": 1128
+          },
+          {
+            "truthIndex": 11,
+            "predictedIndex": 13,
+            "peakOffsetMs": 1217
+          },
+          {
+            "truthIndex": 12,
+            "predictedIndex": 14,
+            "peakOffsetMs": 954
+          },
+          {
+            "truthIndex": 13,
+            "predictedIndex": 15,
+            "peakOffsetMs": 1481
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          3,
+          14
+        ],
+        "unmatchedPredictedIndexes": [
+          0,
+          2,
+          8,
+          16
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "a3fc2037d42244565c2ffce9b2b0df24",
+      "exerciseId": "machine_chest_press",
+      "capturePosition": "frontRight45",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "observed",
+      "profileIdentity": "machine_chest_press/frontRight45/bilateral/workflow-candidate/v1",
+      "predictedCount": 9,
+      "needsReviewCount": 1,
+      "rejectedCount": 9,
+      "matchedReps": 8,
+      "missedReps": 0,
+      "falsePositiveReps": 1,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 5837,
+            "peakMs": 7392,
+            "endMs": 8947
+          },
+          {
+            "repIndex": 2,
+            "startMs": 9104,
+            "peakMs": 10153,
+            "endMs": 11202
+          },
+          {
+            "repIndex": 3,
+            "startMs": 11382,
+            "peakMs": 12492,
+            "endMs": 13601
+          },
+          {
+            "repIndex": 4,
+            "startMs": 13766,
+            "peakMs": 14795,
+            "endMs": 15824
+          },
+          {
+            "repIndex": 5,
+            "startMs": 15962,
+            "peakMs": 16873,
+            "endMs": 17784
+          },
+          {
+            "repIndex": 6,
+            "startMs": 17908,
+            "peakMs": 19051,
+            "endMs": 20193
+          },
+          {
+            "repIndex": 7,
+            "startMs": 20344,
+            "peakMs": 21393,
+            "endMs": 22442
+          },
+          {
+            "repIndex": 8,
+            "startMs": 22582,
+            "peakMs": 24022,
+            "endMs": 25461
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 4100,
+            "peakMs": 4650,
+            "endMs": 4850
+          },
+          {
+            "startMs": 6050,
+            "peakMs": 7550,
+            "endMs": 8650
+          },
+          {
+            "startMs": 9200,
+            "peakMs": 9900,
+            "endMs": 10700
+          },
+          {
+            "startMs": 11500,
+            "peakMs": 12400,
+            "endMs": 13200
+          },
+          {
+            "startMs": 13900,
+            "peakMs": 14800,
+            "endMs": 15300
+          },
+          {
+            "startMs": 16000,
+            "peakMs": 16750,
+            "endMs": 17300
+          },
+          {
+            "startMs": 17950,
+            "peakMs": 18800,
+            "endMs": 19800
+          },
+          {
+            "startMs": 20450,
+            "peakMs": 21450,
+            "endMs": 22050
+          },
+          {
+            "startMs": 22850,
+            "peakMs": 24500,
+            "endMs": 25050
+          }
+        ],
+        "outcomeBreakdown": [
+          {
+            "key": "rejected:anti_interference_filter",
+            "count": 1
+          },
+          {
+            "key": "confirmed:none",
+            "count": 9
+          },
+          {
+            "key": "needs_review:none",
+            "count": 1
+          },
+          {
+            "key": "rejected:incomplete_cycle",
+            "count": 7
+          },
+          {
+            "key": "rejected:required_joint_loss",
+            "count": 1
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 1,
+            "peakOffsetMs": 158
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 2,
+            "peakOffsetMs": -253
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 3,
+            "peakOffsetMs": -92
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 4,
+            "peakOffsetMs": 5
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 5,
+            "peakOffsetMs": -123
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 6,
+            "peakOffsetMs": -251
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 7,
+            "peakOffsetMs": 57
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 8,
+            "peakOffsetMs": 478
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": [
+          0
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "a44741cba03352f1e689fd51276dfec5",
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "frontRight45",
+      "truthCount": 10,
+      "truthSegmentCount": 10,
+      "source": "observed",
+      "profileIdentity": "barbell_bench_press/frontRight45/bilateral/workflow-candidate/v1",
+      "predictedCount": 10,
+      "needsReviewCount": 0,
+      "rejectedCount": 16,
+      "matchedReps": 10,
+      "missedReps": 0,
+      "falsePositiveReps": 0,
+      "exactCount": true,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 15851,
+            "peakMs": 16924,
+            "endMs": 17997
+          },
+          {
+            "repIndex": 2,
+            "startMs": 18411,
+            "peakMs": 19518,
+            "endMs": 20624,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 3,
+            "startMs": 20761,
+            "peakMs": 21888,
+            "endMs": 22848,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 4,
+            "startMs": 23093,
+            "peakMs": 24101,
+            "endMs": 25109,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 5,
+            "startMs": 25512,
+            "peakMs": 26457,
+            "endMs": 27401,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 6,
+            "startMs": 27863,
+            "peakMs": 28730,
+            "endMs": 29596,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 7,
+            "startMs": 30027,
+            "peakMs": 30946,
+            "endMs": 31864,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 8,
+            "startMs": 32085,
+            "peakMs": 33099,
+            "endMs": 34112,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 9,
+            "startMs": 34536,
+            "peakMs": 35346,
+            "endMs": 36156,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          },
+          {
+            "repIndex": 10,
+            "startMs": 36516,
+            "peakMs": 37610,
+            "endMs": 38704,
+            "note": "离心顶点左边比右边高，两边发力有问题，这种算不算问题需要根据专业训练数据去核实"
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 16150,
+            "peakMs": 17400,
+            "endMs": 17700
+          },
+          {
+            "startMs": 18650,
+            "peakMs": 19450,
+            "endMs": 20000
+          },
+          {
+            "startMs": 20850,
+            "peakMs": 21800,
+            "endMs": 22300
+          },
+          {
+            "startMs": 23350,
+            "peakMs": 24500,
+            "endMs": 24650
+          },
+          {
+            "startMs": 25650,
+            "peakMs": 26500,
+            "endMs": 26800
+          },
+          {
+            "startMs": 27750,
+            "peakMs": 28600,
+            "endMs": 29000
+          },
+          {
+            "startMs": 30050,
+            "peakMs": 30650,
+            "endMs": 31100
+          },
+          {
+            "startMs": 32050,
+            "peakMs": 32800,
+            "endMs": 33400
+          },
+          {
+            "startMs": 34350,
+            "peakMs": 35100,
+            "endMs": 35650
+          },
+          {
+            "startMs": 37050,
+            "peakMs": 37550,
+            "endMs": 38100
+          }
+        ],
+        "outcomeBreakdown": [
+          {
+            "key": "rejected:anti_interference_filter",
+            "count": 8
+          },
+          {
+            "key": "confirmed:none",
+            "count": 10
+          },
+          {
+            "key": "rejected:incomplete_cycle",
+            "count": 7
+          },
+          {
+            "key": "rejected:required_joint_loss",
+            "count": 1
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 0,
+            "peakOffsetMs": 476
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 1,
+            "peakOffsetMs": -68
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 2,
+            "peakOffsetMs": -88
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 3,
+            "peakOffsetMs": 399
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 4,
+            "peakOffsetMs": 43
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 5,
+            "peakOffsetMs": -130
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 6,
+            "peakOffsetMs": -296
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 7,
+            "peakOffsetMs": -299
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 8,
+            "peakOffsetMs": -246
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 9,
+            "peakOffsetMs": -60
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": []
+      },
+      "reason": null
+    },
+    {
+      "captureId": "a51c8a692c2a5a5b40cda482065cc6d5",
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "front",
+      "truthCount": 4,
+      "truthSegmentCount": 4,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "needsReviewCount": null,
+      "rejectedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "b1af030833f8d7bfb61a55cfd76db4d8",
+      "exerciseId": "machine_chest_press",
+      "capturePosition": "front",
+      "truthCount": 6,
+      "truthSegmentCount": 6,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "needsReviewCount": null,
+      "rejectedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "front",
+      "truthCount": 8,
+      "truthSegmentCount": 8,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "needsReviewCount": null,
+      "rejectedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "bc29e11c23f97a4b1ccaf321ba1e9db7",
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "front",
+      "truthCount": 4,
+      "truthSegmentCount": 4,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "needsReviewCount": null,
+      "rejectedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "cb71ee6302a7a378d75d1dcdf30cee6a",
+      "exerciseId": "push_up",
+      "capturePosition": "rearRight45",
+      "truthCount": 14,
+      "truthSegmentCount": 14,
+      "source": "observed",
+      "profileIdentity": "push_up/rearRight45/bilateral/workflow-candidate/v1",
+      "predictedCount": 16,
+      "needsReviewCount": 2,
+      "rejectedCount": 2,
+      "matchedReps": 14,
+      "missedReps": 0,
+      "falsePositiveReps": 2,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 8550,
+            "peakMs": 9509,
+            "endMs": 10467
+          },
+          {
+            "repIndex": 2,
+            "startMs": 10799,
+            "peakMs": 11522,
+            "endMs": 12244
+          },
+          {
+            "repIndex": 3,
+            "startMs": 12705,
+            "peakMs": 13336,
+            "endMs": 13966
+          },
+          {
+            "repIndex": 4,
+            "startMs": 14213,
+            "peakMs": 14885,
+            "endMs": 15557
+          },
+          {
+            "repIndex": 5,
+            "startMs": 15974,
+            "peakMs": 16545,
+            "endMs": 17116
+          },
+          {
+            "repIndex": 6,
+            "startMs": 17380,
+            "peakMs": 18087,
+            "endMs": 18794
+          },
+          {
+            "repIndex": 7,
+            "startMs": 19023,
+            "peakMs": 19710,
+            "endMs": 20396
+          },
+          {
+            "repIndex": 8,
+            "startMs": 20699,
+            "peakMs": 21285,
+            "endMs": 21870
+          },
+          {
+            "repIndex": 9,
+            "startMs": 22089,
+            "peakMs": 22793,
+            "endMs": 23497
+          },
+          {
+            "repIndex": 10,
+            "startMs": 23746,
+            "peakMs": 24485,
+            "endMs": 25224
+          },
+          {
+            "repIndex": 11,
+            "startMs": 25466,
+            "peakMs": 26097,
+            "endMs": 26727
+          },
+          {
+            "repIndex": 12,
+            "startMs": 26960,
+            "peakMs": 27602,
+            "endMs": 28244
+          },
+          {
+            "repIndex": 13,
+            "startMs": 28494,
+            "peakMs": 29057,
+            "endMs": 29619
+          },
+          {
+            "repIndex": 14,
+            "startMs": 29904,
+            "peakMs": 30574,
+            "endMs": 31243
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 5350,
+            "peakMs": 5600,
+            "endMs": 6000
+          },
+          {
+            "startMs": 6900,
+            "peakMs": 7800,
+            "endMs": 9150
+          },
+          {
+            "startMs": 9950,
+            "peakMs": 10700,
+            "endMs": 11150
+          },
+          {
+            "startMs": 11850,
+            "peakMs": 12350,
+            "endMs": 12850
+          },
+          {
+            "startMs": 13400,
+            "peakMs": 14000,
+            "endMs": 14300
+          },
+          {
+            "startMs": 14950,
+            "peakMs": 15550,
+            "endMs": 16000
+          },
+          {
+            "startMs": 16650,
+            "peakMs": 17100,
+            "endMs": 17500
+          },
+          {
+            "startMs": 18250,
+            "peakMs": 18750,
+            "endMs": 19200
+          },
+          {
+            "startMs": 19850,
+            "peakMs": 20300,
+            "endMs": 20750
+          },
+          {
+            "startMs": 21450,
+            "peakMs": 21800,
+            "endMs": 22250
+          },
+          {
+            "startMs": 22950,
+            "peakMs": 23550,
+            "endMs": 24000
+          },
+          {
+            "startMs": 24550,
+            "peakMs": 25050,
+            "endMs": 25500
+          },
+          {
+            "startMs": 26150,
+            "peakMs": 26600,
+            "endMs": 27050
+          },
+          {
+            "startMs": 27600,
+            "peakMs": 28150,
+            "endMs": 28550
+          },
+          {
+            "startMs": 29200,
+            "peakMs": 29800,
+            "endMs": 30150
+          },
+          {
+            "startMs": 30950,
+            "peakMs": 31450,
+            "endMs": 31700
+          }
+        ],
+        "outcomeBreakdown": [
+          {
+            "key": "needs_review:none",
+            "count": 2
+          },
+          {
+            "key": "confirmed:none",
+            "count": 16
+          },
+          {
+            "key": "rejected:incomplete_cycle",
+            "count": 1
+          },
+          {
+            "key": "rejected:required_joint_loss",
+            "count": 1
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 2,
+            "peakOffsetMs": 1191
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 3,
+            "peakOffsetMs": 828
+          },
+          {
+            "truthIndex": 2,
+            "predictedIndex": 4,
+            "peakOffsetMs": 664
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 5,
+            "peakOffsetMs": 665
+          },
+          {
+            "truthIndex": 4,
+            "predictedIndex": 6,
+            "peakOffsetMs": 555
+          },
+          {
+            "truthIndex": 5,
+            "predictedIndex": 7,
+            "peakOffsetMs": 663
+          },
+          {
+            "truthIndex": 6,
+            "predictedIndex": 8,
+            "peakOffsetMs": 590
+          },
+          {
+            "truthIndex": 7,
+            "predictedIndex": 9,
+            "peakOffsetMs": 515
+          },
+          {
+            "truthIndex": 8,
+            "predictedIndex": 10,
+            "peakOffsetMs": 757
+          },
+          {
+            "truthIndex": 9,
+            "predictedIndex": 11,
+            "peakOffsetMs": 565
+          },
+          {
+            "truthIndex": 10,
+            "predictedIndex": 12,
+            "peakOffsetMs": 503
+          },
+          {
+            "truthIndex": 11,
+            "predictedIndex": 13,
+            "peakOffsetMs": 548
+          },
+          {
+            "truthIndex": 12,
+            "predictedIndex": 14,
+            "peakOffsetMs": 743
+          },
+          {
+            "truthIndex": 13,
+            "predictedIndex": 15,
+            "peakOffsetMs": 876
+          }
+        ],
+        "unmatchedTruthIndexes": [],
+        "unmatchedPredictedIndexes": [
+          0,
+          1
+        ]
+      },
+      "reason": null
+    },
+    {
+      "captureId": "d8a6e62c017a63b0aa20493301147a47",
+      "exerciseId": "machine_chest_press",
+      "capturePosition": "front",
+      "truthCount": 6,
+      "truthSegmentCount": 6,
+      "source": "unavailable",
+      "profileIdentity": null,
+      "predictedCount": null,
+      "needsReviewCount": null,
+      "rejectedCount": null,
+      "matchedReps": null,
+      "missedReps": null,
+      "falsePositiveReps": null,
+      "exactCount": null,
+      "reason": "No exact observed, built-in, or simulated recognition profile for this context."
+    },
+    {
+      "captureId": "e963bc2e0819f5ef528561cc1260b7ef",
+      "exerciseId": "barbell_bench_press",
+      "capturePosition": "frontLeft45",
+      "truthCount": 5,
+      "truthSegmentCount": 5,
+      "source": "observed",
+      "profileIdentity": "barbell_bench_press/frontLeft45/bilateral/workflow-candidate/v1",
+      "predictedCount": 10,
+      "needsReviewCount": 0,
+      "rejectedCount": 6,
+      "matchedReps": 3,
+      "missedReps": 2,
+      "falsePositiveReps": 7,
+      "exactCount": false,
+      "replayDetail": {
+        "truthSegments": [
+          {
+            "repIndex": 1,
+            "startMs": 16348,
+            "peakMs": 18149,
+            "endMs": 19949
+          },
+          {
+            "repIndex": 2,
+            "startMs": 20323,
+            "peakMs": 21555,
+            "endMs": 22787
+          },
+          {
+            "repIndex": 3,
+            "startMs": 23134,
+            "peakMs": 24674,
+            "endMs": 26214
+          },
+          {
+            "repIndex": 4,
+            "startMs": 26466,
+            "peakMs": 27854,
+            "endMs": 29241
+          },
+          {
+            "repIndex": 5,
+            "startMs": 29452,
+            "peakMs": 31263,
+            "endMs": 33073
+          }
+        ],
+        "predictedSegments": [
+          {
+            "startMs": 14250,
+            "peakMs": 14300,
+            "endMs": 14600
+          },
+          {
+            "startMs": 14700,
+            "peakMs": 14950,
+            "endMs": 15200
+          },
+          {
+            "startMs": 15200,
+            "peakMs": 17200,
+            "endMs": 17700
+          },
+          {
+            "startMs": 18850,
+            "peakMs": 20050,
+            "endMs": 21000
+          },
+          {
+            "startMs": 21000,
+            "peakMs": 21050,
+            "endMs": 21550
+          },
+          {
+            "startMs": 22100,
+            "peakMs": 23000,
+            "endMs": 24050
+          },
+          {
+            "startMs": 25050,
+            "peakMs": 26350,
+            "endMs": 27200
+          },
+          {
+            "startMs": 28250,
+            "peakMs": 29200,
+            "endMs": 30600
+          },
+          {
+            "startMs": 31650,
+            "peakMs": 33850,
+            "endMs": 36600
+          },
+          {
+            "startMs": 36600,
+            "peakMs": 36650,
+            "endMs": 37650
+          }
+        ],
+        "outcomeBreakdown": [
+          {
+            "key": "rejected:anti_interference_filter",
+            "count": 3
+          },
+          {
+            "key": "rejected:duration_exceeded",
+            "count": 1
+          },
+          {
+            "key": "confirmed:none",
+            "count": 10
+          },
+          {
+            "key": "rejected:incomplete_cycle",
+            "count": 2
+          }
+        ],
+        "peakMatches": [
+          {
+            "truthIndex": 0,
+            "predictedIndex": 2,
+            "peakOffsetMs": -949
+          },
+          {
+            "truthIndex": 1,
+            "predictedIndex": 4,
+            "peakOffsetMs": -505
+          },
+          {
+            "truthIndex": 3,
+            "predictedIndex": 7,
+            "peakOffsetMs": 1346
+          }
+        ],
+        "unmatchedTruthIndexes": [
+          2,
+          4
+        ],
+        "unmatchedPredictedIndexes": [
+          0,
+          1,
+          3,
+          5,
+          6,
+          8,
+          9
+        ]
+      },
+      "reason": null
+    }
+  ]
+}

@@ -80,6 +80,10 @@ import {
   assertFixedPlanSafety,
   deriveGoalEnergyGuardrail,
   validateAdaptivePlanCandidate,
+  assessMuscleWeek,
+  assessRecoveryContext,
+  fatigueContributionsForExercise,
+  type MuscleWeekReport,
   type AdaptivePlanCandidate,
   type PlanOutcome,
 } from "../planning";
@@ -1046,6 +1050,33 @@ export class LocalProductKernel {
     return this.goalPath.review({ snapshot, trigger: input.trigger ?? "explicit_request" });
   }
 
+  /**
+   * The weekly muscle review is one structured artifact: UI renders it and the
+   * Agent reads the same object. Only confirmed/imported completed sets enter
+   * the ledger; planned data never does.
+   */
+  async readMuscleWeekReview(input: {
+    userId: string;
+    weekStartDate: string;
+    weekEndDate: string;
+  }): Promise<MuscleWeekReport> {
+    const snapshot = await this.ledger.read();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
+    const completedSets = domain.workouts
+      .filter((workout) => workout.outcome?.completedAt)
+      .map((workout) => ({
+        completedAt: workout.outcome!.completedAt,
+        outcomes: workout.setOutcomes,
+      }));
+    return assessMuscleWeek({
+      week: { startDate: input.weekStartDate, endDate: input.weekEndDate },
+      completedSets,
+      ...(domain.goalContract ? { goalContract: domain.goalContract.value } : {}),
+      knowledgeVersion: this.knowledge.versionPins().exerciseCatalog.contentHash,
+      exerciseById: (id) => this.knowledge.exerciseVariant(id),
+    });
+  }
+
   private async assembleGoalPathSnapshot(input: {
     userId: string;
     evaluatedAt?: string;
@@ -1119,6 +1150,119 @@ export class LocalProductKernel {
     });
   }
 
+  /** 候选校验用的确定性恢复上下文（propose 与 confirm 双侧同一份）。 */
+  private currentRecoveryContext(domain: DomainProjection): import("../planning").RecoveryContext {
+    return assessRecoveryContext({
+      evaluationDate: this.runtime.now().slice(0, 10),
+      completedSets: domain.workouts
+        .filter((workout) => workout.outcome?.completedAt)
+        .map((workout) => ({ completedAt: workout.outcome!.completedAt, outcomes: workout.setOutcomes })),
+      exerciseById: (id) => this.knowledge.exerciseVariant(id),
+    });
+  }
+
+  /**
+   * 只读：选中动作 + 组数/强度意图 → 各肌群主目标/协同/稳定肌相对负荷分列。
+   * 关联未审校的动作列入 unknown，不猜测。永不写入。
+   */
+  estimateMuscleLoad(input: {
+    userId: string;
+    items: readonly { exerciseVariantId: string; workSets: number; effortIntent?: "low" | "moderate" | "high" }[];
+  }): {
+    policy: { id: string; version: string; evidenceTier: "D_product_policy"; unit: "relative_load" };
+    perMuscle: readonly { muscleId: string; role: "primary_intent" | "secondary_intent" | "stabilizer"; relativeLoad: number }[];
+    unknownExercises: readonly string[];
+  } {
+    const fatigueIntentOf = { low: "low", moderate: "medium", high: "high" } as const;
+    const perMuscle = new Map<string, { role: "primary_intent" | "secondary_intent" | "stabilizer"; relativeLoad: number }>();
+    const unknown: string[] = [];
+    for (const item of input.items) {
+      const exercise = this.knowledge.exerciseVariant(item.exerciseVariantId);
+      if (!exercise || exercise.dataEligibility.expectedMuscleMetadata !== "reviewed") {
+        unknown.push(item.exerciseVariantId);
+        continue;
+      }
+      const contributions = fatigueContributionsForExercise({
+        exercise,
+        setCount: Math.max(0, Math.min(40, Math.round(item.workSets))),
+        ...(item.effortIntent ? { fatigueIntent: fatigueIntentOf[item.effortIntent] } : {}),
+      });
+      for (const contribution of contributions) {
+        const key = `${contribution.muscleId}:${contribution.role}`;
+        const current = perMuscle.get(key) ?? { role: contribution.role, relativeLoad: 0 };
+        perMuscle.set(key, { role: contribution.role, relativeLoad: Math.round((current.relativeLoad + contribution.relativeLoad) * 10) / 10 });
+      }
+    }
+    return {
+      policy: { id: "maxpower.relative-muscle-fatigue", version: "1.0.0", evidenceTier: "D_product_policy", unit: "relative_load" },
+      perMuscle: [...perMuscle.entries()].map(([key, value]) => ({ muscleId: key.split(":")[0]!, ...value })),
+      unknownExercises: unknown,
+    };
+  }
+
+  /**
+   * 只读：确认历史 + 可选草稿课次 → 逐日各肌群残差负荷与恢复窗提示。
+   * 永不写入；草稿只是假设输入，不落账。
+   */
+  async forecastRecovery(input: {
+    userId: string;
+    horizonDays: number;
+    draftSessions?: readonly { date: string; items: readonly { exerciseVariantId: string; workSets: number; effortIntent?: "low" | "moderate" | "high" }[] }[];
+  }): Promise<{
+    policy: { id: string; version: string };
+    start: import("../planning").RecoveryContext;
+    days: readonly { date: string; residualBefore: Readonly<Record<string, number>>; added: Readonly<Record<string, number>>; residualAfter: Readonly<Record<string, number>>; windowHints: readonly string[] }[];
+  }> {
+    const snapshot = await this.ledger.read();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
+    const today = this.runtime.now().slice(0, 10);
+    const completedSets = domain.workouts
+      .filter((workout) => workout.outcome?.completedAt)
+      .map((workout) => ({ completedAt: workout.outcome!.completedAt, outcomes: workout.setOutcomes }));
+    const exerciseById = (id: string) => this.knowledge.exerciseVariant(id);
+    const start = assessRecoveryContext({ evaluationDate: today, completedSets, exerciseById });
+    const tierByMuscle = new Map(start.muscles.map((entry) => [entry.muscleId, entry]));
+    const draftByDate = new Map((input.draftSessions ?? []).map((session) => [session.date, session]));
+    const days: { date: string; residualBefore: Record<string, number>; added: Record<string, number>; residualAfter: Record<string, number>; windowHints: string[] }[] = [];
+    let residual: Record<string, number> = Object.fromEntries(start.muscles.map((entry) => [entry.muscleId, entry.residualLoad]));
+    const horizon = Math.max(1, Math.min(14, Math.round(input.horizonDays)));
+    for (let index = 0; index < horizon; index += 1) {
+      const date = index === 0 ? today : new Date(Date.parse(`${today}T00:00:00.000Z`) + index * 86_400_000).toISOString().slice(0, 10);
+      const before: Record<string, number> = index === 0 ? { ...residual } : Object.fromEntries(Object.entries(residual).map(([muscle, value]): [string, number] => [muscle, Math.round(value * 0.62 * 10) / 10]).filter(([, value]) => value >= 0.1));
+      const added: Record<string, number> = {};
+      const draft = draftByDate.get(date);
+      if (draft) {
+        for (const item of draft.items) {
+          const exercise = exerciseById(item.exerciseVariantId);
+          if (!exercise || exercise.dataEligibility.expectedMuscleMetadata !== "reviewed") continue;
+          const fatigueIntent = item.effortIntent === "low" ? "low" as const : item.effortIntent === "high" ? "high" as const : item.effortIntent === "moderate" ? "medium" as const : undefined;
+          const contributions = fatigueContributionsForExercise({
+            exercise,
+            setCount: Math.max(0, Math.min(40, Math.round(item.workSets))),
+            ...(fatigueIntent ? { fatigueIntent } : {}),
+          });
+          for (const contribution of contributions) {
+            added[contribution.muscleId] = Math.round(((added[contribution.muscleId] ?? 0) + contribution.relativeLoad) * 10) / 10;
+          }
+        }
+      }
+      residual = { ...before };
+      for (const [muscle, value] of Object.entries(added)) residual[muscle] = Math.round(((residual[muscle] ?? 0) + value) * 10) / 10;
+      const windowHints = Object.keys(added).flatMap((muscle) => {
+        const context = tierByMuscle.get(muscle);
+        return context && before[muscle] !== undefined && before[muscle]! >= 60
+          ? [`${muscle}: 残差 ${before[muscle]} RU 叠加新负荷（组均值窗 ${context.windowHours[0]}–${context.windowHours[1]}h）`]
+          : [];
+      });
+      days.push({ date, residualBefore: before, added, residualAfter: { ...residual }, windowHints });
+    }
+    return {
+      policy: { id: "maxpower.recovery-windows", version: "1.0.0" },
+      start,
+      days,
+    };
+  }
+
   private planningInputFromEvidence(input: {
     userId: string;
     mode: "first_plan" | "adjustment";
@@ -1153,6 +1297,15 @@ export class LocalProductKernel {
       ...(latestLedger ? { latestLedger: { date: latestLedger.date, version: latestLedger.version, coverage: latestLedger.coverage, energyBalance: latestLedger.energyBalance } } : {}),
       ...(sourceAssessment ? { sourceAssessment: { id: sourceAssessment.id, state: sourceAssessment.state, diagnosis: sourceAssessment.diagnosis, reasonCodes: sourceAssessment.reasonCodes, nextValidationSignals: sourceAssessment.nextValidationSignals } } : {}),
       safetyBlocked: domain.safetyConstraints.some((constraint) => constraint.value.disposition !== "clear") || sourceAssessment?.materialSignal === "hard_safety",
+      // 恢复上下文由确认记录 + 疲劳/恢复政策确定性注入——任何计划 run 必然
+      // 携带它，不依赖模型自觉读取。
+      recoveryContext: assessRecoveryContext({
+        evaluationDate: input.evaluationDate,
+        completedSets: domain.workouts
+          .filter((workout) => workout.outcome?.completedAt)
+          .map((workout) => ({ completedAt: workout.outcome!.completedAt, outcomes: workout.setOutcomes })),
+        exerciseById: (id) => this.knowledge.exerciseVariant(id),
+      }),
     };
   }
 
@@ -1632,6 +1785,7 @@ export class LocalProductKernel {
       ...(currentNutrition ? { currentNutrition } : {}),
       ...(assessment ? { assessment } : {}),
       ...(counterfactual ? { counterfactual } : {}),
+      recoveryContext: this.currentRecoveryContext(domain),
       today: this.runtime.now().slice(0, 10),
       safetyBlocked,
       allowedEnergyRange: deriveGoalEnergyGuardrail(domain.profile.value, domain.goalContract.value, personalEnergy.calibration.maintenanceRange),
@@ -1718,7 +1872,7 @@ export class LocalProductKernel {
     const counterfactual = domain.plan && assessment && proposal.candidate.nutritionStrategy
       ? this.goalPath.compareCandidate({ snapshot: goalPathSnapshot!, assessment, goal: domain.goalContract.value, currentPlan: domain.plan.value, ...(currentNutrition ? { currentNutrition: currentNutrition.value } : {}), candidatePlan: proposal.candidate.planRevision, candidateNutrition: proposal.candidate.nutritionStrategy })
       : undefined;
-    const validation = validateAdaptivePlanCandidate({ candidate: proposal.candidate, goal: domain.goalContract, profile: domain.profile.value, mandate: domain.mandate.value, ...(domain.plan ? { currentPlan: domain.plan } : {}), ...(currentNutrition ? { currentNutrition } : {}), ...(assessment ? { assessment } : {}), ...(counterfactual ? { counterfactual } : {}), today: this.runtime.now().slice(0, 10), safetyBlocked: domain.safetyConstraints.some((constraint) => constraint.value.disposition !== "clear") || assessment?.materialSignal === "hard_safety", allowedEnergyRange: deriveGoalEnergyGuardrail(domain.profile.value, domain.goalContract.value, personalEnergy.calibration.maintenanceRange), allowedPreferenceRefs: [`profile:${domain.profile.value.id}`, ...planningContext.outcomes.map((outcome) => outcome.id), ...snapshot.workingMemory.filter((memory) => memory.userId === input.userId && !memory.deletedAt && !memory.supersededBy).map((memory) => memory.id)] });
+    const validation = validateAdaptivePlanCandidate({ candidate: proposal.candidate, goal: domain.goalContract, profile: domain.profile.value, mandate: domain.mandate.value, ...(domain.plan ? { currentPlan: domain.plan } : {}), ...(currentNutrition ? { currentNutrition } : {}), ...(assessment ? { assessment } : {}), ...(counterfactual ? { counterfactual } : {}), recoveryContext: this.currentRecoveryContext(domain), today: this.runtime.now().slice(0, 10), safetyBlocked: domain.safetyConstraints.some((constraint) => constraint.value.disposition !== "clear") || assessment?.materialSignal === "hard_safety", allowedEnergyRange: deriveGoalEnergyGuardrail(domain.profile.value, domain.goalContract.value, personalEnergy.calibration.maintenanceRange), allowedPreferenceRefs: [`profile:${domain.profile.value.id}`, ...planningContext.outcomes.map((outcome) => outcome.id), ...snapshot.workingMemory.filter((memory) => memory.userId === input.userId && !memory.deletedAt && !memory.supersededBy).map((memory) => memory.id)] });
     if (validation.status !== "valid") throw new Error(`adaptive_plan_revalidation_failed:${validation.issues.map((issue) => issue.code).join(",")}`);
     const planId = domain.plan?.value.id ?? proposal.candidate.planRevision.id;
     const nextPlanRevision = (domain.plan?.revision ?? 0) + 1;
@@ -3192,6 +3346,15 @@ export class LocalProductKernel {
         this.knowledge.exerciseVariant(exerciseVariantId)?.displayName.zh ??
         exerciseVariantId,
       healthLedgers,
+      muscleWeek: assessMuscleWeek({
+        week: weekBoundsFor(input.date),
+        completedSets: domain.workouts
+          .filter((workout) => workout.outcome?.completedAt)
+          .map((workout) => ({ completedAt: workout.outcome!.completedAt, outcomes: workout.setOutcomes })),
+        ...(domain.goalContract ? { goalContract: domain.goalContract.value } : {}),
+        knowledgeVersion: this.knowledge.versionPins().exerciseCatalog.contentHash,
+        exerciseById: (id) => this.knowledge.exerciseVariant(id),
+      }),
     });
   }
 
@@ -4212,25 +4375,54 @@ export class LocalProductKernel {
     if (isFoodCompositionLookup(input.query)) {
       throw new Error("food_composition_lookup_not_supported");
     }
-    const result = this.knowledge.searchKnowledge({
+    // 分层加载（skill 模式）：检索默认只回蒸馏层（L2 gist + L1 段落结论），
+    // 原文永远在本机，agent 需要时按 passageId 下钻（readInstalledKnowledgePassage）。
+    // 请求体预算由此与检索次数解耦（2026-08-16 413 复盘）。
+    const layered = this.knowledge.searchKnowledgeLayered({
       query: input.query,
       limit: input.limit ?? 4,
       ...(input.topic ? { topic: input.topic } : {}),
     });
     return {
-      kind: result.hits.length ? "found" : "unknown",
-      entries: result.hits.map((hit) => ({
-        id: hit.passage.id,
-        title: [hit.passage.docTitle, ...hit.passage.sectionPath].filter(Boolean).join(" · "),
-        text: hit.passage.text,
-        passageRef: {
-          passageId: hit.passage.id,
-          contentHash: hit.passage.contentHash,
-          citationIds: hit.citations
-            .filter((citation) => citation.claimStatus === "curated" && citation.tier !== "U")
-            .map((citation) => citation.id),
-        },
-      })),
+      kind: layered.entries.length ? "found" : "unknown",
+      entries: layered.entries.map((entry) => {
+        const firstPassageId = entry.gist.passageIds[0] ?? "";
+        const firstPassage = firstPassageId ? this.knowledge.readKnowledgePassage(firstPassageId) : undefined;
+        const points = entry.keypoints.map((keypoint) => keypoint.point);
+        return {
+          id: entry.gist.id,
+          title: entry.gist.sectionKey.replace("::", " · "),
+          text: [
+            entry.gist.gist,
+            ...points,
+            `原文段落：${entry.gist.passageIds.join("、")}（需要全文用 knowledge.read_passage 按 id 读取）`,
+          ].join("\n"),
+          passageRef: {
+            passageId: firstPassageId,
+            contentHash: firstPassage?.contentHash ?? "",
+            citationIds: entry.gist.citationRefs,
+          },
+        };
+      }),
+    };
+  }
+
+  /** 下钻 L0 原文段落（agent 判断蒸馏层不够时按需读取）。 */
+  readInstalledKnowledgePassage(input: { passageId: string }): {
+    readonly kind: "found" | "unknown";
+    readonly id?: string;
+    readonly title?: string;
+    readonly text?: string;
+    readonly citationIds?: readonly string[];
+  } {
+    const passage = this.knowledge.readKnowledgePassage(input.passageId);
+    if (!passage) return { kind: "unknown" };
+    return {
+      kind: "found",
+      id: passage.id,
+      title: [passage.docTitle, ...passage.sectionPath].filter(Boolean).join(" · "),
+      text: passage.text,
+      citationIds: passage.citationRefs,
     };
   }
 
@@ -6476,6 +6668,13 @@ function offsetDate(localDate: string, days: number): string {
   const date = new Date(value);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+/** Monday–Sunday ISO week containing the given local date. */
+function weekBoundsFor(localDate: string): { startDate: string; endDate: string } {
+  const value = new Date(`${localDate}T00:00:00.000Z`);
+  const weekday = value.getUTCDay() || 7;
+  return { startDate: offsetDate(localDate, 1 - weekday), endDate: offsetDate(localDate, 7 - weekday) };
 }
 
 function datesBetween(startDate: string, endDate: string): readonly string[] {

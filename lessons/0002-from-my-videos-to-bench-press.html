@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 2 课 · 它认识我的视频，还是认识卧推？</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="lesson">
+  <div class="lesson-kicker">MaxPower 视觉验收 · 第 2 课</div>
+  <h1>它认识我的视频，还是认识卧推？</h1>
+  <p class="subtitle">10 分钟学会识别机器视觉里最常见的偷换：把“在见过的素材上成功”说成“理解了一个动作”。</p>
+
+  <div class="callout">
+    <span class="label">本课唯一目标</span>
+    以后 Agent 报告“卧推识别成功”时，你能追问一句：<b>成功的是哪一级能力，在哪些从未见过的人和环境上验证过？</b>
+  </div>
+
+  <h2><span class="sec-num">SECTION A</span>先拆开三个不同任务</h2>
+  <table>
+    <tr><th>任务</th><th>系统究竟回答什么</th><th>MaxPower 当前边界</th></tr>
+    <tr><td>动作分类</td><td>画面里是不是卧推，而不是划船或推肩？</td><td><span class="status unknown">不要求</span> 用户预先选择动作和机位</td></tr>
+    <tr><td>动作分段</td><td>这一组有几次？每次的开始、最低点、结束在哪？</td><td><span class="status unknown">部分可用</span> 但泛化与阶段精度未过门禁</td></tr>
+    <tr><td>动作评估</td><td>轨迹表现如何？哪些偏差能被画面可靠观察？</td><td><span class="status no">尚未成立</span> 杠铃轨迹和参考走廊证据不足</td></tr>
+  </table>
+
+  <p>所以当前系统并不是看一段任意视频后“认出这是卧推”。产品先告诉它：<code>barbell_bench_press + frontLeft45</code>；系统再用这个特定上下文的规则/参数尝试分段。<b>这是合理的产品选择，但不能被包装成自动理解卧推。</b></p>
+
+  <h2><span class="sec-num">SECTION B</span>“认识卧推”不是开关，而是能力阶梯</h2>
+  <ol class="claim-ladder">
+    <li><div><strong>见过的视频能跑通</strong><span>同一批素材既参与观察、调参，又用于汇报结果；只能证明管线可运行。</span></div></li>
+    <li><div><strong>你的新视频能识别</strong><span>拍一段 Agent 从未见过的新视频，冻结结果后再揭晓人工答案；证明个人内泛化。</span></div></li>
+    <li><div><strong>新人的同场景能识别</strong><span>训练阶段完全没见过这些人，但动作变式、器械和机位固定；证明有限人群泛化。</span></div></li>
+    <li><div><strong>跨场景仍能识别</strong><span>新人、新健身房、新手机、不同身材与合理机位均经过分桶验证；才接近产品级卧推识别。</span></div></li>
+    <li><div><strong>能做动作质量评估</strong><span>另需人工阶段真值、可靠杠铃轨迹、明确参考范围和“不可判断”边界；不能由计次成绩推出。</span></div></li>
+  </ol>
+
+  <div class="callout warn">
+    <span class="label">关键修正</span>
+    世界上不存在脱离范围的“真正识别卧推”。可靠说法必须带适用域，例如：<b>在预选杠铃卧推、45° 前侧机位、单人无遮挡、指定手机性能范围内，对未见过的受试者进行逐次分段。</b>
+  </div>
+
+  <h2><span class="sec-num">SECTION C</span>用当前证据做一次真实判案</h2>
+  <p>MaxPower 现有一份“盲测”报告曾在 6 条卧推视频上得到 46/46 次匹配，看起来很漂亮。但报告自己写明：<b>杠铃检测器和阈值已经见过这 6 个场景</b>，因此只能证明同语料能力，不能证明对新健身房或新人泛化。</p>
+
+  <table>
+    <tr><th>问题</th><th>仓库证据</th><th>能否晋级</th></tr>
+    <tr><td>已见场景能否跑通？</td><td>6/6 视频，46/46 次匹配</td><td><span class="status yes">可以</span></td></tr>
+    <tr><td>同一来源的留出视频？</td><td>卧推 precision 97.6%，recall 89.1%；所有边界全对的视频为 0%</td><td><span class="status unknown">只到局部</span></td></tr>
+    <tr><td>未见过的新用户？</td><td>没有 subject-disjoint 卧推结果</td><td><span class="status no">不能声称</span></td></tr>
+    <tr><td>专业质量建议？</td><td>客户端无可运行杠铃检测权重；完整三点对齐仅 30.8%</td><td><span class="status no">不能声称</span></td></tr>
+  </table>
+
+  <p class="src">本案依据：<a href="../docs/reports/personal-front-bench-blind-recognition-test-2026-08-12.md">同语料盲测报告</a>、<a href="../docs/reports/personal-halpe26-rep-alignment-by-action-2026-08-12.md">按动作留出评估</a>、<a href="../docs/reports/client-rust-realtime-agent-acceptance-2026-08-12.md">客户端验收复盘</a>。</p>
+
+  <div class="callout know">
+    <span class="label">当前最诚实的结论</span>
+    MaxPower 已有“预先指定动作/机位后，对部分个人视频做卧推计次与阶段分段”的能力证据；<b>还没有“对陌生用户可靠识别卧推”或“理解卧推质量”的证据。</b>
+  </div>
+
+  <h2><span class="sec-num">SECTION D</span>你只需向 Agent 索取七张“收据”</h2>
+  <ol class="audit-list">
+    <li><b>能力声明</b>：是在分类动作、数次数、找阶段，还是评动作？只准写一个。</li>
+    <li><b>适用范围</b>：动作变式、器械、机位、遮挡、设备和用户范围是什么？</li>
+    <li><b>测试隔离</b>：被测的人、原视频和拍摄 session 是否从未参与训练、调参或阈值选择？</li>
+    <li><b>人工真值</b>：谁标了每次的 start / turnaround / end？没有标什么就不能验收什么。</li>
+    <li><b>完整指标</b>：同时看 precision、recall、整组全对率、阶段误差和失败数，不能只挑最好看的一个。</li>
+    <li><b>失败分桶</b>：正面/45°、镜子/无镜子、遮挡/无遮挡、新人/本人分别怎样？平均数会隐藏崩溃场景。</li>
+    <li><b>生产同链</b>：评估是否使用手机端真正运行的模型、单次因果输入和同一版本？离线脚本不能冒充客户端能力。</li>
+  </ol>
+
+  <div class="evidence-chain" aria-label="证据链">
+    <div>冻结范围</div><div>冻结模型</div><div>先出预测</div><div>后揭真值</div>
+  </div>
+
+  <p>你无需看到 Agent 的隐藏思考过程。那既难核验，也不是产品证据。你要看的是外部可复查链条：<b>版本、数据清单、预测文件、人工标签、评估脚本、失败样本和禁止声称清单。</b></p>
+
+  <h2><span class="sec-num">SECTION E</span>你真正需要的知识储备</h2>
+  <table>
+    <tr><th>优先级</th><th>要学什么</th><th>学到什么程度</th></tr>
+    <tr><td>现在</td><td>任务定义、数据切分、人工真值、precision/recall、失败分桶</td><td>能审一份报告，抓出偷换概念</td></tr>
+    <tr><td>接下来</td><td>2D 坐标与相机视角、遮挡、关键点/目标跟踪、时序分段</td><td>能定位错误发生在哪一层</td></tr>
+    <tr><td>随后</td><td>运动学与动力学的区别、不确定性、参考轨迹如何建立</td><td>能约束产品可说与不可说的话</td></tr>
+    <tr><td>暂缓</td><td>网络结构、损失函数推导、GPU 训练和论文刷榜</td><td>需要亲自做模型时再深入</td></tr>
+  </table>
+
+  <h2><span class="sec-num">SECTION F</span>检验一下</h2>
+  <div class="quiz" data-answer="no" data-explanation="这些场景参与过阈值选择，只能证明同语料能力。">
+    <p class="q">1 · Agent 在参与过调参的 6 条视频上做到 46/46 次匹配，这能证明它识别陌生人的卧推吗？</p>
+    <label><input type="radio" name="q1" value="yes">能够证明</label>
+    <label><input type="radio" name="q1" value="no">不能证明</label>
+    <label><input type="radio" name="q1" value="unknown">尚缺信息</label>
+    <div class="feedback"></div>
+  </div>
+
+  <div class="quiz" data-answer="unknown" data-explanation="新视频是必要条件，但还需要人工真值和冻结前未见的证据。">
+    <p class="q">2 · Agent 说它测试了“昨天新拍的视频”，但没有给人工标签和预测文件。现在能下结论吗？</p>
+    <label><input type="radio" name="q2" value="yes">能够证明</label>
+    <label><input type="radio" name="q2" value="no">不能证明</label>
+    <label><input type="radio" name="q2" value="unknown">尚缺信息</label>
+    <div class="feedback"></div>
+  </div>
+
+  <h2><span class="sec-num">SECTION G</span>下一次直接这样要求 Agent</h2>
+  <div class="callout">
+    <span class="label">验收指令</span>
+    不要证明“卧推识别有效”。先写清本轮只验证哪一级能力；冻结训练/调参所见的人、视频和 session 清单；用从未见过的用户与场景先生成不可修改的预测，再揭晓人工真值。按用户、机位、遮挡分别报告 precision、recall、整组全对率和 start/turnaround/end 误差。任何未验证能力必须写 <code>unmeasured</code> 或 <code>cannot_judge</code>，不得从计次推断动作质量。
+  </div>
+
+  <p class="src">推荐先读的一手资料与完整研究笔记：<a href="../docs/research/2026-08-13-vision-motion-agent-audit.md">视觉动作识别与 Agent 审核研究</a>。速查版：<a href="../reference/vision-generalization-audit-card.html">“我的视频 vs 真正动作”验收卡</a>。</p>
+
+  <div class="callout know">
+    <span class="label">继续问老师</span>
+    如果“precision/recall”“留出”“人工真值”里任何一个词仍然模糊，直接问我。下一课可以用 10 个虚构卧推视频，带你亲手算一次 precision 和 recall。
+  </div>
+
+  <div class="footer-note">第 2 课完 · 上一课：<a href="0001-plan-and-trace-pipelines.html">规划链路与追踪链路</a></div>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

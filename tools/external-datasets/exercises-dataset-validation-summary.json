@@ -1,0 +1,167 @@
+{
+  "schemaVersion": "maxpower-external-dataset-validation/v1",
+  "dataset": "exercises-dataset-hasaneyldrm",
+  "validatedAt": "2026-08-16",
+  "snapshot": {
+    "commit": "7455efae41b330c265e7cd4b78dfa848e7ce5ebd",
+    "commitDate": "2026-07-16T06:50:40Z",
+    "localRoot": "data/external/exercises-dataset",
+    "files": {
+      "data/exercises.json": {
+        "bytes": 17391530,
+        "sha256": "656634224b8977b99a6d765470ee123260d4979715eaa4e7c0b7c8bb0d79f93d"
+      },
+      "data/exercises.schema.json": {
+        "bytes": 5143,
+        "sha256": "33fb14b439c68e12365e14a0759006c40564646ac27084efe1f2e956804b2d49"
+      }
+    },
+    "byteLengthMatchesGitHubTreeApi": true
+  },
+  "localStatus": {
+    "records": 1324,
+    "uniqueIds": 1324,
+    "duplicateIds": 0,
+    "fieldsCompleteInAllRecords": true,
+    "languages": {
+      "instructions": 10,
+      "instruction_steps": 10,
+      "includesChinese": true
+    },
+    "distinctValues": {
+      "category": 10,
+      "equipment": 28,
+      "target": 19,
+      "muscle_group": 29,
+      "secondary_muscles": 40
+    },
+    "mediaDownloaded": false,
+    "mediaReferencesExcluded": [
+      "image",
+      "gif_url",
+      "media_id"
+    ]
+  },
+  "readability": {
+    "schema": "JSON Schema draft 2020-12, data/exercises.schema.json",
+    "topTargetValues": [
+      [
+        "abs",
+        169
+      ],
+      [
+        "pectorals",
+        158
+      ],
+      [
+        "biceps",
+        151
+      ],
+      [
+        "glutes",
+        144
+      ],
+      [
+        "delts",
+        143
+      ],
+      [
+        "triceps",
+        141
+      ],
+      [
+        "upper back",
+        88
+      ],
+      [
+        "lats",
+        81
+      ]
+    ],
+    "topEquipmentValues": [
+      [
+        "body weight",
+        325
+      ],
+      [
+        "dumbbell",
+        294
+      ],
+      [
+        "cable",
+        157
+      ],
+      [
+        "barbell",
+        154
+      ],
+      [
+        "leverage machine",
+        81
+      ],
+      [
+        "band",
+        54
+      ],
+      [
+        "smith machine",
+        48
+      ],
+      [
+        "kettlebell",
+        41
+      ]
+    ],
+    "categoryValues": [
+      [
+        "upper arms",
+        292
+      ],
+      [
+        "upper legs",
+        227
+      ],
+      [
+        "back",
+        203
+      ],
+      [
+        "waist",
+        169
+      ],
+      [
+        "chest",
+        163
+      ],
+      [
+        "shoulders",
+        143
+      ],
+      [
+        "lower legs",
+        59
+      ],
+      [
+        "lower arms",
+        37
+      ],
+      [
+        "cardio",
+        29
+      ],
+      [
+        "neck",
+        2
+      ]
+    ]
+  },
+  "guardrails": [
+    "License split: MIT covers non-media data only; images/ and videos/ are Gym visual property and were not downloaded.",
+    "Media fields (image, gif_url, media_id) must never be fetched, displayed, or used in training/annotation/generative pipelines.",
+    "Records are candidate exercise concepts only; promotion to ExerciseVariant requires license, naming, equipment, exact-variant, and muscle-role review.",
+    "Muscle vocabulary granularity is inconsistent across fields (quads/quadriceps, delts/shoulders, abs/core); map onto the MaxPower muscle ontology per variant, never wholesale.",
+    "secondary_muscles can repeat the muscle_group value; treat roles as source claims, not reviewed anatomy.",
+    "No stabilizer role, rep boundaries, phases, pose keypoints, or quality labels exist in this dataset; it cannot support pose recognition, rep counting, or form quality features.",
+    "Chinese and other non-English instruction text is machine-translated in style; review before user-facing display."
+  ]
+}

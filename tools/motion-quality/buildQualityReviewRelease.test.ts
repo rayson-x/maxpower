@@ -345,7 +345,7 @@ test("review release rejects a Rust proposal changed after its review projection
 test("Rust proposal content hash matches the serde-order FNV-1a contract", () => {
   const proposal = rustQualityProposalFixture("phase_supported");
 
-  assert.equal(proposal.contentHash, "b86e249d1f490185");
+  assert.equal(proposal.contentHash, "06abc55235eb0f7b");
   assert.equal(computeRustQualityProposalContentHash(proposal), proposal.contentHash);
 });
 
@@ -403,6 +403,34 @@ function rustQualityProposalFixture(
       phaseAfter: "eccentric",
       confidence: 0.8,
       evidenceChannels: ["pose_measured"],
+      normalizedFeatures: {
+        schemaVersion: "maxpower-local-motion-coordinate/v1",
+        coordinateFrameId: 1,
+        sourceTimestampMs: 100 + index * 100,
+        state: "uninitialized",
+        reason: "no_measured_bar_axis",
+        primaryAxis: null,
+        crossAxis: null,
+        origin: null,
+        scale: null,
+        scaleSource: null,
+        equipmentTrackId: null,
+        rawBarAxis: null,
+        coarseView: "front",
+        canonicalFeedMirrored: null,
+        endpointOrderMapping: "screen_ordered_anatomy_unknown",
+        anatomicalSideMapping: "unknown",
+        equipment: null,
+        pose: null,
+        channelAgreement: "cannot_judge",
+        endpointOneProgress: null,
+        endpointTwoProgress: null,
+        anatomicalLeftEndpointProgress: null,
+        anatomicalRightEndpointProgress: null,
+        rawBarAngleRadians: null,
+        baselineCorrectedBarAngleRadians: null,
+        confidence: 0,
+      },
     })),
     conclusions: [
       "task_completion", "range_of_motion", "phase_control", "support_stability",

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frame Forge · 器械视频标注棚</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div class="brand-mark" aria-hidden="true"><span>FF</span></div>
+      <div class="brand-copy">
+        <p class="eyebrow">LOCAL EQUIPMENT DATA FOUNDRY / V1</p>
+        <h1>器械视频标注棚</h1>
+        <p>暂停到事实发生的那一帧。只画你真正看见的器械。</p>
+      </div>
+      <div class="storage-seal">
+        <span class="pulse"></span>
+        <strong>LOCAL ONLY</strong>
+        <small>草稿留在此浏览器，不上传</small>
+      </div>
+      <div class="headline-stats" id="headline-stats"></div>
+    </header>
+
+    <section class="workspace">
+      <aside class="source-rail">
+        <div class="manifest-state" id="manifest-state"></div>
+        <div class="source-tools">
+          <label class="search-wrap">
+            <span>⌕</span>
+            <input id="search" type="search" placeholder="搜索动作 / 机位 / 视频">
+          </label>
+          <div class="filter-grid">
+            <select id="exercise-filter" aria-label="动作筛选"><option value="all">全部动作</option></select>
+            <select id="view-filter" aria-label="机位筛选"><option value="all">全部机位</option></select>
+          </div>
+          <label class="file-button" for="local-video-input">＋ 临时打开本地视频</label>
+          <input id="local-video-input" type="file" accept="video/*" multiple hidden>
+          <p class="microcopy">临时视频不会写入 localStorage；重新打开页面后需再次选择。正式导出仍保留文件名与来源状态。</p>
+        </div>
+        <div class="queue-head"><span>SELECTABLE SOURCES</span><strong id="video-count">0</strong></div>
+        <div class="video-list" id="video-list"><div class="empty">正在读取合规清单…</div></div>
+      </aside>
+
+      <section class="viewer">
+        <div class="stage" id="stage">
+          <video id="video" playsinline preload="metadata"></video>
+          <canvas id="overlay" aria-label="器械标注画布"></canvas>
+          <div class="safe-frame" aria-hidden="true"></div>
+          <div class="stage-labels">
+            <span class="chip acid" id="action-chip">NO VIDEO</span>
+            <span class="chip" id="frame-chip">00:00.000 · F00000</span>
+          </div>
+          <div class="crosshair" aria-hidden="true"></div>
+          <div class="stage-empty" id="stage-empty">
+            <strong>等待视频源</strong>
+            <span>从左侧选择合规视频，或临时打开本地文件。</span>
+          </div>
+        </div>
+
+        <div class="transport">
+          <div class="timeline-shell">
+            <div class="rep-bands" id="rep-bands"></div>
+            <input id="timeline" type="range" min="0" max="1" value="0" step="1" aria-label="视频时间轴">
+            <div class="annotation-marks" id="annotation-marks"></div>
+          </div>
+          <div class="transport-row">
+            <button id="previous-frame" class="transport-btn" title="上一帧">−1F</button>
+            <button id="play" class="transport-btn primary">PLAY</button>
+            <button id="next-frame" class="transport-btn" title="下一帧">+1F</button>
+            <div class="timecode"><strong id="current-time">00:00.000</strong><span>/</span><span id="duration">00:00.000</span></div>
+            <label class="fps-control">FPS <input id="fps" type="number" min="1" max="240" step="1" value="30"></label>
+            <div class="transport-help"><b>SPACE</b> 播放/暂停 · <b>[ ]</b> 逐帧 · <b>A</b> 轴线 · <b>B</b> 框 · <b>⌘S</b> 保存</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="inspector">
+        <div class="inspector-head">
+          <p class="eyebrow">FRAME TRUTH / CURRENT PAUSE</p>
+          <h2 id="case-title">尚未选择视频</h2>
+          <p id="case-lineage">选择视频后开始逐帧标注。</p>
+        </div>
+
+        <section class="panel">
+          <p class="panel-label">01 / 这一帧是什么证据</p>
+          <div class="target-grid" id="target-grid">
+            <button class="target active" data-target="visible_equipment"><b>1</b>真实器械可见<small>需要轴线或框</small></button>
+            <button class="target" data-target="no_target_equipment"><b>2</b>没有目标器械<small>负样本</small></button>
+            <button class="target" data-target="reflection_only"><b>3</b>仅镜像器械<small>硬负样本</small></button>
+            <button class="target" data-target="static_rack_only"><b>4</b>仅静态架位<small>硬负样本</small></button>
+            <button class="target warning" data-target="ambiguous"><b>5</b>无法确认<small>不进入训练</small></button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <p class="panel-label">02 / 选择器械与画法</p>
+          <div class="equipment-tabs" id="equipment-tabs">
+            <button class="equipment-tab active" data-kind="barbell_shaft">杠铃杆 <span>AXIS</span></button>
+            <button class="equipment-tab" data-kind="dumbbell">哑铃 <span>BBOX</span></button>
+          </div>
+          <div class="draw-tools">
+            <button id="axis-tool" class="draw-tool active">A · 拖出轴线</button>
+            <button id="box-tool" class="draw-tool">B · 拖出矩形</button>
+            <button id="undo-instance" class="draw-tool muted">撤销最后一个</button>
+          </div>
+          <p class="drawing-note" id="drawing-note">在暂停画面上，从杠铃杆一个可见端点拖到另一个端点。</p>
+          <div class="instance-list" id="instance-list"><div class="empty small">当前帧还没有几何标注。</div></div>
+        </section>
+
+        <section class="panel compact">
+          <p class="panel-label">03 / 可见性</p>
+          <div class="form-grid">
+            <label>遮挡
+              <select id="occlusion">
+                <option value="none">无遮挡</option>
+                <option value="partial">部分遮挡</option>
+                <option value="heavy">严重遮挡</option>
+              </select>
+            </label>
+            <label class="checkbox"><input id="truncated" type="checkbox">器械被画面裁断</label>
+            <label class="full">备注（可选）<textarea id="note" maxlength="2000" placeholder="只记录可见事实，不推测发力或动作质量。"></textarea></label>
+          </div>
+        </section>
+
+        <section class="panel footer-panel">
+          <div class="flash" id="flash">暂停视频后标注。切换帧不会自动保存。</div>
+          <div class="save-row">
+            <button id="delete-frame" class="action danger">删除本帧</button>
+            <button id="save-frame" class="action primary">保存到浏览器</button>
+          </div>
+          <div class="io-row">
+            <button id="import-json" class="action">导入 JSON</button>
+            <button id="export-json" class="action acid-outline">导出全部 JSON</button>
+            <input id="json-input" type="file" accept="application/json,.json" hidden>
+          </div>
+          <p class="policy-note">localStorage 只是草稿载体。导出的 JSON 仍需通过来源、分组和人工事件门禁，才可成为训练标签。</p>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module" src="/app.mjs"></script>
+</body>
+</html>

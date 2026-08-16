@@ -1,0 +1,171 @@
+{
+  "schemaVersion": "maxpower-personal-temporal-training-report/v1",
+  "generatedAt": "2026-08-10T19:16:22Z",
+  "decision": {
+    "personalGoldenReplayPassed": true,
+    "personalUnseenGeneralizationPassed": false,
+    "mmfitProductTargetPassed": false,
+    "productionPromotion": false,
+    "status": "research_candidate_not_promotable"
+  },
+  "personalGoldenReplay": {
+    "supervision": "human_per_rep_start_peak_end",
+    "acceptance": {
+      "startToleranceMs": 500,
+      "peakToleranceMs": 250,
+      "endToleranceMs": 500,
+      "minimumIntervalIou": 0.6
+    },
+    "parent": {
+      "artifact": "data/workflows/motion-profile/personal-golden-v2/run-2026-08-10/diagnostics/alignment-audit-v15.json",
+      "sourceCaptureCount": 50,
+      "evaluationWindowCount": 54,
+      "expectedSetCount": 465,
+      "humanBoundaryCount": 464,
+      "predictedCount": 461,
+      "matchedBoundaryCount": 449,
+      "alignedBoundaryCount": 110,
+      "exactSetSourceCaptureCount": 44,
+      "exactSetAndBoundarySourceCaptureCount": 1,
+      "absoluteCountError": 12
+    },
+    "candidate": {
+      "modelSchemaVersion": "maxpower-personal-temporal-template-model/v1",
+      "executionBackend": "rust_reference_cli",
+      "canonicalPoseBackend": "rust_wasm_fusion",
+      "sourceCaptureCount": 50,
+      "evaluationWindowCount": 54,
+      "expectedSetCount": 465,
+      "humanBoundaryCount": 464,
+      "predictedCount": 465,
+      "matchedBoundaryCount": 464,
+      "alignedBoundaryCount": 464,
+      "exactSetSourceCaptureCount": 50,
+      "exactSetAndBoundarySourceCaptureCount": 50,
+      "absoluteCountError": 0,
+      "goldenReplayExactRatio": 1.0,
+      "crossRuntimeFeatureQuantization": 0.01,
+      "crossRuntimeSquaredDistanceTolerance": 0.0001
+    },
+    "delta": {
+      "exactSetSourceCaptures": 6,
+      "exactSetAndBoundarySourceCaptures": 49,
+      "alignedBoundaries": 354,
+      "absoluteCountError": -12
+    },
+    "annotationGap": {
+      "sourceCaptureId": "field-capture-2026-08-02T18-19-26-633Z",
+      "expectedSetCount": 10,
+      "humanBoundaryCount": 9,
+      "policy": "preserve human truth and label the inferred cycle as weak_set_count_candidate",
+      "weakCandidate": {
+        "startMs": 13194,
+        "peakMs": 13642,
+        "endMs": 13937
+      }
+    }
+  },
+  "personalLeaveOneSourceOutDiagnostic": {
+    "classification": "diagnostic_only_not_subject_disjoint_accuracy",
+    "reason": "personal records remain legacy_unpartitioned and do not contain trustworthy subject/session groups",
+    "sourceCaptureCount": 50,
+    "eligibleSourceCaptureCount": 38,
+    "expectedSetCount": 465,
+    "humanBoundaryCount": 464,
+    "predictedCount": 297,
+    "matchedBoundaryCount": 258,
+    "alignedBoundaryCount": 132,
+    "exactSetSourceCaptureCount": 13,
+    "exactSetAndBoundarySourceCaptureCount": 1,
+    "exactSetRatio": 0.26,
+    "strictSetAndBoundaryRatio": 0.02
+  },
+  "mmfit": {
+    "supervision": "set_count_only",
+    "rgbTrainVerification": {
+      "zenodoRecord": 7672767,
+      "split": "train",
+      "subjects": ["w01", "w02", "w03", "w04", "w06", "w07", "w08", "w16", "w17", "w18"],
+      "officialSizeAndMd5Passed": 10,
+      "officialSizeAndMd5Failed": 0,
+      "remainingBytes": 0,
+      "nativeMediaPipeHeavyClipCount": 301
+    },
+    "nativeMediaPipeHeavyTrainReference": {
+      "observationDomain": "mmfit_mediapipe33_heavy_cpu",
+      "clipCount": 301,
+      "truthRepCount": 2999,
+      "predictedRepCount": 2874,
+      "exactSetCount": 206,
+      "exactSetRatio": 0.6844,
+      "meanAbsoluteCountError": 0.4884,
+      "note": "train-domain research benchmark; not a frozen unseen result"
+    },
+    "currentFrozenMappedPoseReplay": {
+      "workflowRunId": "80f5e0ae5b0e4e1a980bcf21",
+      "observationDomain": "mmfit_openpose18_mapped",
+      "clipCount": 616,
+      "truthRepCount": 6160,
+      "predictedRepCount": 5854,
+      "exactSetCount": 486,
+      "exactSetRatio": 0.789,
+      "meanAbsoluteCountError": 0.5974,
+      "bySplit": {
+        "train": { "clipCount": 301, "exactSetCount": 236, "exactSetRatio": 0.7841, "meanAbsoluteCountError": 0.6611 },
+        "validation": { "clipCount": 86, "exactSetCount": 73, "exactSetRatio": 0.8488, "meanAbsoluteCountError": 0.4767 },
+        "test": { "clipCount": 90, "exactSetCount": 80, "exactSetRatio": 0.8889, "meanAbsoluteCountError": 0.1778 },
+        "unseen_test": { "clipCount": 139, "exactSetCount": 97, "exactSetRatio": 0.6978, "meanAbsoluteCountError": 0.8058 }
+      },
+      "perRepPhaseMetrics": "not_applicable"
+    }
+  },
+  "workflow": {
+    "inspectRunId": "9991d026c97952c69e3edbd7",
+    "candidateRunId": "80f5e0ae5b0e4e1a980bcf21",
+    "candidateStatus": "not_promotable",
+    "inventory": { "legacySelfCaptures": 11, "legacySelfReps": 89, "mmfitSets": 616, "mmfitReps": 6160 },
+    "leakageChecks": [
+      "same sourceSequenceId has one split",
+      "MM-Fit official subject split preserved",
+      "self data remains legacy_unpartitioned",
+      "test and unseen_test sequence ids are absent from search traces"
+    ]
+  },
+  "promotionBlockers": [
+    "personal golden replay is in-sample and does not prove unseen subject/session generalization",
+    "personal subject/session groups remain legacy_unpartitioned",
+    "only 38 of 50 personal sources have another source in the same action/view bucket",
+    "the learned temporal model is not integrated into streaming MotionPacket or the production profile resolver",
+    "MM-Fit has set-count supervision only and cannot validate per-rep start/peak/end",
+    "MM-Fit unseen_test exact-set ratio is 69.78%, below the requested 95% product target",
+    "MM-Fit license remains research-only pending formal policy review"
+  ],
+  "artifactHashes": {
+    "data/training/personal-golden-segmentation-v2.json": "63c33e44365d8359df32793e16f3a3c8dd4c53d32a970933ed57441d4c150727",
+    "data/workflows/motion-profile/personal-golden-v2/run-2026-08-10/corpus/personal-rust-canonical-v1.json": "7370bb578a5017eeda2e224aa9ddc1329e1957a5c74f9090cfd8433d82bc1d73",
+    "data/workflows/motion-profile/personal-golden-v2/run-2026-08-10/candidates/personal-temporal-template-v1.json": "f68d11d0815b229e42a77871e9862718d41e00aa431339fd5253906fe8666965",
+    "data/workflows/motion-profile/personal-golden-v2/run-2026-08-10/diagnostics/personal-temporal-template-v1-rust-replay.json": "828c836f48cb71b62c01f8be2289db1b2c73648f1674f7181f4d052a973f6eba",
+    "public/motion-sdk/maxpower_motion_sdk.wasm": "6c39bad7f9e33d41440cd155ea1833a1748823791be24abb19c82de53ae1d456",
+    "public/archives/confirmed-captures/recognition-profiles.json": "2efd51c414eaa5c575b9cacc87680bf29f04fc262b290154a211ec88e127c877"
+  },
+  "productionArtifactChanged": false,
+  "nextData": {
+    "minimum": "record new subject/session-grouped held-out videos before tuning",
+    "singleSourceBucketsNeedingAnotherIndependentCapture": [
+      "barbell_bench_press|frontLeft45",
+      "barbell_row|front",
+      "barbell_row|frontRight45",
+      "barbell_row|rearLeft45",
+      "lat_pulldown|rear",
+      "machine_chest_press|frontRight45",
+      "pull_up|rearLeft45",
+      "push_up|rearRight45",
+      "seated_row|frontLeft45",
+      "seated_row|rearLeft45",
+      "seated_row|right",
+      "straight_arm_pulldown|frontLeft45"
+    ],
+    "requiredNegativeWindows": ["setup", "rest", "rack/unrack", "equipment adjustment", "wrong action", "partial rep"],
+    "benchRequirement": "retain RGB equipment/bar-axis observations because supine wrist/elbow MediaPipe landmarks collapse despite visible video"
+  }
+}

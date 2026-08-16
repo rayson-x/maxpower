@@ -32,6 +32,12 @@
         if (!targetOrder.has(key)) throw new Error(`unknown review target ${key}`);
         return decisions.get(key) ?? null;
       },
+      clearDecision(rawTarget) {
+        const target = normalizeTarget(rawTarget);
+        const key = targetKey(target);
+        if (!targetOrder.has(key)) throw new Error(`unknown review target ${key}`);
+        return decisions.delete(key);
+      },
       listDecisions() {
         return Object.freeze([...decisions.values()]
           .sort((left, right) => targetOrder.get(targetKey(left.target)) - targetOrder.get(targetKey(right.target))));

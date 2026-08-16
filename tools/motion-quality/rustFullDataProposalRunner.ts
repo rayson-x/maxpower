@@ -1078,7 +1078,7 @@ export function reviewCapabilityForContext(input: Readonly<{
   return contract.capability.phase;
 }
 
-function serializeCurrentRustFrame(
+export function serializeCurrentRustFrame(
   packet: DecodedMotionPacket,
   canonicalHash: bigint,
   inputEvidence: ReturnType<typeof reviewInputEvidence>,
@@ -1092,6 +1092,9 @@ function serializeCurrentRustFrame(
       selectedCandidateId: packet.target.selectedCandidateId?.toString() ?? null,
     },
     landmarks: packet.canonical.map((landmark) => ({ ...landmark })),
+    localMotionCoordinate: packet.localMotionCoordinate == null
+      ? null
+      : cloneJson(packet.localMotionCoordinate),
     inputPose: inputEvidence.inputPose,
     inputEquipmentAxes: inputEvidence.inputEquipmentAxes,
     equipmentStatus: { ...packet.equipment.status },

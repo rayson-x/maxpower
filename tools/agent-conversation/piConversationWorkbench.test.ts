@@ -331,6 +331,8 @@ test("the production-shaped conversation chain keeps Baseline, Goal and first Pl
     },
     planning: {
       readInput: async ({ userId }) => app.readPlanningInput({ userId, mode: "first_plan" }),
+      estimateMuscleLoad: async () => ({ policy: { id: "test", version: "0" }, perMuscle: [], unknownExercises: [] }),
+      forecastRecovery: async () => ({ policy: { id: "test", version: "0" }, start: { status: "insufficient_history" as const, policy: { id: "test", version: "0" }, evaluatedAt: "2026-08-16", muscles: [], disclaimer: "group_mean_with_individual_signal_adjustment" as const }, days: [] }),
       propose: async ({ userId, candidate, idempotencyKey }) => {
         const result = await app.proposeAdaptivePlanCandidate({ userId, candidate: candidate as AdaptivePlanCandidate, attempt: 1, idempotencyKey });
         return result.artifact
@@ -369,6 +371,127 @@ test("the production-shaped conversation chain keeps Baseline, Goal and first Pl
   if (finalProjection.kind !== "conversation") return;
   assert.equal(finalProjection.items.filter((item) => item.card?.kind === "plan_candidate").length, 1);
   assert.equal(finalProjection.items.find((item) => item.card?.kind === "plan_candidate")?.card?.status, "confirmed");
+});
+
+test("a plan candidate stays confirmable after a module restart (ledger restore)", async () => {
+  const ledger = new InMemoryCoachLedger();
+  let sequence = 0;
+  const runtime = { now: () => "2026-08-16T08:00:00.000+08:00", nextId: (prefix: string) => `${prefix}-${++sequence}` };
+  const app = new LocalProductKernel(ledger, runtime);
+  let confirmedGoal: GoalContractData | undefined;
+  const goalCall = assistant([{ type: "toolCall", id: "goal-path", name: "goal.propose_path", arguments: { primaryGoal: "hypertrophy", targetWeeks: 12, targetWeightKg: 82, acceptableCosts: ["每周 3 次训练"] } }], "toolUse");
+  const goalFinal = assistant([{ type: "text", text: "我把目标路径放在确认卡里。" }], "stop");
+  const planningInputCall = assistant([{ type: "toolCall", id: "planning-input", name: "plan.read_fixed_input", arguments: {} }], "toolUse");
+  const planFinal = assistant([{ type: "text", text: "当前阶段计划已准备好，请确认。" }], "stop");
+  let streamCount = 0;
+  const streamFn = ((_model: Model<any>, _context: Context) => {
+    streamCount += 1;
+    if (streamCount === 1) return stream([{ type: "start", partial: goalCall }, { type: "toolcall_end", contentIndex: 0, toolCall: goalCall.content[0] as never, partial: goalCall }, { type: "done", reason: "toolUse", message: goalCall }], goalCall);
+    if (streamCount === 2) return stream([{ type: "start", partial: goalFinal }, { type: "text_delta", contentIndex: 0, delta: "我把目标路径放在确认卡里。", partial: goalFinal }, { type: "done", reason: "stop", message: goalFinal }], goalFinal);
+    if (streamCount === 3) return stream([{ type: "start", partial: planningInputCall }, { type: "toolcall_end", contentIndex: 0, toolCall: planningInputCall.content[0] as never, partial: planningInputCall }, { type: "done", reason: "toolUse", message: planningInputCall }], planningInputCall);
+    const goal = confirmedGoal;
+    assert.ok(goal, "the Goal confirmation must precede first-plan composition");
+    const candidate: AdaptivePlanCandidate = {
+      id: "first-stage-candidate",
+      generatedBy: { kind: "llm", runId: "fixture", model: "test-model" },
+      planRevision: {
+        id: "first-stage-plan",
+        goalContractRef: { kind: "goal_contract", id: goal!.id, revision: 1 },
+        effectiveFrom: "2026-08-17",
+        knowledgePins: app.getInstalledKnowledgeVersionPins(),
+        sessions: [{ id: "first-stage-session", title: "全身力量训练", scheduledFor: "2026-08-17", knowledgePins: app.getInstalledKnowledgeVersionPins(), tasks: [{ id: "first-stage-task", exerciseVariantId: "dumbbell_bench_press.flat.standard", sets: [{ id: "first-stage-set", targetReps: { min: 8, max: 12 }, targetRir: 3 }] }] }],
+        observationContract: { requiredSignals: ["weekly_body_data"], minimumObservationDays: 14, trackingSilenceReviewDays: 7, reviewCadenceDays: 7, successConditions: ["a"], progressionConditions: ["b"], holdConditions: ["c"], fallbackConditions: ["d"], stopConditions: ["e"] },
+      },
+      nutritionStrategy: { id: "first-stage-nutrition", goalContractRef: { kind: "goal_contract", id: goal!.id, revision: 1 }, status: "active", phase: "hypertrophy", calorieRange: { min: { value: 2450, unit: "kcal" }, max: { value: 2650, unit: "kcal" } }, reviewWindow: { startsAt: "2026-08-17T00:00:00.000+08:00", endsAt: "2026-08-31T00:00:00.000+08:00", minimumWeightObservations: 3 } },
+      behaviorChanges: [{ id: "first-stage-step", instruction: "每天记录主要饮食", burden: "low", preferenceRefs: [] }],
+      rationale: ["先建立基线。"],
+      expectedTradeoffs: ["前期慢。"],
+    };
+    const { id: _id, generatedBy: _generatedBy, ...toolCandidate } = candidate;
+    const planCall = assistant([{ type: "toolCall", id: "plan-candidate", name: "plan.propose_current_stage", arguments: { candidate: toolCandidate } }], "toolUse");
+    if (streamCount === 4) return stream([{ type: "start", partial: planCall }, { type: "toolcall_end", contentIndex: 0, toolCall: planCall.content[0] as never, partial: planCall }, { type: "done", reason: "toolUse", message: planCall }], planCall);
+    return stream([{ type: "start", partial: planFinal }, { type: "text_delta", contentIndex: 0, delta: "当前阶段计划已准备好，请确认。", partial: planFinal }, { type: "done", reason: "stop", message: planFinal }], planFinal);
+  }) as unknown as StreamFn;
+  const pi = { model: { id: "test-model", name: "Test", api: "openai-completions", provider: "test", baseUrl: "https://example.test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1024, maxTokens: 512 } as Model<any>, streamFn };
+  const deps = {
+    ledger,
+    runtime,
+    pi,
+    profileSetup: async (baseline: { userId: string; ageYears: number; heightCm: number; weightKg: number; goalText?: string }) => {
+      await app.executeDomainCommand({
+        type: "user.bootstrap",
+        meta: { userId: baseline.userId, actor: { kind: "user", id: baseline.userId }, deviceId: "conversation-test", occurredAt: "2026-08-16T08:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: `bootstrap:${baseline.userId}` },
+        profile: { id: `profile:${baseline.userId}`, locale: "zh-CN", adultConfirmed: true, dailyActivityLevel: "lightly_active", demographics: { ageYears: baseline.ageYears, sex: "male", height: { value: baseline.heightCm, unit: "cm" }, currentWeight: { value: baseline.weightKg, unit: "kg" } } },
+        mandate: { id: `mandate:${baseline.userId}`, mode: "collaborative", planChangeAuthorization: "always_ask" },
+      });
+    },
+    goals: {
+      confirm: async (input: { userId: string; goal: GoalContractData; selectedOptionId: "gradual" | "balanced" | "faster"; idempotencyKey: string }) => {
+        const result = await app.confirmGoalNegotiation({ userId: input.userId, goal: input.goal, selectedOptionId: input.selectedOptionId, planChangeAuthorization: "always_ask", authorization: { kind: "local_user_presence", verifiedAt: "2026-08-16T08:00:00.000+08:00", nonce: input.idempotencyKey }, idempotencyKey: input.idempotencyKey });
+        confirmedGoal = result.goal;
+        return { goal: result.goal };
+      },
+    },
+    planning: {
+      readInput: async ({ userId }: { userId: string }) => app.readPlanningInput({ userId, mode: "first_plan" }),
+      estimateMuscleLoad: async () => ({ policy: { id: "test", version: "0" }, perMuscle: [], unknownExercises: [] }),
+      forecastRecovery: async () => ({ policy: { id: "test", version: "0" }, start: { status: "insufficient_history" as const, policy: { id: "test", version: "0" }, evaluatedAt: "2026-08-16", muscles: [], disclaimer: "group_mean_with_individual_signal_adjustment" as const }, days: [] }),
+      propose: async ({ userId, candidate, idempotencyKey }: { userId: string; candidate: unknown; idempotencyKey: string }) => {
+        const result = await app.proposeAdaptivePlanCandidate({ userId, candidate: candidate as AdaptivePlanCandidate, attempt: 1, idempotencyKey });
+        return result.artifact
+          ? { status: "ready" as const, proposalId: result.artifact.id, title: result.artifact.title, summary: result.artifact.summary }
+          : { status: "invalid" as const, title: "计划候选未通过固定校验", summary: result.validation.issues.map((issue) => issue.message) };
+      },
+      confirm: async ({ userId, proposalId, idempotencyKey }: { userId: string; proposalId: string; idempotencyKey: string }) => { await app.confirmAdaptivePlanCandidate({ userId, proposalId, idempotencyKey }); },
+      reject: async ({ userId, proposalId, idempotencyKey }: { userId: string; proposalId: string; idempotencyKey: string }) => { await app.rejectAdaptivePlanCandidate({ userId, proposalId, idempotencyKey }); },
+    },
+  } as const;
+  const module = new PiAgentConversationModule(deps);
+  const opened = await module.execute({ kind: "new", userId: "u1" });
+  assert.equal(opened.kind, "opened");
+  if (opened.kind !== "opened") return;
+  await module.execute({ kind: "submit_baseline", userId: "u1", conversationId: opened.conversation.id, baseline: { ageYears: 28, heightCm: 180, weightKg: 80, goalText: "我想增肌" } });
+  await module.whenIdle(opened.conversation.id);
+  let projection = await module.read({ kind: "conversation", userId: "u1", conversationId: opened.conversation.id });
+  if (projection.kind !== "conversation") return;
+  const goalCard = projection.items.find((item) => item.card?.kind === "goal_path");
+  const option = goalCard?.card?.kind === "goal_path" ? goalCard.card.options.find((candidate) => candidate.feasible) : undefined;
+  assert.ok(option);
+  await module.execute({ kind: "resolve_goal_path", userId: "u1", conversationId: opened.conversation.id, cardId: goalCard!.id, optionId: option!.id as "gradual" | "balanced" | "faster" });
+  await module.whenIdle(opened.conversation.id);
+  projection = await module.read({ kind: "conversation", userId: "u1", conversationId: opened.conversation.id });
+  if (projection.kind !== "conversation") return;
+  const planCard = projection.items.find((item) => item.card?.kind === "plan_candidate");
+  assert.ok(planCard);
+
+  // 重启路径上的后台簿记（每日目标路径复核/配方补齐）不得让待确认候选过期：
+  const before = await app.runDailyGoalPathReview({ userId: "u1", idempotencyKey: "daily-goal-path:2026-08-16", timezoneOffsetMinutes: -480 });
+  await app.catchUpRecipes("u1");
+  await app.runDailyGoalPathReview({ userId: "u1", idempotencyKey: "daily-goal-path:2026-08-16", timezoneOffsetMinutes: -480 });
+  void before;
+
+  // 模拟应用重启：同一 ledger，全新 Kernel + 全新 Module（无任何内存状态）。
+  const app2 = new LocalProductKernel(ledger, runtime);
+  const deps2 = {
+    ...deps,
+    planning: {
+      ...deps.planning,
+      readInput: async ({ userId }: { userId: string }) => app2.readPlanningInput({ userId, mode: "first_plan" }),
+      confirm: async ({ userId, proposalId, idempotencyKey }: { userId: string; proposalId: string; idempotencyKey: string }) => { await app2.confirmAdaptivePlanCandidate({ userId, proposalId, idempotencyKey }); },
+      reject: async ({ userId, proposalId, idempotencyKey }: { userId: string; proposalId: string; idempotencyKey: string }) => { await app2.rejectAdaptivePlanCandidate({ userId, proposalId, idempotencyKey }); },
+    },
+  };
+  const restarted = new PiAgentConversationModule(deps2);
+  const restored = await restarted.read({ kind: "conversation", userId: "u1", conversationId: opened.conversation.id });
+  assert.equal(restored.kind, "conversation");
+  if (restored.kind !== "conversation") return;
+  const restoredCard = restored.items.find((item) => item.card?.kind === "plan_candidate");
+  assert.ok(restoredCard, "重启后计划候选卡仍在");
+  assert.equal(restoredCard!.card?.kind === "plan_candidate" ? restoredCard!.card.status : undefined, "awaiting_confirmation");
+  const confirmed = await restarted.execute({ kind: "resolve_plan_candidate", userId: "u1", conversationId: opened.conversation.id, cardId: restoredCard!.id, decision: "confirm" });
+  assert.equal(confirmed.kind, "plan_candidate_confirmed");
+  const domain = await app.readDomainProjection({ userId: "u1" });
+  assert.equal(domain.plan?.value.id, "first-stage-plan");
 });
 
 test("a send immediately after stop starts a new run instead of steering the aborted one", async () => {
@@ -595,6 +718,8 @@ test("a structured plan candidate is validated behind a durable confirmation car
     pi: { model: { id: "test-model", name: "Test", api: "openai-completions", provider: "test", baseUrl: "https://example.test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1024, maxTokens: 512 } as Model<any>, streamFn },
     planning: {
       readInput: async () => ({}),
+      estimateMuscleLoad: async () => ({ policy: { id: "test", version: "0" }, perMuscle: [], unknownExercises: [] }),
+      forecastRecovery: async () => ({ policy: { id: "test", version: "0" }, start: { status: "insufficient_history" as const, policy: { id: "test", version: "0" }, evaluatedAt: "2026-08-16", muscles: [], disclaimer: "group_mean_with_individual_signal_adjustment" as const }, days: [] }),
       propose: async () => ({
         status: "ready",
         proposalId: "proposal-1",
@@ -608,7 +733,7 @@ test("a structured plan candidate is validated behind a durable confirmation car
           tradeoffs: ["进度更慢但可持续"],
           observation: ["最少观察 7 天"],
           diff: ["建立首个当前阶段计划"],
-          validation: { status: "valid", impact: "low", resolution: "confirmation_required", issues: [] },
+          validation: { status: "valid", impact: "low", resolution: "confirmation_required", issues: [], advisories: [] },
         },
       }),
       confirm: async () => { confirmed = true; },
@@ -663,6 +788,8 @@ test("a factual invalidation makes the original conversation plan card non-actio
     pi: { model: { id: "test-model", name: "Test", api: "openai-completions", provider: "test", baseUrl: "https://example.test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1024, maxTokens: 512 } as Model<any>, streamFn },
     planning: {
       readInput: async () => ({}),
+      estimateMuscleLoad: async () => ({ policy: { id: "test", version: "0" }, perMuscle: [], unknownExercises: [] }),
+      forecastRecovery: async () => ({ policy: { id: "test", version: "0" }, start: { status: "insufficient_history" as const, policy: { id: "test", version: "0" }, evaluatedAt: "2026-08-16", muscles: [], disclaimer: "group_mean_with_individual_signal_adjustment" as const }, days: [] }),
       propose: async () => ({ status: "ready" as const, proposalId: "proposal-stale", title: "当前阶段计划候选", summary: ["固定验证通过"], evidenceRefs: [{ aggregate: "timeline", id: "timeline.user-1", revision: 3 }] }),
       confirm: async () => undefined,
       reject: async () => undefined,
@@ -826,7 +953,7 @@ test("only a material fixed GoalPath signal starts Pi work, and the same signal 
     runtime: { now: () => "2026-08-16T08:00:00.000Z", nextId: (prefix: string) => `${prefix}-${++sequence}` },
     pi: { model: { id: "test-model", name: "Test", api: "openai-completions", provider: "test", baseUrl: "https://example.test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1024, maxTokens: 512 } as Model<any>, streamFn },
     signals: { latestMaterial: async () => ({ id: "goal-path:1", state: "at_risk" as const, diagnosis: "goal_plan_mismatch" as const, materialSignal: "review_recommended" as const, reasonCodes: ["deadline_tempo_insufficient"], nextValidationSignals: ["body_weight"] }) },
-    planning: { readInput: async (input) => { sourceAssessmentId = input.sourceAssessmentId; return { sourceAssessmentId: input.sourceAssessmentId }; }, propose: async () => ({ status: "invalid", title: "unused", summary: [] }), confirm: async () => undefined, reject: async () => undefined },
+    planning: { readInput: async (input) => { sourceAssessmentId = input.sourceAssessmentId; return { sourceAssessmentId: input.sourceAssessmentId }; }, propose: async () => ({ status: "invalid", title: "unused", summary: [] }), confirm: async () => undefined, reject: async () => undefined, estimateMuscleLoad: async () => ({ policy: { id: "test", version: "0" }, perMuscle: [], unknownExercises: [] }), forecastRecovery: async () => ({ policy: { id: "test", version: "0" }, start: { status: "insufficient_history", policy: { id: "test", version: "0" }, evaluatedAt: "2026-08-16", muscles: [], disclaimer: "group_mean_with_individual_signal_adjustment" as const }, days: [] }) },
     ...allowAllConversationCapabilities,
   });
   const opened = await module.execute({ kind: "new", userId: "user-1" });
@@ -983,6 +1110,8 @@ test("a validation-failed plan card stays visibly invalid, never disguised as st
     pi: { model: { id: "test-model", name: "Test", api: "openai-completions", provider: "test", baseUrl: "https://example.test", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1024, maxTokens: 512 } as Model<any>, streamFn },
     planning: {
       readInput: async () => ({}),
+      estimateMuscleLoad: async () => ({ policy: { id: "test", version: "0" }, perMuscle: [], unknownExercises: [] }),
+      forecastRecovery: async () => ({ policy: { id: "test", version: "0" }, start: { status: "insufficient_history" as const, policy: { id: "test", version: "0" }, evaluatedAt: "2026-08-16", muscles: [], disclaimer: "group_mean_with_individual_signal_adjustment" as const }, days: [] }),
       propose: async () => ({ status: "invalid" as const, title: "计划候选未通过固定校验", summary: ["stimulus_slot_prescription_missing: 每个刺激槽位必须带固定训练剂量"] }),
       confirm: async () => undefined,
       reject: async () => undefined,

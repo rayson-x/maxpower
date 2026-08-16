@@ -1,0 +1,3019 @@
+{
+  "schemaVersion": "maxpower-external-rolling-profile-training/v2",
+  "generatedAt": "2026-08-09T08:14:37.826Z",
+  "datasetId": "mm-fit",
+  "selectionProtocol": {
+    "identity": "exercise_id × body_orientation_proxy × pose_source(OpenPose-18)",
+    "loading": "one bucket inflated at a time",
+    "selection": "candidate thresholds selected on official subject train split only",
+    "acceptance": "validation MAE must improve without reducing exact/off-by-one ratios, or tie with a higher exact ratio; >5% aggregate overcount is refused",
+    "untouchedEvaluation": [
+      "test",
+      "unseen_test"
+    ],
+    "candidateGrid": [
+      "baseline",
+      "range-85",
+      "range-70",
+      "range-55",
+      "fast",
+      "range-85-fast",
+      "range-70-fast",
+      "direction-flip",
+      "direction-flip-range-70",
+      "direction-flip-range-70-fast",
+      "torso-distance-10",
+      "torso-distance-18",
+      "torso-distance-30"
+    ],
+    "promotionPassed": false,
+    "refusal": "Set-count labels, adapted 2D joints, absent negative windows and unclear dataset licensing cannot promote a runtime profile."
+  },
+  "coverage": {
+    "totalClipCount": 616,
+    "trainedBucketCount": 11,
+    "acceptedBucketCount": 3,
+    "evaluatedClipCount": 532
+  },
+  "aggregate": {
+    "baseline": {
+      "clipCount": 532,
+      "truthRepCount": 5328,
+      "predictedRepCount": 4570,
+      "meanAbsoluteCountError": 1.4474,
+      "exactCountRatio": 0.6842,
+      "offByOneRatio": 0.7951,
+      "overcountClipCount": 5
+    },
+    "selectedAfterValidationGate": {
+      "clipCount": 532,
+      "truthRepCount": 5328,
+      "predictedRepCount": 4833,
+      "meanAbsoluteCountError": 0.968,
+      "exactCountRatio": 0.7406,
+      "offByOneRatio": 0.8459,
+      "overcountClipCount": 9
+    }
+  },
+  "buckets": [
+    {
+      "bucketId": "alternating_dumbbell_biceps_curl/body-orientation-front",
+      "exerciseId": "alternating_dumbbell_biceps_curl",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 27,
+        "validation": 10,
+        "test": 9,
+        "unseen_test": 13,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "baseline",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 27,
+          "truthRepCount": 272,
+          "predictedRepCount": 272,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 10,
+          "truthRepCount": 100,
+          "predictedRepCount": 100,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 94,
+          "predictedRepCount": 94,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 13,
+          "truthRepCount": 133,
+          "predictedRepCount": 133,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 27,
+          "truthRepCount": 272,
+          "predictedRepCount": 272,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 10,
+          "truthRepCount": 100,
+          "predictedRepCount": 100,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 94,
+          "predictedRepCount": 94,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 13,
+          "truthRepCount": 133,
+          "predictedRepCount": 133,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 272,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 274,
+            "meanAbsoluteCountError": 0.0741,
+            "exactCountRatio": 0.9259,
+            "offByOneRatio": 1,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 274,
+            "meanAbsoluteCountError": 0.0741,
+            "exactCountRatio": 0.9259,
+            "offByOneRatio": 1,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 276,
+            "meanAbsoluteCountError": 0.1481,
+            "exactCountRatio": 0.8889,
+            "offByOneRatio": 0.963,
+            "overcountClipCount": 3
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 273,
+            "meanAbsoluteCountError": 0.037,
+            "exactCountRatio": 0.963,
+            "offByOneRatio": 1,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 276,
+            "meanAbsoluteCountError": 0.1481,
+            "exactCountRatio": 0.8519,
+            "offByOneRatio": 1,
+            "overcountClipCount": 4
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 278,
+            "meanAbsoluteCountError": 0.2222,
+            "exactCountRatio": 0.7778,
+            "offByOneRatio": 1,
+            "overcountClipCount": 6
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 113,
+            "meanAbsoluteCountError": 5.8889,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 113,
+            "meanAbsoluteCountError": 5.8889,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 113,
+            "meanAbsoluteCountError": 5.8889,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 313,
+            "meanAbsoluteCountError": 1.6667,
+            "exactCountRatio": 0.2963,
+            "offByOneRatio": 0.5926,
+            "overcountClipCount": 17
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 308,
+            "meanAbsoluteCountError": 1.5556,
+            "exactCountRatio": 0.2222,
+            "offByOneRatio": 0.6667,
+            "overcountClipCount": 18
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 27,
+            "truthRepCount": 272,
+            "predictedRepCount": 299,
+            "meanAbsoluteCountError": 1.0741,
+            "exactCountRatio": 0.3333,
+            "offByOneRatio": 0.7407,
+            "overcountClipCount": 17
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "alternating_lunge/body-orientation-front",
+      "exerciseId": "alternating_lunge",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 18,
+        "validation": 6,
+        "test": 6,
+        "unseen_test": 15,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "range-70-fast",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 18,
+          "truthRepCount": 180,
+          "predictedRepCount": 161,
+          "meanAbsoluteCountError": 1.0556,
+          "exactCountRatio": 0.8333,
+          "offByOneRatio": 0.8333,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 6,
+          "truthRepCount": 60,
+          "predictedRepCount": 60,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 6,
+          "truthRepCount": 60,
+          "predictedRepCount": 60,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 150,
+          "predictedRepCount": 144,
+          "meanAbsoluteCountError": 0.4,
+          "exactCountRatio": 0.8667,
+          "offByOneRatio": 0.8667,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 18,
+          "truthRepCount": 180,
+          "predictedRepCount": 161,
+          "meanAbsoluteCountError": 1.0556,
+          "exactCountRatio": 0.8333,
+          "offByOneRatio": 0.8333,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 6,
+          "truthRepCount": 60,
+          "predictedRepCount": 60,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 6,
+          "truthRepCount": 60,
+          "predictedRepCount": 60,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 150,
+          "predictedRepCount": 144,
+          "meanAbsoluteCountError": 0.4,
+          "exactCountRatio": 0.8667,
+          "offByOneRatio": 0.8667,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 161,
+            "meanAbsoluteCountError": 1.0556,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8333,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 163,
+            "meanAbsoluteCountError": 0.9444,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8333,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 164,
+            "meanAbsoluteCountError": 0.8889,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8333,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 167,
+            "meanAbsoluteCountError": 0.7222,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8333,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 163,
+            "meanAbsoluteCountError": 0.9444,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8333,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 166,
+            "meanAbsoluteCountError": 0.7778,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8333,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 167,
+            "meanAbsoluteCountError": 0.7222,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.8889,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 93,
+            "meanAbsoluteCountError": 4.8333,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.1667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 94,
+            "meanAbsoluteCountError": 4.7778,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.1667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 94,
+            "meanAbsoluteCountError": 4.7778,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.1667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 249,
+            "meanAbsoluteCountError": 3.8333,
+            "exactCountRatio": 0.1111,
+            "offByOneRatio": 0.2222,
+            "overcountClipCount": 16
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 250,
+            "meanAbsoluteCountError": 3.8889,
+            "exactCountRatio": 0.1111,
+            "offByOneRatio": 0.2222,
+            "overcountClipCount": 16
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 18,
+            "truthRepCount": 180,
+            "predictedRepCount": 245,
+            "meanAbsoluteCountError": 3.6111,
+            "exactCountRatio": 0.1111,
+            "offByOneRatio": 0.2222,
+            "overcountClipCount": 16
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "alternating_lunge/body-orientation-oblique45",
+      "exerciseId": "alternating_lunge",
+      "bodyOrientationProxy": "oblique45",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 8,
+        "validation": 3,
+        "test": 3,
+        "unseen_test": 0,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "baseline",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 8,
+          "truthRepCount": 84,
+          "predictedRepCount": 84,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 3,
+          "truthRepCount": 30,
+          "predictedRepCount": 30,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 3,
+          "truthRepCount": 30,
+          "predictedRepCount": 30,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 0,
+          "truthRepCount": 0,
+          "predictedRepCount": 0,
+          "meanAbsoluteCountError": null,
+          "exactCountRatio": null,
+          "offByOneRatio": null,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 8,
+          "truthRepCount": 84,
+          "predictedRepCount": 84,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 3,
+          "truthRepCount": 30,
+          "predictedRepCount": 30,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 3,
+          "truthRepCount": 30,
+          "predictedRepCount": 30,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 0,
+          "truthRepCount": 0,
+          "predictedRepCount": 0,
+          "meanAbsoluteCountError": null,
+          "exactCountRatio": null,
+          "offByOneRatio": null,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 84,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 84,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 84,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 84,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 85,
+            "meanAbsoluteCountError": 0.125,
+            "exactCountRatio": 0.875,
+            "offByOneRatio": 1,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 85,
+            "meanAbsoluteCountError": 0.125,
+            "exactCountRatio": 0.875,
+            "offByOneRatio": 1,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 87,
+            "meanAbsoluteCountError": 0.375,
+            "exactCountRatio": 0.75,
+            "offByOneRatio": 0.875,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 76,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 76,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 76,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 131,
+            "meanAbsoluteCountError": 7.625,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 7
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 131,
+            "meanAbsoluteCountError": 7.625,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 7
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 8,
+            "truthRepCount": 84,
+            "predictedRepCount": 130,
+            "meanAbsoluteCountError": 7.5,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 7
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "alternating_lunge/body-orientation-unknown",
+      "exerciseId": "alternating_lunge",
+      "bodyOrientationProxy": "unknown",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 3,
+        "validation": 0,
+        "test": 0,
+        "unseen_test": 0,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "bodyweight_squat/body-orientation-front",
+      "exerciseId": "bodyweight_squat",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "left",
+      "clipCountsBySplit": {
+        "train": 31,
+        "validation": 9,
+        "test": 9,
+        "unseen_test": 15,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "torso-distance-30",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 31,
+          "truthRepCount": 309,
+          "predictedRepCount": 222,
+          "meanAbsoluteCountError": 2.8065,
+          "exactCountRatio": 0.6452,
+          "offByOneRatio": 0.6452,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 84,
+          "meanAbsoluteCountError": 0.6667,
+          "exactCountRatio": 0.7778,
+          "offByOneRatio": 0.7778,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 90,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 150,
+          "predictedRepCount": 84,
+          "meanAbsoluteCountError": 4.4,
+          "exactCountRatio": 0.3333,
+          "offByOneRatio": 0.4,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 31,
+          "truthRepCount": 309,
+          "predictedRepCount": 222,
+          "meanAbsoluteCountError": 2.8065,
+          "exactCountRatio": 0.6452,
+          "offByOneRatio": 0.6452,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 84,
+          "meanAbsoluteCountError": 0.6667,
+          "exactCountRatio": 0.7778,
+          "offByOneRatio": 0.7778,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 90,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 150,
+          "predictedRepCount": 84,
+          "meanAbsoluteCountError": 4.4,
+          "exactCountRatio": 0.3333,
+          "offByOneRatio": 0.4,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 222,
+            "meanAbsoluteCountError": 2.8065,
+            "exactCountRatio": 0.6452,
+            "offByOneRatio": 0.6452,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 224,
+            "meanAbsoluteCountError": 2.7419,
+            "exactCountRatio": 0.6452,
+            "offByOneRatio": 0.6452,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 237,
+            "meanAbsoluteCountError": 2.3226,
+            "exactCountRatio": 0.6452,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 256,
+            "meanAbsoluteCountError": 1.7097,
+            "exactCountRatio": 0.6774,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 231,
+            "meanAbsoluteCountError": 2.5161,
+            "exactCountRatio": 0.6774,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 233,
+            "meanAbsoluteCountError": 2.4516,
+            "exactCountRatio": 0.6774,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 246,
+            "meanAbsoluteCountError": 2.0323,
+            "exactCountRatio": 0.6774,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 207,
+            "meanAbsoluteCountError": 3.2903,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.6452,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 225,
+            "meanAbsoluteCountError": 2.7097,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 225,
+            "meanAbsoluteCountError": 2.7097,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 348,
+            "meanAbsoluteCountError": 1.2581,
+            "exactCountRatio": 0.4839,
+            "offByOneRatio": 0.7419,
+            "overcountClipCount": 16
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 344,
+            "meanAbsoluteCountError": 1.129,
+            "exactCountRatio": 0.5161,
+            "offByOneRatio": 0.7419,
+            "overcountClipCount": 15
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 309,
+            "predictedRepCount": 339,
+            "meanAbsoluteCountError": 0.9677,
+            "exactCountRatio": 0.6129,
+            "offByOneRatio": 0.7742,
+            "overcountClipCount": 12
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "dumbbell_shoulder_press/body-orientation-front",
+      "exerciseId": "dumbbell_shoulder_press",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 30,
+        "validation": 9,
+        "test": 9,
+        "unseen_test": 12,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "torso-distance-18",
+      "acceptedCandidateId": "torso-distance-18",
+      "baseline": {
+        "train": {
+          "clipCount": 30,
+          "truthRepCount": 302,
+          "predictedRepCount": 204,
+          "meanAbsoluteCountError": 3.2667,
+          "exactCountRatio": 0.6,
+          "offByOneRatio": 0.6,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 71,
+          "meanAbsoluteCountError": 2.1111,
+          "exactCountRatio": 0.6667,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 81,
+          "meanAbsoluteCountError": 1,
+          "exactCountRatio": 0.8889,
+          "offByOneRatio": 0.8889,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 12,
+          "truthRepCount": 116,
+          "predictedRepCount": 39,
+          "meanAbsoluteCountError": 6.4167,
+          "exactCountRatio": 0.25,
+          "offByOneRatio": 0.25,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 30,
+          "truthRepCount": 302,
+          "predictedRepCount": 298,
+          "meanAbsoluteCountError": 0.2,
+          "exactCountRatio": 0.8667,
+          "offByOneRatio": 0.9333,
+          "overcountClipCount": 1
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 89,
+          "meanAbsoluteCountError": 0.1111,
+          "exactCountRatio": 0.8889,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 91,
+          "meanAbsoluteCountError": 0.1111,
+          "exactCountRatio": 0.8889,
+          "offByOneRatio": 1,
+          "overcountClipCount": 1
+        },
+        "unseen_test": {
+          "clipCount": 12,
+          "truthRepCount": 116,
+          "predictedRepCount": 98,
+          "meanAbsoluteCountError": 1.6667,
+          "exactCountRatio": 0.5833,
+          "offByOneRatio": 0.75,
+          "overcountClipCount": 1
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 204,
+            "meanAbsoluteCountError": 3.2667,
+            "exactCountRatio": 0.6,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 196,
+            "meanAbsoluteCountError": 3.5333,
+            "exactCountRatio": 0.6,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 196,
+            "meanAbsoluteCountError": 3.5333,
+            "exactCountRatio": 0.6,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 195,
+            "meanAbsoluteCountError": 3.5667,
+            "exactCountRatio": 0.5667,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 204,
+            "meanAbsoluteCountError": 3.2667,
+            "exactCountRatio": 0.6,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 196,
+            "meanAbsoluteCountError": 3.5333,
+            "exactCountRatio": 0.6,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 196,
+            "meanAbsoluteCountError": 3.5333,
+            "exactCountRatio": 0.6,
+            "offByOneRatio": 0.6,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 272,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 272,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 272,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 299,
+            "meanAbsoluteCountError": 0.2333,
+            "exactCountRatio": 0.8667,
+            "offByOneRatio": 0.9,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 298,
+            "meanAbsoluteCountError": 0.2,
+            "exactCountRatio": 0.8667,
+            "offByOneRatio": 0.9333,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 302,
+            "predictedRepCount": 298,
+            "meanAbsoluteCountError": 0.2,
+            "exactCountRatio": 0.8333,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 1
+          }
+        }
+      ],
+      "candidateProfile": {
+        "identity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "torso-normalized-distance",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "increasing",
+        "primarySignal": {
+          "kind": "landmark-distance",
+          "landmarks": [
+            15,
+            23
+          ]
+        },
+        "secondarySignal": {
+          "kind": "landmark-distance",
+          "landmarks": [
+            16,
+            24
+          ]
+        },
+        "startAmplitude": 0.05,
+        "minPrimaryAmplitude": 0.18,
+        "minSecondaryAmplitude": 0.18,
+        "returnHysteresis": 0.06,
+        "readyTolerance": 0.07,
+        "maxGapMs": 700,
+        "minRepDurationMs": 350,
+        "maxRepDurationMs": 8000,
+        "contentHash": "6952897302510256472",
+        "researchOnly": true,
+        "evidenceDataset": "mm-fit",
+        "promotionPassed": false
+      }
+    },
+    {
+      "bucketId": "jumping_jack/body-orientation-front",
+      "exerciseId": "jumping_jack",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "front",
+      "clipCountsBySplit": {
+        "train": 30,
+        "validation": 6,
+        "test": 9,
+        "unseen_test": 12,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "range-85-fast",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 30,
+          "truthRepCount": 287,
+          "predictedRepCount": 284,
+          "meanAbsoluteCountError": 0.1,
+          "exactCountRatio": 0.9333,
+          "offByOneRatio": 0.9667,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 6,
+          "truthRepCount": 61,
+          "predictedRepCount": 61,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 90,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 12,
+          "truthRepCount": 125,
+          "predictedRepCount": 112,
+          "meanAbsoluteCountError": 1.0833,
+          "exactCountRatio": 0.5833,
+          "offByOneRatio": 0.8333,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 30,
+          "truthRepCount": 287,
+          "predictedRepCount": 284,
+          "meanAbsoluteCountError": 0.1,
+          "exactCountRatio": 0.9333,
+          "offByOneRatio": 0.9667,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 6,
+          "truthRepCount": 61,
+          "predictedRepCount": 61,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 90,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 12,
+          "truthRepCount": 125,
+          "predictedRepCount": 112,
+          "meanAbsoluteCountError": 1.0833,
+          "exactCountRatio": 0.5833,
+          "offByOneRatio": 0.8333,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 284,
+            "meanAbsoluteCountError": 0.1,
+            "exactCountRatio": 0.9333,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 284,
+            "meanAbsoluteCountError": 0.1,
+            "exactCountRatio": 0.9333,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 284,
+            "meanAbsoluteCountError": 0.1,
+            "exactCountRatio": 0.9333,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 284,
+            "meanAbsoluteCountError": 0.1,
+            "exactCountRatio": 0.9333,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 289,
+            "meanAbsoluteCountError": 0.0667,
+            "exactCountRatio": 0.9333,
+            "offByOneRatio": 1,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 287,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 288,
+            "meanAbsoluteCountError": 0.0333,
+            "exactCountRatio": 0.9667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 267,
+            "meanAbsoluteCountError": 0.7333,
+            "exactCountRatio": 0.3,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 268,
+            "meanAbsoluteCountError": 0.7,
+            "exactCountRatio": 0.3333,
+            "offByOneRatio": 0.9667,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 30,
+            "truthRepCount": 287,
+            "predictedRepCount": 271,
+            "meanAbsoluteCountError": 0.6,
+            "exactCountRatio": 0.4,
+            "offByOneRatio": 1,
+            "overcountClipCount": 1
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "lateral_raise/body-orientation-front",
+      "exerciseId": "lateral_raise",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "front",
+      "clipCountsBySplit": {
+        "train": 25,
+        "validation": 7,
+        "test": 9,
+        "unseen_test": 12,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "baseline",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 25,
+          "truthRepCount": 251,
+          "predictedRepCount": 251,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 7,
+          "truthRepCount": 68,
+          "predictedRepCount": 67,
+          "meanAbsoluteCountError": 0.1429,
+          "exactCountRatio": 0.8571,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 90,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 12,
+          "truthRepCount": 120,
+          "predictedRepCount": 120,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 25,
+          "truthRepCount": 251,
+          "predictedRepCount": 251,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 7,
+          "truthRepCount": 68,
+          "predictedRepCount": 67,
+          "meanAbsoluteCountError": 0.1429,
+          "exactCountRatio": 0.8571,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 90,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 12,
+          "truthRepCount": 120,
+          "predictedRepCount": 120,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 251,
+            "meanAbsoluteCountError": 0,
+            "exactCountRatio": 1,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 226,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 227,
+            "meanAbsoluteCountError": 0.96,
+            "exactCountRatio": 0.04,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 227,
+            "meanAbsoluteCountError": 0.96,
+            "exactCountRatio": 0.04,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 478,
+            "meanAbsoluteCountError": 9.08,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 25
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 452,
+            "meanAbsoluteCountError": 8.04,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 25
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 25,
+            "truthRepCount": 251,
+            "predictedRepCount": 432,
+            "meanAbsoluteCountError": 7.32,
+            "exactCountRatio": 0.04,
+            "offByOneRatio": 0.12,
+            "overcountClipCount": 23
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "lateral_raise/body-orientation-oblique45",
+      "exerciseId": "lateral_raise",
+      "bodyOrientationProxy": "oblique45",
+      "capturePosition": null,
+      "initializerCapturePosition": "front",
+      "clipCountsBySplit": {
+        "train": 3,
+        "validation": 0,
+        "test": 0,
+        "unseen_test": 0,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "overhead_triceps_extension/body-orientation-front",
+      "exerciseId": "overhead_triceps_extension",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 31,
+        "validation": 9,
+        "test": 9,
+        "unseen_test": 15,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "torso-distance-30",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 31,
+          "truthRepCount": 311,
+          "predictedRepCount": 250,
+          "meanAbsoluteCountError": 2.2258,
+          "exactCountRatio": 0.5161,
+          "offByOneRatio": 0.6774,
+          "overcountClipCount": 3
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 92,
+          "predictedRepCount": 61,
+          "meanAbsoluteCountError": 3.6667,
+          "exactCountRatio": 0.4444,
+          "offByOneRatio": 0.5556,
+          "overcountClipCount": 1
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 81,
+          "meanAbsoluteCountError": 1,
+          "exactCountRatio": 0.6667,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 152,
+          "predictedRepCount": 129,
+          "meanAbsoluteCountError": 1.6667,
+          "exactCountRatio": 0.6,
+          "offByOneRatio": 0.8,
+          "overcountClipCount": 1
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 31,
+          "truthRepCount": 311,
+          "predictedRepCount": 250,
+          "meanAbsoluteCountError": 2.2258,
+          "exactCountRatio": 0.5161,
+          "offByOneRatio": 0.6774,
+          "overcountClipCount": 3
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 92,
+          "predictedRepCount": 61,
+          "meanAbsoluteCountError": 3.6667,
+          "exactCountRatio": 0.4444,
+          "offByOneRatio": 0.5556,
+          "overcountClipCount": 1
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 81,
+          "meanAbsoluteCountError": 1,
+          "exactCountRatio": 0.6667,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 152,
+          "predictedRepCount": 129,
+          "meanAbsoluteCountError": 1.6667,
+          "exactCountRatio": 0.6,
+          "offByOneRatio": 0.8,
+          "overcountClipCount": 1
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 250,
+            "meanAbsoluteCountError": 2.2258,
+            "exactCountRatio": 0.5161,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 3
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 255,
+            "meanAbsoluteCountError": 2.1935,
+            "exactCountRatio": 0.4839,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 5
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 258,
+            "meanAbsoluteCountError": 2.0968,
+            "exactCountRatio": 0.5161,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 5
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 263,
+            "meanAbsoluteCountError": 2,
+            "exactCountRatio": 0.4839,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 6
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 257,
+            "meanAbsoluteCountError": 2.3226,
+            "exactCountRatio": 0.3548,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 8
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 262,
+            "meanAbsoluteCountError": 2.2903,
+            "exactCountRatio": 0.3548,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 10
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 265,
+            "meanAbsoluteCountError": 2.129,
+            "exactCountRatio": 0.4194,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 9
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 260,
+            "meanAbsoluteCountError": 1.7742,
+            "exactCountRatio": 0.5484,
+            "offByOneRatio": 0.6774,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 268,
+            "meanAbsoluteCountError": 1.5806,
+            "exactCountRatio": 0.5161,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 3
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 273,
+            "meanAbsoluteCountError": 1.6129,
+            "exactCountRatio": 0.4839,
+            "offByOneRatio": 0.7097,
+            "overcountClipCount": 5
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 323,
+            "meanAbsoluteCountError": 0.4516,
+            "exactCountRatio": 0.5484,
+            "offByOneRatio": 1,
+            "overcountClipCount": 13
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 323,
+            "meanAbsoluteCountError": 0.4516,
+            "exactCountRatio": 0.5806,
+            "offByOneRatio": 0.9677,
+            "overcountClipCount": 12
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 31,
+            "truthRepCount": 311,
+            "predictedRepCount": 319,
+            "meanAbsoluteCountError": 0.3226,
+            "exactCountRatio": 0.6774,
+            "offByOneRatio": 1,
+            "overcountClipCount": 9
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "push_up/body-orientation-front",
+      "exerciseId": "push_up",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 0,
+        "validation": 0,
+        "test": 0,
+        "unseen_test": 3,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "push_up/body-orientation-oblique45",
+      "exerciseId": "push_up",
+      "bodyOrientationProxy": "oblique45",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 16,
+        "validation": 6,
+        "test": 9,
+        "unseen_test": 9,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "direction-flip-range-70-fast",
+      "acceptedCandidateId": null,
+      "baseline": {
+        "train": {
+          "clipCount": 16,
+          "truthRepCount": 160,
+          "predictedRepCount": 136,
+          "meanAbsoluteCountError": 1.5,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0.75,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 6,
+          "truthRepCount": 60,
+          "predictedRepCount": 38,
+          "meanAbsoluteCountError": 3.6667,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 70,
+          "meanAbsoluteCountError": 2.2222,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 9,
+          "truthRepCount": 91,
+          "predictedRepCount": 69,
+          "meanAbsoluteCountError": 2.4444,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 16,
+          "truthRepCount": 160,
+          "predictedRepCount": 136,
+          "meanAbsoluteCountError": 1.5,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0.75,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 6,
+          "truthRepCount": 60,
+          "predictedRepCount": 38,
+          "meanAbsoluteCountError": 3.6667,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 70,
+          "meanAbsoluteCountError": 2.2222,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 9,
+          "truthRepCount": 91,
+          "predictedRepCount": 69,
+          "meanAbsoluteCountError": 2.4444,
+          "exactCountRatio": 0,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 136,
+            "meanAbsoluteCountError": 1.5,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.75,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 136,
+            "meanAbsoluteCountError": 1.5,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.75,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 136,
+            "meanAbsoluteCountError": 1.5,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.75,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 136,
+            "meanAbsoluteCountError": 1.5,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.75,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 139,
+            "meanAbsoluteCountError": 1.3125,
+            "exactCountRatio": 0.1875,
+            "offByOneRatio": 0.75,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 139,
+            "meanAbsoluteCountError": 1.3125,
+            "exactCountRatio": 0.1875,
+            "offByOneRatio": 0.75,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 140,
+            "meanAbsoluteCountError": 1.25,
+            "exactCountRatio": 0.1875,
+            "offByOneRatio": 0.8125,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 119,
+            "meanAbsoluteCountError": 2.6875,
+            "exactCountRatio": 0.3125,
+            "offByOneRatio": 0.375,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 129,
+            "meanAbsoluteCountError": 2.0625,
+            "exactCountRatio": 0.375,
+            "offByOneRatio": 0.625,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 16,
+            "truthRepCount": 160,
+            "predictedRepCount": 165,
+            "meanAbsoluteCountError": 0.5625,
+            "exactCountRatio": 0.5625,
+            "offByOneRatio": 0.9375,
+            "overcountClipCount": 5
+          }
+        }
+      ],
+      "candidateProfile": null
+    },
+    {
+      "bucketId": "push_up/body-orientation-side",
+      "exerciseId": "push_up",
+      "bodyOrientationProxy": "side",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 6,
+        "validation": 3,
+        "test": 0,
+        "unseen_test": 0,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "push_up/body-orientation-unknown",
+      "exerciseId": "push_up",
+      "bodyOrientationProxy": "unknown",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 10,
+        "validation": 0,
+        "test": 0,
+        "unseen_test": 3,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "sit_up/body-orientation-front",
+      "exerciseId": "sit_up",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "left",
+      "clipCountsBySplit": {
+        "train": 0,
+        "validation": 0,
+        "test": 0,
+        "unseen_test": 2,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "sit_up/body-orientation-oblique45",
+      "exerciseId": "sit_up",
+      "bodyOrientationProxy": "oblique45",
+      "capturePosition": null,
+      "initializerCapturePosition": "left",
+      "clipCountsBySplit": {
+        "train": 18,
+        "validation": 1,
+        "test": 3,
+        "unseen_test": 12,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "sit_up/body-orientation-side",
+      "exerciseId": "sit_up",
+      "bodyOrientationProxy": "side",
+      "capturePosition": null,
+      "initializerCapturePosition": "left",
+      "clipCountsBySplit": {
+        "train": 12,
+        "validation": 5,
+        "test": 5,
+        "unseen_test": 0,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "direction-flip",
+      "acceptedCandidateId": "direction-flip",
+      "baseline": {
+        "train": {
+          "clipCount": 12,
+          "truthRepCount": 116,
+          "predictedRepCount": 106,
+          "meanAbsoluteCountError": 0.8333,
+          "exactCountRatio": 0.1667,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 5,
+          "truthRepCount": 50,
+          "predictedRepCount": 46,
+          "meanAbsoluteCountError": 0.8,
+          "exactCountRatio": 0.2,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 5,
+          "truthRepCount": 50,
+          "predictedRepCount": 47,
+          "meanAbsoluteCountError": 0.6,
+          "exactCountRatio": 0.4,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 0,
+          "truthRepCount": 0,
+          "predictedRepCount": 0,
+          "meanAbsoluteCountError": null,
+          "exactCountRatio": null,
+          "offByOneRatio": null,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 12,
+          "truthRepCount": 116,
+          "predictedRepCount": 113,
+          "meanAbsoluteCountError": 0.4167,
+          "exactCountRatio": 0.5833,
+          "offByOneRatio": 1,
+          "overcountClipCount": 1
+        },
+        "validation": {
+          "clipCount": 5,
+          "truthRepCount": 50,
+          "predictedRepCount": 48,
+          "meanAbsoluteCountError": 0.4,
+          "exactCountRatio": 0.6,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 5,
+          "truthRepCount": 50,
+          "predictedRepCount": 48,
+          "meanAbsoluteCountError": 0.4,
+          "exactCountRatio": 0.6,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 0,
+          "truthRepCount": 0,
+          "predictedRepCount": 0,
+          "meanAbsoluteCountError": null,
+          "exactCountRatio": null,
+          "offByOneRatio": null,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 106,
+            "meanAbsoluteCountError": 0.8333,
+            "exactCountRatio": 0.1667,
+            "offByOneRatio": 1,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 113,
+            "meanAbsoluteCountError": 0.4167,
+            "exactCountRatio": 0.5833,
+            "offByOneRatio": 1,
+            "overcountClipCount": 1
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 114,
+            "meanAbsoluteCountError": 0.5,
+            "exactCountRatio": 0.5,
+            "offByOneRatio": 1,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 114,
+            "meanAbsoluteCountError": 0.5,
+            "exactCountRatio": 0.5,
+            "offByOneRatio": 1,
+            "overcountClipCount": 2
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 175,
+            "meanAbsoluteCountError": 8.0833,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 10
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 172,
+            "meanAbsoluteCountError": 7.8333,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 10
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 12,
+            "truthRepCount": 116,
+            "predictedRepCount": 172,
+            "meanAbsoluteCountError": 7.8333,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0,
+            "overcountClipCount": 10
+          }
+        }
+      ],
+      "candidateProfile": {
+        "identity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "increasing",
+        "primarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            11,
+            23,
+            25
+          ]
+        },
+        "secondarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            24,
+            26
+          ]
+        },
+        "startAmplitude": 5,
+        "minPrimaryAmplitude": 20,
+        "minSecondaryAmplitude": 20,
+        "returnHysteresis": 5,
+        "readyTolerance": 6,
+        "maxGapMs": 700,
+        "minRepDurationMs": 450,
+        "maxRepDurationMs": 8000,
+        "contentHash": "6041325956879838388",
+        "researchOnly": true,
+        "evidenceDataset": "mm-fit",
+        "promotionPassed": false
+      }
+    },
+    {
+      "bucketId": "sit_up/body-orientation-unknown",
+      "exerciseId": "sit_up",
+      "bodyOrientationProxy": "unknown",
+      "capturePosition": null,
+      "initializerCapturePosition": "left",
+      "clipCountsBySplit": {
+        "train": 2,
+        "validation": 3,
+        "test": 1,
+        "unseen_test": 1,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    },
+    {
+      "bucketId": "standing_dumbbell_row/body-orientation-front",
+      "exerciseId": "standing_dumbbell_row",
+      "bodyOrientationProxy": "front",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 23,
+        "validation": 9,
+        "test": 7,
+        "unseen_test": 15,
+        "unknown": 0
+      },
+      "status": "trained",
+      "selectedCandidateId": "range-70-fast",
+      "acceptedCandidateId": "range-70-fast",
+      "baseline": {
+        "train": {
+          "clipCount": 23,
+          "truthRepCount": 232,
+          "predictedRepCount": 194,
+          "meanAbsoluteCountError": 1.6522,
+          "exactCountRatio": 0.6522,
+          "offByOneRatio": 0.6957,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 52,
+          "meanAbsoluteCountError": 4.2222,
+          "exactCountRatio": 0.4444,
+          "offByOneRatio": 0.5556,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 7,
+          "truthRepCount": 70,
+          "predictedRepCount": 64,
+          "meanAbsoluteCountError": 0.8571,
+          "exactCountRatio": 0.5714,
+          "offByOneRatio": 0.7143,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 152,
+          "predictedRepCount": 109,
+          "meanAbsoluteCountError": 2.8667,
+          "exactCountRatio": 0.6667,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        }
+      },
+      "selected": {
+        "train": {
+          "clipCount": 23,
+          "truthRepCount": 232,
+          "predictedRepCount": 223,
+          "meanAbsoluteCountError": 0.3913,
+          "exactCountRatio": 0.8261,
+          "offByOneRatio": 0.8696,
+          "overcountClipCount": 0
+        },
+        "validation": {
+          "clipCount": 9,
+          "truthRepCount": 90,
+          "predictedRepCount": 76,
+          "meanAbsoluteCountError": 1.5556,
+          "exactCountRatio": 0.5556,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        },
+        "test": {
+          "clipCount": 7,
+          "truthRepCount": 70,
+          "predictedRepCount": 70,
+          "meanAbsoluteCountError": 0,
+          "exactCountRatio": 1,
+          "offByOneRatio": 1,
+          "overcountClipCount": 0
+        },
+        "unseen_test": {
+          "clipCount": 15,
+          "truthRepCount": 152,
+          "predictedRepCount": 122,
+          "meanAbsoluteCountError": 2,
+          "exactCountRatio": 0.6667,
+          "offByOneRatio": 0.6667,
+          "overcountClipCount": 0
+        }
+      },
+      "trainCandidates": [
+        {
+          "candidateId": "baseline",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 194,
+            "meanAbsoluteCountError": 1.6522,
+            "exactCountRatio": 0.6522,
+            "offByOneRatio": 0.6957,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 196,
+            "meanAbsoluteCountError": 1.5652,
+            "exactCountRatio": 0.6522,
+            "offByOneRatio": 0.6957,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 198,
+            "meanAbsoluteCountError": 1.4783,
+            "exactCountRatio": 0.6522,
+            "offByOneRatio": 0.6957,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-55",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 207,
+            "meanAbsoluteCountError": 1.087,
+            "exactCountRatio": 0.6522,
+            "offByOneRatio": 0.7391,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "fast",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 216,
+            "meanAbsoluteCountError": 0.6957,
+            "exactCountRatio": 0.7391,
+            "offByOneRatio": 0.7826,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-85-fast",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 219,
+            "meanAbsoluteCountError": 0.5652,
+            "exactCountRatio": 0.7391,
+            "offByOneRatio": 0.8261,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "range-70-fast",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 223,
+            "meanAbsoluteCountError": 0.3913,
+            "exactCountRatio": 0.8261,
+            "offByOneRatio": 0.8696,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 179,
+            "meanAbsoluteCountError": 2.3043,
+            "exactCountRatio": 0,
+            "offByOneRatio": 0.6522,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 192,
+            "meanAbsoluteCountError": 1.7391,
+            "exactCountRatio": 0.0435,
+            "offByOneRatio": 0.6957,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "direction-flip-range-70-fast",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 197,
+            "meanAbsoluteCountError": 1.5217,
+            "exactCountRatio": 0.087,
+            "offByOneRatio": 0.7391,
+            "overcountClipCount": 0
+          }
+        },
+        {
+          "candidateId": "torso-distance-10",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 232,
+            "meanAbsoluteCountError": 1.0435,
+            "exactCountRatio": 0.3913,
+            "offByOneRatio": 0.913,
+            "overcountClipCount": 12
+          }
+        },
+        {
+          "candidateId": "torso-distance-18",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 229,
+            "meanAbsoluteCountError": 1,
+            "exactCountRatio": 0.4783,
+            "offByOneRatio": 0.913,
+            "overcountClipCount": 10
+          }
+        },
+        {
+          "candidateId": "torso-distance-30",
+          "metrics": {
+            "clipCount": 23,
+            "truthRepCount": 232,
+            "predictedRepCount": 224,
+            "meanAbsoluteCountError": 0.7826,
+            "exactCountRatio": 0.6957,
+            "offByOneRatio": 0.913,
+            "overcountClipCount": 5
+          }
+        }
+      ],
+      "candidateProfile": {
+        "identity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "maturity": "provisional",
+        "schema": "blazepose33",
+        "coordinateUnit": "image-angle-deg",
+        "stateMachineId": "ready-effort-peak-return/v1",
+        "requiredCapabilities": [
+          "canonical-landmarks",
+          "subject-lock"
+        ],
+        "direction": "decreasing",
+        "primarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            11,
+            13,
+            15
+          ]
+        },
+        "secondarySignal": {
+          "kind": "joint-angle",
+          "landmarks": [
+            12,
+            14,
+            16
+          ]
+        },
+        "startAmplitude": 3.5,
+        "minPrimaryAmplitude": 14,
+        "minSecondaryAmplitude": 14,
+        "returnHysteresis": 3.5,
+        "readyTolerance": 4.199999999999999,
+        "maxGapMs": 700,
+        "minRepDurationMs": 300,
+        "maxRepDurationMs": 8000,
+        "contentHash": "14751015761521384729",
+        "researchOnly": true,
+        "evidenceDataset": "mm-fit",
+        "promotionPassed": false
+      }
+    },
+    {
+      "bucketId": "standing_dumbbell_row/body-orientation-unknown",
+      "exerciseId": "standing_dumbbell_row",
+      "bodyOrientationProxy": "unknown",
+      "capturePosition": null,
+      "initializerCapturePosition": "frontLeft45",
+      "clipCountsBySplit": {
+        "train": 8,
+        "validation": 0,
+        "test": 2,
+        "unseen_test": 0,
+        "unknown": 0
+      },
+      "status": "skipped",
+      "reason": "Insufficient isolated evidence (need train>=8, validation>=3)."
+    }
+  ]
+}

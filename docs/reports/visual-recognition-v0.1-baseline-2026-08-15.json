@@ -1,0 +1,265 @@
+{
+  "schemaVersion": "maxpower.visual-recognition-baseline-report/v0.1",
+  "baselineVersion": "0.1.0",
+  "generatedOn": "2026-08-15",
+  "catalogId": "maxpower/visual-recognition-baseline/v0.1",
+  "evaluationId": "visual-recognition-v0.1-known-video-baseline-2026-08-15",
+  "evaluationClass": "known_participant_known_video_regression",
+  "generalizationClaimAllowed": false,
+  "decision": "not_ready_for_reliable_user_rep_counting",
+  "source": {
+    "fullEvaluationSha256": "902d6f008044c240ed9eba98f05b3ec739cf0e59c0c013f88b74220ffa51f035",
+    "reportDigest": "ac097ca382feb4f0b973a42ea0e9e14b19b54bee2ffcc3b74b3384b45afb4979",
+    "protocolSha256": "0729fc177d47e7ef41ffd413246aaf062b49c5aa1a62939a87a1bcc015557afd",
+    "humanSupervisionAssetId": "personal-human-rep-ranges-v2",
+    "poseFeatureAssetId": "personal-native-rtmpose-halpe26-observations",
+    "rawVideoAssetId": "personal-raw-capture-archive"
+  },
+  "dataQuality": {
+    "assetContractChecks": "passed",
+    "duplicateExactContextKeyCount": 0,
+    "evaluatedRecordCount": 53,
+    "evaluatedUniqueSourceCaptureCount": 49,
+    "expectedRepCount": 455,
+    "governanceExcludedRecordCount": 1,
+    "humanRangeCount": 455,
+    "labelRecordCount": 54,
+    "poseSidecarJoinCoverage": 1,
+    "resolvedRecordCount": 54,
+    "reviewedNegativeWindowCount": 237
+  },
+  "headline": {
+    "candidatePrecision": 0.5,
+    "candidateRecall": 0.03296703296703297,
+    "exactSetAndAllBoundariesAlignedRate": 0,
+    "exactSetAndAllBoundariesAlignedRecordCount": 0,
+    "exactSetRate": 0,
+    "exactSetRecordCount": 0,
+    "falsePositiveCount": 15,
+    "matchedEndMaeMs": 814.8,
+    "matchedMeanIntervalIoU": 0.33757276248239293,
+    "matchedRepCount": 15,
+    "matchedStartMaeMs": 721.8,
+    "missedCount": 440,
+    "predictedRepCount": 30,
+    "recordCount": 53,
+    "reviewedNegativeWindowFalseTriggerCount": 3,
+    "strictBoundaryAlignedRate": 0.002197802197802198,
+    "strictBoundaryAlignedRepCount": 1,
+    "truthRepCount": 455,
+    "recognizedRecordCount": 6,
+    "recognizedRecordRate": 0.11320754716981132,
+    "actionCount": 12,
+    "actionsWithPredictions": 1
+  },
+  "byAction": [
+    {
+      "action": "single_arm_cable_lateral_raise",
+      "records": 8,
+      "truthReps": 68,
+      "predictedReps": 30,
+      "matchedReps": 15,
+      "precision": 0.5,
+      "recall": 0.22058823529411764,
+      "exactSetRate": 0
+    },
+    {
+      "action": "barbell_bench_press",
+      "records": 6,
+      "truthReps": 46,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "barbell_row",
+      "records": 6,
+      "truthReps": 58,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "lat_pulldown",
+      "records": 4,
+      "truthReps": 28,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "lateral_raise",
+      "records": 7,
+      "truthReps": 65,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "machine_chest_press",
+      "records": 4,
+      "truthReps": 29,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "pull_up",
+      "records": 1,
+      "truthReps": 5,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "push_up",
+      "records": 1,
+      "truthReps": 14,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "rear_delt_fly",
+      "records": 4,
+      "truthReps": 50,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "seated_row",
+      "records": 3,
+      "truthReps": 24,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "seated_shoulder_press",
+      "records": 6,
+      "truthReps": 44,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    },
+    {
+      "action": "straight_arm_pulldown",
+      "records": 3,
+      "truthReps": 24,
+      "predictedReps": 0,
+      "matchedReps": 0,
+      "precision": null,
+      "recall": 0,
+      "exactSetRate": 0
+    }
+  ],
+  "equipmentObservation": {
+    "accuracyStatus": "not_evaluable_no_human_equipment_track_truth",
+    "availableRecordCount": 33,
+    "canonicalObservationFrameCount": 30520,
+    "decisionAuthority": "ExecutionContract",
+    "decodedFrameCount": 30835,
+    "measuredFrameCount": 30504,
+    "poseFusedFrameCount": 0,
+    "poseInputFrameCount": 10113,
+    "poseInputRateHz": 9.742624391146187,
+    "predictedFrameCount": 16,
+    "requestedRecordCount": 33,
+    "runtime": "maxpower_motion_sdk::EquipmentProviderRegistry",
+    "trackerOutputFrameCount": 30520,
+    "trackerOutputRateHz": 29.402244281398357,
+    "visualProcessedFrameCount": 30793,
+    "visualProcessingRateHz": 29.665246007768665
+  },
+  "motionLifecycle": {
+    "dimensionStates": {
+      "BilateralCoordination/CannotJudge": 53,
+      "ObservationConfidence/CannotJudge": 40,
+      "ObservationConfidence/ObservedAcceptable": 13,
+      "PhaseControl/CannotJudge": 53,
+      "RangeOfMotion/CannotJudge": 47,
+      "RangeOfMotion/ObservedAcceptable": 4,
+      "RangeOfMotion/ObservedDeviation": 2,
+      "StandardVariantCompatibility/CannotJudge": 53,
+      "SupportStability/CannotJudge": 53,
+      "TaskCompletion/CannotJudge": 41,
+      "TaskCompletion/ObservedDeviation": 12,
+      "TrajectoryControl/CannotJudge": 53
+    },
+    "equipmentChannelFrames": 1289,
+    "fusionStates": {
+      "Agreement": 1085,
+      "CannotJudge": 10164,
+      "EquipmentOnly": 3,
+      "PoseOnly": 4627
+    },
+    "localStates": {
+      "Degraded": 4561,
+      "Frozen": 6558,
+      "Learning": 791,
+      "Provisional": 475,
+      "Uninitialized": 3494
+    },
+    "packetCount": 15879,
+    "poseChannelFrames": 5895,
+    "referenceKinds": {
+      "NoReference": 2454,
+      "SelfGeometry": 146,
+      "SetPrefix": 28
+    },
+    "traceCompleteReportCount": 53
+  },
+  "turnaroundEvaluation": {
+    "accuracyStatus": "not_evaluable_no_human_turnaround_truth",
+    "boundaryAuthority": "action_observation_plan_task_primary_and_required_relations",
+    "byRigidBarAction": {
+      "barbell_bench_press": {
+        "equipmentFusedTurnaroundCount": 0,
+        "posePrimaryTurnaroundCount": 0,
+        "predictedRepCount": 0
+      },
+      "barbell_row": {
+        "equipmentFusedTurnaroundCount": 0,
+        "posePrimaryTurnaroundCount": 0,
+        "predictedRepCount": 0
+      },
+      "seated_shoulder_press": {
+        "equipmentFusedTurnaroundCount": 0,
+        "posePrimaryTurnaroundCount": 0,
+        "predictedRepCount": 0
+      }
+    },
+    "equipmentFusedTurnaroundCount": 0,
+    "humanTurnaroundTruthCount": 0,
+    "posePrimaryTurnaroundCount": 30,
+    "predictedRepCount": 30,
+    "rigidBarPredictedRepCount": 0
+  },
+  "qualityAccuracyStatus": "not_evaluable_no_human_quality_truth",
+  "interpretation": {
+    "primaryFailure": "The plan-driven runtime usually cannot establish the TaskPrimary and required relation evidence needed to admit a Rep.",
+    "structuralCoverageMeaning": "Action assets, providers and trace roots install and execute, but structural execution is not accuracy evidence.",
+    "equipmentMeaning": "Provider output rate is measurable; track geometry, association, grip and turnaround accuracy are not evaluable without accepted human truth."
+  }
+}

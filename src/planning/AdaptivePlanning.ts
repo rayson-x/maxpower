@@ -16,7 +16,7 @@ export interface AdaptivePlanCandidate {
 
 export interface AdaptivePlanValidation {
   status: "valid" | "invalid";
-  issues: readonly { code: string; field: string; message: string }[];
+  issues: readonly { code: string; field: string; message: string; severity: "blocking" | "advisory" }[];
   impact: "low" | "high";
   resolution: "confirmation_required" | "auto_apply_once_eligible" | "auto_apply_eligible";
 }
@@ -59,12 +59,14 @@ export function validateAdaptivePlanCandidate(input: {
   currentNutrition?: { revision: number; value: NutritionStrategyData };
   assessment?: GoalPathAssessment;
   counterfactual?: GoalPathCandidateCounterfactual;
+  /** 确定性恢复上下文：有则对候选自动计算恢复 advisory（不经模型自觉）。 */
+  recoveryContext?: import("./recoveryWindows").RecoveryContext;
   today: string;
   safetyBlocked: boolean;
   allowedPreferenceRefs?: readonly string[];
   allowedEnergyRange?: { min: number; max: number };
 }): AdaptivePlanValidation {
-  const issues: { code: string; field: string; message: string }[] = [];
+  const issues: { code: string; field: string; message: string; severity: "blocking" | "advisory" }[] = [];
   const candidate = input.candidate;
   try {
     assertFixedPlanSafety(candidate.planRevision, candidate.nutritionStrategy);
@@ -77,7 +79,14 @@ export function validateAdaptivePlanCandidate(input: {
     for (const ref of change.preferenceRefs) if (!allowedPreferenceRefs.has(ref)) issues.push(issue("unverified_preference_ref", `behaviorChanges.${change.id}.preferenceRefs`, "候选只能引用正式 Plan outcome、Profile 或可管理 Working memory"));
   }
   if (input.safetyBlocked) issues.push(issue("safety_hold_active", "candidate", "安全处置期间不能提交普通计划"));
-  if (candidate.planRevision.goalContractRef.id !== input.goal.value.id || candidate.planRevision.goalContractRef.revision !== input.goal.revision) issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", "候选必须绑定当前目标版本"));
+  // 结构护栏：缺 pins 的候选会在确认后的策略选择里才炸（TypeError），必须拦在提交时。
+  const pins = candidate.planRevision.knowledgePins;
+  if (!pins?.knowledgePack?.contentHash || !pins.exerciseCatalog?.contentHash) {
+    issues.push(issue("knowledge_pins_missing", "planRevision.knowledgePins", "候选必须原样携带固定输入里的 knowledgePins（plan.read_fixed_input 返回的 knowledgePins 对象整体复制到 planRevision.knowledgePins）"));
+  }
+  if (!candidate.planRevision.goalContractRef) {
+    issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：goalContractRef = { id: "${input.goal.value.id}", revision: ${input.goal.revision} }（原样复制，不要自行发明或省略 revision）`));
+  } else if (candidate.planRevision.goalContractRef.id !== input.goal.value.id || candidate.planRevision.goalContractRef.revision !== input.goal.revision) issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：goalContractRef = { id: "${input.goal.value.id}", revision: ${input.goal.revision} }（原样复制，不要自行发明或省略 revision）`));
   if (candidate.planRevision.sessions.some((session) => session.scheduledFor < input.today)) issues.push(issue("candidate_not_future_only", "planRevision.sessions", "候选不能修改过去"));
   if (!candidate.planRevision.sessions.length) issues.push(issue("executable_session_missing", "planRevision.sessions", "当前阶段至少需要一个可执行训练安排"));
   const unsafeText = /(?:\b(?:starv(?:e|ing)|fast(?:ing)?|purge|vomit|laxative|dehydrat(?:e|ion))\b|禁食|绝食|不吃东西|催吐|泻药|脱水|断水)/iu;
@@ -120,22 +129,32 @@ export function validateAdaptivePlanCandidate(input: {
   else {
     if (contract.minimumObservationDays < 7) issues.push(issue("observation_window_too_short", "observationContract.minimumObservationDays", "观察窗口不能短于 7 天"));
     for (const [field, values] of Object.entries({ requiredSignals: contract.requiredSignals, successConditions: contract.successConditions, progressionConditions: contract.progressionConditions, holdConditions: contract.holdConditions, fallbackConditions: contract.fallbackConditions, stopConditions: contract.stopConditions })) {
+      // 结构护栏：模型偶发把条件字段给成字符串/对象，先给可读问题码，不让 TypeError 漏给用户。
+      if (!Array.isArray(values)) {
+        issues.push(issue("observation_contract_condition_not_array", `observationContract.${field}`, "观察合同的每个条件字段都必须是字符串数组"));
+        continue;
+      }
       if (!values.length) issues.push(issue(`observation_${field}_missing`, `observationContract.${field}`, "观察、推进、保持、回退与停止条件都必须明确"));
     }
   }
   const nutrition = candidate.nutritionStrategy;
   if (!nutrition) issues.push(issue("nutrition_strategy_missing", "nutritionStrategy", "正式阶段候选必须同时定义协调后的营养策略；未知目标保持 unknown，不能省略正式领域对象"));
   if (nutrition?.calorieRange) {
-    const min = nutrition.calorieRange.min.value;
-    const max = nutrition.calorieRange.max.value;
-    if (min < 1_200 || max > 5_000 || min > max) issues.push(issue("energy_guardrail_invalid", "nutritionStrategy.calorieRange", "能量范围超出通用安全边界或顺序错误"));
-    if (input.allowedEnergyRange && (min < input.allowedEnergyRange.min || max > input.allowedEnergyRange.max)) issues.push(issue("goal_energy_path_outside_guardrail", "nutritionStrategy.calorieRange", "能量目标超出当前 Goal 与个人资料允许的安全路径"));
-    if (input.goal.value.primaryGoal === "fat_loss_preserve_lean_mass" && min === max) issues.push(issue("energy_range_required", "nutritionStrategy.calorieRange", "减脂能量目标必须保留不确定性范围"));
+    const min = nutrition.calorieRange.min?.value;
+    const max = nutrition.calorieRange.max?.value;
+    // 结构护栏：模型偶发把 calorieRange 给成 {min: 2500, max: 2800} 纯数字。
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      issues.push(issue("energy_guardrail_invalid", "nutritionStrategy.calorieRange", "calorieRange 形状：{ min: { value: number, unit: \"kcal\" }, max: { value: number, unit: \"kcal\" } }，value 是纯数字"));
+    } else {
+      if (min < 1_200 || max > 5_000 || min > max) issues.push(issue("energy_guardrail_invalid", "nutritionStrategy.calorieRange", "能量范围超出通用安全边界或顺序错误"));
+      if (input.allowedEnergyRange && (min < input.allowedEnergyRange.min || max > input.allowedEnergyRange.max)) issues.push(issue("goal_energy_path_outside_guardrail", "nutritionStrategy.calorieRange", "能量目标超出当前 Goal 与个人资料允许的安全路径"));
+      if (input.goal.value.primaryGoal === "fat_loss_preserve_lean_mass" && min === max) issues.push(issue("energy_range_required", "nutritionStrategy.calorieRange", "减脂能量目标必须保留不确定性范围"));
+    }
   }
   for (const [nutrientId, range] of Object.entries(nutrition?.nutrientTargets ?? {})) {
     if (!range) continue;
     const values = [range.minimum, range.maximum, range.target].filter((value): value is number => value !== undefined);
-    if (!values.length || values.some((value) => !Number.isFinite(value) || value < 0) || (range.minimum !== undefined && range.maximum !== undefined && range.minimum > range.maximum)) issues.push(issue("nutrient_target_invalid", `nutritionStrategy.nutrientTargets.${nutrientId}`, "营养素目标必须是有效且有序的明确范围"));
+    if (!values.length || values.some((value) => !Number.isFinite(value) || value < 0) || (range.minimum !== undefined && range.maximum !== undefined && range.minimum > range.maximum)) issues.push(issue("nutrient_target_invalid", `nutritionStrategy.nutrientTargets.${nutrientId}`, "营养素目标形状：{ minimum?: number, maximum?: number, target?: number }，纯数字（单位由营养素约定），至少一个有限非负值且 minimum ≤ maximum；不要用 value/unit 嵌套对象"));
     if (nutrientId === "sodium" && range.unit !== "mg" || nutrientId === "potassium" && range.unit !== "mg" || nutrientId === "fiber" && range.unit !== "g") issues.push(issue("nutrient_target_unit_invalid", `nutritionStrategy.nutrientTargets.${nutrientId}.unit`, "钠/钾使用 mg，膳食纤维使用 g"));
     const ceiling = nutrientId === "sodium" ? 5_000 : nutrientId === "potassium" ? 7_000 : nutrientId === "fiber" ? 100 : nutrientId === "protein" ? 400 : undefined;
     if (ceiling !== undefined && values.some((value) => value > ceiling)) issues.push(issue("nutrient_target_outside_guardrail", `nutritionStrategy.nutrientTargets.${nutrientId}`, "营养素目标超出固定健康边界"));
@@ -172,6 +191,31 @@ export function validateAdaptivePlanCandidate(input: {
       for (const code of input.counterfactual.reasonCodes) issues.push(issue(code, "candidate", "候选没有在同一目标、事实和护栏下实质改善当前路径"));
     }
   }
+  // 恢复 advisory：候选把残差偏高或仍在恢复窗内的肌群排为主目标时产出软
+  // 提示。确定、可审计，且永不阻断提交或授权。
+  if (input.recoveryContext?.status === "ok") {
+    const contextByMuscle = new Map(input.recoveryContext.muscles.map((entry) => [entry.muscleId, entry]));
+    const flagged = new Set<string>();
+    for (const session of candidate.planRevision.sessions) {
+      for (const slot of session.stimulusSlots ?? []) {
+        if (slot.intent.priority === "optional") continue;
+        for (const muscle of slot.intent.directMuscles ?? slot.intent.muscleGroups) {
+          const context = contextByMuscle.get(muscle);
+          if (!context || flagged.has(`${session.id}:${muscle}`)) continue;
+          const gapHours = context.lastTrainedDate
+            ? (Date.parse(`${session.scheduledFor.slice(0, 10)}T12:00:00Z`) - Date.parse(`${context.lastTrainedDate}T12:00:00Z`)) / 3_600_000
+            : Number.POSITIVE_INFINITY;
+          if (context.overlapHint === "elevated") {
+            flagged.add(`${session.id}:${muscle}`);
+            issues.push(advisory("recovery_overlap_elevated", `planRevision.sessions.${session.id}`, `${muscle} 目前残差负荷偏高（组均值政策，非个体测量）；如需连续训练可确认继续`));
+          } else if (gapHours < context.windowHours[0]) {
+            flagged.add(`${session.id}:${muscle}`);
+            issues.push(advisory("recovery_window_short_for_dose", `planRevision.sessions.${session.id}`, `${muscle} 距上次训练约 ${Math.round(gapHours)} 小时，低于 ${context.windowHours[0]}–${context.windowHours[1]} 小时的组均值窗；如需连续训练可确认继续`));
+          }
+        }
+      }
+    }
+  }
   const autoReversible = Boolean(input.currentPlan && input.currentNutrition);
   if (input.mandate.planChangeAuthorization === "deny") {
     issues.push(issue("plan_change_authorization_denied", "mandate", "用户当前授权禁止提出或应用计划调整"));
@@ -184,7 +228,7 @@ export function validateAdaptivePlanCandidate(input: {
     : autoReversible && impact === "low" && input.mandate.planChangeAuthorization === "allow_once"
       ? "auto_apply_once_eligible"
       : "confirmation_required";
-  return { status: issues.length ? "invalid" : "valid", issues, impact, resolution };
+  return { status: issues.some((entry) => entry.severity === "blocking") ? "invalid" : "valid", issues, impact, resolution };
 }
 
 /** Deterministic provisional energy envelope shared by proposal and revalidation. */
@@ -200,7 +244,10 @@ export function deriveGoalEnergyGuardrail(profile: UserProfileData, goal: GoalCo
   return { min: Math.round(maintenanceRange.min * minimumRatio), max: Math.round(maintenanceRange.max * maximumRatio) };
 }
 
-function issue(code: string, field: string, message: string) { return { code, field, message }; }
+function issue(code: string, field: string, message: string) { return { code, field, message, severity: "blocking" as const }; }
+/** 恢复类提示永为 advisory：出现在候选摘要与确认卡片，但永不翻 invalid、
+ * 不阻断 auto_apply。用户的选择权优先于训练规划规则。 */
+function advisory(code: string, field: string, message: string) { return { code, field, message, severity: "advisory" as const }; }
 function midpointEnergy(range: NonNullable<NutritionStrategyData["calorieRange"]>) { return (range.min.value + range.max.value) / 2; }
 function executablePlanShape(plan: PlanRevisionData) {
   return { sessions: plan.sessions, observationContract: plan.observationContract, lifecycle: plan.lifecycle, effectiveFrom: plan.effectiveFrom };

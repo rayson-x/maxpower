@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { BenchPhaseReviewStore } from "./benchPhaseReview";
@@ -11,7 +10,6 @@ import { TechniqueReviewStore } from "./techniqueReview";
 
 async function main(): Promise<void> {
   const projectRoot = process.cwd();
-  const v7GovernedAssets = await resolveV7GovernedAssets(projectRoot);
   const repository = await RecognitionReviewRepository.open(defaultRecognitionReviewOptions(projectRoot));
   const trajectoryRoot = join(projectRoot, "data/workflows/action-trajectory-database/halpe26-v1");
   const techniqueReviews = await TechniqueReviewStore.open({
@@ -52,14 +50,6 @@ async function main(): Promise<void> {
   const benchPhasePagePath = resolve(projectRoot, "tools/recognition-review/public/bench-phase.html");
   const benchRandomTestPagePath = resolve(projectRoot, "tools/recognition-review/public/bench-random-test.html");
   const qualityReviewPagePath = resolve(projectRoot, "tools/recognition-review/public/quality-review.html");
-  const v7AlignmentReviewPagePath = resolve(
-    projectRoot,
-    "tools/recognition-review/public/v7-alignment-review.html",
-  );
-  const v7AlignmentReviewAppPath = resolve(
-    projectRoot,
-    "tools/recognition-review/public/v7AlignmentReviewApp.js",
-  );
   const qualityReviewReleasePath = resolve(
     projectRoot,
     process.env.MAXPOWER_QUALITY_REVIEW_RELEASE
@@ -98,16 +88,6 @@ async function main(): Promise<void> {
     qualityReviewReleasePath,
     qualityReviewVideoRoot: process.env.MAXPOWER_QUALITY_REVIEW_VIDEO_ROOT
       ?? join(projectRoot, "public/archives/confirmed-captures"),
-    v7AlignmentReview: {
-      pagePath: v7AlignmentReviewPagePath,
-      appPath: v7AlignmentReviewAppPath,
-      reportPath: v7GovernedAssets.report.path,
-      reportSha256: v7GovernedAssets.report.sha256,
-      labelPath: v7GovernedAssets.labels.path,
-      labelSha256: v7GovernedAssets.labels.sha256,
-      poseRoot: v7GovernedAssets.pose.path,
-      videoRoot: join(projectRoot, "public/archives/confirmed-captures"),
-    },
     clientRealtimeAgentPagePath,
     clientRealtimeAgentPackPath,
     clientRealtimeAgentPredictionPath,
@@ -119,72 +99,11 @@ async function main(): Promise<void> {
     const dumbbell = dumbbellReviews.index() as { stats: { itemCount: number; submittedItems: number } };
     const poseKeypoint = poseKeypointReviews.index() as { stats: { itemCount: number; submittedItems: number } };
     const benchPhase = benchPhaseReviews.index() as { stats: { repCount: number; submittedCaptures: number; captureCount: number } };
-    process.stdout.write(`[recognition-review] http://127.0.0.1:${port} · v9 wrist-constrained equipment /v9-wrist-constrained-equipment-review.html · personal ${stats.personalAnnotatedVideos} · MM-Fit ${stats.mmfitClips} · barbell ${equipment.stats.submittedItems}/${equipment.stats.itemCount} · dumbbell ${dumbbell.stats.submittedItems}/${dumbbell.stats.itemCount} · pose truth ${poseKeypoint.stats.submittedItems}/${poseKeypoint.stats.itemCount} · bench phase ${benchPhase.stats.submittedCaptures}/${benchPhase.stats.captureCount} (${benchPhase.stats.repCount} reps) · evidence read-only / labels append-only\n`);
+    process.stdout.write(`[recognition-review] http://127.0.0.1:${port} · personal ${stats.personalAnnotatedVideos} · MM-Fit ${stats.mmfitClips} · barbell ${equipment.stats.submittedItems}/${equipment.stats.itemCount} · dumbbell ${dumbbell.stats.submittedItems}/${dumbbell.stats.itemCount} · pose truth ${poseKeypoint.stats.submittedItems}/${poseKeypoint.stats.itemCount} · bench phase ${benchPhase.stats.submittedCaptures}/${benchPhase.stats.captureCount} (${benchPhase.stats.repCount} reps) · evidence read-only / labels append-only\n`);
   });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.on(signal, () => server.close(() => process.exit(0)));
   }
-}
-
-interface GovernedAssetLocation {
-  readonly path: string;
-  readonly sha256?: string;
-}
-
-async function resolveV7GovernedAssets(projectRoot: string): Promise<{
-  report: { path: string; sha256: string };
-  labels: { path: string; sha256: string };
-  pose: { path: string };
-}> {
-  const catalogPath = resolve(
-    projectRoot,
-    process.env.MAXPOWER_TRAINING_DATA_GOVERNANCE_CATALOG
-      ?? "../maxpower-training-data-governance/catalog/assets.json",
-  );
-  const catalog = JSON.parse(await readFile(catalogPath, "utf8")) as {
-    assets?: Array<{
-      id?: unknown;
-      admission?: unknown;
-      allowedTasks?: unknown;
-      location?: GovernedAssetLocation & { root?: unknown };
-    }>;
-  };
-  const requireAsset = (
-    id: string,
-    admission: string,
-    requiredTask: string,
-  ): GovernedAssetLocation => {
-    const asset = catalog.assets?.find((candidate) => candidate.id === id);
-    if (!asset || asset.admission !== admission || asset.location?.root !== "maxpower_source") {
-      throw new Error(`governed v7 asset ${id} is not admitted`);
-    }
-    if (!Array.isArray(asset.allowedTasks) || !asset.allowedTasks.includes(requiredTask)) {
-      throw new Error(`governed v7 asset ${id} does not allow ${requiredTask}`);
-    }
-    if (typeof asset.location.path !== "string" || !asset.location.path.trim()) {
-      throw new Error(`governed v7 asset ${id} path is invalid`);
-    }
-    return asset.location;
-  };
-  const report = requireAsset(
-    "current-rust-v9-wrist-constrained-equipment-alignment-report",
-    "evaluation_only",
-    "regression_diagnosis",
-  );
-  const labels = requireAsset("personal-human-rep-ranges-v2", "label_allowed", "rep_counting");
-  const pose = requireAsset(
-    "personal-native-rtmpose-halpe26-observations",
-    "feature_only",
-    "runtime_parity",
-  );
-  if (typeof report.sha256 !== "string" || typeof labels.sha256 !== "string") {
-    throw new Error("governed v7 file asset hash is invalid");
-  }
-  return {
-    report: { path: resolve(projectRoot, report.path), sha256: report.sha256 },
-    labels: { path: resolve(projectRoot, labels.path), sha256: labels.sha256 },
-    pose: { path: resolve(projectRoot, pose.path) },
-  };
 }
 
 void main().catch((error) => {

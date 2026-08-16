@@ -316,3 +316,55 @@ test("a hard safety signal blocks every authorization mode from applying a norma
   assert.notEqual(proposed.validation.resolution, "auto_apply_eligible", "授权永远不能跨越硬安全处置");
   assert.equal(proposed.autoApplied, undefined);
 });
+
+test("recovery advisories are computed deterministically (zero tool calls) and never block resolution", async () => {
+  const app = await setup();
+  // 昨天 6 组高努力卧推：胸的残差负荷超过提示阈值。
+  const pins = app.getInstalledKnowledgeVersionPins();
+  await app.prepareFreestyleWorkoutSession({
+    userId: "u1",
+    workoutId: "heavy-chest",
+    idempotencyKey: "heavy-chest-prepare",
+    session: { id: "heavy-chest-session", title: "自由训练", scheduledFor: "2026-08-15", knowledgePins: pins, tasks: [{ id: "heavy-chest-task", exerciseVariantId: "bench_press.barbell.decline.close.bilateral.full_rom", sets: Array.from({ length: 6 }, (_, index) => ({ id: `heavy-set-${index}`, targetReps: { min: 6, max: 10 }, targetRir: 1 })) }] },
+  });
+  await app.activateWorkoutSession({ userId: "u1", workoutId: "heavy-chest", mode: "record_only", idempotencyKey: "heavy-chest-activate" });
+  for (let index = 0; index < 6; index += 1) {
+    await app.confirmCurrentSet({ userId: "u1", workoutId: "heavy-chest", confirmAsPlanned: true, idempotencyKey: `heavy-chest-set-${index}` });
+  }
+  await app.completeWorkoutSession({ userId: "u1", workoutId: "heavy-chest", idempotencyKey: "heavy-chest-complete" });
+
+  const withSlots = candidate(app);
+  withSlots.planRevision = {
+    ...withSlots.planRevision,
+    sessions: withSlots.planRevision.sessions.map((session) => ({
+      ...session,
+      tasks: session.tasks.map((task) => ({ ...task, stimulusSlotId: "chest-slot" })),
+      stimulusSlots: [{
+        id: "chest-slot",
+        intent: { movementPattern: "horizontal_push" as const, muscleGroups: ["chest"], directMuscles: ["chest"], stability: "supported" as const, prescriptionMode: "weighted_reps" as const, fatigueIntent: "medium" as const, priority: "primary" as const },
+        prescription: { setCount: 1, repRange: { min: 8, max: 12 }, targetRir: 3, rest: { value: 120, unit: "seconds" as const } },
+        exerciseSlot: { status: "resolved" as const, exerciseVariantId: "dumbbell_bench_press.flat.standard", satisfiedContracts: [], deviatedContracts: [], requiredEquipment: ["dumbbell", "bench"], performanceComparability: "cold_start" as const, coldStart: true, sessionTimeImpactMinutes: 0, fatigueImpact: "medium" as const, cameraCapability: "manual_only" as const, reasonCodes: [] },
+        lockedFields: [],
+      }],
+    })),
+  };
+  const proposed = await app.proposeAdaptivePlanCandidate({ userId: "u1", candidate: withSlots, attempt: 1, idempotencyKey: "advisory-propose" });
+  assert.equal(proposed.validation.status, "valid", "恢复提示永不为 invalid");
+  const advisories = proposed.validation.issues.filter((issue) => issue.severity === "advisory");
+  assert.ok(advisories.some((issue) => issue.code === "recovery_overlap_elevated"), JSON.stringify(proposed.validation.issues));
+  assert.ok(proposed.artifact?.adaptivePlanProposal, "advisory 不阻断候选成为可确认提案");
+});
+
+test("a candidate missing knowledgePins or goalContractRef is blocked with instructive issues (never a TypeError at confirm)", async () => {
+  const app = await setup();
+  const domain = await app.readDomainProjection({ userId: "u1" });
+  const broken = candidate(app) as unknown as { planRevision: Record<string, unknown> };
+  delete broken.planRevision.knowledgePins;
+  delete broken.planRevision.goalContractRef;
+  const validation = validateAdaptivePlanCandidate({ candidate: broken as unknown as AdaptivePlanCandidate, goal: domain.goalContract!, profile: domain.profile!.value, mandate: domain.mandate!.value, today: "2026-08-15", safetyBlocked: false });
+  assert.equal(validation.status, "invalid");
+  const codes = validation.issues.map((issue) => issue.code);
+  assert.ok(codes.includes("knowledge_pins_missing"));
+  assert.ok(codes.includes("goal_ref_mismatch"));
+  assert.match(validation.issues.find((issue) => issue.code === "knowledge_pins_missing")?.message ?? "", /knowledgePins/);
+});

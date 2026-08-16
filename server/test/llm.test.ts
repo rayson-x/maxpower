@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { OpenAiChatCompletionRequest } from "../src/modules/llm/model.js";
 import { ApiError } from "../src/kernel/api-error.js";
 import type { Clock } from "../src/kernel/clock.js";
 import type { IdFactory } from "../src/kernel/ids.js";
@@ -501,7 +502,6 @@ test("rejects provider-specific request fields instead of forwarding policy over
   });
 
   for (const [idempotencyKey, field] of [
-    ["no-provider-store", { store: true }],
     ["no-provider-metadata", { metadata: { user: "private" } }],
     ["no-provider-audio", { modalities: ["audio"] }],
     ["no-provider-tier", { service_tier: "priority" }],

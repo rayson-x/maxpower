@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视觉动作泛化验收卡</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="lesson">
+  <div class="lesson-kicker">Reference · 可打印速查</div>
+  <h1>它认识我的视频，还是认识这个动作？</h1>
+  <p class="subtitle">判断 Agent 是否把同语料成功冒充为动作泛化。</p>
+
+  <h2><span class="sec-num">先选能力级别</span>它到底声称什么？</h2>
+  <table>
+    <tr><th>级别</th><th>最低独立测试</th><th>不能顺带声称</th></tr>
+    <tr><td>L1 已见素材</td><td>同批视频回放</td><td>泛化</td></tr>
+    <tr><td>L2 个人内</td><td>本人新 session</td><td>陌生用户</td></tr>
+    <tr><td>L3 人群内</td><td>未见用户、固定动作×机位</td><td>跨机位/跨器械</td></tr>
+    <tr><td>L4 产品域</td><td>新人×新场地×支持机位分桶</td><td>域外环境</td></tr>
+    <tr><td>L5 质量评估</td><td>阶段真值＋轨迹真值＋参考范围</td><td>发力、负荷、伤病诊断</td></tr>
+  </table>
+
+  <h2><span class="sec-num">七张收据</span>少一张，就降低一级</h2>
+  <ol class="audit-list">
+    <li>一句精确、可证伪的能力声明</li>
+    <li>动作变式、器械、机位、设备、用户范围</li>
+    <li>subject / capture / session 均独立的测试清单</li>
+    <li>与预测分离保存的人工真值</li>
+    <li>precision、recall、整组全对率、阶段误差</li>
+    <li>按用户、机位、遮挡、镜面拆开的失败表</li>
+    <li>与客户端一致的模型、版本、因果运行路径</li>
+  </ol>
+
+  <h2><span class="sec-num">红旗</span>听到这些话立刻停</h2>
+  <table>
+    <tr><th>Agent 的话</th><th>你该问什么</th></tr>
+    <tr><td>“准确率 95%”</td><td>分母是什么？precision 还是 recall？测试用户见过吗？</td></tr>
+    <tr><td>“用了盲测”</td><td>模型、阈值和检测器是否都在揭晓真值前冻结？</td></tr>
+    <tr><td>“支持卧推”</td><td>是预选上下文后的计次，还是自动动作分类？</td></tr>
+    <tr><td>“杠铃轨迹改善结果”</td><td>客户端真的运行检测器了吗，还是只在离线脚本里？</td></tr>
+    <tr><td>“能给动作建议”</td><td>哪些建议有人工质量标签和未见用户验证？</td></tr>
+    <tr><td>“再调一下阈值就好”</td><td>用哪条训练视频调？哪条冻结视频只验不调？</td></tr>
+  </table>
+
+  <h2><span class="sec-num">可信汇报格式</span>让 Agent 只填空</h2>
+  <div class="figure">本轮声明：____________________
+支持范围：动作___ 变式___ 器械___ 机位___
+训练/调参见过：用户___ 视频___ session___
+冻结测试包含：新用户___ 新视频___ 新场地___
+人工真值：count___ start___ turnaround___ end___
+结果：precision___ recall___ exact-set___ phase___
+最差分桶：____________________
+仍不能声称：__________________
+下一次单变量实验：____________</div>
+
+  <div class="callout warn">
+    <span class="label">最后一道门</span>
+    <b>测试集一旦被用来调阈值，它就不再是测试集。</b>换一批新的、此前无人看结果做决定的素材。
+  </div>
+
+  <div class="footer-note">对应课程：<a href="../lessons/0002-from-my-videos-to-bench-press.html">第 2 课 · 它认识我的视频，还是认识卧推？</a></div>
+</main>
+</body>
+</html>

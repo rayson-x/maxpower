@@ -1,0 +1,1263 @@
+{
+  "schemaVersion": "maxpower-new-video-one-pass-recognition/v1",
+  "generatedAt": "2026-08-12T06:13:43.444Z",
+  "purpose": "Unlabeled lower-body capture feasibility and candidate-rep audit",
+  "protocol": {
+    "chronologicalPassesPerVideo": 1,
+    "truthAvailableAtInference": false,
+    "expectedRepCountAvailableAtInference": false,
+    "exerciseIdentitySource": "visual_provisional_user-intended-action-routing",
+    "equipmentDetectorAvailable": false,
+    "accuracyClaimAllowed": false,
+    "productionPromotion": false
+  },
+  "summary": {
+    "sourceCount": 11,
+    "exactViewProfileAvailableCount": 8,
+    "exactViewProfileUnavailableCount": 3,
+    "confirmedRepCandidateCount": 46,
+    "needsReviewRepCandidateCount": 5,
+    "accuracy": null
+  },
+  "rows": [
+    {
+      "captureId": "0509c30c2d7567e326bff68995fd419d",
+      "video": "/Users/Ruihan/Documents/power/new-video/0509c30c2d7567e326bff68995fd419d.mp4",
+      "provisionalExerciseId": "barbell_back_squat",
+      "capturePosition": "left",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-barbell_back_squat/left/bilateral/initializer/v1",
+      "confirmedRepCount": 6,
+      "needsReviewRepCount": 1,
+      "rejectedRepCount": 10,
+      "segments": [
+        {
+          "startMs": 2500,
+          "peakMs": 2700,
+          "endMs": 2900,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 3500,
+          "peakMs": 3600,
+          "endMs": 3800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 4600,
+          "peakMs": 4800,
+          "endMs": 5000,
+          "disposition": "needs_review",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 6500,
+          "peakMs": 7400,
+          "endMs": 7400,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 7400,
+          "peakMs": 9400,
+          "endMs": 9800,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 10800,
+          "peakMs": 11900,
+          "endMs": 11900,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 11900,
+          "peakMs": 13100,
+          "endMs": 14000,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 16700,
+          "peakMs": 18300,
+          "endMs": 18400,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 18400,
+          "peakMs": 19700,
+          "endMs": 20300,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 20900,
+          "peakMs": 21200,
+          "endMs": 21400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 22000,
+          "peakMs": 22200,
+          "endMs": 22400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 24600,
+          "peakMs": 24900,
+          "endMs": 25700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 25800,
+          "peakMs": 26100,
+          "endMs": 26400,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 26500,
+          "peakMs": 26600,
+          "endMs": 26800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 28700,
+          "peakMs": 29500,
+          "endMs": 29700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 30400,
+          "peakMs": 30700,
+          "endMs": 30900,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 30900,
+          "peakMs": 31000,
+          "endMs": 31000,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 339,
+        "poseFrameRatio": 0.9646017699115044,
+        "lowerBodyObservedRatio": 0.8820058997050148,
+        "detectorObservedFrameRatio": 0.743363,
+        "meanPoseScore": 0.595917
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 339,
+        "rustRuntimeMs": 140.423,
+        "rustFramesPerSecond": 2414.134
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": ""
+    },
+    {
+      "captureId": "1f9b98c31456df5d28545a97defa6c9d",
+      "video": "/Users/Ruihan/Documents/power/new-video/1f9b98c31456df5d28545a97defa6c9d.mp4",
+      "provisionalExerciseId": "alternating_lunge",
+      "capturePosition": "frontLeft45",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+      "confirmedRepCount": 10,
+      "needsReviewRepCount": 1,
+      "rejectedRepCount": 6,
+      "segments": [
+        {
+          "startMs": 7200,
+          "peakMs": 7400,
+          "endMs": 7600,
+          "disposition": "needs_review",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 7800,
+          "peakMs": 8200,
+          "endMs": 8400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 8600,
+          "peakMs": 9100,
+          "endMs": 9400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 11900,
+          "peakMs": 12900,
+          "endMs": 13400,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 13400,
+          "peakMs": 13600,
+          "endMs": 13900,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 14400,
+          "peakMs": 15600,
+          "endMs": 16100,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 16800,
+          "peakMs": 17800,
+          "endMs": 18300,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 19100,
+          "peakMs": 20100,
+          "endMs": 20600,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 21400,
+          "peakMs": 22700,
+          "endMs": 23200,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 23600,
+          "peakMs": 23800,
+          "endMs": 24100,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 25300,
+          "peakMs": 25500,
+          "endMs": 25500,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 25500,
+          "peakMs": 27100,
+          "endMs": 27800,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 28600,
+          "peakMs": 29800,
+          "endMs": 30500,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 31200,
+          "peakMs": 32100,
+          "endMs": 32900,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 33500,
+          "peakMs": 34500,
+          "endMs": 35200,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 35800,
+          "peakMs": 36800,
+          "endMs": 37600,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 38500,
+          "peakMs": 38700,
+          "endMs": 38900,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 427,
+        "poseFrameRatio": 0.8805620608899297,
+        "lowerBodyObservedRatio": 0.8477751756440282,
+        "detectorObservedFrameRatio": 0.81733,
+        "meanPoseScore": 0.744195
+      },
+      "equipment": {
+        "policyEnabled": false,
+        "requestedKinds": [],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 427,
+        "rustRuntimeMs": 52.245,
+        "rustFramesPerSecond": 8172.972
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": "visual review suggests a returning/reverse lunge rather than continuous walking"
+    },
+    {
+      "captureId": "25ae9076fe5b5db30b0b12dab11dc157",
+      "video": "/Users/Ruihan/Documents/power/new-video/25ae9076fe5b5db30b0b12dab11dc157.mp4",
+      "provisionalExerciseId": "walking_lunge",
+      "capturePosition": "frontLeft45",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-walking_lunge/frontLeft45/bilateral/initializer/v1",
+      "confirmedRepCount": 5,
+      "needsReviewRepCount": 2,
+      "rejectedRepCount": 17,
+      "segments": [
+        {
+          "startMs": 5800,
+          "peakMs": 5900,
+          "endMs": 6100,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 8400,
+          "peakMs": 8900,
+          "endMs": 8900,
+          "disposition": "rejected",
+          "evidenceReason": "long_continuity_loss"
+        },
+        {
+          "startMs": 8900,
+          "peakMs": 9900,
+          "endMs": 10100,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 11300,
+          "peakMs": 11400,
+          "endMs": 11500,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 11900,
+          "peakMs": 12700,
+          "endMs": 12900,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 14300,
+          "peakMs": 14600,
+          "endMs": 15200,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 15300,
+          "peakMs": 15600,
+          "endMs": 15800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 16900,
+          "peakMs": 17000,
+          "endMs": 17200,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 17400,
+          "peakMs": 18300,
+          "endMs": 18500,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 19700,
+          "peakMs": 20300,
+          "endMs": 21100,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 21100,
+          "peakMs": 21200,
+          "endMs": 21400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 22500,
+          "peakMs": 22600,
+          "endMs": 22800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 22900,
+          "peakMs": 23800,
+          "endMs": 24000,
+          "disposition": "needs_review",
+          "evidenceReason": "short_continuity_recovery"
+        },
+        {
+          "startMs": 25200,
+          "peakMs": 25600,
+          "endMs": 25800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 26200,
+          "peakMs": 26500,
+          "endMs": 26700,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 28200,
+          "peakMs": 29300,
+          "endMs": 29500,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 30600,
+          "peakMs": 31000,
+          "endMs": 31500,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 31500,
+          "peakMs": 32100,
+          "endMs": 32400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 33600,
+          "peakMs": 33700,
+          "endMs": 33800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 34200,
+          "peakMs": 35100,
+          "endMs": 35300,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 36500,
+          "peakMs": 36800,
+          "endMs": 37000,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 37000,
+          "peakMs": 37800,
+          "endMs": 38000,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 38800,
+          "peakMs": 38900,
+          "endMs": 39100,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 39800,
+          "peakMs": 40000,
+          "endMs": 40200,
+          "disposition": "needs_review",
+          "evidenceReason": null
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 430,
+        "poseFrameRatio": 0.9162790697674419,
+        "lowerBodyObservedRatio": 0.8697674418604651,
+        "detectorObservedFrameRatio": 0.876744,
+        "meanPoseScore": 0.825156
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "dumbbell"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 430,
+        "rustRuntimeMs": 26.07,
+        "rustFramesPerSecond": 16494.213
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": ""
+    },
+    {
+      "captureId": "480139c4b702b862a726717cb9e31ec0",
+      "video": "/Users/Ruihan/Documents/power/new-video/480139c4b702b862a726717cb9e31ec0.mp4",
+      "provisionalExerciseId": "romanian_deadlift",
+      "capturePosition": "front",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "unavailable_for_exact_view",
+      "profileIdentity": null,
+      "confirmedRepCount": null,
+      "needsReviewRepCount": null,
+      "rejectedRepCount": null,
+      "segments": [],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 470,
+        "poseFrameRatio": 0.9382978723404255,
+        "lowerBodyObservedRatio": 0.8340425531914893,
+        "detectorObservedFrameRatio": 0.865957,
+        "meanPoseScore": 0.786749
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "dumbbell"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": "No exact simulated initializer exists for the selected action and camera view.",
+      "notes": ""
+    },
+    {
+      "captureId": "4b49a7b8dd38ab0d6b19880269d2d850",
+      "video": "/Users/Ruihan/Documents/power/new-video/4b49a7b8dd38ab0d6b19880269d2d850.mp4",
+      "provisionalExerciseId": "barbell_back_squat",
+      "capturePosition": "front",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "unavailable_for_exact_view",
+      "profileIdentity": null,
+      "confirmedRepCount": null,
+      "needsReviewRepCount": null,
+      "rejectedRepCount": null,
+      "segments": [],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 529,
+        "poseFrameRatio": 0.998109640831758,
+        "lowerBodyObservedRatio": 0.9810964083175804,
+        "detectorObservedFrameRatio": 0.956522,
+        "meanPoseScore": 0.847624
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": "No exact simulated initializer exists for the selected action and camera view.",
+      "notes": ""
+    },
+    {
+      "captureId": "59991a88ae659b5dc001afff38ed994c",
+      "video": "/Users/Ruihan/Documents/power/new-video/59991a88ae659b5dc001afff38ed994c.mp4",
+      "provisionalExerciseId": "conventional_deadlift",
+      "capturePosition": "frontLeft45",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-conventional_deadlift/frontLeft45/bilateral/initializer/v1",
+      "confirmedRepCount": 6,
+      "needsReviewRepCount": 0,
+      "rejectedRepCount": 3,
+      "segments": [
+        {
+          "startMs": 4500,
+          "peakMs": 4700,
+          "endMs": 5500,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 14000,
+          "peakMs": 14100,
+          "endMs": 14400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 14900,
+          "peakMs": 16200,
+          "endMs": 17400,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 19000,
+          "peakMs": 19900,
+          "endMs": 21000,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 22200,
+          "peakMs": 23600,
+          "endMs": 24700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 26100,
+          "peakMs": 27200,
+          "endMs": 28000,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 31200,
+          "peakMs": 32200,
+          "endMs": 34400,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 37400,
+          "peakMs": 38800,
+          "endMs": 40500,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 40500,
+          "peakMs": 43100,
+          "endMs": 43500,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 450,
+        "poseFrameRatio": 0.9955555555555555,
+        "lowerBodyObservedRatio": 0.8977777777777778,
+        "detectorObservedFrameRatio": 0.904444,
+        "meanPoseScore": 0.698395
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 450,
+        "rustRuntimeMs": 21.58,
+        "rustFramesPerSecond": 20852.964
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": ""
+    },
+    {
+      "captureId": "8b9601335dc6aa3a876a1c081b2087b7",
+      "video": "/Users/Ruihan/Documents/power/new-video/8b9601335dc6aa3a876a1c081b2087b7.mp4",
+      "provisionalExerciseId": "barbell_back_squat",
+      "capturePosition": "front",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "unavailable_for_exact_view",
+      "profileIdentity": null,
+      "confirmedRepCount": null,
+      "needsReviewRepCount": null,
+      "rejectedRepCount": null,
+      "segments": [],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 408,
+        "poseFrameRatio": 0.9828431372549019,
+        "lowerBodyObservedRatio": 0.8848039215686274,
+        "detectorObservedFrameRatio": 0.960784,
+        "meanPoseScore": 0.823785
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": "No exact simulated initializer exists for the selected action and camera view.",
+      "notes": ""
+    },
+    {
+      "captureId": "8cff47f1e9b1568682e74852b0777c5c",
+      "video": "/Users/Ruihan/Documents/power/new-video/8cff47f1e9b1568682e74852b0777c5c.mp4",
+      "provisionalExerciseId": "conventional_deadlift",
+      "capturePosition": "frontLeft45",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-conventional_deadlift/frontLeft45/bilateral/initializer/v1",
+      "confirmedRepCount": 5,
+      "needsReviewRepCount": 0,
+      "rejectedRepCount": 3,
+      "segments": [
+        {
+          "startMs": 4000,
+          "peakMs": 4200,
+          "endMs": 4500,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 4600,
+          "peakMs": 5000,
+          "endMs": 5500,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 11700,
+          "peakMs": 13400,
+          "endMs": 14500,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 15700,
+          "peakMs": 17100,
+          "endMs": 17900,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 19200,
+          "peakMs": 20200,
+          "endMs": 21200,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 22400,
+          "peakMs": 23500,
+          "endMs": 24400,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 25700,
+          "peakMs": 26800,
+          "endMs": 27700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 28900,
+          "peakMs": 29800,
+          "endMs": 32200,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 345,
+        "poseFrameRatio": 0.9623188405797102,
+        "lowerBodyObservedRatio": 0.9130434782608695,
+        "detectorObservedFrameRatio": 0.927536,
+        "meanPoseScore": 0.750178
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 345,
+        "rustRuntimeMs": 18.34,
+        "rustFramesPerSecond": 18811.555
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": "visual assignment remains provisional; distinguish from RDL during labeling"
+    },
+    {
+      "captureId": "a3cc29e02ad86562334847b8848f4e47",
+      "video": "/Users/Ruihan/Documents/power/new-video/a3cc29e02ad86562334847b8848f4e47.mp4",
+      "provisionalExerciseId": "conventional_deadlift",
+      "capturePosition": "frontLeft45",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-conventional_deadlift/frontLeft45/bilateral/initializer/v1",
+      "confirmedRepCount": 3,
+      "needsReviewRepCount": 0,
+      "rejectedRepCount": 1,
+      "segments": [
+        {
+          "startMs": 11700,
+          "peakMs": 13900,
+          "endMs": 14700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 16600,
+          "peakMs": 18300,
+          "endMs": 19200,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 25400,
+          "peakMs": 27400,
+          "endMs": 28100,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 29100,
+          "peakMs": 31900,
+          "endMs": 33100,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 361,
+        "poseFrameRatio": 0.9390581717451524,
+        "lowerBodyObservedRatio": 0.8642659279778393,
+        "detectorObservedFrameRatio": 0.861496,
+        "meanPoseScore": 0.716968
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 361,
+        "rustRuntimeMs": 21.299,
+        "rustFramesPerSecond": 16949.351
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": ""
+    },
+    {
+      "captureId": "af36763820957d47739389447e4f7c17",
+      "video": "/Users/Ruihan/Documents/power/new-video/af36763820957d47739389447e4f7c17.mp4",
+      "provisionalExerciseId": "romanian_deadlift",
+      "capturePosition": "frontLeft45",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-romanian_deadlift/frontLeft45/bilateral/initializer/v1",
+      "confirmedRepCount": 6,
+      "needsReviewRepCount": 0,
+      "rejectedRepCount": 7,
+      "segments": [
+        {
+          "startMs": 7500,
+          "peakMs": 7600,
+          "endMs": 7700,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 7800,
+          "peakMs": 8000,
+          "endMs": 8200,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 8600,
+          "peakMs": 8700,
+          "endMs": 8900,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 9400,
+          "peakMs": 9600,
+          "endMs": 10000,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 12100,
+          "peakMs": 12400,
+          "endMs": 12800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 12800,
+          "peakMs": 18200,
+          "endMs": 19300,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 20200,
+          "peakMs": 21800,
+          "endMs": 22600,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 23500,
+          "peakMs": 24900,
+          "endMs": 25900,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 26700,
+          "peakMs": 28100,
+          "endMs": 29000,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 29800,
+          "peakMs": 31300,
+          "endMs": 32300,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 33000,
+          "peakMs": 34800,
+          "endMs": 35700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 37800,
+          "peakMs": 37900,
+          "endMs": 38100,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 38500,
+          "peakMs": 38800,
+          "endMs": 38800,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 403,
+        "poseFrameRatio": 1,
+        "lowerBodyObservedRatio": 0.8808933002481389,
+        "detectorObservedFrameRatio": 0.913151,
+        "meanPoseScore": 0.726759
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 403,
+        "rustRuntimeMs": 25.126,
+        "rustFramesPerSecond": 16039.11
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": "visual assignment remains provisional; distinguish from conventional deadlift during labeling"
+    },
+    {
+      "captureId": "f1158228c2c0eec59af857df1f94594d",
+      "video": "/Users/Ruihan/Documents/power/new-video/f1158228c2c0eec59af857df1f94594d.mp4",
+      "provisionalExerciseId": "barbell_back_squat",
+      "capturePosition": "left",
+      "assignmentSource": "visual_provisional",
+      "groundTruthStatus": "unlabeled",
+      "profileStatus": "simulated_initializer_only",
+      "profileIdentity": "simulated-barbell_back_squat/left/bilateral/initializer/v1",
+      "confirmedRepCount": 5,
+      "needsReviewRepCount": 1,
+      "rejectedRepCount": 14,
+      "segments": [
+        {
+          "startMs": 4400,
+          "peakMs": 4500,
+          "endMs": 4700,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 4700,
+          "peakMs": 5300,
+          "endMs": 5600,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 12600,
+          "peakMs": 13000,
+          "endMs": 13200,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 14500,
+          "peakMs": 14700,
+          "endMs": 15000,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 15400,
+          "peakMs": 15500,
+          "endMs": 15800,
+          "disposition": "needs_review",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 16100,
+          "peakMs": 16200,
+          "endMs": 16400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 16700,
+          "peakMs": 17000,
+          "endMs": 17300,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 18400,
+          "peakMs": 19900,
+          "endMs": 19900,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 19900,
+          "peakMs": 22200,
+          "endMs": 22400,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 23000,
+          "peakMs": 23800,
+          "endMs": 23800,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 23800,
+          "peakMs": 25600,
+          "endMs": 25800,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 26200,
+          "peakMs": 26900,
+          "endMs": 26900,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 26900,
+          "peakMs": 28500,
+          "endMs": 28800,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 30100,
+          "peakMs": 31800,
+          "endMs": 31800,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 31800,
+          "peakMs": 33300,
+          "endMs": 33700,
+          "disposition": "confirmed",
+          "evidenceReason": null
+        },
+        {
+          "startMs": 34800,
+          "peakMs": 35500,
+          "endMs": 35500,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        },
+        {
+          "startMs": 38300,
+          "peakMs": 38600,
+          "endMs": 38800,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 41300,
+          "peakMs": 41700,
+          "endMs": 42300,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 43100,
+          "peakMs": 43200,
+          "endMs": 43400,
+          "disposition": "rejected",
+          "evidenceReason": "incomplete_cycle"
+        },
+        {
+          "startMs": 44100,
+          "peakMs": 44500,
+          "endMs": 44500,
+          "disposition": "rejected",
+          "evidenceReason": "required_joint_loss"
+        }
+      ],
+      "pose": {
+        "pipeline": "yolox-nano-humanart+rtmpose-m-halpe26",
+        "sampleFps": 10,
+        "sampledFrameCount": 476,
+        "poseFrameRatio": 0.7478991596638656,
+        "lowerBodyObservedRatio": 0.6827731092436975,
+        "detectorObservedFrameRatio": 0.241597,
+        "meanPoseScore": 0.579336
+      },
+      "equipment": {
+        "policyEnabled": true,
+        "requestedKinds": [
+          "barbell_shaft",
+          "weight_plate"
+        ],
+        "detectorAvailableInThisRun": false,
+        "observationCount": 0,
+        "role": "auxiliary"
+      },
+      "runtime": {
+        "chronologicalFrameCount": 476,
+        "rustRuntimeMs": 20.994,
+        "rustFramesPerSecond": 22673.234
+      },
+      "onePass": true,
+      "usesTruthAtInference": false,
+      "reason": null,
+      "notes": ""
+    }
+  ],
+  "limitations": [
+    "The videos have no rep annotations, so candidate counts cannot be called correct or incorrect.",
+    "The available lower-body profile is a broad simulated initializer, not a profile learned from labeled lower-body videos.",
+    "This run contains person detection plus pose only; equipment policy is reported but no trained equipment detector produced observations."
+  ]
+}

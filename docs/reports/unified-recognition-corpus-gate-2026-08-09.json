@@ -1,0 +1,2010 @@
+{
+  "schemaVersion": "maxpower-unified-recognition-corpus-gate/v1",
+  "generatedAt": "2026-08-10T22:35:12.659Z",
+  "objective": "Every available MM-Fit set and every approved MaxPower capture must count exactly; captures with rep boundaries must also phase-match every rep without false positives.",
+  "passed": false,
+  "supervisionContract": {
+    "mmfit": {
+      "poseSource": "MM-Fit COCO-18 2D, exact joints mapped to BlazePose33 slots",
+      "annotationGranularity": "set_count",
+      "proves": [
+        "whole-set exact count"
+      ],
+      "cannotProve": [
+        "per-rep start/peak/end alignment",
+        "mobile MediaPipe Heavy parity"
+      ]
+    },
+    "approvedCaptures": {
+      "poseSource": "MaxPower MediaPipe Pose Landmarker Heavy",
+      "annotationGranularity": "per_rep_start_peak_end_with_notes",
+      "proves": [
+        "whole-set exact count",
+        "per-rep phase alignment"
+      ]
+    }
+  },
+  "aggregate": {
+    "complete": true,
+    "totalSampleCount": 627,
+    "exactSampleCount": 435,
+    "exactSampleRatio": 0.6938,
+    "truthRepCount": 6249,
+    "predictedRepCount": 5648,
+    "repCountRatio": 0.9038,
+    "approvedPhaseExactCaptureCount": 7,
+    "approvedPhaseCaptureCount": 11
+  },
+  "sources": {
+    "mmfit": {
+      "sampleCount": 616,
+      "exactSampleCount": 428,
+      "truthRepCount": 6160,
+      "predictedRepCount": 5563,
+      "bySplit": {
+        "train": {
+          "clipCount": 301,
+          "truthRepCount": 2999,
+          "predictedRepCount": 2725,
+          "meanAbsoluteCountError": 0.9701,
+          "exactCountRatio": 0.7076,
+          "offByOneRatio": 0.8605
+        },
+        "validation": {
+          "clipCount": 86,
+          "truthRepCount": 858,
+          "predictedRepCount": 780,
+          "meanAbsoluteCountError": 0.9535,
+          "exactCountRatio": 0.7209,
+          "offByOneRatio": 0.8256
+        },
+        "test": {
+          "clipCount": 90,
+          "truthRepCount": 904,
+          "predictedRepCount": 873,
+          "meanAbsoluteCountError": 0.3667,
+          "exactCountRatio": 0.8222,
+          "offByOneRatio": 0.9333
+        },
+        "unseen_test": {
+          "clipCount": 139,
+          "truthRepCount": 1399,
+          "predictedRepCount": 1185,
+          "meanAbsoluteCountError": 1.5683,
+          "exactCountRatio": 0.5683,
+          "offByOneRatio": 0.7842
+        }
+      }
+    },
+    "approvedCaptures": {
+      "sampleCount": 11,
+      "exactSampleCount": 7,
+      "truthRepCount": 89,
+      "predictedRepCount": 85,
+      "matchedRepCount": 82,
+      "phaseExactSampleCount": 7
+    }
+  },
+  "failures": {
+    "mmfit": [
+      {
+        "sourceSequenceId": "w00:1",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w00:4",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 11,
+        "predictedCount": 10,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w00:5",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w00:6",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w00:9",
+        "split": "unseen_test",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 9,
+        "predictedCount": 1,
+        "delta": -8,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w00:19",
+        "split": "unseen_test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w00:29",
+        "split": "unseen_test",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 11,
+        "predictedCount": 10,
+        "delta": -1,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 3,
+        "delta": -7,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:7",
+        "split": "train",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 11,
+        "predictedCount": 12,
+        "delta": 1,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w01:9",
+        "split": "train",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 11,
+        "predictedCount": 9,
+        "delta": -2,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w01:13",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:14",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:20",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:21",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:22",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w01:23",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w02:3",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w02:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w02:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w02:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w02:17",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w02:21",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:1",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:9",
+        "split": "train",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w03:15",
+        "split": "train",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w03:16",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 12,
+        "predictedCount": 11,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:17",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:20",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w03:21",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w04:1",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w04:2",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w04:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w04:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w04:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:4",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:5",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:6",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:16",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:17",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:18",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 9,
+        "predictedCount": 8,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:19",
+        "split": "unseen_test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:29",
+        "split": "unseen_test",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 11,
+        "predictedCount": 4,
+        "delta": -7,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w05:30",
+        "split": "unseen_test",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:15",
+        "split": "train",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w06:18",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w06:19",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:20",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:21",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w06:28",
+        "split": "train",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w07:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w07:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w07:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w07:13",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w07:14",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w07:15",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w08:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w08:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w08:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w08:16",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 12,
+        "delta": 2,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w08:17",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w08:18",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w09:4",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w09:5",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w09:6",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w09:16",
+        "split": "test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w09:19",
+        "split": "test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w10:4",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w10:5",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w10:6",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w10:20",
+        "split": "test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w10:21",
+        "split": "test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w11:4",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w11:5",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w11:6",
+        "split": "test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w11:7",
+        "split": "test",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w11:17",
+        "split": "test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w11:18",
+        "split": "test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w12:1",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:2",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 3,
+        "delta": -7,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:3",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:4",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 3,
+        "delta": -7,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:5",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:6",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:7",
+        "split": "unseen_test",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w12:9",
+        "split": "unseen_test",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w12:16",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:17",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w12:18",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:1",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:2",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:3",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:4",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:5",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:6",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:8",
+        "split": "unseen_test",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w13:9",
+        "split": "unseen_test",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 3,
+        "delta": -7,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w13:11",
+        "split": "unseen_test",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:12",
+        "split": "unseen_test",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:13",
+        "split": "unseen_test",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w13:14",
+        "split": "unseen_test",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 2,
+        "delta": -8,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w13:15",
+        "split": "unseen_test",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 2,
+        "delta": -8,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w13:16",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:17",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:18",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 11,
+        "predictedCount": 10,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:21",
+        "split": "unseen_test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:28",
+        "split": "unseen_test",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 11,
+        "predictedCount": 10,
+        "delta": -1,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w13:29",
+        "split": "unseen_test",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 11,
+        "predictedCount": 8,
+        "delta": -3,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w14:4",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 8,
+        "delta": -2,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w14:5",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w14:6",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w14:9",
+        "split": "validation",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w14:12",
+        "split": "validation",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w14:16",
+        "split": "validation",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w14:17",
+        "split": "validation",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w15:2",
+        "split": "validation",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w15:3",
+        "split": "validation",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w15:4",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w15:5",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w15:6",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w15:13",
+        "split": "validation",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w15:14",
+        "split": "validation",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w15:15",
+        "split": "validation",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w15:17",
+        "split": "validation",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w15:18",
+        "split": "validation",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w16:1",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:2",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:3",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:7",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:11",
+        "split": "train",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:13",
+        "split": "train",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w16:14",
+        "split": "train",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 12,
+        "predictedCount": 10,
+        "delta": -2,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w16:17",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w16:19",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 6,
+        "predictedCount": 5,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w16:20",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w16:23",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:1",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 11,
+        "predictedCount": 0,
+        "delta": -11,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:2",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 7,
+        "predictedCount": 0,
+        "delta": -7,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:3",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 11,
+        "predictedCount": 0,
+        "delta": -11,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:4",
+        "split": "train",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 2,
+        "delta": -8,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 7,
+        "delta": -3,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:7",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 9,
+        "predictedCount": 1,
+        "delta": -8,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:8",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 12,
+        "predictedCount": 0,
+        "delta": -12,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:11",
+        "split": "train",
+        "exerciseId": "dumbbell_shoulder_press",
+        "expectedCount": 11,
+        "predictedCount": 9,
+        "delta": -2,
+        "profileIdentity": "external-research-dumbbell_shoulder_press/body-orientation-front/bilateral/mmfit/torso-distance-18/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w17:17",
+        "split": "train",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w17:19",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 12,
+        "delta": 2,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:22",
+        "split": "train",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 11,
+        "delta": 1,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w17:32",
+        "split": "train",
+        "exerciseId": "jumping_jack",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-jumping_jack/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:4",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:5",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:6",
+        "split": "train",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:10",
+        "split": "train",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 2,
+        "delta": -8,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:11",
+        "split": "train",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:12",
+        "split": "train",
+        "exerciseId": "alternating_lunge",
+        "expectedCount": 10,
+        "predictedCount": 4,
+        "delta": -6,
+        "profileIdentity": "simulated-alternating_lunge/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:16",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w18:17",
+        "split": "train",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "external-research-sit_up/body-orientation-side/bilateral/mmfit/direction-flip/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w19:4",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w19:6",
+        "split": "validation",
+        "exerciseId": "push_up",
+        "expectedCount": 7,
+        "predictedCount": 8,
+        "delta": 1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w19:16",
+        "split": "validation",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w19:19",
+        "split": "validation",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w19:20",
+        "split": "validation",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 11,
+        "predictedCount": 0,
+        "delta": -11,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w19:21",
+        "split": "validation",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 11,
+        "predictedCount": 4,
+        "delta": -7,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w19:26",
+        "split": "validation",
+        "exerciseId": "lateral_raise",
+        "expectedCount": 9,
+        "predictedCount": 8,
+        "delta": -1,
+        "profileIdentity": "simulated-lateral_raise/front/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:1",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 5,
+        "delta": -5,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:2",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:3",
+        "split": "unseen_test",
+        "exerciseId": "bodyweight_squat",
+        "expectedCount": 10,
+        "predictedCount": 0,
+        "delta": -10,
+        "profileIdentity": "simulated-bodyweight_squat/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:4",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:5",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:6",
+        "split": "unseen_test",
+        "exerciseId": "push_up",
+        "expectedCount": 10,
+        "predictedCount": 9,
+        "delta": -1,
+        "profileIdentity": "simulated-push_up/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:10",
+        "split": "unseen_test",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w20:12",
+        "split": "unseen_test",
+        "exerciseId": "standing_dumbbell_row",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "external-research-standing_dumbbell_row/body-orientation-front/bilateral/mmfit/range-70-fast/v2",
+        "profileSource": "mmfit-validation-gated-candidate"
+      },
+      {
+        "sourceSequenceId": "w20:13",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:14",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:15",
+        "split": "unseen_test",
+        "exerciseId": "sit_up",
+        "expectedCount": 10,
+        "predictedCount": 2,
+        "delta": -8,
+        "profileIdentity": "simulated-sit_up/left/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:16",
+        "split": "unseen_test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:17",
+        "split": "unseen_test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 1,
+        "delta": -9,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      },
+      {
+        "sourceSequenceId": "w20:18",
+        "split": "unseen_test",
+        "exerciseId": "overhead_triceps_extension",
+        "expectedCount": 10,
+        "predictedCount": 6,
+        "delta": -4,
+        "profileIdentity": "simulated-overhead_triceps_extension/frontLeft45/bilateral/initializer/v1",
+        "profileSource": "initializer"
+      }
+    ],
+    "approvedCaptures": [
+      {
+        "captureId": "a51c8a692c2a5a5b40cda482065cc6d5",
+        "bucketKey": "barbell_bench_press|front",
+        "expectedCount": 4,
+        "predictedCount": 3,
+        "matchedCount": 1,
+        "falsePositiveCount": 2,
+        "profileIdentity": "barbell_bench_press/front/bilateral/observed-tuned/v2"
+      },
+      {
+        "captureId": "b8af1ab860d6bbb43cd3f2cadc71506c",
+        "bucketKey": "barbell_bench_press|front",
+        "expectedCount": 8,
+        "predictedCount": 5,
+        "matchedCount": 5,
+        "falsePositiveCount": 0,
+        "profileIdentity": "barbell_bench_press/front/bilateral/observed-tuned/v2"
+      },
+      {
+        "captureId": "bc29e11c23f97a4b1ccaf321ba1e9db7",
+        "bucketKey": "barbell_bench_press|front",
+        "expectedCount": 4,
+        "predictedCount": 3,
+        "matchedCount": 3,
+        "falsePositiveCount": 0,
+        "profileIdentity": "barbell_bench_press/front/bilateral/observed-tuned/v2"
+      },
+      {
+        "captureId": "cb71ee6302a7a378d75d1dcdf30cee6a",
+        "bucketKey": "push_up|rearRight45",
+        "expectedCount": 14,
+        "predictedCount": 15,
+        "matchedCount": 14,
+        "falsePositiveCount": 1,
+        "profileIdentity": "push_up/rearRight45/bilateral/observed-tuned/v2"
+      }
+    ]
+  }
+}

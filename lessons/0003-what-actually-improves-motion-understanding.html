@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第 3 课 · 真正能提高哪三件事？</title>
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="lesson">
+  <div class="lesson-kicker">MaxPower 视觉验收 · 第 3 课</div>
+  <h1>真正能提高哪三件事？</h1>
+  <p class="subtitle">把二十多个开源项目压缩成四个近期能力杠杆：识别、完成度、质量和验证。</p>
+
+  <div class="callout">
+    <span class="label">先给答案</span>
+    目前最能帮助 MaxPower 的不是“肌肉发力模型”，而是：<b>更好的解剖观测、人体＋器械时序融合、证据→规则的质量链，以及独立多机位真值。</b>它们有可能提高结果；是否真的提高，仍必须经过同一冻结集 A/B。
+  </div>
+
+  <h2><span class="sec-num">SECTION A</span>先把三个产品问题拆开</h2>
+  <table>
+    <tr><th>产品问题</th><th>系统应回答</th><th>不能顺带推出</th></tr>
+    <tr><td>动作识别</td><td>在预选动作/机位下，有没有 Rep？阶段边界在哪里？</td><td>动作完成、动作标准</td></tr>
+    <tr><td>动作完成度</td><td>是否经过 start、turnaround、end，达到所需 ROM 并返回？</td><td>路径稳定、没有代偿</td></tr>
+    <tr><td>动作质量</td><td>已完成部分是否满足路径、稳定、对称、节奏等规则？</td><td>真实肌肉发力、受伤风险</td></tr>
+  </table>
+
+  <p><b>一个 Rep 可以被正确识别但没有完成；也可以完整做完但质量较差。</b>因此三项必须有不同输出和不同人工真值，不能共用一个“AI 动作分数”。</p>
+
+  <h2><span class="sec-num">SECTION B</span>P0：人体＋器械融合，最可能先改善识别与完成度</h2>
+  <p>Fitness-AQA 最值得借鉴的不是模型，而是把杠铃/重量轨迹用作不同视频之间的动作相位锚点。它专门研究 back squat、overhead press 和 barbell row，并指出普通 pose 在机位、服装和器械遮挡下会失败。<a href="https://github.com/ParitoshParmar/Fitness-AQA">官方仓库与论文入口</a></p>
+
+  <p>对 MaxPower，这可以落成一条很具体的状态机：</p>
+  <div class="figure">人体证据：肩／肘／腕／髋／膝的方向与置信度
+器械证据：杠铃两端、中心、倾斜、位移与回程
+                 ↓ 多证据共识
+准备 → 离心/下降 → turnaround → 向心/上升 → 回到起点
+                 ↓
+recognized_rep + completion_state + missing_reason</div>
+
+  <p>当前 Rust 已有 point/equipment displacement、joint/segment angle、relative distance、path deviation 等 operator，所以这条路线主要是<b>补可靠器械观测、动作专用 phase 合同和拒判条件</b>，不是换掉整个 SDK。</p>
+
+  <div class="callout know">
+    <span class="label">真正的收益点</span>
+    人体点被杠铃或凳面遮住时，器械轨迹可继续给 phase；杠铃检测失败时，人体关节仍可维持候选。只有两条证据都不足时返回 <code>cannot_judge</code>。这比强迫单一信号永远给答案更可能提高产品可靠率。
+  </div>
+
+  <h2><span class="sec-num">SECTION C</span>P0：证据 → 符号 → 规则，最适合动作质量</h2>
+  <p>NS-AQA 把视频感知、动作符号和专业规则程序拆开，最终生成分项报告；公开实现虽然是跳水且限非商业，但这种分层与 MaxPower 的 feature/rule/explanation 链一致。<a href="https://github.com/laurenok24/NSAQA">NS-AQA 官方仓库</a></p>
+
+  <div class="figure">观测：杠铃中心偏移 8 cm；左右腕高度差 4 cm
+   ↓
+符号：bar_path_drift = high；bilateral_asymmetry = medium
+   ↓
+规则：只在 bench_press × frontLeft45 × visible_bar 上评估
+   ↓
+结果：逐项 verdict + evidence + confidence + cannot_judge reason</div>
+
+  <p>这能改善的是<b>评分可信度和可解释性</b>，不保证模型准确率自动上升。真正缺的不是更多评分维度，而是每个动作 3–5 个可观察错误的自有双人复核真值，以及逐错误 precision/recall。</p>
+
+  <h2><span class="sec-num">SECTION D</span>P1：SynthPose，最值得验证的观测升级</h2>
+  <p>当前 Rust 主要消费 Halpe-26 / BlazePose33。SynthPose 输出 52 点，其中额外解剖 marker 包括胸骨、C7、T6/T11/L2、ASIS/PSIS 和肘腕内外侧；这可能改善躯干倾斜、骨盆、前臂和握杠方向。<a href="https://huggingface.co/stanfordmimi/synthpose-hrnet-48-mmpose/blob/main/README.md">官方模型卡</a></p>
+
+  <p>但它的第一个用途应该是<b>离线 teacher</b>：在同一组困难帧上比较 Halpe-26 与 SynthPose 的人工点位误差、角度误差和下游 phase 误差。只有它稳定改善了最终 feature，才值得扩展 Rust pose schema；不能因为点更多就默认识别更准。</p>
+
+  <h2><span class="sec-num">SECTION E</span>P1：Sports2D / Pose2Sim，改善的是“知道自己对不对”</h2>
+  <p>Sports2D 可参考相机修正、置信度、插值、滤波和角度定义；它也明确限制二维分析适合动作主要处于一个平面。<a href="https://github.com/davidpagnon/Sports2D">Sports2D 官方仓库</a></p>
+
+  <p>Pose2Sim 用多机位标定、同步和三角化生成 3D marker/OpenSim 运动学。<a href="https://github.com/perfanalytics/pose2sim">Pose2Sim 官方仓库</a>。它不会直接提高手机端准确率，但能建立少量动作的参考答案，告诉我们：错误来自 2D 点、单目深度、phase 规则，还是器械跟踪。</p>
+
+  <div class="callout warn">
+    <span class="label">当前不该优先</span>
+    OpenSim、Nimble、MuscleMimic、MinT、MIA 和 OpenCap dynamics 主要解决净关节需求、模拟肌肉或 EMG proxy。它们不会自动改善漏计、阶段偏移和质量标签；在前三项没有可靠真值前引入，只会增加一层无法验收的数字。
+  </div>
+
+  <h2><span class="sec-num">SECTION F</span>三个最小实验，按这个顺序做</h2>
+  <div class="step"><div class="n">1</div><div><h3>人体-only vs 人体＋杠铃</h3><p>选卧推、硬拉、划船的冻结新用户视频；比较 Rep precision/recall、turnaround MAE、整组全对率和拒判率。</p><p class="verify"><b>通过条件</b> 至少一个动作在未见用户上稳定改善，且最差机位不退化。</p></div></div>
+  <div class="step"><div class="n">2</div><div><h3>Halpe-26 vs SynthPose teacher</h3><p>人工标 100–300 个困难帧的肩肘腕、躯干和骨盆点；比较点位、角度以及最终 phase/feature。</p><p class="verify"><b>通过条件</b> 下游 feature 改善，而不只是关键点数量增加。</p></div></div>
+  <div class="step"><div class="n">3</div><div><h3>每动作 3–5 个可观察质量错误</h3><p>双人复核标签；把错误拆成 visible evidence → symbol → rule；报告逐错误 precision/recall 和不能判断覆盖。</p><p class="verify"><b>通过条件</b> 每项都有独立真值、适用机位和明确拒判，不发布不透明总分。</p></div></div>
+
+  <h2><span class="sec-num">SECTION G</span>检验一下</h2>
+  <div class="quiz" data-answer="b" data-explanation="先证明稠密点改善下游 feature，再决定是否扩展 Rust schema。" data-wrong-explanation="点更多只是候选优势，还不是产品提升证据。">
+    <p class="q">1 · SynthPose 已有 52 个关键点，MaxPower 下一步应如何使用？</p>
+    <label><input type="radio" name="q1" value="a">直接上线</label>
+    <label><input type="radio" name="q1" value="b">离线验证</label>
+    <label><input type="radio" name="q1" value="c">暂不采用</label>
+    <div class="feedback"></div>
+  </div>
+
+  <div class="quiz" data-answer="c" data-explanation="它们属于未来动力学研究链，不能替代 Rep、phase 和质量真值。" data-wrong-explanation="肌肉模型不能自动修复当前的观测、分段与标签问题。">
+    <p class="q">2 · 当前为了提高 Rep 与质量准确率，应怎样处理肌肉模型？</p>
+    <label><input type="radio" name="q2" value="a">直接上线</label>
+    <label><input type="radio" name="q2" value="b">离线验证</label>
+    <label><input type="radio" name="q2" value="c">暂不采用</label>
+    <div class="feedback"></div>
+  </div>
+
+  <p class="src">完整技术依据：<a href="../docs/research/2026-08-15-open-source-video-biomechanics-project-landscape.md">开源视频生物力学与动作质量调研</a>。一页速查：<a href="../reference/motion-capability-leverage-map.html">动作理解能力杠杆图</a>。</p>
+
+  <div class="callout know">
+    <span class="label">继续问老师</span>
+    下一步可以直接让我带你设计“人体-only vs 人体＋杠铃”的冻结评测表；如果识别、完成度、质量三者还有混淆，也可以拿一条真实卧推视频逐帧拆给你看。
+  </div>
+
+  <div class="footer-note">第 3 课完 · 上一课：<a href="0002-from-my-videos-to-bench-press.html">它认识我的视频，还是认识卧推？</a></div>
+</main>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

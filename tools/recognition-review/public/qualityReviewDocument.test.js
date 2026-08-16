@@ -149,6 +149,19 @@ test("review state is readable in memory while proposal and decision inputs rema
   });
 });
 
+test("a reviewer can clear one mistaken decision without resetting the whole release", () => {
+  const review = createReviewDocument({ proposal: frozenProposal(), reviewer });
+  const endpoint = { kind: "endpoint", repId: "rep-1", endpoint: "start_anchor" };
+  const conclusion = { kind: "conclusion", repId: "rep-1", conclusionId: "rom-complete" };
+  review.setDecision({ target: endpoint, verdict: "correct", correctedValue: null });
+  review.setDecision({ target: conclusion, verdict: "incorrect", correctedValue: null });
+
+  assert.equal(review.clearDecision(endpoint), true);
+  assert.equal(review.getDecision(endpoint), null);
+  assert.equal(review.getDecision(conclusion)?.verdict, "incorrect");
+  assert.equal(review.clearDecision(endpoint), false);
+});
+
 test("review contract rejects incomplete endpoints, lineage metadata, and implicit corrections", () => {
   const incomplete = frozenProposal();
   delete incomplete.reps[0].endpoints.end_return;

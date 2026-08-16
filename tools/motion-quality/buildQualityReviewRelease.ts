@@ -23,6 +23,7 @@ interface ReviewEvidenceFrame {
   readonly timestampMs: number;
   readonly landmarks: readonly Readonly<Record<string, unknown>>[];
   readonly equipment?: readonly Readonly<Record<string, unknown>>[];
+  readonly localMotionCoordinate?: Readonly<Record<string, unknown>> | null;
   readonly inputPose?: Readonly<{
     readonly source: "rtmpose_halpe26_input";
     readonly landmarks: readonly Readonly<Record<string, unknown>>[];
@@ -365,6 +366,9 @@ export function computeRustQualityProposalContentHash(
         phaseAfter: endpoint.phaseAfter,
         confidence: endpoint.confidence,
         evidenceChannels: endpoint.evidenceChannels,
+        ...(endpoint.normalizedFeatures == null
+          ? {}
+          : { normalizedFeatures: canonicalLocalMotionCoordinate(endpoint.normalizedFeatures) }),
       };
     }),
     conclusions: requireArray(
@@ -385,19 +389,83 @@ export function computeRustQualityProposalContentHash(
     contentHash: "",
   };
   let hash = 0xcbf2_9ce4_8422_2325n;
-  // serde_json preserves the fact that an integer-valued f32 is a float
-  // (`0.0`/`1.0`), while JSON.stringify collapses it to `0`/`1`. Confidence
-  // is the only floating-point field in this contract, so mirror Rust's
-  // representation before applying the shared FNV-1a hash.
-  const rustJson = JSON.stringify(canonical).replace(
-    /"confidence":([01])(?=[,}])/gu,
-    '"confidence":$1.0',
-  );
+  const rustJson = rustQualityJson(canonical);
   for (const byte of Buffer.from(rustJson, "utf8")) {
     hash ^= BigInt(byte);
     hash = BigInt.asUintN(64, hash * 0x0000_0100_0000_01b3n);
   }
   return hash.toString(16).padStart(16, "0");
+}
+
+function canonicalLocalMotionCoordinate(raw: unknown): Readonly<Record<string, unknown>> {
+  const value = requireRecord(raw, "Rust endpoint normalized features");
+  // Keep this in the Rust struct's serde field order. The Web decoder exposes
+  // a friendlier object order, but the immutable content hash is over Rust's
+  // original JSON bytes.
+  return {
+    schemaVersion: value.schemaVersion,
+    coordinateFrameId: value.coordinateFrameId,
+    sourceTimestampMs: value.sourceTimestampMs,
+    state: value.state,
+    reason: value.reason,
+    primaryAxis: value.primaryAxis,
+    crossAxis: value.crossAxis,
+    origin: value.origin,
+    scale: value.scale,
+    scaleSource: value.scaleSource,
+    equipmentTrackId: value.equipmentTrackId,
+    rawBarAxis: value.rawBarAxis,
+    coarseView: value.coarseView,
+    canonicalFeedMirrored: value.canonicalFeedMirrored,
+    anatomicalSideMapping: value.anatomicalSideMapping,
+    endpointOrderMapping: value.endpointOrderMapping,
+    equipment: value.equipment,
+    pose: value.pose,
+    channelAgreement: value.channelAgreement,
+    endpointOneProgress: value.endpointOneProgress,
+    endpointTwoProgress: value.endpointTwoProgress,
+    anatomicalLeftEndpointProgress: value.anatomicalLeftEndpointProgress,
+    anatomicalRightEndpointProgress: value.anatomicalRightEndpointProgress,
+    rawBarAngleRadians: value.rawBarAngleRadians,
+    baselineCorrectedBarAngleRadians: value.baselineCorrectedBarAngleRadians,
+    confidence: value.confidence,
+  };
+}
+
+const RUST_F32_FIELDS = new Set([
+  "alongAxisProgress",
+  "anatomicalLeftEndpointProgress",
+  "anatomicalRightEndpointProgress",
+  "baselineCorrectedBarAngleRadians",
+  "confidence",
+  "coverage",
+  "crossAxisDisplacement",
+  "endpointOneProgress",
+  "endpointTwoProgress",
+  "rawBarAngleRadians",
+  "scale",
+  "uncertainty",
+]);
+
+const RUST_F32_ARRAY_FIELDS = new Set(["crossAxis", "origin", "primaryAxis", "rawBarAxis"]);
+
+function rustQualityJson(value: unknown, fieldName = "", forceFloat = false): string {
+  if (value == null || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("Rust quality proposal contains a non-finite number");
+    const serialized = JSON.stringify(value);
+    return forceFloat && Number.isInteger(value) ? `${serialized}.0` : serialized;
+  }
+  if (Array.isArray(value)) {
+    const arrayFloat = RUST_F32_ARRAY_FIELDS.has(fieldName);
+    return `[${value.map((entry) => rustQualityJson(entry, fieldName, arrayFloat)).join(",")}]`;
+  }
+  const record = requireRecord(value, "Rust quality proposal JSON value");
+  return `{${Object.entries(record).map(([key, entry]) => (
+    `${JSON.stringify(key)}:${rustQualityJson(entry, key, RUST_F32_FIELDS.has(key))}`
+  )).join(",")}}`;
 }
 
 function requireRecord(value: unknown, label: string): Readonly<Record<string, unknown>> {

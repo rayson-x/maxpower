@@ -50,8 +50,9 @@ export interface LlmAliasRequestPolicy {
   maxInputTokens: number;
   /** Server-enforced upper bound for generated tokens. */
   maxOutputTokens: number;
+  /** Maximum inline images per request (0 disables image input for the alias). */
   maxImages: number;
-  /** Maximum decoded bytes for each inline data URL image. */
+  /** Maximum decoded bytes per inline image. */
   maxImageBytes: number;
   /** Worst-case user charge admitted atomically before provider invocation. */
   reservationCredits: number;
@@ -61,7 +62,9 @@ export const DEFAULT_LLM_REQUEST_POLICIES: Readonly<
   Record<ProductAlias, LlmAliasRequestPolicy>
 > = {
   "maxpower/coach-v1": {
-    maxInputBytes: 64 * 1_024,
+    // 字节预算面向大载荷（后续文件/图片上传），与 token 上下文预算正交：
+    // 文本成本由 maxInputTokens/reservation 控制，bytes 只挡超限请求体。
+    maxInputBytes: 10 * 1_024 * 1_024,
     maxInputTokens: 128 * 1_024,
     maxOutputTokens: 4_096,
     maxImages: 4,
@@ -913,6 +916,24 @@ function acceptRequest(
   if (request.parallel_tool_calls !== undefined && request.parallel_tool_calls !== false) {
     throw new ApiError(400, "invalid_request", "parallel_tool_calls must be false.");
   }
+  if (request.store !== undefined && request.store !== false) {
+    throw new ApiError(400, "invalid_request", "store must be false.");
+  }
+  if (
+    request.stream_options !== undefined
+    && (!isPlainObject(request.stream_options)
+      || Object.keys(request.stream_options).length !== 1
+      || request.stream_options.include_usage !== true)
+  ) {
+    throw new ApiError(
+      400,
+      "invalid_request",
+      "stream_options only supports include_usage=true.",
+    );
+  }
+  if (request.tool_choice !== undefined && !isSupportedToolChoice(request.tool_choice)) {
+    throw new ApiError(400, "invalid_request", "tool_choice is invalid.");
+  }
   if (
     request.temperature !== undefined &&
     (typeof request.temperature !== "number" ||
@@ -948,6 +969,7 @@ function acceptRequest(
       ? {}
       : { parallel_tool_calls: request.parallel_tool_calls }),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+    ...(request.tool_choice === undefined ? {} : { tool_choice: request.tool_choice }),
     ...(request.response_format === undefined
       ? {}
       : { response_format: request.response_format }),
@@ -977,7 +999,10 @@ const ALLOWED_REQUEST_FIELDS = new Set([
   "max_tokens",
   "max_completion_tokens",
   "parallel_tool_calls",
+  "store",
+  "stream_options",
   "temperature",
+  "tool_choice",
   "response_format",
 ]);
 
@@ -990,6 +1015,18 @@ function assertAllowedRequestFields(request: OpenAiChatCompletionRequest): void 
       `Unsupported LLM request field: ${unsupported.sort()[0]}.`,
     );
   }
+}
+
+function isSupportedToolChoice(value: unknown): boolean {
+  if (value === "auto" || value === "none" || value === "required") return true;
+  return isPlainObject(value)
+    && Object.keys(value).length === 2
+    && value.type === "function"
+    && isPlainObject(value.function)
+    && Object.keys(value.function).length === 1
+    && typeof value.function.name === "string"
+    && value.function.name.trim().length >= 1
+    && value.function.name.length <= 128;
 }
 
 function outputTokenLimit(
@@ -1019,38 +1056,23 @@ function optionalPositiveInteger(value: unknown, name: string): number | undefin
   return value as number;
 }
 
-function assertImageLimits(
-  messages: readonly unknown[],
-  policy: LlmAliasRequestPolicy,
-): void {
+function assertImageLimits(messages: readonly unknown[], policy: LlmAliasRequestPolicy): void {
   const images = collectImageUrls(messages);
   if (images.length > policy.maxImages) {
-    throw new ApiError(
-      400,
-      "image_limit_exceeded",
-      "The request contains too many images for this product alias.",
-    );
+    throw new ApiError(400, "image_limit_exceeded", "The request contains too many images for this product alias.");
   }
   for (const image of images) {
     const bytes = decodedDataUrlBytes(image);
     if (bytes === undefined) {
-      throw new ApiError(
-        400,
-        "remote_image_forbidden",
-        "LLM image inputs must use bounded inline data URLs.",
-      );
+      throw new ApiError(400, "remote_image_forbidden", "LLM image inputs must use bounded inline data URLs.");
     }
     if (bytes > policy.maxImageBytes) {
-      throw new ApiError(
-        413,
-        "image_too_large",
-        "An LLM image input exceeds the product limit.",
-      );
+      throw new ApiError(413, "image_too_large", "An LLM image input exceeds the product limit.");
     }
   }
 }
 
-function collectImageUrls(value: unknown, seen = new Set<object>()): string[] {
+function collectImageUrls(value: unknown, seen = new Set<object>()): readonly string[] {
   if (value === null || typeof value !== "object") return [];
   if (seen.has(value)) {
     throw new ApiError(400, "invalid_request", "The request must not contain cycles.");
@@ -1063,12 +1085,14 @@ function collectImageUrls(value: unknown, seen = new Set<object>()): string[] {
     if (!isPlainObject(value)) {
       throw new ApiError(400, "invalid_request", "The request must contain plain JSON objects.");
     }
-    const type = value.type;
+    const type = (value as { type?: unknown }).type;
     if (type === "image_url" || type === "input_image") {
-      const candidate = value.image_url ?? value.image_url_data ?? value.url;
+      const candidate = (value as { image_url?: unknown; image_url_data?: unknown; url?: unknown }).image_url
+        ?? (value as { image_url_data?: unknown }).image_url_data
+        ?? (value as { url?: unknown }).url;
       if (typeof candidate === "string") return [candidate];
-      if (isPlainObject(candidate) && typeof candidate.url === "string") {
-        return [candidate.url];
+      if (isPlainObject(candidate) && typeof (candidate as { url?: unknown }).url === "string") {
+        return [(candidate as { url: string }).url];
       }
       throw new ApiError(400, "invalid_request", "An image input is missing its URL.");
     }

@@ -1,4 +1,4 @@
-import { searchPassages } from "./passageSearch";
+import { searchKnowledgeLayers, searchPassages } from "./passageSearch";
 import type { EquipmentRequirement } from "../coach/domain";
 import { stableHash } from "../coach/stable";
 import {
@@ -10,6 +10,7 @@ import {
   type ExerciseVariant,
   type KnowledgeVersionPins,
   type KnowledgePack,
+  type KnowledgePassage,
   type MotionCapabilitySet,
   type SubstitutionCandidate,
 } from "./model";
@@ -19,6 +20,11 @@ export interface ExerciseSearchInput {
   movementPattern?: ExerciseVariant["movementPattern"];
   loadModes?: readonly ExerciseVariant["equipment"]["loadMode"][];
   limit?: number;
+  /**
+   * browse（默认，手动浏览/选择不受限）| recommendation（规划与推荐入口，
+   * 强制 plannerEligible）| record（记录入口，强制 recordable）。
+   */
+  purpose?: "browse" | "recommendation" | "record";
 }
 
 export interface SubstitutionInput {
@@ -211,10 +217,30 @@ export class KnowledgePackRegistry implements MotionCapabilityResolver {
     });
   }
 
+  /** 蒸馏层检索（skill 式分层加载的默认入口）：gist + keypoints，不回原文。 */
+  searchKnowledgeLayered(input: { query: string; limit?: number; topic?: "training" | "nutrition" | "recovery" | "exercise" | "any" }) {
+    return searchKnowledgeLayers({
+      gists: this.pack.programStrategies?.gists,
+      keypoints: this.pack.programStrategies?.keypoints,
+      query: input.query,
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      ...(input.topic ? { topic: input.topic } : {}),
+    });
+  }
+
+  /** 按需下钻 L0 原文（agent 判断蒸馏层不够时再读）。 */
+  readKnowledgePassage(passageId: string): KnowledgePassage | undefined {
+    return this.pack.programStrategies?.passages?.find((passage) => passage.id === passageId);
+  }
+
   search(input: ExerciseSearchInput): readonly ExerciseVariant[] {
     const query = input.query?.trim().toLocaleLowerCase() ?? "";
     return this.pack.exerciseCatalog.variants
       .filter((variant) => variant.status === "active")
+      // 资格强制：推荐入口只见审校通过的 variant；记录入口只见可记录的。
+      // browse 是全量目录——用户手动选择任何动作永远不受限（执行者主权）。
+      .filter((variant) => input.purpose !== "recommendation" || variant.dataEligibility.plannerEligible)
+      .filter((variant) => input.purpose !== "record" || variant.dataEligibility.recordable)
       .filter((variant) => !input.movementPattern || variant.movementPattern === input.movementPattern)
       .filter(
         (variant) =>
@@ -321,6 +347,8 @@ export class KnowledgePackRegistry implements MotionCapabilityResolver {
     const candidates = this.pack.exerciseCatalog.variants
       .filter((candidate) => candidate.id !== original.id)
       .filter((candidate) => candidate.status === "active")
+      // 未审候选永不进入替代推荐；这是既有声明的 enforcement，不是新策略。
+      .filter((candidate) => candidate.dataEligibility.plannerEligible)
       .filter((candidate) => candidate.movementPattern === original.movementPattern)
       .filter((candidate) => !input.constraints.unavailableToday.includes(candidate.id))
       .map((candidate) => {
@@ -565,7 +593,7 @@ export function lintKnowledgePack(pack: KnowledgePack): readonly string[] {
   return errors;
 }
 
-function computePackHash(pack: KnowledgePack): string {
+export function computePackHash(pack: KnowledgePack): string {
   const { contentHash: _contentHash, signature: _signature, ...manifest } = pack.manifest;
   return stableHash({
     manifest,
@@ -578,7 +606,7 @@ function computePackHash(pack: KnowledgePack): string {
   });
 }
 
-function computeCatalogHash(pack: KnowledgePack): string {
+export function computeCatalogHash(pack: KnowledgePack): string {
   const { contentHash: _contentHash, ...catalog } = pack.exerciseCatalog;
   return stableHash(catalog);
 }

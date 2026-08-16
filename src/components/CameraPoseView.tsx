@@ -10,9 +10,7 @@ export function CameraPoseView() {
     const { CameraPoseView: WebCameraPoseView } = require("./CameraPoseView.web") as typeof import("./CameraPoseView.web");
     return <WebCameraPoseView />;
   }
-  if (Platform.OS === "android") {
-    const { CameraPoseView: AndroidCameraPoseView } = require("./CameraPoseView.android") as typeof import("./CameraPoseView.android");
-    return <AndroidCameraPoseView />;
-  }
+  // Native product capture is owned by ProductShell's WorkoutMonitorWorkspace.
+  // The retired Android demo router must not become a second app entry.
   return null;
 }

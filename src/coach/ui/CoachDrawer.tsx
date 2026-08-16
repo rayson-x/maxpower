@@ -359,7 +359,7 @@ function ConversationItemView({ item, onSubmitBaseline, onSaveBaselineDraft, onS
   if (item.card?.kind === "plan_candidate") {
     return <View style={styles.structuredCard}>
       <Text style={styles.structuredCardTitle}>{item.card.title}</Text>
-      {item.card.summary.map((line) => <Text key={line} style={styles.structuredCardHint}>{line}</Text>)}
+      {item.card.summary.map((line, index) => <Text key={`${item.card?.title ?? "plan"}:${index}:${line}`} style={styles.structuredCardHint}>{line}</Text>)}
       {item.card.details ? <PlanCandidateDetails details={item.card.details} /> : null}
       {item.card.status === "awaiting_confirmation" ? <View style={styles.cardActionRow}>
         <Pressable accessibilityRole="button" onPress={() => onAction?.(item, "confirm")} style={styles.cardConfirm}><Text style={styles.cardConfirmText}>确认当前阶段</Text></Pressable>
@@ -403,6 +403,7 @@ function PlanCandidateDetails({ details }: { details: NonNullable<Extract<NonNul
     <PlanDetailSection title="为什么这样安排" lines={details.rationale} />
     <PlanDetailSection title="代价与变化" lines={[...details.tradeoffs, ...details.diff]} />
     <PlanDetailSection title={validationLabel} lines={details.validation.issues.length ? details.validation.issues : [details.validation.resolution === "confirmation_required" ? "需要你的明确确认后才会写入。" : "符合你已授予的自动调整权限。"]} />
+    {details.validation.advisories?.length ? <PlanDetailSection title="备注" lines={details.validation.advisories} /> : null}
   </View>;
 }
 

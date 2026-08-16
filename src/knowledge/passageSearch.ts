@@ -240,3 +240,81 @@ export function searchPassages(input: {
     ...(hits.length === 0 ? { missing: "no_passage_matched" as const } : {}),
   };
 }
+
+/**
+ * 分层检索（skill 式渐进披露）：agent 默认只见蒸馏层——L2 gist（小节一句话要点）
+ * 挂 L1 keypoints（该小节各段落的结论句）；需要原文时按 passageId 单独下钻 L0。
+ * 打分规则与 searchPassages 同族（确定性、可回放）。
+ */
+export interface LayeredKnowledgeEntry {
+  readonly gist: import("./model").KnowledgeGist;
+  /** 该小节内与查询相关的段落结论（L1，按 tier/长度优选，最多 3 条）。 */
+  readonly keypoints: readonly import("./model").KnowledgeKeypoint[];
+  readonly score: number;
+  readonly matchedTerms: readonly string[];
+}
+
+export interface LayeredKnowledgeResult {
+  readonly entries: readonly LayeredKnowledgeEntry[];
+  readonly queryTerms: readonly string[];
+  readonly missing?: "no_passage_matched" | "knowledge_base_empty";
+}
+
+function gistVocabulary(gists: readonly import("./model").KnowledgeGist[]): ReadonlySet<string> {
+  const vocabulary = new Set<string>();
+  for (const gist of gists) {
+    for (const keyword of gist.keywords) {
+      if (keyword.length >= 2) vocabulary.add(keyword);
+    }
+    for (const token of `${gist.docTitle} ${gist.sectionKey}`.toLowerCase().split(/[\s·、，,（）()\/|:：›-]+/)) {
+      if (token.length >= 2) vocabulary.add(token);
+    }
+  }
+  return vocabulary;
+}
+
+export function searchKnowledgeLayers(input: {
+  readonly gists: readonly import("./model").KnowledgeGist[] | undefined;
+  readonly keypoints: readonly import("./model").KnowledgeKeypoint[] | undefined;
+  readonly query: string;
+  readonly topic?: "training" | "nutrition" | "recovery" | "exercise" | "any";
+  readonly limit?: number;
+}): LayeredKnowledgeResult {
+  if (!input.gists?.length) {
+    return { entries: [], queryTerms: [], missing: "knowledge_base_empty" };
+  }
+  const queryTerms = tokenizeQuery(input.query, gistVocabulary(input.gists));
+  const candidates = input.topic && input.topic !== "any"
+    ? input.gists.filter((gist) => gist.topic === input.topic)
+    : input.gists;
+  const keypoints = input.keypoints ?? [];
+  const tierRank = { A: 0, B: 1, C: 2, D: 3, U: 4 } as const;
+
+  const scored: LayeredKnowledgeEntry[] = [];
+  for (const gist of candidates) {
+    const matched = new Set<string>();
+    let score = 0;
+    const sectionText = `${gist.docTitle} ${gist.sectionKey}`.toLowerCase();
+    const gistText = gist.gist.toLowerCase();
+    for (const term of queryTerms) {
+      let hit = false;
+      if (gist.keywords.includes(term)) { score += 3; hit = true; }
+      if (sectionText.includes(term)) { score += 4; hit = true; }
+      else if (gistText.includes(term)) { score += 1; hit = true; }
+      if (hit) matched.add(term);
+    }
+    if (score === 0) continue;
+    if (gist.tier === "A") score += 2;
+    if (gist.tier === "U") score -= 5;
+    if (score <= 0) continue;
+    const passageIds = new Set(gist.passageIds);
+    const points = keypoints
+      .filter((keypoint) => passageIds.has(keypoint.passageId))
+      .sort((left, right) => tierRank[left.tier] - tierRank[right.tier] || left.point.length - right.point.length)
+      .slice(0, 3);
+    scored.push({ gist, keypoints: points, score, matchedTerms: [...matched] });
+  }
+  scored.sort((left, right) => right.score - left.score || left.gist.id.localeCompare(right.gist.id));
+  const entries = scored.slice(0, input.limit ?? 4);
+  return { entries, queryTerms, ...(entries.length === 0 ? { missing: "no_passage_matched" as const } : {}) };
+}

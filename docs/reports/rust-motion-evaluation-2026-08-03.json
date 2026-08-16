@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "form-coach-rust-motion-evaluation/v1",
-  "generatedAt": "2026-08-03T19:51:11.363Z",
+  "schemaVersion": "maxpower-rust-motion-evaluation/v1",
+  "generatedAt": "2026-08-07T19:56:56.973Z",
   "algorithmVersion": "rust-canonical-wasm/v1 + generic-rep-state-machine/v1",
   "evaluationMode": "canonical-sidecar-compatibility-replay",
   "accuracyClaim": "Rep-engine compatibility only; not MediaPipe-to-Rust end-to-end accuracy",
@@ -639,43 +639,43 @@
   "summary": {
     "captureCount": 10,
     "truthCount": 72,
-    "predictedCount": 51,
+    "predictedCount": 34,
     "exactCountCaptures": 2,
     "exactCountRatio": 0.2,
-    "matchedReps": 42,
-    "falsePositiveReps": 9,
-    "missedReps": 30,
-    "precision": 0.8235294117647058,
-    "recall": 0.5833333333333334,
-    "f1": 0.6829268292682927,
-    "negativeWindowFalsePositives": 8,
-    "rawTriggerCount": 79,
+    "matchedReps": 32,
+    "falsePositiveReps": 2,
+    "missedReps": 40,
+    "precision": 0.9411764705882353,
+    "recall": 0.4444444444444444,
+    "f1": 0.6037735849056604,
+    "negativeWindowFalsePositives": 1,
+    "rawTriggerCount": 76,
     "rawMatchedTriggers": 51,
-    "rawFalsePositiveTriggers": 28,
+    "rawFalsePositiveTriggers": 25,
     "rawMissedReps": 21,
-    "rawPrecision": 0.6455696202531646,
+    "rawPrecision": 0.6710526315789473,
     "rawRecall": 0.7083333333333334,
-    "rawF1": 0.6754966887417219,
+    "rawF1": 0.6891891891891891,
     "rawExactCountRatio": 0,
-    "rawNegativeWindowFalsePositives": 20,
-    "productFilteredTriggerCount": 28,
-    "meanBoundaryErrorMs": 483.7142857142857,
-    "coreReplayFpsP50": 4645.9,
-    "coreReplayFpsP95": 6695.8
+    "rawNegativeWindowFalsePositives": 17,
+    "productFilteredTriggerCount": 42,
+    "meanBoundaryErrorMs": 503.6666666666667,
+    "coreReplayFpsP50": 14348.4,
+    "coreReplayFpsP95": 16471
   },
   "heldOut": {
     "captureCount": 3,
     "truthCount": 22,
-    "predictedCount": 20,
-    "exactCountCaptures": 2,
-    "exactCountRatio": 0.6666666666666666,
-    "matchedReps": 17,
-    "falsePositiveReps": 3,
-    "missedReps": 5,
-    "precision": 0.85,
-    "recall": 0.7727272727272727,
-    "f1": 0.8095238095238095,
-    "negativeWindowFalsePositives": 2,
+    "predictedCount": 17,
+    "exactCountCaptures": 1,
+    "exactCountRatio": 0.3333333333333333,
+    "matchedReps": 16,
+    "falsePositiveReps": 1,
+    "missedReps": 6,
+    "precision": 0.9411764705882353,
+    "recall": 0.7272727272727273,
+    "f1": 0.8205128205128205,
+    "negativeWindowFalsePositives": 0,
     "rawTriggerCount": 26,
     "rawMatchedTriggers": 18,
     "rawFalsePositiveTriggers": 8,
@@ -685,23 +685,23 @@
     "rawF1": 0.7500000000000001,
     "rawExactCountRatio": 0,
     "rawNegativeWindowFalsePositives": 4,
-    "productFilteredTriggerCount": 6,
-    "meanBoundaryErrorMs": 514.3333333333334,
-    "coreReplayFpsP50": 3445.9,
-    "coreReplayFpsP95": 3445.9
+    "productFilteredTriggerCount": 9,
+    "meanBoundaryErrorMs": 514.6666666666666,
+    "coreReplayFpsP50": 13354.5,
+    "coreReplayFpsP95": 13354.5
   },
   "challenge": {
     "captureCount": 1,
     "truthCount": 6,
-    "predictedCount": 5,
+    "predictedCount": 0,
     "exactCountCaptures": 0,
     "exactCountRatio": 0,
-    "matchedReps": 5,
+    "matchedReps": 0,
     "falsePositiveReps": 0,
-    "missedReps": 1,
-    "precision": 1,
-    "recall": 0.8333333333333334,
-    "f1": 0.9090909090909091,
+    "missedReps": 6,
+    "precision": 0,
+    "recall": 0,
+    "f1": 0,
     "negativeWindowFalsePositives": 0,
     "rawTriggerCount": 9,
     "rawMatchedTriggers": 6,
@@ -712,25 +712,25 @@
     "rawF1": 0.8,
     "rawExactCountRatio": 0,
     "rawNegativeWindowFalsePositives": 3,
-    "productFilteredTriggerCount": 4,
-    "meanBoundaryErrorMs": 288,
-    "coreReplayFpsP50": 2702.8,
-    "coreReplayFpsP95": 2702.8
+    "productFilteredTriggerCount": 9,
+    "meanBoundaryErrorMs": null,
+    "coreReplayFpsP50": 14756.8,
+    "coreReplayFpsP95": 14756.8
   },
   "byExercise": {
     "lat_pulldown": {
       "captureCount": 4,
       "truthCount": 28,
-      "predictedCount": 28,
+      "predictedCount": 21,
       "exactCountCaptures": 2,
       "exactCountRatio": 0.5,
-      "matchedReps": 27,
-      "falsePositiveReps": 1,
-      "missedReps": 1,
-      "precision": 0.9642857142857143,
-      "recall": 0.9642857142857143,
-      "f1": 0.9642857142857143,
-      "negativeWindowFalsePositives": 1,
+      "matchedReps": 21,
+      "falsePositiveReps": 0,
+      "missedReps": 7,
+      "precision": 1,
+      "recall": 0.75,
+      "f1": 0.8571428571428571,
+      "negativeWindowFalsePositives": 0,
       "rawTriggerCount": 36,
       "rawMatchedTriggers": 28,
       "rawFalsePositiveTriggers": 8,
@@ -740,79 +740,79 @@
       "rawF1": 0.8750000000000001,
       "rawExactCountRatio": 0,
       "rawNegativeWindowFalsePositives": 7,
-      "productFilteredTriggerCount": 8,
-      "meanBoundaryErrorMs": 295,
-      "coreReplayFpsP50": 2702.8,
-      "coreReplayFpsP95": 3445.9
+      "productFilteredTriggerCount": 15,
+      "meanBoundaryErrorMs": 297.6666666666667,
+      "coreReplayFpsP50": 13354.5,
+      "coreReplayFpsP95": 14756.8
     },
     "seated_shoulder_press": {
       "captureCount": 6,
       "truthCount": 44,
-      "predictedCount": 23,
+      "predictedCount": 13,
       "exactCountCaptures": 0,
       "exactCountRatio": 0,
-      "matchedReps": 15,
-      "falsePositiveReps": 8,
-      "missedReps": 29,
-      "precision": 0.6521739130434783,
-      "recall": 0.3409090909090909,
-      "f1": 0.44776119402985076,
-      "negativeWindowFalsePositives": 7,
-      "rawTriggerCount": 43,
+      "matchedReps": 11,
+      "falsePositiveReps": 2,
+      "missedReps": 33,
+      "precision": 0.8461538461538461,
+      "recall": 0.25,
+      "f1": 0.38596491228070173,
+      "negativeWindowFalsePositives": 1,
+      "rawTriggerCount": 40,
       "rawMatchedTriggers": 23,
-      "rawFalsePositiveTriggers": 20,
+      "rawFalsePositiveTriggers": 17,
       "rawMissedReps": 21,
-      "rawPrecision": 0.5348837209302325,
+      "rawPrecision": 0.575,
       "rawRecall": 0.5227272727272727,
-      "rawF1": 0.5287356321839081,
+      "rawF1": 0.5476190476190476,
       "rawExactCountRatio": 0,
-      "rawNegativeWindowFalsePositives": 13,
-      "productFilteredTriggerCount": 20,
-      "meanBoundaryErrorMs": 735.3333333333334,
-      "coreReplayFpsP50": 5235,
-      "coreReplayFpsP95": 6695.8
+      "rawNegativeWindowFalsePositives": 10,
+      "productFilteredTriggerCount": 27,
+      "meanBoundaryErrorMs": 709.6666666666666,
+      "coreReplayFpsP50": 14348.4,
+      "coreReplayFpsP95": 16471
     }
   },
   "byCapturePosition": {
     "front": {
       "captureCount": 6,
       "truthCount": 44,
-      "predictedCount": 23,
+      "predictedCount": 13,
       "exactCountCaptures": 0,
       "exactCountRatio": 0,
-      "matchedReps": 15,
-      "falsePositiveReps": 8,
-      "missedReps": 29,
-      "precision": 0.6521739130434783,
-      "recall": 0.3409090909090909,
-      "f1": 0.44776119402985076,
-      "negativeWindowFalsePositives": 7,
-      "rawTriggerCount": 43,
+      "matchedReps": 11,
+      "falsePositiveReps": 2,
+      "missedReps": 33,
+      "precision": 0.8461538461538461,
+      "recall": 0.25,
+      "f1": 0.38596491228070173,
+      "negativeWindowFalsePositives": 1,
+      "rawTriggerCount": 40,
       "rawMatchedTriggers": 23,
-      "rawFalsePositiveTriggers": 20,
+      "rawFalsePositiveTriggers": 17,
       "rawMissedReps": 21,
-      "rawPrecision": 0.5348837209302325,
+      "rawPrecision": 0.575,
       "rawRecall": 0.5227272727272727,
-      "rawF1": 0.5287356321839081,
+      "rawF1": 0.5476190476190476,
       "rawExactCountRatio": 0,
-      "rawNegativeWindowFalsePositives": 13,
-      "productFilteredTriggerCount": 20,
-      "meanBoundaryErrorMs": 735.3333333333334,
-      "coreReplayFpsP50": 5235,
-      "coreReplayFpsP95": 6695.8
+      "rawNegativeWindowFalsePositives": 10,
+      "productFilteredTriggerCount": 27,
+      "meanBoundaryErrorMs": 709.6666666666666,
+      "coreReplayFpsP50": 14348.4,
+      "coreReplayFpsP95": 16471
     },
     "rear": {
       "captureCount": 1,
       "truthCount": 8,
-      "predictedCount": 8,
-      "exactCountCaptures": 1,
-      "exactCountRatio": 1,
-      "matchedReps": 8,
+      "predictedCount": 7,
+      "exactCountCaptures": 0,
+      "exactCountRatio": 0,
+      "matchedReps": 7,
       "falsePositiveReps": 0,
-      "missedReps": 0,
+      "missedReps": 1,
       "precision": 1,
-      "recall": 1,
-      "f1": 1,
+      "recall": 0.875,
+      "f1": 0.9333333333333333,
       "negativeWindowFalsePositives": 0,
       "rawTriggerCount": 9,
       "rawMatchedTriggers": 8,
@@ -823,24 +823,24 @@
       "rawF1": 0.9411764705882353,
       "rawExactCountRatio": 0,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 1,
-      "meanBoundaryErrorMs": 236,
-      "coreReplayFpsP50": 675.7,
-      "coreReplayFpsP95": 675.7
+      "productFilteredTriggerCount": 2,
+      "meanBoundaryErrorMs": 237,
+      "coreReplayFpsP50": 8264.7,
+      "coreReplayFpsP95": 8264.7
     },
     "rearLeft45": {
       "captureCount": 3,
       "truthCount": 20,
-      "predictedCount": 20,
-      "exactCountCaptures": 1,
-      "exactCountRatio": 0.3333333333333333,
-      "matchedReps": 19,
-      "falsePositiveReps": 1,
-      "missedReps": 1,
-      "precision": 0.95,
-      "recall": 0.95,
-      "f1": 0.9500000000000001,
-      "negativeWindowFalsePositives": 1,
+      "predictedCount": 14,
+      "exactCountCaptures": 2,
+      "exactCountRatio": 0.6666666666666666,
+      "matchedReps": 14,
+      "falsePositiveReps": 0,
+      "missedReps": 6,
+      "precision": 1,
+      "recall": 0.7,
+      "f1": 0.8235294117647058,
+      "negativeWindowFalsePositives": 0,
       "rawTriggerCount": 27,
       "rawMatchedTriggers": 20,
       "rawFalsePositiveTriggers": 7,
@@ -850,10 +850,10 @@
       "rawF1": 0.851063829787234,
       "rawExactCountRatio": 0,
       "rawNegativeWindowFalsePositives": 6,
-      "productFilteredTriggerCount": 7,
-      "meanBoundaryErrorMs": 314.6666666666667,
-      "coreReplayFpsP50": 3445.9,
-      "coreReplayFpsP95": 3445.9
+      "productFilteredTriggerCount": 13,
+      "meanBoundaryErrorMs": 328,
+      "coreReplayFpsP50": 14756.8,
+      "coreReplayFpsP95": 14756.8
     }
   },
   "promotion": {
@@ -876,14 +876,17 @@
       "profileVersion": "lat-pulldown/rear/bilateral/cable/v1",
       "split": "held_out",
       "truthCount": 8,
-      "predictedCount": 8,
+      "predictedCount": 7,
+      "needsReviewCandidateCount": 1,
+      "rejectedCandidateCount": 0,
+      "rejectedCandidateReasons": [],
       "rawTriggerCount": 9,
       "rawMatchedTriggers": 8,
       "rawFalsePositiveTriggers": 1,
       "rawMissedReps": 0,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 1,
+      "productFilteredTriggerCount": 2,
       "tsPredictedCount": 8,
       "tsMatchedReps": 8,
       "tsFirstDivergence": {
@@ -948,10 +951,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 5561,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 5961,
           "phase": "return"
         },
@@ -962,10 +961,6 @@
         {
           "timestampMs": 7191,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 7515,
-          "phase": "peak"
         },
         {
           "timestampMs": 7919,
@@ -980,10 +975,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 9381,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 9810,
           "phase": "return"
         },
@@ -994,10 +985,6 @@
         {
           "timestampMs": 10899,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 11244,
-          "phase": "peak"
         },
         {
           "timestampMs": 11659,
@@ -1012,10 +999,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 13100,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 13509,
           "phase": "return"
         },
@@ -1026,10 +1009,6 @@
         {
           "timestampMs": 14623,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 14907,
-          "phase": "peak"
         },
         {
           "timestampMs": 15242,
@@ -1044,10 +1023,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 16569,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 17057,
           "phase": "return"
         },
@@ -1058,10 +1033,6 @@
         {
           "timestampMs": 18108,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 18401,
-          "phase": "peak"
         },
         {
           "timestampMs": 18814,
@@ -1076,10 +1047,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 20492,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 21109,
           "phase": "return"
         },
@@ -1092,14 +1059,14 @@
           "phase": "frozen"
         }
       ],
-      "exactCount": true,
-      "matchedReps": 8,
+      "exactCount": false,
+      "matchedReps": 7,
       "falsePositiveReps": 0,
-      "missedReps": 0,
-      "meanBoundaryErrorMs": 236,
+      "missedReps": 1,
+      "meanBoundaryErrorMs": 237,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 522.38,
-      "processingFps": 675.7,
+      "processingMs": 42.71,
+      "processingFps": 8264.7,
       "predicted": [
         {
           "startMs": 5211,
@@ -1124,12 +1091,6 @@
           "peakMs": 11456,
           "endMs": 11853,
           "canonicalSliceHash": "14592331433625833423"
-        },
-        {
-          "startMs": 12660,
-          "peakMs": 13307,
-          "endMs": 13636,
-          "canonicalSliceHash": "1275887164555299051"
         },
         {
           "startMs": 14564,
@@ -1160,6 +1121,11 @@
       "split": "held_out",
       "truthCount": 8,
       "predictedCount": 8,
+      "needsReviewCandidateCount": 0,
+      "rejectedCandidateCount": 1,
+      "rejectedCandidateReasons": [
+        "incomplete_cycle"
+      ],
       "rawTriggerCount": 10,
       "rawMatchedTriggers": 8,
       "rawFalsePositiveTriggers": 2,
@@ -1227,20 +1193,20 @@
       },
       "rustPhaseTimeline": [
         {
-          "timestampMs": 3315,
+          "timestampMs": 3370,
           "phase": "effort"
         },
         {
           "timestampMs": 3587,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 3668,
           "phase": "ready"
         },
         {
           "timestampMs": 6069,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 6487,
-          "phase": "peak"
         },
         {
           "timestampMs": 6894,
@@ -1255,10 +1221,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 8618,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 9015,
           "phase": "return"
         },
@@ -1269,10 +1231,6 @@
         {
           "timestampMs": 10242,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 10601,
-          "phase": "peak"
         },
         {
           "timestampMs": 10994,
@@ -1287,10 +1245,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 12611,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 13102,
           "phase": "return"
         },
@@ -1301,10 +1255,6 @@
         {
           "timestampMs": 14351,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 14743,
-          "phase": "peak"
         },
         {
           "timestampMs": 15093,
@@ -1319,10 +1269,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 16838,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 17182,
           "phase": "return"
         },
@@ -1333,10 +1279,6 @@
         {
           "timestampMs": 18504,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 18854,
-          "phase": "peak"
         },
         {
           "timestampMs": 19195,
@@ -1351,10 +1293,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 21095,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 21441,
           "phase": "return"
         },
@@ -1365,10 +1303,6 @@
         {
           "timestampMs": 23247,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 23380,
-          "phase": "peak"
         },
         {
           "timestampMs": 23713,
@@ -1389,8 +1323,8 @@
       "missedReps": 0,
       "meanBoundaryErrorMs": 351,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 110.85,
-      "processingFps": 3445.9,
+      "processingMs": 28.6,
+      "processingFps": 13354.5,
       "predicted": [
         {
           "startMs": 5971,
@@ -1450,14 +1384,20 @@
       "profileVersion": "lat-pulldown/rear-left-45/bilateral/cable/v1",
       "split": "challenge",
       "truthCount": 6,
-      "predictedCount": 5,
+      "predictedCount": 0,
+      "needsReviewCandidateCount": 6,
+      "rejectedCandidateCount": 2,
+      "rejectedCandidateReasons": [
+        "anti_interference_filter",
+        "anti_interference_filter"
+      ],
       "rawTriggerCount": 9,
       "rawMatchedTriggers": 6,
       "rawFalsePositiveTriggers": 3,
       "rawMissedReps": 0,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 3,
-      "productFilteredTriggerCount": 4,
+      "productFilteredTriggerCount": 9,
       "tsPredictedCount": 6,
       "tsMatchedReps": 6,
       "tsFirstDivergence": {
@@ -1468,28 +1408,23 @@
       },
       "rustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 7925,
-        "boundary": "endMs",
-        "deltaMs": -374
+        "timestampMs": 6526,
+        "reason": "missing-rep"
       },
       "tsRustFirstDivergence": {
         "repIndex": 1,
         "timestampMs": 4980,
-        "boundary": "startMs",
-        "deltaMs": 1786
+        "reason": "missing-rep"
       },
       "firstStateFork": {
         "rustVsTruth": {
-          "eventIndex": 2,
+          "eventIndex": 0,
           "expected": {
-            "timestampMs": 8299,
-            "phase": "ready"
+            "timestampMs": 6526,
+            "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 7925,
-            "phase": "ready"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         },
         "tsVsTruth": {
           "eventIndex": 0,
@@ -1509,21 +1444,14 @@
             "timestampMs": 4980,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 6766,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         }
       },
       "rustPhaseTimeline": [
         {
           "timestampMs": 6835,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 7173,
-          "phase": "peak"
         },
         {
           "timestampMs": 7713,
@@ -1538,10 +1466,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 9496,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 9904,
           "phase": "return"
         },
@@ -1552,10 +1476,6 @@
         {
           "timestampMs": 11265,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 11668,
-          "phase": "peak"
         },
         {
           "timestampMs": 12054,
@@ -1570,10 +1490,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 13693,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 14175,
           "phase": "return"
         },
@@ -1584,10 +1500,6 @@
         {
           "timestampMs": 15260,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 15782,
-          "phase": "peak"
         },
         {
           "timestampMs": 16129,
@@ -1602,16 +1514,16 @@
           "phase": "effort"
         },
         {
+          "timestampMs": 18023,
+          "phase": "return"
+        },
+        {
           "timestampMs": 18236,
           "phase": "ready"
         },
         {
           "timestampMs": 20134,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 20193,
-          "phase": "peak"
         },
         {
           "timestampMs": 20327,
@@ -1624,10 +1536,6 @@
         {
           "timestampMs": 22796,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 22861,
-          "phase": "peak"
         },
         {
           "timestampMs": 22934,
@@ -1643,45 +1551,14 @@
         }
       ],
       "exactCount": false,
-      "matchedReps": 5,
+      "matchedReps": 0,
       "falsePositiveReps": 0,
-      "missedReps": 1,
-      "meanBoundaryErrorMs": 288,
+      "missedReps": 6,
+      "meanBoundaryErrorMs": null,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 127.27,
-      "processingFps": 2702.8,
-      "predicted": [
-        {
-          "startMs": 6766,
-          "peakMs": 7437,
-          "endMs": 7925,
-          "canonicalSliceHash": "9471853446872227110"
-        },
-        {
-          "startMs": 8955,
-          "peakMs": 9700,
-          "endMs": 10211,
-          "canonicalSliceHash": "16718560545810440435"
-        },
-        {
-          "startMs": 11199,
-          "peakMs": 11862,
-          "endMs": 12271,
-          "canonicalSliceHash": "8853083590750032294"
-        },
-        {
-          "startMs": 13283,
-          "peakMs": 13904,
-          "endMs": 14329,
-          "canonicalSliceHash": "17598187431518434668"
-        },
-        {
-          "startMs": 15199,
-          "peakMs": 15782,
-          "endMs": 16262,
-          "canonicalSliceHash": "4921529938847500739"
-        }
-      ]
+      "processingMs": 23.31,
+      "processingFps": 14756.8,
+      "predicted": []
     },
     {
       "captureId": "field-capture-2026-08-02T18-46-52-295Z",
@@ -1691,14 +1568,19 @@
       "profileVersion": "lat-pulldown/rear-left-45/bilateral/cable/v1",
       "split": "tuning",
       "truthCount": 6,
-      "predictedCount": 7,
+      "predictedCount": 6,
+      "needsReviewCandidateCount": 1,
+      "rejectedCandidateCount": 1,
+      "rejectedCandidateReasons": [
+        "incomplete_cycle"
+      ],
       "rawTriggerCount": 8,
       "rawMatchedTriggers": 6,
       "rawFalsePositiveTriggers": 2,
       "rawMissedReps": 0,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 1,
+      "productFilteredTriggerCount": 2,
       "tsPredictedCount": 7,
       "tsMatchedReps": 6,
       "tsFirstDivergence": {
@@ -1763,10 +1645,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 6656,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 7081,
           "phase": "return"
         },
@@ -1777,10 +1655,6 @@
         {
           "timestampMs": 8340,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 8617,
-          "phase": "peak"
         },
         {
           "timestampMs": 9065,
@@ -1795,10 +1669,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 10634,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 11154,
           "phase": "return"
         },
@@ -1809,10 +1679,6 @@
         {
           "timestampMs": 12266,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 12626,
-          "phase": "peak"
         },
         {
           "timestampMs": 13060,
@@ -1835,10 +1701,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 14570,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 14908,
           "phase": "return"
         },
@@ -1851,10 +1713,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 16381,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 16774,
           "phase": "return"
         },
@@ -1865,10 +1723,6 @@
         {
           "timestampMs": 18889,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 19086,
-          "phase": "peak"
         },
         {
           "timestampMs": 19495,
@@ -1887,14 +1741,14 @@
           "phase": "ready"
         }
       ],
-      "exactCount": false,
+      "exactCount": true,
       "matchedReps": 6,
-      "falsePositiveReps": 1,
+      "falsePositiveReps": 0,
       "missedReps": 0,
       "meanBoundaryErrorMs": 305,
-      "negativeWindowFalsePositives": 1,
-      "processingMs": 70.28,
-      "processingFps": 4794.9,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 22.48,
+      "processingFps": 14991.4,
       "predicted": [
         {
           "startMs": 6277,
@@ -1931,12 +1785,6 @@
           "peakMs": 16439,
           "endMs": 16983,
           "canonicalSliceHash": "1835637783357018880"
-        },
-        {
-          "startMs": 18826,
-          "peakMs": 21816,
-          "endMs": 22032,
-          "canonicalSliceHash": "15896922502791845377"
         }
       ]
     },
@@ -1948,14 +1796,17 @@
       "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 12,
-      "predictedCount": 13,
+      "predictedCount": 3,
+      "needsReviewCandidateCount": 10,
+      "rejectedCandidateCount": 0,
+      "rejectedCandidateReasons": [],
       "rawTriggerCount": 13,
       "rawMatchedTriggers": 11,
       "rawFalsePositiveTriggers": 2,
       "rawMissedReps": 1,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 0,
+      "productFilteredTriggerCount": 10,
       "tsPredictedCount": 14,
       "tsMatchedReps": 11,
       "tsFirstDivergence": {
@@ -2020,10 +1871,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 1600,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 4334,
           "phase": "return"
         },
@@ -2034,10 +1881,6 @@
         {
           "timestampMs": 5701,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 5901,
-          "phase": "peak"
         },
         {
           "timestampMs": 6668,
@@ -2052,10 +1895,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 7901,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 8768,
           "phase": "return"
         },
@@ -2066,10 +1905,6 @@
         {
           "timestampMs": 9735,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 9868,
-          "phase": "peak"
         },
         {
           "timestampMs": 10635,
@@ -2084,10 +1919,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 11735,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 12502,
           "phase": "return"
         },
@@ -2098,10 +1929,6 @@
         {
           "timestampMs": 13535,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 13668,
-          "phase": "peak"
         },
         {
           "timestampMs": 14368,
@@ -2116,10 +1943,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 15402,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 16235,
           "phase": "return"
         },
@@ -2130,10 +1953,6 @@
         {
           "timestampMs": 17102,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 17235,
-          "phase": "peak"
         },
         {
           "timestampMs": 18069,
@@ -2148,10 +1967,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 19236,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 20202,
           "phase": "return"
         },
@@ -2162,10 +1977,6 @@
         {
           "timestampMs": 21002,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 21236,
-          "phase": "peak"
         },
         {
           "timestampMs": 21903,
@@ -2180,10 +1991,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 23036,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 23769,
           "phase": "return"
         },
@@ -2194,10 +2001,6 @@
         {
           "timestampMs": 24670,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 24870,
-          "phase": "peak"
         },
         {
           "timestampMs": 25603,
@@ -2212,10 +2015,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 26936,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 29503,
           "phase": "return"
         },
@@ -2225,13 +2024,13 @@
         }
       ],
       "exactCount": false,
-      "matchedReps": 11,
-      "falsePositiveReps": 2,
-      "missedReps": 1,
-      "meanBoundaryErrorMs": 785,
-      "negativeWindowFalsePositives": 2,
-      "processingMs": 111.18,
-      "processingFps": 3948.4,
+      "matchedReps": 2,
+      "falsePositiveReps": 1,
+      "missedReps": 10,
+      "meanBoundaryErrorMs": 862,
+      "negativeWindowFalsePositives": 1,
+      "processingMs": 30.6,
+      "processingFps": 14348.4,
       "predicted": [
         {
           "startMs": 1334,
@@ -2246,70 +2045,10 @@
           "canonicalSliceHash": "5819079754154438366"
         },
         {
-          "startMs": 7634,
-          "peakMs": 8234,
-          "endMs": 9101,
-          "canonicalSliceHash": "15696990420119122025"
-        },
-        {
-          "startMs": 9635,
-          "peakMs": 10068,
-          "endMs": 10835,
-          "canonicalSliceHash": "7651987200295441278"
-        },
-        {
-          "startMs": 11335,
-          "peakMs": 12002,
-          "endMs": 12768,
-          "canonicalSliceHash": "13201987171736801296"
-        },
-        {
-          "startMs": 13435,
-          "peakMs": 13902,
-          "endMs": 14635,
-          "canonicalSliceHash": "243633572854462861"
-        },
-        {
-          "startMs": 15135,
-          "peakMs": 15702,
-          "endMs": 16469,
-          "canonicalSliceHash": "628099331104425216"
-        },
-        {
-          "startMs": 17002,
-          "peakMs": 17469,
-          "endMs": 18269,
-          "canonicalSliceHash": "8133155371365260638"
-        },
-        {
-          "startMs": 18936,
-          "peakMs": 19436,
-          "endMs": 20336,
-          "canonicalSliceHash": "145140172557084621"
-        },
-        {
-          "startMs": 20936,
-          "peakMs": 21436,
-          "endMs": 22169,
-          "canonicalSliceHash": "2930181324558031982"
-        },
-        {
           "startMs": 22736,
           "peakMs": 23269,
           "endMs": 24036,
           "canonicalSliceHash": "10202458352554278006"
-        },
-        {
-          "startMs": 24603,
-          "peakMs": 25103,
-          "endMs": 26036,
-          "canonicalSliceHash": "16664981681740718272"
-        },
-        {
-          "startMs": 26636,
-          "peakMs": 28837,
-          "endMs": 29770,
-          "canonicalSliceHash": "6189078650351672545"
         }
       ]
     },
@@ -2321,14 +2060,21 @@
       "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "held_out",
       "truthCount": 6,
-      "predictedCount": 4,
+      "predictedCount": 2,
+      "needsReviewCandidateCount": 2,
+      "rejectedCandidateCount": 3,
+      "rejectedCandidateReasons": [
+        "incomplete_cycle",
+        "incomplete_cycle",
+        "incomplete_cycle"
+      ],
       "rawTriggerCount": 7,
       "rawMatchedTriggers": 2,
       "rawFalsePositiveTriggers": 5,
       "rawMissedReps": 4,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 3,
+      "productFilteredTriggerCount": 5,
       "tsPredictedCount": 7,
       "tsMatchedReps": 3,
       "tsFirstDivergence": {
@@ -2339,15 +2085,15 @@
       },
       "rustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 567,
+        "timestampMs": 5046,
         "boundary": "startMs",
-        "deltaMs": -4479
+        "deltaMs": 10789
       },
       "tsRustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 7101,
-        "boundary": "endMs",
-        "deltaMs": 8734
+        "timestampMs": 700,
+        "boundary": "startMs",
+        "deltaMs": 15135
       },
       "firstStateFork": {
         "rustVsTruth": {
@@ -2357,7 +2103,7 @@
             "phase": "effort"
           },
           "actual": {
-            "timestampMs": 567,
+            "timestampMs": 15835,
             "phase": "effort"
           },
           "reason": "time"
@@ -2375,14 +2121,14 @@
           "reason": "time"
         },
         "tsVsRust": {
-          "eventIndex": 2,
+          "eventIndex": 0,
           "expected": {
-            "timestampMs": 7101,
-            "phase": "ready"
+            "timestampMs": 700,
+            "phase": "effort"
           },
           "actual": {
             "timestampMs": 15835,
-            "phase": "ready"
+            "phase": "effort"
           },
           "reason": "time"
         }
@@ -2391,10 +2137,6 @@
         {
           "timestampMs": 700,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 733,
-          "phase": "peak"
         },
         {
           "timestampMs": 4267,
@@ -2409,10 +2151,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 16268,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 17868,
           "phase": "return"
         },
@@ -2423,10 +2161,6 @@
         {
           "timestampMs": 19302,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 19735,
-          "phase": "peak"
         },
         {
           "timestampMs": 20935,
@@ -2465,10 +2199,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 23836,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 24069,
           "phase": "return"
         },
@@ -2487,19 +2217,13 @@
       ],
       "exactCount": false,
       "matchedReps": 1,
-      "falsePositiveReps": 3,
+      "falsePositiveReps": 1,
       "missedReps": 5,
       "meanBoundaryErrorMs": 956,
-      "negativeWindowFalsePositives": 2,
-      "processingMs": 63.79,
-      "processingFps": 6145.6,
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 23.8,
+      "processingFps": 16471,
       "predicted": [
-        {
-          "startMs": 567,
-          "peakMs": 3967,
-          "endMs": 15835,
-          "canonicalSliceHash": "10263345576870027269"
-        },
         {
           "startMs": 15835,
           "peakMs": 17035,
@@ -2511,12 +2235,6 @@
           "peakMs": 20002,
           "endMs": 21135,
           "canonicalSliceHash": "17484272128651326926"
-        },
-        {
-          "startMs": 22569,
-          "peakMs": 25136,
-          "endMs": 26269,
-          "canonicalSliceHash": "6606449035032116746"
         }
       ]
     },
@@ -2528,14 +2246,19 @@
       "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 5,
-      "predictedCount": 1,
-      "rawTriggerCount": 1,
+      "predictedCount": 0,
+      "needsReviewCandidateCount": 1,
+      "rejectedCandidateCount": 1,
+      "rejectedCandidateReasons": [
+        "duration_exceeded"
+      ],
+      "rawTriggerCount": 2,
       "rawMatchedTriggers": 0,
-      "rawFalsePositiveTriggers": 1,
+      "rawFalsePositiveTriggers": 2,
       "rawMissedReps": 5,
       "rawExactCount": false,
-      "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 0,
+      "rawNegativeWindowFalsePositives": 2,
+      "productFilteredTriggerCount": 2,
       "tsPredictedCount": 6,
       "tsMatchedReps": 2,
       "tsFirstDivergence": {
@@ -2546,15 +2269,13 @@
       },
       "rustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 867,
-        "boundary": "startMs",
-        "deltaMs": -6082
+        "timestampMs": 6949,
+        "reason": "missing-rep"
       },
       "tsRustFirstDivergence": {
         "repIndex": 1,
         "timestampMs": 534,
-        "boundary": "startMs",
-        "deltaMs": 333
+        "reason": "missing-rep"
       },
       "firstStateFork": {
         "rustVsTruth": {
@@ -2563,11 +2284,8 @@
             "timestampMs": 6949,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 867,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         },
         "tsVsTruth": {
           "eventIndex": 0,
@@ -2587,21 +2305,14 @@
             "timestampMs": 534,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 867,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         }
       },
       "rustPhaseTimeline": [
         {
           "timestampMs": 934,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 1067,
-          "phase": "peak"
         },
         {
           "timestampMs": 5634,
@@ -2613,6 +2324,14 @@
         },
         {
           "timestampMs": 26936,
+          "phase": "ready"
+        },
+        {
+          "timestampMs": 27036,
+          "phase": "effort"
+        },
+        {
+          "timestampMs": 27436,
           "phase": "return"
         },
         {
@@ -2622,20 +2341,13 @@
       ],
       "exactCount": false,
       "matchedReps": 0,
-      "falsePositiveReps": 1,
+      "falsePositiveReps": 0,
       "missedReps": 5,
       "meanBoundaryErrorMs": null,
-      "negativeWindowFalsePositives": 1,
-      "processingMs": 69,
-      "processingFps": 6695.8,
-      "predicted": [
-        {
-          "startMs": 867,
-          "peakMs": 5267,
-          "endMs": 27670,
-          "canonicalSliceHash": "1700438312431975300"
-        }
-      ]
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 33.32,
+      "processingFps": 13866.5,
+      "predicted": []
     },
     {
       "captureId": "field-capture-2026-08-03T08-09-44-714Z",
@@ -2645,14 +2357,17 @@
       "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 3,
-      "predictedCount": 1,
+      "predictedCount": 0,
+      "needsReviewCandidateCount": 1,
+      "rejectedCandidateCount": 0,
+      "rejectedCandidateReasons": [],
       "rawTriggerCount": 1,
       "rawMatchedTriggers": 0,
       "rawFalsePositiveTriggers": 1,
       "rawMissedReps": 3,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 0,
+      "productFilteredTriggerCount": 1,
       "tsPredictedCount": 3,
       "tsMatchedReps": 0,
       "tsFirstDivergence": {
@@ -2663,15 +2378,13 @@
       },
       "rustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 667,
-        "boundary": "startMs",
-        "deltaMs": -9149
+        "timestampMs": 9816,
+        "reason": "missing-rep"
       },
       "tsRustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 667,
-        "boundary": "startMs",
-        "deltaMs": -12068
+        "timestampMs": 12735,
+        "reason": "missing-rep"
       },
       "firstStateFork": {
         "rustVsTruth": {
@@ -2680,11 +2393,8 @@
             "timestampMs": 9816,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 667,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         },
         "tsVsTruth": {
           "eventIndex": 0,
@@ -2704,21 +2414,14 @@
             "timestampMs": 12735,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 667,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         }
       },
       "rustPhaseTimeline": [
         {
           "timestampMs": 700,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 867,
-          "phase": "peak"
         },
         {
           "timestampMs": 5700,
@@ -2731,20 +2434,13 @@
       ],
       "exactCount": false,
       "matchedReps": 0,
-      "falsePositiveReps": 1,
+      "falsePositiveReps": 0,
       "missedReps": 3,
       "meanBoundaryErrorMs": null,
-      "negativeWindowFalsePositives": 1,
-      "processingMs": 106.76,
-      "processingFps": 4645.9,
-      "predicted": [
-        {
-          "startMs": 667,
-          "peakMs": 5100,
-          "endMs": 27969,
-          "canonicalSliceHash": "14117527490071101561"
-        }
-      ]
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 34.96,
+      "processingFps": 14186.4,
+      "predicted": []
     },
     {
       "captureId": "field-capture-2026-08-03T08-15-35-147Z",
@@ -2754,14 +2450,17 @@
       "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 8,
-      "predictedCount": 1,
+      "predictedCount": 0,
+      "needsReviewCandidateCount": 1,
+      "rejectedCandidateCount": 0,
+      "rejectedCandidateReasons": [],
       "rawTriggerCount": 1,
       "rawMatchedTriggers": 0,
       "rawFalsePositiveTriggers": 1,
       "rawMissedReps": 8,
       "rawExactCount": false,
       "rawNegativeWindowFalsePositives": 1,
-      "productFilteredTriggerCount": 0,
+      "productFilteredTriggerCount": 1,
       "tsPredictedCount": 10,
       "tsMatchedReps": 7,
       "tsFirstDivergence": {
@@ -2772,15 +2471,13 @@
       },
       "rustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 500,
-        "boundary": "startMs",
-        "deltaMs": -5972
+        "timestampMs": 6472,
+        "reason": "missing-rep"
       },
       "tsRustFirstDivergence": {
         "repIndex": 1,
-        "timestampMs": 500,
-        "boundary": "startMs",
-        "deltaMs": -333
+        "timestampMs": 833,
+        "reason": "missing-rep"
       },
       "firstStateFork": {
         "rustVsTruth": {
@@ -2789,11 +2486,8 @@
             "timestampMs": 6472,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 500,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         },
         "tsVsTruth": {
           "eventIndex": 0,
@@ -2813,21 +2507,14 @@
             "timestampMs": 833,
             "phase": "effort"
           },
-          "actual": {
-            "timestampMs": 500,
-            "phase": "effort"
-          },
-          "reason": "time"
+          "actual": null,
+          "reason": "event-count"
         }
       },
       "rustPhaseTimeline": [
         {
           "timestampMs": 667,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 700,
-          "phase": "peak"
         },
         {
           "timestampMs": 4767,
@@ -2840,20 +2527,13 @@
       ],
       "exactCount": false,
       "matchedReps": 0,
-      "falsePositiveReps": 1,
+      "falsePositiveReps": 0,
       "missedReps": 8,
       "meanBoundaryErrorMs": null,
-      "negativeWindowFalsePositives": 1,
-      "processingMs": 57.56,
-      "processingFps": 8548.2,
-      "predicted": [
-        {
-          "startMs": 500,
-          "peakMs": 4434,
-          "endMs": 32137,
-          "canonicalSliceHash": "6263765688312463719"
-        }
-      ]
+      "negativeWindowFalsePositives": 0,
+      "processingMs": 29.2,
+      "processingFps": 16847.9,
+      "predicted": []
     },
     {
       "captureId": "field-capture-2026-08-03T09-03-30-328Z",
@@ -2863,14 +2543,25 @@
       "profileVersion": "seated-shoulder-press/front/bilateral/dumbbell/v1",
       "split": "tuning",
       "truthCount": 10,
-      "predictedCount": 3,
-      "rawTriggerCount": 20,
+      "predictedCount": 8,
+      "needsReviewCandidateCount": 1,
+      "rejectedCandidateCount": 7,
+      "rejectedCandidateReasons": [
+        "incomplete_cycle",
+        "incomplete_cycle",
+        "incomplete_cycle",
+        "incomplete_cycle",
+        "incomplete_cycle",
+        "incomplete_cycle",
+        "anti_interference_filter"
+      ],
+      "rawTriggerCount": 16,
       "rawMatchedTriggers": 10,
-      "rawFalsePositiveTriggers": 10,
+      "rawFalsePositiveTriggers": 6,
       "rawMissedReps": 0,
       "rawExactCount": false,
-      "rawNegativeWindowFalsePositives": 8,
-      "productFilteredTriggerCount": 17,
+      "rawNegativeWindowFalsePositives": 4,
+      "productFilteredTriggerCount": 8,
       "tsPredictedCount": 1,
       "tsMatchedReps": 1,
       "tsFirstDivergence": {
@@ -2883,13 +2574,13 @@
         "repIndex": 1,
         "timestampMs": 3349,
         "boundary": "startMs",
-        "deltaMs": 1518
+        "deltaMs": 4385
       },
       "tsRustFirstDivergence": {
         "repIndex": 1,
         "timestampMs": 600,
         "boundary": "startMs",
-        "deltaMs": 4267
+        "deltaMs": 7134
       },
       "firstStateFork": {
         "rustVsTruth": {
@@ -2899,7 +2590,7 @@
             "phase": "effort"
           },
           "actual": {
-            "timestampMs": 4867,
+            "timestampMs": 7734,
             "phase": "effort"
           },
           "reason": "time"
@@ -2923,7 +2614,7 @@
             "phase": "effort"
           },
           "actual": {
-            "timestampMs": 4867,
+            "timestampMs": 7734,
             "phase": "effort"
           },
           "reason": "time"
@@ -2931,51 +2622,15 @@
       },
       "rustPhaseTimeline": [
         {
-          "timestampMs": 733,
-          "phase": "effort"
-        },
-        {
-          "timestampMs": 767,
-          "phase": "ready"
-        },
-        {
           "timestampMs": 867,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 967,
-          "phase": "peak"
         },
         {
           "timestampMs": 1433,
           "phase": "return"
         },
         {
-          "timestampMs": 2467,
-          "phase": "ready"
-        },
-        {
-          "timestampMs": 2734,
-          "phase": "effort"
-        },
-        {
-          "timestampMs": 2800,
-          "phase": "ready"
-        },
-        {
-          "timestampMs": 2867,
-          "phase": "effort"
-        },
-        {
-          "timestampMs": 3134,
-          "phase": "ready"
-        },
-        {
-          "timestampMs": 3234,
-          "phase": "effort"
-        },
-        {
-          "timestampMs": 3267,
+          "timestampMs": 2334,
           "phase": "ready"
         },
         {
@@ -2991,10 +2646,6 @@
           "phase": "effort"
         },
         {
-          "timestampMs": 5434,
-          "phase": "peak"
-        },
-        {
           "timestampMs": 6301,
           "phase": "return"
         },
@@ -3007,16 +2658,16 @@
           "phase": "effort"
         },
         {
+          "timestampMs": 8868,
+          "phase": "return"
+        },
+        {
           "timestampMs": 9068,
           "phase": "ready"
         },
         {
           "timestampMs": 10068,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 10734,
-          "phase": "peak"
         },
         {
           "timestampMs": 11034,
@@ -3029,10 +2680,6 @@
         {
           "timestampMs": 12235,
           "phase": "effort"
-        },
-        {
-          "timestampMs": 12668,
-          "phase": "peak"
         },
         {
           "timestampMs": 13301,
@@ -3055,6 +2702,10 @@
           "phase": "effort"
         },
         {
+          "timestampMs": 15602,
+          "phase": "return"
+        },
+        {
           "timestampMs": 15635,
           "phase": "ready"
         },
@@ -3063,12 +2714,20 @@
           "phase": "effort"
         },
         {
+          "timestampMs": 17902,
+          "phase": "return"
+        },
+        {
           "timestampMs": 18002,
           "phase": "ready"
         },
         {
           "timestampMs": 19235,
           "phase": "effort"
+        },
+        {
+          "timestampMs": 20102,
+          "phase": "return"
         },
         {
           "timestampMs": 20235,
@@ -3085,6 +2744,10 @@
         {
           "timestampMs": 21502,
           "phase": "effort"
+        },
+        {
+          "timestampMs": 22602,
+          "phase": "return"
         },
         {
           "timestampMs": 22702,
@@ -3104,6 +2767,10 @@
         },
         {
           "timestampMs": 25003,
+          "phase": "return"
+        },
+        {
+          "timestampMs": 25036,
           "phase": "ready"
         },
         {
@@ -3124,19 +2791,19 @@
         }
       ],
       "exactCount": false,
-      "matchedReps": 3,
+      "matchedReps": 8,
       "falsePositiveReps": 0,
-      "missedReps": 7,
-      "meanBoundaryErrorMs": 465,
+      "missedReps": 2,
+      "meanBoundaryErrorMs": 311,
       "negativeWindowFalsePositives": 0,
-      "processingMs": 88.44,
-      "processingFps": 5235,
+      "processingMs": 32.22,
+      "processingFps": 14371.7,
       "predicted": [
         {
-          "startMs": 4867,
-          "peakMs": 5667,
-          "endMs": 6734,
-          "canonicalSliceHash": "4886693985253181102"
+          "startMs": 7734,
+          "peakMs": 8468,
+          "endMs": 9068,
+          "canonicalSliceHash": "7765109574076746549"
         },
         {
           "startMs": 10001,
@@ -3149,6 +2816,36 @@
           "peakMs": 12868,
           "endMs": 13468,
           "canonicalSliceHash": "3740067404549752079"
+        },
+        {
+          "startMs": 14735,
+          "peakMs": 15368,
+          "endMs": 15635,
+          "canonicalSliceHash": "14229896047269328148"
+        },
+        {
+          "startMs": 16968,
+          "peakMs": 17669,
+          "endMs": 18002,
+          "canonicalSliceHash": "7070229192291522830"
+        },
+        {
+          "startMs": 19135,
+          "peakMs": 19702,
+          "endMs": 20235,
+          "canonicalSliceHash": "12047699807900062432"
+        },
+        {
+          "startMs": 21402,
+          "peakMs": 22136,
+          "endMs": 22702,
+          "canonicalSliceHash": "1904736493941696958"
+        },
+        {
+          "startMs": 23969,
+          "peakMs": 24736,
+          "endMs": 25036,
+          "canonicalSliceHash": "6348687721340020811"
         }
       ]
     }
