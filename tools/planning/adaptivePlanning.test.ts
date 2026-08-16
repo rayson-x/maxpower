@@ -361,10 +361,11 @@ test("a candidate missing knowledgePins or goalContractRef is blocked with instr
   const broken = candidate(app) as unknown as { planRevision: Record<string, unknown> };
   delete broken.planRevision.knowledgePins;
   delete broken.planRevision.goalContractRef;
+  for (const session of (broken.planRevision.sessions ?? []) as Record<string, unknown>[]) delete session.knowledgePins;
   const validation = validateAdaptivePlanCandidate({ candidate: broken as unknown as AdaptivePlanCandidate, goal: domain.goalContract!, profile: domain.profile!.value, mandate: domain.mandate!.value, today: "2026-08-15", safetyBlocked: false });
   assert.equal(validation.status, "invalid");
   const codes = validation.issues.map((issue) => issue.code);
-  assert.ok(codes.includes("knowledge_pins_missing"));
+  assert.equal(codes.filter((code) => code === "knowledge_pins_missing").length, 2, "revision 级与 session 级各一条");
   assert.ok(codes.includes("goal_ref_mismatch"));
   assert.match(validation.issues.find((issue) => issue.code === "knowledge_pins_missing")?.message ?? "", /knowledgePins/);
 });

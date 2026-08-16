@@ -145,6 +145,10 @@ export class KnowledgePackRegistry implements MotionCapabilityResolver {
   }
 
   assertVersionPins(pins: KnowledgeVersionPins): void {
+    // 缺 pins 是结构性错误（模型候选偶发省略 session 级 pins），给领域错误，不裸 TypeError。
+    if (!pins?.knowledgePack || !pins.exerciseCatalog) {
+      throw new KnowledgePackValidationError("missing_reference", ["version_pins_absent"]);
+    }
     const pinnedPack = this.packsByHash.get(pins.knowledgePack.contentHash);
     if (
       !pinnedPack ||

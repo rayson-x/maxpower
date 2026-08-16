@@ -84,6 +84,12 @@ export function validateAdaptivePlanCandidate(input: {
   if (!pins?.knowledgePack?.contentHash || !pins.exerciseCatalog?.contentHash) {
     issues.push(issue("knowledge_pins_missing", "planRevision.knowledgePins", "候选必须原样携带固定输入里的 knowledgePins（plan.read_fixed_input 返回的 knowledgePins 对象整体复制到 planRevision.knowledgePins）"));
   }
+  for (const session of candidate.planRevision.sessions) {
+    if (!session.knowledgePins?.knowledgePack?.contentHash) {
+      issues.push(issue("knowledge_pins_missing", `planRevision.sessions.${session.id}.knowledgePins`, "每个 session 也必须原样携带固定输入里的 knowledgePins"));
+      break;
+    }
+  }
   if (!candidate.planRevision.goalContractRef) {
     issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：goalContractRef = { id: "${input.goal.value.id}", revision: ${input.goal.revision} }（原样复制，不要自行发明或省略 revision）`));
   } else if (candidate.planRevision.goalContractRef.id !== input.goal.value.id || candidate.planRevision.goalContractRef.revision !== input.goal.revision) issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：goalContractRef = { id: "${input.goal.value.id}", revision: ${input.goal.revision} }（原样复制，不要自行发明或省略 revision）`));
