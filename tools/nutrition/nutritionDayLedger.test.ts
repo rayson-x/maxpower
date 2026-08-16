@@ -32,8 +32,8 @@ function mealEvent(input: {
   proteinGrams?: number;
   fatGrams?: number;
   carbohydrateGrams?: number;
-  simplified?: boolean;
-  confidence?: "confirmed" | "estimated";
+  descriptive?: boolean;
+  dayCoverage?: "partial" | "complete";
   lifecycle?: "active" | "superseded" | "tombstoned";
   correctsEventId?: string;
 }): TimelineProjectionEvent {
@@ -49,17 +49,16 @@ function mealEvent(input: {
       kind: "nutrition",
       observationId: `${input.eventId}-observation`,
       mealSlot: input.slot,
-      ...(input.energyKcal === undefined ? {} : { energy: { value: input.energyKcal, unit: "kcal" as const } }),
-      ...(input.proteinGrams === undefined ? {} : { proteinGrams: input.proteinGrams }),
-      ...(input.fatGrams === undefined ? {} : { fatGrams: input.fatGrams }),
-      ...(input.carbohydrateGrams === undefined ? {} : { carbohydrateGrams: input.carbohydrateGrams }),
-      ...(input.simplified
-        ? {
-            observationMode: "simplified" as const,
-            simplified: { proteinCompletion: "met" as const, hunger: "moderate" as const, deviation: "none" as const },
-          }
-        : { observationMode: "precise" as const }),
-      confidence: input.confidence ?? "confirmed",
+      nutrients: [
+        ...(input.energyKcal === undefined ? [] : [{ nutrientId: "energy" as const, amount: input.energyKcal, unit: "kcal" as const, source: { kind: "manual_form" as const, ref: input.eventId } }]),
+        ...(input.proteinGrams === undefined ? [] : [{ nutrientId: "protein" as const, amount: input.proteinGrams, unit: "g" as const, source: { kind: "manual_form" as const, ref: input.eventId } }]),
+        ...(input.fatGrams === undefined ? [] : [{ nutrientId: "fat" as const, amount: input.fatGrams, unit: "g" as const, source: { kind: "manual_form" as const, ref: input.eventId } }]),
+        ...(input.carbohydrateGrams === undefined ? [] : [{ nutrientId: "carbohydrate" as const, amount: input.carbohydrateGrams, unit: "g" as const, source: { kind: "manual_form" as const, ref: input.eventId } }]),
+      ],
+      observationMode: input.descriptive ? "descriptive" as const : "structured" as const,
+      ...(input.dayCoverage ? { dayCoverage: input.dayCoverage } : {}),
+      ...(input.descriptive ? { qualitative: { proteinCompletion: "met" as const, hunger: "moderate" as const, deviation: "none" as const } } : {}),
+      confidence: "confirmed",
     },
     envelope: {
       id: `${input.eventId}-envelope`,
@@ -152,7 +151,7 @@ test("四项账本给出 target、consumed 和 remaining，超额时保留负 re
     plan,
     events: [
       mealEvent({ eventId: "e1", occurredAt: "2026-08-09T08:00:00.000+08:00", slot: "breakfast", energyKcal: 900, proteinGrams: 60, fatGrams: 30, carbohydrateGrams: 90 }),
-      mealEvent({ eventId: "e2", occurredAt: "2026-08-09T12:30:00.000+08:00", slot: "lunch", energyKcal: 1600, proteinGrams: 70, fatGrams: 50, carbohydrateGrams: 200 }),
+      mealEvent({ eventId: "e2", occurredAt: "2026-08-09T12:30:00.000+08:00", slot: "lunch", energyKcal: 1600, proteinGrams: 70, fatGrams: 50, carbohydrateGrams: 200, dayCoverage: "complete" }),
     ],
   });
 
@@ -181,7 +180,7 @@ test("轻量记录计入覆盖但不产生数值摄入，剩余额度只对已�
     plan,
     events: [
       mealEvent({ eventId: "e1", occurredAt: "2026-08-09T08:00:00.000+08:00", slot: "breakfast", energyKcal: 500, proteinGrams: 40 }),
-      mealEvent({ eventId: "e2", occurredAt: "2026-08-09T12:30:00.000+08:00", slot: "lunch", simplified: true }),
+      mealEvent({ eventId: "e2", occurredAt: "2026-08-09T12:30:00.000+08:00", slot: "lunch", descriptive: true }),
     ],
   });
 
@@ -190,19 +189,22 @@ test("轻量记录计入覆盖但不产生数值摄入，剩余额度只对已�
   assert.equal(ledger.unquantifiedMealCount, 1);
   assert.equal(ledger.nutrients.energy.consumedLogged, 500);
   assert.equal(ledger.nutrients.energy.intakeKnown, false);
-  assert.ok(ledger.nutrients.energy.missing.includes("unquantified_meal"));
+  assert.ok(ledger.nutrients.energy.missing.includes("nutrient_not_provided"));
 });
 
-test("未确认的估算不计入 consumed", () => {
+test("关闭当天记录不会把未填写营养的餐次当成零摄入", () => {
   const plan = deriveNutritionDayPlan({ date: "2026-08-09", timezoneOffsetMinutes: OFFSET, strategy });
   const ledger = projectNutritionDayLedger({
     plan,
     events: [
-      mealEvent({ eventId: "e1", occurredAt: "2026-08-09T08:00:00.000+08:00", slot: "breakfast", energyKcal: 500 }),
-      mealEvent({ eventId: "e2", occurredAt: "2026-08-09T12:00:00.000+08:00", slot: "lunch", energyKcal: 800, confidence: "estimated" }),
+      mealEvent({ eventId: "descriptive-breakfast", occurredAt: "2026-08-09T08:00:00.000+08:00", slot: "breakfast", descriptive: true }),
+      mealEvent({ eventId: "closed-dinner", occurredAt: "2026-08-09T20:00:00.000+08:00", slot: "dinner", energyKcal: 600, dayCoverage: "complete" }),
     ],
   });
-  assert.equal(ledger.nutrients.energy.consumedLogged, 500);
+  assert.equal(ledger.coverage, "partial");
+  assert.equal(ledger.nutrients.energy.intakeKnown, false);
+  assert.equal(ledger.nutrients.energy.consumedLogged, 600);
+  assert.ok(ledger.nutrients.energy.missing.includes("nutrient_not_provided"));
 });
 
 test("餐次按早午晚加餐分组并保留每条事实的来源与确认状态", () => {

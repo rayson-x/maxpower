@@ -186,7 +186,7 @@ export class HumanActionCoordinator {
       pendingHumanActions: [pending],
       issueTokens: [token],
       ...(existingRun
-        ? { runs: [{ ...existingRun, status: "suspended", updatedAt: now }] }
+        ? { runs: [{ ...existingRun, status: "awaiting_user", updatedAt: now }] }
         : {}),
       ...(existingTool
         ? { toolCalls: [{ ...existingTool, status: "suspended", updatedAt: now }] }
@@ -343,30 +343,23 @@ function resolveRuntimeFrontier(
   snapshot: Awaited<ReturnType<CoachLedger["read"]>>,
   userId: string,
 ): { planRevision: number; mandateRevision: number; factRefs: FactRef[] } {
-  const legacy = snapshot.users.find((candidate) => candidate.userId === userId);
   const domain = projectDomainEvents(snapshot.domainEvents, { userId });
-  const planRevision = domain.plan?.revision ?? legacy?.plan.revision ?? 0;
-  const mandateRevision = domain.mandate?.revision ?? legacy?.mandate.revision ?? 0;
+  const planRevision = domain.plan?.revision ?? 0;
+  const mandateRevision = domain.mandate?.revision ?? 0;
   return {
     planRevision,
     mandateRevision,
     factRefs: [
       ...(domain.profile
         ? [{ aggregate: "profile" as const, id: domain.profile.value.id, revision: domain.profile.revision }]
-        : legacy
-          ? [{ aggregate: "profile" as const, id: userId, revision: legacy.profileRevision }]
-          : []),
+        : []),
       ...(domain.plan
         ? [{ aggregate: "plan" as const, id: domain.plan.value.id, revision: domain.plan.revision }]
-        : legacy
-          ? [{ aggregate: "plan" as const, id: userId, revision: legacy.plan.revision }]
-          : []),
-      { aggregate: "timeline", id: `timeline.${userId}`, revision: domain.timeline.revision || legacy?.timelineRevision || 0 },
+        : []),
+      { aggregate: "timeline", id: `timeline.${userId}`, revision: domain.timeline.revision },
       ...(domain.mandate
         ? [{ aggregate: "mandate" as const, id: domain.mandate.value.id, revision: domain.mandate.revision }]
-        : legacy
-          ? [{ aggregate: "mandate" as const, id: userId, revision: legacy.mandate.revision }]
-          : []),
+        : []),
       ...domain.safetyConstraints.map((item) => ({
         aggregate: "safety" as const,
         id: item.value.id,

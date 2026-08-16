@@ -3,10 +3,6 @@ import type { Principal } from "../../kernel/principal.js";
 export const DEFAULT_IDENTITY_SCOPES = [
   "account:read",
   "account:delete",
-  "data:read",
-  "data:write",
-  "media:read",
-  "media:write",
   "llm:invoke",
 ] as const;
 

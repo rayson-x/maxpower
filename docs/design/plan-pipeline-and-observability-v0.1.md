@@ -10,7 +10,7 @@
 
 ```
 每组确认（actualLoad/actualReps/actualRIR）→ workout_session 聚合 ✓
-→ completeWorkoutSession 写 timeline 时丢弃负荷数据（createCoachApplication.ts:5322）
+→ 旧流水线曾在写 Timeline 时丢弃负荷数据（该实现已删除）
 → deriveHistory 只认 timeline.historicalSet → 生产中恒为空（GoalCyclePlanner.ts:1144）
 → hasHistory 恒 false → 负荷永远 unknown、RIR 永远 4-5、组数钳到 ≤2、动作评分无历史分
 ```

@@ -2,15 +2,11 @@ import { Hono } from "hono";
 
 import { ApiError } from "./kernel/api-error.js";
 import type { IdentityModule, SocialAuthFlow } from "./modules/identity/model.js";
-import type { ProductData } from "./modules/product-data/model.js";
-import type { MediaLibrary } from "./modules/media/model.js";
 import type { LlmGatewayModule } from "./modules/llm/model.js";
 import type { AccountDeletion } from "./modules/account-deletion/model.js";
 import type { AccessTokenVerifier } from "./http/authenticate.js";
 import { renderError } from "./http/response.js";
 import { createIdentityRoutes } from "./http/routes/identity.js";
-import { createProductDataRoutes } from "./http/routes/product-data.js";
-import { createMediaRoutes } from "./http/routes/media.js";
 import { createLlmRoutes } from "./http/routes/llm.js";
 import { createAccountDeletionRoutes } from "./http/routes/account-deletion.js";
 import { openApiDocument } from "./openapi.js";
@@ -27,8 +23,6 @@ export interface AppDependencies {
   identity: IdentityModule;
   socialAuth?: SocialAuthFlow;
   tokens: AccessTokenVerifier;
-  productData: ProductData;
-  media: MediaLibrary;
   llm: LlmGatewayModule;
   accountDeletion: AccountDeletion;
   localDebugOtp?: string;
@@ -72,20 +66,6 @@ export function createApp(dependencies: AppDependencies, options: AppOptions = {
       ...(dependencies.localDebugOtp === undefined
         ? {}
         : { localDebugOtp: dependencies.localDebugOtp }),
-    }),
-  );
-  app.route(
-    "/v1",
-    createProductDataRoutes({
-      tokens: dependencies.tokens,
-      productData: dependencies.productData,
-    }),
-  );
-  app.route(
-    "/v1",
-    createMediaRoutes({
-      tokens: dependencies.tokens,
-      media: dependencies.media,
     }),
   );
   app.route(

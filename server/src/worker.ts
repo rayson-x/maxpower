@@ -8,13 +8,11 @@ import {
 import { ApiError } from "./kernel/api-error.js";
 import type { AccountDeletion, AccountDeletionJob } from "./modules/account-deletion/model.js";
 import type { LlmInvocationLifecycleAdapter } from "./modules/llm/ports.js";
-import type { MediaDeletionJobResult } from "./adapters/object-storage/index.js";
 import { createProductionWorkerRuntime } from "./runtime/production/production-worker-runtime.js";
 
 export interface DeletionWorkerOptions {
   deletion: Pick<AccountDeletion, "processNext">;
   llmRecovery?: Pick<LlmInvocationLifecycleAdapter, "recoverExpired">;
-  mediaDeletion?: { processNextDeletion(): Promise<MediaDeletionJobResult | undefined> };
   pollIntervalMs: number;
   signal: AbortSignal;
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
@@ -47,23 +45,11 @@ export async function runDeletionWorker(options: DeletionWorkerOptions): Promise
         writeEvent({ event: "llm_reservation_recovery_retry_scheduled" });
       }
     }
-    let mediaDeleted = false;
-    if (options.mediaDeletion !== undefined) {
-      try {
-        const job = await options.mediaDeletion.processNextDeletion();
-        if (job !== undefined) {
-          mediaDeleted = true;
-          writeEvent({ event: "media_deletion_completed", jobId: job.jobId });
-        }
-      } catch {
-        writeEvent({ event: "media_deletion_retry_scheduled", errorCode: "object_delete_failed" });
-      }
-    }
     try {
       const job = await options.deletion.processNext();
       if (job !== undefined) {
         writeEvent(completedEvent(job));
-      } else if (!recovered && !mediaDeleted) {
+      } else if (!recovered) {
         await sleep(options.pollIntervalMs, options.signal);
       }
     } catch (error) {
@@ -109,7 +95,6 @@ async function main(): Promise<void> {
     await runDeletionWorker({
       deletion: runtime.deletion,
       llmRecovery: runtime.llmRecovery,
-      mediaDeletion: runtime.mediaDeletion,
       pollIntervalMs: config.worker.deletionPollMs,
       signal: controller.signal,
     });

@@ -50,7 +50,7 @@ export class ClientSideBackupError extends Error {
 /**
  * Encrypts only the existing portable, redacted structured-data bundle. Media
  * stays excluded until a separate media-backup policy and streaming I/O path
- * exists; this method never reads a MediaBlobStore or any credential store.
+ * exists; this method never reads any attachment store or credential store.
  */
 export class ClientSidePortableBackupService {
   constructor(
@@ -87,7 +87,6 @@ export class ClientSidePortableBackupService {
       },
       // PortableDataService already records `media_bytes` as excluded. Do not
       // manufacture a media-inclusive backup from a structured export.
-      media: [] as const,
     };
     const plaintext = utf8Encode(JSON.stringify(bundle));
     const key = await this.crypto.deriveAes256Key({
@@ -270,7 +269,6 @@ function backupAdditionalData(manifest: BackupManifest): Uint8Array {
       algorithm: manifest.cipher.algorithm,
       ivBase64: manifest.cipher.ivBase64,
     } : undefined,
-    media: manifest.media,
   }));
 }
 

@@ -1,6 +1,4 @@
 import type {
-  AtomicCommit,
-  AtomicCommitResult,
   CoachLedger,
   CoachLedgerDiagnostics,
   DomainAtomicCommit,
@@ -31,8 +29,8 @@ export interface AsyncLedgerSnapshotStore {
 }
 
 /**
- * Durable Ledger used by the browser runtime. IndexedDB owns the large fact
- * snapshot; localStorage is consulted only once to migrate the previous MVP.
+ * Durable Ledger used by the browser runtime. IndexedDB is the only owner of
+ * the canonical fact snapshot.
  */
 export class WebIndexedDbCoachLedger implements CoachLedger {
   private readonly delegate: InMemoryCoachLedger;
@@ -49,21 +47,10 @@ export class WebIndexedDbCoachLedger implements CoachLedger {
   static async open(input: {
     accountId: string;
     snapshots: AsyncLedgerSnapshotStore;
-    legacyStorage?: WebKeyValueStorage;
   }): Promise<WebIndexedDbCoachLedger> {
     assertProductShellStateStoreUserId(input.accountId);
     const key = indexedDbLedgerKey(input.accountId);
-    let serialized = await input.snapshots.read(key);
-    if (!serialized && input.legacyStorage) {
-      const legacyKey = storageKey("ledger", input.accountId);
-      const legacy = input.legacyStorage.getItem(legacyKey);
-      if (legacy && parseSnapshot(legacy)) {
-        // The old copy is removed only after IndexedDB has committed it.
-        await input.snapshots.write(key, legacy);
-        input.legacyStorage.removeItem(legacyKey);
-        serialized = legacy;
-      }
-    }
+    const serialized = await input.snapshots.read(key);
     return new WebIndexedDbCoachLedger(
       key,
       input.snapshots,
@@ -112,17 +99,27 @@ export class WebIndexedDbCoachLedger implements CoachLedger {
     return this.delegate.diagnose();
   }
 
-  commit(input: AtomicCommit): Promise<AtomicCommitResult>;
-  commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
-  commit(input: AtomicCommit | DomainAtomicCommit): Promise<AtomicCommitResult | DomainCommandResult> {
+  commit(input: DomainAtomicCommit): Promise<DomainCommandResult> {
     return this.mutate(async () => {
       const before = await this.delegate.read();
       try {
-        const result = "kind" in input && input.kind === "domain"
-          ? await this.delegate.commit(input)
-          : await this.delegate.commit(input as AtomicCommit);
+        const result = await this.delegate.commit(input);
         await this.persist();
         return result;
+      } catch (cause) {
+        await this.delegate.replace(before);
+        throw cause;
+      }
+    });
+  }
+
+  commitBatch(inputs: readonly DomainAtomicCommit[]): Promise<readonly DomainCommandResult[]> {
+    return this.mutate(async () => {
+      const before = await this.delegate.read();
+      try {
+        const results = await this.delegate.commitBatch(inputs);
+        await this.persist();
+        return results;
       } catch (cause) {
         await this.delegate.replace(before);
         throw cause;
@@ -151,13 +148,13 @@ export async function openWebMaxPowerPersistence(accountId: string): Promise<{
   productShellStateStore: ProductShellStateStore;
   dispose(): Promise<void>;
 }> {
-  const legacyStorage = browserStorage();
+  const shellStorage = browserStorage();
   const snapshots = await BrowserIndexedDbSnapshotStore.open();
   try {
-    const ledger = await WebIndexedDbCoachLedger.open({ accountId, snapshots, legacyStorage });
+    const ledger = await WebIndexedDbCoachLedger.open({ accountId, snapshots });
     return {
       ledger,
-      productShellStateStore: new WebLocalStorageProductShellStateStore(legacyStorage),
+      productShellStateStore: new WebLocalStorageProductShellStateStore(shellStorage),
       dispose: () => ledger.dispose(),
     };
   } catch (cause) {
@@ -174,8 +171,6 @@ class BrowserIndexedDbSnapshotStore implements AsyncLedgerSnapshotStore {
       return Promise.reject(new Error("web_indexed_db_unavailable"));
     }
     return new Promise((resolve, reject) => {
-      // Dedicated name avoids colliding with older experimental local DBs
-      // whose version 1 may not contain the canonical Ledger store.
       const request = globalThis.indexedDB.open("maxpower-coach-ledger-v1", 1);
       request.onupgradeneeded = () => {
         if (!request.result.objectStoreNames.contains("coach-ledger")) {
@@ -213,87 +208,6 @@ class BrowserIndexedDbSnapshotStore implements AsyncLedgerSnapshotStore {
   }
 }
 
-/** Account-isolated durable Ledger for the browser MVP. */
-export class WebLocalStorageCoachLedger implements CoachLedger {
-  private readonly delegate: InMemoryCoachLedger;
-  private mutationTail: Promise<void> = Promise.resolve();
-  private readonly key: string;
-
-  constructor(accountId: string, private readonly storage: WebKeyValueStorage = browserStorage()) {
-    this.key = storageKey("ledger", accountId);
-    this.delegate = new InMemoryCoachLedger(readSnapshot(storage, this.key));
-  }
-
-  async read(): Promise<LedgerSnapshot> {
-    await this.mutationTail;
-    return this.delegate.read();
-  }
-
-  replace(snapshot: LedgerSnapshot): Promise<void> {
-    return this.mutate(async () => {
-      const before = await this.delegate.read();
-      try {
-        await this.delegate.replace(snapshot);
-        await this.persist();
-      } catch (cause) {
-        await this.delegate.replace(before);
-        throw cause;
-      }
-    });
-  }
-
-  swapRestoredSnapshot(input: StagedLedgerRestore): Promise<void> {
-    return this.mutate(async () => {
-      const before = await this.delegate.read();
-      try {
-        await this.delegate.swapRestoredSnapshot(input);
-        await this.persist();
-      } catch (cause) {
-        await this.delegate.replace(before);
-        throw cause;
-      }
-    });
-  }
-
-  async readDomainProjection(query: DomainProjectionQuery): Promise<DomainProjection> {
-    await this.mutationTail;
-    return this.delegate.readDomainProjection(query);
-  }
-
-  async diagnose(): Promise<CoachLedgerDiagnostics> {
-    await this.mutationTail;
-    return this.delegate.diagnose();
-  }
-
-  commit(input: AtomicCommit): Promise<AtomicCommitResult>;
-  commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
-  commit(input: AtomicCommit | DomainAtomicCommit): Promise<AtomicCommitResult | DomainCommandResult> {
-    return this.mutate(async () => {
-      const before = await this.delegate.read();
-      try {
-        const result = "kind" in input && input.kind === "domain"
-          ? await this.delegate.commit(input)
-          : await this.delegate.commit(input as AtomicCommit);
-        await this.persist();
-        return result;
-      } catch (cause) {
-        await this.delegate.replace(before);
-        throw cause;
-      }
-    });
-  }
-
-  private mutate<T>(operation: () => Promise<T>): Promise<T> {
-    const pending = this.mutationTail.then(operation, operation);
-    this.mutationTail = pending.then(() => undefined, () => undefined);
-    return pending;
-  }
-
-  private async persist(): Promise<void> {
-    this.storage.setItem(this.key, JSON.stringify(await this.delegate.read()));
-  }
-}
-
 /** Browser presentation state is durable but remains separate from facts. */
 export class WebLocalStorageProductShellStateStore implements ProductShellStateStore {
   constructor(private readonly storage: WebKeyValueStorage = browserStorage()) {}
@@ -314,12 +228,6 @@ export class WebLocalStorageProductShellStateStore implements ProductShellStateS
   }
 }
 
-function readSnapshot(storage: WebKeyValueStorage, key: string): LedgerSnapshot {
-  const value = storage.getItem(key);
-  if (!value) return EMPTY_LEDGER_SNAPSHOT;
-  return parseSnapshot(value) ?? EMPTY_LEDGER_SNAPSHOT;
-}
-
 function parseSnapshot(value: string): LedgerSnapshot | undefined {
   try {
     const parsed = JSON.parse(value) as LedgerSnapshot;
@@ -329,7 +237,7 @@ function parseSnapshot(value: string): LedgerSnapshot | undefined {
   }
 }
 
-function storageKey(kind: "ledger" | "shell", accountId: string): string {
+function storageKey(kind: "shell", accountId: string): string {
   assertProductShellStateStoreUserId(accountId);
   return `maxpower:${kind}:v1:${encodeURIComponent(accountId)}`;
 }

@@ -4,7 +4,7 @@
 
 **Blocked by:** 03. 策略集数据化 + Session 组装器
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [x] 每份 PlanRevision 有对应 PlannerTrace artifact，内容覆盖输入钉/逐 slot 推理/约束事件/周量账本/逐项 diff
 - [x] 无 trace 的计划提交被拒绝；同输入指纹重放产出同计划

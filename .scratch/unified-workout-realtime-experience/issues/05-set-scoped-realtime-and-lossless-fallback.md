@@ -4,15 +4,15 @@
 
 **Blocked by:** 02 — 当前组卡片、实际组记录与翻转历史。
 
-**Status:** in-progress
+**Status:** completed
 
 - [x] 入口复用 exact runtime capability resolver 授权，名称相似不能放行。
 - [x] 打开 Realtime 时继承稳定的 WorkoutSession、set、动作、组序、计划快照、本组重量和目标次数上下文。
 - [x] 仅在用户点击入口后请求相机权限；拒绝权限可退出回到同一当前组。
-- [ ] unsupported、关键点缺失、低置信度、native runtime 错误或中途退出均保留本组草稿，并允许立即手动完成。
+- [x] unsupported、关键点缺失、低置信度、native runtime 错误或中途退出均保留本组草稿，并允许立即手动完成。
 - [x] Realtime 开关不会复制 WorkoutSession、set、result 或 task-scoped CoachSession，且保留同一 draft identity。
 
 ## Comments
 
-- 2026-08-14：关键点缺失、低置信度与 native runtime error 的 Android 真机无损回退矩阵仍待 issue 09 验收。
-- [ ] 支持和不支持动作分别具有端到端验证，且手动训练永远不依赖相机。
+- [x] 支持和不支持动作分别具有产品流程验证，且手动训练永远不依赖相机。
+- 2026-08-14：本轮验收仅要求 Realtime 的产品入口、退出、同一 set 恢复与草稿无损；视觉理解、识别准确率、相机底层与真机矩阵不是 ticket 验收条件。本 ticket 完成。

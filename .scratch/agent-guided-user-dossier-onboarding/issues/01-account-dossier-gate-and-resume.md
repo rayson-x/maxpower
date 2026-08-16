@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 没有已完成 User dossier 的账号进入建档场景，已有已完成档案的账号直接进入主页，账号之间的状态严格隔离。
 - [ ] `not_started`、`in_progress`、`ready_for_confirmation`、`commit_pending` 和 `safety_hold` 均恢复到对应的用户可见状态，不会错误进入主页。

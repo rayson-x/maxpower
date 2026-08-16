@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } fro
 
 import { uiColors, uiRadius, uiSpace, uiType } from "./tokens";
 import { ProfessionalTermText } from "./ProfessionalTermText";
+import { mobileT } from "../../i18n";
+
 
 /** A capture is deliberately not a persisted Timeline record. */
 export type RecordIntent = "training" | "nutrition" | "activity" | "check_in";
@@ -28,17 +30,17 @@ export function RecordCaptureComposer({
   return <View style={styles.composer}>
     <View style={styles.composerSignal} />
     <TextInput
-      accessibilityLabel="描述要记录的内容"
+      accessibilityLabel={mobileT("mobile.ui.kit.recordcapture.e447b7014f")}
       value={value}
       onChangeText={onChangeText}
       multiline
-      placeholder="说说刚发生了什么"
+      placeholder={mobileT("mobile.ui.kit.recordcapture.e3a35a23b8")}
       placeholderTextColor={uiColors.inkFaint}
       style={styles.composerInput}
     />
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="交给 Coach 整理为记录草稿"
+      accessibilityLabel={mobileT("mobile.ui.kit.recordcapture.57ad56b522")}
       disabled={disabled || !value.trim()}
       onPress={onSubmit}
       style={({ pressed }) => [styles.composerSubmit, (!value.trim() || disabled) && styles.composerSubmitDisabled, pressed && styles.pressed]}
@@ -113,7 +115,7 @@ export function RecordPills<T extends string>({
   onChange,
   compact = false,
 }: {
-  value: T;
+  value: T | undefined;
   options: readonly { id: T; label: string }[];
   onChange(value: T): void;
   compact?: boolean;
@@ -147,7 +149,7 @@ export function RecordConfirmationBar({
     onPress={onConfirm}
     style={({ pressed }) => [styles.confirm, busy && styles.confirmDisabled, pressed && styles.pressed]}
   >
-    <Text style={styles.confirmText}>{busy ? "保存中" : label}</Text>
+    <Text style={styles.confirmText}>{busy ? mobileT("mobile.ui.kit.recordcapture.a032e8fdda") : label}</Text>
     <View style={styles.confirmArrow}><Text style={styles.confirmArrowText}>↑</Text></View>
   </Pressable>;
 }

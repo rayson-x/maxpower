@@ -1,4 +1,3 @@
-import { S3Client } from "@aws-sdk/client-s3";
 import { Hono } from "hono";
 import { Pool } from "pg";
 import { createClient } from "redis";
@@ -11,8 +10,6 @@ import { PostgresAccountDeletionAdapter } from "../../adapters/account-deletion/
 import { PostgresLlmEntitlementAdapter } from "../../adapters/entitlements/postgres-entitlements.js";
 import { PostgresLlmUsageAdapter } from "../../adapters/entitlements/postgres-usage.js";
 import { OpenAiCompatibleLlmProviderAdapter } from "../../adapters/llm-provider/openai-compatible.js";
-import { S3MediaLibraryAdapter } from "../../adapters/object-storage/s3-media-library.js";
-import { createPostgresProductData } from "../../adapters/postgres/product-data.js";
 import { RedisVolatileStreamBufferAdapter } from "../../adapters/stream-buffer/redis-volatile-stream-buffer.js";
 import type { ProductionConfig } from "../../config/production-config.js";
 import { ApiError } from "../../kernel/api-error.js";
@@ -31,8 +28,6 @@ import { createRequestLoggerMiddleware } from "../../http/request-logger.js";
 import { createSecurityMiddleware } from "../../http/security.js";
 import {
   PostgresIdentityEraser,
-  PostgresPresignedUploadExpiryGuard,
-  S3AccountMediaEraser,
 } from "./deletion-erasers.js";
 import { MonthlyFreeGrantLlmGateway } from "./entitlement-grants.js";
 import { HttpsOtpDelivery } from "./otp-delivery.js";
@@ -47,7 +42,6 @@ export interface ProductionInfrastructure {
   postgres: Pool;
   rateLimitRedis: ProductionRedisClient;
   streamRedis: ProductionRedisClient;
-  objectStorage: S3Client;
   close(): Promise<void>;
 }
 
@@ -62,8 +56,6 @@ export interface ProductionRuntime {
   llmRecovery: Pick<LlmInvocationLifecycleAdapter, "recoverExpired">;
   adapterKinds: {
     identity: "better-auth-postgres";
-    productData: "postgres";
-    media: "s3-private";
     entitlement: "postgres-ledger";
     llmProvider: "openai-compatible";
     streamBuffer: "redis-volatile";
@@ -95,13 +87,6 @@ export function composeProductionRuntime(
     serviceJwt: config.auth.serviceJwt,
     google: config.auth.google,
     apple: config.auth.apple,
-  });
-  const productData = createPostgresProductData({ pool: infrastructure.postgres });
-  const media = new S3MediaLibraryAdapter({
-    pool: infrastructure.postgres,
-    client: infrastructure.objectStorage,
-    bucket: config.objectStorage.bucket,
-    transferExpirySeconds: config.media.transferExpirySeconds,
   });
   const entitlements = new PostgresLlmEntitlementAdapter(infrastructure.postgres);
   const usage = new PostgresLlmUsageAdapter(infrastructure.postgres, {
@@ -137,22 +122,9 @@ export function composeProductionRuntime(
     monthlyCredits: config.llm.monthlyFreeCredits,
   });
 
-  const mediaEraser = new S3AccountMediaEraser({
-    bucket: config.objectStorage.bucket,
-    client: {
-      send(command) {
-        return infrastructure.objectStorage.send(command as never);
-      },
-    },
-    guard: new PostgresPresignedUploadExpiryGuard({
-      pool: infrastructure.postgres,
-      transferExpirySeconds: config.media.transferExpirySeconds,
-    }),
-  });
   const deletion = new AccountDeletionModule({
     adapter: new PostgresAccountDeletionAdapter({
       pool: infrastructure.postgres,
-      media: mediaEraser,
       identity: new PostgresIdentityEraser(infrastructure.postgres),
     }),
   });
@@ -160,22 +132,12 @@ export function composeProductionRuntime(
     postgres: infrastructure.postgres,
     rateLimitRedis: infrastructure.rateLimitRedis,
     streamRedis: infrastructure.streamRedis,
-    objectStorage: {
-      bucket: config.objectStorage.bucket,
-      client: {
-        send(command) {
-          return infrastructure.objectStorage.send(command as never);
-        },
-      },
-    },
   });
   const coreApp = createApp(
     {
       identity: identityStack.identity,
       socialAuth: identityStack.socialAuth,
       tokens: identityStack.identity,
-      productData,
-      media,
       llm,
       accountDeletion: deletion,
     },
@@ -212,8 +174,6 @@ export function composeProductionRuntime(
     llmRecovery: usage,
     adapterKinds: {
       identity: "better-auth-postgres",
-      productData: "postgres",
-      media: "s3-private",
       entitlement: "postgres-ledger",
       llmProvider: "openai-compatible",
       streamBuffer: "redis-volatile",
@@ -252,14 +212,6 @@ export async function createProductionRuntime(config: ProductionConfig): Promise
   postgres.on("error", () => writeDependencyError("postgres"));
   const rateLimitRedis = redisFacade(nativeRateLimitRedis);
   const streamRedis = redisFacade(nativeStreamRedis);
-  const objectStorage = new S3Client({
-    endpoint: config.objectStorage.endpoint,
-    region: config.objectStorage.region,
-    forcePathStyle: config.objectStorage.forcePathStyle,
-    ...(config.objectStorage.credentials
-      ? { credentials: config.objectStorage.credentials }
-      : {}),
-  });
   let closed = false;
   const close = async (): Promise<void> => {
     if (closed) return;
@@ -269,7 +221,6 @@ export async function createProductionRuntime(config: ProductionConfig): Promise
       streamRedis.close(),
       postgres.end(),
     ]);
-    objectStorage.destroy();
   };
 
   try {
@@ -285,7 +236,6 @@ export async function createProductionRuntime(config: ProductionConfig): Promise
       postgres,
       rateLimitRedis,
       streamRedis,
-      objectStorage,
       close,
     });
     await runtime.initialize();

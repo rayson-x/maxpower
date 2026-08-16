@@ -4,7 +4,7 @@
 
 **Blocked by:** 10 — 移除旧固定建档与训练等级 fallback
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 确定性 E2E 从空档案登录开始，走完问候、四项 Baseline intake、自然语言捕获、动态表单、assessment/readiness、摘要确认、ProductData acknowledgement、Planner proposal 和计划确认。
 - [ ] 卡片输入、自然语言输入和混合输入对相同明确事实形成等价领域结果，同时保留不同来源审计。

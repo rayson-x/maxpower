@@ -1,4 +1,6 @@
-Status: ready-for-agent
+Status: wontfix
+
+Replaced for this product flow by `.scratch/record-first-adaptive-coach/PRD.md`. Existing code is retained only when it directly matches the new business model.
 
 # MaxPower Client MVP — Adaptive Planning, Live Coach and Daily Management
 

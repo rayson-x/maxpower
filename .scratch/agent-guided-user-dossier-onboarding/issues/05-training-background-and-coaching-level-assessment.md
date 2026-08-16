@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Agent 动态表单与行动门槛
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 新建档流程不展示或要求用户选择训练等级，旧 `trainingExperience` 不作为新捕获事实。
 - [ ] Training background 分别保存累计训练时间范围、近期连续性/停训、近期分化、exact exercise familiarity、可比训练组、训练环境、器械、日程和执行情况。

@@ -4,6 +4,8 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { canCorrectTimelineEntry, timelineSummary, type CoachProductProjection } from "../../../product";
 import type { TimelineReadEvent } from "../../../timeline";
 import { uiColors, uiType } from "../../ui-kit";
+import { mobileT } from "../../../i18n";
+
 
 type TimelineEntry = CoachProductProjection["today"]["activityLog"]["entries"][number];
 
@@ -32,20 +34,20 @@ export function Timeline({
           <View style={styles.body}>
             <Text style={styles.title}>{timelineSummary(entry)}</Text>
             <Text style={styles.meta}>
-              {entry.envelope?.provenance.confidence === "estimated" ? "估算" : "已确认"}
+              {entry.envelope?.provenance.confidence === "estimated" ? mobileT("mobile.ui.components.timeline.b73b8f52b0") : mobileT("mobile.ui.components.timeline.d9fea67ad2")}
               {" · "}
-              {entry.envelope?.provenance.origin ?? "本地"}
+              {entry.envelope?.provenance.origin ?? mobileT("mobile.ui.components.timeline.e8666c377c")}
             </Text>
           </View>
           {onCorrect && canCorrectTimelineEntry(entry) ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`更正${timelineSummary(entry)}`}
+              accessibilityLabel={mobileT("mobile.ui.components.timeline.7272ec1719", { value0: timelineSummary(entry) })}
               hitSlop={8}
               onPress={() => onCorrect(entry)}
               style={({ pressed }) => [styles.correct, pressed && styles.correctPressed]}
             >
-              <Text style={styles.correctText}>更正</Text>
+              <Text style={styles.correctText}>{mobileT("mobile.ui.components.timeline.193dc7f1dc")}</Text>
             </Pressable>
           ) : null}
         </View>

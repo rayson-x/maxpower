@@ -2,69 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createManualMealObservation } from "../../src/nutrition";
-import { CoachApplication } from "../../src/coach/createCoachApplication";
-import { InMemoryCoachLedger } from "../../src/coach/ledger";
 
-test("精确手工餐食只保存用户输入的数值与标签来源", () => {
+test("manual structured observation preserves only explicit field values and sources", () => {
   const observation = createManualMealObservation({
     id: "meal-1",
-    occurredAt: "2026-08-09T12:00:00.000+08:00",
-    description: "鸡肉饭",
-    mode: "precise",
-    provenance: "label",
-    energyKcal: 540,
-    proteinGrams: 36,
-    carbohydrateGrams: 62,
+    occurredAt: "2026-08-15T12:00:00.000Z",
+    description: "包装食品",
+    mode: "structured",
+    provenance: "manually_transcribed_label",
+    foods: [{ id: "food-1", name: "包装食品", portion: "1 份" }],
+    nutrients: [
+      { nutrientId: "energy", amount: 320, unit: "kcal", source: { kind: "manually_transcribed_label", ref: "form-1" } },
+      { nutrientId: "sodium", amount: 680, unit: "mg", source: { kind: "manually_transcribed_label", ref: "form-1" } },
+    ],
   });
-  assert.equal(observation.mode, "precise");
-  assert.equal(observation.provenance, "label");
-  assert.deepEqual(observation.energy, { value: 540, unit: "kcal" });
-  assert.equal(observation.fatGrams, undefined);
+
+  assert.equal(observation.mode, "structured");
+  assert.equal(observation.nutrients?.[0]?.amount, 320);
+  assert.equal(observation.nutrients?.[1]?.nutrientId, "sodium");
+  assert.equal(observation.foods?.[0]?.name, "包装食品");
 });
 
-test("轻量餐食保留结构化执行反馈，不伪造成热量记录", () => {
+test("descriptive food does not acquire nutrient values", () => {
   const observation = createManualMealObservation({
     id: "meal-2",
-    occurredAt: "2026-08-09T19:00:00.000+08:00",
-    description: "晚餐",
-    mode: "simplified",
-    provenance: "manual",
-    simplified: { proteinCompletion: "met", hunger: "moderate", deviation: "small" },
+    occurredAt: "2026-08-15T18:00:00.000Z",
+    description: "一碗牛肉面",
+    mode: "descriptive",
+    provenance: "manual_form",
+    foods: [{ id: "food-2", name: "牛肉面", portion: "一碗" }],
   });
-  assert.equal(observation.energy, undefined);
-  assert.deepEqual(observation.simplified, { proteinCompletion: "met", hunger: "moderate", deviation: "small" });
+  assert.equal(observation.mode, "descriptive");
+  assert.equal(observation.nutrients, undefined);
 });
 
-test("用户确认的轻量记录把结构化反馈保留在 Timeline，而不是丢在 UI 里", async () => {
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
-    now: () => "2026-08-09T19:00:00.000+08:00",
-    nextId: (prefix) => `${prefix}-1`,
-  });
-  const observation = createManualMealObservation({
-    id: "meal-3",
-    occurredAt: "2026-08-09T19:00:00.000+08:00",
-    description: "晚餐",
-    mode: "simplified",
-    provenance: "manual",
-    simplified: { proteinCompletion: "met", hunger: "moderate", deviation: "small" },
-  });
-  await app.confirmMealObservation({ userId: "u1", idempotencyKey: "meal-3-confirm", observation });
-  const timeline = (await app.readDomainProjection({ userId: "u1" })).timeline.current;
-  const event = timeline.find((item) => item.fact.kind === "nutrition");
-  assert.ok(event && event.fact.kind === "nutrition");
-  assert.deepEqual(event.fact.simplified, { proteinCompletion: "met", hunger: "moderate", deviation: "small" });
-  assert.equal(event.fact.energy, undefined);
-});
-
-test("缺失描述、精确数值或非法数值不会成为 canonical meal", () => {
+test("structured observation rejects missing or mismatched sources", () => {
+  assert.throws(() => createManualMealObservation({ id: "meal-3", occurredAt: "2026-08-15T18:00:00.000Z", description: "x", mode: "structured", provenance: "manual_form" }), /nutrition_structured_value_required/);
   assert.throws(() => createManualMealObservation({
-    id: "meal", occurredAt: "2026-08-09T12:00:00.000+08:00", description: "", mode: "simplified", provenance: "manual",
-    simplified: { proteinCompletion: "partial", hunger: "moderate", deviation: "none" },
-  }), /description_required/);
-  assert.throws(() => createManualMealObservation({
-    id: "meal", occurredAt: "2026-08-09T12:00:00.000+08:00", description: "午餐", mode: "precise", provenance: "manual",
-  }), /precise_value_required/);
-  assert.throws(() => createManualMealObservation({
-    id: "meal", occurredAt: "2026-08-09T12:00:00.000+08:00", description: "午餐", mode: "precise", provenance: "manual", energyKcal: -1,
-  }), /value_invalid/);
+    id: "meal-4",
+    occurredAt: "2026-08-15T18:00:00.000Z",
+    description: "x",
+    mode: "structured",
+    provenance: "manual_form",
+    nutrients: [{ nutrientId: "protein", amount: 20, unit: "g", source: { kind: "current_user_statement", ref: "turn-1" } }],
+  }), /nutrition_value_source_mismatch/);
 });

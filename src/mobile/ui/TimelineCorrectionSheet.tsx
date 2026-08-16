@@ -9,10 +9,12 @@ import {
 } from "react-native";
 
 import type { TimelineFact } from "../../coach/domain";
-import type { CoachApplication } from "../../coach/createCoachApplication";
+import type { RecordModule } from "../../records";
 import { buildTimelineCorrectionRequest, canCorrectTimelineEntry, timelineSummary } from "../../product";
 import type { TimelineReadEvent } from "../../timeline";
 import { colors, radius } from "./theme";
+import { mobileT } from "../../i18n";
+
 
 /**
  * Correction is a narrow, typed path for an already committed Timeline fact.
@@ -21,13 +23,13 @@ import { colors, radius } from "./theme";
  * projection.
  */
 export function TimelineCorrectionSheet({
-  application,
+  records,
   userId,
   entry,
   onDismiss,
   onSaved,
 }: {
-  application: CoachApplication;
+  records: RecordModule;
   userId: string;
   entry: TimelineReadEvent;
   onDismiss: () => void;
@@ -53,7 +55,7 @@ export function TimelineCorrectionSheet({
         recordedAt: now,
         fact,
       });
-      await application.correctTimelineFact({
+      await records.correctFact({
         userId,
         idempotencyKey: `mobile-timeline-correction:${entry.eventId}:${Date.now().toString(36)}`,
         ...request,
@@ -68,34 +70,34 @@ export function TimelineCorrectionSheet({
 
   return (
     <View accessibilityViewIsModal style={styles.scrim}>
-      <Pressable accessibilityRole="button" accessibilityLabel="关闭记录更正" onPress={onDismiss} style={StyleSheet.absoluteFill} />
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.timelinecorrectionsheet.8b3b463ed6")} onPress={onDismiss} style={StyleSheet.absoluteFill} />
       <View style={styles.sheet}>
         <View style={styles.handle} />
         <ScrollView bounces={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={styles.eyebrow}>记录更正</Text>
+          <Text style={styles.eyebrow}>{mobileT("mobile.ui.timelinecorrectionsheet.b9e1cf9ed9")}</Text>
           <Text style={styles.title}>{timelineSummary(entry)}</Text>
-          <Text style={styles.description}>原记录会保留。这次提交会新增一条更正记录。</Text>
+          <Text style={styles.description}>{mobileT("mobile.ui.timelinecorrectionsheet.a6933fbfeb")}</Text>
           {supported ? <>
             <CorrectionFields fact={entry.fact} primary={primary} secondary={secondary} onPrimaryChange={setPrimary} onSecondaryChange={setSecondary} />
             <View style={styles.field}>
-              <Text style={styles.label}>更正原因</Text>
+              <Text style={styles.label}>{mobileT("mobile.ui.timelinecorrectionsheet.3538bc24d3")}</Text>
               <TextInput
-                accessibilityLabel="更正原因"
+                accessibilityLabel={mobileT("mobile.ui.timelinecorrectionsheet.3538bc24d3")}
                 value={reason}
                 onChangeText={setReason}
-                placeholder="例如：刚才填少了时长"
+                placeholder={mobileT("mobile.ui.timelinecorrectionsheet.bc1649ae87")}
                 placeholderTextColor={colors.ink3}
                 multiline
                 style={[styles.input, styles.reasonInput]}
               />
             </View>
             {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-            <Pressable accessibilityRole="button" accessibilityLabel="保存更正" disabled={saving} onPress={() => void save()} style={[styles.save, saving && styles.disabled]}>
-              <Text style={styles.saveText}>{saving ? "正在保存" : "保存更正"}</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.timelinecorrectionsheet.20180ad7e4")} disabled={saving} onPress={() => void save()} style={[styles.save, saving && styles.disabled]}>
+              <Text style={styles.saveText}>{saving ? mobileT("mobile.ui.timelinecorrectionsheet.15127c2c4f") : mobileT("mobile.ui.timelinecorrectionsheet.20180ad7e4")}</Text>
             </Pressable>
           </> : <>
-            <Text style={styles.unavailable}>这条训练结果需要在训练日报中更正，以保留组级执行与 Session 的关联。</Text>
-            <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.cancel}><Text style={styles.cancelText}>完成</Text></Pressable>
+            <Text style={styles.unavailable}>{mobileT("mobile.ui.timelinecorrectionsheet.3894c05914")}</Text>
+            <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.cancel}><Text style={styles.cancelText}>{mobileT("mobile.ui.timelinecorrectionsheet.33246f6a5e")}</Text></Pressable>
           </>}
         </ScrollView>
       </View>
@@ -119,28 +121,31 @@ function CorrectionFields({
   switch (fact.kind) {
     case "activity":
       return <>
-        <TextField label="活动" value={primary} onChange={onPrimaryChange} />
-        <TextField label="时长（分钟，可留空）" value={secondary} keyboardType="decimal-pad" onChange={onSecondaryChange} />
+        <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.b2548636f0")} value={primary} onChange={onPrimaryChange} />
+        <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.3ddf62cc1b")} value={secondary} keyboardType="decimal-pad" onChange={onSecondaryChange} />
       </>;
     case "nutrition":
-      return <TextField label="餐食描述（可留空）" value={primary} onChange={onPrimaryChange} />;
+      return <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.4717c582b0")} value={primary} onChange={onPrimaryChange} />;
     case "sleep":
-      return <TextField label={`睡眠时长（${fact.duration?.unit ?? "分钟"}）`} value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />;
+      return <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.18def84508", { value0: fact.duration?.unit ?? mobileT("mobile.ui.timelinecorrectionsheet.28bf227b9b") })} value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />;
     case "body":
       return <TextField label={`${bodyLabel(fact)}（${fact.measurement.quantity.unit}）`} value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />;
     case "recovery":
-      return <TextField label="主观恢复（1–5）" value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />;
+      return <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.5506dee33f")} value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />;
     case "symptom":
       return <>
-        <TextField label="程度（1–5，可留空）" value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />
-        <TextField label="补充说明（可留空）" value={secondary} onChange={onSecondaryChange} />
+        <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.60ea93f956")} value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />
+        <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.161fce5b35")} value={secondary} onChange={onSecondaryChange} />
       </>;
     case "schedule":
-      return <TextField label="日程说明（可留空）" value={primary} onChange={onPrimaryChange} />;
+      return <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.3b29c579ea")} value={primary} onChange={onPrimaryChange} />;
     case "rest":
-      return <TextField label="休息说明（可留空）" value={primary} onChange={onPrimaryChange} />;
+      return <TextField label={mobileT("mobile.ui.timelinecorrectionsheet.11b57dc3e8")} value={primary} onChange={onPrimaryChange} />;
     case "training":
+    case "clinical_context":
       return null;
+    case "subjective":
+      return <TextField label={fact.metric} value={primary} keyboardType="decimal-pad" onChange={onPrimaryChange} />;
   }
 }
 
@@ -159,6 +164,8 @@ function initialPrimaryValue(fact: TimelineFact): string {
     case "schedule": return fact.note ?? "";
     case "rest": return fact.note ?? "";
     case "training": return "";
+    case "clinical_context": return "";
+    case "subjective": return String(fact.value);
   }
 }
 
@@ -171,19 +178,19 @@ function initialSecondaryValue(fact: TimelineFact): string {
 function correctedFact(fact: TimelineFact, primary: string, secondary: string): TimelineFact {
   switch (fact.kind) {
     case "activity": {
-      const activityType = requiredText(primary, "请填写活动内容。");
-      const minutes = optionalNumber(secondary, "活动时长需要是非负数字。", 0);
+      const activityType = requiredText(primary, mobileT("mobile.ui.timelinecorrectionsheet.e7346fd3ad"));
+      const minutes = optionalNumber(secondary, mobileT("mobile.ui.timelinecorrectionsheet.76e449f92e"), 0);
       const { duration: _duration, ...rest } = fact;
       return { ...rest, activityType, ...(minutes === undefined ? {} : { duration: { value: minutes, unit: "minutes" } }) };
     }
     case "nutrition":
       return { ...fact, ...(primary.trim() ? { mealDescription: primary.trim() } : { mealDescription: undefined }) };
     case "sleep": {
-      const duration = requiredNumber(primary, "请填写睡眠时长。", 0.01);
+      const duration = requiredNumber(primary, mobileT("mobile.ui.timelinecorrectionsheet.e39f2bbcb1"), 0.01);
       return { ...fact, duration: { value: duration, unit: fact.duration?.unit ?? "minutes" } };
     }
     case "body": {
-      const value = requiredNumber(primary, "请填写身体测量值。", 0.01, fact.measurement.metric === "body_fat_percentage" ? 100 : undefined);
+      const value = requiredNumber(primary, mobileT("mobile.ui.timelinecorrectionsheet.60109c7b4d"), 0.01, fact.measurement.metric === "body_fat_percentage" ? 100 : undefined);
       switch (fact.measurement.metric) {
         case "body_weight":
           return { ...fact, measurement: { ...fact.measurement, quantity: { ...fact.measurement.quantity, value } } };
@@ -194,12 +201,12 @@ function correctedFact(fact: TimelineFact, primary: string, secondary: string): 
       }
     }
     case "recovery": {
-      const perceivedRecovery = optionalNumber(primary, "主观恢复需要在 1 到 5 之间。", 1, 5);
+      const perceivedRecovery = optionalNumber(primary, mobileT("mobile.ui.timelinecorrectionsheet.6b8637450c"), 1, 5);
       const { perceivedRecovery: _previous, ...rest } = fact;
       return { ...rest, ...(perceivedRecovery === undefined ? {} : { perceivedRecovery }) };
     }
     case "symptom": {
-      const severity = optionalNumber(primary, "程度需要在 1 到 5 之间。", 1, 5);
+      const severity = optionalNumber(primary, mobileT("mobile.ui.timelinecorrectionsheet.f29a9b6d29"), 1, 5);
       const { severity: _previousSeverity, note: _previousNote, ...rest } = fact;
       return { ...rest, ...(severity === undefined ? {} : { severity }), ...(secondary.trim() ? { note: secondary.trim() } : {}) };
     }
@@ -209,6 +216,10 @@ function correctedFact(fact: TimelineFact, primary: string, secondary: string): 
       return { ...fact, ...(primary.trim() ? { note: primary.trim() } : { note: undefined }) };
     case "training":
       throw new Error("timeline_training_correction_requires_workout_summary");
+    case "clinical_context":
+      return fact;
+    case "subjective":
+      return { ...fact, value: requiredNumber(primary, fact.metric, 0) };
   }
 }
 
@@ -235,15 +246,15 @@ function durationInMinutes(value: number, unit: "seconds" | "minutes" | "hours")
 }
 
 function bodyLabel(fact: Extract<TimelineFact, { kind: "body" }>): string {
-  return fact.measurement.metric === "body_weight" ? "体重" : fact.measurement.metric === "body_fat_percentage" ? "体脂率" : fact.measurement.site;
+  return fact.measurement.metric === "body_weight" ? mobileT("mobile.ui.timelinecorrectionsheet.3193595c29") : fact.measurement.metric === "body_fat_percentage" ? mobileT("mobile.ui.timelinecorrectionsheet.71e062f5f8") : fact.measurement.site;
 }
 
 function correctionErrorCopy(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : "";
-  if (message === "correction_reason_required") return "请说明这次更正的原因。";
-  if (message === "timeline_correction_target_not_active") return "这条记录已经被更正，请刷新后查看最新版本。";
-  if (message === "timeline_fact_not_found") return "这条记录已不可用，请刷新后重试。";
-  return message || "暂时无法保存更正。";
+  if (message === "correction_reason_required") return mobileT("mobile.ui.timelinecorrectionsheet.3fe5545ff7");
+  if (message === "timeline_correction_target_not_active") return mobileT("mobile.ui.timelinecorrectionsheet.5ec0122939");
+  if (message === "timeline_fact_not_found") return mobileT("mobile.ui.timelinecorrectionsheet.936c404212");
+  return message || mobileT("mobile.ui.timelinecorrectionsheet.c865c745a0");
 }
 
 const styles = StyleSheet.create({

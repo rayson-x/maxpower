@@ -1,5 +1,5 @@
 import type { MealObservation } from "./NutritionStrategyEngine";
-import type { FoodEntryData, MealSlot } from "./NutritionDayLedger";
+import { assertNutrientValues, type FoodEntryData, type MealSlot, type NutrientValueData, type NutrientValueSourceKind } from "./NutritionDayLedger";
 
 /**
  * A small, local-only boundary between a mobile form and canonical meal facts.
@@ -12,13 +12,11 @@ export interface ManualMealObservationInput {
   description: string;
   mealSlot?: MealSlot;
   foods?: readonly FoodEntryData[];
-  mode: "precise" | "simplified";
-  provenance: "manual" | "label";
-  energyKcal?: number;
-  proteinGrams?: number;
-  fatGrams?: number;
-  carbohydrateGrams?: number;
-  simplified?: NonNullable<MealObservation["simplified"]>;
+  mode: "structured" | "descriptive";
+  provenance: NutrientValueSourceKind;
+  nutrients?: readonly NutrientValueData[];
+  qualitative?: NonNullable<MealObservation["qualitative"]>;
+  dayCoverage?: "partial" | "complete";
 }
 
 /**
@@ -30,42 +28,35 @@ export function createManualMealObservation(input: ManualMealObservationInput): 
   if (!description) throw new Error("nutrition_description_required");
   if (!input.id || !input.occurredAt) throw new Error("nutrition_observation_identity_required");
 
-  const nutrients = {
-    ...(input.energyKcal === undefined ? {} : { energy: { value: input.energyKcal, unit: "kcal" as const } }),
-    ...(input.proteinGrams === undefined ? {} : { proteinGrams: input.proteinGrams }),
-    ...(input.fatGrams === undefined ? {} : { fatGrams: input.fatGrams }),
-    ...(input.carbohydrateGrams === undefined ? { } : { carbohydrateGrams: input.carbohydrateGrams }),
-  };
-  for (const value of [input.energyKcal, input.proteinGrams, input.fatGrams, input.carbohydrateGrams]) {
-    if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
-      throw new Error("nutrition_value_invalid");
-    }
-  }
+  assertNutrientValues(input.nutrients ?? []);
 
-  if (input.mode === "precise") {
-    if (!Object.keys(nutrients).length) throw new Error("nutrition_precise_value_required");
+  if (input.mode === "structured") {
+    if (!input.nutrients?.length) throw new Error("nutrition_structured_value_required");
+    if (input.nutrients.some((value) => value.source.kind !== input.provenance)) {
+      throw new Error("nutrition_value_source_mismatch");
+    }
     return {
       id: input.id,
       occurredAt: input.occurredAt,
-      mode: "precise",
+      mode: "structured",
       description,
       ...(input.mealSlot ? { mealSlot: input.mealSlot } : {}),
       ...(input.foods ? { foods: input.foods } : {}),
-      ...nutrients,
+      nutrients: input.nutrients,
       provenance: input.provenance,
+      ...(input.dayCoverage ? { dayCoverage: input.dayCoverage } : {}),
     };
   }
 
-  if (input.provenance !== "manual") throw new Error("nutrition_simplified_requires_manual_provenance");
-  if (!input.simplified) throw new Error("nutrition_simplified_details_required");
   return {
     id: input.id,
     occurredAt: input.occurredAt,
-    mode: "simplified",
+    mode: "descriptive",
     description,
     ...(input.mealSlot ? { mealSlot: input.mealSlot } : {}),
     ...(input.foods ? { foods: input.foods } : {}),
-    simplified: input.simplified,
-    provenance: "manual",
+    ...(input.qualitative ? { qualitative: input.qualitative } : {}),
+    provenance: input.provenance,
+    ...(input.dayCoverage ? { dayCoverage: input.dayCoverage } : {}),
   };
 }

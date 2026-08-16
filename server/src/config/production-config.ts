@@ -33,18 +33,6 @@ export interface ProductionConfig {
     };
     otpDelivery: { endpoint: string; bearerToken: string };
   };
-  objectStorage: {
-    endpoint: string;
-    region: string;
-    bucket: string;
-    /** Omit to use the AWS SDK default credential chain (for example an EC2 IAM role). */
-    credentials?: {
-      accessKeyId: string;
-      secretAccessKey: string;
-    };
-    forcePathStyle: boolean;
-  };
-  media: { transferExpirySeconds: number };
   llm: {
     fingerprintSecret: string;
     monthlyFreeCredits: number;
@@ -78,8 +66,6 @@ export interface MigrationConfig {
 export interface ProductionWorkerConfig {
   runtime: "production";
   database: { url: string };
-  objectStorage: ProductionConfig["objectStorage"];
-  media: ProductionConfig["media"];
   worker: ProductionConfig["worker"];
 }
 
@@ -122,37 +108,11 @@ export function parseProductionWorkerConfig(
   if (databaseUrl && !isTlsPostgresUrl(databaseUrl)) {
     errors.push("Worker DATABASE_URL must be a TLS PostgreSQL URL");
   }
-  const endpoint = required("S3_ENDPOINT");
-  if (endpoint && !isUrlWithProtocol(endpoint, "https:")) {
-    errors.push("S3_ENDPOINT must be an absolute HTTPS URL");
-  }
-  const region = required("S3_REGION");
-  const bucket = required("S3_BUCKET");
-  const accessKeyId = environment.S3_ACCESS_KEY_ID?.trim() ?? "";
-  const secretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim() ?? "";
-  if (Boolean(accessKeyId) !== Boolean(secretAccessKey)) {
-    errors.push("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be provided together");
-  }
-  const forcePathStyleText = required("S3_FORCE_PATH_STYLE");
-  if (forcePathStyleText !== "true" && forcePathStyleText !== "false") {
-    errors.push("S3_FORCE_PATH_STYLE must be true or false");
-  }
-  const transferExpirySeconds = integer("MEDIA_TRANSFER_EXPIRY_SECONDS", 60, 3_600);
   const deletionPollMs = integer("DELETION_WORKER_POLL_MS", 100, 60_000);
   if (errors.length > 0) throw new ProductionConfigurationError(errors);
   return {
     runtime: "production",
     database: { url: databaseUrl },
-    objectStorage: {
-      endpoint,
-      region,
-      bucket,
-      ...(accessKeyId && secretAccessKey
-        ? { credentials: { accessKeyId, secretAccessKey } }
-        : {}),
-      forcePathStyle: forcePathStyleText === "true",
-    },
-    media: { transferExpirySeconds },
     worker: { deletionPollMs },
   };
 }
@@ -273,20 +233,6 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
   const otpEndpoint = https("OTP_DELIVERY_ENDPOINT");
   const otpBearerToken = secret("OTP_DELIVERY_BEARER_TOKEN");
 
-  const s3Endpoint = https("S3_ENDPOINT");
-  const s3Region = required("S3_REGION");
-  const s3Bucket = required("S3_BUCKET");
-  const s3AccessKeyId = environment.S3_ACCESS_KEY_ID?.trim() ?? "";
-  const s3SecretAccessKey = environment.S3_SECRET_ACCESS_KEY?.trim() ?? "";
-  if (Boolean(s3AccessKeyId) !== Boolean(s3SecretAccessKey)) {
-    errors.push("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be provided together");
-  }
-  const forcePathStyleText = required("S3_FORCE_PATH_STYLE");
-  if (forcePathStyleText !== "true" && forcePathStyleText !== "false") {
-    errors.push("S3_FORCE_PATH_STYLE must be true or false");
-  }
-  const mediaTransferExpirySeconds = integer("MEDIA_TRANSFER_EXPIRY_SECONDS", 60, 3_600);
-
   const port = integer("PORT", 1, 65_535);
   const maxRequestBytes = integer("HTTP_MAX_REQUEST_BYTES");
   const rateLimitRequests = integer("HTTP_RATE_LIMIT_REQUESTS");
@@ -303,8 +249,6 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
   const coachMaxInputBytes = integer("LLM_COACH_MAX_INPUT_BYTES", 1, maxRequestBytes);
   const coachMaxInputTokens = integer("LLM_COACH_MAX_INPUT_TOKENS");
   const coachMaxOutputTokens = integer("LLM_COACH_MAX_OUTPUT_TOKENS");
-  const coachMaxImages = integer("LLM_COACH_MAX_IMAGES", 0, 16);
-  const coachMaxImageBytes = integer("LLM_COACH_MAX_IMAGE_BYTES", 1, coachMaxInputBytes);
   const coachProviderInputCost = integer(
     "LLM_COACH_PROVIDER_INPUT_COST_MICROS_PER_MILLION",
     0,
@@ -313,42 +257,11 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
     "LLM_COACH_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION",
     0,
   );
-  const nutritionProviderEndpoint = https("LLM_NUTRITION_PROVIDER_ENDPOINT");
-  const nutritionProviderApiKey = secret("LLM_NUTRITION_PROVIDER_API_KEY");
-  const nutritionProviderId = required("LLM_NUTRITION_PROVIDER_ID");
-  const nutritionModel = required("LLM_NUTRITION_MODEL");
-  const nutritionInputCredits = integer("LLM_NUTRITION_INPUT_CREDITS_PER_MILLION", 0);
-  const nutritionOutputCredits = integer("LLM_NUTRITION_OUTPUT_CREDITS_PER_MILLION", 0);
-  const nutritionPricingVersion = required("LLM_NUTRITION_PRICING_VERSION_ID");
-  const nutritionMaxInputBytes = integer(
-    "LLM_NUTRITION_MAX_INPUT_BYTES",
-    1,
-    maxRequestBytes,
-  );
-  const nutritionMaxInputTokens = integer("LLM_NUTRITION_MAX_INPUT_TOKENS");
-  const nutritionMaxOutputTokens = integer("LLM_NUTRITION_MAX_OUTPUT_TOKENS");
-  const nutritionMaxImages = integer("LLM_NUTRITION_MAX_IMAGES", 0, 16);
-  const nutritionMaxImageBytes = integer(
-    "LLM_NUTRITION_MAX_IMAGE_BYTES",
-    1,
-    nutritionMaxInputBytes,
-  );
-  const nutritionProviderInputCost = integer(
-    "LLM_NUTRITION_PROVIDER_INPUT_COST_MICROS_PER_MILLION",
-    0,
-  );
-  const nutritionProviderOutputCost = integer(
-    "LLM_NUTRITION_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION",
-    0,
-  );
   const fingerprintSecret = secret("LLM_FINGERPRINT_SECRET", 32);
   const monthlyFreeCredits = integer("LLM_MONTHLY_FREE_CREDITS");
 
   if (coachMaxInputTokens < coachMaxInputBytes) {
     errors.push("LLM_COACH_MAX_INPUT_TOKENS must cover the maximum UTF-8 request bytes");
-  }
-  if (nutritionMaxInputTokens < nutritionMaxInputBytes) {
-    errors.push("LLM_NUTRITION_MAX_INPUT_TOKENS must cover the maximum UTF-8 request bytes");
   }
   const worstCaseCredits = (
     name: string,
@@ -371,13 +284,6 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
     coachMaxOutputTokens,
     coachOutputCredits,
   );
-  const nutritionReservationCredits = worstCaseCredits(
-    "LLM_NUTRITION",
-    nutritionMaxInputTokens,
-    nutritionInputCredits,
-    nutritionMaxOutputTokens,
-    nutritionOutputCredits,
-  );
 
   if (errors.length > 0) {
     throw new ProductionConfigurationError(errors);
@@ -394,16 +300,6 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
       inputCostMicrosPerMillionTokens: coachProviderInputCost,
       outputCostMicrosPerMillionTokens: coachProviderOutputCost,
     },
-    "maxpower/nutrition-vision-v1": {
-      endpoint: nutritionProviderEndpoint,
-      apiKey: nutritionProviderApiKey,
-      model: nutritionModel,
-      maxOutputTokens: nutritionMaxOutputTokens,
-      inputCreditsPerMillionTokens: nutritionInputCredits,
-      outputCreditsPerMillionTokens: nutritionOutputCredits,
-      inputCostMicrosPerMillionTokens: nutritionProviderInputCost,
-      outputCostMicrosPerMillionTokens: nutritionProviderOutputCost,
-    },
   };
   const usageRoutes: Readonly<Record<ProductAlias, UsageRouteMetadata>> = {
     "maxpower/coach-v1": {
@@ -411,38 +307,19 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
       providerModel: coachModel,
       pricingVersionId: coachPricingVersion,
     },
-    "maxpower/nutrition-vision-v1": {
-      providerId: nutritionProviderId,
-      providerModel: nutritionModel,
-      pricingVersionId: nutritionPricingVersion,
-    },
   };
   const requestPolicies: Readonly<Record<ProductAlias, LlmAliasRequestPolicy>> = {
     "maxpower/coach-v1": {
       maxInputBytes: coachMaxInputBytes,
       maxInputTokens: coachMaxInputTokens,
       maxOutputTokens: coachMaxOutputTokens,
-      maxImages: coachMaxImages,
-      maxImageBytes: coachMaxImageBytes,
       reservationCredits: coachReservationCredits,
-    },
-    "maxpower/nutrition-vision-v1": {
-      maxInputBytes: nutritionMaxInputBytes,
-      maxInputTokens: nutritionMaxInputTokens,
-      maxOutputTokens: nutritionMaxOutputTokens,
-      maxImages: nutritionMaxImages,
-      maxImageBytes: nutritionMaxImageBytes,
-      reservationCredits: nutritionReservationCredits,
     },
   };
   const providerCostRoutes: Readonly<Record<ProductAlias, ProviderCostRoute>> = {
     "maxpower/coach-v1": {
       inputMicrosPerMillionTokens: coachProviderInputCost,
       outputMicrosPerMillionTokens: coachProviderOutputCost,
-    },
-    "maxpower/nutrition-vision-v1": {
-      inputMicrosPerMillionTokens: nutritionProviderInputCost,
-      outputMicrosPerMillionTokens: nutritionProviderOutputCost,
     },
   };
 
@@ -478,21 +355,6 @@ export function parseProductionConfig(environment: NodeJS.ProcessEnv): Productio
       },
       otpDelivery: { endpoint: otpEndpoint, bearerToken: otpBearerToken },
     },
-    objectStorage: {
-      endpoint: s3Endpoint,
-      region: s3Region,
-      bucket: s3Bucket,
-      ...(s3AccessKeyId && s3SecretAccessKey
-        ? {
-            credentials: {
-              accessKeyId: s3AccessKeyId,
-              secretAccessKey: s3SecretAccessKey,
-            },
-          }
-        : {}),
-      forcePathStyle: forcePathStyleText === "true",
-    },
-    media: { transferExpirySeconds: mediaTransferExpirySeconds },
     llm: {
       fingerprintSecret,
       monthlyFreeCredits,

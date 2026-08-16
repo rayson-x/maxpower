@@ -1,4 +1,4 @@
-import { IncrementalSha256 } from "../cloud/media/IncrementalSha256";
+import { IncrementalSha256 } from "./IncrementalSha256";
 
 /** Collision-resistant, deterministic label for account-scoped local resources. */
 export function namespaceDigest(parts: readonly string[]): string {

@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 用户档案到长期策略、周计划与今日计划
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 开始实施前盘点现有 Workout、Motion、Agent stream 和 UI 的公开行为，仅补公开闭环缺口
 - [ ] Today 从 active SessionPrescription 创建或恢复唯一 WorkoutSession，并保存所依据的 GoalCycle/PlanRevision/phase refs

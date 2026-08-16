@@ -6,6 +6,10 @@
     "@mariozechner/pi-agent-core": "0.73.1",
     "@mariozechner/pi-ai": "0.73.1",
     "@mediapipe/tasks-vision": "^1.0.1",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
     "expo": "~57.0.9",
     "expo-background-task": "~57.0.8",
     "expo-dev-client": "~57.0.10",
@@ -61,10 +65,6 @@
     "benchmark:rust-motion": "cargo run --release --manifest-path rust/motion-sdk/Cargo.toml --bin motion_benchmark",
     "evaluate:rust-motion": "npm run build:motion-wasm && tsc -p tools/motion-sdk/tsconfig.eval.json && node .motion-sdk-eval-build/tools/motion-sdk/evaluate.js",
     "harness": "tsc -p tools/harness/tsconfig.json && node .harness-build/tools/harness/analyze.js",
-    "test:coach-lifecycle": "tsc -p tsconfig.mine.json && node --test .test-build/tools/e2e/coachLifecycle.e2e.test.js",
-    "e2e:real-provider-lifecycle": "tsc -p tsconfig.mine.json && node .test-build/tools/e2e/realProviderLifecycleE2e.js",
-    "e2e:personal-live-plan": "tsc -p tsconfig.mine.json && node .test-build/tools/e2e/personalLivePlannerE2e.js",
-    "e2e:real-onboarding-collection": "npx tsx tools/e2e/realOnboardingCollectionE2e.ts",
     "validate:labeled-fixture": "tsc -p tools/labeled-set-fixture/tsconfig.json && node .labeled-fixture-build/tools/labeled-set-fixture/validate.js",
     "validate:home-workout": "tsc -p tools/home-workout-validation/tsconfig.json && node .home-workout-validation-build/tools/home-workout-validation/evaluate.js",
     "train:segmentation": "tsc -p tools/segmentation-training/tsconfig.json && node .segmentation-training-build/tools/segmentation-training/train.js",
@@ -120,5 +120,12 @@
     "test:external-fitness-data": "tsc -p tools/external-fitness-data/tsconfig.test.json && node --test .external-fitness-data-test-build/tools/external-fitness-data/externalFitnessData.test.js .external-fitness-data-test-build/tools/external-fitness-data/rollingProfileTrainer.test.js .external-fitness-data-test-build/tools/external-fitness-data/unifiedRecognitionCorpusGate.test.js .external-fitness-data-test-build/tools/exercise-registry/exerciseRegistry.test.js .external-fitness-data-test-build/tools/mobile-mvp/mobileDataLayer.test.js .external-fitness-data-test-build/tools/muscle-association/muscleAssociationDatabase.test.js .external-fitness-data-test-build/tools/simulated-kinematic-prior/simulatedKinematicPrior.test.js",
     "test": "tsc -p tsconfig.test.json && node .test-build/tools/runTests.js"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "autolinking": {
+      "android": {
+        "exclude": ["pose-camera"]
+      }
+    }
+  }
 }

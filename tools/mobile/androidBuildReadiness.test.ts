@@ -50,6 +50,7 @@ function findAutolinkedAndroidModules(): Record<string, AutolinkedModule> {
 test("Android production composition keeps Expo SDK 57 native prerequisites declared", () => {
   const packageJson = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
+    expo?: { autolinking?: { android?: { exclude?: readonly string[] } } };
   };
   const app = readAppConfig();
   const pluginNames = new Set((app.expo.plugins ?? []).map(pluginName));
@@ -62,7 +63,8 @@ test("Android production composition keeps Expo SDK 57 native prerequisites decl
     new Set(["expo-sqlite", "expo-background-task", "expo-notifications", "expo-secure-store"]),
     new Set(["expo-sqlite", "expo-background-task", "expo-notifications", "expo-secure-store"].filter((name) => pluginNames.has(name))),
   );
-  assert.ok(app.expo.android?.permissions?.includes("android.permission.CAMERA"));
+  assert.ok(!app.expo.android?.permissions?.includes("android.permission.CAMERA"));
+  assert.ok(packageJson.expo?.autolinking?.android?.exclude?.includes("pose-camera"));
   assert.ok(app.expo.android?.permissions?.includes("android.permission.health.READ_SLEEP"));
 });
 
@@ -78,16 +80,17 @@ test("Android MVP shell can reach the deployed cloud-developer HTTP API", () => 
   const compositionRoot = readFileSync(resolve(root, "src/mobile/ui/MaxPowerApp.tsx"), "utf8");
 
   assert.match(manifest, /<application[^>]*android:usesCleartextTraffic="true"/);
-  assert.match(compositionRoot, /const MVP_API_ENDPOINT = "http:\/\/54\.151\.241\.139:3000"/);
-  assert.match(compositionRoot, /createMobileAccountRuntimeFactory\(\{ apiBaseUrl: baseUrl, allowInsecureHttp: true \}\)/);
+  assert.match(compositionRoot, /EXPO_PUBLIC_MAXPOWER_API_BASE_URL/);
+  assert.match(compositionRoot, /http:\/\/54\.151\.241\.139:3000/);
+  assert.match(compositionRoot, /createMobileAccountRuntimeFactory\(\{ apiBaseUrl: baseUrl \}\)/);
 });
 
 test("authenticated Android runtime enables the complete Agent tool harness", () => {
   const runtime = readFileSync(resolve(root, "src/mobile/runtime/createMobileAccountRuntime.ts"), "utf8");
 
-  assert.match(runtime, /llmProviderResolver: cloudCoach\.llmProviderResolver/);
-  assert.match(runtime, /knowledgeToolsEnabled: true/);
-  assert.match(runtime, /actionToolsEnabled: true/);
+  assert.match(runtime, /pi: cloudCoach\.pi/);
+  assert.match(runtime, /new PiAgentConversationModule/);
+  assert.match(runtime, /createLocalConversationAdapters\(\{ kernel, records \}\)/);
   assert.match(runtime, /behaviorDecisionRecorder: new BehaviorDecisionTraceRecorder/);
 });
 
@@ -106,56 +109,46 @@ test("shared native shell uses the Expo SDK 57 safe-area primitive instead of fi
 test("Android local native modules are discoverable by Expo Autolinking with their JS bridge names", () => {
   const modules = findAutolinkedAndroidModules();
 
-  assert.deepEqual(modules["pose-camera"]?.config?.android?.modules, [
-    "expo.modules.posecamera.PoseCameraModule",
-  ]);
+  assert.equal(modules["pose-camera"], undefined);
   assert.deepEqual(modules["health-connect"]?.config?.android?.modules, [
     "expo.modules.maxpowerhealthconnect.MaxPowerHealthConnectModule",
   ]);
 });
 
-test("Android module manifests keep camera and Health Connect permissions in native module scope", () => {
-  const poseManifest = readFileSync(resolve(root, "modules/pose-camera/android/src/main/AndroidManifest.xml"), "utf8");
+test("Android V1 admits Health Connect but does not package a camera surface", () => {
   const healthManifest = readFileSync(resolve(root, "modules/health-connect/android/src/main/AndroidManifest.xml"), "utf8");
   const applicationManifest = readFileSync(resolve(root, "android/app/src/main/AndroidManifest.xml"), "utf8");
-  const poseModule = readFileSync(resolve(root, "modules/pose-camera/android/src/main/java/expo/modules/posecamera/PoseCameraModule.kt"), "utf8");
   const healthModule = readFileSync(resolve(root, "modules/health-connect/android/src/main/java/expo/modules/maxpowerhealthconnect/MaxPowerHealthConnectModule.kt"), "utf8");
 
-  assert.match(poseManifest, /android\.permission\.CAMERA/);
-  assert.match(poseManifest, /android\.hardware\.camera\.any/);
   assert.match(healthManifest, /android\.permission\.health\.READ_SLEEP/);
   assert.match(healthManifest, /android\.permission\.health\.READ_HEART_RATE_VARIABILITY/);
-  assert.match(poseModule, /Name\("PoseCamera"\)/);
   assert.match(healthModule, /Name\("MaxPowerHealthConnect"\)/);
   assert.match(applicationManifest, /<data android:scheme="maxpower"\/>/);
-});
-
-test("pose-camera packages Rust libraries from one generated source only", () => {
-  const build = readFileSync(resolve(root, "modules/pose-camera/android/build.gradle"), "utf8");
-
-  assert.match(build, /jniLibs\.srcDirs = \[rustJniDir\]/);
-  assert.doesNotMatch(build, /jniLibs\.srcDirs \+= rustJniDir/);
+  assert.doesNotMatch(applicationManifest, /android\.permission\.CAMERA/);
 });
 
 test("fresh Android install opens the shared SQLite file sequentially before creating isolated connections", () => {
   const persistence = readFileSync(resolve(root, "src/mobile/native/ExpoMaxPowerPersistence.ts"), "utf8");
-  const opens = [...persistence.matchAll(/await SQLite\.openDatabaseAsync\(databaseName\)/g)];
-  // One connection owns the durable Coach Ledger and one owns transient shell
-  // presentation state. The removed cloud-product cache no longer opens a
-  // third connection to this local-authoritative MVP database.
+  const connectionPolicy = readFileSync(
+    resolve(root, "src/mobile/native/ExpoDatabaseConnections.ts"),
+    "utf8",
+  );
+  const opens = [...persistence.matchAll(/await openIsolatedDatabaseConnection\(databaseName, SQLite\.openDatabaseAsync\)/g)];
+  // The durable Coach Ledger and transient shell presentation state each own
+  // an isolated handle. There is no cloud projection cache in the local-first
+  // MVP.
   assert.equal(opens.length, 2);
   assert.doesNotMatch(persistence, /Promise\.all\([\s\S]*openDatabaseAsync/);
+  assert.match(connectionPolicy, /useNewConnection: true/);
 });
 
-test("native SQLite directory is converted to an absolute file URI before legacy-file inspection", () => {
+test("native SQLite persistence has no legacy database migration path", () => {
   const persistence = readFileSync(
     resolve(root, "src/mobile/native/ExpoMaxPowerPersistence.ts"),
     "utf8",
   );
 
-  assert.match(persistence, /const fileDirectory = absoluteFileUri\(directory\)/);
-  assert.match(persistence, /return `file:\/\/\$\{directory\.startsWith\("\/"\) \? "" : "\/"\}\$\{directory\}`/);
-  assert.doesNotMatch(persistence, /new File\(directory, (?:databaseName|legacyName)\)/);
+  assert.doesNotMatch(persistence, /legacy|migrat|new File\(/i);
 });
 
 test("native workout and result surfaces translate planner identifiers and render completion time locally", () => {
@@ -169,10 +162,12 @@ test("native workout and result surfaces translate planner identifiers and rende
   assert.doesNotMatch(shell, />\{summary\.title\}<\/Text>/);
 });
 
-test("Coach drawer keeps transient and failed tool feedback without stacking completed rows", () => {
+test("Coach drawer renders only durable Pi Conversation items and local cards", () => {
   const drawer = readFileSync(resolve(root, "src/coach/ui/CoachDrawer.tsx"), "utf8");
 
-  assert.match(drawer, /if \(part\.state === "output-available"\) return null;/);
-  assert.match(drawer, /part\.state === "output-error" \? "未能完成" : "正在读取与整理"/);
-  assert.doesNotMatch(drawer, /: "已完成"/);
+  assert.match(drawer, /<FlatList/);
+  assert.match(drawer, /data=\{conversationItems\}/);
+  assert.match(drawer, /ConversationItemView/);
+  assert.match(drawer, /record_confirmation/);
+  assert.doesNotMatch(drawer, /CoachStreamProjection|StreamPart|ArtifactState/);
 });

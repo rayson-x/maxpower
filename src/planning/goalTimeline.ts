@@ -1,7 +1,6 @@
 import type { GoalContractData, UserProfileData } from "../coach/domain";
 import { copy, type LocalizedText, type Locale } from "./copy";
 import { estimateBodyFat } from "./bodyComposition";
-import { bodyMassStateOf } from "./personTiering";
 
 /**
  * 目标 → 时间反推（数据自适应版，2026-08-12 用户拍板）。
@@ -17,6 +16,20 @@ import { bodyMassStateOf } from "./personTiering";
  */
 
 export const KCAL_PER_KG_FAT = 7700;
+
+function bodyMassStateOf(profile: UserProfileData): { state: "low" | "normal" | "high" | "very_high"; bmi?: number } {
+  const height = profile.demographics?.height;
+  const weight = profile.demographics?.currentWeight;
+  if (!height || !weight) return { state: "normal" };
+  const heightCm = height.unit === "cm" ? height.value : height.value * 2.54;
+  const weightKg = weight.unit === "kg" ? weight.value : weight.value * 0.45359237;
+  if (heightCm <= 0 || weightKg <= 0) return { state: "normal" };
+  const bmi = weightKg / (heightCm / 100) ** 2;
+  return {
+    state: bmi < 19 ? "low" : bmi < 25 ? "normal" : bmi < 30 ? "high" : "very_high",
+    bmi: Math.round(bmi * 10) / 10,
+  };
+}
 
 export function maxDailyDeficitKcal(state: "low" | "normal" | "high" | "very_high"): number {
   switch (state) {

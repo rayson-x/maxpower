@@ -367,8 +367,8 @@ function sanitizeRestoredSession(session: CoachSession): CoachSession {
 }
 
 function sanitizeRestoredRun(run: CoachRunRecord): CoachRunRecord {
-  if (run.status === "completed" || run.status === "terminated" || run.status === "failed") return run;
-  return { ...run, status: "terminated", terminalCode: "restore_requires_new_turn" };
+  if (run.status === "completed" || run.status === "interrupted" || run.status === "failed") return run;
+  return { ...run, status: "interrupted", terminalCode: "restore_requires_new_turn" };
 }
 
 function validateRuntimeReferences(

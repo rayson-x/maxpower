@@ -1,15 +1,13 @@
 export {
-  CoachApplication,
-  createInMemoryCoachApplication,
-} from "./createCoachApplication";
+  LocalProductKernel,
+  createInMemoryLocalProductKernel,
+} from "./LocalProductKernel";
 export type {
-  CoachApplicationDependencies,
-  SeedUserStateInput,
+  LocalProductKernelDependencies,
+  SeedDomainStateForTestInput,
   ShowArtifactResult,
   ShowTodayPlanResult,
-  StartSessionInput,
-} from "./createCoachApplication";
-export { ActionPolicyError } from "./actions";
+} from "./LocalProductKernel";
 export { HumanActionError } from "./hitl";
 export { MemoryConflictError } from "./memory";
 export {
@@ -17,73 +15,14 @@ export {
   LedgerConflictError,
 } from "./ledger";
 export type {
-  AtomicCommit,
-  AtomicCommitResult,
   CoachLedger,
 } from "./ledger";
-export { ArtifactCardRegistry } from "./cards";
-export { PolicyGate } from "./policy";
-export { CoachToolRegistry, ToolSchemaError } from "./toolRegistry";
-export { projectPlannerProgress } from "./planningProgress";
-export type {
-  PlannerProgressClaimInput,
-  PlannerProgressInput,
-  PlannerProgressProposalInput,
-  PlannerProgressStage,
-  VerifiedPlannerClaim,
-} from "./planningProgress";
-export {
-  createGoalSpecificRiskAssessmentPort,
-  evaluateGoalSpecificRisk,
-} from "./goalSpecificRisk";
-export type {
-  ComparableGoalMeasurement,
-  GoalMeasurementRequirement,
-  GoalProtectionConstraints,
-  GoalSpecificRiskDecision,
-  GoalSpecificRiskObservations,
-  GoalSpecificRiskSnapshot,
-  GoalSpecificRiskSnapshotSource,
-  HypertrophyGoalContractExtension,
-  PhysiqueGoalContractExtension,
-} from "./goalSpecificRisk";
 export type * from "./model";
 export type * from "./ports";
-export {
-  ContextAssembler,
-  FunctionLLMProvider,
-  OpenAICompatibleProvider,
-  ProviderServiceError,
-  ScriptedLLMProvider,
-} from "./adapters/provider";
-export type {
-  ContextManifest,
-  LLMProvider,
-  LLMProviderResolver,
-  LLMProviderRequest,
-  OpenAICompatibleFetch,
-  OpenAICompatibleFetchResponse,
-  OpenAICompatibleProviderOptions,
-  ProviderContext,
-  ProviderEvent,
-  ProviderServiceErrorCode,
-} from "./adapters/provider";
-export { FixtureMotionRuntime } from "./adapters/motion";
-export type {
-  CanonicalTrainingFinalization,
-  CanonicalRepObservation,
-  CanonicalSetObservation,
-  LiveSessionState,
-  MotionTimelineFinalizationPort,
-  MotionRuntime,
-  ObserveSetResult,
-} from "./adapters/motion";
 export * from "./sqlite";
-export * from "../onboarding";
 export * from "../planning";
 export * from "../training-rules";
 export * from "../replanning";
 export * from "../scheduling";
-export * from "../sync";
 export * from "../privacy";
 export * from "../product";

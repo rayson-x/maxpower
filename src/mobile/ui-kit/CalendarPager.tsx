@@ -14,6 +14,8 @@ import Svg, { Circle, Defs, Ellipse, LinearGradient, Stop } from "react-native-s
 
 import { describeCycleRange } from "./calendarModel";
 import { uiColors, uiRadius, uiType } from "./tokens";
+import { mobileT } from "../../i18n";
+
 
 export interface CalendarPagerDay {
   date: string;
@@ -170,7 +172,7 @@ export function CalendarPager({ mode, days, selectedDate, today, planRange, loca
       </View>
       <Pressable
         accessibilityRole="switch"
-        accessibilityLabel="切换周视图与月视图"
+        accessibilityLabel={mobileT("mobile.ui.kit.calendarpager.ee8fbcc493")}
         accessibilityState={{ checked: mode === "month" }}
         onPress={() => onModeChange(mode === "week" ? "month" : "week")}
         style={({ pressed }) => [styles.modeSwitch, pressed && styles.modeSwitchPressed]}
@@ -178,13 +180,13 @@ export function CalendarPager({ mode, days, selectedDate, today, planRange, loca
         <Animated.View style={[styles.modeSwitchThumb, {
           transform: [{ translateX: modeProgress.interpolate({ inputRange: [0, 1], outputRange: [0, 32] }) }],
         }]} />
-        <Text style={[styles.modeSwitchLabel, mode === "week" && styles.modeSwitchLabelSelected]}>周</Text>
-        <Text style={[styles.modeSwitchLabel, mode === "month" && styles.modeSwitchLabelSelected]}>月</Text>
+        <Text style={[styles.modeSwitchLabel, mode === "week" && styles.modeSwitchLabelSelected]}>{mobileT("mobile.ui.kit.calendarpager.451b86707b")}</Text>
+        <Text style={[styles.modeSwitchLabel, mode === "month" && styles.modeSwitchLabelSelected]}>{mobileT("mobile.ui.kit.calendarpager.d9b59879f3")}</Text>
       </Pressable>
     </View>
     <View style={styles.pagerRow}>
-      <Pressable accessibilityRole="button" accessibilityLabel="上一段日期" onPress={() => changePage(-1)} style={({ pressed }) => [styles.arrow, pressed && styles.arrowPressed]}><Text style={styles.arrowText}>‹</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="下一段日期" onPress={() => changePage(1)} style={({ pressed }) => [styles.arrow, pressed && styles.arrowPressed]}><Text style={styles.arrowText}>›</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.calendarpager.506a1ec5c5")} onPress={() => changePage(-1)} style={({ pressed }) => [styles.arrow, pressed && styles.arrowPressed]}><Text style={styles.arrowText}>‹</Text></Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.calendarpager.9f6a20b857")} onPress={() => changePage(1)} style={({ pressed }) => [styles.arrow, pressed && styles.arrowPressed]}><Text style={styles.arrowText}>›</Text></Pressable>
     </View>
     <View
       ref={calendarViewport}
@@ -223,14 +225,14 @@ function CalendarDatePage({ mode, days, selectedDate, today, width, onSelectDate
 }) {
   const leading = mode === "month" && days.length ? mondayIndex(days[0]!.date) : 0;
   return <View pointerEvents={onSelectDate ? "auto" : "none"} style={[styles.calendarPage, width === undefined ? styles.calendarPageUnmeasured : { width }]}>
-    <View style={styles.weekLabels}>{["一", "二", "三", "四", "五", "六", "日"].map((label) => <Text key={label} style={styles.weekLabel}>{label}</Text>)}</View>
+    <View style={styles.weekLabels}>{[mobileT("mobile.ui.kit.calendarpager.d274eee8a1"), mobileT("mobile.ui.kit.calendarpager.1d5639f716"), mobileT("mobile.ui.kit.calendarpager.49ddb069d5"), mobileT("mobile.ui.kit.calendarpager.4f88740b34"), mobileT("mobile.ui.kit.calendarpager.8f07f53d63"), mobileT("mobile.ui.kit.calendarpager.3d72c724e0"), mobileT("mobile.ui.kit.calendarpager.15917f3b32")].map((label) => <Text key={label} style={styles.weekLabel}>{label}</Text>)}</View>
     <View style={styles.grid}>
       {Array.from({ length: leading }, (_, index) => <View key={`empty:${index}`} style={styles.cell} />)}
       {days.map((day) => {
         const selected = day.date === selectedDate;
         const isToday = day.date === today;
         const hasRecord = day.completed || day.partial || day.hasActivityLog;
-        return <Pressable key={day.date} accessibilityRole="button" accessibilityLabel={`查看 ${day.date} 的实际记录`} disabled={!onSelectDate} onPress={() => onSelectDate?.(day.date)} style={({ pressed }) => [styles.cell, pressed && styles.cellPressed]}>
+        return <Pressable key={day.date} accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.calendarpager.45a61c974b", { value0: day.date })} disabled={!onSelectDate} onPress={() => onSelectDate?.(day.date)} style={({ pressed }) => [styles.cell, pressed && styles.cellPressed]}>
           <View style={styles.dayFaceStack}>
             {selected ? <SelectedDateGlass /> : null}
             <View style={[styles.dayFace, selected && styles.dayFaceSelected, isToday && !selected && styles.dayFaceToday]}>

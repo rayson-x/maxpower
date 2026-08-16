@@ -4,6 +4,7 @@ import type {
   CoachRecipeKind,
   FactRef,
   JobAttempt,
+  LedgerSnapshot,
   NotificationIntent,
   NotificationKind,
   NotificationReceipt,
@@ -177,9 +178,14 @@ export class LocalRecipeEngine {
     // Native local notifications can be scheduled at the user-confirmed wall
     // time. Background work remains a best-effort recovery path; it is never
     // the mechanism that makes a future reminder precise.
-    if (recipe.enabled && this.notifications?.upsert && Date.parse(job.earliestAt) > Date.parse(now)) {
-      const intent = notificationForJob(job, recipe, now, notificationIntentId(job));
-      await this.scheduleNotificationForJob(job, intent, now);
+    if (recipe.enabled && this.notifications && Date.parse(job.earliestAt) > Date.parse(now)) {
+      const policyReason = this.notificationPolicyReason(job, recipe, snapshot, job.earliestAt);
+      if (policyReason) {
+        await this.persistTerminalJob(job, "skipped", policyReason, now);
+      } else {
+        const intent = notificationForJob(job, recipe, now, notificationIntentId(job));
+        await this.scheduleNotificationForJob(job, intent, now);
+      }
     }
     return { recipe, job };
   }
@@ -413,40 +419,9 @@ export class LocalRecipeEngine {
         expiredJobIds.push(job.id);
         continue;
       }
-      const intendedKind = notificationKindForRecipe(recipe.kind, job.trigger.recoveryEvidence);
-      const settings = recipe.notificationSettings;
-      if (settings?.doNotDisturb) {
-        await this.persistTerminalJob(job, "skipped", "notification_dnd", now);
-        skippedJobIds.push(job.id);
-        continue;
-      }
-      if (settings?.enabledNotificationKinds && !settings.enabledNotificationKinds.includes(intendedKind)) {
-        await this.persistTerminalJob(job, "skipped", "notification_kind_disabled", now);
-        skippedJobIds.push(job.id);
-        continue;
-      }
-      if (settings?.suppressDuringWorkout && job.trigger.trainingInProgress) {
-        await this.persistTerminalJob(job, "skipped", "training_in_progress", now);
-        skippedJobIds.push(job.id);
-        continue;
-      }
-      const quietHours = settings?.quietHours ?? recipe.fixedReminder?.quietHours;
-      if (quietHours && isWithinQuietHours(now, job.timezoneOffsetMinutes, quietHours)) {
-        await this.persistTerminalJob(job, "skipped", "quiet_hours", now);
-        skippedJobIds.push(job.id);
-        continue;
-      }
-      const maxPerLocalDate = settings?.maxPerLocalDate ?? defaultMaxPerLocalDate(recipe.kind);
-      const alreadyScheduled = snapshot.notificationIntents.filter(
-        (intent) =>
-          intent.userId === job.userId &&
-          intent.kind === intendedKind &&
-          intent.localDateIntent === job.localDateIntent &&
-          intent.jobId !== job.id &&
-          (intent.status === "pending" || intent.status === "scheduled"),
-      ).length;
-      if (alreadyScheduled >= maxPerLocalDate) {
-        await this.persistTerminalJob(job, "skipped", "notification_frequency_cap", now);
+      const policyReason = this.notificationPolicyReason(job, recipe, snapshot, now);
+      if (policyReason) {
+        await this.persistTerminalJob(job, "skipped", policyReason, now);
         skippedJobIds.push(job.id);
         continue;
       }
@@ -469,6 +444,33 @@ export class LocalRecipeEngine {
       }
     }
     return { attempted, scheduledNotificationIds, expiredJobIds, skippedJobIds };
+  }
+
+  private notificationPolicyReason(
+    job: ScheduledJob,
+    recipe: CoachRecipe,
+    snapshot: LedgerSnapshot,
+    evaluatedAt: string,
+  ): "notification_dnd" | "notification_kind_disabled" | "training_in_progress" | "quiet_hours" | "notification_frequency_cap" | undefined {
+    const intendedKind = notificationKindForRecipe(recipe.kind, job.trigger.recoveryEvidence);
+    const settings = recipe.notificationSettings;
+    if (settings?.doNotDisturb) return "notification_dnd";
+    if (settings?.enabledNotificationKinds && !settings.enabledNotificationKinds.includes(intendedKind)) {
+      return "notification_kind_disabled";
+    }
+    if (settings?.suppressDuringWorkout && job.trigger.trainingInProgress) return "training_in_progress";
+    const quietHours = settings?.quietHours ?? recipe.fixedReminder?.quietHours;
+    if (quietHours && isWithinQuietHours(evaluatedAt, job.timezoneOffsetMinutes, quietHours)) return "quiet_hours";
+    const maxPerLocalDate = settings?.maxPerLocalDate ?? defaultMaxPerLocalDate(recipe.kind);
+    const alreadyScheduled = snapshot.notificationIntents.filter(
+      (intent) =>
+        intent.userId === job.userId &&
+        intent.kind === intendedKind &&
+        intent.localDateIntent === job.localDateIntent &&
+        intent.jobId !== job.id &&
+        (intent.status === "pending" || intent.status === "scheduled"),
+    ).length;
+    return alreadyScheduled >= maxPerLocalDate ? "notification_frequency_cap" : undefined;
   }
 
   async cancelRecipe(userId: string, recipeId: string): Promise<void> {
@@ -555,11 +557,7 @@ export class LocalRecipeEngine {
       recordedAt: now,
     });
     try {
-      if (this.notifications.upsert) {
-        await this.notifications.upsert({ id: intent.id, at: intent.scheduledAt, title: intent.title, body: intent.body, deepLink: encodeDeepLink(intent.deepLink) });
-      } else {
-        await this.notifications.schedule({ id: intent.id, at: intent.scheduledAt, title: intent.title, body: intent.body });
-      }
+      await this.notifications.upsert({ id: intent.id, at: intent.scheduledAt, title: intent.title, body: intent.body, deepLink: encodeDeepLink(intent.deepLink) });
       await this.persistNotificationScheduled(job, intent, now, { ...attempt, outcome: "scheduled", finishedAt: now });
       return true;
     } catch (error) {
@@ -666,7 +664,7 @@ const EVENT_NOTIFICATION_TEMPLATES: Readonly<Record<Exclude<CoachRecipeKind, "mo
     kind: "weekly_report",
     title: "本周记录已准备好",
     body: "打开 MaxPower 查看本周的训练与恢复。",
-    deepLinkKind: "progress",
+    deepLinkKind: "plan",
   },
   deload_ended: {
     kind: "deload_explanation",

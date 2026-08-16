@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [x] 完成一场含 user_confirmed 负荷数据的训练后，timeline 出现对应 historicalSet 事实，planner 的 deriveHistory 返回非空
 - [x] 四个 replan 入口的 plan 请求均携带从 workout 聚合组装的 historicalPerformance

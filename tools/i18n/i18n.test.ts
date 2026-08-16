@@ -33,15 +33,17 @@ test("缺失键返回带 key 的占位（便于发现漏翻，不静默空串）
 test("资源表完整性：每条必须 en + zh 双语言，且英文非空是真英文", () => {
   for (const [domain, table] of Object.entries(TRANSLATIONS)) {
     for (const [key, entry] of Object.entries(table)) {
-      assert.ok(entry.en.length > 3, `${domain}.${key} 缺英文`);
+      assert.ok(entry.en.length > 0, `${domain}.${key} 缺英文`);
       assert.ok(entry.zh.length > 0, `${domain}.${key} 缺中文`);
-      assert.ok(/[A-Za-z]{4,}/.test(entry.en), `${domain}.${key} 英文不是英文`);
+      // "真英文"的可执行判据是“不是中文占位”：UI 里有大量合法的短词与缩写
+      // (Sun、min、Log、−30 s)，长度或字母游程启发式会误伤它们。
       assert.ok(!/[一-鿿]/.test(entry.en), `${domain}.${key} 英文里混了中文`);
+      assert.ok(/[A-Za-z0-9]/.test(entry.en), `${domain}.${key} 英文不是英文`);
     }
   }
 });
 
 test("createTranslator 绑定资源表后复用", () => {
   const t = createTranslator(PLANNING_COPY, "zh");
-  assert.ok(t("tiering.recomp.leanBeginner").includes("新手窗口期"));
+  assert.ok(t("tiering.recomp.leanBeginner").includes("偏瘦"));
 });

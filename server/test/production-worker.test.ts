@@ -70,30 +70,6 @@ test("worker recovers expired LLM reservations without exposing invocation conte
   }]);
 });
 
-test("worker drains durable media byte-deletion jobs outside the HTTP request", async () => {
-  const controller = new AbortController();
-  const events: Record<string, unknown>[] = [];
-  await runDeletionWorker({
-    deletion: {
-      async processNext() {
-        controller.abort();
-        return undefined;
-      },
-    },
-    mediaDeletion: {
-      async processNextDeletion() {
-        return { jobId: "media-delete-1", accountId: "alice", deletedAssetIds: ["asset-1"] };
-      },
-    },
-    pollIntervalMs: 1,
-    signal: controller.signal,
-    sleep: async () => undefined,
-    writeEvent(event) { events.push(event); },
-  });
-  assert.deepEqual(events, [{ event: "media_deletion_completed", jobId: "media-delete-1" }]);
-  assert.doesNotMatch(JSON.stringify(events), /alice|asset-1/);
-});
-
 test("worker entrypoint composes the least-privilege runtime instead of the API runtime", () => {
   const source = readFileSync(resolve(process.cwd(), "src/worker.ts"), "utf8");
   assert.match(source, /parseProductionWorkerConfig/);

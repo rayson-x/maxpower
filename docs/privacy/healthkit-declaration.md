@@ -21,7 +21,7 @@ location routes, calories for TDEE claims, diagnoses, recovery scores or plans.
 ## Purpose and handling
 
 The native HealthKit module emits a bounded page of primitive observations and
-an opaque per-type anchor. `CoachApplication` commits the normalized evidence,
+an opaque per-type anchor. The local Product Kernel commits the normalized evidence,
 its source/device provenance and the anchor together to the local SQLite
 ledger. A failed commit leaves the anchor unadvanced. Deleted sample UUIDs
 become Timeline tombstones; imported facts preserve their original source and

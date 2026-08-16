@@ -14,16 +14,14 @@ import {
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 
-import type { CoachApplication } from "../../coach";
-import type { DynamicFormAnswer, DynamicFormCard, FirstPlannerHandoffProposal, OnboardingEntryState } from "../../onboarding";
-import type { NutritionStrategyData, PlannedExerciseTask } from "../../coach/domain";
-import type { CoachContextKind, CoachMessage, CoachSession, ContextRef, EvidenceBriefArtifact, NutritionObservationDraftArtifact } from "../../coach/model";
+import type { LocalProductKernel } from "../../coach";
+import type { ConversationItem, PiAgentConversationModule } from "../../agent-conversation";
+import type { RecordModule } from "../../records";
+import type { DomainProjection, NutritionStrategyData, PlannedExerciseTask } from "../../coach/domain";
+import type { CoachSession, EvidenceBriefArtifact } from "../../coach/model";
+import { goalPathStateLabel } from "../../coach/goalPathCopy";
 import type { CustomExerciseVariantView, MovementPattern } from "../../knowledge";
-import {
-  CoachDrawer,
-  CoachStreamProjection,
-  type CoachStreamSnapshot,
-} from "../../coach/ui";
+import { CoachDrawer } from "../../coach/ui";
 import {
   coachDrawerAvailableForRoute,
   type CoachDrawerRoute,
@@ -31,17 +29,9 @@ import {
   type CoachProductProjection,
   type ProductSession,
   type WorkoutOutcomeProductSummary,
-  presentReplicaSyncOverview,
 } from "../../product";
 import type { TimelineReadEvent } from "../../timeline";
-import type { CloudMediaLibrary } from "../cloud";
-import {
-  createManualMealObservation,
-  estimateMaintenanceEnergy,
-  type DailyIntakeBudget,
-  type DailyIntakeStatus,
-  type NextMealRecommendation,
-} from "../../nutrition";
+import type { DailyHealthLedger } from "../../health";
 import { colors, radius } from "./theme";
 import {
   APP_DOCK_BODY_HEIGHT,
@@ -58,90 +48,56 @@ import {
 } from "../ui-kit";
 import { ANDROID_HEALTH_CONNECT_MVP_METRICS } from "../native/AndroidHealthConnectPort";
 import { APPLE_HEALTHKIT_MVP_METRICS } from "../native/AppleHealthKitPort";
-import { ProgressScreen as VideoLibraryScreen, type ReplaySelection } from "./ProgressScreen";
-import { ReplayScreen } from "./ReplayScreen";
-import { WorkoutMonitorWorkspace } from "./WorkoutMonitorWorkspace";
-import { defaultSelectedFreeWeightEquipment } from "../../motion/equipmentRecognitionPolicy";
-import {
-  readPoseCameraRuntimeHealth,
-  type PoseCameraRuntimeHealth,
-} from "../../../modules/pose-camera/src/PoseCameraView";
-import type { WorkoutSetRealtimeContext } from "./workoutRealtime";
-import { resolveWorkoutSetRealtimeCapability } from "./workoutRealtime";
-import { NutritionObservationDraftSheet } from "./NutritionObservationDraftSheet";
 import { TimelineCorrectionSheet } from "./TimelineCorrectionSheet";
 import { WorkoutOutcomeCorrectionSheet } from "./WorkoutOutcomeCorrectionSheet";
-import { RecordFocus, type RecordFocusMode } from "./RecordFocus";
-import { BaselineIntakeCard } from "./BaselineIntakeCard";
-import { EMPTY_BASELINE_INTAKE, type BaselineIntakeValues } from "./baselineIntake";
-import { DynamicOnboardingFormCard } from "./DynamicOnboardingFormCard";
-import {
-  answeredDynamicOnboardingFormFieldIds,
-  createDynamicOnboardingFormValues,
-  updateDynamicOnboardingFormValue,
-  type DynamicOnboardingFormValue,
-  type DynamicOnboardingFormValues,
-} from "./dynamicOnboardingForm";
+import { RecordFocus, type RecordFocusInitialMode } from "./RecordFocus";
 import { ProductDock } from "./components/ProductDock";
 import { Timeline } from "./components/Timeline";
 import {
-  buildPlanningReportSummary,
   forecastEligibility,
   forecastName,
   planningPhrase,
   strategyName,
 } from "./planningReport";
 import type { ProductShellStateStore } from "./ProductShellStateStore";
-import {
-  createCloudPlanRecoverySnapshot,
-  createCloudProfileRecoverySnapshot,
-  createCloudWorkoutExecutionSnapshot,
-  type CloudJsonObject,
-  type ConfirmedProductBridge,
-  type ProductShellCloudProjection,
-} from "../product-data";
-import { applyUpcomingWorkoutPlanChange } from "../../workout/UpcomingWorkoutPlanEditor";
 import { ProfessionalTermText } from "../ui-kit";
 import { workoutHorizontalIntent, workoutReorderIntent } from "./workoutGestures";
+import { userFacingError } from "../userFacingError";
+import { coachingModeLabel } from "./productCopy";
 import {
   applyInboundNavigationIntent,
   initialProductShellState,
-  resolveUserDossierEntryRoute,
   resolveMaxPowerDeepLink,
   type ProductDeepLinkRoute,
   type ProductCoachAttachment,
   type ProductShellRecovery,
   type ProductShellState,
 } from "./productNavigation";
+import { mobileT, setMobileUiLocale } from "../../i18n";
+
 
 export type ProductRoute = CoachDrawerRoute;
 type PrimaryProductRoute = "today" | "calendar" | "plan" | "profile";
 
 export interface ProductShellProps {
-  application: CoachApplication;
-  /** Confirmation boundary; MVP commits to the local account Ledger. */
-  confirmedProduct: ConfirmedProductBridge;
-  /** Explicit opt-in upload/list/delete workflow for personal media. */
-  cloudMediaLibrary: CloudMediaLibrary;
+  application: LocalProductKernel;
+  conversation: PiAgentConversationModule;
+  records: RecordModule;
   userId: string;
   /** Any validated notification or OS Linking event uses the same registry. */
   incomingDeepLink?: string;
-  /** @deprecated Use incomingDeepLink for notification and OS URL events. */
-  notificationDeepLink?: string;
-  /** Local presentation-state port; domain facts remain in CoachApplication. */
+  /** Local presentation-state port; domain facts remain in LocalProductKernel. */
   productShellStateStore?: ProductShellStateStore;
   /** Resolved before rendering by the native composition root. */
   initialProductShellRecovery?: ProductShellRecovery;
   onOpenAccountSettings?: () => void;
-  /** Account runtime finishes a queued Timeline assessment after local writes. */
-  onTimelineChanged?(): Promise<void>;
 }
 
-type ActivityLogMode = RecordFocusMode;
+type ActivityLogMode = RecordFocusInitialMode;
 const DASHBOARD_CARD_MIN_HEIGHT = 456;
 
 /** Shared iOS/Android shell. It owns navigation presentation state only. */
-export function ProductShell({ application, confirmedProduct, cloudMediaLibrary, userId, incomingDeepLink, notificationDeepLink, productShellStateStore, initialProductShellRecovery, onOpenAccountSettings, onTimelineChanged }: ProductShellProps) {
+export function ProductShell({ application, conversation, records, userId, incomingDeepLink, productShellStateStore, initialProductShellRecovery, onOpenAccountSettings }: ProductShellProps) {
   const initialShellState = initialProductShellRecovery?.state ?? initialProductShellState(localDate());
   const [route, setRoute] = useState<ProductRoute>(initialShellState.navigation.route);
   const [date, setDate] = useState(initialShellState.navigation.date);
@@ -151,34 +107,26 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(initialShellState.navigation.date);
   const [calendarMode, setCalendarMode] = useState<CalendarPresentationMode>(initialShellState.navigation.calendarMode);
   const [workoutId, setWorkoutId] = useState<string | undefined>(initialShellState.navigation.workoutId);
-  const [replaySelection, setReplaySelection] = useState<ReplaySelection>();
-  const [replayReturnRoute, setReplayReturnRoute] = useState<"video_library" | "workout">("video_library");
   const [coachExpanded, setCoachExpanded] = useState(initialShellState.navigation.coachExpanded);
   const [coachComposerAnchor, setCoachComposerAnchor] = useState<CoachComposerAnchor>();
-  const [recordAnchor, setRecordAnchor] = useState<CoachComposerAnchor>();
   const [coachFocusRequest, setCoachFocusRequest] = useState(0);
-  const [coachEntryMode, setCoachEntryMode] = useState<"text" | "voice">("text");
   const [showActivityLog, setShowActivityLog] = useState(false);
-  const [activityLogInitialMode, setActivityLogInitialMode] = useState<ActivityLogMode>("training");
+  const [activityLogInitialMode, setActivityLogInitialMode] = useState<ActivityLogMode>("picker");
   const [timelineCorrection, setTimelineCorrection] = useState<TimelineReadEvent>();
   const [workoutSummary, setWorkoutSummary] = useState<WorkoutOutcomeProductSummary>();
   const [workoutCorrectionId, setWorkoutCorrectionId] = useState<string>();
-  const [nutritionDraft, setNutritionDraft] = useState<NutritionObservationDraftArtifact>();
-  const [nutritionDraftBusy, setNutritionDraftBusy] = useState(false);
   const [screen, setScreen] = useState<CoachProductProjection>();
-  const [onboardingEntry, setOnboardingEntry] = useState<OnboardingEntryState>();
-  const [entryGate, setEntryGate] = useState<"resolving" | "resolved" | "failed">("resolving");
-  const onboardingRequired = useRef(true);
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
-  const cloudConfirmed = confirmedProduct;
-  const stream = useRef(new CoachStreamProjection());
-  const [streamSnapshot, setStreamSnapshot] = useState<CoachStreamSnapshot>(stream.current.snapshot());
   const [coachSession, setCoachSession] = useState<CoachSession>();
-  const [coachMessages, setCoachMessages] = useState<readonly CoachMessage[]>([]);
+  const [coachWorking, setCoachWorking] = useState(false);
+  const [coachItems, setCoachItems] = useState<readonly ConversationItem[]>([]);
   const [coachSessions, setCoachSessions] = useState<readonly CoachSession[]>([]);
   const [coachAttachment, setCoachAttachment] = useState<ProductCoachAttachment | undefined>(initialShellState.coachAttachment);
+  const hydrateCoachRef = useRef<(requestedSession?: CoachSession) => Promise<void>>();
+  const initialSignalReconciled = useRef(false);
   const initialShellRecoveryHandled = useRef(false);
+  const onboardingCoachOpened = useRef(false);
   const productShellSaveChain = useRef(Promise.resolve());
   const primaryPager = useRef<HorizontalRoutePagerHandle>(null);
   const [shellRestorationReady, setShellRestorationReady] = useState(!initialProductShellRecovery);
@@ -198,322 +146,332 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
   };
 
   const refresh = useCallback(async () => {
-    setEntryGate("resolving");
     setLoading(true);
     try {
-      const [projection, onboardingEntry] = await Promise.all([
-        application.readProductProjection({
-          userId,
-          date,
-          timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1,
-          calendarMode,
-          calendarAnchorDate,
-        }),
-        application.readOnboardingEntryState({ userId }),
-      ]);
-      // A completed User dossier is the entry condition for the main product,
-      // not merely a card the user may choose to open later. The projection is
-      // the public application seam; ProductShell never reads the Ledger.
-      setRoute((requestedRoute) => resolveUserDossierEntryRoute({
-        requestedRoute,
-        onboardingRequired: onboardingEntry.destination === "onboarding",
-      }));
-      setOnboardingEntry(onboardingEntry);
-      onboardingRequired.current = onboardingEntry.destination === "onboarding";
-      setEntryGate("resolved");
+      const projection = await application.readProductProjection({
+        userId,
+        date,
+        timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1,
+        calendarMode,
+        calendarAnchorDate,
+      });
+      setMobileUiLocale(projection.profile.locale);
       setScreen(projection);
       setError(undefined);
     } catch (cause) {
-      setEntryGate("failed");
-      setError(cause instanceof Error ? cause.message : "无法读取本地资料");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.6133501b1b")));
     } finally {
       setLoading(false);
     }
   }, [application, calendarAnchorDate, calendarMode, date, userId]);
 
-  // Every client-originated Timeline write uses this one completion path.
-  // The runtime only settles an already-queued current evaluation, so opening
-  // the activity sheet never invents an empty review or a plan adjustment.
-  const settleTimelineAndRefresh = useCallback(() => {
+  // Domain modules own fixed GoalPath review and Conversation ingress. The UI
+  // only refreshes projections and, when a material signal opened a thread,
+  // makes that durable thread available on the next Coach opening.
+  const refreshAfterFormalWrite = useCallback(() => {
     void (async () => {
-      try {
-        await onTimelineChanged?.();
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "已保存记录，但暂时无法完成进度检查");
-      } finally {
-        await refresh();
-      }
-    })();
-  }, [onTimelineChanged, refresh]);
+      await refresh();
+      const history = await conversation.read({ kind: "history", userId });
+      if (history.kind !== "history") return;
+      setCoachSessions(history.conversations);
+      const newest = history.conversations[0];
+      if (!newest || newest.id === coachSession?.id) return;
+      const projection = await conversation.read({ kind: "conversation", userId, conversationId: newest.id });
+      if (projection.kind !== "conversation" || !projection.items.some((item) =>
+        item.card?.kind === "receipt" && item.card.detail?.startsWith("signal:"),
+      )) return;
+      await hydrateCoachRef.current?.(projection.conversation);
+    })().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540"))));
+  }, [coachSession, conversation, refresh, userId]);
 
+  // Every formal Record and Workout write reaches the same kernel-owned fixed
+  // signal gate. This shell only reads the resulting projection.
   useEffect(() => {
     void refresh();
   }, [refresh]);
   useEffect(() => {
-    if (route === "onboarding" || route === "video_library" || route === "replay") {
-      setCoachExpanded(false);
-      setCoachAttachment((current) => current ? { ...current, foreground: "minimized" } : undefined);
-    }
-  }, [route]);
-  useEffect(() => {
-    const intent = resolveMaxPowerDeepLink(incomingDeepLink ?? notificationDeepLink);
+    const intent = resolveMaxPowerDeepLink(incomingDeepLink);
     if (!intent) return;
     // This is intentionally a view-state transition only. In particular, an
     // external Workout URL does not prepare/activate a session or create a
     // Coach session; WorkoutScreen will read the canonical session by id.
     const next = applyInboundNavigationIntent(navigationState.current, intent);
-    setRoute(resolveUserDossierEntryRoute({
-      requestedRoute: next.route,
-      onboardingRequired: onboardingRequired.current,
-    }));
+    setRoute(next.route);
     setDate(next.date);
     setCalendarAnchorDate(next.date);
     setCalendarMode(next.calendarMode);
     setWorkoutId(next.workoutId);
     setCoachExpanded(next.coachExpanded);
     setCoachAttachment((current) => current ? { ...current, foreground: "minimized" } : undefined);
-  }, [incomingDeepLink, notificationDeepLink]);
-
-  const context = useMemo<ContextRef>(() => ({
-    kind: routeContext(route),
-    ref: route === "today" || route === "calendar" ? date : route === "plan" ? `plan:${screen?.source.planRevision ?? "none"}` : route === "workout" ? workoutId ?? "active" : route,
-  }), [date, route, screen?.source.planRevision, workoutId]);
-
-  // A stream is task-scoped. Moving between Today, a plan, and a Workout
-  // must never leave the previous task's parts as the target of the next
-  // composer submission; the persisted projection is rehydrated on demand.
-  useEffect(() => {
-    setCoachExpanded(false);
-    setCoachSession(undefined);
-    setCoachMessages([]);
-    setCoachAttachment((current) => current && !contextAcceptsRestoredCoach(current.context, context, screen === undefined)
-      ? { ...current, foreground: "minimized" }
-      : current);
-    const next = new CoachStreamProjection();
-    stream.current = next;
-    setStreamSnapshot(next.snapshot());
-  }, [context.kind, context.ref]);
+  }, [incomingDeepLink]);
 
   const beginOrResumeWorkout = useCallback(async () => {
     const today = screen?.today;
-    if (!today?.session) return;
+    if (!today) return;
     try {
       let id = today.activeWorkout?.id;
+      if (!id && !today.session && today.state === "record_first") {
+        id = `freestyle-${Date.now().toString(36)}`;
+        const localWorkoutId = id;
+        const knowledgePins = application.getInstalledKnowledgeVersionPins();
+        await application.prepareFreestyleWorkoutSession({ userId, workoutId: localWorkoutId, session: { id: `freestyle-session-${date}`, title: "自由训练", scheduledFor: date, knowledgePins, tasks: [] }, mode: "record_only", idempotencyKey: `mobile-workout:${localWorkoutId}:prepare-freestyle` });
+        await application.activateWorkoutSession({ userId, workoutId: localWorkoutId, mode: "record_only", idempotencyKey: `mobile-workout:${localWorkoutId}:activate` });
+      }
       if (!id) {
-        if (!screen?.source.planId || !screen.source.planRevision) throw new Error("当前计划无法启动训练");
+        if (!today.session) throw new Error("record_first_freestyle_session_unavailable");
+        if (!screen?.source.planId || !screen.source.planRevision) throw new Error(mobileT("mobile.ui.productshell.697bcb4f78"));
         id = `workout-${Date.now().toString(36)}`;
         const localWorkoutId = id;
-        await cloudConfirmed.startWorkoutThen({
-          localWorkoutId,
-          localPlanId: screen.source.planId,
-          title: today.session.title,
-          data: { sessionPrescriptionId: today.session.id, mode: "record_only" },
-          startedAt: new Date().toISOString(),
-          idempotencyKey: `mobile-workout:${localWorkoutId}:start`,
-          commitLocal: async () => {
-            await application.prepareWorkoutSession({
-              userId,
-              workoutId: localWorkoutId,
-              prescriptionRef: {
-                planId: screen.source.planId!,
-                planRevision: screen.source.planRevision!,
-                sessionPrescriptionId: today.session!.id,
-              },
-              mode: "record_only",
-              idempotencyKey: `mobile-workout:${localWorkoutId}:prepare`,
-            });
-            await application.activateWorkoutSession({
-              userId,
-              workoutId: localWorkoutId,
-              mode: "record_only",
-              idempotencyKey: `mobile-workout:${localWorkoutId}:activate`,
-            });
-          },
-        });
-      } else {
-        const existing = await application.readWorkoutSession({ userId, workoutId: id });
-        if (existing.state.mode === "coach_monitor") {
-          const localWorkoutId = id;
-          await cloudConfirmed.updateWorkoutThen({
-            localWorkoutId,
-            patch: { data: { mode: "record_only" } },
-            idempotencyKey: `mobile-workout:${localWorkoutId}:legacy-monitor-off:cloud`,
-            commitLocal: () => application.setWorkoutMonitoringMode({
-              userId,
-              workoutId: localWorkoutId,
-              enabled: false,
-              idempotencyKey: `mobile-workout:${localWorkoutId}:legacy-monitor-off`,
-            }),
-          });
-        }
-        // Paused sessions are routed to PausedWorkoutScreen. That screen owns
-        // safety acknowledgement and expired-window partial proposals.
+        await application.prepareWorkoutSession({ userId, workoutId: localWorkoutId, prescriptionRef: { planId: screen.source.planId!, planRevision: screen.source.planRevision!, sessionPrescriptionId: today.session!.id }, mode: "record_only", idempotencyKey: `mobile-workout:${localWorkoutId}:prepare` });
+        await application.activateWorkoutSession({ userId, workoutId: localWorkoutId, mode: "record_only", idempotencyKey: `mobile-workout:${localWorkoutId}:activate` });
       }
       setWorkoutId(id);
       setCoachExpanded(false);
       setRoute("workout");
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法开始训练");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.010826f04f")));
     }
-  }, [application, cloudConfirmed, refresh, screen, userId]);
+  }, [application, date, refresh, screen, userId]);
 
   const requestWorkoutStart = useCallback(() => {
     void beginOrResumeWorkout();
   }, [beginOrResumeWorkout]);
 
-  const resolveCoachSession = useCallback(async (messageContext: ContextRef): Promise<CoachSession | undefined> => {
-    if (messageContext.kind === "workout") {
-      return application.ensureWorkoutCoachSession({
-        userId,
-        workoutId: messageContext.ref,
-        idempotencyKey: `mobile-workout:${messageContext.ref}:coach-session`,
-      });
-    }
-    const candidates = await application.listCoachSessions({ userId });
-    let session = candidates.find(
-      (candidate) =>
-        candidate.context.kind === messageContext.kind &&
-        candidate.context.ref === messageContext.ref &&
-        candidate.status === "active",
-    ) ?? candidates.find(
-      (candidate) =>
-        candidate.context.kind === messageContext.kind &&
-        candidate.context.ref === messageContext.ref &&
-        candidate.status !== "archived" &&
-        candidate.status !== "completed",
-    );
-    if (!session) return undefined;
-    if (session.status !== "active") session = await application.setSessionStatus(session.id, "active");
-    return session;
-  }, [application, userId]);
-
-  const hydrateCoach = useCallback(async () => {
-    const [session, sessions] = await Promise.all([
-      resolveCoachSession(context),
-      application.listCoachSessions({ userId }),
-    ]);
-    setCoachSessions(sessions.filter((candidate) => candidate.status !== "archived"));
+  const hydrateCoach = useCallback(async (requestedSession?: CoachSession) => {
+    const history = await conversation.read({ kind: "history", userId });
+    const sessions = history.kind === "history" ? history.conversations : [];
+    setCoachSessions(sessions);
+    let session = requestedSession ?? coachSession;
     if (!session) {
-      setCoachSession(undefined);
-      setCoachMessages([]);
-      // A session from another destination may remain minimized while the
-      // user navigates. Once the current destination has no matching session,
-      // it is stale for this drawer and must not be allowed to close the newly
-      // opened surface again.
-      setCoachAttachment(undefined);
-      return;
+      const opened = await conversation.execute({ kind: "new", userId });
+      if (opened.kind !== "opened") return;
+      session = opened.conversation;
+    } else {
+      const opened = await conversation.execute({ kind: "open", userId, conversationId: session.id });
+      if (opened.kind !== "opened") return;
+      session = opened.conversation;
     }
-    setCoachSession(session);
-    setCoachAttachment({
-      sessionId: session.id,
-      context: session.context,
-      foreground: coachExpanded ? "expanded" : "minimized",
-    });
-    const persisted = await application.readSessionProjection(session.id);
-    setCoachMessages(persisted.messages);
-    const next = new CoachStreamProjection(persisted.artifacts, undefined, persisted.presentations, persisted.pendingHumanActions);
-    persisted.runEvents.forEach((event) => next.accept(event));
-    stream.current = next;
-    setStreamSnapshot(next.snapshot());
-  }, [application, coachExpanded, context, resolveCoachSession]);
+    const projection = await conversation.read({ kind: "conversation", userId, conversationId: session.id });
+    if (projection.kind !== "conversation") return;
+    setCoachSession(projection.conversation);
+    setCoachItems(projection.items);
+    setCoachAttachment({ sessionId: projection.conversation.id, foreground: coachExpanded ? "expanded" : "minimized" });
+  }, [coachExpanded, coachSession, conversation, userId]);
+  hydrateCoachRef.current = hydrateCoach;
 
-  const sendToCoach = useCallback(async (text: string, messageContext: ContextRef) => {
-    const optimisticMessage: CoachMessage = {
-      id: `ui-message:${Date.now().toString(36)}`,
-      sessionId: coachSession?.id ?? "pending-session",
-      userId,
-      role: "user",
-      content: text,
-      createdAt: new Date().toISOString(),
-    };
-    setCoachMessages((current) => [...current, optimisticMessage]);
+  // The first authenticated surface is the conversation, not a dashboard
+  // which asks a new user to discover Coach. Once the baseline is confirmed,
+  // this effect deliberately never opens the onboarding surface again.
+  useEffect(() => {
+    if (!shellRestorationReady || !screen || screen.profile.profileReady || onboardingCoachOpened.current) return;
+    onboardingCoachOpened.current = true;
+    setCoachExpanded(true);
+    void hydrateCoach().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540"))));
+  }, [hydrateCoach, screen, shellRestorationReady]);
+
+  // Background daily review and foreground manual writes share the same
+  // fixed Signal gate.  A material result can recover the most recent
+  // conversation (or create one); no material result creates neither Pi work
+  // nor a conversation shell.
+  useEffect(() => {
+    if (initialSignalReconciled.current || !screen) return;
+    initialSignalReconciled.current = true;
+    let cancelled = false;
+    void (async () => {
+      const result = await conversation.execute({
+        kind: "reconcile",
+        userId,
+        causationId: "product-shell-initial-signal-check",
+      });
+      if (result.kind !== "signal_started") return;
+      setCoachWorking(true);
+      await conversation.whenIdle(result.conversationId);
+      if (cancelled) return;
+      setCoachWorking(false);
+      const opened = await conversation.execute({ kind: "open", userId, conversationId: result.conversationId });
+      if (opened.kind === "opened") await hydrateCoachRef.current?.(opened.conversation);
+      await refresh();
+    })().catch((cause) => {
+      if (!cancelled) setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")));
+    });
+    return () => { cancelled = true; };
+  }, [conversation, refresh, screen, userId]);
+
+  // A daily fixed review may have run while the app was closed. Once its
+  // durable Conversation is available, route the material signal through the
+  // same Pi path as a freshly written Record. The module owns global signal
+  // deduplication, so this effect never creates a second Agent run.
+  useEffect(() => {
+    if (!coachSession) return;
+    let cancelled = false;
+    void (async () => {
+      const result = await conversation.execute({
+        kind: "reconcile",
+        userId,
+        conversationId: coachSession.id,
+        causationId: `conversation-open:${coachSession.id}`,
+      });
+      if (result.kind !== "signal_started") return;
+      setCoachWorking(true);
+      await conversation.whenIdle(coachSession.id);
+      if (!cancelled) {
+        setCoachWorking(false);
+        await hydrateCoach(coachSession);
+        await refresh();
+      }
+    })().catch((cause) => {
+      if (!cancelled) setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")));
+    });
+    return () => { cancelled = true; };
+  }, [coachSession, conversation, hydrateCoach, refresh, userId]);
+
+  const sendToCoach = useCallback(async (text: string) => {
     try {
-      let session = await resolveCoachSession(messageContext);
+      let session = coachSession;
       if (!session) {
-        session = await application.startSession({ userId, context: messageContext });
-      } else if (session.status !== "active") {
-        session = await application.setSessionStatus(session.id, "active");
+        const opened = await conversation.execute({ kind: "new", userId });
+        if (opened.kind !== "opened") throw new Error("conversation_open_failed");
+        session = opened.conversation;
       }
       setCoachSession(session);
       setCoachAttachment({
         sessionId: session.id,
-        context: session.context,
         foreground: coachExpanded ? "expanded" : "minimized",
       });
-      await application.sendCoachTurn({ sessionId: session.id, text });
-      await onTimelineChanged?.();
-      const afterTurn = await application.readSessionProjection(session.id);
-      setCoachMessages(afterTurn.messages);
-      const persistedNext = new CoachStreamProjection(afterTurn.artifacts, undefined, afterTurn.presentations, afterTurn.pendingHumanActions);
-      afterTurn.runEvents.forEach((event) => persistedNext.accept(event));
-      stream.current = persistedNext;
-      setStreamSnapshot(persistedNext.snapshot());
-      setCoachSessions((await application.listCoachSessions({ userId })).filter((candidate) => candidate.status !== "archived"));
+      // The current page rides along as an optional per-turn attachment; it
+      // never selects or changes the conversation.
+      const attachment = { kind: route, ref: route === "workout" && workoutId ? workoutId : date } as const;
+      const sent = await conversation.execute({ kind: "send", userId, conversationId: session.id, text, clientTurnId: `mobile:${Date.now().toString(36)}`, attachment });
+      if (sent.kind === "missing") throw new Error("conversation_missing");
+      setCoachWorking(true);
+      const poll = setInterval(() => void hydrateCoach(session), 240);
+      try {
+        await conversation.whenIdle(session.id);
+      } finally {
+        clearInterval(poll);
+        setCoachWorking(false);
+      }
+      await hydrateCoach(session);
       await refresh();
     } catch (cause) {
-      stream.current.fail({
-        id: `send-${Date.now()}`,
-        message: cause instanceof Error ? cause.message : "暂时无法继续对话",
-      });
-      setStreamSnapshot(stream.current.snapshot());
+      setCoachWorking(false);
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")));
       if (cause instanceof Error && cause.message === "remote_llm_permission_required") throw cause;
     }
-  }, [application, coachExpanded, coachSession?.id, onTimelineChanged, refresh, resolveCoachSession, userId]);
+  }, [coachExpanded, coachSession, conversation, date, hydrateCoach, refresh, route, userId, workoutId]);
 
   const selectCoachSession = useCallback(async (sessionId: string) => {
     try {
-      const sessions = await application.listCoachSessions({ userId });
-      const session = sessions.find((candidate) => candidate.id === sessionId && candidate.status !== "archived");
-      if (!session) throw new Error("这段历史对话已不可用");
-      const persisted = await application.readSessionProjection(session.id);
-      const next = new CoachStreamProjection(persisted.artifacts, undefined, persisted.presentations, persisted.pendingHumanActions);
-      persisted.runEvents.forEach((event) => next.accept(event));
-      setCoachSession(session);
-      setCoachMessages(persisted.messages);
-      setCoachSessions(sessions.filter((candidate) => candidate.status !== "archived"));
-      setCoachAttachment({ sessionId: session.id, context: session.context, foreground: "expanded" });
-      stream.current = next;
-      setStreamSnapshot(next.snapshot());
+      const opened = await conversation.execute({ kind: "open", userId, conversationId: sessionId });
+      if (opened.kind !== "opened") throw new Error(mobileT("mobile.ui.productshell.9c53df839a"));
+      setCoachSession(opened.conversation);
+      // State updates are asynchronous. Hydrating without this explicit
+      // session would reopen the previously selected thread after a resume.
+      await hydrateCoach(opened.conversation);
       setCoachExpanded(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法读取历史对话");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.88d93f28ce")));
     }
-  }, [application, userId]);
+  }, [conversation, hydrateCoach, userId]);
 
   const startNewCoachConversation = useCallback(() => {
-    setCoachSession(undefined);
-    setCoachMessages([]);
-    setCoachAttachment(undefined);
-    const next = new CoachStreamProjection();
-    stream.current = next;
-    setStreamSnapshot(next.snapshot());
-  }, []);
+    void (async () => {
+      const opened = await conversation.execute({ kind: "new", userId });
+      if (opened.kind !== "opened") return;
+      setCoachSession(opened.conversation);
+      setCoachItems([]);
+      setCoachAttachment({ sessionId: opened.conversation.id, foreground: "expanded" });
+      const history = await conversation.read({ kind: "history", userId });
+      if (history.kind === "history") setCoachSessions(history.conversations);
+    })();
+  }, [conversation, userId]);
+
+  const stopCoach = useCallback(() => {
+    if (!coachSession) return;
+    void (async () => {
+      await conversation.execute({ kind: "stop", userId, conversationId: coachSession.id });
+      setCoachWorking(false);
+      await hydrateCoach();
+    })().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540"))));
+  }, [coachSession, conversation, hydrateCoach, userId]);
+
+  const submitBaseline = useCallback((baseline: { ageYears: number; heightCm: number; weightKg: number; goalText?: string }) => {
+    if (!coachSession) return;
+    void (async () => {
+      setCoachWorking(true);
+      const result = await conversation.execute({ kind: "submit_baseline", userId, conversationId: coachSession.id, baseline });
+      if (result.kind !== "baseline_submitted") throw new Error("baseline_not_submitted");
+      await conversation.whenIdle(coachSession.id);
+      await hydrateCoach();
+      await refresh();
+    })().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")))).finally(() => setCoachWorking(false));
+  }, [coachSession, conversation, hydrateCoach, refresh, userId]);
+
+  const saveBaselineDraft = useCallback((draft: { ageYears?: string; heightCm?: string; weightKg?: string; goalText?: string }) => {
+    if (!coachSession) return;
+    void conversation.execute({ kind: "save_baseline_draft", userId, conversationId: coachSession.id, draft })
+      .then(() => hydrateCoach(coachSession))
+      .catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540"))));
+  }, [coachSession, conversation, hydrateCoach, userId]);
+
+  const submitIntakeForm = useCallback((item: ConversationItem, values: Readonly<Record<string, string>>) => {
+    if (!coachSession) return;
+    void (async () => {
+      setCoachWorking(true);
+      const result = await conversation.execute({ kind: "submit_intake_form", userId, conversationId: coachSession.id, cardId: item.id, values });
+      if (result.kind !== "intake_form_submitted") throw new Error("intake_form_not_submitted");
+      await conversation.whenIdle(coachSession.id);
+      await hydrateCoach();
+      await refresh();
+    })().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")))).finally(() => setCoachWorking(false));
+  }, [coachSession, conversation, hydrateCoach, refresh, userId]);
+
+  const resolveConversationCard = useCallback((item: ConversationItem, actionId: string) => {
+    void (async () => {
+      // Cards are durable conversation artifacts. A resumed shell can render
+      // one before its in-memory session reference has rehydrated, so recover
+      // that same session instead of silently dropping the user's action.
+      let session = coachSession;
+      if (!session && coachAttachment) {
+        const opened = await conversation.execute({ kind: "open", userId, conversationId: coachAttachment.sessionId });
+        if (opened.kind === "opened") {
+          session = opened.conversation;
+          setCoachSession(session);
+        }
+      }
+      if (!session) throw new Error("conversation_session_unavailable");
+      setCoachWorking(true);
+      if (item.kind === "goal_path") {
+        await conversation.execute({ kind: "resolve_goal_path", userId, conversationId: session.id, cardId: item.id, optionId: actionId as "gradual" | "balanced" | "faster" });
+        await conversation.whenIdle(session.id);
+      } else if (item.kind === "choice" && actionId === "record_only") {
+        await conversation.execute({ kind: "choose_record_only", userId, conversationId: session.id, cardId: item.id });
+      } else if (item.kind === "choice" && actionId === "continue_goal") {
+        await conversation.execute({ kind: "continue_goal_discussion", userId, conversationId: session.id, cardId: item.id });
+        await conversation.whenIdle(session.id);
+      } else if (item.card?.kind === "plan_candidate" && (actionId === "confirm" || actionId === "reject")) {
+        await conversation.execute({ kind: "resolve_plan_candidate", userId, conversationId: session.id, cardId: item.id, decision: actionId });
+      } else if (item.card?.kind === "record_confirmation" && (actionId === "confirm" || actionId === "reject")) {
+        await conversation.execute({ kind: "resolve_record", userId, conversationId: session.id, cardId: item.id, decision: actionId });
+      } else if (item.card?.kind === "receipt" && actionId === "correct_record") {
+        await conversation.execute({ kind: "request_correction", userId, conversationId: session.id, cardId: item.id });
+        await conversation.whenIdle(session.id);
+      }
+      await hydrateCoach(session);
+      await refresh();
+    })().catch((cause) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")))).finally(() => setCoachWorking(false));
+  }, [coachAttachment, coachSession, conversation, hydrateCoach, refresh, userId]);
 
   const handleCoachExpandedChange = useCallback((expanded: boolean) => {
     setCoachExpanded(expanded);
-    setCoachAttachment((current) => {
-      if (!current) return current;
-      if (expanded && !contextAcceptsRestoredCoach(current.context, context, screen === undefined)) {
-        return undefined;
-      }
-      return {
-        ...current,
-        foreground: expanded && sameCoachContext(current.context, context) ? "expanded" : "minimized",
-      };
-    });
+    setCoachAttachment((current) => current ? { ...current, foreground: expanded ? "expanded" : "minimized" } : current);
     if (expanded) void hydrateCoach();
-  }, [context, hydrateCoach, screen]);
+  }, [hydrateCoach]);
 
   /** The collapsed dock declares the input intent before its composer grows into the conversation surface. */
   const openCoachFromDock = useCallback(() => {
-    setCoachEntryMode("text");
     setCoachFocusRequest((current) => current + 1);
-    handleCoachExpandedChange(true);
-  }, [handleCoachExpandedChange]);
-
-  const openCoachVoiceFromDock = useCallback(() => {
-    setCoachEntryMode("voice");
     handleCoachExpandedChange(true);
   }, [handleCoachExpandedChange]);
 
@@ -526,54 +484,20 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
     if (!recovery) return;
     let active = true;
     void (async () => {
+      const history = await conversation.read({ kind: "history", userId });
+      if (active && history.kind === "history") setCoachSessions(history.conversations);
       const attachment = recovery.state.coachAttachment;
       if (attachment) {
-        const sessions = await application.listCoachSessions({ userId });
-        const session = sessions.find((candidate) =>
-          candidate.id === attachment.sessionId &&
-          candidate.status !== "archived" &&
-          candidate.context.kind === attachment.context.kind &&
-          candidate.context.ref === attachment.context.ref,
-        );
+        const opened = await conversation.execute({ kind: "open", userId, conversationId: attachment.sessionId });
         if (!active) return;
-        if (!session) {
+        if (opened.kind === "opened") {
+          setCoachSession(opened.conversation);
+          setCoachAttachment({ sessionId: opened.conversation.id, foreground: attachment.foreground });
+          setCoachExpanded(attachment.foreground === "expanded");
+          if (attachment.foreground === "expanded") await hydrateCoach();
+        } else {
           setCoachAttachment(undefined);
           setCoachExpanded(false);
-        } else {
-          const canForeground = attachment.foreground === "expanded" && contextAcceptsRestoredCoach(session.context, context, screen === undefined);
-          const restoredAttachment: ProductCoachAttachment = {
-            sessionId: session.id,
-            context: session.context,
-            foreground: canForeground ? "expanded" : "minimized",
-          };
-          setCoachAttachment(restoredAttachment);
-          setCoachSession(session);
-          setCoachExpanded(canForeground);
-          if (canForeground) {
-            const persisted = await application.readSessionProjection(session.id);
-            if (!active) return;
-            setCoachMessages(persisted.messages);
-            const next = new CoachStreamProjection(persisted.artifacts, undefined, persisted.presentations, persisted.pendingHumanActions);
-            persisted.runEvents.forEach((event) => next.accept(event));
-            stream.current = next;
-            setStreamSnapshot(next.snapshot());
-          }
-        }
-      }
-      if (active) {
-        const sessions = await application.listCoachSessions({ userId });
-        if (active) setCoachSessions(sessions.filter((candidate) => candidate.status !== "archived"));
-      }
-      if (recovery.formRecovery.kind === "reopen") {
-        try {
-          const draft = await application.readNutritionObservationDraft({
-            userId,
-            artifactId: recovery.formRecovery.form.artifactId,
-          });
-          if (active) setNutritionDraft(draft);
-        } catch {
-          // The durable artifact may have been rejected/deleted elsewhere. A
-          // missing reference must not be recreated as a new food fact.
         }
       }
     })().catch(() => {
@@ -585,23 +509,16 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
       if (active) setShellRestorationReady(true);
     });
     return () => { active = false; };
-  }, [application, context, initialProductShellRecovery, screen, userId]);
+  }, [application, conversation, hydrateCoach, initialProductShellRecovery, userId]);
 
   const presentationState = useMemo<ProductShellState>(() => {
     const persistableRoute = isProductDeepLinkRoute(route) ? route : "today";
-    const attachment = coachAttachment && contextAcceptsRestoredCoach(coachAttachment.context, context, screen === undefined)
-      ? {
-          ...coachAttachment,
-          foreground: coachExpanded ? "expanded" as const : "minimized" as const,
-        }
-      : coachAttachment ? { ...coachAttachment, foreground: "minimized" as const } : undefined;
-    const unfinishedForm = nutritionDraft
-      ? { kind: "nutrition_draft_review" as const, artifactId: nutritionDraft.id, recovery: "reopen_persisted_reference" as const }
-      : showActivityLog
+    const attachment = coachAttachment
+      ? { ...coachAttachment, foreground: coachExpanded ? "expanded" as const : "minimized" as const }
+      : undefined;
+    const unfinishedForm = showActivityLog
         ? { kind: "activity_log" as const, recovery: "discard_on_process_restore" as const }
-        : route === "onboarding"
-          ? { kind: "onboarding" as const, recovery: "discard_on_process_restore" as const }
-          : undefined;
+        : undefined;
     return {
       navigation: {
         route: persistableRoute,
@@ -613,7 +530,7 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
       ...(attachment ? { coachAttachment: attachment } : {}),
       ...(unfinishedForm ? { unfinishedForm } : {}),
     };
-  }, [calendarMode, coachAttachment, coachExpanded, context, date, nutritionDraft, route, screen, showActivityLog, workoutId]);
+  }, [calendarMode, coachAttachment, coachExpanded, date, route, showActivityLog, workoutId]);
 
   useEffect(() => {
     if (!productShellStateStore || !shellRestorationReady) return;
@@ -622,111 +539,24 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
       .catch(() => undefined)
       .then(() => productShellStateStore.save({ userId, state: presentationState }))
       .catch(() => {
-        if (mounted) setError("页面状态暂时无法保存；训练与记录不受影响。");
+        if (mounted) setError(mobileT("mobile.ui.productshell.d8a2cbad47"));
       });
     return () => { mounted = false; };
   }, [presentationState, productShellStateStore, shellRestorationReady, userId]);
 
-  const handleCardAction = useCallback(async (actionId: string, artifactId: string) => {
-    if (actionId === "start_workout") {
-      requestWorkoutStart();
-      return;
-    }
-    if (actionId === "open_future_plan_preview") {
-      setRoute("plan");
-      setCoachExpanded(false);
-      await refresh();
-      return;
-    }
-    if (actionId === "review") {
-      try {
-        setNutritionDraft(await application.readNutritionObservationDraft({ userId, artifactId }));
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "暂时无法读取这份餐食估算");
-      }
-      return;
-    }
-    if (actionId !== "apply" && actionId !== "reject" && actionId !== "undo" && actionId !== "confirm") {
-      setError("此卡片操作尚未在当前客户端提供。");
-      return;
-    }
-    try {
-      await application.invokeArtifactCardAction({
-        userId,
-        artifactId,
-        action: actionId,
-        idempotencyKey: `mobile-card:${artifactId}:${actionId}:${Date.now().toString(36)}`,
-      });
-      await hydrateCoach();
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法执行这个操作");
-    }
-  }, [application, hydrateCoach, refresh, requestWorkoutStart, userId]);
-
-  const handleHumanAction = useCallback(async (pendingActionId: string, optionId: string) => {
-    try {
-      const sessionProjection = coachSession
-        ? await application.readSessionProjection(coachSession.id)
-        : undefined;
-      const pending = sessionProjection?.pendingHumanActions.find((item) => item.id === pendingActionId);
-      const isEnergyRebalanceChoice = pending?.prompt.includes("能量回拨提案") === true;
-      const preview = screen?.plan.latestPlanningPreview;
-      await application.respondToPendingHumanAction({ userId, pendingActionId, optionId });
-      if (
-        isEnergyRebalanceChoice &&
-        preview?.planningPreview?.status === "awaiting_confirmation" &&
-        preview.planningPreview.request.requestedScope === "future_plan"
-      ) {
-        if (optionId === "confirm") {
-          const domain = await application.readDomainProjection({ userId });
-          await cloudConfirmed.publishPlanThen({
-            localPlanId: screen?.source.planId ?? preview.id,
-            title: "MaxPower 训练计划",
-            snapshot: createCloudPlanRecoverySnapshot({
-              artifactId: preview.id,
-              planningPreview: preview.planningPreview,
-              domain,
-            }),
-            idempotencyKey: `mobile-coach-preview:${preview.id}`,
-            commitLocal: () => application.confirmPlanningPreview({
-              userId,
-              previewId: preview.id,
-              idempotencyKey: `mobile-coach-preview:confirm:${preview.id}`,
-            }),
-          });
-        } else if (optionId === "decline") {
-          await application.rejectPlanningPreview({
-            userId,
-            previewId: preview.id,
-            idempotencyKey: `mobile-coach-preview:reject:${preview.id}`,
-          });
-        }
-      }
-      await hydrateCoach();
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法提交这个选择");
-    }
-  }, [application, cloudConfirmed, coachSession, hydrateCoach, refresh, screen, userId]);
-
   const commitProductRoute = useCallback((nextRoute: ProductRoute) => {
-    const normalizedRoute = nextRoute === "progress" ? "plan" : nextRoute;
-    if (normalizedRoute === "today" || normalizedRoute === "plan") setDate(localDate());
-    setRoute(normalizedRoute);
+    if (nextRoute === "today" || nextRoute === "plan") setDate(localDate());
+    setRoute(nextRoute);
   }, []);
 
   const navigateProductRoute = useCallback((nextRoute: ProductRoute) => {
-    const normalizedRoute = nextRoute === "progress" ? "plan" : nextRoute;
-    if (isPrimaryProductRoute(route) && isPrimaryProductRoute(normalizedRoute) && primaryPager.current) {
-      primaryPager.current.navigate(normalizedRoute);
+    if (isPrimaryProductRoute(route) && isPrimaryProductRoute(nextRoute) && primaryPager.current) {
+      primaryPager.current.navigate(nextRoute);
       return;
     }
-    commitProductRoute(normalizedRoute);
+    commitProductRoute(nextRoute);
   }, [commitProductRoute, route]);
 
-  if (entryGate === "resolving") return <LoadingState />;
-  if (entryGate === "failed") return <ErrorState message={error ?? "暂时无法确认档案状态"} onRetry={() => void refresh()} />;
   if (loading && !screen) return <LoadingState />;
   if (error && !screen) return <ErrorState message={error} onRetry={() => void refresh()} />;
   if (!screen) return <LoadingState />;
@@ -742,7 +572,7 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
         pages={[
           {
             id: "today",
-            content: <TodayScreen application={application} userId={userId} screen={screen} onOpenCalendar={() => navigateProductRoute("calendar")} onOpenCoach={() => handleCoachExpandedChange(true)} onOpenPlan={() => navigateProductRoute("plan")} onStartOnboarding={() => setRoute("onboarding")} onBeginWorkout={requestWorkoutStart} onRecordActivity={() => { setActivityLogInitialMode("activity"); setShowActivityLog(true); }} onRecordMeal={() => { setActivityLogInitialMode("nutrition"); setShowActivityLog(true); }} onCheckIn={() => { setActivityLogInitialMode("recovery"); setShowActivityLog(true); }} onViewWorkoutSummary={setWorkoutSummary} onCorrectTimeline={setTimelineCorrection} onMealDraft={(draft) => setNutritionDraft(draft)} />,
+            content: <TodayScreen application={application} userId={userId} screen={screen} onOpenCalendar={() => navigateProductRoute("calendar")} onOpenCoach={() => handleCoachExpandedChange(true)} onBeginWorkout={requestWorkoutStart} onRecordActivity={() => { setActivityLogInitialMode("activity"); setShowActivityLog(true); }} onRecordMeal={() => { setActivityLogInitialMode("nutrition"); setShowActivityLog(true); }} onCheckIn={() => { setActivityLogInitialMode("recovery"); setShowActivityLog(true); }} onViewWorkoutSummary={setWorkoutSummary} onCorrectTimeline={setTimelineCorrection} />,
           },
           {
             id: "calendar",
@@ -760,182 +590,77 @@ export function ProductShell({ application, confirmedProduct, cloudMediaLibrary,
           },
           {
             id: "plan",
-            content: <PlanScreen initialTab="overview" application={application} cloudConfirmed={cloudConfirmed} userId={userId} screen={screen} onOpenVideoLibrary={() => setRoute("video_library")} onRecordMeal={() => { setActivityLogInitialMode("nutrition"); setShowActivityLog(true); }} onUpdated={() => void refresh()} />,
+            content: <PlanScreen initialTab="overview" application={application} userId={userId} screen={screen} onRecordMeal={() => { setActivityLogInitialMode("nutrition"); setShowActivityLog(true); }} onOpenCoach={() => handleCoachExpandedChange(true)} onUpdated={() => void refresh()} />,
           },
           {
             id: "profile",
-            content: <ProfileScreen application={application} userId={userId} screen={screen} onStartOnboarding={() => setRoute("onboarding")} onOpenAccountSettings={onOpenAccountSettings} onUpdated={() => void refresh()} />,
+            content: <ProfileScreen application={application} userId={userId} screen={screen} onOpenAccountSettings={onOpenAccountSettings} onUpdated={() => void refresh()} />,
           },
         ]}
       /> : null}
-      {route === "onboarding" && <OnboardingScreen key={userId} application={application} cloudConfirmed={cloudConfirmed} userId={userId} entry={onboardingEntry} messages={coachMessages} onSendConversation={async (text, draftId) => sendToCoach(text, { kind: "onboarding", ref: draftId })} onStartConversation={async (draftId) => { await application.startOnboardingAgentTurn({ userId, draftId }); const session = (await application.listCoachSessions({ userId, taskKind: "onboarding" })).find((candidate) => candidate.context.kind === "onboarding" && candidate.context.ref === draftId && candidate.status !== "archived"); if (session) { const projection = await application.readSessionProjection(session.id); setCoachSession(session); setCoachMessages(projection.messages); } await refresh(); }} onAllowRemoteConversation={async (draftId) => { await application.allowOnboardingRemoteConversation({ draftId }); await refresh(); }} onCompleted={() => { setRoute("today"); void refresh(); }} onProgressSaved={() => void refresh()} />}
-      {route === "workout" && workoutId ? <WorkoutScreen application={application} cloudConfirmed={cloudConfirmed} userId={userId} workoutId={workoutId} coachStream={streamSnapshot} onSendToCoach={(text) => sendToCoach(text, context)} onCoachCardAction={handleCardAction} onCoachHumanAction={handleHumanAction} onOpenCoach={() => handleCoachExpandedChange(true)} onFinished={() => { setWorkoutId(undefined); setRoute("today"); settleTimelineAndRefresh(); }} onUnavailable={() => { setWorkoutId(undefined); setRoute("today"); void refresh(); }} onOpenSavedVideo={(selection) => { setReplaySelection(selection); setReplayReturnRoute("workout"); setRoute("replay"); }} locale={screen.profile.locale} /> : null}
-      {route === "video_library" && <VideoLibraryScreen application={application} userId={userId} cloudMediaLibrary={cloudMediaLibrary} onOpenReplay={(selection) => { setReplaySelection(selection); setReplayReturnRoute("video_library"); setRoute("replay"); }} />}
-      {route === "replay" && replaySelection ? <ReplayScreen {...replaySelection} onExit={() => { setReplaySelection(undefined); setRoute(replayReturnRoute); }} locale={screen.profile.locale} /> : null}
-
+      {route === "workout" && workoutId ? <WorkoutScreen application={application} userId={userId} workoutId={workoutId} onOpenCoach={() => handleCoachExpandedChange(true)} onFinished={() => { setWorkoutId(undefined); setRoute("today"); refreshAfterFormalWrite(); }} onUnavailable={() => { setWorkoutId(undefined); setRoute("today"); void refresh(); }} /> : null}
       {error ? <View style={styles.inlineError}><Text style={styles.inlineErrorText}>{error}</Text></View> : null}
-      {route !== "onboarding" && route !== "workout" && route !== "video_library" && route !== "replay" ? <ProductDock route={route} coachStatus={streamSnapshot.status} coachExpanded={coachExpanded} onChange={navigateProductRoute} onRecord={() => { setActivityLogInitialMode("training"); setShowActivityLog(true); }} onOpenCoach={openCoachFromDock} onOpenCoachVoice={openCoachVoiceFromDock} onCoachAnchorChange={setCoachComposerAnchor} onRecordAnchorChange={setRecordAnchor} /> : null}
+      {route !== "workout" ? <ProductDock route={route} coachBusy={coachWorking} coachExpanded={coachExpanded} onChange={navigateProductRoute} onRecord={() => { setActivityLogInitialMode("picker"); setShowActivityLog(true); }} onOpenCoach={openCoachFromDock} onCoachAnchorChange={setCoachComposerAnchor} /> : null}
       {coachDrawerAvailableForRoute(route) ? <CoachDrawer
-        context={context}
-        stream={streamSnapshot}
         session={coachSession}
-        messages={coachMessages}
+        conversationItems={coachItems}
+        onSubmitBaseline={submitBaseline}
+        onSaveBaselineDraft={saveBaselineDraft}
+        onSubmitIntakeForm={submitIntakeForm}
+        onConversationCardAction={resolveConversationCard}
         sessions={coachSessions}
         expanded={coachExpanded}
-        bottomInset={route === "workout" ? 16 : APP_DOCK_BODY_HEIGHT}
-        dockedComposer={route !== "workout"}
-        composerAnchor={route === "workout" ? undefined : coachComposerAnchor}
+        onboarding={Boolean(screen && !screen.profile.profileReady)}
+        bottomInset={screen && !screen.profile.profileReady ? 0 : route === "workout" ? 16 : APP_DOCK_BODY_HEIGHT}
+        horizontalInset={screen && !screen.profile.profileReady ? 0 : 8}
+        dockedComposer={route !== "workout" && Boolean(screen?.profile.profileReady)}
+        composerAnchor={route === "workout" || !screen?.profile.profileReady ? undefined : coachComposerAnchor}
         focusRequest={coachFocusRequest}
-        entryMode={coachEntryMode}
         onExpandedChange={handleCoachExpandedChange}
-        onSend={(text, messageContext) => void sendToCoach(text, messageContext)}
+        onSend={(text) => void sendToCoach(text)}
         onSelectSession={(sessionId) => void selectCoachSession(sessionId)}
         onStartNew={startNewCoachConversation}
-        onCardAction={(actionId, artifactId) => void handleCardAction(actionId, artifactId)}
-        onHumanAction={(pendingActionId, optionId) => void handleHumanAction(pendingActionId, optionId)}
+        onStop={stopCoach}
+        running={coachWorking}
       /> : null}
       <RecordFocus
-        application={application}
+        records={records}
         userId={userId}
         initialMode={activityLogInitialMode}
         referenceWeightKg={screen.profile.referenceWeightKg}
         syncedSleepMinutes={latestImportedSleepMinutes(screen.today.activityLog.entries)}
         visible={showActivityLog}
-        anchor={recordAnchor}
         onDismiss={() => setShowActivityLog(false)}
-        onSaved={() => { setShowActivityLog(false); settleTimelineAndRefresh(); }}
-        onAskCoach={(prompt) => {
-          setShowActivityLog(false);
-          setCoachFocusRequest((current) => current + 1);
-          handleCoachExpandedChange(true);
-          void sendToCoach(prompt, context);
-        }}
-        onEstimateMeal={(description) => {
-          void (async () => {
-            try {
-              const draft = await application.createNutritionObservationDraft({
-                userId,
-                idempotencyKey: `mobile-nutrition-estimate:${Date.now().toString(36)}`,
-                occurredAt: new Date().toISOString(),
-                request: {
-                  text: description,
-                  inputProvenance: ["text"],
-                  mediaConsent: "not_requested",
-                  purpose: "meal_estimate",
-                },
-              });
-              setShowActivityLog(false);
-              setNutritionDraft(draft);
-            } catch (cause) {
-              setError(cause instanceof Error ? cause.message : "暂时无法估算这餐");
-            }
-          })();
-        }}
+        onSaved={() => { setShowActivityLog(false); refreshAfterFormalWrite(); }}
+        onStartFreestyleWorkout={requestWorkoutStart}
       />
-      {timelineCorrection ? <TimelineCorrectionSheet application={application} userId={userId} entry={timelineCorrection} onDismiss={() => setTimelineCorrection(undefined)} onSaved={() => { setTimelineCorrection(undefined); settleTimelineAndRefresh(); }} /> : null}
+      {timelineCorrection ? <TimelineCorrectionSheet records={records} userId={userId} entry={timelineCorrection} onDismiss={() => setTimelineCorrection(undefined)} onSaved={() => { setTimelineCorrection(undefined); refreshAfterFormalWrite(); }} /> : null}
       {workoutSummary ? <WorkoutOutcomeSummarySheet summary={workoutSummary} onDismiss={() => setWorkoutSummary(undefined)} onCorrect={() => { setWorkoutCorrectionId(workoutSummary.id); setWorkoutSummary(undefined); }} /> : null}
-      {workoutCorrectionId ? <WorkoutOutcomeCorrectionSheet application={application} userId={userId} workoutId={workoutCorrectionId} onDismiss={() => setWorkoutCorrectionId(undefined)} onSaved={() => { setWorkoutCorrectionId(undefined); settleTimelineAndRefresh(); }} /> : null}
-      {nutritionDraft ? <NutritionObservationDraftSheet
-        artifact={nutritionDraft}
-        busy={nutritionDraftBusy}
-        locale={screen.profile.locale}
-        onDismiss={() => { if (!nutritionDraftBusy) setNutritionDraft(undefined); }}
-        onConfirm={(edits) => {
-          setNutritionDraftBusy(true);
-          void (async () => {
-            try {
-              await application.confirmNutritionObservationDraft({
-                userId,
-                artifactId: nutritionDraft.id,
-                edits,
-                idempotencyKey: `mobile-nutrition-draft:${nutritionDraft.id}:confirm:${Date.now().toString(36)}`,
-              });
-              await onTimelineChanged?.();
-              setNutritionDraft(undefined);
-              await hydrateCoach();
-              await refresh();
-            } catch (cause) {
-              setError(cause instanceof Error ? cause.message : "暂时无法确认这份餐食记录");
-            } finally {
-              setNutritionDraftBusy(false);
-            }
-          })();
-        }}
-        onReject={() => {
-          setNutritionDraftBusy(true);
-          void (async () => {
-            try {
-              await application.rejectNutritionObservationDraft({
-                userId,
-                artifactId: nutritionDraft.id,
-                idempotencyKey: `mobile-nutrition-draft:${nutritionDraft.id}:reject:${Date.now().toString(36)}`,
-              });
-              setNutritionDraft(undefined);
-              await hydrateCoach();
-              await refresh();
-            } catch (cause) {
-              setError(cause instanceof Error ? cause.message : "暂时无法放弃这份餐食估算");
-            } finally {
-              setNutritionDraftBusy(false);
-            }
-          })();
-        }}
-      /> : null}
+      {workoutCorrectionId ? <WorkoutOutcomeCorrectionSheet application={application} userId={userId} workoutId={workoutCorrectionId} onDismiss={() => setWorkoutCorrectionId(undefined)} onSaved={() => { setWorkoutCorrectionId(undefined); refreshAfterFormalWrite(); }} /> : null}
     </View>
   );
 }
 
-function CloudCanonicalStatus({
-  projection,
-  error,
-  onRetry,
-}: {
-  projection: ProductShellCloudProjection;
-  error?: string;
-  onRetry(): void;
-}) {
-  const plan = projection.plans[0];
-  const workout = projection.workouts[0];
-  const result = projection.results[0];
-  return (
-    <View style={styles.cloudCanonicalStatus}>
-      <View style={styles.cloudCanonicalHeading}>
-        <Text style={styles.cloudCanonicalTitle}>云端已确认 · {projection.profile.displayName ?? "MaxPower 账号"}</Text>
-        {error ? <Pressable accessibilityRole="button" onPress={onRetry}><Text style={styles.cloudCanonicalRetry}>重试</Text></Pressable> : null}
-      </View>
-      <Text numberOfLines={1} style={styles.cloudCanonicalMeta}>
-        计划 {plan?.title ?? "暂无"} · 训练 {workout?.title ?? "暂无"} · 结果 {result?.kind ?? "暂无"}
-      </Text>
-      {error ? <Text style={styles.cloudCanonicalError}>{error}</Text> : null}
-    </View>
-  );
-}
-
-function TodayScreen({ application, userId, screen, onOpenCalendar, onOpenCoach, onOpenPlan, onStartOnboarding, onBeginWorkout, onRecordActivity, onRecordMeal, onCheckIn, onViewWorkoutSummary, onCorrectTimeline, onMealDraft }: { application: CoachApplication; userId: string; screen: CoachProductProjection; onOpenCalendar: () => void; onOpenCoach: () => void; onOpenPlan: () => void; onStartOnboarding: () => void; onBeginWorkout: () => void; onRecordActivity: () => void; onRecordMeal: () => void; onCheckIn: () => void; onViewWorkoutSummary: (summary: WorkoutOutcomeProductSummary) => void; onCorrectTimeline: (entry: TimelineReadEvent) => void; onMealDraft: (draft: NutritionObservationDraftArtifact) => void }) {
+function TodayScreen({ screen, onOpenCalendar, onOpenCoach, onBeginWorkout, onRecordActivity, onRecordMeal, onCheckIn, onViewWorkoutSummary, onCorrectTimeline }: { application: LocalProductKernel; userId: string; screen: CoachProductProjection; onOpenCalendar: () => void; onOpenCoach: () => void; onBeginWorkout: () => void; onRecordActivity: () => void; onRecordMeal: () => void; onCheckIn: () => void; onViewWorkoutSummary: (summary: WorkoutOutcomeProductSummary) => void; onCorrectTimeline: (entry: TimelineReadEvent) => void }) {
   const { today, coach } = screen;
   const [dashboardTab, setDashboardTab] = useState<"training" | "nutrition">("training");
-  const preview = screen.plan.latestPlanningPreview;
-  const hasRiskAdjustment = Boolean(
-    preview?.planningPreview?.status === "awaiting_confirmation"
-    && preview.planningPreview.sourceRiskEvaluationId,
-  );
   return (
     <ScrollView contentContainerStyle={[styles.content, styles.dockContent]} showsVerticalScrollIndicator={false}>
       <View style={styles.todayHeader}>
-        <View><Text style={styles.todayKicker}>TODAY / {weekDayLabel(today.date)}</Text><Text style={styles.date}>{shortDate(today.date)}</Text></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="打开日历" hitSlop={10} onPress={onOpenCalendar}>
-          <Text style={styles.calendarLink}>日历</Text>
+        <View><Text style={styles.todayKicker}>{mobileT("mobile.ui.productshell.20c296b7b1")}{weekDayLabel(today.date)}</Text><Text style={styles.date}>{shortDate(today.date)}</Text></View>
+        <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.2a8dbcfb8d")} hitSlop={10} onPress={onOpenCalendar}>
+          <Text style={styles.calendarLink}>{mobileT("mobile.ui.productshell.2ecbc11608")}</Text>
         </Pressable>
       </View>
       <DashboardFlipCard
         value={dashboardTab}
-        training={<TodayCard today={today} onFlip={() => setDashboardTab("nutrition")} onStartOnboarding={onStartOnboarding} onBeginWorkout={onBeginWorkout} onRecordActivity={onRecordActivity} onViewWorkoutSummary={onViewWorkoutSummary} />}
-        nutrition={<NutritionLedgerCard application={application} userId={userId} date={today.date} nutrition={today.nutrition} onFlip={() => setDashboardTab("training")} onRecordMeal={onRecordMeal} onMealDraft={onMealDraft} />}
+        training={<TodayCard today={today} onFlip={() => setDashboardTab("nutrition")} onBeginWorkout={onBeginWorkout} onRecordActivity={onRecordActivity} onViewWorkoutSummary={onViewWorkoutSummary} />}
+        nutrition={<NutritionLedgerCard nutrition={today.nutrition} onFlip={() => setDashboardTab("training")} onRecordMeal={onRecordMeal} />}
       />
       {dashboardTab === "training" ? <RecoveryStatusCard recovery={today.recovery} onCheckIn={onCheckIn} /> : null}
-      {hasRiskAdjustment ? <Pressable accessibilityRole="button" accessibilityLabel="查看待确认的进度调整" onPress={onOpenPlan} style={styles.pendingPreviewCard}><View><Text style={styles.pendingPreviewKicker}>PLAN CHECK READY</Text><Text style={styles.pendingPreviewTitle}>最新记录需要调整后续安排</Text><Text style={styles.pendingPreviewMeta}>当前计划不会自动改变；查看方案后由你确认。</Text></View><Text style={styles.pendingPreviewArrow}>›</Text></Pressable> : null}
+      {today.goalPathSignal ? <Pressable accessibilityRole="button" onPress={onOpenCoach} style={styles.pendingPreviewCard}><View>{today.goalPathSignal.goalPathAssessment ? <Text style={styles.pendingPreviewKicker}>{goalPathStateLabel(today.goalPathSignal.goalPathAssessment.assessment.state)}</Text> : null}<Text style={styles.pendingPreviewTitle}>{today.goalPathSignal.title}</Text><Text style={styles.pendingPreviewMeta}>{today.goalPathSignal.summary.slice(0, 2).join("；")}</Text></View><Text style={styles.pendingPreviewArrow}>›</Text></Pressable> : null}
       {today.activityLog.entries.length ? <>
-        <SectionHeading title="今天已记录" meta={`${today.activityLog.entries.length} 条`} />
+        <SectionHeading title={mobileT("mobile.ui.productshell.3b6d4b8a60")} meta={mobileT("mobile.ui.productshell.a8be842b1b", { value0: today.activityLog.entries.length })} />
         <Timeline entries={today.activityLog.entries} onCorrect={onCorrectTimeline} />
       </> : null}
       {coach.pending ? <CoachPending prompt={coach.pending.prompt} /> : null}
@@ -1018,65 +743,66 @@ function latestImportedSleepMinutes(entries: readonly TimelineReadEvent[]): numb
 }
 
 function RecoveryStatusCard({ recovery, onCheckIn }: { recovery: CoachProductProjection["today"]["recovery"]; onCheckIn: () => void }) {
-  const label = recovery.level === "normal" ? "按原计划" : recovery.level === "slight_reduction" ? "稍微放缓" : recovery.level === "recovery_priority" ? "优先恢复" : "暂停并确认";
+  const label = recovery.level === "normal" ? mobileT("mobile.ui.productshell.c177e6ac8c") : recovery.level === "slight_reduction" ? mobileT("mobile.ui.productshell.e921a3c856") : recovery.level === "recovery_priority" ? mobileT("mobile.ui.productshell.41ef55f740") : mobileT("mobile.ui.productshell.ce4faf591f");
   return <View style={styles.recoveryStatusCard}>
-    <View style={styles.sectionHeader}><View><Text style={[styles.cardEyebrow, styles.intakeEyebrow]}>今日恢复</Text><Text style={styles.detailTitle}>{label}</Text></View><Text style={styles.detailMeta}>{recovery.validUntil ? `复核 ${recovery.validUntil.slice(0, 10)}` : "尚未记录"}</Text></View>
-    <Text style={styles.detailMeta}>{recovery.reasons.map((reason) => recoveryReasonLabel(reason)).join("、") || "没有需要降低训练量的恢复信号"}</Text>
-    {recovery.missing.length ? <Text style={styles.detailMeta}>待补充：{recovery.missing.map((reason) => recoveryReasonLabel(reason)).join("、")}</Text> : null}
-    <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.recoveryCheckInButton}><Text style={styles.recoveryCheckInText}>记录睡眠 / 疲劳 / 酸痛</Text></Pressable>
+      <View style={styles.sectionHeader}><View><Text style={[styles.cardEyebrow, styles.intakeEyebrow]}>{mobileT("mobile.ui.productshell.185bea2b62")}</Text><Text style={styles.detailTitle}>{label}</Text></View><Text style={styles.detailMeta}>{recovery.validUntil ? mobileT("mobile.ui.productshell.5089cbcba8", { value0: recovery.validUntil.slice(0, 10) }) : mobileT("mobile.ui.productshell.ae482564fc")}</Text></View>
+    <Text style={styles.detailMeta}>{recovery.reasons.map((reason) => recoveryReasonLabel(reason)).join("、") || mobileT("mobile.ui.productshell.fc88757e91")}</Text>
+    {recovery.missing.length ? <Text style={styles.detailMeta}>{mobileT("mobile.ui.productshell.c3a296cafd")}{recovery.missing.map((reason) => recoveryReasonLabel(reason)).join("、")}</Text> : null}
+    <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.recoveryCheckInButton}><Text style={styles.recoveryCheckInText}>{mobileT("mobile.ui.productshell.d67a417a5b")}</Text></Pressable>
   </View>;
 }
 
-function NutritionLedgerCard({ application, userId, date, nutrition, onFlip, onRecordMeal, onMealDraft }: { application: CoachApplication; userId: string; date: string; nutrition: CoachProductProjection["today"]["nutrition"]; onFlip: () => void; onRecordMeal: () => void; onMealDraft: (draft: NutritionObservationDraftArtifact) => void }) {
-  const [recommendation, setRecommendation] = useState<NextMealRecommendation>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const labels = { protein: "蛋白质", carbohydrate: "碳水", fat: "脂肪" } as const;
+function NutritionLedgerCard({ nutrition, onFlip, onRecordMeal }: { nutrition: CoachProductProjection["today"]["nutrition"]; onFlip: () => void; onRecordMeal: () => void }) {
+  const labels = { protein: mobileT("mobile.ui.productshell.fcf373f67b"), carbohydrate: mobileT("mobile.ui.productshell.3215da61d1"), fat: mobileT("mobile.ui.productshell.2eef1156d9"), fiber: mobileT("mobile.nutrient.fiber"), sodium: mobileT("mobile.nutrient.sodium"), potassium: mobileT("mobile.nutrient.potassium"), calcium: mobileT("mobile.nutrient.calcium"), iron: mobileT("mobile.nutrient.iron"), magnesium: mobileT("mobile.nutrient.magnesium"), vitamin_c: mobileT("mobile.nutrient.vitaminC") } as const;
   return <View style={[styles.nutritionLedgerCard, styles.dashboardNutritionCard]}>
     <View style={styles.nutritionCardHeader}>
-      <Text style={styles.nutritionCardTitle}>今日摄入</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="翻回训练卡片" onPress={onFlip} style={({ pressed }) => [styles.cardFlipButtonLight, pressed && styles.cardFlipButtonPressed]}><Text style={styles.cardFlipButtonLightText}>↻ 训练</Text></Pressable>
+      <Text style={styles.nutritionCardTitle}>{mobileT("mobile.ui.productshell.d4f0ba3885")}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.40bb29e9f1")} onPress={onFlip} style={({ pressed }) => [styles.cardFlipButtonLight, pressed && styles.cardFlipButtonPressed]}><Text style={styles.cardFlipButtonLightText}>{mobileT("mobile.ui.productshell.ca9a3c441c")}</Text></Pressable>
     </View>
     <View style={styles.intakeOverviewRow}>
-      <DailyFuelRing budget={nutrition.budget} size={132} />
+      <DailyFuelRing ledger={nutrition.healthLedger} size={132} />
       <View style={styles.intakeOverviewCopy}>
-        <Text style={styles.intakeDayLabel}>今日目标</Text>
-        <Text style={styles.intakeTargetValue}>{nutrition.budget.recommendedKcal === undefined ? "—" : nutrition.budget.recommendedKcal.toLocaleString()}</Text>
+        <Text style={styles.intakeDayLabel}>{mobileT("mobile.ui.productshell.65a31eda73")}</Text>
+        <Text style={styles.intakeTargetValue}>{ledgerTargetKcal(nutrition.healthLedger)?.toLocaleString() ?? "—"}</Text>
         <Text style={styles.intakeTargetUnit}>kcal</Text>
-        {nutrition.budget.activityAdjustmentKcal > 0 ? <Text style={styles.intakeActivityCredit}>活动 +{nutrition.budget.activityAdjustmentKcal} kcal</Text> : null}
-        {nutrition.budget.recommendedRange ? <Text style={styles.intakeTargetRange}>{nutrition.budget.recommendedRange.min.toLocaleString()}–{nutrition.budget.recommendedRange.max.toLocaleString()}</Text> : null}
+        {nutrition.healthLedger.nutritionPlan.targets.energy.range ? <Text style={styles.intakeTargetRange}>{nutrition.healthLedger.nutritionPlan.targets.energy.range.min.toLocaleString()}–{nutrition.healthLedger.nutritionPlan.targets.energy.range.max.toLocaleString()}</Text> : null}
       </View>
     </View>
     <View style={styles.nutritionMacroStrip}>
       {(Object.keys(labels) as (keyof typeof labels)[]).map((nutrient) => {
         const value = nutrition.ledger.nutrients[nutrient];
+        if (!value) return null;
         const target = value.target;
-        return <View key={nutrient} style={styles.nutritionMacroItem}><Text style={styles.nutritionProgressLabel}>{labels[nutrient]}</Text><Text style={styles.nutritionMacroValue}>{value.intakeKnown ? `${Math.round(value.consumedLogged)} g` : "—"}</Text>{target === undefined ? null : <Text style={styles.nutritionProgressMeta}>目标 {Math.round(target)} g</Text>}</View>;
+        return <View key={nutrient} style={styles.nutritionMacroItem}><Text style={styles.nutritionProgressLabel}>{labels[nutrient]}</Text><Text style={styles.nutritionMacroValue}>{value.intakeKnown ? `${Math.round(value.consumedLogged)} ${value.unit}` : "—"}</Text>{target === undefined ? null : <Text style={styles.nutritionProgressMeta}>{mobileT("mobile.ui.productshell.941f08313a")}{Math.round(target)} {value.unit}</Text>}</View>;
       })}
     </View>
-    {nutrition.ledger.meals.length ? <View style={styles.nutritionMealList}>{nutrition.ledger.meals.map((meal) => <View key={meal.eventId} style={styles.nutritionMealRow}><Text style={styles.nutritionMealTitle}>{meal.description ?? meal.slot}</Text><Text style={styles.nutritionMealMeta}>{meal.confirmed ? "已确认" : "待确认"}{meal.nutrients?.energy !== undefined ? ` · ${Math.round(meal.nutrients.energy)} kcal` : " · 数值未知"}</Text></View>)}</View> : null}
-    {recommendation ? <View style={styles.nutritionRecommendationList}>{recommendation.candidates.map((candidate) => <Pressable key={candidate.id} accessibilityRole="button" disabled={busy} onPress={() => { setBusy(true); void application.selectNextMealRecommendation({ userId, recommendation, candidateId: candidate.id, idempotencyKey: `mobile-meal-draft:${candidate.id}` }).then(onMealDraft).catch((cause) => setError(cause instanceof Error ? cause.message : "推荐已变化，请重新计算")).finally(() => setBusy(false)); }} style={styles.nutritionRecommendationRow}><View style={styles.nutritionRecommendationBody}><Text style={styles.nutritionRecommendationTitle}>{candidate.title}</Text><Text style={styles.nutritionMealMeta}>{candidate.assumptions.join(" · ")}</Text></View><Text style={styles.chevron}>›</Text></Pressable>)}</View> : null}
-    {error ? <Text style={styles.formError}>{error}</Text> : null}
-    <View style={styles.nutritionButtonRow}><Pressable accessibilityRole="button" onPress={onRecordMeal} style={styles.nutritionRecordButton}><Text style={styles.nutritionRecordButtonText}>记录餐食</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => { setBusy(true); void application.createNextMealRecommendation({ userId, date, timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1, mealSlot: "snack" }).then(setRecommendation).catch((cause) => setError(cause instanceof Error ? cause.message : "暂时无法生成下一餐")).finally(() => setBusy(false)); }} style={styles.nutritionSuggestButton}><Text style={styles.nutritionSuggestButtonText}>{busy ? "处理中" : "推荐下一餐"}</Text></Pressable></View>
+    {nutrition.ledger.meals.length ? <View style={styles.nutritionMealList}>{nutrition.ledger.meals.map((meal) => { const energy = meal.nutrients?.find((value) => value.nutrientId === "energy")?.amount; return <View key={meal.eventId} style={styles.nutritionMealRow}><Text style={styles.nutritionMealTitle}>{meal.description ?? meal.slot}</Text><Text style={styles.nutritionMealMeta}>{meal.confirmed ? mobileT("mobile.ui.productshell.d9fea67ad2") : mobileT("mobile.ui.productshell.27b5842c97")}{energy !== undefined ? ` · ${Math.round(energy)} kcal` : mobileT("mobile.ui.productshell.57afd9deea")}</Text></View>; })}</View> : null}
+    <View style={styles.nutritionButtonRow}><Pressable accessibilityRole="button" onPress={onRecordMeal} style={styles.nutritionRecordButton}><Text style={styles.nutritionRecordButtonText}>{mobileT("mobile.ui.productshell.58c95b36bd")}</Text></Pressable></View>
   </View>;
 }
 
-function DailyFuelRing({ budget, size = 148 }: { budget: DailyIntakeBudget; size?: number }) {
-  const palette = intakePalette(budget.status);
+function DailyFuelRing({ ledger, size = 148 }: { ledger: DailyHealthLedger; size?: number }) {
+  const palette = intakePalette(ledgerIntakeStatus(ledger));
   const center = size / 2;
   const radiusValue = center - 15;
   const circumference = 2 * Math.PI * radiusValue;
-  const progress = clampNumber(budget.progressRatio ?? 0, 0, 1);
-  const overflow = clampNumber((budget.progressRatio ?? 1) - 1, 0, 0.25) / 0.25;
-  const percentage = budget.progressRatio === undefined ? undefined : Math.round(budget.progressRatio * 100);
-  return <View accessibilityLabel={budget.consumedKcal === undefined ? "今日摄入尚未完整量化" : `已摄入 ${budget.consumedKcal} 千卡，完成建议目标的 ${percentage} 百分比`} style={[styles.intakeRingWrap, { width: size, height: size }]}>
+  const progressRatio = ledgerProgressRatio(ledger);
+  const consumedKcal = ledgerConsumedKcal(ledger);
+  const progress = clampNumber(progressRatio ?? 0, 0, 1);
+  const overflow = clampNumber((progressRatio ?? 1) - 1, 0, 0.25) / 0.25;
+  const percentage = progressRatio === undefined ? undefined : Math.round(progressRatio * 100);
+  return <View accessibilityLabel={consumedKcal === undefined
+    ? mobileT("mobile.ui.productshell.6e39714d90")
+    : percentage === undefined
+      ? mobileT("mobile.productShell.intake.consumedWithoutTarget", { consumed: consumedKcal })
+      : mobileT("mobile.ui.productshell.58fb1ff0b4", { value0: consumedKcal, value1: percentage })} style={[styles.intakeRingWrap, { width: size, height: size }]}>
     <Svg width={size} height={size}>
       <Circle cx={center} cy={center} r={radiusValue} fill="none" stroke={colors.paper2} strokeWidth={10} />
       <Circle cx={center} cy={center} r={radiusValue} fill="none" stroke={palette.color} strokeWidth={10} strokeLinecap="round" strokeDasharray={`${circumference} ${circumference}`} strokeDashoffset={circumference * (1 - progress)} transform={`rotate(-90 ${center} ${center})`} />
       {overflow > 0 ? <Circle cx={center} cy={center} r={radiusValue + 8} fill="none" stroke={palette.color} strokeWidth={3} strokeLinecap="round" strokeDasharray={`${2 * Math.PI * (radiusValue + 8)} ${2 * Math.PI * (radiusValue + 8)}`} strokeDashoffset={2 * Math.PI * (radiusValue + 8) * (1 - overflow)} transform={`rotate(-90 ${center} ${center})`} /> : null}
     </Svg>
     <View style={styles.intakeRingCenter}>
-      <Text style={[styles.intakeRingValue, { color: palette.ink }]}>{budget.consumedKcal === undefined ? "—" : budget.consumedKcal.toLocaleString()}</Text>
+      <Text style={[styles.intakeRingValue, { color: palette.ink }]}>{consumedKcal === undefined ? "—" : consumedKcal.toLocaleString()}</Text>
       <Text style={styles.intakeRingUnit}>kcal</Text>
       {percentage !== undefined ? <Text style={[styles.intakeRingPercent, { color: palette.ink }]}>{percentage}%</Text> : null}
     </View>
@@ -1085,13 +811,17 @@ function DailyFuelRing({ budget, size = 148 }: { budget: DailyIntakeBudget; size
 
 function CoachNotice({ screen, onOpenCoach }: { screen: CoachProductProjection; onOpenCoach: () => void }) {
   const notice = screen.coach.pending
-    ? "有一项需要确认"
+    ? mobileT("mobile.ui.productshell.8508e96aad")
+    : screen.coach.goalCompletionNext === "goal_negotiation"
+      ? mobileT("mobile.plan.completion.nextGoal")
+      : screen.coach.goalCompletionNext === "maintenance_planning"
+        ? mobileT("mobile.plan.completion.nextMaintenance")
     : screen.coach.latestUndoableAction
-      ? "最近的调整仍可撤销"
+      ? mobileT("mobile.ui.productshell.7fe325a839")
       : undefined;
   if (!notice) return <View style={styles.noticeSpacer} />;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel="查看 Coach 动态" onPress={onOpenCoach} style={styles.coachNotice}>
+    <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.d11d944699")} onPress={onOpenCoach} style={styles.coachNotice}>
       <View style={styles.noticeDot} />
       <Text style={styles.coachNoticeText}>{notice}</Text>
       <Text style={styles.noticeChevron}>›</Text>
@@ -1099,26 +829,25 @@ function CoachNotice({ screen, onOpenCoach }: { screen: CoachProductProjection; 
   );
 }
 
-function TodayCard({ today, onFlip, onStartOnboarding, onBeginWorkout, onRecordActivity, onViewWorkoutSummary }: { today: CoachProductProjection["today"]; onFlip: () => void; onStartOnboarding: () => void; onBeginWorkout: () => void; onRecordActivity: () => void; onViewWorkoutSummary: (summary: WorkoutOutcomeProductSummary) => void }) {
+function TodayCard({ today, onFlip, onBeginWorkout, onRecordActivity, onViewWorkoutSummary }: { today: CoachProductProjection["today"]; onFlip: () => void; onBeginWorkout: () => void; onRecordActivity: () => void; onViewWorkoutSummary: (summary: WorkoutOutcomeProductSummary) => void }) {
   const copy = todayCopy(today);
-  const canTakeAction = ["open_onboarding", "start_workout", "continue_workout", "record_activity"].includes(today.action) || (today.action === "view_summary" && Boolean(today.completedWorkout));
+  const canTakeAction = ["start_workout", "continue_workout", "record_activity"].includes(today.action) || (today.action === "view_summary" && Boolean(today.completedWorkout));
   const takeAction = () => {
-    if (today.action === "open_onboarding") onStartOnboarding();
-    else if (today.action === "record_activity") onRecordActivity();
+    if (today.action === "record_activity") onRecordActivity();
     else if (today.action === "view_summary" && today.completedWorkout) onViewWorkoutSummary(today.completedWorkout);
     else if (today.action === "start_workout" || today.action === "continue_workout") onBeginWorkout();
   };
   return (
     <View style={styles.todayCard}>
       <View style={styles.summaryArea}>
-        <Pressable accessibilityRole="button" accessibilityLabel="翻到饮食卡片" onPress={onFlip} style={({ pressed }) => [styles.cardFlipButtonDark, pressed && styles.cardFlipButtonPressed]}><Text style={styles.cardFlipButtonDarkText}>↻ 饮食</Text></Pressable>
-        <Text style={styles.cardEyebrow}>今日计划</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.c42f1a2140")} onPress={onFlip} style={({ pressed }) => [styles.cardFlipButtonDark, pressed && styles.cardFlipButtonPressed]}><Text style={styles.cardFlipButtonDarkText}>{mobileT("mobile.ui.productshell.4d06db95b6")}</Text></Pressable>
+        <Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.8edd0f641d")}</Text>
         <Text style={styles.planTitle} numberOfLines={2}>{today.session ? readablePlanSessionTitle(today.session.title) : copy.title}</Text>
         <Text style={styles.planSubtitle} numberOfLines={1}>{copy.subtitle}</Text>
         <View style={styles.metricsRow}>
-          <Metric value={today.session?.estimatedMinutes ? `${today.session.estimatedMinutes}′` : "—"} label="预计时长" />
-          <Metric value={today.session ? String(today.session.totalSetCount || today.session.taskCount) : "—"} label={today.session?.kind === "cardio" ? "目标项目" : "工作组"} />
-          <Metric value={today.activeWorkout?.status === "paused" ? "已暂停" : today.activeWorkout?.status === "active" ? "进行中" : today.session?.kind === "rest" ? "恢复" : ""} label="状态" />
+          <Metric value={today.session?.estimatedMinutes ? `${today.session.estimatedMinutes}′` : "—"} label={mobileT("mobile.ui.productshell.d84ee81f27")} />
+          <Metric value={today.session ? String(today.session.totalSetCount || today.session.taskCount) : "—"} label={today.session?.kind === "cardio" ? mobileT("mobile.ui.productshell.08f87c580d") : mobileT("mobile.ui.productshell.1fcfb573d2")} />
+          <Metric value={today.activeWorkout?.status === "paused" ? mobileT("mobile.ui.productshell.fcbae46bf8") : today.activeWorkout?.status === "active" ? mobileT("mobile.ui.productshell.6f1972e48e") : today.session?.kind === "rest" ? mobileT("mobile.ui.productshell.79748ca1c6") : ""} label={mobileT("mobile.ui.productshell.62e951a692")} />
         </View>
       </View>
       <View style={styles.taskArea}>
@@ -1162,24 +891,24 @@ function WorkoutOutcomeSummarySheet({
 }) {
   return (
     <View accessibilityViewIsModal style={styles.logScrim}>
-      <Pressable accessibilityRole="button" accessibilityLabel="关闭训练日报" onPress={onDismiss} style={StyleSheet.absoluteFill} />
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.b41a0c627c")} onPress={onDismiss} style={StyleSheet.absoluteFill} />
       <View style={styles.outcomeSheet}>
         <View style={styles.sheetHandle} />
-        <Text style={styles.cardEyebrow}>训练日报</Text>
+        <Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.e14bc9de1f")}</Text>
         <Text style={styles.outcomeTitle}>{readablePlanSessionTitle(summary.title)}</Text>
         <Text style={styles.outcomeStatus}>{outcomeStatusLabel(summary.status)}</Text>
         <View style={styles.outcomeMetricRow}>
-          <OutcomeMetric value={String(summary.completedWorkSets)} label="完成工作组" />
-          <OutcomeMetric value={String(summary.incompleteSetCount)} label="未完成组" />
-          <OutcomeMetric value={outcomeCompletenessLabel(summary.dataCompleteness)} label="记录来源" />
+          <OutcomeMetric value={String(summary.completedWorkSets)} label={mobileT("mobile.ui.productshell.61ec828096")} />
+          <OutcomeMetric value={String(summary.incompleteSetCount)} label={mobileT("mobile.ui.productshell.a66108ea5d")} />
+          <OutcomeMetric value={outcomeCompletenessLabel(summary.dataCompleteness)} label={mobileT("mobile.ui.productshell.d82c9100ca")} />
         </View>
         <View style={styles.outcomeFacts}>
-          <View style={styles.outcomeFactRow}><Text style={styles.outcomeFactLabel}>计划日期</Text><Text style={styles.outcomeFactValue}>{shortDate(summary.scheduledFor)}</Text></View>
-          <View style={styles.outcomeFactRow}><Text style={styles.outcomeFactLabel}>实际结束</Text><Text style={styles.outcomeFactValue}>{localDateTime(summary.completedAt)}</Text></View>
+          <View style={styles.outcomeFactRow}><Text style={styles.outcomeFactLabel}>{mobileT("mobile.ui.productshell.d0f48e113d")}</Text><Text style={styles.outcomeFactValue}>{shortDate(summary.scheduledFor)}</Text></View>
+          <View style={styles.outcomeFactRow}><Text style={styles.outcomeFactLabel}>{mobileT("mobile.ui.productshell.997dcb12b3")}</Text><Text style={styles.outcomeFactValue}>{localDateTime(summary.completedAt)}</Text></View>
         </View>
-        <Text style={styles.outcomeBoundary}>计划与实际完成内容分别保留。需要修正时会新增一条更正记录。</Text>
-        <Pressable accessibilityRole="button" onPress={onCorrect} style={styles.outcomeCorrectionButton}><Text style={styles.outcomeCorrectionButtonText}>更正训练记录</Text></Pressable>
-        <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.primaryButton}><Text style={styles.primaryButtonText}>完成</Text></Pressable>
+        <Text style={styles.outcomeBoundary}>{mobileT("mobile.ui.productshell.bebc8eb050")}</Text>
+        <Pressable accessibilityRole="button" onPress={onCorrect} style={styles.outcomeCorrectionButton}><Text style={styles.outcomeCorrectionButtonText}>{mobileT("mobile.ui.productshell.db7f3467f5")}</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{mobileT("mobile.ui.productshell.33246f6a5e")}</Text></Pressable>
       </View>
     </View>
   );
@@ -1190,195 +919,6 @@ function OutcomeMetric({ value, label }: { value: string; label: string }) {
 }
 
 /** A low-friction, offline-first entry point for the day's factual Timeline. */
-function ActivityLogEntry({
-  application,
-  userId,
-  initialMode,
-  onDismiss,
-  onSaved,
-}: {
-  application: CoachApplication;
-  userId: string;
-  initialMode?: ActivityLogMode;
-  onDismiss: () => void;
-  onSaved: () => void;
-}) {
-  const [entryMode, setEntryMode] = useState<ActivityLogMode>(initialMode ?? "activity");
-  const [activityType, setActivityType] = useState(initialMode === "nutrition" ? "早餐" : "散步");
-  const [durationMinutes, setDurationMinutes] = useState("");
-  const [intensity, setIntensity] = useState<"easy" | "moderate" | "hard" | "unknown">("moderate");
-  const [score, setScore] = useState("3");
-  const [bodyMetric, setBodyMetric] = useState<"body_weight" | "body_fat_percentage">("body_weight");
-  const [nutritionMode, setNutritionMode] = useState<"simplified" | "precise">("simplified");
-  const [nutritionProvenance, setNutritionProvenance] = useState<"manual" | "label">("manual");
-  const [energyKcal, setEnergyKcal] = useState("");
-  const [proteinGrams, setProteinGrams] = useState("");
-  const [fatGrams, setFatGrams] = useState("");
-  const [carbohydrateGrams, setCarbohydrateGrams] = useState("");
-  const [proteinCompletion, setProteinCompletion] = useState<"none" | "partial" | "met">("partial");
-  const [hunger, setHunger] = useState<"low" | "moderate" | "high">("moderate");
-  const [deviation, setDeviation] = useState<"none" | "small" | "large">("none");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-  const save = async () => {
-    const minutes = optionalFiniteNumber(durationMinutes);
-    if (entryMode === "activity" && !activityType.trim()) { setError("请写下今天做了什么。"); return; }
-    if (entryMode === "activity" && minutes !== undefined && (!Number.isFinite(minutes) || minutes < 0)) { setError("时长需要是非负数字。"); return; }
-    const scoreValue = optionalFiniteNumber(score);
-    if ((entryMode === "sleep" || entryMode === "recovery") && (scoreValue === undefined || scoreValue < 1 || scoreValue > 5)) { setError("请用 1 到 5 记录主观感受。"); return; }
-    if (entryMode === "sleep" && (minutes === undefined || minutes <= 0)) { setError("请填写睡眠时长。"); return; }
-    if (entryMode === "body" && (scoreValue === undefined || scoreValue <= 0 || (bodyMetric === "body_fat_percentage" && scoreValue > 100))) { setError(bodyMetric === "body_weight" ? "请填写体重。" : "体脂率需要在 0 到 100 之间。"); return; }
-    setSaving(true);
-    try {
-      const now = new Date();
-      if (entryMode === "nutrition") {
-        const observation = createManualMealObservation({
-          id: `manual-meal:${now.getTime()}`,
-          occurredAt: now.toISOString(),
-          description: activityType,
-          mealSlot: mealSlotForLabel(activityType),
-          foods: [{
-            id: `manual-food:${now.getTime()}`,
-            name: activityType,
-            portion: "用户记录的一份餐食",
-            ...(optionalFiniteNumber(energyKcal) !== undefined ? { energy: { value: optionalFiniteNumber(energyKcal)!, unit: "kcal" as const } } : {}),
-            ...(optionalFiniteNumber(proteinGrams) !== undefined ? { proteinGrams: optionalFiniteNumber(proteinGrams) } : {}),
-            ...(optionalFiniteNumber(fatGrams) !== undefined ? { fatGrams: optionalFiniteNumber(fatGrams) } : {}),
-            ...(optionalFiniteNumber(carbohydrateGrams) !== undefined ? { carbohydrateGrams: optionalFiniteNumber(carbohydrateGrams) } : {}),
-            source: nutritionProvenance,
-          }],
-          mode: nutritionMode,
-          provenance: nutritionMode === "simplified" ? "manual" : nutritionProvenance,
-          ...(nutritionMode === "precise" ? {
-            ...(optionalFiniteNumber(energyKcal) === undefined ? {} : { energyKcal: optionalFiniteNumber(energyKcal) }),
-            ...(optionalFiniteNumber(proteinGrams) === undefined ? {} : { proteinGrams: optionalFiniteNumber(proteinGrams) }),
-            ...(optionalFiniteNumber(fatGrams) === undefined ? {} : { fatGrams: optionalFiniteNumber(fatGrams) }),
-            ...(optionalFiniteNumber(carbohydrateGrams) === undefined ? {} : { carbohydrateGrams: optionalFiniteNumber(carbohydrateGrams) }),
-          } : {
-            simplified: { proteinCompletion, hunger, deviation },
-          }),
-        });
-        await application.confirmMealObservation({
-          userId,
-          idempotencyKey: `mobile-meal:${now.getTime()}`,
-          source: observation.provenance,
-          observation,
-        });
-        onSaved();
-        return;
-      }
-      await application.recordTimelineFact({
-        userId,
-        idempotencyKey: `mobile-activity:${now.getTime()}`,
-        fact: entryMode === "activity"
-          ? {
-              kind: "activity" as const,
-              activityType: activityType.trim(),
-              ...(minutes === undefined ? {} : { duration: { value: minutes, unit: "minutes" as const } }),
-              intensity,
-              confidence: "confirmed" as const,
-            }
-          : entryMode === "sleep" ? {
-              kind: "sleep" as const,
-              duration: { value: minutes!, unit: "minutes" as const },
-              quality: scoreValue,
-              confidence: "confirmed" as const,
-            } : entryMode === "recovery" ? {
-              kind: "recovery" as const,
-              perceivedRecovery: scoreValue,
-              confidence: "confirmed" as const,
-            } : {
-              kind: "body" as const,
-              measurement: bodyMetric === "body_weight"
-                ? { metric: "body_weight" as const, quantity: { value: scoreValue!, unit: "kg" as const } }
-                : { metric: "body_fat_percentage" as const, quantity: { value: scoreValue!, unit: "percent" as const } },
-              confidence: "confirmed" as const,
-            },
-        envelope: {
-          time: { startedAt: now.toISOString(), timezoneOffsetMinutes: -now.getTimezoneOffset() },
-          provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" },
-          privacyClass: "sensitive",
-          causalRefs: [],
-          evidenceRefs: [],
-          layer: "raw_observation",
-        },
-      });
-      onSaved();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时未能保存记录");
-    } finally {
-      setSaving(false);
-    }
-  };
-  return (
-    <BottomDrawer visible tall title="统一记录" subtitle="活动、饮食、睡眠、恢复与身体数据" onDismiss={onDismiss}>
-      <ScrollView contentContainerStyle={styles.logDrawerContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <Text style={styles.cardEyebrow}>活动记录</Text>
-        <Text style={styles.logTitle}>{entryMode === "activity" ? "今天做了什么？" : entryMode === "nutrition" ? "这一餐吃了什么？" : entryMode === "sleep" ? "昨晚睡得怎样？" : entryMode === "recovery" ? "现在恢复得怎样？" : "记录身体状态"}</Text>
-        <View style={styles.logModeRow}>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: entryMode === "activity" }} onPress={() => { setEntryMode("activity"); setActivityType("散步"); }} style={[styles.logMode, entryMode === "activity" && styles.logModeSelected]}><Text style={[styles.logModeText, entryMode === "activity" && styles.logModeTextSelected]}>活动</Text></Pressable>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: entryMode === "nutrition" }} onPress={() => { setEntryMode("nutrition"); setActivityType("早餐"); setNutritionMode("simplified"); }} style={[styles.logMode, entryMode === "nutrition" && styles.logModeSelected]}><Text style={[styles.logModeText, entryMode === "nutrition" && styles.logModeTextSelected]}>饮食</Text></Pressable>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: entryMode === "sleep" }} onPress={() => { setEntryMode("sleep"); setScore("3"); }} style={[styles.logMode, entryMode === "sleep" && styles.logModeSelected]}><Text style={[styles.logModeText, entryMode === "sleep" && styles.logModeTextSelected]}>睡眠</Text></Pressable>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: entryMode === "recovery" }} onPress={() => { setEntryMode("recovery"); setScore("3"); }} style={[styles.logMode, entryMode === "recovery" && styles.logModeSelected]}><Text style={[styles.logModeText, entryMode === "recovery" && styles.logModeTextSelected]}>恢复</Text></Pressable>
-          <Pressable accessibilityRole="tab" accessibilityState={{ selected: entryMode === "body" }} onPress={() => { setEntryMode("body"); setScore(""); }} style={[styles.logMode, entryMode === "body" && styles.logModeSelected]}><Text style={[styles.logModeText, entryMode === "body" && styles.logModeTextSelected]}>身体</Text></Pressable>
-        </View>
-        {(entryMode === "activity" || entryMode === "nutrition") ? <View style={styles.logQuickRow}>
-          {(entryMode === "activity" ? ["散步", "有氧", "拉伸", "休息"] : ["早餐", "午餐", "晚餐", "加餐"]).map((value) => <Pressable key={value} accessibilityRole="button" onPress={() => setActivityType(value)} style={[styles.logQuick, activityType === value && styles.logQuickSelected]}><Text style={[styles.logQuickText, activityType === value && styles.logQuickTextSelected]}>{value}</Text></Pressable>)}
-        </View> : null}
-        {(entryMode === "activity" || entryMode === "nutrition") ? <TextInput accessibilityLabel={entryMode === "activity" ? "活动描述" : "餐食描述"} value={activityType} onChangeText={setActivityType} placeholder={entryMode === "activity" ? "例如：下班后快走" : "例如：一碗面和鸡蛋"} placeholderTextColor={colors.ink3} style={styles.logInput} /> : null}
-        {entryMode === "nutrition" ? <>
-          <View style={styles.logQuickRow}>
-            <Pressable accessibilityRole="radio" accessibilityState={{ selected: nutritionMode === "simplified" }} onPress={() => setNutritionMode("simplified")} style={[styles.logQuick, nutritionMode === "simplified" && styles.logQuickSelected]}><Text style={[styles.logQuickText, nutritionMode === "simplified" && styles.logQuickTextSelected]}>简单记录</Text></Pressable>
-            <Pressable accessibilityRole="radio" accessibilityState={{ selected: nutritionMode === "precise" }} onPress={() => setNutritionMode("precise")} style={[styles.logQuick, nutritionMode === "precise" && styles.logQuickSelected]}><Text style={[styles.logQuickText, nutritionMode === "precise" && styles.logQuickTextSelected]}>精确输入</Text></Pressable>
-          </View>
-          {nutritionMode === "simplified" ? <>
-            <NutritionChoice label="蛋白质" value={proteinCompletion} options={[{ value: "none", label: "未覆盖" }, { value: "partial", label: "部分" }, { value: "met", label: "达到" }]} onChange={setProteinCompletion} />
-            <NutritionChoice label="饥饿感" value={hunger} options={[{ value: "low", label: "不明显" }, { value: "moderate", label: "一般" }, { value: "high", label: "明显" }]} onChange={setHunger} />
-            <NutritionChoice label="与计划" value={deviation} options={[{ value: "none", label: "一致" }, { value: "small", label: "小偏差" }, { value: "large", label: "明显偏差" }]} onChange={setDeviation} />
-          </> : <>
-            <View style={styles.logQuickRow}>
-              <Pressable accessibilityRole="radio" accessibilityState={{ selected: nutritionProvenance === "manual" }} onPress={() => setNutritionProvenance("manual")} style={[styles.logQuick, nutritionProvenance === "manual" && styles.logQuickSelected]}><Text style={[styles.logQuickText, nutritionProvenance === "manual" && styles.logQuickTextSelected]}>手动输入</Text></Pressable>
-              <Pressable accessibilityRole="radio" accessibilityState={{ selected: nutritionProvenance === "label" }} onPress={() => setNutritionProvenance("label")} style={[styles.logQuick, nutritionProvenance === "label" && styles.logQuickSelected]}><Text style={[styles.logQuickText, nutritionProvenance === "label" && styles.logQuickTextSelected]}>标签数据</Text></Pressable>
-            </View>
-            <View style={styles.nutritionMetricGrid}>
-              <NutritionMetricInput label="能量 kcal" value={energyKcal} onChange={setEnergyKcal} />
-              <NutritionMetricInput label="蛋白质 g" value={proteinGrams} onChange={setProteinGrams} />
-              <NutritionMetricInput label="脂肪 g" value={fatGrams} onChange={setFatGrams} />
-              <NutritionMetricInput label="碳水 g" value={carbohydrateGrams} onChange={setCarbohydrateGrams} />
-            </View>
-          </>}
-        </> : null}
-        {entryMode === "activity" ? <View style={styles.logDuration}><Text style={styles.logLabel}>时长（分钟，可不填）</Text><TextInput accessibilityLabel="活动时长分钟" keyboardType="decimal-pad" value={durationMinutes} onChangeText={setDurationMinutes} placeholder="—" placeholderTextColor={colors.ink3} style={styles.logDurationInput} /></View> : null}
-        {entryMode === "activity" ? <View style={styles.logQuickRow}>
-          {[{ id: "easy", label: "轻松" }, { id: "moderate", label: "适中" }, { id: "hard", label: "吃力" }].map((option) => <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ selected: intensity === option.id }} onPress={() => setIntensity(option.id as typeof intensity)} style={[styles.logQuick, intensity === option.id && styles.logQuickSelected]}><Text style={[styles.logQuickText, intensity === option.id && styles.logQuickTextSelected]}>{option.label}</Text></Pressable>)}
-        </View> : null}
-        {entryMode === "sleep" ? <View style={styles.logDuration}><Text style={styles.logLabel}>睡眠时长（分钟）</Text><TextInput accessibilityLabel="睡眠时长分钟" keyboardType="decimal-pad" value={durationMinutes} onChangeText={setDurationMinutes} placeholder="例如 450" placeholderTextColor={colors.ink3} style={styles.logDurationInput} /></View> : null}
-        {(entryMode === "sleep" || entryMode === "recovery") ? <View style={styles.logQuickRow}>{[{ value: "1", label: "很差" }, { value: "2", label: "偏低" }, { value: "3", label: "一般" }, { value: "4", label: "不错" }, { value: "5", label: "很好" }].map((option) => <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ selected: score === option.value }} onPress={() => setScore(option.value)} style={[styles.logQuick, score === option.value && styles.logQuickSelected]}><Text style={[styles.logQuickText, score === option.value && styles.logQuickTextSelected]}>{option.label}</Text></Pressable>)}</View> : null}
-        {entryMode === "body" ? <><View style={styles.logQuickRow}><Pressable accessibilityRole="radio" accessibilityState={{ selected: bodyMetric === "body_weight" }} onPress={() => setBodyMetric("body_weight")} style={[styles.logQuick, bodyMetric === "body_weight" && styles.logQuickSelected]}><Text style={[styles.logQuickText, bodyMetric === "body_weight" && styles.logQuickTextSelected]}>体重</Text></Pressable><Pressable accessibilityRole="radio" accessibilityState={{ selected: bodyMetric === "body_fat_percentage" }} onPress={() => setBodyMetric("body_fat_percentage")} style={[styles.logQuick, bodyMetric === "body_fat_percentage" && styles.logQuickSelected]}><Text style={[styles.logQuickText, bodyMetric === "body_fat_percentage" && styles.logQuickTextSelected]}>体脂</Text></Pressable></View><View style={styles.logDuration}><Text style={styles.logLabel}>{bodyMetric === "body_weight" ? "体重（kg）" : "体脂率（%）"}</Text><TextInput accessibilityLabel={bodyMetric === "body_weight" ? "体重千克" : "体脂率"} keyboardType="decimal-pad" value={score} onChangeText={setScore} placeholder="—" placeholderTextColor={colors.ink3} style={styles.logDurationInput} /></View></> : null}
-        {error ? <Text style={styles.formError}>{error}</Text> : null}
-        <Pressable accessibilityRole="button" disabled={saving} onPress={() => void save()} style={[styles.logSave, saving && styles.primaryButtonDisabled]}><Text style={styles.logSaveText}>{saving ? "正在保存" : "保存记录"}</Text></Pressable>
-      </ScrollView>
-    </BottomDrawer>
-  );
-}
-
-function NutritionChoice<T extends string>({ label, value, options, onChange }: {
-  label: string;
-  value: T;
-  options: readonly { value: T; label: string }[];
-  onChange: (value: T) => void;
-}) {
-  return <View style={styles.nutritionChoice}><Text style={styles.logLabel}>{label}</Text><View style={styles.logQuickRow}>{options.map((option) => <Pressable key={option.value} accessibilityRole="radio" accessibilityState={{ selected: value === option.value }} onPress={() => onChange(option.value)} style={[styles.logQuick, value === option.value && styles.logQuickSelected]}><Text style={[styles.logQuickText, value === option.value && styles.logQuickTextSelected]}>{option.label}</Text></Pressable>)}</View></View>;
-}
-
-function NutritionMetricInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <View style={styles.nutritionMetric}><Text style={styles.nutritionMetricLabel}>{label}</Text><TextInput accessibilityLabel={label} keyboardType="decimal-pad" value={value} onChangeText={onChange} placeholder="—" placeholderTextColor={colors.ink3} style={styles.nutritionMetricInput} /></View>;
-}
-
-function mealSlotForLabel(label: string): "breakfast" | "lunch" | "dinner" | "snack" {
-  return label === "早餐" ? "breakfast" : label === "午餐" ? "lunch" : label === "晚餐" ? "dinner" : "snack";
-}
-
 function CalendarScreen(props: {
   screen: CoachProductProjection;
   onSelectDate: (date: string) => void;
@@ -1411,12 +951,12 @@ function CalendarScreen(props: {
       />
       {hasSelectedRecords ? <PanelCard>
         <Text style={styles.cardEyebrow}>{weekdayAndDate(calendar.selected.date)}</Text>
-        <Text style={styles.detailTitle}>{calendar.selected.date === today ? "今天做过的事" : "当天实际记录"}</Text>
+        <Text style={styles.detailTitle}>{calendar.selected.date === today ? mobileT("mobile.ui.productshell.4bceaea0e4") : mobileT("mobile.ui.productshell.02d90aff65")}</Text>
         {calendar.selected.performedWorkouts.map((summary) => (
-          <Pressable key={summary.id} accessibilityRole="button" accessibilityLabel={`查看 ${readablePlanSessionTitle(summary.title)} 的训练结果`} onPress={() => props.onViewWorkoutSummary(summary)} style={styles.performedWorkoutRow}>
+          <Pressable key={summary.id} accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.bd1240e203", { value0: readablePlanSessionTitle(summary.title) })} onPress={() => props.onViewWorkoutSummary(summary)} style={styles.performedWorkoutRow}>
             <View style={styles.performedWorkoutCopy}>
               <Text style={styles.performedWorkoutTitle}>{readablePlanSessionTitle(summary.title)}</Text>
-              <Text style={styles.performedWorkoutMeta}>{outcomeStatusLabel(summary.status)} · {summary.completedWorkSets} 组完成 · {localDateTime(summary.completedAt).slice(-5)}</Text>
+              <Text style={styles.performedWorkoutMeta}>{outcomeStatusLabel(summary.status)} · {summary.completedWorkSets} {mobileT("mobile.ui.productshell.7e8e8e94a6")}{localDateTime(summary.completedAt).slice(-5)}</Text>
             </View>
             <Text style={styles.chevron}>›</Text>
           </Pressable>
@@ -1429,109 +969,63 @@ function CalendarScreen(props: {
 
 type PlanWorkspaceTab = "overview" | "training" | "intake" | "trends";
 
-function PlanScreen({ application, cloudConfirmed, userId, screen, initialTab, onOpenVideoLibrary, onRecordMeal, onUpdated }: { application: CoachApplication; cloudConfirmed: ConfirmedProductBridge; userId: string; screen: CoachProductProjection; initialTab: PlanWorkspaceTab; onOpenVideoLibrary: () => void; onRecordMeal: () => void; onUpdated: () => void }) {
+function PlanScreen({ application, userId, screen, initialTab, onRecordMeal, onOpenCoach, onUpdated }: { application: LocalProductKernel; userId: string; screen: CoachProductProjection; initialTab: PlanWorkspaceTab; onRecordMeal: () => void; onOpenCoach: () => void; onUpdated: () => void }) {
   const { plan } = screen;
   const [activeTab, setActiveTab] = useState<PlanWorkspaceTab>(initialTab);
-  const [managingExercises, setManagingExercises] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
-  const [previewOverride, setPreviewOverride] = useState<EvidenceBriefArtifact>();
+  const [completionProposal, setCompletionProposal] = useState<EvidenceBriefArtifact>();
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewError, setPreviewError] = useState<string>();
-  const preview = previewOverride ?? plan.latestPlanningPreview;
-  useEffect(() => {
-    const trigger = preview?.planningPreview?.request.trigger;
-    if (
-      preview?.planningPreview?.status === "awaiting_confirmation"
-      && (
-        preview.planningPreview.proposal.planRevision.rollingEnergyAdjustment?.status === "gentle_rebalance"
-        || trigger === "recovery_downgraded"
-        || Boolean(preview.planningPreview.sourceRiskEvaluationId)
-      )
-    ) {
-      setShowPreview(true);
-    }
-  }, [preview?.id, preview?.planningPreview?.status, preview?.planningPreview?.proposal.planRevision.rollingEnergyAdjustment?.status, preview?.planningPreview?.request.trigger]);
-  const confirmPreview = async () => {
-    if (!preview?.planningPreview || preview.planningPreview.status !== "awaiting_confirmation") return;
+  const pauseCurrentPlan = async () => {
     setPreviewBusy(true);
     try {
-      const domain = await application.readDomainProjection({ userId });
-      await cloudConfirmed.publishPlanThen({
-        localPlanId: screen.source.planId ?? preview.id,
-        title: "MaxPower 训练计划",
-        snapshot: createCloudPlanRecoverySnapshot({
-          artifactId: preview.id,
-          planningPreview: preview.planningPreview,
-          domain,
-        }),
-        idempotencyKey: `mobile-plan-preview:${preview.id}`,
-        commitLocal: () => application.confirmPlanningPreview({
-          userId,
-          previewId: preview.id,
-          idempotencyKey: `mobile-plan-preview:confirm:${preview.id}`,
-        }),
-      });
-      setPreviewOverride(undefined);
-      setPreviewError(undefined);
-      setShowPreview(false);
-      onUpdated();
-    } catch (cause) {
-      setPreviewError(cause instanceof Error ? cause.message : "预览已变化，请重新计算");
-    } finally {
-      setPreviewBusy(false);
-    }
-  };
-  const rejectPreview = async () => {
-    if (!preview?.planningPreview || preview.planningPreview.status !== "awaiting_confirmation") return;
-    setPreviewBusy(true);
-    try {
-      setPreviewOverride(await application.rejectPlanningPreview({ userId, previewId: preview.id, idempotencyKey: `mobile-plan-preview:reject:${preview.id}` }));
+      const mutationKey = `mobile-plan:pause:${Date.now().toString(36)}`;
+      await application.pausePlan({ userId, reason: "user_paused", idempotencyKey: mutationKey });
       setPreviewError(undefined);
       onUpdated();
     } catch (cause) {
-      setPreviewError(cause instanceof Error ? cause.message : "暂时无法保存你的选择");
+      setPreviewError(userFacingError(cause, mobileT("mobile.ui.productshell.1cdd25e544")));
     } finally {
       setPreviewBusy(false);
     }
   };
-  const recomputePreview = async () => {
-    if (!preview?.planningPreview) return;
+  const reopenCurrentPlanning = async () => {
     setPreviewBusy(true);
     try {
-      const next = await application.recomputePlanningPreview({
-        userId,
-        previewId: preview.id,
-        // Each explicit retry is a new evaluation attempt. The resulting
-        // artifact itself remains content-addressed, so unchanged facts still
-        // deduplicate without freezing a prior failed attempt forever.
-        idempotencyKey: `mobile-plan-preview:recompute:${preview.id}:${Date.now().toString(36)}`,
-      });
-      setPreviewOverride(next);
+      const mutationKey = `mobile-plan:reopen:${Date.now().toString(36)}`;
+      await application.reopenPlanning({ userId, idempotencyKey: mutationKey });
       setPreviewError(undefined);
+      onUpdated();
+      onOpenCoach();
     } catch (cause) {
-      setPreviewError(cause instanceof Error ? cause.message : "暂时无法重新计算预览");
+      setPreviewError(userFacingError(cause, mobileT("mobile.ui.productshell.0a9b0c6d48")));
     } finally {
       setPreviewBusy(false);
     }
   };
-  const requestRebuild = async () => {
-    if (preview?.planningPreview && preview.planningPreview.status !== "confirmed") {
-      setShowPreview(true);
-      return;
-    }
+  const checkGoalCompletion = async () => {
     setPreviewBusy(true);
     try {
-      const next = await application.createPhaseTransitionPreview({
-        userId,
-        currentDate: localDate(),
-        trigger: "user_requested",
-        idempotencyKey: `mobile-plan-rebuild:${Date.now().toString(36)}`,
-      });
-      setPreviewOverride(next);
+      const proposal = await application.proposeGoalCompletion({ userId, timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1, idempotencyKey: `mobile-goal-completion:${Date.now().toString(36)}` });
+      setCompletionProposal(proposal);
       setPreviewError(undefined);
-      setShowPreview(true);
     } catch (cause) {
-      setPreviewError(cause instanceof Error ? cause.message : "暂时无法建立重建预览");
+      setPreviewError(userFacingError(cause, mobileT("mobile.plan.completion.unavailable")));
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  const resolveCompletion = async (resolution: "reject" | "confirm_and_record_only" | "confirm_and_maintain" | "confirm_and_request_new_goal") => {
+    if (!completionProposal?.goalCompletionProposal) return;
+    setPreviewBusy(true);
+    try {
+      const mutationKey = `mobile-goal-completion:${resolution}:${completionProposal.id}`;
+      const result = await application.resolveGoalCompletion({ userId, proposalId: completionProposal.id, resolution, idempotencyKey: mutationKey });
+      setCompletionProposal(undefined);
+      setPreviewError(undefined);
+      onUpdated();
+      if (result.status === "completed" && (result.next === "goal_negotiation" || result.next === "maintenance_planning")) onOpenCoach();
+    } catch (cause) {
+      setPreviewError(userFacingError(cause, mobileT("mobile.plan.completion.stale")));
     } finally {
       setPreviewBusy(false);
     }
@@ -1540,28 +1034,27 @@ function PlanScreen({ application, cloudConfirmed, userId, screen, initialTab, o
     <View style={styles.planPage}>
       <View style={styles.planFixedHeader}>
         <View style={styles.planTitleRow}>
-          <View><Text style={styles.screenTitle}>计划与趋势</Text><Text style={styles.screenSub}>{plan.horizon ? `${shortDate(plan.horizon.startDate)}—${shortDate(plan.horizon.endDate)}` : "长期目标、当前行动与真实变化"}</Text></View>
-          <View style={styles.planHeaderActions}><Pressable accessibilityRole="button" accessibilityLabel="重建计划" disabled={previewBusy} onPress={() => void requestRebuild()} style={styles.compactTextButton}><Text style={styles.compactTextButtonText}>{previewBusy ? "生成中" : "重建"}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="管理动作" onPress={() => setManagingExercises(true)} style={styles.compactTextButton}><Text style={styles.compactTextButtonText}>动作</Text></Pressable></View>
+          <View><Text style={styles.screenTitle}>{mobileT("mobile.ui.productshell.ff5c3df60f")}</Text><Text style={styles.screenSub}>{plan.horizon ? `${shortDate(plan.horizon.startDate)}—${shortDate(plan.horizon.endDate)}` : mobileT("mobile.ui.productshell.85c4af69e2")}</Text></View>
         </View>
-        <SegmentedControl<PlanWorkspaceTab> compact value={activeTab} onChange={setActiveTab} options={[{ id: "overview", label: "概览" }, { id: "training", label: "训练" }, { id: "intake", label: "摄入" }, { id: "trends", label: "趋势" }]} />
+        <SegmentedControl<PlanWorkspaceTab> compact value={activeTab} onChange={setActiveTab} options={[{ id: "overview", label: mobileT("mobile.ui.productshell.5060421d15") }, { id: "training", label: mobileT("mobile.ui.productshell.796e01d5af") }, { id: "intake", label: mobileT("mobile.ui.productshell.7eb82652f0") }, { id: "trends", label: mobileT("mobile.ui.productshell.376df657e6") }]} />
       </View>
       <ScrollView key={activeTab} contentContainerStyle={styles.planTabContent} showsVerticalScrollIndicator={false}>
-        {plan.status === "unavailable" ? <Empty label="完成建档后，这里会显示当前周期与本周安排。" /> : null}
-        {plan.status === "stale" ? <Empty label="目标已更新，当前计划需要重新生成。" /> : null}
-          {plan.status === "current" && activeTab === "overview" ? <PlanOverview screen={screen} preview={preview} onOpenTrends={() => setActiveTab("trends")} onOpenPreview={() => setShowPreview(true)} /> : null}
+        {plan.status === "unavailable" && activeTab !== "trends" ? <><Empty label={mobileT("mobile.ui.productshell.3b5b7d6265")} />{plan.lifecycleState === "paused" || plan.lifecycleState === "planning_required" ? <Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void reopenCurrentPlanning()} style={styles.reportConfirmButton}><Text style={styles.reportConfirmText}>{mobileT("mobile.plan.lifecycle.replan")}</Text></Pressable> : null}{plan.lifecycleState === "completed" ? <Pressable accessibilityRole="button" onPress={onOpenCoach} style={styles.reportConfirmButton}><Text style={styles.reportConfirmText}>{mobileT("mobile.plan.lifecycle.discussNext")}</Text></Pressable> : null}</> : null}
+        {plan.status === "stale" ? <Empty label={mobileT("mobile.ui.productshell.5eccce9221")} /> : null}
+          {plan.status === "current" && activeTab === "overview" ? <PlanOverview screen={screen} onOpenTrends={() => setActiveTab("trends")} /> : null}
         {plan.status === "current" && activeTab === "training" ? <TrainingPlanTab plan={plan} locale={screen.profile.locale} /> : null}
         {plan.status === "current" && activeTab === "intake" ? <IntakePlanTab screen={screen} onRecordMeal={onRecordMeal} /> : null}
-        {plan.status === "current" && activeTab === "trends" ? <PlanTrends screen={screen} onOpenVideoLibrary={onOpenVideoLibrary} /> : null}
+        {activeTab === "trends" ? <PlanTrends application={application} userId={userId} screen={screen} onUpdated={onUpdated} /> : null}
       </ScrollView>
-      {managingExercises ? <ExerciseManager application={application} userId={userId} onDismiss={() => setManagingExercises(false)} /> : null}
-      <BottomDrawer visible={Boolean(showPreview && preview)} tall title={preview?.planningPreview?.request.trigger === "recovery_downgraded" ? "肩日调整预览" : preview?.planningPreview?.sourceRiskEvaluationId ? "进度风险调整预览" : "重建计划预览"} subtitle="确认前不会改变当前执行版本" onDismiss={() => setShowPreview(false)}>
-        {preview ? <PlanningPreviewScreen preview={preview} nutritionStrategy={plan.nutritionTarget} busy={previewBusy} error={previewError} locale={screen.profile.locale} onConfirm={() => void confirmPreview()} onReject={() => void rejectPreview()} onRecompute={() => void recomputePreview()} /> : null}
+      {plan.status === "current" ? <View style={styles.planLifecycleActions}><Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void checkGoalCompletion()} style={styles.pauseButton}><Text style={styles.pauseButtonText}>{mobileT("mobile.plan.completion.check")}</Text></Pressable><Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void pauseCurrentPlan()} style={styles.pauseButton}><Text style={styles.pauseButtonText}>{mobileT("mobile.ui.productshell.de0ebad8bf")}</Text></Pressable></View> : null}
+      <BottomDrawer visible={Boolean(completionProposal)} title={completionProposal?.title ?? mobileT("mobile.plan.completion.candidate")} subtitle={mobileT("mobile.plan.completion.userOnly")} onDismiss={() => setCompletionProposal(undefined)}>
+        {completionProposal ? <View style={styles.completionProposal}><Text style={styles.completionProposalText}>{completionProposal.summary.join("\n")}</Text>{previewError ? <Text style={styles.errorText}>{previewError}</Text> : null}<Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void resolveCompletion("confirm_and_record_only")} style={styles.reportConfirmButton}><Text style={styles.reportConfirmText}>{mobileT("mobile.plan.completion.recordOnly")}</Text></Pressable><Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void resolveCompletion("confirm_and_maintain")} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>{mobileT("mobile.plan.completion.maintain")}</Text></Pressable><Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void resolveCompletion("confirm_and_request_new_goal")} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>{mobileT("mobile.plan.completion.newGoal")}</Text></Pressable><Pressable accessibilityRole="button" disabled={previewBusy} onPress={() => void resolveCompletion("reject")} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>{mobileT("mobile.plan.completion.reject")}</Text></Pressable></View> : null}
       </BottomDrawer>
     </View>
   );
 }
 
-function PlanOverview({ screen, preview, onOpenTrends, onOpenPreview }: { screen: CoachProductProjection; preview?: EvidenceBriefArtifact; onOpenTrends(): void; onOpenPreview(): void }) {
+function PlanOverview({ screen, onOpenTrends }: { screen: CoachProductProjection; onOpenTrends(): void }) {
   const { plan, progress, today } = screen;
   const locale = screen.profile.locale;
   const phase = progress.metrics.find((metric) => metric.name === "phase_progress");
@@ -1570,25 +1063,23 @@ function PlanOverview({ screen, preview, onOpenTrends, onOpenPreview }: { screen
   const composite = progress.strengthTrends.composite.at(-1)?.index;
   return <>
     <View style={styles.cycleHero}>
-      <View style={styles.reportCoverTop}><Text style={styles.reportKicker}>PLAN CYCLE / r{plan.revision ?? 0}</Text><View style={styles.reportStatus}><View style={styles.reportStatusDot} /><Text style={styles.reportStatusText}>执行中</Text></View></View>
-      <Text style={styles.cycleHeroLabel}>当前方式</Text>
+      <View style={styles.reportCoverTop}><Text style={styles.reportKicker}>{mobileT("mobile.ui.productshell.bb4bf3b6ee")}{plan.revision ?? 0} {mobileT("mobile.ui.productshell.3da4ed2a6f")}</Text><View style={styles.reportStatus}><View style={styles.reportStatusDot} /><Text style={styles.reportStatusText}>{mobileT("mobile.ui.productshell.1f425b6bf0")}</Text></View></View>
+      <Text style={styles.cycleHeroLabel}>{mobileT("mobile.ui.productshell.37f3513176")}</Text>
       <Text style={styles.cycleHeroTitle}>{strategyName(plan.strategySelection?.primary ?? "unknown", locale)}</Text>
-      <Text style={styles.cycleHeroCopy}>{plan.horizon ? `${plan.horizon.startDate} → ${plan.horizon.endDate}` : "等待长期周期信息"}</Text>
+      <Text style={styles.cycleHeroCopy}>{plan.horizon ? `${plan.horizon.startDate} → ${plan.horizon.endDate}` : mobileT("mobile.ui.productshell.66f0e40be2")}</Text>
       <View style={styles.cycleProgressRail}><View style={[styles.cycleProgressFill, { flex: Math.max(0.02, Math.min(1, phase?.value.score ?? 0)) }]} /><View style={{ flex: Math.max(0.001, 1 - Math.max(0.02, Math.min(1, phase?.value.score ?? 0))) }} /></View>
-      <View style={styles.reportMetricGrid}><ReportMetric value={`${trainingDays} 天`} label="本周训练" /><ReportMetric value={remaining === undefined ? "—" : `${remaining} 天`} label="距周期结束" /><ReportMetric value={composite === undefined ? "待记录" : `${composite}`} label="三项指数" /></View>
+      <View style={styles.reportMetricGrid}><ReportMetric value={mobileT("mobile.ui.productshell.a9cc46ba8b", { value0: trainingDays })} label={mobileT("mobile.ui.productshell.479d143315")} /><ReportMetric value={remaining === undefined ? "—" : mobileT("mobile.ui.productshell.a9cc46ba8b", { value0: remaining })} label={mobileT("mobile.ui.productshell.bcccd6b52e")} /><ReportMetric value={composite === undefined ? mobileT("mobile.ui.productshell.78081971e6") : `${composite}`} label={mobileT("mobile.ui.productshell.52851e6cb5")} /></View>
     </View>
 
-    {preview?.planningPreview && preview.planningPreview.status !== "confirmed" ? <Pressable accessibilityRole="button" accessibilityLabel="查看待确认的重建计划" onPress={onOpenPreview} style={styles.pendingPreviewCard}><View><Text style={styles.pendingPreviewKicker}>REBUILD READY</Text><Text style={styles.pendingPreviewTitle}>有一份重建预览等待处理</Text><Text style={styles.pendingPreviewMeta}>当前计划仍在执行，确认后才会切换版本。</Text></View><Text style={styles.pendingPreviewArrow}>›</Text></Pressable> : null}
-
-    <SectionHeading title="当前行为" meta="建议与事实分开" />
+    <SectionHeading title={mobileT("mobile.ui.productshell.7cb8b108e3")} meta={mobileT("mobile.ui.productshell.e919f3425a")} />
     <View style={styles.behaviorGrid}>
-      <BehaviorCard mark="T" title="训练" value={today.session ? readablePlanSessionTitle(today.session.title) : "恢复与日常活动"} meta={today.session ? sessionMeta(today.session) : "今天没有训练安排"} />
-      <BehaviorCard mark="N" title="摄入" value={today.nutrition.budget.recommendedKcal === undefined ? "目标待建立" : `${today.nutrition.budget.recommendedKcal.toLocaleString()} kcal`} meta={intakeAdjustmentSummary(today.nutrition.budget)} />
-      <BehaviorCard mark="R" title="恢复" value={recoveryLevelLabel(today.recovery.level)} meta={today.recovery.reasons.map((reason) => recoveryReasonLabel(reason, locale)).join("、") || "没有降低训练量的信号"} />
+      <BehaviorCard mark={mobileT("mobile.ui.productshell.8eeeee1f77")} title={mobileT("mobile.ui.productshell.796e01d5af")} value={today.session ? readablePlanSessionTitle(today.session.title) : mobileT("mobile.ui.productshell.e03c88bda9")} meta={today.session ? sessionMeta(today.session) : mobileT("mobile.ui.productshell.35644a8f7c")} />
+      <BehaviorCard mark={mobileT("mobile.ui.productshell.d46696735b")} title={mobileT("mobile.ui.productshell.ff39dd8692")} value={ledgerTargetKcal(today.nutrition.healthLedger) === undefined ? mobileT("mobile.ui.productshell.316dd87f08") : `${ledgerTargetKcal(today.nutrition.healthLedger)!.toLocaleString()} kcal`} meta={intakeAdjustmentSummary(today.nutrition.healthLedger)} />
+      <BehaviorCard mark={mobileT("mobile.ui.productshell.4f69065f13")} title={mobileT("mobile.ui.productshell.79748ca1c6")} value={recoveryLevelLabel(today.recovery.level)} meta={today.recovery.reasons.map((reason) => recoveryReasonLabel(reason, locale)).join("、") || mobileT("mobile.ui.productshell.8dfdae9fee")} />
     </View>
 
-    <Pressable accessibilityRole="button" accessibilityLabel="查看长期趋势" onPress={onOpenTrends} style={styles.trendEntryCard}>
-      <View><Text style={styles.trendEntryKicker}>LONG VIEW</Text><Text style={styles.trendEntryTitle}>身体与力量趋势</Text><Text style={styles.trendEntryMeta}>体重、体脂、三大项与综合指数都在同一处查看。</Text></View><Text style={styles.trendEntryArrow}>↗</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.caceaad286")} onPress={onOpenTrends} style={styles.trendEntryCard}>
+      <View><Text style={styles.trendEntryKicker}>{mobileT("mobile.ui.productshell.d59aa2cd98")}</Text><Text style={styles.trendEntryTitle}>{mobileT("mobile.ui.productshell.f894dc3211")}</Text><Text style={styles.trendEntryMeta}>{mobileT("mobile.ui.productshell.ff7d1e628f")}</Text></View><Text style={styles.trendEntryArrow}>↗</Text>
     </Pressable>
   </>;
 }
@@ -1597,26 +1088,95 @@ function BehaviorCard({ mark, title, value, meta }: { mark: string; title: strin
   return <PanelCard style={styles.behaviorCard}><View style={styles.behaviorTop}><Text style={styles.behaviorMark}>{mark}</Text><Text style={styles.behaviorTitle}>{title}</Text></View><Text style={styles.behaviorValue}>{value}</Text><Text style={styles.behaviorMeta}>{meta}</Text></PanelCard>;
 }
 
-function PlanTrends({ screen, onOpenVideoLibrary }: { screen: CoachProductProjection; onOpenVideoLibrary: () => void }) {
+function PlanTrends({ application, userId, screen, onUpdated }: { application: LocalProductKernel; userId: string; screen: CoachProductProjection; onUpdated(): void }) {
+  const [feedback, setFeedback] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
   const weight = screen.progress.bodyTrends.weight[0];
   const bodyFat = screen.progress.bodyTrends.bodyFat[0];
   const weightPoints = weight?.smoothedPoints.map((point) => ({ label: point.date, value: point.smoothedValue ?? point.value })) ?? [];
   const bodyFatPoints = bodyFat?.smoothedPoints.map((point) => ({ label: point.date, value: point.smoothedValue ?? point.value })) ?? [];
   const composite = screen.progress.strengthTrends.composite;
+  const health = screen.progress.healthTrends;
+  const dailyEnergy = health.daily.flatMap((day) => day.energyBalance.status === "complete" ? [{ label: day.date, value: (day.energyBalance.range.min + day.energyBalance.range.max) / 2 }] : []);
+  const weeklyEnergy = health.weekly.flatMap((bucket) => bucket.energyBalance ? [{ label: bucket.key, value: (bucket.energyBalance.min + bucket.energyBalance.max) / 2 }] : []);
+  const monthlyEnergy = health.monthly.flatMap((bucket) => bucket.energyBalance ? [{ label: bucket.key, value: (bucket.energyBalance.min + bucket.energyBalance.max) / 2 }] : []);
+  const dailyProtein = health.daily.flatMap((day) => day.nutrition.nutrients.protein.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.protein.consumedLogged }] : []);
+  const dailyFiber = health.daily.flatMap((day) => day.nutrition.nutrients.fiber.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.fiber.consumedLogged }] : []);
+  const dailySodium = health.daily.flatMap((day) => day.nutrition.nutrients.sodium.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.sodium.consumedLogged }] : []);
+  const dailyPotassium = health.daily.flatMap((day) => day.nutrition.nutrients.potassium.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.potassium.consumedLogged }] : []);
+  const dailyCalcium = health.daily.flatMap((day) => day.nutrition.nutrients.calcium.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.calcium.consumedLogged }] : []);
+  const dailyIron = health.daily.flatMap((day) => day.nutrition.nutrients.iron.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.iron.consumedLogged }] : []);
+  const dailyMagnesium = health.daily.flatMap((day) => day.nutrition.nutrients.magnesium.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.magnesium.consumedLogged }] : []);
+  const dailyVitaminC = health.daily.flatMap((day) => day.nutrition.nutrients.vitamin_c?.intakeKnown ? [{ label: day.date, value: day.nutrition.nutrients.vitamin_c.consumedLogged }] : []);
+  const weeklyActivity = health.weekly.map((bucket) => ({ label: bucket.key, value: bucket.activityMinutes }));
+  const weeklyTraining = health.weekly.map((bucket) => ({ label: bucket.key, value: bucket.trainingCompleted }));
+  const weeklyRecovery = health.weekly.map((bucket) => ({ label: bucket.key, value: bucket.recoveryObservationCount }));
+  const saveStageFeedback = async (burden: "acceptable" | "high") => {
+    if (!screen.source.planId || !screen.plan.revision || !screen.plan.effectiveFrom) return;
+    setFeedbackBusy(true);
+    try {
+      await application.recordPlanOutcome({
+        userId,
+        planId: screen.source.planId,
+        planRevision: screen.plan.revision,
+        observedFrom: screen.plan.effectiveFrom,
+        observedThrough: screen.today.date,
+        timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1,
+        burden,
+        ...(feedback.trim() ? { feedback: feedback.trim() } : {}),
+        preferenceSignals: [{
+          behaviorId: `plan:${screen.source.planId}:revision:${screen.plan.revision}:stage_shape`,
+          result: burden === "acceptable" ? "repeated_and_acceptable" : "avoided",
+          source: "confirmed_behavior_and_feedback",
+        }],
+        idempotencyKey: `mobile-plan-feedback:${screen.source.planId}:${screen.plan.revision}:${Date.now().toString(36)}`,
+      });
+      setFeedbackSaved(true);
+      onUpdated();
+    } finally {
+      setFeedbackBusy(false);
+    }
+  };
   return <>
-    <SectionHeading title="身体趋势" meta="来自已确认记录" />
-    <TrendChart title="体重" value={trendValue(weight?.smoothedPoints.at(-1)?.smoothedValue, weight?.rawPoints.at(-1)?.unit)} meta={trendCoverage(weight?.coverage.observations)} points={weightPoints} />
-    <TrendChart title="体脂" value={trendValue(bodyFat?.smoothedPoints.at(-1)?.smoothedValue, bodyFat?.rawPoints.at(-1)?.unit)} meta={trendCoverage(bodyFat?.coverage.observations)} points={bodyFatPoints} color={uiColors.amber} />
+    {screen.plan.status === "current" ? <View style={styles.quickChoiceCard}>
+      <Text style={styles.quickChoiceTitle}>{mobileT("mobile.plan.feedback.title")}</Text>
+      <Text style={styles.quickChoiceHint}>{mobileT("mobile.plan.feedback.hint")}</Text>
+      <TextInput accessibilityLabel={mobileT("mobile.plan.feedback.label")} value={feedback} onChangeText={setFeedback} placeholder={mobileT("mobile.plan.feedback.placeholder")} placeholderTextColor={colors.ink3} style={styles.logInput} />
+      <View style={styles.logQuickRow}>
+        <Pressable accessibilityRole="button" disabled={feedbackBusy} onPress={() => void saveStageFeedback("acceptable")} style={styles.logQuick}><Text style={styles.logQuickText}>{mobileT("mobile.plan.feedback.acceptable")}</Text></Pressable>
+        <Pressable accessibilityRole="button" disabled={feedbackBusy} onPress={() => void saveStageFeedback("high")} style={styles.logQuick}><Text style={styles.logQuickText}>{mobileT("mobile.plan.feedback.high")}</Text></Pressable>
+      </View>
+      {feedbackSaved ? <Text style={styles.quickChoiceHint}>{mobileT("mobile.plan.feedback.saved")}</Text> : null}
+    </View> : null}
+    <SectionHeading title={mobileT("mobile.trends.energyNutrition")} meta={health.calibration.status === "calibrated" ? mobileT("mobile.trends.maintenanceRange", { min: health.calibration.maintenanceRange?.min ?? "—", max: health.calibration.maintenanceRange?.max ?? "—" }) : mobileT("mobile.trends.calibrating")} />
+    <TrendChart title={mobileT("mobile.trends.dailyEnergy")} value={dailyEnergy.length ? `${Math.round(dailyEnergy.at(-1)!.value)} kcal` : "—"} meta={mobileT("mobile.trends.completeDaysOnly")} points={dailyEnergy} color={uiColors.amber} />
+    <TrendChart title={mobileT("mobile.trends.weeklyEnergy")} value={weeklyEnergy.length ? `${Math.round(weeklyEnergy.at(-1)!.value)} kcal` : "—"} meta={mobileT("mobile.trends.weeklySummary")} points={weeklyEnergy} color={uiColors.safe} />
+    <TrendChart title={mobileT("mobile.trends.monthlyEnergy")} value={monthlyEnergy.length ? `${Math.round(monthlyEnergy.at(-1)!.value)} kcal` : "—"} meta={mobileT("mobile.trends.monthlySummary")} points={monthlyEnergy} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.ui.productshell.fcf373f67b") })} value={dailyProtein.length ? `${Math.round(dailyProtein.at(-1)!.value)} g` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyProtein} color={uiColors.safe} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.fiber") })} value={dailyFiber.length ? `${Math.round(dailyFiber.at(-1)!.value)} g` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyFiber} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.sodium") })} value={dailySodium.length ? `${Math.round(dailySodium.at(-1)!.value)} mg` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailySodium} color={uiColors.amber} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.potassium") })} value={dailyPotassium.length ? `${Math.round(dailyPotassium.at(-1)!.value)} mg` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyPotassium} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.calcium") })} value={dailyCalcium.length ? `${Math.round(dailyCalcium.at(-1)!.value)} mg` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyCalcium} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.iron") })} value={dailyIron.length ? `${Math.round(dailyIron.at(-1)!.value)} mg` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyIron} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.magnesium") })} value={dailyMagnesium.length ? `${Math.round(dailyMagnesium.at(-1)!.value)} mg` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyMagnesium} />
+    <TrendChart title={mobileT("mobile.trends.dailyNutrient", { nutrient: mobileT("mobile.nutrient.vitaminC") })} value={dailyVitaminC.length ? `${Math.round(dailyVitaminC.at(-1)!.value)} mg` : "—"} meta={mobileT("mobile.trends.confirmedCompleteDays")} points={dailyVitaminC} />
+    <SectionHeading title={mobileT("mobile.trends.activityTrainingRecovery")} meta={mobileT("mobile.trends.missingNotFailure")} />
+    <TrendChart title={mobileT("mobile.trends.weeklyActivity")} value={weeklyActivity.length ? `${Math.round(weeklyActivity.at(-1)!.value)} min` : "—"} meta={mobileT("mobile.trends.confirmedActivity")} points={weeklyActivity} />
+    <TrendChart title={mobileT("mobile.trends.weeklyTraining")} value={weeklyTraining.length ? `${Math.round(weeklyTraining.at(-1)!.value)} 次` : "—"} meta={mobileT("mobile.trends.confirmedCompletion")} points={weeklyTraining} color={uiColors.safe} />
+    <TrendChart title={mobileT("mobile.trends.weeklyRecovery")} value={weeklyRecovery.length ? `${Math.round(weeklyRecovery.at(-1)!.value)} 次` : "—"} meta={mobileT("mobile.trends.sleepRecovery")} points={weeklyRecovery} color={uiColors.amber} />
+    <SectionHeading title={mobileT("mobile.ui.productshell.f27012ee66")} meta={mobileT("mobile.ui.productshell.021d6ca577")} />
+    <TrendChart title={mobileT("mobile.ui.productshell.3193595c29")} value={trendValue(weight?.smoothedPoints.at(-1)?.smoothedValue, weight?.rawPoints.at(-1)?.unit)} meta={trendCoverage(weight?.coverage.observations)} points={weightPoints} />
+    <TrendChart title={mobileT("mobile.ui.productshell.338f5241cc")} value={trendValue(bodyFat?.smoothedPoints.at(-1)?.smoothedValue, bodyFat?.rawPoints.at(-1)?.unit)} meta={trendCoverage(bodyFat?.coverage.observations)} points={bodyFatPoints} color={uiColors.amber} />
 
-    <SectionHeading title="力量趋势" meta="同一动作的可比记录" />
-    {screen.progress.strengthTrends.lifts.map((lift) => <TrendChart key={lift.id} title={lift.label} value={lift.latestKg === undefined ? "—" : `${lift.latestKg} kg`} meta={lift.changePercent === undefined ? "等待至少两次可比记录" : `较起点 ${lift.changePercent >= 0 ? "+" : ""}${lift.changePercent}%`} points={lift.points.map((point) => ({ label: point.date, value: point.valueKg }))} />)}
-    <TrendChart title="三大项综合指数" value={composite.length ? `${composite.at(-1)!.index}` : "—"} meta="三项起点合计 = 100" points={composite.map((point) => ({ label: point.date, value: point.index }))} color={uiColors.safe} />
+    <SectionHeading title={mobileT("mobile.ui.productshell.221f52190d")} meta={mobileT("mobile.ui.productshell.1217d9972c")} />
+    {screen.progress.strengthTrends.lifts.map((lift) => <TrendChart key={lift.id} title={lift.label} value={lift.latestKg === undefined ? "—" : `${lift.latestKg} kg`} meta={lift.changePercent === undefined ? mobileT("mobile.ui.productshell.82e0f825d6") : mobileT("mobile.ui.productshell.299b7fac2a", { value0: lift.changePercent >= 0 ? "+" : "", value1: lift.changePercent })} points={lift.points.map((point) => ({ label: point.date, value: point.valueKg }))} />)}
+    <TrendChart title={mobileT("mobile.ui.productshell.bdd5b6918b")} value={composite.length ? `${composite.at(-1)!.index}` : "—"} meta={mobileT("mobile.ui.productshell.4d33e41013")} points={composite.map((point) => ({ label: point.date, value: point.index }))} color={uiColors.safe} />
 
-    <SectionHeading title="行为判断" meta="用于复核，不替代原始记录" />
+    <SectionHeading title={mobileT("mobile.ui.productshell.71b9018159")} meta={mobileT("mobile.ui.productshell.4609781aac")} />
     <View style={styles.metricDecisionCard}>{screen.progress.metrics.map((metric, index) => <MetricDecisionRow key={metric.name} metric={metric} index={index + 1} />)}</View>
-    <Pressable accessibilityRole="button" accessibilityLabel="打开训练视频" onPress={onOpenVideoLibrary} style={styles.videoLibraryCard}><View><Text style={styles.videoLibraryTitle}>训练视频与动作回放</Text><Text style={styles.videoLibraryMeta}>回看本机记录，并重新运行识别</Text></View><Text style={styles.videoLibraryArrow}>›</Text></Pressable>
-    <SectionHeading title="时间线报告" meta={screen.progress.reportArtifacts.length ? `${screen.progress.reportArtifacts.length} 份` : "尚未生成"} />
-    {screen.progress.reportArtifacts.length ? screen.progress.reportArtifacts.map((artifact) => <View key={artifact.id} style={styles.reportRow}><Text style={styles.reportTitle}>{artifact.kind === "weekly_coach_report" ? "每周回顾" : artifact.kind === "goal_forecast" ? "目标路径" : artifact.kind === "mesocycle_review" ? "周期回顾" : "计划复核"}</Text><Text style={styles.reportMeta}>{artifact.createdAt.slice(0, 10)}</Text></View>) : <Empty label="积累训练与生活记录后，这里会形成长期时间线。" />}
+    <SectionHeading title={mobileT("mobile.ui.productshell.6833cf1b3b")} meta={screen.progress.reportArtifacts.length ? mobileT("mobile.ui.productshell.85851356c7", { value0: screen.progress.reportArtifacts.length }) : mobileT("mobile.ui.productshell.6da8b19d8b")} />
+    {screen.progress.reportArtifacts.length ? screen.progress.reportArtifacts.map((artifact) => <View key={artifact.id} style={styles.reportRow}><Text style={styles.reportTitle}>{artifact.kind === "weekly_coach_report" ? mobileT("mobile.ui.productshell.19e222d00d") : mobileT("mobile.ui.productshell.c7420676ff")}</Text><Text style={styles.reportMeta}>{artifact.createdAt.slice(0, 10)}</Text></View>) : <Empty label={mobileT("mobile.ui.productshell.667bb8d8b3")} />}
   </>;
 }
 
@@ -1627,94 +1187,94 @@ function TrainingPlanTab({ plan, locale }: { plan: CoachProductProjection["plan"
     .reduce((sum, session) => sum + session.totalSetCount, 0);
   return <>
     {plan.strategySelection ? <View style={styles.committedPlanHero}>
-      <View style={styles.reportCoverTop}><Text style={styles.reportKicker}>ACTIVE PROGRAM / r{plan.revision ?? 0}</Text><View style={styles.reportStatus}><View style={styles.reportStatusDot} /><Text style={styles.reportStatusText}>执行中</Text></View></View>
-      <Text style={styles.reportCoverLabel}>当前训练阶段</Text>
+      <View style={styles.reportCoverTop}><Text style={styles.reportKicker}>{mobileT("mobile.plan.activeRevision", { revision: plan.revision ?? 0 })}</Text><View style={styles.reportStatus}><View style={styles.reportStatusDot} /><Text style={styles.reportStatusText}>{mobileT("mobile.ui.productshell.1f425b6bf0")}</Text></View></View>
+      <Text style={styles.reportCoverLabel}>{mobileT("mobile.ui.productshell.6674bef13e")}</Text>
       <Text style={styles.reportCoverTitle}>{strategyName(plan.strategySelection.primary, locale)}</Text>
       <Text style={styles.reportCoverCopy}>{planningPhrase(plan.appliedPhaseStrategy?.objective ?? "progress_with_recovery_budget", locale)}</Text>
-      <View style={styles.reportMetricGrid}><ReportMetric value={`${currentTraining.length} 天`} label="本周训练" /><ReportMetric value={`${currentSets} 组`} label="工作组" /><ReportMetric value={plan.appliedPhaseStrategy ? shortDate(plan.appliedPhaseStrategy.reviewAt) : "每周"} label="下次复核" /></View>
+      <View style={styles.reportMetricGrid}><ReportMetric value={mobileT("mobile.ui.productshell.a9cc46ba8b", { value0: currentTraining.length })} label={mobileT("mobile.ui.productshell.479d143315")} /><ReportMetric value={mobileT("mobile.ui.productshell.47040f073f", { value0: currentSets })} label={mobileT("mobile.ui.productshell.1fcfb573d2")} /><ReportMetric value={plan.appliedPhaseStrategy ? shortDate(plan.appliedPhaseStrategy.reviewAt) : mobileT("mobile.ui.productshell.a93b55d8bf")} label={mobileT("mobile.ui.productshell.c0ddc03b4c")} /></View>
     </View> : null}
 
-    <ReportSectionHeading index="01" title="本周训练" subtitle="动作、组数和目标次数来自当前确认版本" />
+    <ReportSectionHeading index="01" title={mobileT("mobile.ui.productshell.479d143315")} subtitle={mobileT("mobile.ui.productshell.96805b8574")} />
     {plan.currentWeek.map((session) => <DetailedPlanSession key={session.id} session={session} />)}
 
-    <ReportSectionHeading index="02" title="如何推进" subtitle="真实训练和恢复会决定下一次改什么" />
+    <ReportSectionHeading index="02" title={mobileT("mobile.ui.productshell.f17a51e144")} subtitle={mobileT("mobile.ui.productshell.53c97464cb")} />
     <View style={styles.strategyStack}>
-      <StrategyReportCard mark="T" title="负荷进阶" copy={planningPhrase(plan.trainingStrategy?.progression[0] ?? "compare_exact_variant_history_when_available", locale)} />
-      <StrategyReportCard mark="R" title="恢复边界" copy={planningPhrase(plan.recoveryStrategy?.objective ?? "keep_daily_variation inside a safe next-session boundary", locale)} />
+      <StrategyReportCard mark="T" title={mobileT("mobile.ui.productshell.a23c7ae9c9")} copy={planningPhrase(plan.trainingStrategy?.progression[0] ?? "compare_exact_variant_history_when_available", locale)} />
+      <StrategyReportCard mark="R" title={mobileT("mobile.ui.productshell.29990e9c51")} copy={planningPhrase(plan.recoveryStrategy?.objective ?? "keep_daily_variation inside a safe next-session boundary", locale)} />
     </View>
     {plan.explanation ? <View style={styles.reportEvidenceCard}>{plan.explanation.userEvidence.map((item) => <ReportBullet key={item} text={planningPhrase(item, locale)} />)}{plan.explanation.ruleReason.map((item) => <ReportBullet key={item} text={planningPhrase(item, locale)} />)}{plan.explanation.uncertainty.map((item) => <ReportBullet key={item} text={planningPhrase(item, locale)} tone="unknown" />)}</View> : null}
 
-    {plan.forecasts.length ? <><ReportSectionHeading index="03" title="推进路径" subtitle="不是承诺日期；记录趋势后会重新校准" /><View style={styles.forecastStack}>{plan.forecasts.map((forecast) => <View key={forecast.scenario} style={[styles.forecastReportCard, forecast.scenario === "balanced" && styles.forecastReportCardRecommended]}><View style={styles.forecastReportTop}><View><Text style={styles.forecastReportTitle}>{forecastName(forecast.scenario, locale)}</Text><Text style={styles.forecastReportEligibility}>{forecastEligibility(forecast.eligibility, locale)}</Text></View>{forecast.scenario === "balanced" ? <Text style={styles.forecastRecommended}>推荐</Text> : null}</View><Text style={styles.forecastReportDate}>{shortDate(forecast.earliest)}—{shortDate(forecast.latest)}</Text><Text style={styles.forecastReportMeta}>取舍：{forecast.tradeoffs.map((value) => planningPhrase(value, locale)).join("；")}</Text></View>)}</View></> : null}
+    {plan.forecasts.length ? <><ReportSectionHeading index="03" title={mobileT("mobile.ui.productshell.efb1fd2fd9")} subtitle={mobileT("mobile.ui.productshell.03e9fdc03a")} /><View style={styles.forecastStack}>{plan.forecasts.map((forecast) => <View key={forecast.scenario} style={[styles.forecastReportCard, forecast.scenario === "balanced" && styles.forecastReportCardRecommended]}><View style={styles.forecastReportTop}><View><Text style={styles.forecastReportTitle}>{forecastName(forecast.scenario, locale)}</Text><Text style={styles.forecastReportEligibility}>{forecastEligibility(forecast.eligibility, locale)}</Text></View>{forecast.scenario === "balanced" ? <Text style={styles.forecastRecommended}>{mobileT("mobile.ui.productshell.62b46f24ae")}</Text> : null}</View><Text style={styles.forecastReportDate}>{shortDate(forecast.earliest)}—{shortDate(forecast.latest)}</Text><Text style={styles.forecastReportMeta}>{mobileT("mobile.ui.productshell.a606583b54")}{forecast.tradeoffs.map((value) => planningPhrase(value, locale)).join("；")}</Text></View>)}</View></> : null}
 
-    {plan.nextWeek.length ? <><ReportSectionHeading index="04" title="下一周预排" subtitle="会根据本周完成度和恢复状态更新" />{plan.nextWeek.map((session) => <DetailedPlanSession key={session.id} session={session} subdued />)}</> : null}
-    {plan.futureIntentCount ? <Text style={styles.planFootnote}>后续 {plan.futureIntentCount} 项仍是周期意图，会在临近时物化。</Text> : null}
+    {plan.nextWeek.length ? <><ReportSectionHeading index="04" title={mobileT("mobile.ui.productshell.14e97cc11e")} subtitle={mobileT("mobile.ui.productshell.8b39aa6f3d")} />{plan.nextWeek.map((session) => <DetailedPlanSession key={session.id} session={session} subdued />)}</> : null}
+    {plan.futureIntentCount ? <Text style={styles.planFootnote}>{mobileT("mobile.ui.productshell.068c69578d")}{plan.futureIntentCount} {mobileT("mobile.ui.productshell.b1106ec793")}</Text> : null}
   </>;
 }
 
 function IntakePlanTab({ screen, onRecordMeal }: { screen: CoachProductProjection; onRecordMeal: () => void }) {
   const plan = screen.plan;
-  const todayBudget = plan.intakeWeek.find((budget) => budget.date === screen.today.date) ?? screen.today.nutrition.budget;
-  const palette = intakePalette(todayBudget.status);
+  const todayBudget = plan.intakeWeek.find((budget) => budget.date === screen.today.date) ?? screen.today.nutrition.healthLedger;
+  const palette = intakePalette(ledgerIntakeStatus(todayBudget));
   const explanation = intakeExplanation(todayBudget);
   const nutritionProtein = plan.nutritionTarget?.macronutrientTargets?.proteinGrams;
-  const knownTargetDays = plan.intakeWeek.filter((budget) => budget.recommendedKcal !== undefined);
+  const knownTargetDays = plan.intakeWeek.filter((budget) => ledgerTargetKcal(budget) !== undefined);
   const weeklyTarget = knownTargetDays.length === plan.intakeWeek.length
-    ? knownTargetDays.reduce((sum, budget) => sum + (budget.recommendedKcal ?? 0), 0)
+    ? knownTargetDays.reduce((sum, budget) => sum + (ledgerTargetKcal(budget) ?? 0), 0)
     : undefined;
   return <>
     <View style={styles.intakePlanHero}>
       <View style={styles.intakePlanHeroTop}>
-        <View><Text style={[styles.cardEyebrow, styles.intakeEyebrow]}>TODAY / {shortDate(todayBudget.date)}</Text><Text style={styles.intakePlanHeroTitle}>今天该吃多少</Text></View>
+        <View><Text style={[styles.cardEyebrow, styles.intakeEyebrow]}>{mobileT("mobile.date.todayShort", { date: shortDate(todayBudget.date) })}</Text><Text style={styles.intakePlanHeroTitle}>{mobileT("mobile.ui.productshell.ecd65f09e3")}</Text></View>
         <View style={[styles.intakeStatusChip, { backgroundColor: palette.soft }]}><View style={[styles.intakeStatusDot, { backgroundColor: palette.color }]} /><Text style={[styles.intakeStatusChipText, { color: palette.ink }]}>{intakeStatusLabel(todayBudget)}</Text></View>
       </View>
       <View style={styles.intakePlanHeroMain}>
-        <DailyFuelRing budget={todayBudget} size={154} />
+        <DailyFuelRing ledger={todayBudget} size={154} />
         <View style={styles.intakePlanHeroNumbers}>
-          <Text style={styles.intakeDayLabel}>{nutritionDayKindLabel(todayBudget.dayKind)}建议</Text>
-          <Text style={styles.intakePlanTarget}>{todayBudget.recommendedKcal?.toLocaleString() ?? "—"}</Text>
+          <Text style={styles.intakeDayLabel}>{nutritionDayKindLabel(todayBudget.nutritionPlan.dayKind)}{mobileT("mobile.ui.productshell.c5134eb19c")}</Text>
+          <Text style={styles.intakePlanTarget}>{ledgerTargetKcal(todayBudget)?.toLocaleString() ?? "—"}</Text>
           <Text style={styles.intakeTargetUnit}>kcal</Text>
-          <Text style={styles.intakeTargetRange}>{todayBudget.recommendedRange ? `${todayBudget.recommendedRange.min.toLocaleString()}–${todayBudget.recommendedRange.max.toLocaleString()} 为正常区间` : "目标资料不足"}</Text>
+          <Text style={styles.intakeTargetRange}>{todayBudget.nutritionPlan.targets.energy.range ? mobileT("mobile.ui.productshell.fc3455c55e", { value0: todayBudget.nutritionPlan.targets.energy.range.min.toLocaleString(), value1: todayBudget.nutritionPlan.targets.energy.range.max.toLocaleString() }) : mobileT("mobile.ui.productshell.02599b3712")}</Text>
         </View>
       </View>
       <View style={[styles.intakeExplanation, { backgroundColor: palette.soft, borderLeftColor: palette.color }]}><Text style={[styles.intakeExplanationTitle, { color: palette.ink }]}>{explanation.title}</Text><Text style={styles.intakeExplanationBody}>{explanation.body}</Text></View>
-      <Pressable accessibilityRole="button" onPress={onRecordMeal} style={styles.intakePlanPrimary}><Text style={styles.intakePlanPrimaryText}>记录一餐</Text><View style={styles.intakePlanPrimaryArrow}><Text style={styles.intakePlanPrimaryArrowText}>＋</Text></View></Pressable>
+      <Pressable accessibilityRole="button" onPress={onRecordMeal} style={styles.intakePlanPrimary}><Text style={styles.intakePlanPrimaryText}>{mobileT("mobile.ui.productshell.0df4b00a18")}</Text><View style={styles.intakePlanPrimaryArrow}><Text style={styles.intakePlanPrimaryArrowText}>＋</Text></View></Pressable>
     </View>
 
-    <ReportSectionHeading index="01" title="本周摄入安排" subtitle={weeklyTarget === undefined ? "目标会跟随训练安排与已记录运动变化" : `本周建议总量约 ${weeklyTarget.toLocaleString()} kcal`} />
+    <ReportSectionHeading index="01" title={mobileT("mobile.ui.productshell.bd32e8e4f0")} subtitle={weeklyTarget === undefined ? mobileT("mobile.ui.productshell.7260141f34") : mobileT("mobile.ui.productshell.0748298d55", { value0: weeklyTarget.toLocaleString() })} />
     <View style={styles.intakeWeekCard}>
       {plan.intakeWeek.map((budget) => <IntakeWeekRow key={budget.date} budget={budget} current={budget.date === screen.today.date} />)}
     </View>
 
-    <ReportSectionHeading index="02" title="今天为什么是这个数" subtitle="训练多一点可以多补给，但不会按手表热量一比一返还" />
+    <ReportSectionHeading index="02" title={mobileT("mobile.ui.productshell.7cc538b9d1")} subtitle={mobileT("mobile.ui.productshell.b037f18a59")} />
     <View style={styles.intakeBreakdownCard}>
-      <IntakeBreakdownRow label="日均基础目标" detail={plan.nutritionTarget?.confidence === "provisional" ? "起始估算；14 天后用饮食与体重趋势校准" : "来自当前目标与已确认营养策略"} value={todayBudget.baseTargetKcal === undefined ? "待建立" : `${todayBudget.baseTargetKcal.toLocaleString()} kcal`} />
-      <IntakeBreakdownRow label={todayBudget.dayKind === "training" ? "训练日分配" : todayBudget.dayKind === "rest" ? "休息日分配" : "当天类型分配"} detail="在一周总量附近重新分配" value={signedKcal(todayBudget.dayTypeAdjustmentKcal)} tone={todayBudget.dayTypeAdjustmentKcal > 0 ? "positive" : "neutral"} />
-      <IntakeBreakdownRow label="已记录运动补给" detail={todayBudget.activityMinutes ? `${todayBudget.activityMinutes} 分钟 · 保守估算，最多加 200 kcal` : "记录额外运动后自动加入，最多 200 kcal"} value={signedKcal(todayBudget.activityAdjustmentKcal)} tone={todayBudget.activityAdjustmentKcal > 0 ? "positive" : "neutral"} />
-      <View style={styles.intakeBreakdownTotal}><Text style={styles.intakeBreakdownTotalLabel}>今日建议</Text><Text style={styles.intakeBreakdownTotalValue}>{todayBudget.recommendedKcal === undefined ? "—" : `${todayBudget.recommendedKcal.toLocaleString()} kcal`}</Text></View>
+      <IntakeBreakdownRow label={mobileT("mobile.ui.productshell.5b8a81be18")} detail={plan.nutritionTarget?.confidence === "provisional" ? mobileT("mobile.ui.productshell.5474b622cd") : mobileT("mobile.ui.productshell.0d66b08d45")} value={ledgerTargetKcal(todayBudget) === undefined ? mobileT("mobile.ui.productshell.901f4139cc") : `${ledgerTargetKcal(todayBudget)!.toLocaleString()} kcal`} />
+      <IntakeBreakdownRow label={nutritionDayKindLabel(todayBudget.nutritionPlan.dayKind)} detail={mobileT("mobile.ui.productshell.4bea0b67a5")} value={todayBudget.nutritionPlan.targets.energy.range ? `${todayBudget.nutritionPlan.targets.energy.range.min.toLocaleString()}–${todayBudget.nutritionPlan.targets.energy.range.max.toLocaleString()} kcal` : "—"} />
+      <IntakeBreakdownRow label={mobileT("mobile.ui.productshell.58630bc131")} detail={mobileT("mobile.ui.productshell.59bf22812e")} value={todayBudget.expenditure.total.range ? `${todayBudget.expenditure.total.range.min.toLocaleString()}–${todayBudget.expenditure.total.range.max.toLocaleString()} kcal` : "—"} />
+      <View style={styles.intakeBreakdownTotal}><Text style={styles.intakeBreakdownTotalLabel}>{mobileT("mobile.ui.productshell.d93d0ed8bb")}</Text><Text style={styles.intakeBreakdownTotalValue}>{todayBudget.energyBalance.status === "complete" ? signedKcal(Math.round((todayBudget.energyBalance.range.min + todayBudget.energyBalance.range.max) / 2)) : "—"}</Text></View>
     </View>
 
-    <ReportSectionHeading index="03" title="不只看热量" subtitle="先稳定蛋白质和规律进餐，再判断周趋势" />
+    <ReportSectionHeading index="03" title={mobileT("mobile.ui.productshell.450e92a0b1")} subtitle={mobileT("mobile.ui.productshell.f008567c2a")} />
     <View style={styles.nutritionPrincipleCard}>
-      <View style={styles.nutritionPrincipleLead}><Text style={styles.nutritionPrincipleValue}>{nutritionProtein ? `${nutritionProtein.min}–${nutritionProtein.max} g` : "待补资料"}</Text><Text style={styles.nutritionPrincipleLabel}>每日蛋白质目标</Text></View>
+      <View style={styles.nutritionPrincipleLead}><Text style={styles.nutritionPrincipleValue}>{nutritionProtein ? `${nutritionProtein.min}–${nutritionProtein.max} g` : mobileT("mobile.ui.productshell.a24a2c55f7")}</Text><Text style={styles.nutritionPrincipleLabel}>{mobileT("mobile.ui.productshell.417440321b")}</Text></View>
       <View style={styles.intakeSteps}>
-        <IntakeStep index="1" title="正餐先安排蛋白质" detail={nutritionProtein ? `把 ${nutritionProtein.min}–${nutritionProtein.max} g 分到 3–4 餐，不必一餐补齐。` : "每餐先安排明确蛋白质来源；资料完整后再换算克数。"} />
-        <IntakeStep index="2" title="训练日把更多能量放在训练前后" detail="额外预算优先支持训练表现与恢复，不意味着必须吃高糖零食。" />
-        <IntakeStep index="3" title="不要用极端少吃补偿" detail="一次偏高看周趋势；长期明显偏低同样需要纠正，不是越少越好。" />
+        <IntakeStep index="1" title={mobileT("mobile.ui.productshell.70a1677746")} detail={nutritionProtein ? mobileT("mobile.ui.productshell.6310cf75e6", { value0: nutritionProtein.min, value1: nutritionProtein.max }) : mobileT("mobile.ui.productshell.92abb26d88")} />
+        <IntakeStep index="2" title={mobileT("mobile.ui.productshell.ae60c5ab17")} detail={mobileT("mobile.ui.productshell.d6c64e25ae")} />
+        <IntakeStep index="3" title={mobileT("mobile.ui.productshell.c5be261dc3")} detail={mobileT("mobile.ui.productshell.906647cfc4")} />
       </View>
-      <Text style={styles.reportBoundary}>这里只统计已确认且量化的餐食。漏记会保持“未知”，不会制造虚假的低摄入结论。</Text>
+      <Text style={styles.reportBoundary}>{mobileT("mobile.ui.productshell.6bdc3f0bc0")}</Text>
     </View>
   </>;
 }
 
-function IntakeWeekRow({ budget, current }: { budget: DailyIntakeBudget; current: boolean }) {
-  const palette = intakePalette(budget.status);
-  const progress = clampNumber(budget.progressRatio ?? 0, 0, 1);
+function IntakeWeekRow({ budget, current }: { budget: DailyHealthLedger; current: boolean }) {
+  const palette = intakePalette(ledgerIntakeStatus(budget));
+  const progress = clampNumber(ledgerProgressRatio(budget) ?? 0, 0, 1);
   return <View style={[styles.intakeWeekRow, current && styles.intakeWeekRowCurrent]}>
-    <View style={[styles.intakeWeekDay, current && styles.intakeWeekDayCurrent]}><Text style={[styles.intakeWeekDayName, current && styles.intakeWeekDayNameCurrent]}>{current ? "今天" : weekDayLabel(budget.date)}</Text><Text style={[styles.intakeWeekDate, current && styles.intakeWeekDateCurrent]}>{budget.date.slice(5).replace("-", "/")}</Text></View>
+    <View style={[styles.intakeWeekDay, current && styles.intakeWeekDayCurrent]}><Text style={[styles.intakeWeekDayName, current && styles.intakeWeekDayNameCurrent]}>{current ? mobileT("mobile.ui.productshell.17e83cc25e") : weekDayLabel(budget.date)}</Text><Text style={[styles.intakeWeekDate, current && styles.intakeWeekDateCurrent]}>{budget.date.slice(5).replace("-", "/")}</Text></View>
     <View style={styles.intakeWeekBody}>
-      <View style={styles.intakeWeekTop}><Text style={styles.intakeWeekKind}>{nutritionDayKindLabel(budget.dayKind)}</Text><Text style={styles.intakeWeekTarget}>{budget.recommendedKcal === undefined ? "待建立" : `${budget.recommendedKcal.toLocaleString()} kcal`}</Text></View>
+      <View style={styles.intakeWeekTop}><Text style={styles.intakeWeekKind}>{nutritionDayKindLabel(budget.nutritionPlan.dayKind)}</Text><Text style={styles.intakeWeekTarget}>{ledgerTargetKcal(budget) === undefined ? mobileT("mobile.ui.productshell.901f4139cc") : `${ledgerTargetKcal(budget)!.toLocaleString()} kcal`}</Text></View>
       <View style={styles.intakeWeekProgress}><View style={[styles.intakeWeekProgressFill, { backgroundColor: palette.color, flex: progress }]} /><View style={{ flex: Math.max(0.001, 1 - progress) }} /></View>
-      <View style={styles.intakeWeekBottom}><Text style={styles.intakeWeekConsumed}>{budget.consumedKcal === undefined ? "摄入待记录" : `已记录 ${budget.consumedKcal.toLocaleString()} kcal`}</Text><Text style={[styles.intakeWeekStatus, { color: palette.ink }]}>{intakeStatusLabel(budget)}</Text></View>
+      <View style={styles.intakeWeekBottom}><Text style={styles.intakeWeekConsumed}>{ledgerConsumedKcal(budget) === undefined ? mobileT("mobile.ui.productshell.8848fd08e1") : mobileT("mobile.ui.productshell.a73e2bf080", { value0: ledgerConsumedKcal(budget)!.toLocaleString() })}</Text><Text style={[styles.intakeWeekStatus, { color: palette.ink }]}>{intakeStatusLabel(budget)}</Text></View>
     </View>
   </View>;
 }
@@ -1724,18 +1284,18 @@ function IntakeBreakdownRow({ label, detail, value, tone = "neutral" }: { label:
 }
 
 const movementChoices: readonly { value: MovementPattern; label: string }[] = [
-  { value: "horizontal_push", label: "水平推" },
-  { value: "vertical_push", label: "垂直推" },
-  { value: "horizontal_pull", label: "水平拉" },
-  { value: "vertical_pull", label: "垂直拉" },
-  { value: "squat", label: "深蹲" },
-  { value: "hip_hinge", label: "髋铰链" },
-  { value: "lunge", label: "弓步" },
-  { value: "core_anti_extension", label: "核心" },
-  { value: "locomotion", label: "移动" },
+  { value: "horizontal_push", label: mobileT("mobile.ui.productshell.39cf667cf6") },
+  { value: "vertical_push", label: mobileT("mobile.ui.productshell.278584dc5c") },
+  { value: "horizontal_pull", label: mobileT("mobile.ui.productshell.86a96eb16d") },
+  { value: "vertical_pull", label: mobileT("mobile.ui.productshell.73a7b538ab") },
+  { value: "squat", label: mobileT("mobile.ui.productshell.892fd5fbd9") },
+  { value: "hip_hinge", label: mobileT("mobile.ui.productshell.3459617d92") },
+  { value: "lunge", label: mobileT("mobile.ui.productshell.67b8955983") },
+  { value: "core_anti_extension", label: mobileT("mobile.ui.productshell.10d95f2cd2") },
+  { value: "locomotion", label: mobileT("mobile.ui.productshell.591f3aa55f") },
 ];
 
-function ExerciseManager({ application, userId, onDismiss }: { application: CoachApplication; userId: string; onDismiss: () => void }) {
+function ExerciseManager({ application, userId, onDismiss }: { application: LocalProductKernel; userId: string; onDismiss: () => void }) {
   const [exercises, setExercises] = useState<readonly CustomExerciseVariantView[]>();
   const [name, setName] = useState("");
   const [movement, setMovement] = useState<MovementPattern>();
@@ -1747,7 +1307,7 @@ function ExerciseManager({ application, userId, onDismiss }: { application: Coac
       setExercises(await application.listCustomExerciseVariants(userId));
       setError(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法读取自定义动作");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.dce066e541")));
     }
   }, [application, userId]);
   useEffect(() => { void load(); }, [load]);
@@ -1759,7 +1319,7 @@ function ExerciseManager({ application, userId, onDismiss }: { application: Coac
   const save = async () => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setError("请先填写动作名称。");
+      setError(mobileT("mobile.ui.productshell.14c52fdc88"));
       return;
     }
     setBusy(true);
@@ -1783,7 +1343,7 @@ function ExerciseManager({ application, userId, onDismiss }: { application: Coac
       resetForm();
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法保存动作");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.45dcc45100")));
     } finally {
       setBusy(false);
     }
@@ -1801,7 +1361,7 @@ function ExerciseManager({ application, userId, onDismiss }: { application: Coac
       if (editing?.id === exercise.id) resetForm();
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法归档动作");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.411efc0d21")));
     } finally {
       setBusy(false);
     }
@@ -1817,75 +1377,32 @@ function ExerciseManager({ application, userId, onDismiss }: { application: Coac
       <View style={styles.exerciseManagerSheet}>
         <View style={styles.sheetHandle} />
         <View style={styles.exerciseManagerHeader}>
-          <View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>我的动作</Text><Text style={styles.exerciseManagerSub}>只管理你自己新增的动作；未知信息不会被当作训练事实。</Text></View>
-          <Pressable accessibilityRole="button" accessibilityLabel="关闭动作管理" onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>完成</Text></Pressable>
+          <View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>{mobileT("mobile.ui.productshell.00a7fb031f")}</Text><Text style={styles.exerciseManagerSub}>{mobileT("mobile.ui.productshell.753c0cd0f7")}</Text></View>
+          <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.85eddb7f77")} onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>{mobileT("mobile.ui.productshell.33246f6a5e")}</Text></Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.exerciseManagerScroll} keyboardShouldPersistTaps="handled">
           {exercises === undefined ? <ActivityIndicator color={colors.limeDeep} /> : exercises.length ? exercises.map((exercise) => (
             <View key={exercise.id} style={styles.exerciseRow}>
-              <View style={styles.exerciseRowBody}><Text style={styles.exerciseRowTitle}>{exercise.name}</Text><Text style={styles.exerciseRowMeta}>{movementLabel(exercise.movement)} · {exercise.prescriptionMode === "bodyweight_reps" ? "徒手次数" : exercise.prescriptionMode === "timed" ? "计时" : "重量 / 次数"}</Text></View>
-              <Pressable accessibilityRole="button" accessibilityLabel={`编辑 ${exercise.name}`} disabled={busy} onPress={() => startEdit(exercise)} style={styles.exerciseInlineButton}><Text style={styles.exerciseInlineText}>编辑</Text></Pressable>
-              <Pressable accessibilityRole="button" accessibilityLabel={`归档 ${exercise.name}`} disabled={busy} onPress={() => void archive(exercise)} style={styles.exerciseInlineButton}><Text style={styles.exerciseArchiveText}>归档</Text></Pressable>
+              <View style={styles.exerciseRowBody}><Text style={styles.exerciseRowTitle}>{exercise.name}</Text><Text style={styles.exerciseRowMeta}>{movementLabel(exercise.movement)} · {exercise.prescriptionMode === "bodyweight_reps" ? mobileT("mobile.ui.productshell.8ccfa9ce7a") : exercise.prescriptionMode === "timed" ? mobileT("mobile.ui.productshell.3cacefc6aa") : mobileT("mobile.ui.productshell.f0c21c3440")}</Text></View>
+              <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.f872afc332", { value0: exercise.name })} disabled={busy} onPress={() => startEdit(exercise)} style={styles.exerciseInlineButton}><Text style={styles.exerciseInlineText}>{mobileT("mobile.ui.productshell.a7f814c0a4")}</Text></Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.57a816ba3d", { value0: exercise.name })} disabled={busy} onPress={() => void archive(exercise)} style={styles.exerciseInlineButton}><Text style={styles.exerciseArchiveText}>{mobileT("mobile.ui.productshell.ddfde75bec")}</Text></Pressable>
             </View>
-          )) : <Text style={styles.exerciseEmpty}>还没有自定义动作。常用动作由本地知识包提供；这里适合记录你自己的器械或变式。</Text>}
+          )) : <Text style={styles.exerciseEmpty}>{mobileT("mobile.ui.productshell.ef3db68a70")}</Text>}
           <View style={styles.exerciseForm}>
-            <Text style={styles.exerciseFormTitle}>{editing ? "编辑动作" : "新增动作"}</Text>
-            <TextInput accessibilityLabel="动作名称" value={name} onChangeText={setName} style={styles.logInput} placeholder="例如：健身房的坐姿划船机" placeholderTextColor="#777971" />
-            <Text style={styles.exerciseFieldLabel}>动作模式（可留空）</Text>
+            <Text style={styles.exerciseFormTitle}>{editing ? mobileT("mobile.ui.productshell.f64bb060a4") : mobileT("mobile.ui.productshell.f05fa8682c")}</Text>
+            <TextInput accessibilityLabel={mobileT("mobile.ui.productshell.7bfa73f408")} value={name} onChangeText={setName} style={styles.logInput} placeholder={mobileT("mobile.ui.productshell.9009cf6bfe")} placeholderTextColor="#777971" />
+            <Text style={styles.exerciseFieldLabel}>{mobileT("mobile.ui.productshell.1df775c291")}</Text>
             <View style={styles.logQuickRow}>{movementChoices.map((choice) => <Pressable key={choice.value} accessibilityRole="radio" accessibilityState={{ selected: movement === choice.value }} onPress={() => setMovement((current) => current === choice.value ? undefined : choice.value)} style={[styles.logQuick, movement === choice.value && styles.logQuickSelected]}><Text style={[styles.logQuickText, movement === choice.value && styles.logQuickTextSelected]}>{choice.label}</Text></Pressable>)}</View>
             {error ? <Text style={styles.formError}>{error}</Text> : null}
             <View style={styles.exerciseFormActions}>
-              {editing ? <Pressable accessibilityRole="button" disabled={busy} onPress={resetForm} style={styles.exerciseCancel}><Text style={styles.exerciseCancelText}>取消</Text></Pressable> : null}
-              <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()} style={[styles.logSave, styles.exerciseSave, busy && styles.primaryButtonDisabled]}><Text style={styles.logSaveText}>{busy ? "正在保存" : editing ? "保存修改" : "新增动作"}</Text></Pressable>
+              {editing ? <Pressable accessibilityRole="button" disabled={busy} onPress={resetForm} style={styles.exerciseCancel}><Text style={styles.exerciseCancelText}>{mobileT("mobile.ui.productshell.4d0b4688c7")}</Text></Pressable> : null}
+              <Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()} style={[styles.logSave, styles.exerciseSave, busy && styles.primaryButtonDisabled]}><Text style={styles.logSaveText}>{busy ? mobileT("mobile.ui.productshell.15127c2c4f") : editing ? mobileT("mobile.ui.productshell.60b4ae9082") : mobileT("mobile.ui.productshell.f05fa8682c")}</Text></Pressable>
             </View>
           </View>
         </ScrollView>
       </View>
     </View>
   );
-}
-
-function ProgressScreen({ screen, onOpenVideoLibrary }: { screen: CoachProductProjection; onOpenVideoLibrary: () => void }) {
-  const weight = screen.progress.bodyTrends.weight[0];
-  const bodyFat = screen.progress.bodyTrends.bodyFat[0];
-  const phase = screen.progress.metrics.find((metric) => metric.name === "phase_progress");
-  const training = screen.progress.metrics.find((metric) => metric.name === "training_trend");
-  return (
-    <ScrollView contentContainerStyle={styles.progressContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.screenHeader}><View><Text style={styles.screenTitle}>进展</Text><Text style={styles.screenSub}>只用已确认记录判断趋势</Text></View></View>
-      <View style={styles.progressHero}>
-        <View style={styles.progressHeroTop}><Text style={styles.progressHeroKicker}>TRAINING RECORD</Text><Text style={styles.progressHeroPeriod}>当前阶段</Text></View>
-        <View style={styles.progressHeroMain}><Text style={styles.progressHeroValue}>{screen.progress.completedWorkoutCount}</Text><View style={styles.progressHeroUnit}><Text style={styles.progressHeroUnitStrong}>次训练完成</Text><Text style={styles.progressHeroUnitSub}>每次结束后才计入</Text></View></View>
-        <View style={styles.progressHeroFooter}><View><Text style={styles.progressHeroFooterLabel}>训练趋势</Text><Text style={styles.progressHeroFooterValue}>{training ? metricDirectionLabel(training.value.direction) : "待积累"}</Text></View><View><Text style={styles.progressHeroFooterLabel}>阶段进度</Text><Text style={styles.progressHeroFooterValue}>{phase?.value.score === undefined ? "待计算" : `${Math.round(phase.value.score * 100)}%`}</Text></View></View>
-      </View>
-
-      <View style={styles.editorialSectionHeader}><Text style={styles.editorialSectionTitle}>身体快照</Text><Text style={styles.editorialSectionMeta}>趋势，不是单点</Text></View>
-      <View style={styles.bodySnapshotCard}>
-        <BodyTrendRow label="体重" value={trendValue(weight?.smoothedPoints.at(-1)?.smoothedValue, weight?.rawPoints.at(-1)?.unit)} meta={trendCoverage(weight?.coverage.observations)} />
-        <BodyTrendRow label="体脂" value={trendValue(bodyFat?.smoothedPoints.at(-1)?.smoothedValue, bodyFat?.rawPoints.at(-1)?.unit)} meta={trendCoverage(bodyFat?.coverage.observations)} />
-      </View>
-
-      <View style={styles.editorialSectionHeader}><Text style={styles.editorialSectionTitle}>六项判断</Text><Text style={styles.editorialSectionMeta}>Coach 决策依据</Text></View>
-      <View style={styles.metricDecisionCard}>{screen.progress.metrics.map((metric, index) => <MetricDecisionRow key={metric.name} metric={metric} index={index + 1} />)}</View>
-
-      <View style={styles.editorialSectionHeader}><Text style={styles.editorialSectionTitle}>训练视频</Text><Text style={styles.editorialSectionMeta}>仅保存在本机</Text></View>
-      <Pressable accessibilityRole="button" accessibilityLabel="打开训练视频" onPress={onOpenVideoLibrary} style={styles.videoLibraryCard}>
-        <View><Text style={styles.videoLibraryTitle}>本机视频库</Text><Text style={styles.videoLibraryMeta}>回放已录制的动作，并在本地重新识别</Text></View><Text style={styles.videoLibraryArrow}>›</Text>
-      </Pressable>
-
-      <View style={styles.editorialSectionHeader}><Text style={styles.editorialSectionTitle}>报告</Text><Text style={styles.editorialSectionMeta}>{screen.progress.reportArtifacts.length ? `${screen.progress.reportArtifacts.length} 份` : "尚未生成"}</Text></View>
-      {screen.progress.reportArtifacts.length ? screen.progress.reportArtifacts.map((artifact) => (
-        <View key={artifact.id} style={styles.reportRow}>
-          <Text style={styles.reportTitle}>{artifact.kind === "weekly_coach_report" ? "每周回顾" : artifact.kind === "goal_forecast" ? "目标路径" : artifact.kind === "mesocycle_review" ? "周期回顾" : "计划复核"}</Text>
-          <Text style={styles.reportMeta}>{artifact.createdAt.slice(0, 10)}</Text>
-        </View>
-      )) : <Empty label="积累一些训练与生活记录后，这里会出现趋势和报告。" />}
-    </ScrollView>
-  );
-}
-
-function BodyTrendRow({ label, value, meta }: { label: string; value: string; meta: string }) {
-  return <View style={styles.bodyTrendRow}><View><Text style={styles.bodyTrendLabel}>{label}</Text><Text style={styles.bodyTrendMeta}>{meta}</Text></View><Text style={styles.bodyTrendValue}>{value}</Text></View>;
 }
 
 function MetricDecisionRow({ metric, index }: { metric: CoachProductProjection["progress"]["metrics"][number]; index: number }) {
@@ -1896,12 +1413,12 @@ function MetricDecisionRow({ metric, index }: { metric: CoachProductProjection["
     <View style={styles.metricDecisionBody}>
       <View style={styles.metricDecisionTop}><Text style={styles.metricDecisionTitle}>{metricLabel(metric.name)}</Text><Text style={[styles.metricDecisionValue, { color }]}>{metricDirectionLabel(metric.value.direction)}</Text></View>
       <View style={styles.metricDecisionRail}><View style={[styles.metricDecisionFill, { backgroundColor: color, flex: Math.max(0.02, score) }]} /><View style={{ flex: Math.max(0.001, 1 - Math.max(0.02, score)) }} /></View>
-      <Text style={styles.metricDecisionMeta}>{metricConfidenceLabel(metric.confidence)} · {metric.comparableDays} 天可比</Text>
+      <Text style={styles.metricDecisionMeta}>{metricConfidenceLabel(metric.confidence)} · {metric.comparableDays} {mobileT("mobile.ui.productshell.72b3928d01")}</Text>
     </View>
   </View>;
 }
 
-function ProfileScreen({ application, userId, screen, onStartOnboarding, onOpenAccountSettings, onUpdated }: { application: CoachApplication; userId: string; screen: CoachProductProjection; onStartOnboarding: () => void; onOpenAccountSettings?: () => void; onUpdated: () => void }) {
+function ProfileScreen({ application, userId, screen, onOpenAccountSettings, onUpdated }: { application: LocalProductKernel; userId: string; screen: CoachProductProjection; onOpenAccountSettings?: () => void; onUpdated: () => void }) {
   const profile = screen.profile;
   const [showPermissions, setShowPermissions] = useState(false);
   const [showPrivacyDetails, setShowPrivacyDetails] = useState(false);
@@ -1909,45 +1426,45 @@ function ProfileScreen({ application, userId, screen, onStartOnboarding, onOpenA
   const [showCoachMemory, setShowCoachMemory] = useState(false);
   return (
     <ScrollView contentContainerStyle={[styles.content, styles.dockContent, styles.profileContent]} showsVerticalScrollIndicator={false}>
-      {!profile.onboardingComplete ? <Pressable accessibilityRole="button" onPress={onStartOnboarding} style={styles.profileStart}><Text style={styles.profileStartText}>开始建档</Text></Pressable> : null}
-      {profile.onboardingComplete ? <Pressable accessibilityRole="button" accessibilityLabel="打开个人档案" onPress={onStartOnboarding} style={({ pressed }) => [styles.profileHero, pressed && styles.cardPressed]}>
-        <View style={styles.profileHeroTop}><Text style={styles.profileHeroKicker}>ATHLETE PROFILE</Text><Text style={styles.profileHeroStatus}>编辑档案 ↗</Text></View>
-        <Text style={styles.profileHeroLabel}>当前主目标</Text><Text style={styles.profileHeroTitle}>{goalLabel(profile.primaryGoal)}</Text>
-        <Text style={styles.profileHeroMeta}>{experienceLabel(profile.trainingExperience)} · Coach {mandateLabel(profile.mandateMode)}</Text>
-        <View style={styles.profileHeroStats}><View style={styles.profileHeroStat}><Text style={styles.profileHeroStatValue}>{profile.locations}</Text><Text style={styles.profileHeroStatLabel}>训练地点</Text></View><View style={styles.profileHeroStat}><Text style={styles.profileHeroStatValue}>{profile.customExercises}</Text><Text style={styles.profileHeroStatLabel}>自定义动作</Text></View></View>
-      </Pressable> : null}
-      <Text style={styles.sectionTitle}>Coach 记忆</Text>
+      {!profile.profileReady ? <View style={styles.profileStart}><Text style={styles.profileStartText}>{mobileT("mobile.conversation.profile.missing")}</Text></View> : null}
+      {profile.profileReady ? <View style={styles.profileHero}>
+        <View style={styles.profileHeroTop}><Text style={styles.profileHeroKicker}>{mobileT("mobile.ui.productshell.b0734a570c")}</Text><Text style={styles.profileHeroStatus}>{mobileT("mobile.ui.productshell.6809a9dd02")}</Text></View>
+        <Text style={styles.profileHeroLabel}>{mobileT("mobile.ui.productshell.0679103486")}</Text><Text style={styles.profileHeroTitle}>{goalLabel(profile.primaryGoal)}</Text>
+        <Text style={styles.profileHeroMeta}>{coachingModeLabel(profile.mandateMode)}</Text>
+        <View style={styles.profileHeroStats}><View style={styles.profileHeroStat}><Text style={styles.profileHeroStatValue}>{profile.locations}</Text><Text style={styles.profileHeroStatLabel}>{mobileT("mobile.ui.productshell.972a3e3b17")}</Text></View><View style={styles.profileHeroStat}><Text style={styles.profileHeroStatValue}>{profile.customExercises}</Text><Text style={styles.profileHeroStatLabel}>{mobileT("mobile.ui.productshell.34032efb9c")}</Text></View></View>
+      </View> : null}
+      <Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.dc9f2a12e0")}</Text>
       <CoachMemoryPanel application={application} userId={userId} onOpen={() => setShowCoachMemory(true)} />
-      <Text style={styles.sectionTitle}>权限</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="管理数据与权限" onPress={() => setShowPermissions(true)} style={[styles.profileCard, !profile.permissions && styles.profileSingleLineCard]}>
-        {profile.permissions ? (
+      <Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.560165a6d7")}</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.d80f804e89")} onPress={() => setShowPermissions(true)} style={[styles.profileCard, !profile.permissions && !profile.planAuthorization && styles.profileSingleLineCard]}>
+        {profile.permissions || profile.planAuthorization ? (
           <>
-            <ProfileRow label="相机" value={permissionLabel(profile.permissions.camera)} />
-            <ProfileRow label="健康数据" value={permissionLabel(profile.permissions.health)} />
-            <ProfileRow label="通知" value={permissionLabel(profile.permissions.notifications)} />
-            <ProfileRow label="照片分析" value={permissionLabel(profile.permissions.mediaUpload)} />
+            {profile.permissions ? <ProfileRow label={mobileT("mobile.ui.productshell.0cd894e993")} value={permissionLabel(profile.permissions.health)} /> : null}
+            {profile.permissions ? <ProfileRow label={mobileT("mobile.ui.productshell.7a66c0d036")} value={permissionLabel(profile.permissions.notifications)} /> : null}
+            {profile.planAuthorization ? <ProfileRow label={mobileT("mobile.profile.planAuthorization.title")} value={planAuthorizationLabel(profile.planAuthorization.mandate.planChangeAuthorization)} /> : null}
           </>
-        ) : <Text style={styles.emptyText}>建档后可逐项选择授权。</Text>}
+        ) : <Text style={styles.emptyText}>{mobileT("mobile.ui.productshell.c6decd12ea")}</Text>}
       </Pressable>
-      <Text style={styles.sectionTitle}>账号与数据</Text>
+      <Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.3ea651f16f")}</Text>
       <PrivacySettingsPanel
         application={application}
         userId={userId}
         refreshKey={profile.permissions?.revision ?? 0}
         onOpenDetails={() => setShowPrivacyDetails(true)}
       />
-      {onOpenAccountSettings ? <Pressable accessibilityRole="button" accessibilityLabel="打开登录与账号设置" onPress={onOpenAccountSettings} style={styles.profileLinkCard}><View><Text style={styles.profileLinkTitle}>登录与账号</Text><Text style={styles.profileLinkMeta}>登录方式、退出与账号删除</Text></View><Text style={styles.profileLinkArrow}>›</Text></Pressable> : null}
-      <Text style={styles.sectionTitle}>健康数据</Text>
+      {onOpenAccountSettings ? <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.b2686551cb")} onPress={onOpenAccountSettings} style={styles.profileLinkCard}><View><Text style={styles.profileLinkTitle}>{mobileT("mobile.ui.productshell.3c64034000")}</Text><Text style={styles.profileLinkMeta}>{mobileT("mobile.ui.productshell.372997171d")}</Text></View><Text style={styles.profileLinkArrow}>›</Text></Pressable> : null}
+      <Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.0cd894e993")}</Text>
       <HealthConnectionPanel application={application} userId={userId} permissions={profile.permissions} sources={profile.healthSources} onUpdated={onUpdated} />
-      <Text style={styles.sectionTitle}>Coach 提醒</Text>
+      <Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.c430bdb19d")}</Text>
       <RecipeReminderSettings application={application} userId={userId} onUpdated={onUpdated} />
+      <Text style={styles.sectionTitle}>{mobileT("mobile.profile.secondaryTools.title")}</Text>
       {profile.actionLog.recent.length ? <>
-        <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>Coach 操作</Text><Pressable accessibilityRole="button" accessibilityLabel="查看全部 Coach 操作" onPress={() => setShowActionLog(true)}><Text style={styles.sectionLink}>查看全部</Text></Pressable></View>
+        <View style={styles.sectionHeader}><Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.752398909f")}</Text><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.2c6cdd6fdc")} onPress={() => setShowActionLog(true)}><Text style={styles.sectionLink}>{mobileT("mobile.ui.productshell.ed2172fd78")}</Text></Pressable></View>
         <View style={[styles.profileCard, styles.actionLogCard]}>
-          {profile.actionLog.recent.map((entry, index) => <View key={entry.id} style={[styles.actionLogRow, index === profile.actionLog.recent.length - 1 && styles.actionLogRowLast]}><View style={styles.actionLogBody}><Text style={styles.actionLogTitle}>{actionLabel(entry.action)}</Text><Text style={styles.actionLogMeta}>{entry.actor === "agent" ? "Coach" : entry.actor === "rule_engine" ? "本地规则" : "你"} · {actionResultLabel(entry.result)} · {entry.occurredAt.slice(5, 16)}</Text></View></View>)}
+          {profile.actionLog.recent.map((entry, index) => <View key={entry.id} style={[styles.actionLogRow, index === profile.actionLog.recent.length - 1 && styles.actionLogRowLast]}><View style={styles.actionLogBody}><Text style={styles.actionLogTitle}>{actionLabel(entry.action)}</Text><Text style={styles.actionLogMeta}>{entry.actor === "agent" ? "Coach" : entry.actor === "rule_engine" ? mobileT("mobile.ui.productshell.fe3f473ffc") : mobileT("mobile.ui.productshell.5630b886f9")} · {actionResultLabel(entry.result)} · {entry.occurredAt.slice(5, 16)}</Text></View></View>)}
         </View>
       </> : null}
-      {showPermissions && profile.permissions ? <PermissionSettings application={application} userId={userId} permissions={profile.permissions} onDismiss={() => setShowPermissions(false)} onUpdated={() => { setShowPermissions(false); onUpdated(); }} /> : null}
+      {showPermissions && (profile.permissions || profile.planAuthorization) ? <PermissionSettings application={application} userId={userId} permissions={profile.permissions} planAuthorization={profile.planAuthorization} onDismiss={() => setShowPermissions(false)} onUpdated={() => { setShowPermissions(false); onUpdated(); }} /> : null}
       {showPrivacyDetails ? <PrivacySettingsSheet
         application={application}
         userId={userId}
@@ -1962,11 +1479,11 @@ function ProfileScreen({ application, userId, screen, onStartOnboarding, onOpenA
   );
 }
 
-type PrivacySettingsOverviewValue = Awaited<ReturnType<CoachApplication["readPrivacySettingsOverview"]>>;
+type PrivacySettingsOverviewValue = Awaited<ReturnType<LocalProductKernel["readPrivacySettingsOverview"]>>;
 
 /** A compact status card; the full disclosure deliberately lives behind a tap. */
 function PrivacySettingsPanel({ application, userId, refreshKey, onOpenDetails }: {
-  application: CoachApplication;
+  application: LocalProductKernel;
   userId: string;
   refreshKey: number;
   onOpenDetails: () => void;
@@ -1981,22 +1498,21 @@ function PrivacySettingsPanel({ application, userId, refreshKey, onOpenDetails }
         setError(undefined);
       }
     }).catch(() => {
-      if (active) setError("暂时无法读取数据使用状态");
+      if (active) setError(mobileT("mobile.ui.productshell.bb11f8db1e"));
     });
     return () => { active = false; };
   }, [application, refreshKey, userId]);
   if (!overview && !error) return <View style={[styles.profileCard, styles.privacySummaryLoading]}><ActivityIndicator color={colors.limeDeep} /></View>;
-  if (error || !overview) return <Pressable accessibilityRole="button" accessibilityLabel="查看账号与数据" onPress={onOpenDetails} style={[styles.profileCard, styles.privacySummaryLoading]}><Text style={styles.emptyText}>{error ?? "查看数据使用"}</Text></Pressable>;
-  return <Pressable accessibilityRole="button" accessibilityLabel="查看账号与数据" onPress={onOpenDetails} style={styles.profileCard}>
-    <ProfileRow label="账号" value={privacyAccountLabel(overview)} />
-    <ProfileRow label="同步" value={privacySyncLabel(overview)} />
-    <ProfileRow label="远程模型" value={privacyRemoteModelLabel(overview)} />
-    <View style={styles.privacySummaryFooter}><Text style={styles.privacySummaryFooterText}>{privacyMediaLabel(overview)}</Text><Text style={styles.sectionLink}>查看详情</Text></View>
+  if (error || !overview) return <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.e721e00e3a")} onPress={onOpenDetails} style={[styles.profileCard, styles.privacySummaryLoading]}><Text style={styles.emptyText}>{error ?? mobileT("mobile.ui.productshell.381429fdad")}</Text></Pressable>;
+  return <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.e721e00e3a")} onPress={onOpenDetails} style={styles.profileCard}>
+    <ProfileRow label={mobileT("mobile.ui.productshell.9013849179")} value={privacyAccountLabel(overview)} />
+    <ProfileRow label={mobileT("mobile.ui.productshell.597a04d4bb")} value={privacyRemoteModelLabel(overview)} />
+    <View style={styles.privacySummaryFooter}><Text style={styles.sectionLink}>{mobileT("mobile.ui.productshell.faea8c1db9")}</Text></View>
   </Pressable>;
 }
 
 function PrivacySettingsSheet({ application, userId, refreshKey, canManagePermissions, onManagePermissions, onDismiss }: {
-  application: CoachApplication;
+  application: LocalProductKernel;
   userId: string;
   refreshKey: number;
   canManagePermissions: boolean;
@@ -2013,30 +1529,22 @@ function PrivacySettingsSheet({ application, userId, refreshKey, canManagePermis
         setError(undefined);
       }
     }).catch(() => {
-      if (active) setError("暂时无法读取数据使用状态");
+      if (active) setError(mobileT("mobile.ui.productshell.bb11f8db1e"));
     });
     return () => { active = false; };
   }, [application, refreshKey, userId]);
-  return <BottomDrawer visible tall title="账号与数据" subtitle="账号、同步、云端 AI 与本机媒体" onDismiss={onDismiss}>
+  return <BottomDrawer visible tall title={mobileT("mobile.ui.productshell.3ea651f16f")} subtitle={mobileT("mobile.ui.productshell.d86d778a9b")} onDismiss={onDismiss}>
       {error ? <Text style={styles.formError}>{error}</Text> : overview === undefined ? <View style={styles.privacySheetLoading}><ActivityIndicator color={colors.limeDeep} /></View> : <ScrollView contentContainerStyle={styles.privacyDetailList} showsVerticalScrollIndicator={false}>
-        <PrivacyDetailBlock title="账号" summary={privacyAccountLabel(overview)}>
+        <PrivacyDetailBlock title={mobileT("mobile.ui.productshell.9013849179")} summary={privacyAccountLabel(overview)}>
           <Text style={styles.privacyDetailText}>{privacyAccountDetail(overview)}</Text>
         </PrivacyDetailBlock>
-        <PrivacyDetailBlock title="同步" summary={privacySyncLabel(overview)}>
-          <Text style={styles.privacyDetailText}>{privacySyncDetail(overview)}</Text>
+        <PrivacyDetailBlock title={mobileT("mobile.ui.productshell.91bedb8b57")} summary={privacyRemoteModelLabel(overview)}>
+          <Text style={styles.privacyDetailText}>{mobileT("mobile.ui.productshell.7f529142f1")}{overview.remoteModel.consent.includedCategories.join("、")}{mobileT("mobile.ui.productshell.7cf1b55e72")}</Text>
+          <Text style={styles.privacyDetailText}>{mobileT("mobile.ui.productshell.d5b3234522")}{overview.remoteModel.consent.removedDirectIdentityFields.join("、")}。</Text>
+          <Text style={styles.privacyDetailMeta}>{mobileT("mobile.ui.productshell.6f5c2f2999")}{overview.remoteModel.configuration.service} {mobileT("mobile.ui.productshell.9223225d34")}</Text>
+          <Text style={styles.privacyDetailMeta}>{mobileT("mobile.ui.productshell.e7079730eb")}</Text>
         </PrivacyDetailBlock>
-        <ReplicaSyncStatus application={application} userId={userId} refreshKey={refreshKey} />
-        <PrivacyDetailBlock title="MaxPower 云端 AI" summary={privacyRemoteModelLabel(overview)}>
-          <Text style={styles.privacyDetailText}>登录后，云端 AI 作为核心在线服务，为当前任务接收相关的{overview.remoteModel.consent.includedCategories.join("、")}语义。</Text>
-          <Text style={styles.privacyDetailText}>发送前会移除{overview.remoteModel.consent.removedDirectIdentityFields.join("、")}。</Text>
-          <Text style={styles.privacyDetailMeta}>服务由 {overview.remoteModel.configuration.service} 统一管理；客户端不保存或展示 Provider、物理模型与密钥。</Text>
-          <Text style={styles.privacyDetailMeta}>该能力随登录自动启用；退出登录后停止使用。</Text>
-        </PrivacyDetailBlock>
-        <PrivacyDetailBlock title="本机媒体" summary={privacyMediaLabel(overview)}>
-          <Text style={styles.privacyDetailText}>当前媒体只保留在本机，不会因为开启同步而自动上传。</Text>
-          <Text style={styles.privacyDetailMeta}>{privacyMediaProtectionDetail(overview)}</Text>
-        </PrivacyDetailBlock>
-        {canManagePermissions ? <Pressable accessibilityRole="button" accessibilityLabel="管理数据授权" onPress={onManagePermissions} style={styles.privacyManageButton}><Text style={styles.privacyManageButtonText}>管理授权</Text></Pressable> : null}
+        {canManagePermissions ? <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.f60fee9d10")} onPress={onManagePermissions} style={styles.privacyManageButton}><Text style={styles.privacyManageButtonText}>{mobileT("mobile.ui.productshell.ed6476bcad")}</Text></Pressable> : null}
       </ScrollView>}
   </BottomDrawer>;
 }
@@ -2045,82 +1553,26 @@ function PrivacyDetailBlock({ title, summary, children }: { title: string; summa
   return <View style={styles.privacyDetailBlock}><View style={styles.privacyDetailHeading}><Text style={styles.privacyDetailTitle}>{title}</Text><Text style={styles.privacyDetailSummary}>{summary}</Text></View>{children}</View>;
 }
 
-/**
- * Sync detail is deliberately read from the Facade rather than from the
- * privacy summary. It can expose local backlog and a user-initiated retry,
- * but not a cursor, remote payload, device identifier, or automatic branch
- * selection.
- */
-function ReplicaSyncStatus({ application, userId, refreshKey }: {
-  application: CoachApplication;
-  userId: string;
-  refreshKey: number;
-}) {
-  const [overview, setOverview] = useState<Awaited<ReturnType<CoachApplication["readReplicaSyncOverview"]>>>();
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      setOverview(await application.readReplicaSyncOverview(userId));
-      setError(undefined);
-    } catch {
-      setError("暂时无法读取同步状态");
-    } finally {
-      setLoading(false);
-    }
-  }, [application, userId]);
-  useEffect(() => { void refresh(); }, [refresh, refreshKey]);
-
-  const retry = async () => {
-    setBusy(true);
-    try {
-      await application.synchronizeReplica(userId);
-      await refresh();
-    } catch {
-      // Transport detail stays inside the internal audit. The user only needs
-      // the current local state and a safe retry opportunity.
-      setError("同步暂时未完成；本机资料仍可继续使用。");
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (loading && !overview) return <View style={styles.privacyDetailBlock}><Text style={styles.privacyDetailTitle}>同步详情</Text><ActivityIndicator color={colors.limeDeep} /></View>;
-  if (!overview) return <View style={styles.privacyDetailBlock}><Text style={styles.privacyDetailTitle}>同步详情</Text><Text style={styles.privacyDetailText}>{error ?? "暂时无法读取同步状态"}</Text></View>;
-  const presentation = presentReplicaSyncOverview(overview);
-  return <View style={styles.privacyDetailBlock}>
-    <View style={styles.privacyDetailHeading}><Text style={styles.privacyDetailTitle}>同步详情</Text><Text style={styles.privacyDetailSummary}>{presentation.label}</Text></View>
-    <Text style={styles.privacyDetailText}>{presentation.detail}</Text>
-    {overview.lastSucceededAt ? <Text style={styles.privacyDetailMeta}>最近完成于 {overview.lastSucceededAt.slice(0, 16).replace("T", " ")}</Text> : null}
-    {presentation.conflicts.map((conflict) => <View key={`${conflict.label}:${conflict.detail}`} style={styles.replicaConflict}><Text style={styles.replicaConflictTitle}>{conflict.label}</Text><Text style={styles.privacyDetailMeta}>{conflict.detail}</Text></View>)}
-    {error ? <Text style={styles.formError}>{error}</Text> : null}
-    {presentation.canRetry && presentation.retryLabel ? <Pressable accessibilityRole="button" accessibilityLabel={presentation.retryLabel} disabled={busy} onPress={() => void retry()} style={[styles.replicaSyncButton, busy && styles.primaryButtonDisabled]}><Text style={styles.replicaSyncButtonText}>{busy ? "正在同步" : presentation.retryLabel}</Text></Pressable> : null}
-  </View>;
-}
-
 const recipeReminderCopy: Readonly<Record<Exclude<import("../../coach/model").CoachRecipeKind, "fixed_reminder">, string>> = {
-  session_completed_assessment: "训练完成后准备下一次训练",
-  morning_check_in: "早晨的恢复记录提醒",
-  recovery_changed: "恢复状态变化后的安排提醒",
-  today_plan_changed: "今日安排发生变化",
-  missed_session_review: "未完成训练后的安排提醒",
-  schedule_or_equipment_changed: "场地或器材变化后的下一步",
-  weekly_review: "每周训练与恢复回顾",
-  deload_ended: "恢复周结束后的安排",
+  session_completed_assessment: mobileT("mobile.ui.productshell.7a8214be97"),
+  morning_check_in: mobileT("mobile.ui.productshell.5bdd4572ec"),
+  recovery_changed: mobileT("mobile.ui.productshell.83509043a5"),
+  today_plan_changed: mobileT("mobile.ui.productshell.487e666316"),
+  missed_session_review: mobileT("mobile.ui.productshell.18732cd46e"),
+  schedule_or_equipment_changed: mobileT("mobile.ui.productshell.d547a4194e"),
+  weekly_review: mobileT("mobile.ui.productshell.5e781d485a"),
+  deload_ended: mobileT("mobile.ui.productshell.82f7e4099a"),
 };
 
-function RecipeReminderSettings({ application, userId, onUpdated }: { application: CoachApplication; userId: string; onUpdated: () => void }) {
-  const [recipes, setRecipes] = useState<Awaited<ReturnType<CoachApplication["listCoachRecipes"]>>>();
+function RecipeReminderSettings({ application, userId, onUpdated }: { application: LocalProductKernel; userId: string; onUpdated: () => void }) {
+  const [recipes, setRecipes] = useState<Awaited<ReturnType<LocalProductKernel["listCoachRecipes"]>>>();
   const [busyRecipeId, setBusyRecipeId] = useState<string>();
   const [error, setError] = useState<string>();
   const load = useCallback(async () => {
     await application.ensureDefaultEventRecipes(userId);
     setRecipes((await application.listCoachRecipes(userId)).filter((recipe) => recipe.kind !== "fixed_reminder"));
   }, [application, userId]);
-  useEffect(() => { void load().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法读取提醒设置")); }, [load]);
+  useEffect(() => { void load().catch((cause: unknown) => setError(userFacingError(cause, mobileT("mobile.ui.productshell.9ba86f1615")))); }, [load]);
   const toggle = async (recipe: NonNullable<typeof recipes>[number]) => {
     setBusyRecipeId(recipe.id);
     try {
@@ -2133,16 +1585,16 @@ function RecipeReminderSettings({ application, userId, onUpdated }: { applicatio
       await load();
       onUpdated();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法更新提醒设置");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.d8c3171708")));
     } finally {
       setBusyRecipeId(undefined);
     }
   };
   return <View style={[styles.profileCard, styles.reminderSettingsCard]}>
-    <Text style={[styles.healthConnectionNote, styles.reminderSettingsIntro]}>这些是本机的提醒类别；系统通知权限与安静时段会在实际投递前再次生效。</Text>
+    <Text style={[styles.healthConnectionNote, styles.reminderSettingsIntro]}>{mobileT("mobile.ui.productshell.ea6b782a4b")}</Text>
     {recipes === undefined ? <ActivityIndicator color={colors.limeDeep} /> : recipes.map((recipe) => {
       const label = recipeReminderCopy[recipe.kind as keyof typeof recipeReminderCopy];
-      return <View key={recipe.id} style={styles.permissionRow}><Text style={[styles.permissionTitle, { flex: 1 }]}>{label}</Text><Pressable accessibilityRole="switch" accessibilityLabel={`切换${label}`} accessibilityState={{ checked: recipe.enabled, disabled: busyRecipeId !== undefined }} disabled={busyRecipeId !== undefined} onPress={() => void toggle(recipe)} style={[styles.permissionSwitch, recipe.enabled && styles.permissionSwitchOn, busyRecipeId === recipe.id && styles.primaryButtonDisabled]}><View style={[styles.permissionKnob, recipe.enabled && styles.permissionKnobOn]} /></Pressable></View>;
+      return <View key={recipe.id} style={styles.permissionRow}><Text style={[styles.permissionTitle, { flex: 1 }]}>{label}</Text><Pressable accessibilityRole="switch" accessibilityLabel={mobileT("mobile.ui.productshell.6700026687", { value0: label })} accessibilityState={{ checked: recipe.enabled, disabled: busyRecipeId !== undefined }} disabled={busyRecipeId !== undefined} onPress={() => void toggle(recipe)} style={[styles.permissionSwitch, recipe.enabled && styles.permissionSwitchOn, busyRecipeId === recipe.id && styles.primaryButtonDisabled]}><View style={[styles.permissionKnob, recipe.enabled && styles.permissionKnobOn]} /></Pressable></View>;
     })}
     {error ? <Text style={styles.formError}>{error}</Text> : null}
   </View>;
@@ -2152,16 +1604,16 @@ const healthConnectionPlatform = Platform.OS === "ios" ? "healthkit" as const : 
 const healthConnectionMetrics = healthConnectionPlatform === "healthkit"
   ? APPLE_HEALTHKIT_MVP_METRICS
   : ANDROID_HEALTH_CONNECT_MVP_METRICS;
-const healthConnectionName = healthConnectionPlatform === "healthkit" ? "Apple 健康" : "Health Connect";
+const healthConnectionName = healthConnectionPlatform === "healthkit" ? mobileT("mobile.ui.productshell.6de270c4a7") : "Health Connect";
 
 function HealthConnectionPanel({ application, userId, permissions, sources, onUpdated }: {
-  application: CoachApplication;
+  application: LocalProductKernel;
   userId: string;
   permissions: CoachProductProjection["profile"]["permissions"];
   sources: CoachProductProjection["profile"]["healthSources"];
   onUpdated: () => void;
 }) {
-  const [connection, setConnection] = useState<Awaited<ReturnType<CoachApplication["getHealthConnectionState"]>>>();
+  const [connection, setConnection] = useState<Awaited<ReturnType<LocalProductKernel["getHealthConnectionState"]>>>();
   const [busy, setBusy] = useState<"permission" | "sync">();
   const [error, setError] = useState<string>();
   const refreshConnection = useCallback(async () => {
@@ -2169,7 +1621,7 @@ function HealthConnectionPanel({ application, userId, permissions, sources, onUp
       setConnection(await application.getHealthConnectionState({ metricTypes: healthConnectionMetrics }));
       setError(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法读取健康数据连接状态");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.6e10d1ce84")));
     }
   }, [application]);
   useEffect(() => { void refreshConnection(); }, [refreshConnection]);
@@ -2192,7 +1644,7 @@ function HealthConnectionPanel({ application, userId, permissions, sources, onUp
       await refreshConnection();
       onUpdated();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `无法更新 ${healthConnectionName} 授权`);
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.78e29c0255", { value0: healthConnectionName })));
     } finally {
       setBusy(undefined);
     }
@@ -2211,7 +1663,7 @@ function HealthConnectionPanel({ application, userId, permissions, sources, onUp
       await refreshConnection();
       onUpdated();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : `暂时无法同步 ${healthConnectionName}`);
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.ae5a413fbb", { value0: healthConnectionName })));
     } finally {
       setBusy(undefined);
     }
@@ -2223,42 +1675,42 @@ function HealthConnectionPanel({ application, userId, permissions, sources, onUp
   const canSync = availability === "available" && grants > 0;
   return <View style={[styles.profileCard, styles.healthConnectionCard]}>
     <View style={styles.healthConnectionTop}>
-      <View style={{ flex: 1 }}><Text style={styles.healthConnectionTitle}>{healthConnectionName}</Text><Text style={styles.healthConnectionMeta}>{connection ? healthConnectionStatus(connection.availability, grants, healthConnectionName) : "正在检查本机支持情况"}</Text></View>
+      <View style={{ flex: 1 }}><Text style={styles.healthConnectionTitle}>{healthConnectionName}</Text><Text style={styles.healthConnectionMeta}>{connection ? healthConnectionStatus(connection.availability, grants, healthConnectionName) : mobileT("mobile.ui.productshell.01f3a43f96")}</Text></View>
       {busy ? <ActivityIndicator color={colors.limeDeep} /> : null}
     </View>
-    <Text style={styles.healthConnectionNote}>{healthConnectionPlatform === "healthkit" ? "睡眠、SDNN、静息心率、已完成活动、体重和体脂可分别请求读取。Apple 不会公开逐项读取授权；无样本不会被解释为没有记录。" : "睡眠、RMSSD、静息心率、已完成活动、体重和体脂可分别授权；未授权时仍可手动记录。"}</Text>
+    <Text style={styles.healthConnectionNote}>{healthConnectionPlatform === "healthkit" ? mobileT("mobile.ui.productshell.7ffc07ca01") : mobileT("mobile.ui.productshell.0596c7dcf4")}</Text>
     {sources.length ? <View style={styles.healthImportedList}>{sources.map((source) => <ProfileRow key={source.platform} label={healthSourceLabel(source.platform)} value={healthSourceSummary(source)} />)}</View> : null}
     {error ? <Text style={styles.formError}>{error}</Text> : null}
-    {!permissions ? <Text style={styles.healthConnectionMeta}>完成建档后可以选择连接。</Text> : <View style={styles.healthConnectionActions}>
-      {canRequest ? <Pressable accessibilityRole="button" disabled={busy !== undefined} onPress={() => void requestPermission()} style={[styles.healthConnectionPrimary, busy && styles.primaryButtonDisabled]}><Text style={styles.healthConnectionPrimaryText}>{availability === "permission_denied_or_revoked" ? "重新授权" : "选择读取范围"}</Text></Pressable> : null}
-      {canSync ? <Pressable accessibilityRole="button" disabled={busy !== undefined} onPress={() => void sync()} style={[styles.healthConnectionSecondary, busy && styles.primaryButtonDisabled]}><Text style={styles.healthConnectionSecondaryText}>同步更新</Text></Pressable> : null}
+    {!permissions ? <Text style={styles.healthConnectionMeta}>{mobileT("mobile.ui.productshell.0617573f0d")}</Text> : <View style={styles.healthConnectionActions}>
+      {canRequest ? <Pressable accessibilityRole="button" disabled={busy !== undefined} onPress={() => void requestPermission()} style={[styles.healthConnectionPrimary, busy && styles.primaryButtonDisabled]}><Text style={styles.healthConnectionPrimaryText}>{availability === "permission_denied_or_revoked" ? mobileT("mobile.ui.productshell.203ccc8c45") : mobileT("mobile.ui.productshell.f8e6314ffb")}</Text></Pressable> : null}
+      {canSync ? <Pressable accessibilityRole="button" disabled={busy !== undefined} onPress={() => void sync()} style={[styles.healthConnectionSecondary, busy && styles.primaryButtonDisabled]}><Text style={styles.healthConnectionSecondaryText}>{mobileT("mobile.ui.productshell.51e6d9eba4")}</Text></Pressable> : null}
     </View>}
   </View>;
 }
 
-function ActionLogViewer({ application, userId, onDismiss }: { application: CoachApplication; userId: string; onDismiss: () => void }) {
-  const [events, setEvents] = useState<Awaited<ReturnType<CoachApplication["listActionLog"]>>>();
+function ActionLogViewer({ application, userId, onDismiss }: { application: LocalProductKernel; userId: string; onDismiss: () => void }) {
+  const [events, setEvents] = useState<Awaited<ReturnType<LocalProductKernel["listActionLog"]>>>();
   const [error, setError] = useState<string>();
   useEffect(() => {
     void application.listActionLog(userId).then(setEvents).catch((cause: unknown) => {
-      setError(cause instanceof Error ? cause.message : "无法读取操作日志");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.8d8fabc62b")));
     });
   }, [application, userId]);
-  return <View style={styles.actionLogScrim}><View style={styles.actionLogSheet}><View style={styles.sheetHandle} /><View style={styles.exerciseManagerHeader}><View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>Coach 操作</Text><Text style={styles.exerciseManagerSub}>这是操作轨迹，不是你的训练 Timeline。撤销会保留原记录并创建补偿版本。</Text></View><Pressable accessibilityRole="button" accessibilityLabel="关闭 Coach 操作" onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>完成</Text></Pressable></View><ScrollView contentContainerStyle={styles.actionLogList}>{error ? <Text style={styles.formError}>{error}</Text> : events === undefined ? <ActivityIndicator color={colors.limeDeep} /> : events.length ? events.map((event) => <View key={event.id} style={styles.actionLogDetailRow}><View style={styles.actionLogDetailTop}><Text style={styles.actionLogTitle}>{actionLabel(event.action)}</Text><Text style={styles.actionLogResult}>{actionResultLabel(event.result)}</Text></View><Text style={styles.actionLogDetailMeta}>{actorLabel(event.actor)} · {event.occurredAt.slice(0, 16).replace("T", " ")}</Text><Text style={styles.actionLogIntent}>{event.intent}</Text>{event.beforeRevision !== undefined || event.afterRevision !== undefined ? <Text style={styles.actionLogDetailMeta}>版本 {event.beforeRevision ?? "—"} → {event.afterRevision ?? "—"}</Text> : null}{event.reversible && !event.undoneBy ? <Text style={styles.actionLogReversible}>可通过原卡片撤销</Text> : null}</View>) : <Text style={styles.exerciseEmpty}>还没有记录。实际训练、饮食和恢复会在 Timeline 中查看。</Text>}</ScrollView></View></View>;
+  return <View style={styles.actionLogScrim}><View style={styles.actionLogSheet}><View style={styles.sheetHandle} /><View style={styles.exerciseManagerHeader}><View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>{mobileT("mobile.ui.productshell.6c71a7c375")}</Text><Text style={styles.exerciseManagerSub}>{mobileT("mobile.ui.productshell.0066498cc1")}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.8662de8f9b")} onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>{mobileT("mobile.ui.productshell.33246f6a5e")}</Text></Pressable></View><ScrollView contentContainerStyle={styles.actionLogList}>{error ? <Text style={styles.formError}>{error}</Text> : events === undefined ? <ActivityIndicator color={colors.limeDeep} /> : events.length ? events.map((event) => <View key={event.id} style={styles.actionLogDetailRow}><View style={styles.actionLogDetailTop}><Text style={styles.actionLogTitle}>{actionLabel(event.action)}</Text><Text style={styles.actionLogResult}>{actionResultLabel(event.result)}</Text></View><Text style={styles.actionLogDetailMeta}>{actorLabel(event.actor)} · {event.occurredAt.slice(0, 16).replace("T", " ")}</Text>{event.beforeRevision !== undefined || event.afterRevision !== undefined ? <Text style={styles.actionLogDetailMeta}>{mobileT("mobile.ui.productshell.989d1affa0")}{event.beforeRevision ?? "—"} → {event.afterRevision ?? "—"}</Text> : null}{event.reversible && !event.undoneBy ? <Text style={styles.actionLogReversible}>{mobileT("mobile.ui.productshell.c93c3eede8")}</Text> : null}</View>) : <Text style={styles.exerciseEmpty}>{mobileT("mobile.ui.productshell.580aa82639")}</Text>}</ScrollView></View></View>;
 }
 
-type CoachMemoryItem = Awaited<ReturnType<CoachApplication["listMemory"]>>[number];
+type CoachMemoryItem = Awaited<ReturnType<LocalProductKernel["listMemory"]>>[number];
 type CoachMemoryKind = CoachMemoryItem["kind"];
 
 const coachMemoryKinds: readonly { value: CoachMemoryKind; label: string }[] = [
-  { value: "preference", label: "偏好" },
-  { value: "focus", label: "当前重点" },
-  { value: "strategy_note", label: "策略备注" },
-  { value: "open_question", label: "待确认" },
-  { value: "hypothesis", label: "待验证" },
+  { value: "preference", label: mobileT("mobile.ui.productshell.dfdf11c5fd") },
+  { value: "focus", label: mobileT("mobile.ui.productshell.7077b38c75") },
+  { value: "strategy_note", label: mobileT("mobile.ui.productshell.87dee1684e") },
+  { value: "open_question", label: mobileT("mobile.ui.productshell.27b5842c97") },
+  { value: "hypothesis", label: mobileT("mobile.ui.productshell.0b48e4bdd8") },
 ];
 
-function CoachMemoryPanel({ application, userId, onOpen }: { application: CoachApplication; userId: string; onOpen: () => void }) {
+function CoachMemoryPanel({ application, userId, onOpen }: { application: LocalProductKernel; userId: string; onOpen: () => void }) {
   const [items, setItems] = useState<readonly CoachMemoryItem[]>();
   useEffect(() => {
     let active = true;
@@ -2266,15 +1718,15 @@ function CoachMemoryPanel({ application, userId, onOpen }: { application: CoachA
     return () => { active = false; };
   }, [application, userId]);
   const pinned = items?.filter((item) => item.pinned).length ?? 0;
-  return <Pressable accessibilityRole="button" accessibilityLabel="管理 Coach 记忆" onPress={onOpen} style={[styles.profileCard, styles.profileSummaryCard]}>
+  return <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.26b67e0767")} onPress={onOpen} style={[styles.profileCard, styles.profileSummaryCard]}>
     <View style={styles.privacySummaryFooter}>
-      <View style={styles.profileSummaryCopy}><Text style={styles.profileLabel}>本机备忘</Text><Text style={styles.exerciseManagerSub}>不会自动改写资料、Timeline 或计划</Text></View>
-      <Text style={styles.sectionLink}>{items === undefined ? "查看" : `${items.length} 条${pinned ? ` · 已固定 ${pinned}` : ""}`}</Text>
+      <View style={styles.profileSummaryCopy}><Text style={styles.profileLabel}>{mobileT("mobile.ui.productshell.f05e9b346c")}</Text><Text style={styles.exerciseManagerSub}>{mobileT("mobile.ui.productshell.7794925912")}</Text></View>
+      <Text style={styles.sectionLink}>{items === undefined ? mobileT("mobile.ui.productshell.f7acefd2d4") : mobileT("mobile.ui.productshell.3d65202abf", { value0: items.length, value1: pinned ? mobileT("mobile.ui.productshell.09b1520565", { value0: pinned }) : "" })}</Text>
     </View>
   </Pressable>;
 }
 
-function CoachMemorySheet({ application, userId, onDismiss }: { application: CoachApplication; userId: string; onDismiss: () => void }) {
+function CoachMemorySheet({ application, userId, onDismiss }: { application: LocalProductKernel; userId: string; onDismiss: () => void }) {
   const [items, setItems] = useState<readonly CoachMemoryItem[]>();
   const [editing, setEditing] = useState<CoachMemoryItem>();
   const [content, setContent] = useState("");
@@ -2288,7 +1740,7 @@ function CoachMemorySheet({ application, userId, onDismiss }: { application: Coa
       setItems(await application.listMemory(userId));
       setError(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法读取 Coach 记忆");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.ea16c39346")));
     }
   }, [application, userId]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -2299,7 +1751,7 @@ function CoachMemorySheet({ application, userId, onDismiss }: { application: Coa
     setEditing(item); setContent(item.content); setKind(item.kind); setSensitivity(item.sensitivity); setPinned(item.pinned); setError(undefined);
   };
   const save = async () => {
-    if (!content.trim()) { setError("先写下希望 Coach 记住的内容。"); return; }
+    if (!content.trim()) { setError(mobileT("mobile.ui.productshell.8964d6c976")); return; }
     setBusy(true);
     try {
       await application.upsertMemory({
@@ -2316,36 +1768,36 @@ function CoachMemorySheet({ application, userId, onDismiss }: { application: Coa
       resetEditor();
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法保存 Coach 记忆");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.0efec584b7")));
     } finally { setBusy(false); }
   };
   const togglePin = async (item: CoachMemoryItem) => {
     setBusy(true);
     try { await application.setMemoryPinned({ userId, id: item.id, expectedVersion: item.version, pinned: !item.pinned }); await refresh(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "无法更新固定状态"); }
+    catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.400c30157e"))); }
     finally { setBusy(false); }
   };
   const forget = async (item: CoachMemoryItem) => {
     setBusy(true);
     try { await application.forgetMemory({ userId, id: item.id, expectedVersion: item.version }); await refresh(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "无法删除 Coach 记忆"); }
+    catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.32b88ed594"))); }
     finally { setBusy(false); }
   };
   return <View accessibilityViewIsModal style={styles.permissionScrim}>
     <View style={coachMemoryStyles.sheet}>
       <View style={styles.sheetHandle} />
-      <View style={styles.exerciseManagerHeader}><View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>Coach 记忆</Text><Text style={styles.exerciseManagerSub}>这是可管理的本机备忘，不是你的档案、真实经历或自动执行指令。</Text></View><Pressable accessibilityRole="button" accessibilityLabel="关闭 Coach 记忆" onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>完成</Text></Pressable></View>
+      <View style={styles.exerciseManagerHeader}><View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>{mobileT("mobile.ui.productshell.dc9f2a12e0")}</Text><Text style={styles.exerciseManagerSub}>{mobileT("mobile.ui.productshell.2f75cadeb8")}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.2c371f6c82")} onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>{mobileT("mobile.ui.productshell.33246f6a5e")}</Text></Pressable></View>
       <ScrollView contentContainerStyle={coachMemoryStyles.body} keyboardShouldPersistTaps="handled">
         <View style={coachMemoryStyles.editor}>
-          <Text style={coachMemoryStyles.editorTitle}>{editing ? "编辑备忘" : "添加备忘"}</Text>
+          <Text style={coachMemoryStyles.editorTitle}>{editing ? mobileT("mobile.ui.productshell.eb79e220e6") : mobileT("mobile.ui.productshell.8795e8e3d1")}</Text>
           <View style={coachMemoryStyles.kindRow}>{coachMemoryKinds.map((candidate) => <Pressable key={candidate.value} accessibilityRole="radio" accessibilityState={{ selected: kind === candidate.value }} onPress={() => setKind(candidate.value)} style={[coachMemoryStyles.kindChip, kind === candidate.value && coachMemoryStyles.kindChipSelected]}><Text style={[coachMemoryStyles.kindText, kind === candidate.value && coachMemoryStyles.kindTextSelected]}>{candidate.label}</Text></Pressable>)}</View>
-          <TextInput accessibilityLabel="Coach 记忆内容" value={content} onChangeText={setContent} multiline maxLength={1000} placeholder="例如：周末更适合在上午训练" placeholderTextColor={colors.ink3} style={coachMemoryStyles.input} />
-          <View style={coachMemoryStyles.optionRow}><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: pinned }} onPress={() => setPinned((value) => !value)} style={coachMemoryStyles.option}><Text style={coachMemoryStyles.optionMark}>{pinned ? "✓" : "○"}</Text><Text style={coachMemoryStyles.optionText}>固定，Coach 不可覆盖</Text></Pressable><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: sensitivity === "private" }} onPress={() => setSensitivity((value) => value === "private" ? "normal" : "private")} style={coachMemoryStyles.option}><Text style={coachMemoryStyles.optionMark}>{sensitivity === "private" ? "✓" : "○"}</Text><Text style={coachMemoryStyles.optionText}>仅本机私密</Text></Pressable></View>
+          <TextInput accessibilityLabel={mobileT("mobile.ui.productshell.0f76a2a1d0")} value={content} onChangeText={setContent} multiline maxLength={1000} placeholder={mobileT("mobile.ui.productshell.88c310eca5")} placeholderTextColor={colors.ink3} style={coachMemoryStyles.input} />
+          <View style={coachMemoryStyles.optionRow}><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: pinned }} onPress={() => setPinned((value) => !value)} style={coachMemoryStyles.option}><Text style={coachMemoryStyles.optionMark}>{pinned ? "✓" : "○"}</Text><Text style={coachMemoryStyles.optionText}>{mobileT("mobile.ui.productshell.a0f83c64ca")}</Text></Pressable><Pressable accessibilityRole="checkbox" accessibilityState={{ checked: sensitivity === "private" }} onPress={() => setSensitivity((value) => value === "private" ? "normal" : "private")} style={coachMemoryStyles.option}><Text style={coachMemoryStyles.optionMark}>{sensitivity === "private" ? "✓" : "○"}</Text><Text style={coachMemoryStyles.optionText}>{mobileT("mobile.ui.productshell.5ffafdb4ad")}</Text></Pressable></View>
           {error ? <Text style={styles.formError}>{error}</Text> : null}
-          <View style={coachMemoryStyles.editorActions}>{editing ? <Pressable accessibilityRole="button" onPress={resetEditor} style={coachMemoryStyles.cancel}><Text style={coachMemoryStyles.cancelText}>取消编辑</Text></Pressable> : null}<Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()} style={[coachMemoryStyles.save, busy && styles.primaryButtonDisabled]}><Text style={coachMemoryStyles.saveText}>{editing ? "保存修改" : "保存备忘"}</Text></Pressable></View>
+          <View style={coachMemoryStyles.editorActions}>{editing ? <Pressable accessibilityRole="button" onPress={resetEditor} style={coachMemoryStyles.cancel}><Text style={coachMemoryStyles.cancelText}>{mobileT("mobile.ui.productshell.c698df948d")}</Text></Pressable> : null}<Pressable accessibilityRole="button" disabled={busy} onPress={() => void save()} style={[coachMemoryStyles.save, busy && styles.primaryButtonDisabled]}><Text style={coachMemoryStyles.saveText}>{editing ? mobileT("mobile.ui.productshell.60b4ae9082") : mobileT("mobile.ui.productshell.7b788ed201")}</Text></Pressable></View>
         </View>
-        <Text style={coachMemoryStyles.listTitle}>已保存</Text>
-        {items === undefined ? <ActivityIndicator color={colors.limeDeep} /> : items.length ? items.map((item) => <View key={item.id} style={coachMemoryStyles.item}><View style={coachMemoryStyles.itemHead}><Text style={coachMemoryStyles.itemKind}>{coachMemoryKinds.find((candidate) => candidate.value === item.kind)?.label ?? item.kind}</Text><Text style={coachMemoryStyles.itemMeta}>{item.pinned ? "已固定" : item.provenance.actor === "agent" ? "Coach 整理" : "你记录"}{item.sensitivity === "private" ? " · 私密" : ""}</Text></View><Text style={coachMemoryStyles.itemContent}>{item.content}</Text><View style={coachMemoryStyles.itemActions}><Pressable accessibilityRole="button" disabled={busy} onPress={() => edit(item)}><Text style={coachMemoryStyles.itemActionText}>编辑</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void togglePin(item)}><Text style={coachMemoryStyles.itemActionText}>{item.pinned ? "取消固定" : "固定"}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void forget(item)}><Text style={coachMemoryStyles.deleteText}>删除</Text></Pressable></View></View>) : <Text style={styles.emptyText}>还没有备忘。需要时可以把偏好、当前重点或待确认的问题写在这里。</Text>}
+        <Text style={coachMemoryStyles.listTitle}>{mobileT("mobile.ui.productshell.cdfab96f75")}</Text>
+        {items === undefined ? <ActivityIndicator color={colors.limeDeep} /> : items.length ? items.map((item) => <View key={item.id} style={coachMemoryStyles.item}><View style={coachMemoryStyles.itemHead}><Text style={coachMemoryStyles.itemKind}>{coachMemoryKinds.find((candidate) => candidate.value === item.kind)?.label ?? item.kind}</Text><Text style={coachMemoryStyles.itemMeta}>{item.pinned ? mobileT("mobile.ui.productshell.6301fb5e3c") : item.provenance.actor === "agent" ? mobileT("mobile.ui.productshell.663b821f22") : mobileT("mobile.ui.productshell.5eb3ddd266")}{item.sensitivity === "private" ? mobileT("mobile.ui.productshell.673404b432") : ""}</Text></View><Text style={coachMemoryStyles.itemContent}>{item.content}</Text><View style={coachMemoryStyles.itemActions}><Pressable accessibilityRole="button" disabled={busy} onPress={() => edit(item)}><Text style={coachMemoryStyles.itemActionText}>{mobileT("mobile.ui.productshell.a7f814c0a4")}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void togglePin(item)}><Text style={coachMemoryStyles.itemActionText}>{item.pinned ? mobileT("mobile.ui.productshell.09250f2cdb") : mobileT("mobile.ui.productshell.f34fcf6d32")}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void forget(item)}><Text style={coachMemoryStyles.deleteText}>{mobileT("mobile.ui.productshell.3755f56f2f")}</Text></Pressable></View></View>) : <Text style={styles.emptyText}>{mobileT("mobile.ui.productshell.acc6970cd6")}</Text>}
       </ScrollView>
     </View>
   </View>;
@@ -2367,19 +1819,19 @@ const coachMemoryStyles = StyleSheet.create({
 });
 
 type PermissionSettingsValue = NonNullable<CoachProductProjection["profile"]["permissions"]>;
-type PermissionSettingsKey = Exclude<keyof PermissionSettingsValue, "revision" | "id" | "remoteLlmDisclosure" | "remoteLlm" | "cloudSync">;
+type PermissionSettingsKey = Exclude<keyof PermissionSettingsValue, "revision" | "id" | "remoteLlmDisclosure" | "remoteLlm" | "camera">;
+type PlanAuthorizationValue = NonNullable<CoachProductProjection["profile"]["planAuthorization"]>;
 
 const permissionSettings: readonly { key: PermissionSettingsKey; label: string; description: string }[] = [
-  { key: "camera", label: "相机", description: "只在你主动进入监控或录像时再请求系统相机权限。" },
-  { key: "health", label: "健康数据", description: "可连接系统健康数据；拒绝后仍能手动记录。" },
-  { key: "notifications", label: "提醒", description: "用于本地训练与恢复提醒；系统通知权限会单独确认。" },
-  { key: "mediaUpload", label: "照片分析", description: "每次发送食物图片前都会让你确认；识别结果先是草稿。" },
+  { key: "health", label: mobileT("mobile.ui.productshell.0cd894e993"), description: mobileT("mobile.ui.productshell.b72a76e88c") },
+  { key: "notifications", label: mobileT("mobile.ui.productshell.81944e48a3"), description: mobileT("mobile.ui.productshell.dd2a33cf71") },
 ];
 
-function PermissionSettings({ application, userId, permissions, onDismiss, onUpdated }: { application: CoachApplication; userId: string; permissions: PermissionSettingsValue; onDismiss: () => void; onUpdated: () => void }) {
-  const [busy, setBusy] = useState<PermissionSettingsKey>();
+function PermissionSettings({ application, userId, permissions, planAuthorization, onDismiss, onUpdated }: { application: LocalProductKernel; userId: string; permissions?: PermissionSettingsValue; planAuthorization?: PlanAuthorizationValue; onDismiss: () => void; onUpdated: () => void }) {
+  const [busy, setBusy] = useState<PermissionSettingsKey | "plan_authorization">();
   const [error, setError] = useState<string>();
   const setPermission = async (key: PermissionSettingsKey, value: "granted" | "denied") => {
+    if (!permissions) return;
     setBusy(key);
     let updated = false;
     try {
@@ -2396,7 +1848,7 @@ function PermissionSettings({ application, userId, permissions, onDismiss, onUpd
       });
       updated = true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法更新本地授权");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.be66c9fa8d")));
     } finally {
       setBusy(undefined);
     }
@@ -2405,469 +1857,49 @@ function PermissionSettings({ application, userId, permissions, onDismiss, onUpd
   const toggle = (key: PermissionSettingsKey, enabled: boolean) => {
     void setPermission(key, enabled ? "denied" : "granted");
   };
+  const setPlanAuthorization = async (value: NonNullable<PlanAuthorizationValue["mandate"]["planChangeAuthorization"]>) => {
+    if (!planAuthorization) return;
+    setBusy("plan_authorization");
+    let updated = false;
+    try {
+      const key = `mobile-plan-authorization:${planAuthorization.revision}:${value}:${Date.now().toString(36)}`;
+      await application.updateCoachingMandateFromSettings({
+        userId,
+        mandateId: planAuthorization.mandate.id,
+        expectedRevision: planAuthorization.revision,
+        mandate: { ...planAuthorization.mandate, planChangeAuthorization: value },
+        authorization: { kind: "local_user_presence", verifiedAt: new Date().toISOString(), nonce: key },
+        idempotencyKey: key,
+      });
+      updated = true;
+    } catch (cause) {
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.be66c9fa8d")));
+    } finally {
+      setBusy(undefined);
+    }
+    if (updated) onUpdated();
+  };
   return (
     <View style={styles.permissionScrim}>
       <View style={styles.permissionSheet}>
         <View style={styles.sheetHandle} />
-        <View style={styles.exerciseManagerHeader}><View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>数据与权限</Text><Text style={styles.exerciseManagerSub}>本地授权独立保存。真正启用设备能力时，系统仍会按需再次确认。</Text></View><Pressable accessibilityRole="button" accessibilityLabel="关闭数据与权限" onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>完成</Text></Pressable></View>
+        <View style={styles.exerciseManagerHeader}><View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>{mobileT("mobile.ui.productshell.669bf8c809")}</Text><Text style={styles.exerciseManagerSub}>{mobileT("mobile.ui.productshell.ea4490e111")}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.0163ba8d58")} onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>{mobileT("mobile.ui.productshell.33246f6a5e")}</Text></Pressable></View>
         <ScrollView contentContainerStyle={styles.permissionList}>
-          {permissionSettings.map((setting) => {
+          {permissions ? permissionSettings.map((setting) => {
             const value = permissions[setting.key];
             const enabled = value === "granted";
             return <View key={setting.key} style={styles.permissionRow}><View style={styles.permissionBody}><Text style={styles.permissionTitle}>{setting.label}</Text><Text style={styles.permissionDescription}>{setting.description}</Text></View><Pressable accessibilityRole="switch" accessibilityState={{ checked: enabled, disabled: busy !== undefined }} disabled={busy !== undefined} onPress={() => toggle(setting.key, enabled)} style={[styles.permissionSwitch, enabled && styles.permissionSwitchOn, busy === setting.key && styles.primaryButtonDisabled]}><View style={[styles.permissionKnob, enabled && styles.permissionKnobOn]} /></Pressable></View>;
-          })}
+          }) : null}
+          {planAuthorization ? <View style={styles.permissionBody}>
+            <Text style={styles.permissionTitle}>{mobileT("mobile.profile.planAuthorization.title")}</Text>
+            <Text style={styles.permissionDescription}>{mobileT("mobile.profile.planAuthorization.description")}</Text>
+            <View accessibilityRole="radiogroup" style={coachMemoryStyles.kindRow}>{(["ask_this_time", "always_ask", "allow_once", "allow_similar_small", "deny"] as const).map((authorization) => <Pressable key={authorization} accessibilityRole="radio" accessibilityState={{ checked: planAuthorization.mandate.planChangeAuthorization === authorization, disabled: busy !== undefined }} disabled={busy !== undefined} onPress={() => void setPlanAuthorization(authorization)} style={[coachMemoryStyles.kindChip, planAuthorization.mandate.planChangeAuthorization === authorization && coachMemoryStyles.kindChipSelected]}><Text style={[coachMemoryStyles.kindText, planAuthorization.mandate.planChangeAuthorization === authorization && coachMemoryStyles.kindTextSelected]}>{planAuthorizationLabel(authorization)}</Text></Pressable>)}</View>
+          </View> : null}
           {error ? <Text style={styles.formError}>{error}</Text> : null}
         </ScrollView>
       </View>
     </View>
   );
-}
-
-function OnboardingScreen({ application, cloudConfirmed, userId, entry, messages, onSendConversation, onStartConversation, onAllowRemoteConversation, onCompleted, onProgressSaved }: { application: CoachApplication; cloudConfirmed: ConfirmedProductBridge; userId: string; entry?: OnboardingEntryState; messages: readonly CoachMessage[]; onSendConversation: (text: string, draftId: string) => Promise<void>; onStartConversation: (draftId: string) => Promise<void>; onAllowRemoteConversation: (draftId: string) => Promise<void>; onCompleted: () => void; onProgressSaved: () => void }) {
-  const [baselineIntake, setBaselineIntake] = useState<BaselineIntakeValues>({ ...EMPTY_BASELINE_INTAKE });
-  const [baselineSubmitted, setBaselineSubmitted] = useState(false);
-  const [baselineSaving, setBaselineSaving] = useState(false);
-  const [dynamicCard, setDynamicCard] = useState<DynamicFormCard>();
-  const [dynamicValues, setDynamicValues] = useState<DynamicOnboardingFormValues>();
-  const [dynamicUnknownFields, setDynamicUnknownFields] = useState<ReadonlySet<string>>(new Set());
-  const [dynamicLoading, setDynamicLoading] = useState(false);
-  const [dynamicSaving, setDynamicSaving] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string>();
-  const onboardingDraftId = useRef<string | undefined>(entry?.draft?.id);
-  const dynamicRequestFrontier = useRef<string | undefined>(undefined);
-  const [dossierSummary, setDossierSummary] = useState<import("../../onboarding").OnboardingDossierSummary>();
-  const [firstPlan, setFirstPlan] = useState<FirstPlannerHandoffProposal>();
-  const [conversationText, setConversationText] = useState("");
-  const [conversationSending, setConversationSending] = useState(false);
-  const [remotePermissionNeeded, setRemotePermissionNeeded] = useState(false);
-  const latestAssessment = entry?.draft?.coachingLevelAssessments?.at(-1);
-  const assessmentHasEvidence = Boolean(
-    latestAssessment && Object.values(latestAssessment.dimensions).some((dimension) => dimension.supportingEvidence.length > 0),
-  );
-  useEffect(() => {
-    if (entry?.draft?.id) onboardingDraftId.current = entry.draft.id;
-  }, [entry?.draft?.id]);
-  useEffect(() => {
-    const baseline = entry?.draft?.patch.baseline;
-    if (!baseline) return;
-    setBaselineIntake({
-      ageYears: baseline.age ? String(baseline.age.ageYears) : "",
-      heightCm: baseline.height ? String(baseline.height.value.value) : "",
-      currentWeightKg: baseline.currentWeight ? String(baseline.currentWeight.value.value) : "",
-      goalNarrative: baseline.goalNarrative?.text ?? "",
-    });
-    if (entry?.draft?.baselineMissingFields.length === 0) setBaselineSubmitted(true);
-  }, [entry]);
-  useEffect(() => {
-    const draft = entry?.draft;
-    const requestFrontier = draft ? `${draft.id}:${draft.revision}` : undefined;
-    if (!draft || draft.baselineMissingFields.length > 0 || dynamicCard || dynamicLoading || dynamicRequestFrontier.current === requestFrontier) return;
-    dynamicRequestFrontier.current = requestFrontier;
-    setDynamicLoading(true);
-    void application.readActiveOnboardingDynamicForm({ draftId: draft.id }).then((card) => {
-      if (!card) return;
-      setDynamicCard(card);
-      setDynamicValues(createDynamicOnboardingFormValues(card));
-      setDynamicUnknownFields(new Set());
-    }).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "暂时没能准备好下一步。请再试一次。");
-    }).finally(() => setDynamicLoading(false));
-  }, [application, dynamicCard, dynamicLoading, entry]);
-  const saveBaseline = async (values: BaselineIntakeValues) => {
-    const observedAt = new Date().toISOString();
-    const submissionId = `baseline-card:${userId}:${observedAt}`;
-    setBaselineSaving(true);
-    setError(undefined);
-    try {
-      const draft = await application.startOrResumeBaselineIntake({ userId });
-      onboardingDraftId.current = draft.id;
-      await application.saveBaselineIntake({
-        draftId: draft.id,
-        inputMode: "form",
-        idempotencyKey: submissionId,
-        values: {
-          age: { ageYears: Number(values.ageYears.trim()), observedAt, source: { kind: "form_submission", submissionId } },
-          height: { value: { value: Number(values.heightCm.trim()), unit: "cm" }, observedAt, source: { kind: "form_submission", submissionId } },
-          currentWeight: { value: { value: Number(values.currentWeightKg.trim()), unit: "kg" }, observedAt, source: { kind: "form_submission", submissionId } },
-          goalNarrative: { text: values.goalNarrative.trim(), observedAt, source: { kind: "form_submission", submissionId } },
-        },
-      });
-      setBaselineSubmitted(true);
-      try {
-        await onStartConversation(draft.id);
-      } catch (cause) {
-        if (cause instanceof Error && cause.message === "remote_llm_permission_required") {
-          setRemotePermissionNeeded(true);
-        } else {
-          throw cause;
-        }
-      }
-      onProgressSaved();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "这几个信息还需要再确认一下。");
-    } finally {
-      setBaselineSaving(false);
-    }
-  };
-  const sendOnboardingConversation = async () => {
-    const draftId = entry?.draft?.id ?? onboardingDraftId.current;
-    const text = conversationText.trim();
-    if (!draftId || !text) return;
-    setConversationSending(true);
-    setError(undefined);
-    try {
-      await onSendConversation(text, draftId);
-      setConversationText("");
-      onProgressSaved();
-    } catch (cause) {
-      if (cause instanceof Error && cause.message === "remote_llm_permission_required") {
-        setRemotePermissionNeeded(true);
-      } else {
-        setError(cause instanceof Error ? cause.message : "这段话暂时没能写入对话。请再试一次。");
-      }
-    } finally {
-      setConversationSending(false);
-    }
-  };
-  const allowRemoteConversation = async () => {
-    const draftId = entry?.draft?.id ?? onboardingDraftId.current;
-    if (!draftId) return;
-    setConversationSending(true);
-    setError(undefined);
-    try {
-      await onAllowRemoteConversation(draftId);
-      setRemotePermissionNeeded(false);
-      await onStartConversation(draftId);
-      onProgressSaved();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时没能开启这段对话。请再试一次。");
-    } finally {
-      setConversationSending(false);
-    }
-  };
-  const submitDynamicCard = async (values: DynamicOnboardingFormValues) => {
-    if (!dynamicCard) return;
-    const draftId = entry?.draft?.id ?? onboardingDraftId.current ?? "";
-    setDynamicSaving(true);
-    setError(undefined);
-    try {
-      const answeredFieldIds = answeredDynamicOnboardingFormFieldIds(dynamicCard, values, dynamicUnknownFields);
-      if (!answeredFieldIds.length) throw new Error("请填写至少一项，或明确选择暂不填写。");
-      const answers: DynamicFormAnswer[] = answeredFieldIds.map((fieldId) => dynamicUnknownFields.has(fieldId)
-        ? { fieldId, state: "explicit_unknown" }
-        : { fieldId, state: "captured_explicit", value: dynamicFormValueToDomain(values[fieldId]) });
-      await application.submitOnboardingDynamicForm({
-        draftId,
-        cardId: dynamicCard.cardId,
-        expectedDraftRevision: dynamicCard.draftRevision,
-        answers,
-        idempotencyKey: `mobile-onboarding:${dynamicCard.cardId}:submit`,
-      });
-      setDynamicCard(undefined);
-      setDynamicValues(undefined);
-      setDynamicUnknownFields(new Set());
-      await onStartConversation(draftId);
-      onProgressSaved();
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "这组信息还需要再确认一下。";
-      setError(message);
-      if (message === "stale_dynamic_form") {
-        setDynamicCard(undefined);
-        setDynamicValues(undefined);
-        setDynamicUnknownFields(new Set());
-        onProgressSaved();
-      }
-    } finally {
-      setDynamicSaving(false);
-    }
-  };
-  const prepareDossierConfirmation = async () => {
-    const draftId = entry?.draft?.id ?? onboardingDraftId.current;
-    if (!draftId) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      setDossierSummary(await application.readOnboardingDossierSummary({ draftId }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法整理档案。");
-    } finally {
-      setSaving(false);
-    }
-  };
-  const confirmDossier = async () => {
-    if (!dossierSummary) return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      const staged = await application.stageOnboardingDossierConfirmation({
-        userId,
-        draftId: dossierSummary.draftId,
-        expectedDraftRevision: dossierSummary.draftRevision,
-        expectedFactFrontier: dossierSummary.confirmation.factFrontier,
-        idempotencyKey: `mobile-onboarding:${dossierSummary.draftId}:confirm-dossier`,
-      });
-      await cloudConfirmed.patchProfileThen({
-        patch: { data: createCloudProfileRecoverySnapshot(staged.domain) },
-        idempotencyKey: `mobile-onboarding:${dossierSummary.draftId}:profile-recovery`,
-        commitLocal: () => staged.commitAcknowledged(),
-      });
-      const handoff = await application.createFirstPlannerHandoff({
-        userId,
-        draftId: dossierSummary.draftId,
-        currentDate: localDate(),
-        idempotencyKey: `mobile-onboarding:${dossierSummary.draftId}:first-plan`,
-      });
-      setDossierSummary(undefined);
-      setFirstPlan(handoff);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "档案有更新，请重新确认。");
-      setDossierSummary(undefined);
-      onProgressSaved();
-    } finally {
-      setSaving(false);
-    }
-  };
-  const confirmFirstPlan = async () => {
-    if (!firstPlan || firstPlan.status !== "awaiting_confirmation") return;
-    setSaving(true);
-    setError(undefined);
-    try {
-      await application.confirmFirstPlannerHandoff({
-        userId,
-        proposalId: firstPlan.id,
-        idempotencyKey: `mobile-onboarding:${firstPlan.id}:confirm`,
-      });
-      onCompleted();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "计划已变化，请重新检查。");
-    } finally {
-      setSaving(false);
-    }
-  };
-  if (!baselineSubmitted) {
-    return <ScrollView contentContainerStyle={styles.onboardingContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.onboardingHero}>
-        <View style={styles.onboardingHeroTop}><Text style={styles.onboardingKicker}>从这里开始</Text><Text style={styles.onboardingStep}>01</Text></View>
-        <Text style={styles.onboardingHeroTitle}>说说你现在{`\n`}和想去的地方。</Text>
-        <Text style={styles.onboardingHeroCopy}>先给我四个基本信息。接下来我会按你的目标继续了解，不让你填一长串问卷。</Text>
-        <View style={styles.onboardingProgress}><View style={styles.onboardingProgressOn} /><View style={styles.onboardingProgressOff} /></View>
-      </View>
-      <BaselineIntakeCard
-        value={baselineIntake}
-        disabled={baselineSaving}
-        onChange={(field, value) => setBaselineIntake((current) => ({ ...current, [field]: value }))}
-        onContinue={(value) => void saveBaseline(value)}
-      />
-      {error ? <Text style={styles.formError}>{error}</Text> : null}
-    </ScrollView>;
-  }
-  if (baselineSubmitted && !dossierSummary && !firstPlan) {
-    return <ScrollView contentContainerStyle={styles.onboardingContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.onboardingHero}>
-        <View style={styles.onboardingHeroTop}><Text style={styles.onboardingKicker}>已记下</Text><Text style={styles.onboardingStep}>02</Text></View>
-        <Text style={styles.onboardingHeroTitle}>这就够开始了。</Text>
-        <Text style={styles.onboardingHeroCopy}>我会先根据你的目标整理下一步真正需要了解的内容；已经说过的，不会再让你重复回答。</Text>
-      </View>
-      {remotePermissionNeeded ? <View style={styles.quickChoiceCard}>
-        <Text style={styles.quickChoiceTitle}>继续前，确认是否使用联网对话。</Text>
-        <Text style={styles.quickChoiceHint}>联网时会把建立档案所需的训练、目标和基础身体信息发给对话服务；不包含姓名或联系方式。</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="允许使用联网对话并继续" disabled={conversationSending} onPress={() => void allowRemoteConversation()} style={[styles.onboardingButton, conversationSending && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{conversationSending ? "正在开启…" : "允许并继续"}</Text><Text style={styles.onboardingButtonArrow}>→</Text></Pressable>
-      </View> : dynamicCard && dynamicValues ? <DynamicOnboardingFormCard
-        card={dynamicCard}
-        value={dynamicValues}
-        disabled={dynamicSaving}
-        onChange={(fieldId, value) => {
-          setDynamicUnknownFields((current) => {
-            const next = new Set(current);
-            next.delete(fieldId);
-            return next;
-          });
-          setDynamicValues((current) => current ? updateDynamicOnboardingFormValue(dynamicCard, current, fieldId, value) : current);
-        }}
-        onExplicitUnknown={(fieldId) => setDynamicUnknownFields((current) => new Set([...current, fieldId]))}
-        onSubmit={(values) => void submitDynamicCard(values)}
-      /> : <View style={styles.quickChoiceCard}>
-        <Text style={styles.quickChoiceTitle}>{dynamicLoading ? "我在整理下一步。" : "接下来继续这一段对话。"}</Text>
-        {messages.slice(-3).map((message) => <ProfessionalTermText key={message.id} text={message.content} prefix={message.role === "assistant" ? "我：" : "你："} style={styles.quickChoiceHint} />)}
-        <TextInput accessibilityLabel="补充你的训练情况" value={conversationText} onChangeText={setConversationText} editable={!conversationSending} multiline placeholder="比如：我练了两年，一周四练，最近胸背腿肩，健身房训练。" placeholderTextColor={colors.ink3} style={styles.onboardingInput} />
-        <Pressable accessibilityRole="button" accessibilityLabel="发送建档对话" disabled={conversationSending || !conversationText.trim()} onPress={() => void sendOnboardingConversation()} style={[styles.onboardingButton, (conversationSending || !conversationText.trim()) && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{conversationSending ? "正在整理…" : "继续"}</Text><Text style={styles.onboardingButtonArrow}>→</Text></Pressable>
-      </View>}
-      {!remotePermissionNeeded && !dynamicCard && !dynamicLoading && assessmentHasEvidence ? <Pressable accessibilityRole="button" accessibilityLabel="查看档案摘要" disabled={saving} onPress={() => void prepareDossierConfirmation()} style={[styles.onboardingButton, saving && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{saving ? "正在整理…" : "查看档案摘要"}</Text><Text style={styles.onboardingButtonArrow}>→</Text></Pressable> : null}
-      {!remotePermissionNeeded && !dynamicCard && !dynamicLoading && !assessmentHasEvidence ? <Text style={styles.quickChoiceHint}>我还需要从你的描述里确认一点训练背景，才会整理档案；不会用默认等级替代。</Text> : null}
-      {error ? <Text style={styles.formError}>{error}</Text> : null}
-    </ScrollView>;
-  }
-  if (dossierSummary) return (
-    <ScrollView contentContainerStyle={styles.onboardingContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.onboardingHero}><View style={styles.onboardingHeroTop}><Text style={styles.onboardingKicker}>确认档案</Text><Text style={styles.onboardingStep}>03</Text></View><Text style={styles.onboardingHeroTitle}>这是我目前理解的你。</Text><Text style={styles.onboardingHeroCopy}>确认后才会建立正式档案；训练计划仍会单独交给你确认。</Text></View>
-      <View style={styles.quickChoiceCard}>
-        <Text style={styles.quickChoiceTitle}>{dossierSummary.userFacts.baseline?.goalNarrative?.text}</Text>
-        <Text style={styles.quickChoiceHint}>年龄 {dossierSummary.userFacts.baseline?.age?.ageYears} · 身高 {dossierSummary.userFacts.baseline?.height?.value.value} cm · 体重 {dossierSummary.userFacts.baseline?.currentWeight?.value.value} kg</Text>
-        {dossierSummary.trainingBackground?.recentSplit?.length ? <Text style={styles.quickChoiceHint}>近期训练：{dossierSummary.trainingBackground.recentSplit.join(" / ")}</Text> : null}
-        <Text style={styles.quickChoiceHint}>训练评估：{dossierSummary.coachingLevelAssessment ? "已根据你的训练记录整理，仍可继续校准" : "还没有足够记录，不会替你判断水平"}</Text>
-        <Text style={styles.quickChoiceHint}>当前状态：{dossierSummary.readiness.status === "active" ? "可以按受影响部位调整训练" : dossierSummary.readiness.status === "unassessed" ? "尚未做当日恢复确认" : "恢复信息需要更新"}</Text>
-        <Text style={styles.quickChoiceHint}>安全状态：{dossierSummary.safety.status === "restricted" ? "有活动限制，会先保守处理" : dossierSummary.safety.status === "stop_signal" ? "需暂停并寻求专业帮助" : dossierSummary.safety.status === "explicitly_unknown" ? "限制情况暂不确定" : "尚未声明限制"}</Text>
-        <Text style={styles.quickChoiceHint}>调整方式：{dossierSummary.authorization.mandate?.mode === "manual" ? "所有计划变化先由你确认" : "尚未设置"}</Text>
-        {Object.values(dossierSummary.userFacts.dynamicFields ?? {}).filter((field) => field.state === "normalized_needs_review").map((field) => <Text key={field.fieldId} style={styles.quickChoiceHint}>待你确认：{field.fieldId} · {typeof field.value === "string" ? field.value : JSON.stringify(field.value)}</Text>)}
-        {dossierSummary.unknowns.length ? <Text style={styles.quickChoiceHint}>暂未确认：{dossierSummary.unknowns.join("、")}</Text> : null}
-        {dossierSummary.limitedActions.length ? <Text style={styles.quickChoiceHint}>暂不自动处理：{dossierSummary.limitedActions.join("、")}</Text> : null}
-      </View>
-      {error ? <Text style={styles.formError}>{error}</Text> : null}
-      <Pressable accessibilityRole="button" accessibilityLabel="确认我的档案" disabled={saving} onPress={() => void confirmDossier()} style={[styles.onboardingButton, saving && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{saving ? "正在保存档案…" : "确认我的档案"}</Text><Text style={styles.onboardingButtonArrow}>→</Text></Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel="返回继续修改档案" disabled={saving} onPress={() => setDossierSummary(undefined)} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>返回继续修改</Text></Pressable>
-    </ScrollView>
-  );
-  if (firstPlan) return (
-    <ScrollView contentContainerStyle={styles.onboardingContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.onboardingHero}>
-        <View style={styles.onboardingHeroTop}><Text style={styles.onboardingKicker}>首次计划</Text><Text style={styles.onboardingStep}>04</Text></View>
-        <Text style={styles.onboardingHeroTitle}>{firstPlan.status === "needs_input" ? "先校准，不猜。" : "这是第一版安排。"}</Text>
-        <Text style={styles.onboardingHeroCopy}>{firstPlan.status === "needs_input" ? "还缺少会改变训练安排的信息。补齐后再给你第一版，不会用默认水平代替。" : "这是可执行的起点。确认后才会成为你的活动计划，之后会按记录和恢复继续调整。"}</Text>
-      </View>
-      {firstPlan.status === "needs_input" ? <View style={styles.quickChoiceCard}>
-        <Text style={styles.quickChoiceTitle}>还需要确认</Text>
-        {firstPlan.needsInput.map((item) => <Text key={item} style={styles.quickChoiceHint}>· {item}</Text>)}
-      </View> : <View style={styles.quickChoiceCard}>
-        <Text style={styles.quickChoiceTitle}>{firstPlan.plan?.strategy.name ?? "首次训练计划"}</Text>
-        {firstPlan.plan?.week.sessions.map((session) => <Text key={session.id} style={styles.quickChoiceHint}>{session.focus} · {session.exercises.length} 个动作</Text>)}
-        {firstPlan.unknowns.length ? <Text style={styles.quickChoiceHint}>仍待校准：{firstPlan.unknowns.join("、")}</Text> : null}
-      </View>}
-      {error ? <Text style={styles.formError}>{error}</Text> : null}
-      {firstPlan.status === "awaiting_confirmation" ? <Pressable accessibilityRole="button" accessibilityLabel="确认首次训练计划" disabled={saving} onPress={() => void confirmFirstPlan()} style={[styles.onboardingButton, saving && styles.primaryButtonDisabled]}><Text style={styles.onboardingButtonText}>{saving ? "正在确认…" : "确认这版计划"}</Text><Text style={styles.onboardingButtonArrow}>→</Text></Pressable> : <Pressable accessibilityRole="button" accessibilityLabel="返回补充信息" disabled={saving} onPress={() => { const draftId = entry?.draft?.id ?? onboardingDraftId.current; setFirstPlan(undefined); if (draftId) void onStartConversation(draftId).then(onProgressSaved).catch((cause) => setError(cause instanceof Error ? cause.message : "暂时没能继续这段对话。")); }} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>返回补充信息</Text></Pressable>}
-    </ScrollView>
-  );
-}
-
-function PlanningPreviewScreen({ preview, nutritionStrategy, busy, error, locale, onConfirm, onReject, onRecompute }: {
-  preview: EvidenceBriefArtifact;
-  nutritionStrategy?: NutritionStrategyData;
-  busy: boolean;
-  error?: string;
-  /** From profile.locale; falls back to English when unknown. */
-  locale?: string;
-  onConfirm?: () => void;
-  onReject?: () => void;
-  onRecompute: () => void;
-}) {
-  const proposal = preview.planningPreview?.proposal;
-  if (!proposal) {
-    return <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.screenHeader}><View><Text style={styles.screenTitle}>计划预览</Text><Text style={styles.screenSub}>当前事实不足以安全生成路线</Text></View></View>
-      <View style={styles.detailCard}><Text style={styles.detailTitle}>先保留未知</Text>{preview.summary.map((item) => <Text key={item} style={styles.detailMeta}>{item}</Text>)}<Text style={styles.planFootnote}>不会用猜测填入训练能力、重量或维护热量。</Text></View>
-      {error ? <Text style={styles.formError}>{error}</Text> : null}
-      <Pressable accessibilityRole="button" disabled={busy} onPress={onRecompute} style={[styles.primaryButton, busy && styles.primaryButtonDisabled]}><Text style={styles.primaryButtonText}>重新检查</Text></Pressable>
-    </ScrollView>;
-  }
-  const phase = proposal.appliedPhaseStrategy;
-  const report = buildPlanningReportSummary(proposal, locale);
-  const firstWeek = proposal.planRevision.materializedWeeks?.[0];
-  const trainingSessions = firstWeek?.sessions.filter((session) => session.kind !== "rest" && session.tasks.length > 0) ?? [];
-  const strengthBaselineNeedsSetContext = proposal.missing.includes("strength_baseline_missing_reps_rir");
-  const protein = nutritionStrategy?.macronutrientTargets?.proteinGrams;
-  const hasProteinTarget = Boolean(protein && protein.max > 0);
-  const energyRange = nutritionStrategy?.calorieRange;
-  const rollingEnergy = proposal.planRevision.rollingEnergyAdjustment;
-  const recoveryAdjustment = preview.planningPreview?.request.trigger === "recovery_downgraded";
-  const riskAdjustment = Boolean(preview.planningPreview?.sourceRiskEvaluationId);
-  const recoverySession = recoveryAdjustment ? trainingSessions[0] : undefined;
-  const recoveryFirstSet = recoverySession?.tasks.flatMap((task) => task.sets)[0];
-  const rebalanceIsEstimate = rollingEnergy?.surplusSource === "description_estimate" || rollingEnergy?.surplusSource === "mixed";
-  const rebalanceRange = rollingEnergy?.estimatedSurplusRangeKcal;
-  const rebalanceActionKcal = rollingEnergy?.plannedAdditionalExpenditureKcal ?? 0;
-  const rebalanceRemainingKcal = rollingEnergy?.remainingSurplusKcal ?? 0;
-  const firstRebalanceAction = rollingEnergy?.actions[0];
-  const rebalanceActivityText = firstRebalanceAction
-    ? firstRebalanceAction.extraLowImpactCardioMinutes > 0
-      ? `每次增加 ${firstRebalanceAction.extraLowImpactCardioMinutes} 分钟快走，并多走 ${firstRebalanceAction.extraSteps} 步`
-      : `课程已占满，不强塞有氧；在恢复正常时多走 ${firstRebalanceAction.extraSteps} 步`
-    : "当前没有可安全增加的活动时段";
-  return <ScrollView contentContainerStyle={styles.reportContent} showsVerticalScrollIndicator={false}>
-    <View style={styles.reportCover}>
-      <View style={styles.reportCoverTop}><Text style={styles.reportKicker}>MAXPOWER / TRAINING BRIEF</Text><View style={styles.reportStatus}><View style={styles.reportStatusDot} /><Text style={styles.reportStatusText}>{preview.planningPreview?.status === "awaiting_confirmation" ? "待确认" : preview.planningPreview?.status === "stale" ? "需重算" : "未启用"}</Text></View></View>
-      <Text style={styles.reportCoverLabel}>{recoveryAdjustment ? "下一次训练调整" : riskAdjustment ? "根据最新记录的未来调整" : "你的起始路线"}</Text>
-      <Text style={styles.reportCoverTitle}>{recoveryAdjustment ? "保守肩日" : riskAdjustment ? "把计划拉回目标路径" : strategyName(proposal.strategySelection?.primary ?? "unknown", locale)}</Text>
-      <Text style={styles.reportCoverCopy}>{recoveryAdjustment ? "睡眠欠佳、腿部仍酸而上肢可用：下一节换为肩部训练，降低工作量并取消练后有氧。" : riskAdjustment ? "最新记录使原定进度需要复核；这里仅比较未来可执行的调整，确认前当前计划保持不变。" : phase ? planningPhrase(phase.objective, locale) : "根据你确认的目标、时间和训练环境生成。"}</Text>
-      <View style={styles.reportMetricGrid}>
-        <ReportMetric value={`${report.trainingDays} 天`} label="每周训练" />
-        <ReportMetric value={report.sessionDurationMinutes ? `${report.sessionDurationMinutes} 分` : "按日调整"} label="单次预算" />
-        <ReportMetric value={report.phaseDuration} label="首个阶段" />
-      </View>
-    <View style={styles.reportConfidenceRow}><Text style={styles.reportConfidence}>起始置信度 {report.confidencePercent}%</Text><Text style={styles.reportConfidenceMeta}>· 记录越完整，后续计划越具体</Text></View>
-    </View>
-
-    {recoveryAdjustment ? <View style={styles.reportCalibration}>
-      <Text style={styles.reportCalibrationTitle}>这次实际会怎么调整</Text>
-      <ProfessionalTermText text={`下一节改为 ${recoverySession ? readablePlanSessionTitle(recoverySession.title) : "肩部训练"}；本次以 ${recoveryFirstSet?.targetRirRange ? `RIR ${recoveryFirstSet.targetRirRange.min}–${recoveryFirstSet.targetRirRange.max}` : "更保守的余力"} 完成，组间休息 ${recoveryFirstSet?.rest?.unit === "seconds" ? `${recoveryFirstSet.rest.value} 秒` : "按动作提示"}，不安排练后有氧。确认前，当前版本不变。`} style={styles.reportCalibrationCopy} />
-    </View> : null}
-
-    <ReportSectionHeading index="01" title={recoveryAdjustment ? "调整后的训练安排" : "首周训练计划"} subtitle={report.weekRange ? `${report.weekRange} · ${report.totalWorkSets} 个力量训练工作组` : "当前周安排"} />
-    <View style={styles.weekStrip}>{report.sessions.map((session) => <View key={session.id} style={[styles.weekStripDay, session.kind === "training" && styles.weekStripDayOn]}><Text style={[styles.weekStripLabel, session.kind === "training" && styles.weekStripLabelOn]}>{session.dayLabel.slice(1)}</Text><View style={[styles.weekStripDot, session.kind === "training" && styles.weekStripDotOn]} /><Text style={[styles.weekStripDate, session.kind === "training" && styles.weekStripDateOn]}>{Number(session.date.slice(-2))}</Text></View>)}</View>
-    {trainingSessions.map((session, index) => <View key={session.id} style={styles.reportSessionCard}>
-      <View style={styles.reportSessionTop}><View><Text style={styles.reportSessionDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.reportSessionTitle}>{readablePlanSessionTitle(session.title)}</Text></View><Text style={styles.reportSessionOrdinal}>{String(index + 1).padStart(2, "0")}</Text></View>
-      <View style={styles.reportTaskList}>{session.tasks.map((task) => <View key={task.id} style={styles.reportTaskRow}><View style={styles.reportTaskBullet} /><Text numberOfLines={1} style={styles.reportTaskName}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.reportTaskDose}>{planTaskDose(task)}</Text></View>)}</View>
-      {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? "力量完成后有氧" : "独立有氧"} · {session.aerobicBlock.minutes} 分钟</Text><ProfessionalTermText text={`RPE ${session.aerobicBlock.targetRpe.min}–${session.aerobicBlock.targetRpe.max} · ${session.aerobicBlock.talkTest} ${session.aerobicBlock.fastedEligible ? "空腹仅可按偏好选择，不增加减脂承诺。" : "本计划不安排空腹有氧。"}`} style={styles.reportAerobicCopy} />{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
-      <Text style={styles.reportSessionFoot}>{session.estimatedDuration?.unit === "minutes" ? `预计 ${session.estimatedDuration.value} 分钟${session.durationBudget?.unit === "minutes" ? ` · 可用最多 ${session.durationBudget.value} 分钟` : ""}` : session.durationBudget?.unit === "minutes" ? `可用最多 ${session.durationBudget.value} 分钟` : "按完成质量调整时长"} · {session.kind === "cardio" ? "以能稳定完成的强度为准" : strengthBaselineNeedsSetContext ? "已读取力量参考；首场确认最近工作组的次数与余力" : "工作重量从可控热身逐步确认"}</Text>
-    </View>)}
-    <View style={styles.reportRuleCard}><Text style={styles.reportRuleEyebrow}>如何进阶</Text>{(proposal.trainingStrategy?.progression ?? []).map((rule) => <ReportBullet key={rule} text={planningPhrase(rule, locale)} />)}{(proposal.trainingStrategy?.recoveryRules ?? []).map((rule) => <ReportBullet key={rule} text={planningPhrase(rule, locale)} tone="guard" />)}</View>
-
-    <ReportSectionHeading index="02" title="每日摄入计划" subtitle="先建立可执行基线，再用真实趋势校准" />
-    <View style={styles.nutritionReportCard}>
-      <View style={styles.nutritionReportMetrics}>
-        <View style={styles.nutritionReportMetric}><Text style={styles.nutritionReportValue}>{energyRange ? `${Math.round(energyRange.min.value)}–${Math.round(energyRange.max.value)}` : "7 天基线"}</Text><Text style={styles.nutritionReportLabel}>{energyRange ? "kcal / 天" : "热量策略"}</Text></View>
-        <View style={styles.nutritionReportDivider} />
-        <View style={styles.nutritionReportMetric}><Text style={styles.nutritionReportValue}>{hasProteinTarget ? `${protein!.min}–${protein!.max} g` : "每餐有蛋白"}</Text><Text style={styles.nutritionReportLabel}>蛋白质</Text></View>
-      </View>
-      {!energyRange ? <View style={styles.reportCalibration}><Text style={styles.reportCalibrationTitle}>为什么没有硬填一个热量数字？</Text><Text style={styles.reportCalibrationCopy}>你还没有提供足够的维持热量输入。前 7 天按平常吃法完成至少 3 个完整日记录，系统再结合体重趋势给出可复核的范围。</Text></View> : <View style={styles.reportCalibration}><Text style={styles.reportCalibrationTitle}>这是起始估算，不是测得消耗</Text><Text style={styles.reportCalibrationCopy}>确认后，摄入 Tab 会把周均目标分配到训练日与休息日；已确认的额外运动只增加一笔最多 200 kcal 的保守补给。两周后再用饮食与同条件体重趋势校准。</Text></View>}
-      {rollingEnergy?.status === "gentle_rebalance" ? <View style={styles.reportCalibration}><Text style={styles.reportCalibrationTitle}>{rebalanceIsEstimate ? "聚餐后的暂估回调 · 待你确认" : "已记录聚餐后的温和回调 · 待你确认"}</Text><Text style={styles.reportCalibrationCopy}>{rebalanceIsEstimate ? `你上报了“吃多/聚餐”但没有热量；Planner 按高于计划约 ${rebalanceRange?.min ?? 0}–${rebalanceRange?.max ?? 0} kcal 的保守范围暂估，补录热量后会自动改用真实差额。` : `最近量化记录相对计划多出约 ${rollingEnergy.unrecoveredSurplusKcal} kcal；已按这个差额计算后续活动量。`} 接下来 {rollingEnergy.horizonDays} 个可用时段，{rebalanceActivityText}，预计先分摊约 {rebalanceActionKcal} kcal；仍有约 {rebalanceRemainingKcal} kcal 留给后续趋势复核。只在恢复正常时执行，不以空腹、间歇或加练腿部来硬抵消。若选择保留原计划，不代表失败，但本周预计赤字会少约 {rollingEnergy.unrecoveredSurplusKcal} kcal、进度会相应放慢；保持下一餐正常、完成下一次训练，仍然比极端节食更能把计划拉回正轨。</Text></View> : null}
-      <View style={styles.intakeSteps}>
-        <IntakeStep index="1" title="每天分成 3–4 餐" detail={hasProteinTarget ? `把 ${protein!.min}–${protein!.max} g 蛋白质平均分配，优先来自正餐。` : "每餐安排一个明确蛋白质来源；补充体重后会换算为克数。"} />
-        <IntakeStep index="2" title="训练前后安排主食" detail="把更容易消化的碳水放在训练前后；休息日不因一次漏练自动大幅减餐。" />
-        <IntakeStep index="3" title="保留脂肪与蔬果底线" detail={`脂肪不低于总能量的 ${nutritionStrategy?.macronutrientTargets?.fatEnergyFloorPercent ?? 20}%，其余空间按饥饿、消化和训练表现调整。`} />
-        <IntakeStep index="4" title="两周做第一次复核" detail={`在 ${nutritionStrategy?.reviewWindow?.endsAt ?? report.reviewAt} 前记录至少 3 次同条件体重，不用单日波动改方向。`} />
-      </View>
-    </View>
-
-    <ReportSectionHeading index="03" title="为什么这样安排" subtitle="训练、营养与恢复使用同一组边界" />
-    <View style={styles.strategyStack}>
-      <StrategyReportCard mark="T" title="训练" copy={planningPhrase(proposal.trainingStrategy?.objective ?? "progress_with_recovery_budget", locale)} />
-      <StrategyReportCard mark="N" title="营养" copy={planningPhrase(proposal.nutritionStrategy?.objective ?? "support_goal_while_observing_real_intake", locale)} />
-      <StrategyReportCard mark="R" title="恢复" copy={planningPhrase(proposal.recoveryStrategy?.objective ?? "keep_daily_variation inside a safe next-session boundary", locale)} />
-    </View>
-    {proposal.explanation ? <View style={styles.reportEvidenceCard}>
-      <Text style={styles.reportRuleEyebrow}>你的事实与决策逻辑</Text>
-      {proposal.explanation.userEvidence.map((item) => <ReportBullet key={item} text={planningPhrase(item, locale)} />)}
-      {proposal.explanation.ruleReason.map((item) => <ReportBullet key={item} text={planningPhrase(item, locale)} />)}
-    </View> : null}
-
-    <ReportSectionHeading index="04" title="三条推进路径" subtitle="日期是复核窗口，不是结果保证" />
-    <View style={styles.forecastStack}>{(proposal.adaptiveForecasts ?? []).map((forecast) => <View key={forecast.scenario} style={[styles.forecastReportCard, forecast.scenario === "balanced" && styles.forecastReportCardRecommended]}>
-      <View style={styles.forecastReportTop}><View><Text style={styles.forecastReportTitle}>{forecastName(forecast.scenario, locale)}</Text><Text style={styles.forecastReportEligibility}>{forecastEligibility(forecast.eligibility, locale)}</Text></View>{forecast.scenario === "balanced" ? <Text style={styles.forecastRecommended}>推荐</Text> : null}</View>
-      <Text style={styles.forecastReportDate}>{shortDate(forecast.earliest)}—{shortDate(forecast.latest)}</Text>
-      <Text style={styles.forecastReportMeta}>需要：{forecast.executionRequirements.map((value) => planningPhrase(value, locale)).join("；")}</Text>
-      <Text style={styles.forecastReportMeta}>取舍：{forecast.tradeoffs.map((value) => planningPhrase(value, locale)).join("；")}</Text>
-      <Text style={styles.forecastReportConfidence}>可信区间 {Math.round(forecast.confidence.min * 100)}–{Math.round(forecast.confidence.max * 100)}% · {shortDate(forecast.recalibrateAt)} 复核</Text>
-    </View>)}</View>
-
-    <ReportSectionHeading index="05" title="未知项与证据边界" subtitle="不知道的内容不会被模型猜测" />
-    <View style={styles.reportUnknownCard}>
-      {report.missingFacts.map((item) => <ReportBullet key={item} text={item} tone="unknown" />)}
-      {proposal.explanation?.researchEvidence.map((citation) => <View key={citation.citationId} style={styles.reportCitation}><Text style={styles.reportCitationTitle}>本地知识版本 · {citation.citationId}</Text><Text style={styles.reportCitationCopy}>{citation.claim}。适用范围：{planningPhrase(citation.population, locale)}；局限：{citation.limitation}。</Text></View>)}
-      <Text style={styles.reportBoundary}>这份报告由本地规则引擎从你确认的资料生成；LLM 负责解释和交互，不可自行改写训练计划或补造热量、重量与身体事实。</Text>
-    </View>
-    {error ? <Text style={styles.formError}>{error}</Text> : null}
-    {preview.planningPreview?.status === "awaiting_confirmation" && onConfirm ? <Pressable accessibilityRole="button" accessibilityLabel={rollingEnergy?.status === "gentle_rebalance" ? "确认这次温和回调" : recoveryAdjustment ? "确认这次肩日调整" : riskAdjustment ? "确认这份后续调整" : "接受报告并创建第一周"} disabled={busy} onPress={onConfirm} style={[styles.reportConfirmButton, busy && styles.primaryButtonDisabled]}><Text style={styles.reportConfirmText}>{busy ? "正在创建第一周…" : rollingEnergy?.status === "gentle_rebalance" ? "确认这次温和回调" : recoveryAdjustment ? "确认这次肩日调整" : riskAdjustment ? "确认这份后续调整" : "接受报告并创建第一周"}</Text><Text style={styles.reportConfirmArrow}>→</Text></Pressable> : null}
-    <Pressable accessibilityRole="button" accessibilityLabel="根据最新资料重新分析" disabled={busy} onPress={onRecompute} style={styles.reportSecondaryButton}><Text style={styles.reportSecondaryText}>资料有变化，重新分析</Text></Pressable>
-    {preview.planningPreview?.status === "awaiting_confirmation" && onReject ? <Pressable accessibilityRole="button" accessibilityLabel="暂不启用计划" disabled={busy} onPress={onReject} style={styles.previewRejectButton}><Text style={styles.previewRejectText}>暂不启用这份计划</Text></Pressable> : null}
-  </ScrollView>;
-}
-
-function OnboardingSectionHeading({ step, label, hint }: { step: string; label: string; hint: string }) {
-  return <View style={styles.quickChoiceHeading}><Text style={styles.quickChoiceStep}>{step}</Text><View style={styles.quickChoiceHeadingBody}><Text style={styles.quickChoiceTitle}>{label}</Text><Text style={styles.quickChoiceHint}>{hint}</Text></View></View>;
-}
-
-function QuickChoice<T extends string>({ step, label, hint, options, selected, onSelect }: { step: string; label: string; hint: string; options: readonly { id: T; label: string }[]; selected: T; onSelect: (id: T) => void }) {
-  return <View style={styles.quickChoiceCard}><OnboardingSectionHeading step={step} label={label} hint={hint} /><View style={styles.optionList}>{options.map((option) => <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: selected === option.id }} aria-checked={selected === option.id} accessibilityLabel={option.label} onPress={() => onSelect(option.id)} style={[styles.option, styles.quickChoiceOption, selected === option.id && styles.optionSelected]}><Text style={[styles.optionText, selected === option.id && styles.optionTextSelected]}>{option.label}</Text></Pressable>)}</View></View>;
 }
 
 function ReportSectionHeading({ index, title, subtitle }: { index: string; title: string; subtitle: string }) {
@@ -2894,23 +1926,15 @@ function Question<T extends string>({ label, options, selected, onSelect }: { la
   return <View style={styles.question}><Text style={styles.questionLabel}>{label}</Text><View style={styles.optionList}>{options.map((option) => <Pressable key={option.id} accessibilityRole="radio" accessibilityState={{ checked: selected === option.id }} aria-checked={selected === option.id} onPress={() => onSelect(option.id)} style={[styles.option, selected === option.id && styles.optionSelected]}><Text style={[styles.optionText, selected === option.id && styles.optionTextSelected]}>{option.label}</Text></Pressable>)}</View></View>;
 }
 
-function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachStream, onSendToCoach, onCoachCardAction, onCoachHumanAction, onOpenCoach, onFinished, onUnavailable, onOpenSavedVideo, locale }: {
-  application: CoachApplication;
-  cloudConfirmed: ConfirmedProductBridge;
+function WorkoutScreen({ application, userId, workoutId, onOpenCoach, onFinished, onUnavailable }: {
+  application: LocalProductKernel;
   userId: string;
   workoutId: string;
-  coachStream: CoachStreamSnapshot;
-  onSendToCoach: (text: string) => Promise<void> | void;
-  onCoachCardAction: (actionId: string, artifactId: string) => Promise<void> | void;
-  onCoachHumanAction: (pendingActionId: string, optionId: string) => Promise<void> | void;
   onOpenCoach: () => void;
   onFinished: () => void;
   onUnavailable: () => void;
-  onOpenSavedVideo: (selection: ReplaySelection) => void;
-  /** From profile.locale; falls back to English when unknown. */
-  locale?: string;
 }) {
-  const [workout, setWorkout] = useState<Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>>();
+  const [workout, setWorkout] = useState<Awaited<ReturnType<LocalProductKernel["readWorkoutSession"]>>>();
   const [error, setError] = useState<string>();
   const [restRemaining, setRestRemaining] = useState<number | null>(null);
   const [editingActual, setEditingActual] = useState(false);
@@ -2929,26 +1953,16 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [finishReviewOpen, setFinishReviewOpen] = useState(false);
   const [finishSaveState, setFinishSaveState] = useState<"idle" | "saving" | "failed" | "conflict">("idle");
-  const [nextSetRecommendation, setNextSetRecommendation] = useState<Awaited<ReturnType<CoachApplication["recommendNextWorkoutSet"]>>>();
   const [removedTaskUndo, setRemovedTaskUndo] = useState<{ task: PlannedExerciseTask; index: number }>();
-  const [poseRuntimeHealth, setPoseRuntimeHealth] = useState<PoseCameraRuntimeHealth>();
-  const restoredObservationId = useRef<string | undefined>(undefined);
   const load = useCallback(async () => {
     try {
       setWorkout(await application.readWorkoutSession({ userId, workoutId }));
       setError(undefined);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "无法读取训练");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.d37b8f28a9")));
     }
   }, [application, userId, workoutId]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    let active = true;
-    void readPoseCameraRuntimeHealth().then((health) => {
-      if (active) setPoseRuntimeHealth(health);
-    });
-    return () => { active = false; };
-  }, []);
   useEffect(() => {
     if (!workout?.state.restTimer) {
       setRestRemaining(null);
@@ -2967,35 +1981,11 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     const interval = setInterval(() => { void refreshRest(); }, 1_000);
     return () => { active = false; clearInterval(interval); };
   }, [application, userId, workoutId, workout?.state.restTimer?.id, workout?.state.restTimer?.deadlineWallClockAt]);
-  useEffect(() => {
-    if (!workout || workout.state.mode === "coach_monitor") return;
-    const resolvedSetIds = new Set([
-      ...workout.setOutcomes.map((outcome) => outcome.prescriptionSetId),
-      ...(workout.skippedSets ?? []).map((skippedSet) => skippedSet.prescriptionSetId),
-    ]);
-    const current = workout.frozenPrescription.tasks
-      .flatMap((task) => task.sets.map((set) => ({ task, set })))
-      .find(({ set }) => set.id === workout.state.currentSetId && !resolvedSetIds.has(set.id));
-    if (!current) return;
-    const observation = [...(workout.setObservations ?? [])].reverse()
-      .find((item) => item.prescriptionSetId === current.set.id);
-    if (!observation || restoredObservationId.current === observation.id) return;
-    restoredObservationId.current = observation.id;
-    const draft = workout.drafts.find((item) => item.prescriptionSetId === current.set.id);
-    setActualReps(draft?.actualReps !== undefined
-      ? String(draft.actualReps)
-      : observation.judgement === "observed" ? String(observation.counts.confirmed) : current.set.targetReps ? String(current.set.targetReps.max) : "");
-    setActualLoad(draft?.actualLoad ? String(draft.actualLoad.value) : current.set.targetLoad ? String(current.set.targetLoad.value) : "");
-    setActualLoadUnit(draft?.actualLoad?.unit ?? current.set.targetLoad?.unit);
-    setActualRir(draft?.actualRir !== undefined ? String(draft.actualRir) : current.set.targetRir === undefined ? "" : String(current.set.targetRir));
-    setNoviceFeedback(draft?.noviceFeedback);
-    setEditingActual(true);
-  }, [workout]);
   if (!workout) return error
-    ? <ErrorState title="未找到这次训练" message={error} onRetry={onUnavailable} retryLabel="返回今天" />
+    ? <ErrorState title={mobileT("mobile.ui.productshell.bb2b8a9927")} message={error} onRetry={onUnavailable} retryLabel={mobileT("mobile.ui.productshell.cff1ad3d04")} />
     : <LoadingState />;
   if (workout.status === "paused") {
-    return <PausedWorkoutScreen application={application} cloudConfirmed={cloudConfirmed} userId={userId} workoutId={workoutId} reason={workout.state.pauseReason} onFinished={onFinished} onResumed={() => void load()} />;
+    return <PausedWorkoutScreen application={application} userId={userId} workoutId={workoutId} reason={workout.state.pauseReason} onFinished={onFinished} onResumed={() => void load()} />;
   }
   const completed = new Set(workout.setOutcomes.map((outcome) => outcome.prescriptionSetId));
   const skipped = new Set((workout.skippedSets ?? []).map((set) => set.prescriptionSetId));
@@ -3004,61 +1994,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
   const pending = pendingSets.find(({ set }) => set.id === workout.state.currentSetId && !resolved.has(set.id))
     ?? pendingSets.find(({ set }) => !resolved.has(set.id));
   const pendingDraft = pending ? workout.drafts.find((draft) => draft.prescriptionSetId === pending.set.id) : undefined;
-  const persistedObservation = pending
-    ? [...(workout.setObservations ?? [])].reverse().find((item) => item.prescriptionSetId === pending.set.id)
-    : undefined;
   const pendingSetIndex = pending ? pending.task.sets.findIndex((set) => set.id === pending.set.id) + 1 : 0;
-  const runtimePlatform = Platform.OS === "android" || Platform.OS === "ios" ? Platform.OS : "web";
-  const selectedEquipment = pending
-    ? defaultSelectedFreeWeightEquipment(pending.task.exerciseVariantId)
-    : "none";
-  const realtimeCapability = pending ? resolveWorkoutSetRealtimeCapability({
-    exerciseVariantId: pending.task.exerciseVariantId,
-    selectedEquipment,
-    platform: runtimePlatform,
-    nativeRuntimeAvailable:
-      poseRuntimeHealth?.canonicalBridgeReady === true
-      && poseRuntimeHealth.runtimeReady === true,
-  }) : undefined;
-  const realtimeAvailable = realtimeCapability?.available === true;
-  const executionLoad = pendingDraft?.actualLoad ?? pending?.set.targetLoad;
-  const realtimeContext: WorkoutSetRealtimeContext | undefined = pending ? {
-    workoutId,
-    setId: pending.set.id,
-    exerciseVariantId: pending.task.exerciseVariantId,
-    selectedEquipment,
-    setIndex: pendingSetIndex,
-    ...(pending.set.targetReps ? { targetReps: pending.set.targetReps.max } : {}),
-    ...(executionLoad ? { executionLoad } : {}),
-    ...(realtimeCapability?.profileIdentity ? { capabilityIdentity: realtimeCapability.profileIdentity } : {}),
-  } : undefined;
-  if (workout.state.mode === "coach_monitor" && pending && realtimeContext) {
-    return (
-      <WorkoutMonitorWorkspace
-        application={application}
-        userId={userId}
-        workoutId={workoutId}
-        exerciseVariantId={pending.task.exerciseVariantId}
-        setContext={realtimeContext}
-        coachStream={coachStream}
-        onSendToCoach={onSendToCoach}
-        onCoachCardAction={onCoachCardAction}
-        onCoachHumanAction={onCoachHumanAction}
-        onExit={() => void load()}
-        onObservationReady={(observation) => {
-          setActualReps(String(observation.report.confirmedCount));
-          setActualLoad(pendingDraft?.actualLoad ? String(pendingDraft.actualLoad.value) : pending.set.targetLoad ? String(pending.set.targetLoad.value) : "");
-          setActualLoadUnit(pendingDraft?.actualLoad?.unit ?? pending.set.targetLoad?.unit);
-          setActualRir(pendingDraft?.actualRir === undefined ? "" : String(pendingDraft.actualRir));
-          setNoviceFeedback(pendingDraft?.noviceFeedback);
-          setEditingActual(true);
-          void load();
-        }}
-        onOpenSavedVideo={onOpenSavedVideo}
-        locale={locale}
-      />
-    );
-  }
   const startRest = async (setId: string, duration: { value: number; unit: "seconds" | "minutes" | "hours" }) => {
     await application.startRestTimer({
       userId,
@@ -3068,51 +2004,24 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       idempotencyKey: `mobile-workout:${workoutId}:rest:${setId}`,
     });
   };
-  const refreshNextSetRecommendation = async (sourceOutcomeId: string) => {
-    try {
-      const recommendation = await application.recommendNextWorkoutSet({ userId, workoutId, sourceOutcomeId });
-      setNextSetRecommendation(recommendation.status === "proposal" ? recommendation : undefined);
-    } catch {
-      // A missing RulePack, equipment profile, or RIR is intentionally quiet:
-      // the just-recorded set remains valid and the next set stays unchanged.
-      setNextSetRecommendation(undefined);
-    }
-  };
   const skipCurrentSet = async (reason: string) => {
     if (!pending) return;
     try {
-      await cloudConfirmed.confirmResultThen({
-        localWorkoutId: workoutId,
-        localResultId: pending.set.id,
-        kind: "workout_set_skipped",
-        payload: { prescriptionSetId: pending.set.id, reason },
-        provenance: { source: "confirmed_user_input" },
-        occurredAt: new Date().toISOString(),
-        idempotencyKey: `mobile-workout:${workoutId}:skip:${pending.set.id}`,
-        commitLocal: () => application.skipCurrentSet({
-          userId,
-          workoutId,
-          reason,
-          idempotencyKey: `mobile-workout:${workoutId}:skip:${pending.set.id}`,
-        }),
-      });
+      await application.skipCurrentSet({ userId, workoutId, reason, idempotencyKey: `mobile-workout:${workoutId}:skip:${pending.set.id}` });
       setShowSkipSet(false);
-      setNextSetRecommendation(undefined);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "本组未能跳过");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.6bd22a7679")));
     }
   };
   const openActual = () => {
     if (!pending) return;
     setActualReps(pendingDraft?.actualReps !== undefined
       ? String(pendingDraft.actualReps)
-      : persistedObservation?.judgement === "observed"
-        ? String(persistedObservation.counts.confirmed)
-        : pending.set.targetReps ? String(pending.set.targetReps.max) : "");
-    setActualLoad(pendingDraft?.actualLoad ? String(pendingDraft.actualLoad.value) : pending.set.targetLoad ? String(pending.set.targetLoad.value) : "");
-    setActualLoadUnit(pendingDraft?.actualLoad?.unit ?? pending.set.targetLoad?.unit);
-    setActualRir(pendingDraft?.actualRir !== undefined ? String(pendingDraft.actualRir) : pending.set.targetRir === undefined ? "" : String(pending.set.targetRir));
+      : "");
+    setActualLoad(pendingDraft?.actualLoad ? String(pendingDraft.actualLoad.value) : "");
+    setActualLoadUnit(pendingDraft?.actualLoad?.unit);
+    setActualRir(pendingDraft?.actualRir !== undefined ? String(pendingDraft.actualRir) : "");
     setNoviceFeedback(pendingDraft?.noviceFeedback);
     setEditingActual(true);
   };
@@ -3129,12 +2038,12 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     const actualLoadValue = optionalFiniteNumber(actualLoad);
     const rir = optionalFiniteNumber(actualRir);
     if (pending.set.targetReps && (reps === undefined || !Number.isInteger(reps) || reps < 0)) {
-      setError("请填写实际次数。");
+      setError(mobileT("mobile.ui.productshell.f0cece115f"));
       return;
     }
-    if (actualLoadValue !== undefined && actualLoadValue < 0) { setError("重量不能小于 0。"); return; }
-    if (actualLoadValue !== undefined && actualLoadUnit === undefined) { setError("请选择实际重量单位 kg 或 lb。"); return; }
-    if (rir !== undefined && (rir < 0 || rir > 10)) { setError("RIR 需要在 0 到 10 之间。"); return; }
+    if (actualLoadValue !== undefined && actualLoadValue < 0) { setError(mobileT("mobile.ui.productshell.2f108951e3")); return; }
+    if (actualLoadValue !== undefined && actualLoadUnit === undefined) { setError(mobileT("mobile.ui.productshell.a81cebac2b")); return; }
+    if (rir !== undefined && (rir < 0 || rir > 10)) { setError(mobileT("mobile.ui.productshell.321399dc76")); return; }
     const draft = await application.saveCurrentSetDraft({
         userId,
         workoutId,
@@ -3153,42 +2062,20 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       await persistActualDraft();
       setEditingActual(false);
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "本组草稿未能保存"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.f7b5d2130e"))); }
   };
   const confirmActual = async () => {
     if (!pending) return;
     try {
       const saved = await persistActualDraft();
       if (!saved) return;
-      const { draft, reps, actualLoadValue, rir } = saved;
-      const outcome = await cloudConfirmed.confirmResultThen({
-        localWorkoutId: workoutId,
-        localResultId: pending.set.id,
-        kind: "workout_set",
-        payload: {
-          prescriptionSetId: pending.set.id,
-          ...(reps !== undefined ? { actualReps: reps } : {}),
-          ...(actualLoadValue !== undefined && actualLoadUnit ? { actualLoad: { value: actualLoadValue, unit: actualLoadUnit } } : {}),
-          ...(rir !== undefined ? { actualRir: rir } : {}),
-          ...(noviceFeedback ? { noviceFeedback } : {}),
-        },
-        provenance: { source: "confirmed_user_input" },
-        occurredAt: new Date().toISOString(),
-        idempotencyKey: `mobile-workout:${workoutId}:confirm:${pending.set.id}`,
-        commitLocal: () => application.confirmCurrentSet({
-          userId,
-          workoutId,
-          draftId: draft.id,
-          ...(persistedObservation ? { observationId: persistedObservation.id } : {}),
-          idempotencyKey: `mobile-workout:${workoutId}:confirm:${pending.set.id}`,
-        }),
-      });
+      const { draft } = saved;
+      await application.confirmCurrentSet({ userId, workoutId, draftId: draft.id, idempotencyKey: `mobile-workout:${workoutId}:confirm:${pending.set.id}` });
       const rest = pending.set.rest ?? workout.state.policy.defaultRest;
       if (rest) await startRest(pending.set.id, rest);
-      await refreshNextSetRecommendation(outcome.id);
       setEditingActual(false);
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "本组未能保存"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.4894afa807"))); }
   };
   const saveTarget = async () => {
     if (!pending) return;
@@ -3196,11 +2083,11 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     const targetLoadValue = optionalFiniteNumber(targetLoad);
     const rir = optionalFiniteNumber(targetRir);
     if (pending.set.targetReps && (reps === undefined || !Number.isInteger(reps) || reps < 0)) {
-      setError("目标次数需要是非负整数。");
+      setError(mobileT("mobile.ui.productshell.e68165d161"));
       return;
     }
-    if (targetLoadValue !== undefined && targetLoadValue < 0) { setError("目标重量不能小于 0。"); return; }
-    if (rir !== undefined && (rir < 0 || rir > 10)) { setError("目标 RIR 需要在 0 到 10 之间。"); return; }
+    if (targetLoadValue !== undefined && targetLoadValue < 0) { setError(mobileT("mobile.ui.productshell.90291e6184")); return; }
+    if (rir !== undefined && (rir < 0 || rir > 10)) { setError(mobileT("mobile.ui.productshell.0ca0ed4b7b")); return; }
     try {
       const change = {
         kind: "adjust_set" as const,
@@ -3212,52 +2099,22 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
           ...(rir !== undefined ? { targetRir: rir } : {}),
         },
       };
-      const applied = applyUpcomingWorkoutPlanChange({
-        before: workout.frozenPrescription,
-        change,
-        completedPrescriptionSetIds: [...resolved],
-        ...(pendingDraft ? { draftedPrescriptionSetId: pendingDraft.prescriptionSetId } : {}),
-      });
-      await cloudConfirmed.updateWorkoutThen({
-        localWorkoutId: workoutId,
-        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
-        idempotencyKey: `mobile-workout:${workoutId}:revise:${pending.set.id}:cloud`,
-        commitLocal: () => application.editUpcomingWorkoutPlan({
-          userId,
-          workoutId,
-          change,
-          reason: "user_adjusted_unstarted_set",
-          idempotencyKey: `mobile-workout:${workoutId}:revise:${pending.set.id}`,
-        }),
-      });
+      await application.editUpcomingWorkoutPlan({ userId, workoutId, change, reason: "user_adjusted_unstarted_set", idempotencyKey: `mobile-workout:${workoutId}:revise:${pending.set.id}` });
       setEditingTarget(false);
-      setNextSetRecommendation(undefined);
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "本组开始后不能再修改目标"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.ac463ab5f7"))); }
   };
   const finish = async () => {
     try {
       setFinishSaveState("saving");
-      const completedAt = new Date().toISOString();
-      await cloudConfirmed.completeWorkoutThen({
-        localWorkoutId: workoutId,
-        summary: workoutCompletionCloudSummary(workout, pending ? "partial" : "completed"),
-        completedAt,
-        idempotencyKey: `mobile-workout:${workoutId}:finish:cloud`,
-        commitLocal: () => application.completeWorkoutSession({
-          userId,
-          workoutId,
-          status: pending ? "partial" : "completed",
-          idempotencyKey: `mobile-workout:${workoutId}:finish`,
-        }),
-      });
+      await application.completeWorkoutSession({ userId, workoutId, status: pending ? "partial" : "completed", idempotencyKey: `mobile-workout:${workoutId}:finish` });
       setFinishSaveState("idle");
       onFinished();
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : "训练未能结束";
+      const detail = cause instanceof Error ? cause.message : mobileT("mobile.ui.productshell.114f115186");
       const conflict = /conflict|revision/i.test(detail);
       setFinishSaveState(conflict ? "conflict" : "failed");
-      setError(conflict ? "训练总结存在云端版本冲突，本地训练尚未结束。" : "训练总结尚未获云端确认，本地训练尚未结束；可以重试。");
+      setError(conflict ? mobileT("mobile.ui.productshell.3b7a25145f") : mobileT("mobile.ui.productshell.a31f3ae772"));
     }
   };
   const cancelRest = async () => {
@@ -3269,7 +2126,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       });
       setRestRemaining(null);
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "休息计时未能结束"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.13777f7c6f"))); }
   };
   const adjustRest = async (deltaSeconds: number) => {
     try {
@@ -3280,19 +2137,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         idempotencyKey: `mobile-workout:${workoutId}:rest:${workout.state.restTimer?.id ?? "none"}:${deltaSeconds}`,
       });
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "无法调整休息时间"); }
-  };
-  const enableMonitor = async () => {
-    if (!realtimeAvailable) return;
-    try {
-      await application.setWorkoutMonitoringMode({
-        userId,
-        workoutId,
-        enabled: true,
-        idempotencyKey: `mobile-workout:${workoutId}:monitor:on`,
-      });
-      await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "当前组进行中，请先完成或撤回本组记录。"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.e5b39de530"))); }
   };
   const pause = async () => {
     try {
@@ -3302,7 +2147,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
         idempotencyKey: `mobile-workout:${workoutId}:pause`,
       });
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "暂时无法暂停训练"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.1cdd25e544"))); }
   };
   const pauseForSafety = async (signal: "new_sharp_pain" | "chest_discomfort" | "dizziness_or_fainting" | "unusual_breathing_difficulty" | "known_constraint") => {
     try {
@@ -3314,47 +2159,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       });
       setShowSafetyPauseChoices(false);
       await load();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "暂时无法暂停训练"); }
-  };
-  const applyNextSetRecommendation = async () => {
-    if (!nextSetRecommendation?.change) return;
-    try {
-      if (workout.revision !== nextSetRecommendation.baseWorkoutRevision) throw new Error("stale_next_set_recommendation");
-      const currentDraft = workout.drafts.find((draft) => draft.prescriptionSetId === workout.state.currentSetId);
-      const applied = applyUpcomingWorkoutPlanChange({
-        before: workout.frozenPrescription,
-        change: nextSetRecommendation.change,
-        completedPrescriptionSetIds: [...resolved],
-        ...(currentDraft ? { draftedPrescriptionSetId: currentDraft.prescriptionSetId } : {}),
-      });
-      await cloudConfirmed.updateWorkoutThen({
-        localWorkoutId: workoutId,
-        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
-        idempotencyKey: `mobile-workout:${workoutId}:apply-next-set:${nextSetRecommendation.sourceOutcomeId}:cloud`,
-        commitLocal: () => application.applyNextWorkoutSetRecommendation({
-          recommendation: nextSetRecommendation,
-          idempotencyKey: `mobile-workout:${workoutId}:apply-next-set:${nextSetRecommendation.sourceOutcomeId}`,
-        }),
-      });
-      setNextSetRecommendation(undefined);
-      await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "下一组建议已过期，请重新查看当前记录。");
-      setNextSetRecommendation(undefined);
-    }
-  };
-  const dismissNextSetRecommendation = async (disposition: "rejected" | "ignored") => {
-    if (!nextSetRecommendation) return;
-    try {
-      await application.dismissNextWorkoutSetRecommendation({
-        recommendation: nextSetRecommendation,
-        disposition,
-        idempotencyKey: `mobile-workout:${workoutId}:next-set:${nextSetRecommendation.sourceOutcomeId}:${disposition}`,
-      });
-      setNextSetRecommendation(undefined);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "未能保存这次选择，请重试。");
-    }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.1cdd25e544"))); }
   };
   const focusTask = async (taskId: string) => {
     try {
@@ -3369,7 +2174,7 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
       setHistoryExpanded(false);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时无法切换动作");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.b4a5fb7e67")));
     }
   };
   const currentExerciseOutcomes = pending
@@ -3386,97 +2191,76 @@ function WorkoutScreen({ application, cloudConfirmed, userId, workoutId, coachSt
     if (!removedTaskUndo) return;
     try {
       const change = { kind: "add_task" as const, task: removedTaskUndo.task, index: removedTaskUndo.index };
-      const currentDraft = workout.drafts.find((draft) => draft.prescriptionSetId === workout.state.currentSetId);
-      const applied = applyUpcomingWorkoutPlanChange({
-        before: workout.frozenPrescription,
-        change,
-        completedPrescriptionSetIds: [...resolved],
-        ...(currentDraft ? { draftedPrescriptionSetId: currentDraft.prescriptionSetId } : {}),
-      });
       const key = `mobile-workout:${workoutId}:undo-remove-task:${removedTaskUndo.task.id}:${workout.revision}`;
-      await cloudConfirmed.updateWorkoutThen({
-        localWorkoutId: workoutId,
-        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
-        idempotencyKey: `${key}:cloud`,
-        commitLocal: () => application.editUpcomingWorkoutPlan({
-          userId,
-          workoutId,
-          change,
-          reason: "user_undid_removed_unstarted_task",
-          idempotencyKey: key,
-        }),
-      });
+      await application.editUpcomingWorkoutPlan({ userId, workoutId, change, reason: "user_undid_removed_unstarted_task", idempotencyKey: key });
       setRemovedTaskUndo(undefined);
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "未能撤销移除，请重试。");
+      setError(userFacingError(cause, mobileT("mobile.ui.productshell.1b2a218f1e")));
     }
   };
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.workoutTop}><View><Text style={styles.screenTitle}>{readablePlanSessionTitle(workout.frozenPrescription.title)}</Text><Text style={styles.screenSub}>统一训练执行</Text></View><View style={styles.workoutTopActions}>{skipped.size ? <Text style={{ color: colors.terra, fontSize: 11, fontWeight: "800" }}>已跳过 {skipped.size} 组</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel="打开训练中的 Coach" onPress={onOpenCoach} style={styles.workoutCoachButton}><Text style={styles.workoutCoachButtonText}>Coach</Text></Pressable></View></View>
-      {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>组间休息</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <ProfessionalTermText text={`下一组：${exerciseDisplayName(pending.task.exerciseVariantId)} · ${setDose(pending.set)}`} style={styles.workoutTaskBoundary} /> : <Text style={styles.workoutTaskBoundary}>已没有待完成组</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel="减少三十秒休息" onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>−30 秒</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="增加三十秒休息" onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>+30 秒</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>结束</Text></Pressable></View></View> : null}
-      {nextSetRecommendation?.status === "proposal" ? <View style={styles.nextSetRecommendation}><View style={styles.nextSetRecommendationBody}><Text style={styles.cardEyebrow}>下一组建议 · {nextSetRecommendation.decision.scope === "next_unstarted_set" ? "只影响下一未开始组" : nextSetRecommendation.decision.scope}</Text><Text style={styles.nextSetRecommendationTitle}>调整前：{JSON.stringify(nextSetRecommendation.decision.before)}</Text><Text style={styles.nextSetRecommendationTitle}>调整后：{JSON.stringify(nextSetRecommendation.decision.after)}</Text><Text style={styles.nextSetRecommendationDetail}>{nextSetRecommendation.decision.explanation}</Text></View><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" onPress={() => void dismissNextSetRecommendation("rejected")} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>拒绝，保持原计划</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void dismissNextSetRecommendation("ignored")} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>暂时忽略</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void applyNextSetRecommendation()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>应用</Text></Pressable></View></View> : null}
+      <View style={styles.workoutTop}><View><Text style={styles.screenTitle}>{readablePlanSessionTitle(workout.frozenPrescription.title)}</Text><Text style={styles.screenSub}>{mobileT("mobile.ui.productshell.85b1c821ec")}</Text></View><View style={styles.workoutTopActions}>{skipped.size ? <Text style={{ color: colors.terra, fontSize: 11, fontWeight: "800" }}>{mobileT("mobile.ui.productshell.9f38afd41e")}{skipped.size} {mobileT("mobile.ui.productshell.726ff2fac5")}</Text> : null}<Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.14c0b43542")} onPress={onOpenCoach} style={styles.workoutCoachButton}><Text style={styles.workoutCoachButtonText}>Coach</Text></Pressable></View></View>
+      {restRemaining !== null ? <View style={styles.restCard}><View><Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.8b0b189c16")}</Text><Text style={styles.restTime}>{formatRestSeconds(restRemaining)}</Text>{pending ? <ProfessionalTermText text={mobileT("mobile.ui.productshell.eb81279e39", { value0: exerciseDisplayName(pending.task.exerciseVariantId), value1: setDose(pending.set) })} style={styles.workoutTaskBoundary} /> : <Text style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.c74e75468d")}</Text>}</View><View style={styles.restActions}><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.c64f281f6e")} onPress={() => void adjustRest(-30)} style={styles.restAdd}><Text style={styles.restAddText}>{mobileT("mobile.ui.productshell.13b0c41493")}</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.98cac1b6c0")} onPress={() => void adjustRest(30)} style={styles.restAdd}><Text style={styles.restAddText}>{mobileT("mobile.ui.productshell.abdcb2973b")}</Text></Pressable><Pressable accessibilityRole="button" onPress={() => void cancelRest()} style={styles.restCancel}><Text style={styles.restCancelText}>{mobileT("mobile.ui.productshell.76b9880829")}</Text></Pressable></View></View> : null}
       {pending ? (
         <WorkoutSetFlipCard
           flipped={historyExpanded}
           swipeEnabled={!editingActual && !editingTarget && !historyExpanded}
           onSwipe={swipeCurrentCard}
           front={<>
-          <View style={styles.currentSetHeader}><Text style={styles.cardEyebrow}>当前组 · 第 {pendingSetIndex} 组</Text>{currentExerciseOutcomes.length ? <Pressable accessibilityRole="button" accessibilityLabel={`${historyExpanded ? "收起" : "查看"}${currentExerciseOutcomes.length}组完成历史`} accessibilityState={{ expanded: historyExpanded }} onPress={() => setHistoryExpanded((value) => !value)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>已完成 {currentExerciseOutcomes.length} 组 ↻</Text></Pressable> : <Text style={styles.notRecordedText}>尚未记录</Text>}</View>
+          <View style={styles.currentSetHeader}><Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.3e19ec2c0b")}{pendingSetIndex} {mobileT("mobile.ui.productshell.726ff2fac5")}</Text>{currentExerciseOutcomes.length ? <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.6f11dc5a77", { value0: historyExpanded ? mobileT("mobile.ui.productshell.5d5815647c") : mobileT("mobile.ui.productshell.f7acefd2d4"), value1: currentExerciseOutcomes.length })} accessibilityState={{ expanded: historyExpanded }} onPress={() => setHistoryExpanded((value) => !value)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>{mobileT("mobile.ui.productshell.e99b48a29b")}{currentExerciseOutcomes.length} {mobileT("mobile.ui.productshell.e9f2c96d10")}</Text></Pressable> : <Text style={styles.notRecordedText}>{mobileT("mobile.ui.productshell.55fba87777")}</Text>}</View>
           <Text style={styles.currentSetTitle}>{exerciseDisplayName(pending.task.exerciseVariantId)}</Text>
           <ProfessionalTermText text={setDose(pending.set)} style={styles.currentSetDose} />
-          <ProfessionalTermText text="重量、RIR 与疼痛只来自你的确认；相机不会替你推断。" style={styles.currentSetBoundary} />
+          <ProfessionalTermText text={mobileT("mobile.ui.productshell.56587f2e78")} style={styles.currentSetBoundary} />
           {editingActual ? (
             <View style={styles.actualForm}>
-              <Text style={styles.setReviewTitle}>Set Review</Text>
-              <ProfessionalTermText text={setDose(pending.set)} prefix="计划快照：" style={styles.setReviewSnapshot} />
-              {persistedObservation ? <View style={styles.observationSummary}><Text style={styles.observationSummaryTitle}>Canonical observation · 本机留存</Text><Text style={styles.observationSummaryText}>已确认 {persistedObservation.counts.confirmed} · 待复核 {persistedObservation.counts.needsReview} · 已拒绝 {persistedObservation.counts.rejected}</Text><Text style={styles.observationSummaryBoundary}>{persistedObservation.judgement === "cannot_judge" ? "当前相机证据无法判断；请手动确认。" : "只有已确认次数用于预填；原观察不会被你的修正覆盖。"} 此观察尚不是云端 confirmed Result。</Text></View> : <Text style={styles.setReviewSnapshot}>观察：手动记录（无相机证据）</Text>}
-              <ActualInput label="次数" value={actualReps} onChange={setActualReps} />
-              <ActualInput label="重量" value={actualLoad} onChange={setActualLoad} />
+              <Text style={styles.setReviewTitle}>{mobileT("mobile.ui.productshell.ddfa264136")}</Text>
+              <ProfessionalTermText text={setDose(pending.set)} prefix={mobileT("mobile.ui.productshell.c018c0bed0")} style={styles.setReviewSnapshot} />
+              <Text style={styles.setReviewSnapshot}>{mobileT("mobile.ui.productshell.e88c63650d")}</Text>
+              <ActualInput label={mobileT("mobile.ui.productshell.d4a97e7577")} value={actualReps} onChange={setActualReps} />
+              <ActualInput label={mobileT("mobile.ui.productshell.0a4f2ecb1c")} value={actualLoad} onChange={setActualLoad} />
               <View accessibilityRole="radiogroup" style={styles.setActions}><Pressable accessibilityRole="radio" accessibilityState={{ checked: actualLoadUnit === "kg" }} onPress={() => setActualLoadUnit("kg")} style={[styles.actualButton, actualLoadUnit === "kg" && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>kg</Text></Pressable><Pressable accessibilityRole="radio" accessibilityState={{ checked: actualLoadUnit === "lb" }} onPress={() => setActualLoadUnit("lb")} style={[styles.actualButton, actualLoadUnit === "lb" && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>lb</Text></Pressable></View>
-              <ActualInput label="RIR" value={actualRir} onChange={setActualRir} />
-              <Text style={styles.setReviewSnapshot}>主观感受（可选）</Text>
-              <View accessibilityRole="radiogroup" style={styles.setActions}>{([['easy', '轻松'], ['appropriate', '合适'], ['hard', '吃力']] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: noviceFeedback === value }} onPress={() => setNoviceFeedback((current) => current === value ? undefined : value)} style={[styles.actualButton, noviceFeedback === value && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>{label}</Text></Pressable>)}</View>
-              {persistedObservation?.counts.needsReview ? <View style={styles.setActions}><Pressable accessibilityRole="button" onPress={() => setActualReps(String(persistedObservation.counts.confirmed + persistedObservation.counts.needsReview))} style={styles.actualButton}><Text style={styles.actualButtonText}>计入 {persistedObservation.counts.needsReview} 次待复核</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setActualReps(String(persistedObservation.counts.confirmed))} style={styles.actualButton}><Text style={styles.actualButtonText}>保持不计入</Text></Pressable></View> : null}
-              <Pressable accessibilityRole="button" onPress={() => void confirmActual()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>确认实际完成</Text></Pressable>
-              <Pressable accessibilityRole="button" onPress={() => void saveActualDraft()} style={styles.actualButton}><Text style={styles.actualButtonText}>保存本组输入，稍后完成</Text></Pressable>
+              <ActualInput label={mobileT("mobile.ui.productshell.f5249a281b")} value={actualRir} onChange={setActualRir} />
+              <Text style={styles.setReviewSnapshot}>{mobileT("mobile.ui.productshell.5b01d8b46f")}</Text>
+              <View accessibilityRole="radiogroup" style={styles.setActions}>{([['easy', mobileT("mobile.ui.productshell.c9c4a72eeb")], ['appropriate', mobileT("mobile.ui.productshell.e523b6ab39")], ['hard', mobileT("mobile.ui.productshell.6ee6e775bb")]] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: noviceFeedback === value }} onPress={() => setNoviceFeedback((current) => current === value ? undefined : value)} style={[styles.actualButton, noviceFeedback === value && styles.workoutTaskSelected]}><Text style={styles.actualButtonText}>{label}</Text></Pressable>)}</View>
+              <Pressable accessibilityRole="button" onPress={() => void confirmActual()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{mobileT("mobile.ui.productshell.50cd81ea17")}</Text></Pressable>
+              <Pressable accessibilityRole="button" onPress={() => void saveActualDraft()} style={styles.actualButton}><Text style={styles.actualButtonText}>{mobileT("mobile.ui.productshell.ccc49af3b2")}</Text></Pressable>
             </View>
           ) : editingTarget ? (
             <View style={styles.actualForm}>
-              <ActualInput label="目标次数" value={targetReps} onChange={setTargetReps} />
-              {pending.set.targetLoad ? <ActualInput label="目标重量" value={targetLoad} onChange={setTargetLoad} /> : null}
-              <ActualInput label="目标 RIR" value={targetRir} onChange={setTargetRir} />
-              <Text style={styles.currentSetBoundary}>保存后只影响尚未开始的这一组。</Text>
-              <Pressable accessibilityRole="button" onPress={() => void saveTarget()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>保存目标</Text></Pressable>
+              <ActualInput label={mobileT("mobile.ui.productshell.2acbbfd778")} value={targetReps} onChange={setTargetReps} />
+              {pending.set.targetLoad ? <ActualInput label={mobileT("mobile.ui.productshell.701137047a")} value={targetLoad} onChange={setTargetLoad} /> : null}
+              <ActualInput label={mobileT("mobile.ui.productshell.51ab19e0e1")} value={targetRir} onChange={setTargetRir} />
+              <Text style={styles.currentSetBoundary}>{mobileT("mobile.ui.productshell.3ff229db69")}</Text>
+              <Pressable accessibilityRole="button" onPress={() => void saveTarget()} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{mobileT("mobile.ui.productshell.9e77acc723")}</Text></Pressable>
             </View>
           ) : (
             <>
-              <Pressable accessibilityRole="button" onPress={openActual} style={styles.primaryButton}><Text style={styles.primaryButtonText}>完成本组并检查</Text></Pressable>
-              {realtimeAvailable ? <View style={styles.monitorEntry}><View><Text style={styles.monitorEntryTitle}>Realtime 自动计次</Text><ProfessionalTermText text="当前动作与机位具备 exact capability；相机不会确认重量或 RIR" style={styles.monitorEntrySub} /></View><Pressable accessibilityRole="button" accessibilityLabel="为当前组开启 Realtime 自动计次" onPress={() => void enableMonitor()} style={styles.monitorEntryButton}><Text style={styles.monitorEntryButtonText}>开启</Text></Pressable></View> : null}
+              <Pressable accessibilityRole="button" onPress={openActual} style={styles.primaryButton}><Text style={styles.primaryButtonText}>{mobileT("mobile.ui.productshell.5b7324c4a8")}</Text></Pressable>
               <View style={styles.setActions}>
-                <Pressable accessibilityRole="button" onPress={openTarget} style={styles.actualButton}><Text style={styles.actualButtonText}>调整本组目标</Text></Pressable>
-                <Pressable accessibilityRole="button" onPress={() => setShowSkipSet(true)} style={styles.actualButton}><Text style={styles.skipSetText}>跳过本组</Text></Pressable>
+                <Pressable accessibilityRole="button" onPress={openTarget} style={styles.actualButton}><Text style={styles.actualButtonText}>{mobileT("mobile.ui.productshell.1de1acaa7f")}</Text></Pressable>
+                <Pressable accessibilityRole="button" onPress={() => setShowSkipSet(true)} style={styles.actualButton}><Text style={styles.skipSetText}>{mobileT("mobile.ui.productshell.bf8b274f68")}</Text></Pressable>
               </View>
             </>
           )}
-          {!editingActual && !editingTarget ? <Pressable accessibilityRole="button" onPress={() => setManagingUpcomingTasks(true)} style={styles.manageWorkoutTasksButton}><Text style={styles.manageWorkoutTasksText}>管理后续动作</Text></Pressable> : null}
+          {!editingActual && !editingTarget ? <Pressable accessibilityRole="button" onPress={() => setManagingUpcomingTasks(true)} style={styles.manageWorkoutTasksButton}><Text style={styles.manageWorkoutTasksText}>{mobileT("mobile.ui.productshell.04e9ef97d3")}</Text></Pressable> : null}
           </>}
-          back={<><View style={styles.currentSetHeader}><View><Text style={styles.cardEyebrow}>实际完成历史</Text><Text style={styles.currentSetTitle}>{exerciseDisplayName(pending.task.exerciseVariantId)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="返回当前组正面" onPress={() => setHistoryExpanded(false)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>返回 ↻</Text></Pressable></View><CompletedSetHistory outcomes={currentExerciseOutcomes} /></>}
+          back={<><View style={styles.currentSetHeader}><View><Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.d9cb1f81b0")}</Text><Text style={styles.currentSetTitle}>{exerciseDisplayName(pending.task.exerciseVariantId)}</Text></View><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.1cc07b3eb9")} onPress={() => setHistoryExpanded(false)} style={styles.completedHistoryButton}><Text style={styles.completedHistoryButtonText}>{mobileT("mobile.ui.productshell.c2aa1928a6")}</Text></Pressable></View><CompletedSetHistory outcomes={currentExerciseOutcomes} /></>}
         />
-      ) : <Empty label="本次计划中的组已处理。" />}
-      <Text style={styles.sectionTitle}>今日动作路线</Text>
+      ) : <Empty label={mobileT("mobile.ui.productshell.24aabd5f85")} />}
+      <Text style={styles.sectionTitle}>{mobileT("mobile.ui.productshell.81cec5c455")}</Text>
       {workout.frozenPrescription.tasks.map((task) => {
         const taskCompleted = workout.setOutcomes.filter((outcome) => outcome.exerciseVariantId === task.exerciseVariantId).length;
         const hasPending = task.sets.some((set) => !resolved.has(set.id));
-        return <Pressable key={task.id} accessibilityRole="button" accessibilityLabel={`切换到${exerciseDisplayName(task.exerciseVariantId)}`} accessibilityState={{ selected: pending?.task.id === task.id, disabled: !hasPending }} disabled={!hasPending} onPress={() => void focusTask(task.id)} style={[styles.workoutTask, pending?.task.id === task.id && styles.workoutTaskSelected]}><View style={styles.workoutRouteRow}><View style={{ flex: 1 }}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.workoutRouteMeta}>{taskCompleted ? `已完成 ${taskCompleted} 组` : "尚未记录"}</Text></View><Text style={styles.chevron}>›</Text></View></Pressable>;
+        return <Pressable key={task.id} accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.61a55d2718", { value0: exerciseDisplayName(task.exerciseVariantId) })} accessibilityState={{ selected: pending?.task.id === task.id, disabled: !hasPending }} disabled={!hasPending} onPress={() => void focusTask(task.id)} style={[styles.workoutTask, pending?.task.id === task.id && styles.workoutTaskSelected]}><View style={styles.workoutRouteRow}><View style={{ flex: 1 }}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.workoutRouteMeta}>{taskCompleted ? mobileT("mobile.ui.productshell.71272a1c9d", { value0: taskCompleted }) : mobileT("mobile.ui.productshell.55fba87777")}</Text></View><Text style={styles.chevron}>›</Text></View></Pressable>;
       })}
-      {removedTaskUndo ? <View style={styles.nextSetRecommendation}><Text style={styles.nextSetRecommendationDetail}>已移除 {exerciseDisplayName(removedTaskUndo.task.exerciseVariantId)}，已完成结果保持不变。</Text><Pressable accessibilityRole="button" onPress={() => void undoRemovedTask()} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>撤销移除</Text></Pressable></View> : null}
+      {removedTaskUndo ? <View style={styles.workoutNotice}><Text style={styles.workoutNoticeDetail}>{mobileT("mobile.ui.productshell.4e5c4958dd")}{exerciseDisplayName(removedTaskUndo.task.exerciseVariantId)}{mobileT("mobile.ui.productshell.efde97170b")}</Text><Pressable accessibilityRole="button" onPress={() => void undoRemovedTask()} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>{mobileT("mobile.ui.productshell.f83e9251eb")}</Text></Pressable></View> : null}
       {error ? <Text style={styles.formError}>{error}</Text> : null}
-      <Pressable accessibilityRole="button" onPress={() => void pause()} style={styles.pauseButton}><Text style={styles.pauseButtonText}>暂停训练</Text></Pressable>
-      <Pressable accessibilityRole="button" onPress={() => setShowSafetyPauseChoices(true)} style={styles.safetyPauseButton}><Text style={styles.safetyPauseButtonText}>安全暂停</Text></Pressable>
-      {finishReviewOpen ? <View style={styles.workoutTaskPicker}><Text style={styles.logTitle}>训练实际总结</Text><Text style={styles.workoutTaskBoundary}>已确认 {workout.setOutcomes.length} 组 · 已跳过 {skipped.size} 组 · canonical observation 覆盖 {(workout.setObservations ?? []).length} 组 · 用户修正 {workout.setOutcomes.filter((item) => item.performedRepsProvenance?.userAdjusted).length} 组</Text>{workout.setOutcomes.map((outcome, index) => <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{exerciseDisplayName(outcome.exerciseVariantId)}</Text><Text style={styles.completedHistoryDelta}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? outcome.actualDuration?.value ?? outcome.actualDistance?.value ?? "—"}{outcome.actualRir === undefined ? "" : ` · RIR ${outcome.actualRir}`}</Text></View>)}{(workout.skippedSets ?? []).map((item) => <Text key={item.id} style={styles.workoutTaskBoundary}>跳过：{exerciseDisplayName(item.exerciseVariantId)} · {item.reason}</Text>)}{workout.frozenPrescription.tasks.filter((task) => task.id.includes(":replacement:")).map((task) => <Text key={task.id} style={styles.workoutTaskBoundary}>替换剩余组：{exerciseDisplayName(task.exerciseVariantId)}</Text>)}<Text style={styles.workoutTaskBoundary}>保存状态：{finishSaveState === "saving" ? "等待云端确认" : finishSaveState === "conflict" ? "云端冲突，未保存" : finishSaveState === "failed" ? "未获云端确认，可重试" : "尚未提交"}</Text><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => setFinishReviewOpen(false)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>返回训练</Text></Pressable><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => void finish()} style={styles.nextSetRecommendationButton}><Text style={styles.nextSetRecommendationButtonText}>{finishSaveState === "failed" || finishSaveState === "conflict" ? "重试确认" : pending ? "确认部分完成" : "确认完成"}</Text></Pressable></View></View> : <Pressable accessibilityRole="button" onPress={() => setFinishReviewOpen(true)} style={styles.finishButton}><Text style={styles.finishButtonText}>{pending ? "查看部分完成总结" : "查看训练总结"}</Text></Pressable>}
-      {managingUpcomingTasks ? <WorkoutTaskEditor application={application} cloudConfirmed={cloudConfirmed} userId={userId} workout={workout} onDismiss={() => setManagingUpcomingTasks(false)} onChanged={async () => { setNextSetRecommendation(undefined); await load(); }} onRemoved={(task, index) => setRemovedTaskUndo({ task, index })} /> : null}
+      <Pressable accessibilityRole="button" onPress={() => void pause()} style={styles.pauseButton}><Text style={styles.pauseButtonText}>{mobileT("mobile.ui.productshell.cb990e4699")}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={() => setShowSafetyPauseChoices(true)} style={styles.safetyPauseButton}><Text style={styles.safetyPauseButtonText}>{mobileT("mobile.ui.productshell.40e179a954")}</Text></Pressable>
+      {finishReviewOpen ? <View style={styles.workoutTaskPicker}><Text style={styles.logTitle}>{mobileT("mobile.ui.productshell.e14bc9de1f")}</Text><Text style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.e99b48a29b")}{workout.setOutcomes.length} {mobileT("mobile.ui.productshell.1ccd8f52e5")}{skipped.size} </Text>{workout.setOutcomes.map((outcome, index) => <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{exerciseDisplayName(outcome.exerciseVariantId)}</Text><Text style={styles.completedHistoryDelta}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? outcome.actualDuration?.value ?? outcome.actualDistance?.value ?? "—"}{outcome.actualRir === undefined ? "" : mobileT("mobile.ui.productshell.c428b6ec11", { value0: outcome.actualRir })}</Text></View>)}{(workout.skippedSets ?? []).map((item) => <Text key={item.id} style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.c1b1114d07")}{exerciseDisplayName(item.exerciseVariantId)} · {item.reason}</Text>)}{workout.frozenPrescription.tasks.filter((task) => task.id.includes(":replacement:")).map((task) => <Text key={task.id} style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.8b19275238")}{exerciseDisplayName(task.exerciseVariantId)}</Text>)}<Text style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.1da06efc7b")}{finishSaveState === "saving" ? mobileT("mobile.ui.productshell.a4d77e6a76") : finishSaveState === "conflict" ? mobileT("mobile.ui.productshell.e6c04496ef") : finishSaveState === "failed" ? mobileT("mobile.ui.productshell.dcf6d3e49e") : mobileT("mobile.ui.productshell.25a45621ed")}</Text><View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => setFinishReviewOpen(false)} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>{mobileT("mobile.ui.productshell.3166554c46")}</Text></Pressable><Pressable accessibilityRole="button" disabled={finishSaveState === "saving"} onPress={() => void finish()} style={styles.workoutConfirmButton}><Text style={styles.workoutConfirmButtonText}>{finishSaveState === "failed" || finishSaveState === "conflict" ? mobileT("mobile.ui.productshell.48a0cad32a") : pending ? mobileT("mobile.ui.productshell.b56377ea25") : mobileT("mobile.ui.productshell.dab1726e45")}</Text></Pressable></View></View> : <Pressable accessibilityRole="button" onPress={() => setFinishReviewOpen(true)} style={styles.finishButton}><Text style={styles.finishButtonText}>{pending ? mobileT("mobile.ui.productshell.899f8ba261") : mobileT("mobile.ui.productshell.dda45d7e1a")}</Text></Pressable>}
+      {managingUpcomingTasks ? <WorkoutTaskEditor application={application} userId={userId} workout={workout} onDismiss={() => setManagingUpcomingTasks(false)} onChanged={load} onRemoved={(task, index) => setRemovedTaskUndo({ task, index })} /> : null}
       {showSafetyPauseChoices ? <SafetyPauseChoices onDismiss={() => setShowSafetyPauseChoices(false)} onSelect={(signal) => void pauseForSafety(signal)} /> : null}
       {showSkipSet && pending ? <SkipCurrentSetSheet exerciseVariantId={pending.task.exerciseVariantId} onDismiss={() => setShowSkipSet(false)} onConfirm={(reason) => void skipCurrentSet(reason)} /> : null}
     </ScrollView>
@@ -3538,7 +2322,7 @@ function WorkoutSetFlipCard({
   const frontRotation = flip.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "180deg"] });
   const backRotation = flip.interpolate({ inputRange: [0, 1], outputRange: ["180deg", "360deg"] });
   return <Animated.View
-    accessibilityActions={[{ name: "decrement", label: "上一个动作" }, { name: "increment", label: "下一个动作" }]}
+    accessibilityActions={[{ name: "decrement", label: mobileT("mobile.ui.productshell.d8445d74c2") }, { name: "increment", label: mobileT("mobile.ui.productshell.691688e4f7") }]}
     onAccessibilityAction={(event) => onSwipe(event.nativeEvent.actionName === "increment" ? "next" : "previous")}
     style={[styles.workoutSetFlipStage, { height, transform: [{ translateX }] }]}
     {...panResponder.panHandlers}
@@ -3563,9 +2347,9 @@ function WorkoutSetFlipCard({
 function CompletedSetHistory({
   outcomes,
 }: {
-  outcomes: Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>["setOutcomes"];
+  outcomes: Awaited<ReturnType<LocalProductKernel["readWorkoutSession"]>>["setOutcomes"];
 }) {
-  return <View accessibilityLabel="已确认组历史" style={styles.completedHistory}>{outcomes.map((outcome, index) => {
+  return <View accessibilityLabel={mobileT("mobile.ui.productshell.c2fd726065")} style={styles.completedHistory}>{outcomes.map((outcome, index) => {
     const previous = outcomes[index - 1];
     const loadChange = outcome.actualLoad && previous?.actualLoad && outcome.actualLoad.unit === previous.actualLoad.unit
       ? outcome.actualLoad.value - previous.actualLoad.value
@@ -3573,7 +2357,7 @@ function CompletedSetHistory({
     const repsChange = outcome.actualReps !== undefined && previous?.actualReps !== undefined
       ? outcome.actualReps - previous.actualReps
       : undefined;
-    return <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? "—"}</Text><Text style={styles.completedHistoryDelta}>{index === 0 ? "首组" : `${loadChange === undefined ? "负荷未知" : loadChange > 0 ? `加重 ${loadChange}` : loadChange < 0 ? `减重 ${Math.abs(loadChange)}` : "负荷持平"}${repsChange === undefined || repsChange === 0 ? "" : repsChange > 0 ? ` · +${repsChange} 次` : ` · ${repsChange} 次`}`}</Text></View>;
+    return <View key={outcome.id} style={styles.completedHistoryRow}><Text style={styles.completedHistoryIndex}>{index + 1}</Text><Text style={styles.completedHistoryDose}>{outcome.actualLoad ? `${outcome.actualLoad.value}${outcome.actualLoad.unit} × ` : ""}{outcome.actualReps ?? "—"}</Text><Text style={styles.completedHistoryDelta}>{index === 0 ? mobileT("mobile.ui.productshell.da3e6ee56b") : `${loadChange === undefined ? mobileT("mobile.ui.productshell.51fb74ffb6") : loadChange > 0 ? mobileT("mobile.ui.productshell.df935454fe", { value0: loadChange }) : loadChange < 0 ? mobileT("mobile.ui.productshell.e7a45746c4", { value0: Math.abs(loadChange) }) : mobileT("mobile.ui.productshell.0c92ee59ce")}${repsChange === undefined || repsChange === 0 ? "" : repsChange > 0 ? mobileT("mobile.ui.productshell.fc1cfa82ca", { value0: repsChange }) : mobileT("mobile.ui.productshell.a6f05c64f4", { value0: repsChange })}`}</Text></View>;
   })}</View>;
 }
 
@@ -3637,17 +2421,17 @@ function SwipeRevealWorkoutTaskRow({
   return <View style={{ position: "relative", overflow: "hidden", borderRadius: radius.row }} {...panResponder.panHandlers}>
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="确认移除这个未开始动作"
+      accessibilityLabel={mobileT("mobile.ui.productshell.5e79e74c91")}
       accessibilityElementsHidden={!revealed}
       disabled={!revealed || !removeEnabled}
       onPress={onConfirmRemove}
       style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 96, backgroundColor: colors.terra, alignItems: "center", justifyContent: "center" }}
-    ><Text style={{ color: colors.white, fontSize: 12, fontWeight: "900" }}>确认移除</Text></Pressable>
+    ><Text style={{ color: colors.white, fontSize: 12, fontWeight: "900" }}>{mobileT("mobile.ui.productshell.050ff5c725")}</Text></Pressable>
     <Animated.View style={{ transform: [{ translateX }, { translateY }], opacity: reorderArmed ? 0.9 : 1 }}>{children}</Animated.View>
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="长按并上下拖动排序"
-      accessibilityHint="长按后向上或向下拖动"
+      accessibilityLabel={mobileT("mobile.ui.productshell.1daf50ffa1")}
+      accessibilityHint={mobileT("mobile.ui.productshell.10cb9c746d")}
       delayLongPress={350}
       disabled={revealed || !canMoveUp && !canMoveDown}
       onLongPress={() => { settle(false); setReorderArmed(true); }}
@@ -3670,31 +2454,31 @@ function SkipCurrentSetSheet({
   const submit = () => {
     const value = reason.trim();
     if (!value) {
-      setError("请说明跳过原因，方便后续安排理解这次记录。");
+      setError(mobileT("mobile.ui.productshell.13efc7999d"));
       return;
     }
     onConfirm(value);
   };
   return <View accessibilityViewIsModal style={styles.safetyPauseScrim}>
-    <Pressable accessibilityRole="button" accessibilityLabel="关闭跳过本组" onPress={onDismiss} style={StyleSheet.absoluteFill} />
+    <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.5db224ff85")} onPress={onDismiss} style={StyleSheet.absoluteFill} />
     <View style={styles.skipSetSheet}>
       <View style={styles.sheetHandle} />
-      <Text style={styles.cardEyebrow}>训练记录</Text>
-      <Text style={styles.skipSetTitle}>跳过这一组？</Text>
-      <Text style={styles.skipSetDetail}>{exerciseDisplayName(exerciseVariantId)} 会保留在今天的训练记录中，但不会算作已完成训练量。</Text>
+      <Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.fd91ccd57f")}</Text>
+      <Text style={styles.skipSetTitle}>{mobileT("mobile.ui.productshell.4ec952cb9a")}</Text>
+      <Text style={styles.skipSetDetail}>{exerciseDisplayName(exerciseVariantId)} {mobileT("mobile.ui.productshell.d7f244c5f2")}</Text>
       <TextInput
-        accessibilityLabel="跳过原因"
+        accessibilityLabel={mobileT("mobile.ui.productshell.d65271e962")}
         value={reason}
         onChangeText={(value) => { setReason(value); setError(undefined); }}
-        placeholder="例如：器械被占用、时间不足、状态不适合"
+        placeholder={mobileT("mobile.ui.productshell.6114f81f53")}
         placeholderTextColor={colors.ink3}
         style={styles.skipSetInput}
         multiline
         maxLength={240}
       />
       {error ? <Text style={styles.formError}>{error}</Text> : null}
-      <Pressable accessibilityRole="button" onPress={submit} style={styles.skipSetConfirm}><Text style={styles.skipSetConfirmText}>确认跳过</Text></Pressable>
-      <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.safetyPauseCancel}><Text style={styles.safetyPauseCancelText}>继续这一组</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={submit} style={styles.skipSetConfirm}><Text style={styles.skipSetConfirmText}>{mobileT("mobile.ui.productshell.dc7998d1d5")}</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.safetyPauseCancel}><Text style={styles.safetyPauseCancelText}>{mobileT("mobile.ui.productshell.f5fe9e8ad4")}</Text></Pressable>
     </View>
   </View>;
 }
@@ -3704,21 +2488,21 @@ function SafetyPauseChoices({ onDismiss, onSelect }: {
   onSelect: (signal: "new_sharp_pain" | "chest_discomfort" | "dizziness_or_fainting" | "unusual_breathing_difficulty" | "known_constraint") => void;
 }) {
   const choices: readonly { signal: "new_sharp_pain" | "chest_discomfort" | "dizziness_or_fainting" | "unusual_breathing_difficulty" | "known_constraint"; label: string }[] = [
-    { signal: "new_sharp_pain", label: "出现新的锐痛" },
-    { signal: "chest_discomfort", label: "胸部不适" },
-    { signal: "dizziness_or_fainting", label: "头晕或接近晕厥" },
-    { signal: "unusual_breathing_difficulty", label: "异常呼吸困难" },
-    { signal: "known_constraint", label: "已有专业限制需要遵守" },
+    { signal: "new_sharp_pain", label: mobileT("mobile.ui.productshell.6e6201f2e1") },
+    { signal: "chest_discomfort", label: mobileT("mobile.ui.productshell.1c87dd6fd1") },
+    { signal: "dizziness_or_fainting", label: mobileT("mobile.ui.productshell.5e44f89b91") },
+    { signal: "unusual_breathing_difficulty", label: mobileT("mobile.ui.productshell.db0c33bff7") },
+    { signal: "known_constraint", label: mobileT("mobile.ui.productshell.b30a975b18") },
   ];
   return <View accessibilityViewIsModal style={styles.safetyPauseScrim}>
-    <Pressable accessibilityRole="button" accessibilityLabel="关闭安全暂停" onPress={onDismiss} style={StyleSheet.absoluteFill} />
+    <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.2ae3af30ba")} onPress={onDismiss} style={StyleSheet.absoluteFill} />
     <View style={styles.safetyPauseSheet}>
       <View style={styles.sheetHandle} />
-      <Text style={styles.cardEyebrow}>训练安全</Text>
-      <Text style={styles.safetyPauseTitle}>先暂停，再决定下一步</Text>
-      <Text style={styles.safetyPauseDetail}>这不会诊断原因，也不会替你继续训练。选择后会冻结当前训练的自动推进。</Text>
+      <Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.9692ba9c17")}</Text>
+      <Text style={styles.safetyPauseTitle}>{mobileT("mobile.ui.productshell.8adfaf0672")}</Text>
+      <Text style={styles.safetyPauseDetail}>{mobileT("mobile.ui.productshell.82e33a4a0c")}</Text>
       {choices.map((choice) => <Pressable key={choice.signal} accessibilityRole="button" onPress={() => onSelect(choice.signal)} style={styles.safetyPauseChoice}><Text style={styles.safetyPauseChoiceText}>{choice.label}</Text><Text style={styles.chevron}>›</Text></Pressable>)}
-      <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.safetyPauseCancel}><Text style={styles.safetyPauseCancelText}>返回训练</Text></Pressable>
+      <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.safetyPauseCancel}><Text style={styles.safetyPauseCancelText}>{mobileT("mobile.ui.productshell.570554cecc")}</Text></Pressable>
     </View>
   </View>;
 }
@@ -3730,17 +2514,15 @@ function SafetyPauseChoices({ onDismiss, onSelect }: {
  */
 function WorkoutTaskEditor({
   application,
-  cloudConfirmed,
   userId,
   workout,
   onDismiss,
   onChanged,
   onRemoved,
 }: {
-  application: CoachApplication;
-  cloudConfirmed: ConfirmedProductBridge;
+  application: LocalProductKernel;
   userId: string;
-  workout: Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>;
+  workout: Awaited<ReturnType<LocalProductKernel["readWorkoutSession"]>>;
   onDismiss: () => void;
   onChanged: () => Promise<void> | void;
   onRemoved: (task: PlannedExerciseTask, index: number) => void;
@@ -3748,8 +2530,8 @@ function WorkoutTaskEditor({
   const [query, setQuery] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
   const [selectedExerciseId, setSelectedExerciseId] = useState<string>();
-  const [setCount, setSetCount] = useState("1");
-  const [targetValue, setTargetValue] = useState("10");
+  const [setCount, setSetCount] = useState("");
+  const [targetValue, setTargetValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [saveState, setSaveState] = useState<"idle" | "saving" | "failed" | "conflict">("idle");
@@ -3773,42 +2555,24 @@ function WorkoutTaskEditor({
       application.searchExerciseCatalog({ query: selectedExerciseId, limit: 1 })[0]
     : undefined;
   const commit = async (
-    change: Parameters<CoachApplication["editUpcomingWorkoutPlan"]>[0]["change"],
+    change: Parameters<LocalProductKernel["editUpcomingWorkoutPlan"]>[0]["change"],
     reason: string,
   ) => {
     setBusy(true);
     setSaveState("saving");
     try {
       const key = `mobile-workout:${workout.id}:task-edit:${workout.revision}:${change.kind}:${selectedTaskId ?? selectedExerciseId ?? "none"}`;
-      const currentDraft = workout.drafts.find((draft) => draft.prescriptionSetId === workout.state.currentSetId);
-      const applied = applyUpcomingWorkoutPlanChange({
-        before: workout.frozenPrescription,
-        change,
-        completedPrescriptionSetIds: [...completed],
-        ...(currentDraft ? { draftedPrescriptionSetId: currentDraft.prescriptionSetId } : {}),
-      });
-      await cloudConfirmed.updateWorkoutThen({
-        localWorkoutId: workout.id,
-        patch: { data: { workoutExecution: createCloudWorkoutExecutionSnapshot(applied.frozenPrescription) } },
-        idempotencyKey: `${key}:cloud`,
-        commitLocal: () => application.editUpcomingWorkoutPlan({
-          userId,
-          workoutId: workout.id,
-          change,
-          reason,
-          idempotencyKey: key,
-        }),
-      });
+      await application.editUpcomingWorkoutPlan({ userId, workoutId: workout.id, change, reason, idempotencyKey: key });
       setError(undefined);
       setSaveState("idle");
       await onChanged();
       onDismiss();
       return true;
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : "无法更新尚未开始的动作";
+      const detail = cause instanceof Error ? cause.message : mobileT("mobile.ui.productshell.eb8e55bcec");
       const conflict = /conflict|revision/i.test(detail);
       setSaveState(conflict ? "conflict" : "failed");
-      setError(conflict ? "云端版本有冲突，路线没有保存。请刷新后再试。" : "云端尚未确认，路线没有保存。可以重试。");
+      setError(conflict ? mobileT("mobile.ui.productshell.9cec27855f") : mobileT("mobile.ui.productshell.754d21d42c"));
       return false;
     } finally {
       setBusy(false);
@@ -3816,22 +2580,22 @@ function WorkoutTaskEditor({
   };
   const add = async () => {
     if (!selectedExercise) {
-      setError("先从动作库选择一个动作。");
+      setError(mobileT("mobile.ui.productshell.3471124484"));
       return;
     }
     const count = optionalFiniteNumber(setCount);
     const value = optionalFiniteNumber(targetValue);
     if (!count || !Number.isInteger(count) || count < 1 || count > 12) {
-      setError("组数需要是 1 到 12 的整数。");
+      setError(mobileT("mobile.ui.productshell.4256527303"));
       return;
     }
     if (value === undefined || value <= 0) {
-      setError("请填写每组的目标次数、时长或距离。");
+      setError(mobileT("mobile.ui.productshell.99440016c2"));
       return;
     }
     const identity = selectedExercise.identity.loadMeasurement;
     if (identity === "none") {
-      setError("这个动作没有可执行的组级计量；请通过当天活动记录保存实际经历。");
+      setError(mobileT("mobile.ui.productshell.6461639b3b"));
       return;
     }
     const taskId = `session-task:${workout.id}:${selectedExercise.id}:${workout.revision}`;
@@ -3857,7 +2621,7 @@ function WorkoutTaskEditor({
   };
   const replace = async () => {
     if (!selectedTaskId || !selectedExercise) {
-      setError("先选择要替换的后续动作和新的动作。");
+      setError(mobileT("mobile.ui.productshell.e995f5fe09"));
       return;
     }
     const selectedTask = workout.frozenPrescription.tasks.find((task) => task.id === selectedTaskId)!;
@@ -3886,11 +2650,11 @@ function WorkoutTaskEditor({
       <View style={styles.exerciseManagerSheet}>
         <View style={styles.sheetHandle} />
         <View style={styles.exerciseManagerHeader}>
-          <View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>后续动作</Text><Text style={styles.exerciseManagerSub}>已完成或正在记录的组保持不变。更换动作不会沿用原动作的目标重量。</Text></View>
-          <Pressable accessibilityRole="button" accessibilityLabel="关闭后续动作管理" onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>完成</Text></Pressable>
+          <View style={styles.exerciseManagerHeaderCopy}><Text style={styles.logTitle}>{mobileT("mobile.ui.productshell.db26286d9f")}</Text><Text style={styles.exerciseManagerSub}>{mobileT("mobile.ui.productshell.d03fb52b0d")}</Text></View>
+          <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.productshell.d2b4085e18")} onPress={onDismiss} style={styles.exerciseClose}><Text style={styles.exerciseCloseText}>{mobileT("mobile.ui.productshell.33246f6a5e")}</Text></Pressable>
         </View>
         <ScrollView contentContainerStyle={styles.exerciseManagerScroll} keyboardShouldPersistTaps="handled">
-          <Text style={styles.exerciseFieldLabel}>尚未开始</Text>
+          <Text style={styles.exerciseFieldLabel}>{mobileT("mobile.ui.productshell.434621d9fe")}</Text>
           {editableTasks.length ? editableTasks.map((task) => {
             const originalIndex = workout.frozenPrescription.tasks.findIndex((candidate) => candidate.id === task.id);
             const hasLockedSet = task.sets.some((set) => completed.has(set.id) || drafted.has(set.id));
@@ -3903,23 +2667,23 @@ function WorkoutTaskEditor({
               onReorder={(direction) => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + (direction === "up" ? -1 : 1) }, "user_dragged_unstarted_task")}
             >
               <View style={[styles.workoutTaskEditorRow, selectedTaskId === task.id && styles.workoutTaskEditorRowSelected]}>
-                <Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedTaskId === task.id }} onPress={() => setSelectedTaskId(task.id)} style={styles.workoutTaskEditorPrimary}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.exerciseManagerSub}>{task.sets.length} 组 · {hasLockedSet ? "已开始；只能替换剩余组" : "左滑后确认移除；长按用上下按钮排序"}</Text></Pressable>
+                <Pressable accessibilityRole="radio" accessibilityState={{ selected: selectedTaskId === task.id }} onPress={() => setSelectedTaskId(task.id)} style={styles.workoutTaskEditorPrimary}><Text style={styles.workoutTaskTitle}>{exerciseDisplayName(task.exerciseVariantId)}</Text><Text style={styles.exerciseManagerSub}>{task.sets.length} {mobileT("mobile.ui.productshell.a91e97907e")}{hasLockedSet ? mobileT("mobile.ui.productshell.724b296b9e") : mobileT("mobile.ui.productshell.2202d70612")}</Text></Pressable>
                 <View style={styles.workoutTaskEditorActions}>
-                  <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex <= 0} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex - 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>上移</Text></Pressable>
-                  <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex >= workout.frozenPrescription.tasks.length - 1} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>下移</Text></Pressable>
+                  <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex <= 0} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex - 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>{mobileT("mobile.ui.productshell.8a0c839791")}</Text></Pressable>
+                  <Pressable accessibilityRole="button" disabled={busy || hasLockedSet || originalIndex >= workout.frozenPrescription.tasks.length - 1} onPress={() => void commit({ kind: "reorder_task", taskId: task.id, toIndex: originalIndex + 1 }, "user_reordered_unstarted_task")} style={styles.workoutTaskTiny}><Text style={styles.workoutTaskTinyText}>{mobileT("mobile.ui.productshell.05c46fa3b7")}</Text></Pressable>
                 </View>
               </View>
             </SwipeRevealWorkoutTaskRow>;
-          }) : <Text style={styles.exerciseEmpty}>当前没有可编辑的后续动作。已开始的训练内容会保持原样。</Text>}
+          }) : <Text style={styles.exerciseEmpty}>{mobileT("mobile.ui.productshell.f8e0116dbd")}</Text>}
           <View style={styles.workoutTaskPicker}>
-            <Text style={styles.exerciseFieldLabel}>从动作库选择</Text>
-            <TextInput accessibilityLabel="搜索动作库" value={query} onChangeText={setQuery} style={styles.logInput} placeholder="搜索动作" placeholderTextColor="#777971" />
-            <View style={styles.workoutCatalogList}>{candidates.map((candidate) => <Pressable key={candidate.id} accessibilityRole="radio" accessibilityState={{ selected: selectedExerciseId === candidate.id }} onPress={() => setSelectedExerciseId(candidate.id)} style={[styles.workoutCatalogRow, selectedExerciseId === candidate.id && styles.workoutCatalogRowSelected]}><Text style={styles.exerciseRowTitle}>{candidate.displayName.zh}</Text><Text style={styles.exerciseManagerSub}>{candidate.identity.loadMeasurement === "time" ? "计时" : candidate.identity.loadMeasurement === "distance" ? "距离" : candidate.identity.loadMeasurement === "bodyweight_node" ? "徒手" : "重量 / 次数"}</Text></Pressable>)}</View>
-            {selectedExercise ? <Text style={styles.workoutTaskBoundary}>新加入的动作不预填重量；请在记录前确认实际负荷。</Text> : null}
-            <View style={styles.workoutTaskAddFields}><LightNumberInput label="组数" value={setCount} onChange={setSetCount} /><LightNumberInput label={selectedExercise?.identity.loadMeasurement === "time" ? "秒" : selectedExercise?.identity.loadMeasurement === "distance" ? "米" : "次数"} value={targetValue} onChange={setTargetValue} /></View>
-            <View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={busy} onPress={() => void replace()} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>替换所选动作</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void add()} style={[styles.logSave, styles.workoutTaskAddButton, busy && styles.primaryButtonDisabled]}><Text style={styles.logSaveText}>添加到本次训练</Text></Pressable></View>
+            <Text style={styles.exerciseFieldLabel}>{mobileT("mobile.ui.productshell.9541ef28eb")}</Text>
+            <TextInput accessibilityLabel={mobileT("mobile.ui.productshell.13d3cd6134")} value={query} onChangeText={setQuery} style={styles.logInput} placeholder={mobileT("mobile.ui.productshell.30b0565c91")} placeholderTextColor="#777971" />
+            <View style={styles.workoutCatalogList}>{candidates.map((candidate) => <Pressable key={candidate.id} accessibilityRole="radio" accessibilityState={{ selected: selectedExerciseId === candidate.id }} onPress={() => setSelectedExerciseId(candidate.id)} style={[styles.workoutCatalogRow, selectedExerciseId === candidate.id && styles.workoutCatalogRowSelected]}><Text style={styles.exerciseRowTitle}>{candidate.displayName.zh}</Text><Text style={styles.exerciseManagerSub}>{candidate.identity.loadMeasurement === "time" ? mobileT("mobile.ui.productshell.3cacefc6aa") : candidate.identity.loadMeasurement === "distance" ? mobileT("mobile.ui.productshell.b3480678b6") : candidate.identity.loadMeasurement === "bodyweight_node" ? mobileT("mobile.ui.productshell.9f99f6bb83") : mobileT("mobile.ui.productshell.f0c21c3440")}</Text></Pressable>)}</View>
+            {selectedExercise ? <Text style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.9103e42b40")}</Text> : null}
+            <View style={styles.workoutTaskAddFields}><LightNumberInput label={mobileT("mobile.ui.productshell.1a569fe919")} value={setCount} onChange={setSetCount} /><LightNumberInput label={selectedExercise?.identity.loadMeasurement === "time" ? mobileT("mobile.ui.productshell.eb6aaba1a1") : selectedExercise?.identity.loadMeasurement === "distance" ? mobileT("mobile.ui.productshell.ee7f305751") : mobileT("mobile.ui.productshell.d4a97e7577")} value={targetValue} onChange={setTargetValue} /></View>
+            <View style={styles.workoutTaskButtons}><Pressable accessibilityRole="button" disabled={busy} onPress={() => void replace()} style={styles.workoutTaskSecondary}><Text style={styles.workoutTaskSecondaryText}>{mobileT("mobile.ui.productshell.f0424203c7")}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void add()} style={[styles.logSave, styles.workoutTaskAddButton, busy && styles.primaryButtonDisabled]}><Text style={styles.logSaveText}>{mobileT("mobile.ui.productshell.87742d86fb")}</Text></Pressable></View>
           </View>
-      {saveState === "saving" ? <Text style={styles.workoutTaskBoundary}>正在等待云端确认…</Text> : null}
+      {saveState === "saving" ? <Text style={styles.workoutTaskBoundary}>{mobileT("mobile.ui.productshell.62eccbb2a2")}</Text> : null}
       {error ? <Text style={styles.formError}>{error}</Text> : null}
         </ScrollView>
       </View>
@@ -3927,59 +2691,38 @@ function WorkoutTaskEditor({
   );
 }
 
-function PausedWorkoutScreen({ application, cloudConfirmed, userId, workoutId, reason, onFinished, onResumed }: { application: CoachApplication; cloudConfirmed: ConfirmedProductBridge; userId: string; workoutId: string; reason?: "user" | "safety" | "background" | "schedule"; onFinished: () => void; onResumed: () => void }) {
+function PausedWorkoutScreen({ application, userId, workoutId, reason, onFinished, onResumed }: { application: LocalProductKernel; userId: string; workoutId: string; reason?: "user" | "safety" | "background" | "schedule"; onFinished: () => void; onResumed: () => void }) {
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const resume = async () => {
     setBusy(true);
     try {
-      const result = await cloudConfirmed.updateWorkoutThen({
-        localWorkoutId: workoutId,
-        patch: { data: { lifecycle: "resumed", acknowledgedSafetyPause: reason === "safety" } },
-        idempotencyKey: `mobile-workout:${workoutId}:resume:cloud`,
-        commitLocal: () => application.resumeWorkoutSession({
-          userId,
-          workoutId,
-          acknowledgeSafetyPause: reason === "safety",
-          idempotencyKey: `mobile-workout:${workoutId}:resume`,
-        }),
-      });
+      const result = await application.resumeWorkoutSession({ userId, workoutId, acknowledgeSafetyPause: reason === "safety", idempotencyKey: `mobile-workout:${workoutId}:resume` });
       if (result.status === "partial_proposal") {
-        setError("间隔已超过本次训练的恢复窗口；可以结束为未完成，或回到今天重新安排。");
+        setError(mobileT("mobile.ui.productshell.146e89e100"));
         return;
       }
       onResumed();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "暂时无法继续训练"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.f8eb3b7293"))); }
     finally { setBusy(false); }
   };
   const finishPartial = async () => {
     setBusy(true);
     try {
-      await cloudConfirmed.completeWorkoutThen({
-        localWorkoutId: workoutId,
-        summary: { status: "partial", pauseReason: reason ?? "unknown" },
-        completedAt: new Date().toISOString(),
-        idempotencyKey: `mobile-workout:${workoutId}:finish-paused:cloud`,
-        commitLocal: () => application.completeWorkoutSession({
-          userId,
-          workoutId,
-          status: "partial",
-          idempotencyKey: `mobile-workout:${workoutId}:finish-paused`,
-        }),
-      });
+      await application.completeWorkoutSession({ userId, workoutId, status: "partial", idempotencyKey: `mobile-workout:${workoutId}:finish-paused` });
       onFinished();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "暂时无法结束训练"); }
+    } catch (cause) { setError(userFacingError(cause, mobileT("mobile.ui.productshell.bccc45c859"))); }
     finally { setBusy(false); }
   };
-  const title = reason === "safety" ? "先暂停一下" : "训练已暂停";
+  const title = reason === "safety" ? mobileT("mobile.ui.productshell.0df8cc75ac") : mobileT("mobile.ui.productshell.dc591a14ee");
   const detail = reason === "safety"
-    ? "这是非诊断性的暂停。请根据自身情况决定是否继续；如有需要，请寻求合适的专业帮助。"
-    : "当前进度和休息计时都已保存在本机。恢复后会回到同一组。";
-  return <View style={styles.pausedPage}><View style={styles.pausedCard}><Text style={styles.cardEyebrow}>训练 Session</Text><Text style={styles.pausedTitle}>{title}</Text><Text style={styles.pausedDetail}>{detail}</Text>{error ? <Text style={styles.formError}>{error}</Text> : null}<Pressable accessibilityRole="button" disabled={busy} onPress={() => void resume()} style={[styles.primaryButton, busy && styles.primaryButtonDisabled]}><Text style={styles.primaryButtonText}>{reason === "safety" ? "确认后继续" : "继续训练"}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void finishPartial()} style={styles.finishButton}><Text style={styles.finishButtonText}>结束并保留已完成内容</Text></Pressable></View></View>;
+    ? mobileT("mobile.ui.productshell.cda81ae26a")
+    : mobileT("mobile.ui.productshell.1f2b45649a");
+  return <View style={styles.pausedPage}><View style={styles.pausedCard}><Text style={styles.cardEyebrow}>{mobileT("mobile.ui.productshell.dc591a14ee")}</Text><Text style={styles.pausedTitle}>{title}</Text><Text style={styles.pausedDetail}>{detail}</Text>{error ? <Text style={styles.formError}>{error}</Text> : null}<Pressable accessibilityRole="button" disabled={busy} onPress={() => void resume()} style={[styles.primaryButton, busy && styles.primaryButtonDisabled]}><Text style={styles.primaryButtonText}>{reason === "safety" ? mobileT("mobile.ui.productshell.104bce818d") : mobileT("mobile.ui.productshell.3166554c46")}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => void finishPartial()} style={styles.finishButton}><Text style={styles.finishButtonText}>{mobileT("mobile.ui.productshell.36d9bc620d")}</Text></Pressable></View></View>;
 }
 
 function ActualInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return <View style={styles.actualField}><ProfessionalTermText text={label} style={styles.actualLabel} /><TextInput accessibilityLabel={`实际${label}`} keyboardType="decimal-pad" value={value} onChangeText={onChange} style={styles.actualInput} placeholder="—" placeholderTextColor="#777971" /></View>;
+  return <View style={styles.actualField}><ProfessionalTermText text={label} style={styles.actualLabel} /><TextInput accessibilityLabel={mobileT("mobile.ui.productshell.70c3f439be", { value0: label })} keyboardType="decimal-pad" value={value} onChangeText={onChange} style={styles.actualInput} placeholder="—" placeholderTextColor="#777971" /></View>;
 }
 
 function LightNumberInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -3992,126 +2735,98 @@ function PlanSession({ session, subdued = false }: { session: ProductSession; su
 
 function DetailedPlanSession({ session, subdued = false }: { session: ProductSession; subdued?: boolean }) {
   const rest = session.kind === "rest" || session.kind === "recovery" || session.taskCount === 0;
-  if (rest) return <View style={[styles.committedRestDay, subdued && styles.planSessionSubdued]}><Text style={styles.committedRestDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.committedRestTitle}>恢复与记录</Text><Text style={styles.committedRestMeta}>保持日常活动；可补记睡眠、疲劳或饮食</Text></View>;
+  if (rest) return <View style={[styles.committedRestDay, subdued && styles.planSessionSubdued]}><Text style={styles.committedRestDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.committedRestTitle}>{mobileT("mobile.ui.productshell.c902062a8f")}</Text><Text style={styles.committedRestMeta}>{mobileT("mobile.ui.productshell.937232390d")}</Text></View>;
   return <View style={[styles.reportSessionCard, subdued && styles.planSessionSubdued]}>
-    <View style={styles.reportSessionTop}><View><Text style={styles.reportSessionDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.reportSessionTitle}>{readablePlanSessionTitle(session.title)}</Text></View><Text style={styles.committedSessionSets}>{session.totalSetCount} 组</Text></View>
-    <View style={styles.reportTaskList}>{session.actions.map((task) => <View key={task.id} style={styles.reportTaskRow}><View style={styles.reportTaskBullet} /><Text numberOfLines={1} style={styles.reportTaskName}>{humanizeExerciseLabel(task.label)}</Text><Text style={styles.reportTaskDose}>{humanizeDoseSummary(task.summary)}{task.targetRir !== undefined ? ` · 余力 ${task.targetRir}` : ""}</Text></View>)}</View>
-    {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? "力量完成后有氧" : "独立有氧"} · {session.aerobicBlock.minutes} 分钟</Text><ProfessionalTermText text={`RPE ${session.aerobicBlock.targetRpe.min}–${session.aerobicBlock.targetRpe.max} · ${session.aerobicBlock.talkTest} ${session.aerobicBlock.fastedEligible ? "空腹仅是偏好选项。" : "本计划不安排空腹有氧。"}`} style={styles.reportAerobicCopy} />{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
-    <Text style={styles.reportSessionFoot}>{session.estimatedMinutes ? `预计 ${session.estimatedMinutes} 分钟` : "按完成质量调整时长"} · 先保证动作质量，再考虑加量</Text>
+    <View style={styles.reportSessionTop}><View><Text style={styles.reportSessionDate}>{weekdayAndDate(session.scheduledFor)}</Text><Text style={styles.reportSessionTitle}>{readablePlanSessionTitle(session.title)}</Text></View><Text style={styles.committedSessionSets}>{session.totalSetCount} {mobileT("mobile.ui.productshell.726ff2fac5")}</Text></View>
+    <View style={styles.reportTaskList}>{session.actions.map((task) => <View key={task.id} style={styles.reportTaskRow}><View style={styles.reportTaskBullet} /><Text numberOfLines={1} style={styles.reportTaskName}>{humanizeExerciseLabel(task.label)}</Text><Text style={styles.reportTaskDose}>{humanizeDoseSummary(task.summary)}{task.targetRir !== undefined ? mobileT("mobile.ui.productshell.73ac72549d", { value0: task.targetRir }) : ""}</Text></View>)}</View>
+    {session.aerobicBlock ? <View style={styles.reportAerobicBlock}><Text style={styles.reportAerobicTitle}>{session.aerobicBlock.placement === "after_strength" ? mobileT("mobile.ui.productshell.0cf5fd6711") : mobileT("mobile.ui.productshell.51d825bcd4")} · {session.aerobicBlock.minutes} {mobileT("mobile.ui.productshell.28bf227b9b")}</Text><ProfessionalTermText text={`RPE ${session.aerobicBlock.targetRpe.min}–${session.aerobicBlock.targetRpe.max} · ${session.aerobicBlock.talkTest} ${session.aerobicBlock.fastedEligible ? mobileT("mobile.ui.productshell.a26d533454") : mobileT("mobile.ui.productshell.906178ac62")}`} style={styles.reportAerobicCopy} />{session.aerobicBlock.safetyNote ? <Text style={styles.reportAerobicGuard}>{session.aerobicBlock.safetyNote}</Text> : null}</View> : null}
+    <Text style={styles.reportSessionFoot}>{session.estimatedMinutes ? mobileT("mobile.ui.productshell.744a71c057", { value0: session.estimatedMinutes }) : mobileT("mobile.ui.productshell.9d7e88acce")} {mobileT("mobile.ui.productshell.8bf0c039bb")}</Text>
   </View>;
 }
 
 function Metric({ value, label }: { value: string; label: string }) { return <View style={styles.metric}><Text style={styles.metricValue}>{value || "—"}</Text><Text style={styles.metricLabel}>{label}</Text></View>; }
-function ProgressMetric({ label, value, meta }: { label: string; value: string; meta: string }) { return <View style={styles.progressMetric}><Text style={styles.progressMetricValue}>{value}</Text><Text style={styles.progressMetricLabel}>{label}</Text><Text style={styles.progressMetricMeta}>{meta}</Text></View>; }
 function ProfileRow({ label, value }: { label: string; value: string }) { return <View style={styles.profileRow}><Text style={styles.profileLabel}>{label}</Text><Text style={styles.profileValue}>{value}</Text></View>; }
-function CoachPending({ prompt }: { prompt: string }) { return <View style={styles.pendingCard}><Text style={styles.pendingLabel}>等待确认</Text><Text style={styles.pendingText}>{prompt}</Text></View>; }
+function CoachPending({ prompt }: { prompt: string }) { return <View style={styles.pendingCard}><Text style={styles.pendingLabel}>{mobileT("mobile.ui.productshell.25a45621ed")}</Text><Text style={styles.pendingText}>{prompt}</Text></View>; }
 function Empty({ label, compact = false }: { label: string; compact?: boolean }) { return <View style={[styles.empty, compact && styles.emptyCompact]}><Text style={styles.emptyText}>{label}</Text></View>; }
-function LoadingState() { return <View style={styles.statePage}><ActivityIndicator color={colors.limeDeep} /><Text style={styles.stateText}>正在读取本地资料</Text></View>; }
-function ErrorState({ message, onRetry, title = "暂时无法打开资料", retryLabel = "重试" }: { message: string; onRetry: () => void; title?: string; retryLabel?: string }) { return <View style={styles.statePage}><Text style={styles.stateTitle}>{title}</Text><Text style={styles.stateText}>{message}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.retry}><Text style={styles.retryText}>{retryLabel}</Text></Pressable></View>; }
-
-function routeContext(route: ProductRoute): CoachContextKind {
-  if (route === "onboarding") return "onboarding";
-  if (route === "plan") return "plan";
-  if (route === "profile") return "profile";
-  if (route === "video_library" || route === "replay") return "progress";
-  return route;
-}
+function LoadingState() { return <View style={styles.statePage}><ActivityIndicator color={colors.limeDeep} /><Text style={styles.stateText}>{mobileT("mobile.ui.productshell.73c362ad6d")}</Text></View>; }
+function ErrorState({ message, onRetry, title = mobileT("mobile.ui.productshell.a8013df8d6"), retryLabel = mobileT("mobile.ui.productshell.e2d53a6d3a") }: { message: string; onRetry: () => void; title?: string; retryLabel?: string }) { return <View style={styles.statePage}><Text style={styles.stateTitle}>{title}</Text><Text style={styles.stateText}>{message}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.retry}><Text style={styles.retryText}>{retryLabel}</Text></Pressable></View>; }
 
 function localDate(): string { return new Date(Date.now() - new Date().getTimezoneOffset() * 60_000).toISOString().slice(0, 10); }
-/** Compatibility helper retained for adapters that only emit the old trio. */
-export function resolveNotificationDeepLink(value?: string): { route: "today" | "progress" | "workout"; ref: string } | undefined {
-  const intent = resolveMaxPowerDeepLink(value);
-  if (!intent || intent.route === "calendar" || intent.route === "plan" || intent.route === "profile") return undefined;
-  if (intent.route === "workout") return { route: "workout", ref: intent.workoutId };
-  if (intent.route === "today" || intent.route === "progress") {
-    return { route: intent.route, ref: intent.date };
-  }
-  return undefined;
-}
 function isProductDeepLinkRoute(route: ProductRoute): route is ProductDeepLinkRoute {
-  return route === "today" || route === "calendar" || route === "plan" || route === "progress" || route === "profile" || route === "workout";
+  return route === "today" || route === "calendar" || route === "plan" || route === "profile" || route === "workout";
 }
 function isPrimaryProductRoute(route: string): route is PrimaryProductRoute {
   return route === "today" || route === "calendar" || route === "plan" || route === "profile";
 }
-function sameCoachContext(left: ContextRef, right: ContextRef): boolean {
-  return left.kind === right.kind && left.ref === right.ref;
-}
-function contextAcceptsRestoredCoach(saved: ContextRef, current: ContextRef, projectionPending: boolean): boolean {
-  // The Plan context contains its materialized revision, which is unavailable
-  // during the first projection read. Preserve a saved Plan attachment until
-  // that exact revision can be checked; no other context gets this exception.
-  return sameCoachContext(saved, current) || (projectionPending && saved.kind === "plan" && current.kind === "plan");
-}
 function shiftCalendarDate(date: string, days: number): string { const next = new Date(`${date}T12:00:00.000Z`); next.setUTCDate(next.getUTCDate() + days); return next.toISOString().slice(0, 10); }
 function shiftCalendarMonth(date: string, months: number): string { const [year, month, day] = date.split("-").map(Number); const first = new Date(Date.UTC(year!, month! - 1 + months, 1, 12)); const lastDay = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate(); first.setUTCDate(Math.min(day!, lastDay)); return first.toISOString().slice(0, 10); }
-function shortDate(date: string): string { const [, month, day] = date.split("-"); return `${Number(month)} 月 ${Number(day)} 日`; }
+function shortDate(date: string): string { const [, month, day] = date.split("-"); return mobileT("mobile.ui.productshell.b65c525564", { value0: Number(month), value1: Number(day) }); }
 function localDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getMonth() + 1} 月 ${date.getDate()} 日 ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return mobileT("mobile.ui.productshell.58c84df909", { value0: date.getMonth() + 1, value1: date.getDate(), value2: pad(date.getHours()), value3: pad(date.getMinutes()) });
 }
-function sessionMeta(session: ProductSession): string { return `${session.kind === "cardio" ? "有氧" : session.kind === "rest" || session.kind === "recovery" ? "恢复" : "训练"}${session.estimatedMinutes ? ` · ${session.estimatedMinutes} 分钟` : ""}${session.taskCount ? ` · ${session.taskCount} 项` : ""}`; }
-function weekdayAndDate(date: string): string { const weekday = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][new Date(`${date}T12:00:00.000Z`).getUTCDay()]; return `${weekday} · ${shortDate(date)}`; }
-function readablePlanSessionTitle(title: string): string { return title.replace("hypertrophy", "增肌").replace("strength", "力量").replace("fat_loss_preserve_lean_mass", "减脂保肌"); }
+function sessionMeta(session: ProductSession): string { return `${session.kind === "cardio" ? mobileT("mobile.ui.productshell.25b132283f") : session.kind === "rest" || session.kind === "recovery" ? mobileT("mobile.ui.productshell.79748ca1c6") : mobileT("mobile.ui.productshell.796e01d5af")}${session.estimatedMinutes ? mobileT("mobile.ui.productshell.7c633644b1", { value0: session.estimatedMinutes }) : ""}${session.taskCount ? mobileT("mobile.ui.productshell.a11fcc6073", { value0: session.taskCount }) : ""}`; }
+function weekdayAndDate(date: string): string { const weekday = [mobileT("mobile.ui.productshell.c3405710e0"), mobileT("mobile.ui.productshell.792c34e70d"), mobileT("mobile.ui.productshell.8f03441d4b"), mobileT("mobile.ui.productshell.254556737b"), mobileT("mobile.ui.productshell.18f1fd9e88"), mobileT("mobile.ui.productshell.4344fc1363"), mobileT("mobile.ui.productshell.f0c6199aa0")][new Date(`${date}T12:00:00.000Z`).getUTCDay()]; return `${weekday} · ${shortDate(date)}`; }
+function readablePlanSessionTitle(title: string): string { return title.replace("hypertrophy", mobileT("mobile.ui.productshell.5ea5b92ec0")).replace("strength", mobileT("mobile.ui.productshell.043b41ab7d")).replace("fat_loss_preserve_lean_mass", mobileT("mobile.ui.productshell.18c4940da9")); }
 function humanizeExerciseLabel(label: string): string {
   const tokenLabels: Record<string, string> = {
-    band: "弹力带",
-    barbell: "杠铃",
-    bodyweight: "徒手",
-    cable: "绳索",
-    cardio_machine: "有氧器械",
-    dumbbell: "哑铃",
-    kettlebell: "壶铃",
-    machine: "固定器械",
-    none: "无器械",
-    conventional: "传统式",
-    breathing: "呼吸练习",
-    body_saw: "身体锯",
-    brisk: "快走",
-    ankle: "踝部",
-    incline: "上斜",
-    decline: "下斜",
-    easy: "轻松",
-    easy_walk: "轻松步行",
-    elbow_at_side: "肘贴体侧",
-    forward: "前跨式",
-    full_body: "全身",
-    gentle_stretch: "轻柔拉伸",
-    half_kneeling: "半跪姿",
-    hip: "髋部",
-    in_place: "原地",
-    interval: "间歇",
-    knee: "膝撑",
-    knee_raise: "提膝",
-    kneeling: "跪姿",
-    lateral: "侧向",
-    lean_away: "侧倾式",
-    long_lever: "长杠杆",
-    lying: "卧姿",
-    ninety_degree: "90 度",
-    overhead: "过顶式",
-    paused: "停顿式",
-    pushdown: "下压式",
-    recumbent: "卧式",
-    rear_foot_elevated: "后脚抬高",
-    reverse: "后撤式",
-    rest: "休息",
-    rope: "绳索式",
-    romanian: "罗马尼亚式",
-    seated: "坐姿",
-    side_left: "左侧",
-    side_right: "右侧",
-    spin: "动感单车",
-    steady: "稳态",
-    standing: "站姿",
-    step_jack: "开合踏步",
-    shoulder: "肩部",
-    thoracic: "胸椎",
-    walking: "行走式",
-    wrist: "腕部",
-    upright: "直立式",
+    band: mobileT("mobile.ui.productshell.55c300f60d"),
+    barbell: mobileT("mobile.ui.productshell.18411deb8a"),
+    bodyweight: mobileT("mobile.ui.productshell.9f99f6bb83"),
+    cable: mobileT("mobile.ui.productshell.7befd27dda"),
+    cardio_machine: mobileT("mobile.ui.productshell.48bced69af"),
+    dumbbell: mobileT("mobile.ui.productshell.eab45346b2"),
+    kettlebell: mobileT("mobile.ui.productshell.2c7701669d"),
+    machine: mobileT("mobile.ui.productshell.afdbbba4b3"),
+    none: mobileT("mobile.ui.productshell.aa41b3943c"),
+    conventional: mobileT("mobile.ui.productshell.7383d54675"),
+    breathing: mobileT("mobile.ui.productshell.5fd964d0e6"),
+    body_saw: mobileT("mobile.ui.productshell.31fc2fe63e"),
+    brisk: mobileT("mobile.ui.productshell.804d9d8064"),
+    ankle: mobileT("mobile.ui.productshell.e31bbf9fa9"),
+    incline: mobileT("mobile.ui.productshell.d1f0722062"),
+    decline: mobileT("mobile.ui.productshell.6f02571a23"),
+    easy: mobileT("mobile.ui.productshell.c9c4a72eeb"),
+    easy_walk: mobileT("mobile.ui.productshell.0c938ddc18"),
+    elbow_at_side: mobileT("mobile.ui.productshell.54022dc63e"),
+    forward: mobileT("mobile.ui.productshell.5987f408dd"),
+    full_body: mobileT("mobile.ui.productshell.15598fb229"),
+    gentle_stretch: mobileT("mobile.ui.productshell.16a5c06d3c"),
+    half_kneeling: mobileT("mobile.ui.productshell.cddf3ae88a"),
+    hip: mobileT("mobile.ui.productshell.b6cb35f15f"),
+    in_place: mobileT("mobile.ui.productshell.b7daa85402"),
+    interval: mobileT("mobile.ui.productshell.a25e603f78"),
+    knee: mobileT("mobile.ui.productshell.e4861197d9"),
+    knee_raise: mobileT("mobile.ui.productshell.9850eb8e5f"),
+    kneeling: mobileT("mobile.ui.productshell.0fd17308e3"),
+    lateral: mobileT("mobile.ui.productshell.692bc6a06a"),
+    lean_away: mobileT("mobile.ui.productshell.f6f44b7382"),
+    long_lever: mobileT("mobile.ui.productshell.c0275273de"),
+    lying: mobileT("mobile.ui.productshell.5e90e45d44"),
+    ninety_degree: mobileT("mobile.ui.productshell.df0f1517ce"),
+    overhead: mobileT("mobile.ui.productshell.e0464e6eb7"),
+    paused: mobileT("mobile.ui.productshell.92ef1c79c3"),
+    pushdown: mobileT("mobile.ui.productshell.1e8cd56ec0"),
+    recumbent: mobileT("mobile.ui.productshell.8f69b444d0"),
+    rear_foot_elevated: mobileT("mobile.ui.productshell.b7fe54ea9a"),
+    reverse: mobileT("mobile.ui.productshell.e3a96490b3"),
+    rest: mobileT("mobile.ui.productshell.da11d57634"),
+    rope: mobileT("mobile.ui.productshell.e91a55a873"),
+    romanian: mobileT("mobile.ui.productshell.ddfb62c7b6"),
+    seated: mobileT("mobile.ui.productshell.1a23b8e788"),
+    side_left: mobileT("mobile.ui.productshell.440495fc2d"),
+    side_right: mobileT("mobile.ui.productshell.1e4e7a177d"),
+    spin: mobileT("mobile.ui.productshell.911b6382af"),
+    steady: mobileT("mobile.ui.productshell.9a5e166372"),
+    standing: mobileT("mobile.ui.productshell.2f953f98f4"),
+    step_jack: mobileT("mobile.ui.productshell.75c6655a28"),
+    shoulder: mobileT("mobile.ui.productshell.0e302421dd"),
+    thoracic: mobileT("mobile.ui.productshell.3e332764a8"),
+    walking: mobileT("mobile.ui.productshell.2418916d1f"),
+    wrist: mobileT("mobile.ui.productshell.408488fbee"),
+    upright: mobileT("mobile.ui.productshell.613ea3ec83"),
   };
   return label
     .split(" · ")
@@ -4121,273 +2836,197 @@ function humanizeExerciseLabel(label: string): string {
 }
 function humanizeDoseSummary(summary: string): string {
   return summary
-    .replace(/\bminutes?\b/g, "分钟")
-    .replace(/\bseconds?\b/g, "秒")
-    .replace(/\bhours?\b/g, "小时")
-    .replace(/\breps?\b/g, "次");
+    .replace(/\bminutes?\b/g, mobileT("mobile.ui.productshell.28bf227b9b"))
+    .replace(/\bseconds?\b/g, mobileT("mobile.ui.productshell.eb6aaba1a1"))
+    .replace(/\bhours?\b/g, mobileT("mobile.ui.productshell.99f6904ff3"))
+    .replace(/\breps?\b/g, mobileT("mobile.ui.productshell.5e5b8169ee"));
 }
 function exerciseDisplayName(id: string): string {
   const prefix = id.split(".")[0];
   return ({
-    anti_rotation_press: "抗旋推",
-    bench_press: "卧推",
-    biceps_curl: "肱二头弯举",
-    calf_raise: "提踵",
-    chest_fly: "飞鸟",
-    crunch: "卷腹",
-    cycle: "骑行",
-    deadlift: "硬拉",
-    elliptical: "椭圆机",
-    external_rotation: "肩外旋",
-    front_raise: "前平举",
-    hip_thrust: "臀桥 / 髋推",
-    knee_extension: "腿屈伸",
-    knee_flexion: "腿弯举",
-    lat_pulldown: "高位下拉",
-    lateral_raise: "侧平举",
-    leg_press: "腿举",
-    lunge: "弓步",
-    march: "踏步",
-    mobility_flow: "灵活性活动",
-    overhead_press: "肩上推举",
-    plank: "平板支撑",
-    push_up: "俯卧撑",
-    pull_up: "引体向上",
-    rear_delt_fly: "后束飞鸟",
-    recovery_activity: "恢复活动",
-    row: "划船",
-    split_squat: "分腿蹲",
-    inverted_row: "反向划船",
-    squat: "深蹲",
-    stair_climb: "爬楼",
-    straight_arm_pulldown: "直臂下压",
-    triceps_extension: "肱三头伸展",
-    walk: "步行",
-    romanian_deadlift: "罗马尼亚硬拉",
-    shoulder_press: "肩上推举",
+    anti_rotation_press: mobileT("mobile.ui.productshell.0ab6e93212"),
+    bench_press: mobileT("mobile.ui.productshell.3e3510f68d"),
+    biceps_curl: mobileT("mobile.ui.productshell.87547c94af"),
+    calf_raise: mobileT("mobile.ui.productshell.fe47ccd518"),
+    chest_fly: mobileT("mobile.ui.productshell.20f45492d1"),
+    crunch: mobileT("mobile.ui.productshell.cb73c1a749"),
+    cycle: mobileT("mobile.ui.productshell.596c5a92ea"),
+    deadlift: mobileT("mobile.ui.productshell.1e54cd433c"),
+    elliptical: mobileT("mobile.ui.productshell.97cd453e1a"),
+    external_rotation: mobileT("mobile.ui.productshell.31fbc2cc00"),
+    front_raise: mobileT("mobile.ui.productshell.7b337ab1df"),
+    hip_thrust: mobileT("mobile.ui.productshell.55d33807cc"),
+    knee_extension: mobileT("mobile.ui.productshell.677bd71c0c"),
+    knee_flexion: mobileT("mobile.ui.productshell.520aa50d31"),
+    lat_pulldown: mobileT("mobile.ui.productshell.c28855ee30"),
+    lateral_raise: mobileT("mobile.ui.productshell.71105cb874"),
+    leg_press: mobileT("mobile.ui.productshell.2e5b0b61f2"),
+    lunge: mobileT("mobile.ui.productshell.67b8955983"),
+    march: mobileT("mobile.ui.productshell.be74831776"),
+    mobility_flow: mobileT("mobile.ui.productshell.af1ec9647e"),
+    overhead_press: mobileT("mobile.ui.productshell.7251c03894"),
+    plank: mobileT("mobile.ui.productshell.96d9004303"),
+    push_up: mobileT("mobile.ui.productshell.d6901dd1e8"),
+    pull_up: mobileT("mobile.ui.productshell.967c0d3aac"),
+    rear_delt_fly: mobileT("mobile.ui.productshell.bfac05ce8b"),
+    recovery_activity: mobileT("mobile.ui.productshell.2cbdae07ce"),
+    row: mobileT("mobile.ui.productshell.3febe8cf8d"),
+    split_squat: mobileT("mobile.ui.productshell.78f50f3835"),
+    inverted_row: mobileT("mobile.ui.productshell.0ce2b2714c"),
+    squat: mobileT("mobile.ui.productshell.892fd5fbd9"),
+    stair_climb: mobileT("mobile.ui.productshell.286c460906"),
+    straight_arm_pulldown: mobileT("mobile.ui.productshell.027661e045"),
+    triceps_extension: mobileT("mobile.ui.productshell.d187fc6670"),
+    walk: mobileT("mobile.ui.productshell.191f5b40d1"),
+    romanian_deadlift: mobileT("mobile.ui.productshell.9043995a63"),
+    shoulder_press: mobileT("mobile.ui.productshell.7251c03894"),
   } as Record<string, string>)[prefix] ?? id.replace(/[._-]+/g, " ");
 }
 function planTaskDose(task: import("../../coach/domain").PlannedExerciseTask): string {
   const first = task.sets[0];
-  if (!first) return "待校准";
+  if (!first) return mobileT("mobile.ui.productshell.71e93e636f");
   const target = first.targetReps
-    ? `${first.targetReps.min === first.targetReps.max ? first.targetReps.min : `${first.targetReps.min}–${first.targetReps.max}`} 次`
+    ? mobileT("mobile.ui.productshell.ddd97d4b7a", { value0: first.targetReps.min === first.targetReps.max ? first.targetReps.min : `${first.targetReps.min}–${first.targetReps.max}` })
     : first.targetDuration
-      ? `${first.targetDuration.value} ${first.targetDuration.unit === "seconds" ? "秒" : first.targetDuration.unit === "minutes" ? "分钟" : "小时"}`
+      ? `${first.targetDuration.value} ${first.targetDuration.unit === "seconds" ? mobileT("mobile.ui.productshell.eb6aaba1a1") : first.targetDuration.unit === "minutes" ? mobileT("mobile.ui.productshell.28bf227b9b") : mobileT("mobile.ui.productshell.99f6904ff3")}`
       : first.targetDistance
         ? `${first.targetDistance.value} ${first.targetDistance.unit}`
-        : "待校准";
+        : mobileT("mobile.ui.productshell.71e93e636f");
   const rest = first.rest
     ? first.rest.unit === "seconds"
-      ? `${first.rest.value} 秒`
-      : `${first.rest.value} 分钟`
+      ? mobileT("mobile.ui.productshell.e4b5ab2535", { value0: first.rest.value })
+      : mobileT("mobile.ui.productshell.b16f805a29", { value0: first.rest.value })
     : undefined;
-  return `${task.sets.length} × ${target}${first.targetRir !== undefined ? ` · 余力约 ${first.targetRir}` : ""}${rest ? ` · 休息 ${rest}` : ""}`;
+  return `${task.sets.length} × ${target}${first.targetRir !== undefined ? mobileT("mobile.ui.productshell.8b9ce18b64", { value0: first.targetRir }) : ""}${rest ? mobileT("mobile.ui.productshell.9240234c39", { value0: rest }) : ""}`;
 }
-function outcomeStatusLabel(status: WorkoutOutcomeProductSummary["status"]): string { return status === "completed" ? "已完成" : status === "partial" ? "部分完成" : "已中止"; }
-function outcomeCompletenessLabel(value: WorkoutOutcomeProductSummary["dataCompleteness"]): string { return value === "complete" ? "记录完整" : value === "partial" ? "部分记录" : "手动记录"; }
+function outcomeStatusLabel(status: WorkoutOutcomeProductSummary["status"]): string { return status === "completed" ? mobileT("mobile.ui.productshell.e99b48a29b") : status === "partial" ? mobileT("mobile.ui.productshell.5395180221") : mobileT("mobile.ui.productshell.5c174784ba"); }
+function outcomeCompletenessLabel(value: WorkoutOutcomeProductSummary["dataCompleteness"]): string { return value === "complete" ? mobileT("mobile.ui.productshell.66ead22926") : value === "partial" ? mobileT("mobile.ui.productshell.acb47b3ad7") : mobileT("mobile.ui.productshell.d98299e6c4"); }
 function trendValue(value: number | undefined, unit: string | undefined): string { return value === undefined ? "—" : `${value.toFixed(1)}${unit === "percent" ? "%" : unit ?? ""}`; }
-function trendCoverage(count: number | undefined): string { return count ? `${count} 条可比记录` : "记录不足"; }
-function metricLabel(name: string): string { return { body_trend: "身体趋势", training_trend: "训练趋势", nutrition_adherence: "营养执行", recovery_trend: "恢复趋势", phase_progress: "阶段进度", goal_feasibility: "目标可行性" }[name] ?? name; }
-function metricDirectionLabel(direction: string, score?: number): string { if (direction === "improving") return score === undefined ? "改善" : `改善 ${score.toFixed(2)}`; if (direction === "declining") return score === undefined ? "下降" : `下降 ${Math.abs(score).toFixed(2)}`; if (direction === "stable") return "稳定"; return "待积累"; }
-function metricConfidenceLabel(confidence: string): string { return confidence === "high" ? "高信心" : confidence === "moderate" ? "中信心" : "低信心"; }
-function nutritionDayKindLabel(kind: DailyIntakeBudget["dayKind"]): string { return kind === "training" ? "训练日" : kind === "rest" ? "休息日" : kind === "deload" ? "减量日" : kind === "recovery" ? "恢复日" : "类型待确认"; }
-function intakePalette(status: DailyIntakeStatus): { color: string; soft: string; ink: string } {
+function trendCoverage(count: number | undefined): string { return count ? mobileT("mobile.ui.productshell.193c00e1d7", { value0: count }) : mobileT("mobile.ui.productshell.d4ddd5191e"); }
+function metricLabel(name: string): string { return { body_trend: mobileT("mobile.ui.productshell.f27012ee66"), training_trend: mobileT("mobile.ui.productshell.c60b8441ed"), nutrition_adherence: mobileT("mobile.ui.productshell.437ccd29f9"), recovery_trend: mobileT("mobile.ui.productshell.a18ec79a53"), phase_progress: mobileT("mobile.ui.productshell.3f997371e4"), goal_feasibility: mobileT("mobile.ui.productshell.894788593b") }[name] ?? name; }
+function metricDirectionLabel(direction: string, score?: number): string { if (direction === "improving") return score === undefined ? mobileT("mobile.ui.productshell.f59bd9e46e") : mobileT("mobile.ui.productshell.2e03207ef0", { value0: score.toFixed(2) }); if (direction === "declining") return score === undefined ? mobileT("mobile.ui.productshell.36485c37a3") : mobileT("mobile.ui.productshell.7a5073dcca", { value0: Math.abs(score).toFixed(2) }); if (direction === "stable") return mobileT("mobile.ui.productshell.4024bd5e23"); return mobileT("mobile.ui.productshell.06b938781d"); }
+function metricConfidenceLabel(confidence: string): string { return confidence === "high" ? mobileT("mobile.ui.productshell.8683dd012a") : confidence === "moderate" ? mobileT("mobile.ui.productshell.6b303a2562") : mobileT("mobile.ui.productshell.31c33fa3d4"); }
+type LedgerIntakeStatus = "unknown" | "partial" | "below" | "on_track" | "over";
+function nutritionDayKindLabel(kind: DailyHealthLedger["nutritionPlan"]["dayKind"]): string { return kind === "training" ? mobileT("mobile.ui.productshell.132d15591f") : kind === "rest" ? mobileT("mobile.ui.productshell.743a4ad0dd") : kind === "deload" ? mobileT("mobile.ui.productshell.1e370de3e6") : kind === "recovery" ? mobileT("mobile.ui.productshell.7369b4b9a3") : mobileT("mobile.ui.productshell.c4f64b5c3c"); }
+function ledgerTargetKcal(ledger: DailyHealthLedger): number | undefined { return ledger.nutritionPlan.targets.energy.value; }
+function ledgerConsumedKcal(ledger: DailyHealthLedger): number | undefined { const value = ledger.nutrition.nutrients.energy; return value.reportedValueCount ? Math.round(value.consumedLogged) : undefined; }
+function ledgerProgressRatio(ledger: DailyHealthLedger): number | undefined { const target = ledgerTargetKcal(ledger); const consumed = ledgerConsumedKcal(ledger); return ledger.nutrition.nutrients.energy.intakeKnown && target && consumed !== undefined ? consumed / target : undefined; }
+function ledgerVariancePercent(ledger: DailyHealthLedger): number | undefined { const ratio = ledgerProgressRatio(ledger); return ratio === undefined ? undefined : Math.round((ratio - 1) * 100); }
+function ledgerIntakeStatus(ledger: DailyHealthLedger): LedgerIntakeStatus { const variance = ledgerVariancePercent(ledger); if (ledger.nutrition.coverage === "no_log") return "unknown"; if (variance === undefined) return "partial"; if (variance < -10) return "below"; if (variance > 10) return "over"; return "on_track"; }
+function intakePalette(status: LedgerIntakeStatus): { color: string; soft: string; ink: string } {
   if (status === "on_track") return { color: colors.fuelSafe, soft: colors.fuelSafeSoft, ink: "#476D0C" };
-  if (status === "slightly_over" || status === "below" || status === "far_below") return { color: colors.fuelWarn, soft: colors.fuelWarnSoft, ink: "#805500" };
-  if (status === "high") return { color: colors.fuelDanger, soft: colors.fuelDangerSoft, ink: "#9F2B20" };
+  if (status === "below" || status === "partial") return { color: colors.fuelWarn, soft: colors.fuelWarnSoft, ink: "#805500" };
+  if (status === "over") return { color: colors.fuelDanger, soft: colors.fuelDangerSoft, ink: "#9F2B20" };
   return { color: colors.ink3, soft: colors.paper2, ink: colors.ink2 };
 }
-function intakeStatusLabel(budget: DailyIntakeBudget): string {
-  if (budget.status === "unknown") return "待记录";
-  if (budget.status === "on_track") return "正常范围";
-  const variance = budget.variancePercent ?? 0;
-  return variance < 0 ? `低 ${Math.abs(variance)}%` : `高 ${variance}%`;
+function intakeStatusLabel(budget: DailyHealthLedger): string {
+  const status = ledgerIntakeStatus(budget);
+  if (status === "unknown") return mobileT("mobile.ui.productshell.78081971e6");
+  if (status === "partial") return "记录不完整";
+  if (status === "on_track") return mobileT("mobile.ui.productshell.cc88ccd29d");
+  const variance = ledgerVariancePercent(budget) ?? 0;
+  return variance < 0 ? mobileT("mobile.ui.productshell.7f9939a39b", { value0: Math.abs(variance) }) : mobileT("mobile.ui.productshell.095a33e0a7", { value0: variance });
 }
-function intakeExplanation(budget: DailyIntakeBudget): { title: string; body: string } {
-  const magnitude = Math.abs(budget.variancePercent ?? 0);
-  if (budget.status === "unknown") {
-    const partial = budget.missing.includes("unquantified_meal");
+function intakeExplanation(budget: DailyHealthLedger): { title: string; body: string } {
+  const status = ledgerIntakeStatus(budget);
+  const magnitude = Math.abs(ledgerVariancePercent(budget) ?? 0);
+  if (status === "unknown" || status === "partial") {
+    const partial = status === "partial";
     return {
-      title: partial ? "有餐食尚未量化" : "还不能判断吃多或吃少",
-      body: partial ? "已有餐食没有完整份量或热量，系统会保持未知，不把缺失值当成零。补齐后圆环才会判断区间。" : "未记录不等于摄入为零。记录餐食后，圆环会按今天的训练与运动预算显示正常、偏高或偏低。",
+      title: partial ? mobileT("mobile.ui.productshell.5e5609966d") : mobileT("mobile.ui.productshell.fe531eb587"),
+      body: partial ? mobileT("mobile.ui.productshell.5ff22e2e1c") : mobileT("mobile.ui.productshell.5aa6bc588c"),
     };
   }
-  if (budget.status === "far_below") return { title: `当前记录明显偏低 · 少 ${magnitude}%`, body: "如果今天已接近结束，建议补足一餐或加餐。长期明显少吃会影响训练表现、恢复和瘦体重；减脂也不是越少越好。" };
-  if (budget.status === "below") return { title: `还没进入建议区间 · 少 ${magnitude}%`, body: "今天仍低于建议下限。若还有正餐，优先补蛋白质、主食和正常份量，不需要用挨饿换取更快进度。" };
-  if (budget.status === "on_track") return { title: "处于建议摄入 ±10%", body: "圆环为绿色表示今天已在可执行区间。维持规律进餐即可，不必为了精确到个位数继续加减。" };
-  if (budget.status === "slightly_over") return { title: `黄色提醒 · 高 ${magnitude}%`, body: "今天比建议值高出 10% 以上。先停止额外加餐，下一餐按饥饿感和蛋白质目标安排；明天回到原计划，不做惩罚性少吃。" };
-  return { title: `红色提醒 · 高 ${magnitude}%`, body: "今天比建议值高出 20% 以上。把它作为一次可复盘的记录，留意饮料、零食和份量；不要用第二天极端断食补偿。" };
+  if (status === "below") return { title: mobileT("mobile.ui.productshell.1a649f84d2", { value0: magnitude }), body: mobileT("mobile.ui.productshell.e0d4f039c3") };
+  if (status === "on_track") return { title: mobileT("mobile.ui.productshell.e448b9a13c"), body: mobileT("mobile.ui.productshell.5c6819f820") };
+  return { title: mobileT("mobile.ui.productshell.cd4d0f8b1b", { value0: magnitude }), body: mobileT("mobile.ui.productshell.c0eac9fdf5") };
 }
-function intakeAdjustmentSummary(budget: DailyIntakeBudget): string {
-  const parts = [
-    budget.dayTypeAdjustmentKcal ? `${nutritionDayKindLabel(budget.dayKind)} ${signedKcal(budget.dayTypeAdjustmentKcal)}` : undefined,
-    budget.activityAdjustmentKcal ? `运动 ${signedKcal(budget.activityAdjustmentKcal)}` : undefined,
-  ].filter((part): part is string => Boolean(part));
-  return parts.length ? parts.join(" · ") : "按本周训练安排动态分配";
+function intakeAdjustmentSummary(budget: DailyHealthLedger): string {
+  if (budget.energyBalance.status !== "complete") return budget.nutrition.coverage === "partial" ? "记录不完整，暂不判断热量差" : mobileT("mobile.ui.productshell.75600fba2c");
+  return `热量差 ${signedKcal(Math.round((budget.energyBalance.range.min + budget.energyBalance.range.max) / 2))}`;
 }
 function signedKcal(value: number): string { return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toLocaleString()} kcal`; }
-function weekDayLabel(date: string): string { return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][new Date(`${date}T12:00:00.000Z`).getUTCDay()] ?? ""; }
+function weekDayLabel(date: string): string { return [mobileT("mobile.ui.productshell.c3405710e0"), mobileT("mobile.ui.productshell.792c34e70d"), mobileT("mobile.ui.productshell.8f03441d4b"), mobileT("mobile.ui.productshell.254556737b"), mobileT("mobile.ui.productshell.18f1fd9e88"), mobileT("mobile.ui.productshell.4344fc1363"), mobileT("mobile.ui.productshell.f0c6199aa0")][new Date(`${date}T12:00:00.000Z`).getUTCDay()] ?? ""; }
 function dateDistance(from: string, to: string): number { return Math.round((Date.parse(`${to}T12:00:00.000Z`) - Date.parse(`${from}T12:00:00.000Z`)) / 86_400_000); }
-function recoveryLevelLabel(level: CoachProductProjection["today"]["recovery"]["level"]): string { return level === "normal" ? "按原计划" : level === "slight_reduction" ? "稍微放缓" : level === "recovery_priority" ? "恢复优先" : "暂停并确认"; }
+function recoveryLevelLabel(level: CoachProductProjection["today"]["recovery"]["level"]): string { return level === "normal" ? mobileT("mobile.ui.productshell.c177e6ac8c") : level === "slight_reduction" ? mobileT("mobile.ui.productshell.e921a3c856") : level === "recovery_priority" ? mobileT("mobile.ui.productshell.be7c927520") : mobileT("mobile.ui.productshell.ce4faf591f"); }
 function clampNumber(value: number, min: number, max: number): number { return Math.max(min, Math.min(max, value)); }
-function goalLabel(value?: string): string { return value === "hypertrophy" ? "增肌" : value === "strength" ? "增力" : value === "fat_loss_preserve_lean_mass" ? "减脂保肌" : "待填写"; }
-function experienceLabel(value?: string): string { return value === "beginner" ? "刚开始训练" : value === "intermediate" ? "规律训练" : value === "advanced" ? "进阶训练" : "训练经验待补充"; }
+function goalLabel(value?: string): string {
+  if (value === "hypertrophy") return mobileT("mobile.ui.productshell.5ea5b92ec0");
+  if (value === "strength") return mobileT("mobile.ui.productshell.e73fa7ffe3");
+  if (value === "fat_loss_preserve_lean_mass") return mobileT("mobile.ui.productshell.18c4940da9");
+  if (value === "physique") return mobileT("mobile.ui.productshell.goal.physique");
+  if (value === "maintain") return mobileT("mobile.ui.productshell.goal.maintain");
+  if (value === "return_to_training") return mobileT("mobile.ui.productshell.goal.returnToTraining");
+  return mobileT("mobile.ui.productshell.7c8d65e331");
+}
 function recoveryReasonLabel(value: string, locale?: string): string {
   return ({
-    no_active_recovery_constraint: "当前没有恢复限制",
-    check_in_optional: "睡眠、疲劳与酸痛（可选）",
-    recovery_check_in_missing: "尚未记录恢复感受",
-    sleep_missing: "尚未记录睡眠",
+    no_active_recovery_constraint: mobileT("mobile.ui.productshell.c8ef1034e0"),
+    check_in_optional: mobileT("mobile.ui.productshell.b6426caf17"),
+    recovery_check_in_missing: mobileT("mobile.ui.productshell.ff422dd442"),
+    sleep_missing: mobileT("mobile.ui.productshell.a1437ff08c"),
   } as Record<string, string>)[value] ?? planningPhrase(value, locale).replaceAll("_", " ");
 }
-function movementLabel(value?: MovementPattern): string { return movementChoices.find((choice) => choice.value === value)?.label ?? "未分类"; }
-function mandateLabel(value?: string): string { return value === "manual" ? "手动" : value === "managed" ? "托管" : value === "collaborative" ? "协作" : "待选择"; }
-function permissionLabel(value: string): string { return value === "granted" ? "已允许" : value === "denied" ? "未允许" : "未设置"; }
+function movementLabel(value?: MovementPattern): string { return movementChoices.find((choice) => choice.value === value)?.label ?? mobileT("mobile.ui.productshell.b28f13ea3e"); }
+function permissionLabel(value: string): string { return value === "granted" ? mobileT("mobile.ui.productshell.3dec7f67ef") : value === "denied" ? mobileT("mobile.ui.productshell.3cbefc6e34") : mobileT("mobile.ui.productshell.55a04b58cd"); }
+function planAuthorizationLabel(value: NonNullable<import("../../coach/domain").CoachingMandateData["planChangeAuthorization"]>): string {
+  return ({ ask_this_time: "本次询问", always_ask: "每次询问", allow_once: "允许一次小调整", allow_similar_small: "允许同类小调整", deny: "不允许自动调整" } as const)[value];
+}
 function privacyAccountLabel(_overview: PrivacySettingsOverviewValue): string {
-  return "已登录 MaxPower";
+  return mobileT("mobile.ui.productshell.3eacabd81c");
 }
 function privacyAccountDetail(_overview: PrivacySettingsOverviewValue): string {
-  return "当前产品运行时已由在线账号验证；本机缓存、界面状态与后台任务均按此账号隔离。";
-}
-function privacySyncLabel(overview: PrivacySettingsOverviewValue): string {
-  if (overview.sync.authorization !== "granted") return overview.sync.authorization === "denied" ? "已关闭" : "未启用";
-  if (overview.sync.status === "synchronized") return "已同步";
-  if (overview.sync.status === "pending_upload") return overview.sync.pendingChanges ? `${overview.sync.pendingChanges} 项待同步` : "等待同步";
-  if (overview.sync.status === "conflict") return "需要处理";
-  if (overview.sync.status === "retry_needed") return "等待重试";
-  if (overview.sync.status === "rejected") return "需要检查";
-  if (overview.sync.status === "pending_dependency") return "等待资料";
-  return overview.sync.capability === "available" ? "尚未同步" : "此设备未配置";
-}
-function privacySyncDetail(overview: PrivacySettingsOverviewValue): string {
-  if (overview.sync.authorization !== "granted") return "同步尚未启用；本机资料继续独立保存，也不会发起同步请求。";
-  if (overview.sync.status === "conflict") return `有 ${overview.sync.needsReview} 个版本分支需要你在原编辑流程中新建版本处理，系统不会自动选择其中一边。`;
-  if (overview.sync.status === "retry_needed") return "上次同步未完成；会在可用时提供受控重试，最近一次成功时间会保留。";
-  if (overview.sync.status === "synchronized") return overview.sync.lastSucceededAt ? `最近成功同步于 ${overview.sync.lastSucceededAt.slice(0, 16).replace("T", " ")}。` : "本地副本已与已连接设备一致。";
-  if (overview.sync.status === "pending_upload") return "本地已有变更等待同步；训练记录在同步前后都保留在本机。";
-  return overview.sync.capability === "available" ? "同步已允许，但还没有完成一次同步。" : "这台设备尚未配置同步服务。";
+  return mobileT("mobile.ui.productshell.edff115a3a");
 }
 function privacyRemoteModelLabel(overview: PrivacySettingsOverviewValue): string {
-  return overview.remoteModel.configuration.status === "managed_cloud" ? "已启用" : "不可用";
+  return overview.remoteModel.configuration.status === "managed_cloud" ? mobileT("mobile.ui.productshell.25d2843150") : mobileT("mobile.ui.productshell.beff4a1cd1");
 }
-function privacyMediaLabel(overview: PrivacySettingsOverviewValue): string {
-  if (overview.media.availability === "temporarily_unavailable") return "本机媒体暂时不可读取";
-  if (overview.media.availability === "not_configured") return "未配置本机媒体存储";
-  return overview.media.active.itemCount ? `本机媒体 ${overview.media.active.itemCount} 项 · ${formatByteCount(overview.media.active.byteLength)}` : "没有本机媒体";
-}
-function privacyMediaProtectionDetail(overview: PrivacySettingsOverviewValue): string {
-  if (overview.media.availability === "temporarily_unavailable") return "无法读取本机存储状态；不会因此声明媒体已上传或已删除。";
-  const { platformProtected, clientSideEncrypted, notEncrypted } = overview.media.encryption;
-  const parts = [
-    platformProtected ? `${platformProtected} 项受系统保护` : undefined,
-    clientSideEncrypted ? `${clientSideEncrypted} 项使用客户端加密` : undefined,
-    notEncrypted ? `${notEncrypted} 项当前未加密` : undefined,
-  ].filter((part): part is string => Boolean(part));
-  return parts.length ? parts.join("；") : "当前没有可用媒体。";
-}
-function formatByteCount(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-function healthSourceLabel(platform: CoachProductProjection["profile"]["healthSources"][number]["platform"]): string { return platform === "health_connect" ? "Health Connect" : platform === "healthkit" ? "Apple 健康" : "手动健康记录"; }
+function healthSourceLabel(platform: CoachProductProjection["profile"]["healthSources"][number]["platform"]): string { return platform === "health_connect" ? "Health Connect" : platform === "healthkit" ? mobileT("mobile.ui.productshell.6de270c4a7") : mobileT("mobile.ui.productshell.2f360ef59d"); }
 function healthSourceSummary(source: CoachProductProjection["profile"]["healthSources"][number]): string {
   const sourceName = healthSourceLabel(source.platform);
   if (source.availability !== "available") {
-    return source.availability === "provider_missing_or_update_required" ? `需要安装或更新 ${sourceName}` :
-      source.availability === "not_supported" ? `当前设备不支持 ${sourceName}` :
-      source.availability === "permission_not_requested" ? "尚未请求授权" :
-      source.availability === "permission_denied_or_revoked" ? "授权已拒绝或撤销" :
-      source.availability === "temporarily_unavailable" ? "暂时无法读取，保留已有记录" : "读取失败，保留已有记录";
+    return source.availability === "provider_missing_or_update_required" ? mobileT("mobile.ui.productshell.4eec435747", { value0: sourceName }) :
+      source.availability === "not_supported" ? mobileT("mobile.ui.productshell.1302dcfcb8", { value0: sourceName }) :
+      source.availability === "permission_not_requested" ? mobileT("mobile.ui.productshell.40b1a25060") :
+      source.availability === "permission_denied_or_revoked" ? mobileT("mobile.ui.productshell.1be54e90a5") :
+      source.availability === "temporarily_unavailable" ? mobileT("mobile.ui.productshell.f11b856457") : mobileT("mobile.ui.productshell.1b8b025470");
   }
   const granted = source.grantedMetricTypes.length;
   const unknown = source.unknownPermissionMetricTypes.length;
   const metricText = unknown
-    ? `${unknown}/${source.metricTypes.length} 项已请求读取`
-    : `${granted}/${source.metricTypes.length} 项已授权`;
+    ? mobileT("mobile.ui.productshell.1524bd15ef", { value0: unknown, value1: source.metricTypes.length })
+    : mobileT("mobile.ui.productshell.288674ff99", { value0: granted, value1: source.metricTypes.length });
   const importedAt = source.lastSuccessfulImportAt ?? source.lastAttemptAt;
   return `${metricText} · ${importedAt.slice(5, 16)}`;
 }
 function healthConnectionStatus(availability: import("../../coach/model").HealthAdapterAvailability, granted: number, sourceName: string): string {
-  if (availability === "available") return granted ? `已选择 ${granted} 项数据来源` : "还没有选择可读取的数据";
-  if (availability === "provider_missing_or_update_required") return `需要安装或更新 ${sourceName}`;
-  if (availability === "not_supported") return `当前设备不支持 ${sourceName}`;
-  if (availability === "permission_not_requested") return "尚未请求系统读取权限";
-  if (availability === "permission_denied_or_revoked") return "系统读取权限已拒绝或撤销";
-  if (availability === "temporarily_unavailable") return "暂时无法连接；已有记录会保留";
-  return "暂时无法读取；已有记录会保留";
+  if (availability === "available") return granted ? mobileT("mobile.ui.productshell.b4b5e13ae3", { value0: granted }) : mobileT("mobile.ui.productshell.c3fe7f3557");
+  if (availability === "provider_missing_or_update_required") return mobileT("mobile.ui.productshell.4eec435747", { value0: sourceName });
+  if (availability === "not_supported") return mobileT("mobile.ui.productshell.1302dcfcb8", { value0: sourceName });
+  if (availability === "permission_not_requested") return mobileT("mobile.ui.productshell.40df696003");
+  if (availability === "permission_denied_or_revoked") return mobileT("mobile.ui.productshell.afb788da15");
+  if (availability === "temporarily_unavailable") return mobileT("mobile.ui.productshell.4150381383");
+  return mobileT("mobile.ui.productshell.21d4e02175");
 }
-function actionLabel(action: CoachProductProjection["profile"]["actionLog"]["recent"][number]["action"]): string { return action === "plan.change.applied" ? "已更新计划" : action === "plan.change.undone" ? "已撤销调整" : action === "plan.change.rejected" ? "保留原计划" : action === "plan.change.ignored" ? "暂不调整" : action === "proposal.created" ? "已生成建议" : action === "assessment.created" ? "已完成复核" : action === "fact.written" ? "已写入记录" : action === "timeline.corrected" ? "已更正记录" : action === "workout.corrected" ? "已更正训练记录" : action === "workout.set_skipped" ? "已跳过训练组" : action === "memory.changed" ? "已更新 Coach 记忆" : action === "permission.changed" ? "已更新授权" : "Coach 操作"; }
-function actionResultLabel(result: CoachProductProjection["profile"]["actionLog"]["recent"][number]["result"]): string { return result === "applied" ? "已执行" : result === "undone" ? "已撤销" : result === "rejected" ? "已拒绝" : result === "allowed" ? "已记录" : "未完成"; }
-function strategyLabel(strategy: string): string { return ({ fat_loss_recomposition: "减脂重组", preserve_lean_mass_cut: "保肌减脂", final_cut: "最后减脂", maintenance_recomposition: "维持重组", recovery_maintenance: "恢复维持", conservative_gain: "保守增肌", stable_strength_gain: "稳定增力", return_to_training: "停训回归", advanced_specialization_maintenance: "专项维持", post_loss_consolidation_gain: "减重后巩固", diet_break: "Diet break", deload_overlay: "Deload" } as Record<string, string>)[strategy] ?? strategy; }
-function forecastScenarioLabel(scenario: "strict_aggressive" | "balanced" | "flexible"): string { return scenario === "strict_aggressive" ? "严格进取" : scenario === "balanced" ? "平衡" : "灵活"; }
-function actorLabel(actor: "user" | "agent" | "rule_engine" | "sensor" | "sync"): string { return actor === "agent" ? "Coach" : actor === "rule_engine" ? "本地规则" : actor === "sensor" ? "设备" : actor === "sync" ? "同步" : "你"; }
+function actionLabel(action: CoachProductProjection["profile"]["actionLog"]["recent"][number]["action"]): string { return action === "plan.change.applied" ? mobileT("mobile.ui.productshell.9db8fc01fc") : action === "plan.change.undone" ? mobileT("mobile.ui.productshell.0469cebd74") : action === "plan.change.rejected" ? mobileT("mobile.ui.productshell.ea6ec2eed0") : action === "plan.change.ignored" ? mobileT("mobile.ui.productshell.9f92616234") : action === "proposal.created" ? mobileT("mobile.ui.productshell.28ec7c5625") : action === "assessment.created" ? mobileT("mobile.ui.productshell.45980bd4d0") : action === "fact.written" ? mobileT("mobile.ui.productshell.c94c4d8600") : action === "timeline.corrected" ? mobileT("mobile.ui.productshell.2ca4f20b5c") : action === "workout.corrected" ? mobileT("mobile.ui.productshell.5790351403") : action === "workout.set_skipped" ? mobileT("mobile.ui.productshell.2f3901d777") : action === "memory.changed" ? mobileT("mobile.ui.productshell.eb4b6cc0eb") : action === "permission.changed" ? mobileT("mobile.ui.productshell.ccb6dce6c0") : mobileT("mobile.ui.productshell.752398909f"); }
+function actionResultLabel(result: CoachProductProjection["profile"]["actionLog"]["recent"][number]["result"]): string { return result === "applied" ? mobileT("mobile.ui.productshell.ab1f366cb0") : result === "undone" ? mobileT("mobile.ui.productshell.61063ba81b") : result === "rejected" ? mobileT("mobile.ui.productshell.4c7c52c706") : result === "allowed" ? mobileT("mobile.ui.productshell.d94731eaa9") : mobileT("mobile.ui.productshell.b61b08aec3"); }
+function strategyLabel(strategy: string): string { return ({ fat_loss_recomposition: mobileT("mobile.ui.productshell.f6d6eefcbf"), preserve_lean_mass_cut: mobileT("mobile.ui.productshell.821ac906e3"), final_cut: mobileT("mobile.ui.productshell.27ab18ed67"), maintenance_recomposition: mobileT("mobile.ui.productshell.28553b6e2e"), recovery_maintenance: mobileT("mobile.ui.productshell.0d0f8629d8"), conservative_gain: mobileT("mobile.ui.productshell.1f7069e914"), stable_strength_gain: mobileT("mobile.ui.productshell.c0124b2ad5"), return_to_training: mobileT("mobile.ui.productshell.3bf5cc2440"), advanced_specialization_maintenance: mobileT("mobile.ui.productshell.e0692359d1"), post_loss_consolidation_gain: mobileT("mobile.ui.productshell.7ac2368587"), diet_break: "Diet break", deload_overlay: "Deload" } as Record<string, string>)[strategy] ?? strategy; }
+function forecastScenarioLabel(scenario: "strict_aggressive" | "balanced" | "flexible"): string { return scenario === "strict_aggressive" ? mobileT("mobile.ui.productshell.9da8303c79") : scenario === "balanced" ? mobileT("mobile.ui.productshell.d86368eac0") : mobileT("mobile.ui.productshell.3c2ab9e4c7"); }
+function actorLabel(actor: "user" | "agent" | "rule_engine" | "sensor" | "sync"): string { return actor === "agent" ? "Coach" : actor === "rule_engine" ? mobileT("mobile.ui.productshell.fe3f473ffc") : actor === "sensor" ? mobileT("mobile.ui.productshell.01f2c16cda") : actor === "sync" ? mobileT("mobile.ui.productshell.e88ab5ba61") : mobileT("mobile.ui.productshell.5630b886f9"); }
 function optionalFiniteNumber(value: string): number | undefined { const parsed = Number(value.trim()); return value.trim() && Number.isFinite(parsed) ? parsed : undefined; }
-function workoutCompletionCloudSummary(
-  workout: Awaited<ReturnType<CoachApplication["readWorkoutSession"]>>,
-  status: "completed" | "partial",
-): CloudJsonObject {
-  return JSON.parse(JSON.stringify({
-    status,
-    workoutRevision: workout.revision,
-    completedSets: workout.setOutcomes.map((outcome) => ({
-      resultId: outcome.id,
-      prescriptionSetId: outcome.prescriptionSetId,
-      exerciseVariantId: outcome.exerciseVariantId,
-      ...(outcome.actualLoad ? { actualLoad: outcome.actualLoad } : {}),
-      ...(outcome.actualReps !== undefined ? { actualReps: outcome.actualReps } : {}),
-      ...(outcome.actualDuration ? { actualDuration: outcome.actualDuration } : {}),
-      ...(outcome.actualDistance ? { actualDistance: outcome.actualDistance } : {}),
-      ...(outcome.actualRir !== undefined ? { actualRir: outcome.actualRir } : {}),
-      ...(outcome.noviceFeedback ? { noviceFeedback: outcome.noviceFeedback } : {}),
-      ...(outcome.observationRef ? { observationId: outcome.observationRef.id } : {}),
-      userAdjustedObservation: outcome.performedRepsProvenance?.userAdjusted === true,
-    })),
-    skippedSets: (workout.skippedSets ?? []).map((item) => ({
-      prescriptionSetId: item.prescriptionSetId,
-      exerciseVariantId: item.exerciseVariantId,
-      reason: item.reason,
-    })),
-    effectiveRoute: workout.frozenPrescription.tasks.map((task) => ({
-      taskId: task.id,
-      exerciseVariantId: task.exerciseVariantId,
-      prescriptionSetIds: task.sets.map((set) => set.id),
-      replacement: task.id.includes(":replacement:"),
-    })),
-    canonicalObservationCount: (workout.setObservations ?? []).length,
-  })) as CloudJsonObject;
-}
-
-/** Convert only UI typing drafts into the catalog's typed command values. */
-function dynamicFormValueToDomain(value: DynamicOnboardingFormValue): unknown {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value) || value === undefined) return value;
-  if ("amount" in value && "unit" in value) {
-    return { value: Number(value.amount), unit: value.unit };
-  }
-  if ("start" in value && "end" in value) return { start: value.start, end: value.end };
-  return Object.fromEntries(Object.entries(value).map(([key, nested]) => [
-    key,
-    key === "reps" || key === "effort_value" || key === "days_per_week" || key === "minutes_per_session"
-      || key === "consecutive_weeks" || key === "usual_sessions_per_week" || key === "time_away_weeks"
-      ? Number(nested)
-      : dynamicFormValueToDomain(nested),
-  ]));
-}
 function formatRestSeconds(seconds: number): string { return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; }
 function setDose(set: { targetReps?: { min: number; max: number }; targetDuration?: { value: number; unit: string }; targetDistance?: { value: number; unit: string }; targetLoad?: { value: number; unit: string }; targetRir?: number }): string {
-  const volume = set.targetReps ? `${set.targetReps.min}–${set.targetReps.max} 次` : set.targetDuration ? `${set.targetDuration.value} ${set.targetDuration.unit}` : set.targetDistance ? `${set.targetDistance.value} ${set.targetDistance.unit}` : "待记录";
+  const volume = set.targetReps ? mobileT("mobile.ui.productshell.2b0811a078", { value0: set.targetReps.min, value1: set.targetReps.max }) : set.targetDuration ? `${set.targetDuration.value} ${set.targetDuration.unit}` : set.targetDistance ? `${set.targetDistance.value} ${set.targetDistance.unit}` : mobileT("mobile.ui.productshell.78081971e6");
   return `${volume}${set.targetLoad ? ` · ${set.targetLoad.value} ${set.targetLoad.unit}` : ""}${set.targetRir !== undefined ? ` · RIR ${set.targetRir}` : ""}`;
 }
 function todayCopy(today: CoachProductProjection["today"]): { title: string; subtitle: string; empty: string; action: string } {
-  if (today.state === "onboarding_required") return { title: "先建立资料", subtitle: "从基础信息开始，之后可随时补充", empty: "还没有生成训练任务", action: "开始建档" };
-  if (today.state === "safety_hold") return { title: "先暂停安排", subtitle: today.reason ?? "需要先处理当前状态", empty: "不安排训练任务", action: "查看原因" };
-  if (today.state === "planner_hold") return { title: "等待计划更新", subtitle: today.reason ?? "", empty: "不会用假任务填满今天", action: "查看原因" };
-  if (today.state === "activity") return { title: today.session?.title ?? "今日活动", subtitle: "按自己的节奏完成", empty: "记录今天的活动", action: "记录活动" };
-  if (today.state === "rest") return { title: today.session?.title ?? "恢复日", subtitle: "训练之外的经历也会被记录", empty: "记录恢复或活动", action: "记录今天" };
-  if (today.state === "completed") return { title: today.session?.title ?? "今天已完成", subtitle: "训练结果已进入今日记录", empty: "查看完成摘要", action: "查看日报" };
-  return { title: today.session?.title ?? "今日训练", subtitle: "按计划执行；下一组可以调整", empty: "", action: today.action === "continue_workout" ? "继续训练" : "开始训练" };
+  if (today.state === "record_first") return { title: "今天由你安排", subtitle: "记录饮食、身体状态，或开始一次自由训练", empty: "没有计划也可以持续记录和训练", action: "记录或自由训练" };
+  if (today.state === "safety_hold") return { title: mobileT("mobile.ui.productshell.de0ebad8bf"), subtitle: today.reason ?? mobileT("mobile.ui.productshell.0539554585"), empty: mobileT("mobile.ui.productshell.040f13acaa"), action: mobileT("mobile.ui.productshell.04e47b53c8") };
+  if (today.state === "planner_hold") return { title: mobileT("mobile.ui.productshell.59b0ae1c3b"), subtitle: today.reason ?? "", empty: mobileT("mobile.ui.productshell.fd2ae92498"), action: mobileT("mobile.ui.productshell.04e47b53c8") };
+  if (today.state === "activity") return { title: today.session?.title ?? mobileT("mobile.ui.productshell.ce7b14e405"), subtitle: mobileT("mobile.ui.productshell.801d1f2ce9"), empty: mobileT("mobile.ui.productshell.bc47ec6438"), action: mobileT("mobile.ui.productshell.920d6c6570") };
+  if (today.state === "rest") return { title: today.session?.title ?? mobileT("mobile.ui.productshell.7369b4b9a3"), subtitle: mobileT("mobile.ui.productshell.e4152d8d42"), empty: mobileT("mobile.ui.productshell.04bc15c7e9"), action: mobileT("mobile.ui.productshell.d0c5b8dced") };
+  if (today.state === "completed") return { title: today.session?.title ?? mobileT("mobile.ui.productshell.0014c0b984"), subtitle: mobileT("mobile.ui.productshell.155f1234ea"), empty: mobileT("mobile.ui.productshell.ee8d9e2931"), action: mobileT("mobile.ui.productshell.5cd5db139a") };
+  return { title: today.session?.title ?? mobileT("mobile.ui.productshell.573a9df92c"), subtitle: mobileT("mobile.ui.productshell.ccedc9e6e9"), empty: "", action: today.action === "continue_workout" ? mobileT("mobile.ui.productshell.3166554c46") : mobileT("mobile.ui.productshell.be24590d21") };
 }
 
 const styles = StyleSheet.create({
@@ -4436,6 +3075,10 @@ const styles = StyleSheet.create({
   progressMetricCompactTitle: { color: colors.ink2, fontSize: 11, fontWeight: "800" },
   progressMetricCompactValue: { color: colors.ink, fontSize: 15, fontWeight: "900" },
   planPage: { flex: 1, backgroundColor: colors.paper },
+  planLifecycleActions: { paddingHorizontal: 18, paddingVertical: 8, flexDirection: "row", justifyContent: "center", gap: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  completionProposal: { gap: 12, paddingBottom: 18 },
+  completionProposalText: { color: colors.ink2, fontSize: 14, lineHeight: 21 },
+  errorText: { color: colors.terra, fontSize: 12, lineHeight: 18 },
   planFixedHeader: { paddingHorizontal: 18, paddingTop: 13, paddingBottom: 10, gap: 13, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
   planTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   compactTextButton: { minHeight: 36, borderRadius: radius.chip, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, justifyContent: "center", paddingHorizontal: 14 },
@@ -4517,19 +3160,6 @@ const styles = StyleSheet.create({
   nutritionPrincipleLead: { paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: "#343830" },
   nutritionPrincipleValue: { color: colors.lime, fontSize: 24, fontWeight: "900", letterSpacing: -0.5 },
   nutritionPrincipleLabel: { color: "#9FA59B", fontSize: 10, fontWeight: "800", marginTop: 4 },
-  progressContent: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 168, gap: 14 },
-  progressHero: { backgroundColor: colors.dark, borderRadius: 28, padding: 21, gap: 18 },
-  progressHeroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  progressHeroKicker: { color: colors.lime, fontSize: 9, fontWeight: "900", letterSpacing: 1.5 },
-  progressHeroPeriod: { color: "#8F958B", fontSize: 10, fontWeight: "800" },
-  progressHeroMain: { flexDirection: "row", alignItems: "flex-end", gap: 13 },
-  progressHeroValue: { color: colors.white, fontSize: 68, lineHeight: 70, fontWeight: "900", letterSpacing: -3 },
-  progressHeroUnit: { paddingBottom: 9 },
-  progressHeroUnitStrong: { color: colors.white, fontSize: 15, fontWeight: "900" },
-  progressHeroUnitSub: { color: "#8F958B", fontSize: 9, marginTop: 4 },
-  progressHeroFooter: { flexDirection: "row", gap: 10, paddingTop: 14, borderTopWidth: 1, borderTopColor: "#343830" },
-  progressHeroFooterLabel: { color: "#8F958B", fontSize: 9, fontWeight: "800" },
-  progressHeroFooterValue: { color: colors.white, fontSize: 13, fontWeight: "900", marginTop: 4, minWidth: 112 },
   editorialSectionHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginTop: 6 },
   editorialSectionTitle: { color: colors.ink, fontSize: 18, fontWeight: "900", letterSpacing: -0.25 },
   editorialSectionMeta: { color: colors.ink3, fontSize: 10, fontWeight: "700" },
@@ -4560,23 +3190,7 @@ const styles = StyleSheet.create({
   profileHeroStatValue: { color: colors.white, fontSize: 20, fontWeight: "900", fontFamily: "monospace" },
   profileHeroStatLabel: { color: "#8F958B", fontSize: 9, marginTop: 3 },
   page: { flex: 1, backgroundColor: colors.paper },
-  cloudCanonicalStatus: { backgroundColor: colors.dark, paddingHorizontal: 18, paddingVertical: 8, gap: 2 },
-  cloudCanonicalHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  cloudCanonicalTitle: { color: colors.lime, fontSize: 11, fontWeight: "900", flex: 1 },
-  cloudCanonicalMeta: { color: "#B7BBB3", fontSize: 10 },
-  cloudCanonicalRetry: { color: colors.white, fontSize: 10, fontWeight: "900" },
-  cloudCanonicalError: { color: "#F4B8AE", fontSize: 10 },
   content: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 168, gap: 14 },
-  onboardingContent: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 72, gap: 12 },
-  onboardingHero: { backgroundColor: colors.dark, borderRadius: 28, padding: 22, paddingBottom: 20, minHeight: 276, justifyContent: "space-between", overflow: "hidden" },
-  onboardingHeroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  onboardingKicker: { color: colors.lime, fontSize: 10, fontWeight: "900", letterSpacing: 1.7 },
-  onboardingStep: { color: "#858B80", fontSize: 11, fontFamily: "monospace", fontWeight: "800" },
-  onboardingHeroTitle: { color: colors.white, fontSize: 35, lineHeight: 40, fontWeight: "900", letterSpacing: -1.2, marginTop: 28 },
-  onboardingHeroCopy: { color: "#B6BBB1", fontSize: 13, lineHeight: 20, maxWidth: 310, marginTop: 14 },
-  onboardingProgress: { flexDirection: "row", gap: 6, marginTop: 22 },
-  onboardingProgressOn: { height: 3, flex: 1, borderRadius: 2, backgroundColor: colors.lime },
-  onboardingProgressOff: { height: 3, flex: 1, borderRadius: 2, backgroundColor: "#353A33" },
   quickChoiceCard: { backgroundColor: colors.white, borderRadius: 22, padding: 17, gap: 13, borderWidth: 1, borderColor: "rgba(22,24,29,0.055)" },
   quickChoiceHeading: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
   quickChoiceStep: { width: 28, color: colors.limeInk, fontSize: 11, fontFamily: "monospace", fontWeight: "900", paddingTop: 3 },
@@ -4602,8 +3216,6 @@ const styles = StyleSheet.create({
   additionalFieldNote: { color: colors.ink3, fontSize: 10, lineHeight: 15, marginTop: -4 },
   safetyConfirmCard: { backgroundColor: "#F0F7D9", borderRadius: 22, padding: 8, gap: 4 },
   safetyConfirmEyebrow: { color: colors.limeInk, fontSize: 10, fontWeight: "900", letterSpacing: 1.2, paddingHorizontal: 8, paddingTop: 7, paddingBottom: 2 },
-  onboardingButtonArrow: { color: colors.lime, fontSize: 22, fontWeight: "500" },
-  onboardingPrivacyNote: { color: colors.ink3, fontSize: 10, textAlign: "center", lineHeight: 15, marginBottom: 12 },
   reportContent: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 72, gap: 13 },
   reportCover: { backgroundColor: colors.dark, borderRadius: 28, padding: 22, gap: 10, overflow: "hidden" },
   committedPlanHero: { backgroundColor: colors.dark, borderRadius: 28, padding: 22, gap: 10, overflow: "hidden" },
@@ -4739,12 +3351,11 @@ const styles = StyleSheet.create({
   planSession: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }, planSessionSubdued: { opacity: 0.68 }, planSessionDate: { width: 42, color: colors.ink2, fontSize: 11, lineHeight: 15 }, planSessionBody: { flex: 1 }, planSessionTitle: { color: colors.ink, fontSize: 15, fontWeight: "800" }, planSessionMeta: { color: colors.ink3, fontSize: 11, marginTop: 4 }, chevron: { color: colors.ink3, fontSize: 22 }, planFootnote: { color: colors.ink3, fontSize: 12, lineHeight: 18, marginTop: 4 },
   exerciseManagerScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, exerciseManagerSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, exerciseManagerHeader: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginBottom: 16 }, exerciseManagerHeaderCopy: { flex: 1, minWidth: 0, paddingRight: 4 }, exerciseManagerSub: { color: colors.ink3, fontSize: 12, lineHeight: 18, marginTop: 5 }, exerciseClose: { flexShrink: 0, minWidth: 64, minHeight: 38, paddingHorizontal: 14, borderWidth: 1, borderColor: colors.line, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.white }, exerciseCloseText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, exerciseManagerScroll: { gap: 10, paddingBottom: 8 }, exerciseRow: { backgroundColor: colors.white, borderRadius: radius.row, minHeight: 64, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8 }, exerciseRowBody: { flex: 1 }, exerciseRowTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" }, exerciseRowMeta: { color: colors.ink3, fontSize: 11, marginTop: 4 }, exerciseInlineButton: { minHeight: 32, justifyContent: "center", paddingHorizontal: 5 }, exerciseInlineText: { color: colors.ink2, fontSize: 12, fontWeight: "800" }, exerciseArchiveText: { color: colors.terra, fontSize: 12, fontWeight: "800" }, exerciseEmpty: { color: colors.ink2, backgroundColor: colors.white, borderRadius: radius.row, padding: 15, fontSize: 13, lineHeight: 20 }, exerciseForm: { marginTop: 8, padding: 14, borderRadius: radius.card, backgroundColor: "#EEF9C7", gap: 10 }, exerciseFormTitle: { color: colors.ink, fontSize: 16, fontWeight: "900" }, exerciseFieldLabel: { color: colors.ink2, fontSize: 12, fontWeight: "800", marginTop: 2 }, exerciseFormActions: { flexDirection: "row", gap: 9 }, exerciseCancel: { minHeight: 48, minWidth: 78, borderRadius: radius.chip, justifyContent: "center", alignItems: "center", backgroundColor: colors.white, borderWidth: 1, borderColor: colors.line }, exerciseCancelText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, exerciseSave: { flex: 1, marginTop: 0 },
   progressGrid: { flexDirection: "row", gap: 8 }, progressMetric: { flex: 1, backgroundColor: colors.white, borderRadius: radius.row, padding: 13, minHeight: 112 }, progressMetricValue: { color: colors.ink, fontSize: 20, fontWeight: "900" }, progressMetricLabel: { color: colors.ink2, fontSize: 11, marginTop: 8 }, progressMetricMeta: { color: colors.ink3, fontSize: 10, marginTop: 4, lineHeight: 14 }, reportRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 15, flexDirection: "row", justifyContent: "space-between" }, reportTitle: { color: colors.ink, fontWeight: "800" }, reportMeta: { color: colors.ink3, fontSize: 11 },
-  videoLibraryCard: { backgroundColor: colors.dark, borderRadius: radius.row, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, videoLibraryTitle: { color: colors.white, fontSize: 15, fontWeight: "900" }, videoLibraryMeta: { color: "#aeb3a6", fontSize: 11, marginTop: 5 }, videoLibraryArrow: { color: colors.lime, fontSize: 28, lineHeight: 30 },
   profileCard: { backgroundColor: colors.white, borderRadius: radius.card, paddingHorizontal: 16 }, profileSummaryCard: { paddingHorizontal: 18, paddingVertical: 16 }, profileSummaryCopy: { flex: 1, minWidth: 0 }, profileSingleLineCard: { paddingHorizontal: 18, paddingVertical: 17 }, reminderSettingsCard: { paddingHorizontal: 18, paddingTop: 17, paddingBottom: 8 }, reminderSettingsIntro: { paddingHorizontal: 2, paddingBottom: 12, marginBottom: 2 }, profileStart: { backgroundColor: colors.dark, borderRadius: radius.chip, minHeight: 48, alignItems: "center", justifyContent: "center" }, profileStartText: { color: colors.white, fontSize: 15, fontWeight: "800" }, profileRow: { minHeight: 50, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth }, profileLabel: { color: colors.ink2, fontSize: 14 }, profileValue: { color: colors.ink, fontSize: 14, fontWeight: "700" }, privacySummaryLoading: { minHeight: 74, alignItems: "center", justifyContent: "center" }, privacySummaryFooter: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }, privacySummaryFooterText: { color: colors.ink3, fontSize: 12, flex: 1 }, privacySheet: { maxHeight: "84%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, privacySheetLoading: { minHeight: 160, alignItems: "center", justifyContent: "center" }, privacyDetailList: { gap: 10, paddingBottom: 8 }, privacyDetailBlock: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, gap: 7 }, privacyDetailHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 12 }, privacyDetailTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" }, privacyDetailSummary: { color: colors.limeInk, fontSize: 12, fontWeight: "800", textAlign: "right" }, privacyDetailText: { color: colors.ink2, fontSize: 12, lineHeight: 18 }, privacyDetailMeta: { color: colors.ink3, fontSize: 11, lineHeight: 17, marginTop: 1 }, privacyManageButton: { minHeight: 46, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", marginTop: 2 }, privacyManageButtonText: { color: colors.lime, fontSize: 14, fontWeight: "900" }, replicaConflict: { borderLeftWidth: 2, borderLeftColor: colors.limeDeep, backgroundColor: colors.paper, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, gap: 2, marginTop: 1 }, replicaConflictTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" }, replicaSyncButton: { minHeight: 42, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", marginTop: 3 }, replicaSyncButtonText: { color: colors.lime, fontSize: 13, fontWeight: "900" }, healthConnectionCard: { paddingVertical: 16, gap: 10 }, healthConnectionTop: { flexDirection: "row", alignItems: "center", gap: 12 }, healthConnectionTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" }, healthConnectionMeta: { color: colors.ink3, fontSize: 12, lineHeight: 18, marginTop: 3 }, healthConnectionNote: { color: colors.ink2, fontSize: 12, lineHeight: 18 }, healthImportedList: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line, marginTop: 2 }, healthConnectionActions: { flexDirection: "row", gap: 8, marginTop: 2 }, healthConnectionPrimary: { flex: 1, minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, healthConnectionPrimaryText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, healthConnectionSecondary: { minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.paper, borderColor: colors.line, borderWidth: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 14 }, healthConnectionSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, actionLogCard: { paddingVertical: 4, overflow: "hidden" }, actionLogRow: { flexDirection: "row", alignItems: "center", minHeight: 68, paddingVertical: 10, borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 }, actionLogRowLast: { borderBottomWidth: 0 }, actionLogBody: { flex: 1 }, actionLogTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, actionLogMeta: { color: colors.ink3, fontSize: 11, marginTop: 4 },
   permissionScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, permissionSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, permissionList: { gap: 9, paddingBottom: 8 }, permissionRow: { backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 14, paddingVertical: 13, flexDirection: "row", alignItems: "center", gap: 12 }, permissionBody: { flex: 1 }, permissionTitle: { color: colors.ink, fontSize: 14, fontWeight: "800" }, permissionDescription: { color: colors.ink3, fontSize: 11, lineHeight: 16, marginTop: 4 }, permissionSwitch: { width: 45, height: 28, borderRadius: 16, backgroundColor: colors.paper2, padding: 3, justifyContent: "center" }, permissionSwitchOn: { backgroundColor: colors.limeDeep, alignItems: "flex-end" }, permissionKnob: { width: 22, height: 22, borderRadius: 12, backgroundColor: colors.white, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 2, shadowOffset: { width: 0, height: 1 } }, permissionKnobOn: { backgroundColor: colors.dark }, actionLogScrim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, zIndex: 44, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, actionLogSheet: { maxHeight: "82%", backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 }, actionLogList: { gap: 9, paddingBottom: 8 }, actionLogDetailRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 14, gap: 4 }, actionLogDetailTop: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actionLogResult: { color: colors.limeInk, fontSize: 11, fontWeight: "800" }, actionLogDetailMeta: { color: colors.ink3, fontSize: 11, lineHeight: 16 }, actionLogIntent: { color: colors.ink2, fontSize: 12, lineHeight: 18, marginVertical: 2 }, actionLogReversible: { color: colors.limeInk, fontSize: 11, fontWeight: "800", marginTop: 2 },
-  nutritionLedgerCard: { backgroundColor: colors.white, borderRadius: 24, padding: 17, gap: 13, borderWidth: 1, borderColor: "rgba(22,24,29,0.055)" }, nutritionCoverage: { color: colors.limeInk, fontSize: 12, fontWeight: "900" }, nutritionProgressGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, nutritionProgressItem: { width: "48%", backgroundColor: colors.paper2, borderRadius: 12, padding: 10, gap: 3 }, nutritionProgressLabel: { color: colors.ink2, fontSize: 10, fontWeight: "800" }, nutritionProgressValue: { color: colors.ink, fontSize: 18, fontFamily: "monospace", fontWeight: "900" }, nutritionProgressMeta: { color: colors.ink3, fontSize: 9, lineHeight: 13 }, nutritionMealList: { backgroundColor: colors.paper, borderRadius: 14, paddingHorizontal: 12 }, nutritionMealRow: { minHeight: 44, justifyContent: "center", borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth }, nutritionMealTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" }, nutritionMealMeta: { color: colors.ink3, fontSize: 10, marginTop: 3 }, nutritionRecordButton: { flex: 1, minHeight: 44, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" }, nutritionRecordButtonText: { color: colors.white, fontSize: 13, fontWeight: "900" }, recoveryStatusCard: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 9 }, recoveryCheckInButton: { minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.paper2, alignItems: "center", justifyContent: "center" }, recoveryCheckInText: { color: colors.ink, fontSize: 12, fontWeight: "900" }, question: { gap: 9 }, questionLabel: { color: colors.ink, fontWeight: "800", fontSize: 15 }, optionList: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, option: { backgroundColor: colors.white, borderRadius: radius.chip, borderWidth: 1, borderColor: "transparent", minHeight: 40, paddingHorizontal: 13, justifyContent: "center" }, optionSelected: { backgroundColor: "#EEF9C7", borderColor: colors.limeDeep }, optionText: { color: colors.ink2, fontSize: 13, fontWeight: "700" }, optionTextSelected: { color: colors.limeInk }, onboardingFields: { flexDirection: "row", gap: 8 }, onboardingInput: { flex: 1, minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 10, fontSize: 13 }, professionalToggle: { minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, professionalToggleText: { color: colors.limeInk, fontSize: 13, fontWeight: "900" }, professionalFields: { backgroundColor: colors.paper2, borderRadius: radius.card, padding: 14, gap: 12 }, confirmRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: colors.white, borderRadius: radius.row, padding: 14 }, checkbox: { width: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: colors.ink3, alignItems: "center", justifyContent: "center", marginTop: 1 }, checkboxOn: { borderColor: colors.limeDeep, backgroundColor: colors.lime }, checkboxMark: { color: colors.limeInk, fontWeight: "900" }, confirmText: { flex: 1, color: colors.ink2, fontSize: 13, lineHeight: 19 }, formError: { color: colors.terra, fontSize: 12 }, onboardingButton: { backgroundColor: colors.dark, minHeight: 54, borderRadius: radius.chip, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, marginTop: 4 }, onboardingButtonText: { color: colors.white, fontSize: 16, fontWeight: "900" }, previewRejectButton: { minHeight: 44, alignItems: "center", justifyContent: "center", marginBottom: 24 }, previewRejectText: { color: colors.ink3, fontSize: 13, fontWeight: "800" },
-  workoutTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }, workoutTopActions: { alignItems: "flex-end", gap: 8 }, workoutProgress: { color: colors.limeInk, backgroundColor: colors.lime, borderRadius: radius.chip, paddingHorizontal: 11, paddingVertical: 7, fontWeight: "900" }, workoutCoachButton: { minHeight: 34, minWidth: 72, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, workoutCoachButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, currentSetCard: { backgroundColor: colors.dark, borderRadius: 26, padding: 22, gap: 10 }, currentSetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }, completedHistoryButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 4 }, completedHistoryButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, notRecordedText: { color: "#979C93", fontSize: 12, fontWeight: "800" }, currentSetTitle: { color: colors.white, fontSize: 22, fontWeight: "900" }, currentSetDose: { color: "#C5C9C0", fontSize: 15 }, currentSetBoundary: { color: "#979C93", fontSize: 11, lineHeight: 17, marginBottom: 4 }, completedHistory: { borderRadius: 14, backgroundColor: "rgba(255,255,255,0.08)", paddingHorizontal: 12 }, completedHistoryRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.12)" }, completedHistoryIndex: { color: "#979C93", width: 18, fontFamily: "monospace" }, completedHistoryDose: { color: colors.white, minWidth: 78, fontWeight: "800" }, completedHistoryDelta: { color: "#B6BAAF", flex: 1, fontSize: 11 }, setReviewTitle: { color: colors.white, fontSize: 18, fontWeight: "900" }, setReviewSnapshot: { color: "#B6BAAF", fontSize: 11 }, observationSummary: { backgroundColor: "rgba(198,241,53,0.12)", borderRadius: 12, padding: 12, gap: 3 }, observationSummaryTitle: { color: colors.lime, fontSize: 12, fontWeight: "900" }, observationSummaryText: { color: colors.white, fontSize: 13, fontWeight: "800" }, observationSummaryBoundary: { color: "#B6BAAF", fontSize: 10, lineHeight: 15 }, setActions: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actualButton: { flex: 1, alignItems: "center", minHeight: 44, justifyContent: "center" }, actualButtonText: { color: colors.lime, fontWeight: "800", fontSize: 13 }, skipSetText: { color: "#F5B6A4", fontWeight: "800", fontSize: 13 }, actualForm: { gap: 8 }, actualField: { minHeight: 44, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", flexDirection: "row", alignItems: "center", paddingHorizontal: 12 }, actualLabel: { color: "#B6BAAF", width: 52, fontSize: 12 }, actualInput: { flex: 1, color: colors.white, fontSize: 15, fontWeight: "700", paddingVertical: 0, textAlign: "right" }, workoutTask: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 4 }, workoutTaskSelected: { borderWidth: 2, borderColor: colors.limeDeep }, workoutRouteRow: { flexDirection: "row", alignItems: "center", minHeight: 44 }, workoutRouteMeta: { color: colors.ink3, fontSize: 12 }, workoutTaskTitle: { color: colors.ink, fontWeight: "800", fontSize: 15, marginBottom: 4 }, workoutSetRow: { flexDirection: "row", alignItems: "center", minHeight: 38, gap: 10 }, workoutSetIndex: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.paper2, color: colors.ink2, fontSize: 11, textAlign: "center", paddingTop: 3 }, workoutSetDose: { flex: 1, color: colors.ink2, fontFamily: "monospace", fontSize: 12 }, workoutSetState: { color: colors.ink3, fontSize: 11 }, workoutSetDone: { color: colors.limeDeep, fontWeight: "800" }, workoutSetSkipped: { color: colors.terra, fontWeight: "800" }, manageWorkoutTasksButton: { minHeight: 44, borderRadius: radius.chip, borderWidth: 1, borderColor: "#3B4039", alignItems: "center", justifyContent: "center", marginTop: 2 }, manageWorkoutTasksText: { color: colors.white, fontSize: 13, fontWeight: "800" }, workoutTaskEditorRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 12, gap: 8 }, workoutTaskEditorRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskEditorPrimary: { minHeight: 44 }, workoutTaskEditorActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, workoutTaskTiny: { minHeight: 44, justifyContent: "center" }, workoutTaskTinyText: { color: colors.ink2, fontSize: 12, fontWeight: "800" }, workoutTaskPicker: { backgroundColor: "#EEF9C7", borderRadius: radius.card, padding: 14, gap: 9, marginTop: 4 }, workoutCatalogList: { gap: 6 }, workoutCatalogRow: { backgroundColor: colors.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, workoutCatalogRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskBoundary: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, workoutTaskAddFields: { flexDirection: "row", gap: 8 }, workoutTaskNumberField: { flex: 1, minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", paddingHorizontal: 10 }, workoutTaskNumberLabel: { color: colors.ink2, fontSize: 12 }, workoutTaskNumberInput: { flex: 1, color: colors.ink, fontFamily: "monospace", fontWeight: "800", textAlign: "right", fontSize: 14, paddingVertical: 0 }, workoutTaskButtons: { flexDirection: "row", gap: 8 }, workoutTaskSecondary: { flex: 1, minHeight: 46, borderRadius: radius.chip, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center", backgroundColor: colors.white }, workoutTaskSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, workoutTaskAddButton: { flex: 1, marginTop: 0 }, pauseButton: { minHeight: 44, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, pauseButtonText: { color: colors.ink3, fontSize: 13, fontWeight: "800" }, safetyPauseButton: { minHeight: 44, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.terraSoft }, safetyPauseButtonText: { color: colors.terra, fontSize: 13, fontWeight: "900" }, safetyPauseScrim: { ...StyleSheet.absoluteFill, zIndex: 55, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, safetyPauseSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, safetyPauseTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, safetyPauseDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19, marginBottom: 4 }, safetyPauseChoice: { minHeight: 50, paddingHorizontal: 14, borderRadius: radius.row, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, safetyPauseChoiceText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: "800" }, safetyPauseCancel: { minHeight: 46, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line }, safetyPauseCancelText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, skipSetSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, skipSetTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, skipSetDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19 }, skipSetInput: { minHeight: 86, borderRadius: radius.row, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 13, paddingVertical: 11, textAlignVertical: "top", fontSize: 14 }, skipSetConfirm: { minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, skipSetConfirmText: { color: colors.white, fontWeight: "900", fontSize: 15 }, finishButton: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, finishButtonText: { color: colors.ink, fontWeight: "800" }, pausedPage: { flex: 1, padding: 20, justifyContent: "center", backgroundColor: colors.paper }, pausedCard: { backgroundColor: colors.dark, padding: 24, borderRadius: 28, gap: 13 }, pausedTitle: { color: colors.white, fontSize: 30, fontWeight: "900" }, pausedDetail: { color: "#B7BBB3", fontSize: 14, lineHeight: 21, marginBottom: 8 },
-  monitorEntry: { minHeight: 62, backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 15, paddingVertical: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, monitorEntryTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, monitorEntrySub: { color: colors.ink3, fontSize: 11, marginTop: 3 }, monitorEntryButton: { minWidth: 54, minHeight: 34, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, monitorEntryButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, nextSetRecommendation: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 84, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }, nextSetRecommendationBody: { flex: 1, gap: 2 }, nextSetRecommendationTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" }, nextSetRecommendationDetail: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, nextSetRecommendationButton: { minWidth: 58, minHeight: 38, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, nextSetRecommendationButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" },
+  nutritionLedgerCard: { backgroundColor: colors.white, borderRadius: 24, padding: 17, gap: 13, borderWidth: 1, borderColor: "rgba(22,24,29,0.055)" }, nutritionCoverage: { color: colors.limeInk, fontSize: 12, fontWeight: "900" }, nutritionProgressGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, nutritionProgressItem: { width: "48%", backgroundColor: colors.paper2, borderRadius: 12, padding: 10, gap: 3 }, nutritionProgressLabel: { color: colors.ink2, fontSize: 10, fontWeight: "800" }, nutritionProgressValue: { color: colors.ink, fontSize: 18, fontFamily: "monospace", fontWeight: "900" }, nutritionProgressMeta: { color: colors.ink3, fontSize: 9, lineHeight: 13 }, nutritionMealList: { backgroundColor: colors.paper, borderRadius: 14, paddingHorizontal: 12 }, nutritionMealRow: { minHeight: 44, justifyContent: "center", borderBottomColor: colors.line, borderBottomWidth: StyleSheet.hairlineWidth }, nutritionMealTitle: { color: colors.ink, fontSize: 12, fontWeight: "800" }, nutritionMealMeta: { color: colors.ink3, fontSize: 10, marginTop: 3 }, nutritionRecordButton: { flex: 1, minHeight: 44, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center" }, nutritionRecordButtonText: { color: colors.white, fontSize: 13, fontWeight: "900" }, recoveryStatusCard: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 9 }, recoveryCheckInButton: { minHeight: 40, borderRadius: radius.chip, backgroundColor: colors.paper2, alignItems: "center", justifyContent: "center" }, recoveryCheckInText: { color: colors.ink3, fontSize: 12, fontWeight: "900" }, question: { gap: 9 }, questionLabel: { color: colors.ink, fontWeight: "800", fontSize: 15 }, optionList: { flexDirection: "row", flexWrap: "wrap", gap: 8 }, option: { backgroundColor: colors.white, borderRadius: radius.chip, borderWidth: 1, borderColor: "transparent", minHeight: 40, paddingHorizontal: 13, justifyContent: "center" }, optionSelected: { backgroundColor: "#EEF9C7", borderColor: colors.limeDeep }, optionText: { color: colors.ink2, fontSize: 13, fontWeight: "700" }, optionTextSelected: { color: colors.limeInk }, formError: { color: colors.terra, fontSize: 12 }, previewRejectButton: { minHeight: 44, alignItems: "center", justifyContent: "center", marginBottom: 24 }, previewRejectText: { color: colors.ink3, fontSize: 13, fontWeight: "800" },
+  workoutTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }, workoutTopActions: { alignItems: "flex-end", gap: 8 }, workoutProgress: { color: colors.limeInk, backgroundColor: colors.lime, borderRadius: radius.chip, paddingHorizontal: 11, paddingVertical: 7, fontWeight: "900" }, workoutCoachButton: { minHeight: 34, minWidth: 72, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, workoutCoachButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, currentSetCard: { backgroundColor: colors.dark, borderRadius: 26, padding: 22, gap: 10 }, currentSetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }, completedHistoryButton: { minHeight: 44, justifyContent: "center", paddingHorizontal: 4 }, completedHistoryButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, notRecordedText: { color: "#979C93", fontSize: 12, fontWeight: "800" }, currentSetTitle: { color: colors.white, fontSize: 22, fontWeight: "900" }, currentSetDose: { color: "#C5C9C0", fontSize: 15 }, currentSetBoundary: { color: "#979C93", fontSize: 11, lineHeight: 17, marginBottom: 4 }, completedHistory: { borderRadius: 14, backgroundColor: "rgba(255,255,255,0.08)", paddingHorizontal: 12 }, completedHistoryRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "rgba(255,255,255,0.12)" }, completedHistoryIndex: { color: "#979C93", width: 18, fontFamily: "monospace" }, completedHistoryDose: { color: colors.white, minWidth: 78, fontWeight: "800" }, completedHistoryDelta: { color: "#B6BAAF", flex: 1, fontSize: 11 }, setReviewTitle: { color: colors.white, fontSize: 18, fontWeight: "900" }, setReviewSnapshot: { color: "#B6BAAF", fontSize: 11 }, setActions: { flexDirection: "row", justifyContent: "space-between", gap: 12 }, actualButton: { flex: 1, alignItems: "center", minHeight: 44, justifyContent: "center" }, actualButtonText: { color: colors.lime, fontWeight: "800", fontSize: 13 }, skipSetText: { color: "#F5B6A4", fontWeight: "800", fontSize: 13 }, actualForm: { gap: 8 }, actualField: { minHeight: 44, borderRadius: 10, backgroundColor: "rgba(255,255,255,0.10)", flexDirection: "row", alignItems: "center", paddingHorizontal: 12 }, actualLabel: { color: "#B6BAAF", width: 52, fontSize: 12 }, actualInput: { flex: 1, color: colors.white, fontSize: 15, fontWeight: "700", paddingVertical: 0, textAlign: "right" }, workoutTask: { backgroundColor: colors.white, borderRadius: radius.card, padding: 16, gap: 4 }, workoutTaskSelected: { borderWidth: 2, borderColor: colors.limeDeep }, workoutRouteRow: { flexDirection: "row", alignItems: "center", minHeight: 44 }, workoutRouteMeta: { color: colors.ink3, fontSize: 12 }, workoutTaskTitle: { color: colors.ink, fontWeight: "800", fontSize: 15, marginBottom: 4 }, workoutSetRow: { flexDirection: "row", alignItems: "center", minHeight: 38, gap: 10 }, workoutSetIndex: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.paper2, color: colors.ink2, fontSize: 11, textAlign: "center", paddingTop: 3 }, workoutSetDose: { flex: 1, color: colors.ink2, fontFamily: "monospace", fontSize: 12 }, workoutSetState: { color: colors.ink3, fontSize: 11 }, workoutSetDone: { color: colors.limeDeep, fontWeight: "800" }, workoutSetSkipped: { color: colors.terra, fontWeight: "800" }, manageWorkoutTasksButton: { minHeight: 44, borderRadius: radius.chip, borderWidth: 1, borderColor: "#3B4039", alignItems: "center", justifyContent: "center", marginTop: 2 }, manageWorkoutTasksText: { color: colors.white, fontSize: 13, fontWeight: "800" }, workoutTaskEditorRow: { backgroundColor: colors.white, borderRadius: radius.row, padding: 12, gap: 8 }, workoutTaskEditorRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskEditorPrimary: { minHeight: 44 }, workoutTaskEditorActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, workoutTaskTiny: { minHeight: 44, justifyContent: "center" }, workoutTaskTinyText: { color: colors.ink2, fontSize: 12, fontWeight: "800" }, workoutTaskPicker: { backgroundColor: "#EEF9C7", borderRadius: radius.card, padding: 14, gap: 9, marginTop: 4 }, workoutCatalogList: { gap: 6 }, workoutCatalogRow: { backgroundColor: colors.white, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, workoutCatalogRowSelected: { borderWidth: 1, borderColor: colors.limeDeep }, workoutTaskBoundary: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, workoutTaskAddFields: { flexDirection: "row", gap: 8 }, workoutTaskNumberField: { flex: 1, minHeight: 46, borderRadius: 12, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", paddingHorizontal: 10 }, workoutTaskNumberLabel: { color: colors.ink2, fontSize: 12 }, workoutTaskNumberInput: { flex: 1, color: colors.ink, fontFamily: "monospace", fontWeight: "800", textAlign: "right", fontSize: 14, paddingVertical: 0 }, workoutTaskButtons: { flexDirection: "row", gap: 8 }, workoutTaskSecondary: { flex: 1, minHeight: 46, borderRadius: radius.chip, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center", backgroundColor: colors.white }, workoutTaskSecondaryText: { color: colors.ink, fontSize: 12, fontWeight: "800" }, workoutTaskAddButton: { flex: 1, marginTop: 0 }, pauseButton: { minHeight: 44, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, pauseButtonText: { color: colors.ink3, fontSize: 13, fontWeight: "800" }, safetyPauseButton: { minHeight: 44, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.terraSoft }, safetyPauseButtonText: { color: colors.terra, fontSize: 13, fontWeight: "900" }, safetyPauseScrim: { ...StyleSheet.absoluteFill, zIndex: 55, justifyContent: "flex-end", backgroundColor: "rgba(10,12,10,0.42)" }, safetyPauseSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, safetyPauseTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, safetyPauseDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19, marginBottom: 4 }, safetyPauseChoice: { minHeight: 50, paddingHorizontal: 14, borderRadius: radius.row, backgroundColor: colors.white, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, safetyPauseChoiceText: { flex: 1, color: colors.ink, fontSize: 14, fontWeight: "800" }, safetyPauseCancel: { minHeight: 46, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.line }, safetyPauseCancelText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, skipSetSheet: { backgroundColor: colors.paper, borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 22, paddingTop: 12, paddingBottom: 38, gap: 10 }, skipSetTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" }, skipSetDetail: { color: colors.ink2, fontSize: 13, lineHeight: 19 }, skipSetInput: { minHeight: 86, borderRadius: radius.row, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, paddingHorizontal: 13, paddingVertical: 11, textAlignVertical: "top", fontSize: 14 }, skipSetConfirm: { minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, skipSetConfirmText: { color: colors.white, fontWeight: "900", fontSize: 15 }, finishButton: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, minHeight: 48, borderRadius: radius.chip, alignItems: "center", justifyContent: "center" }, finishButtonText: { color: colors.ink, fontWeight: "800" }, pausedPage: { flex: 1, padding: 20, justifyContent: "center", backgroundColor: colors.paper }, pausedCard: { backgroundColor: colors.dark, padding: 24, borderRadius: 28, gap: 13 }, pausedTitle: { color: colors.white, fontSize: 30, fontWeight: "900" }, pausedDetail: { color: "#B7BBB3", fontSize: 14, lineHeight: 21, marginBottom: 8 },
+  monitorEntry: { minHeight: 62, backgroundColor: colors.white, borderRadius: radius.row, paddingHorizontal: 15, paddingVertical: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, monitorEntryTitle: { color: colors.ink, fontSize: 13, fontWeight: "800" }, monitorEntrySub: { color: colors.ink3, fontSize: 11, marginTop: 3 }, monitorEntryButton: { minWidth: 54, minHeight: 34, borderRadius: radius.chip, alignItems: "center", justifyContent: "center", backgroundColor: colors.dark }, monitorEntryButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, workoutNotice: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 84, padding: 14, flexDirection: "row", alignItems: "center", gap: 12 }, workoutNoticeDetail: { color: colors.ink2, fontSize: 11, lineHeight: 16 }, workoutConfirmButton: { minWidth: 58, minHeight: 38, borderRadius: radius.chip, backgroundColor: colors.dark, alignItems: "center", justifyContent: "center", paddingHorizontal: 12 }, workoutConfirmButtonText: { color: colors.lime, fontSize: 12, fontWeight: "900" },
   restCard: { backgroundColor: "#EEF9C7", borderRadius: radius.card, minHeight: 72, paddingHorizontal: 16, paddingVertical: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, restTime: { color: colors.ink, fontFamily: "monospace", fontSize: 24, fontWeight: "900", marginTop: 2 }, restActions: { flexDirection: "row", alignItems: "center", gap: 8 }, restAdd: { backgroundColor: colors.dark, borderRadius: radius.chip, minHeight: 38, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" }, restAddText: { color: colors.lime, fontSize: 12, fontWeight: "900" }, restCancel: { backgroundColor: colors.white, borderColor: colors.line, borderWidth: 1, borderRadius: radius.chip, minHeight: 38, paddingHorizontal: 14, alignItems: "center", justifyContent: "center" }, restCancelText: { color: colors.ink, fontSize: 12, fontWeight: "800" },
   inlineError: { position: "absolute", left: 18, right: 18, bottom: 158, backgroundColor: colors.terraSoft, padding: 10, borderRadius: 12 }, inlineErrorText: { color: colors.terra, textAlign: "center", fontSize: 12 },
   productDock: { position: "absolute", left: 10, right: 10, bottom: 8, overflow: "hidden", borderRadius: 24, borderWidth: 1, borderColor: "rgba(22,24,29,0.10)", backgroundColor: "rgba(255,255,255,0.97)", paddingTop: 8, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 14 },

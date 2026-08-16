@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 扩展可回放的行为决策审计.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 同一事件通过对话和手动记录得到等价的有效 Timeline 事实与触发结果；更正保留原始 provenance。
 - [ ] 协调器对 material、coalesced、skipped、stale、failed 做幂等审计，且只对事实变化做风险工作。

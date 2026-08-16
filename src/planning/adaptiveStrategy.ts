@@ -105,7 +105,7 @@ export function selectAdaptiveStrategy(input: {
   currentDate: string;
   knowledgePins: KnowledgeVersionPins;
 }): AdaptiveStrategyPlan {
-  const goalType = input.goal.goalType ?? legacyGoalType(input.goal.primaryGoal);
+  const goalType = goalTypeForPrimaryGoal(input.goal.primaryGoal);
   const history = input.profile.historyModifiers;
   const priorStrategies = history?.priorStrategies ?? history?.plateau?.priorStrategies;
   const historyModifiers = [
@@ -122,7 +122,7 @@ export function selectAdaptiveStrategy(input: {
   ];
   const riskGuardrails = [
     "missing_measurements_remain_unknown",
-    "single_day_change_cannot_switch_goal_cycle",
+    "single_day_change_cannot_replace_goal_contract",
     "pain_or_red_flag_pauses_planning",
   ];
   const primary = choosePrimaryStrategy(input.profile, goalType, history);
@@ -191,7 +191,7 @@ export function selectAdaptiveStrategy(input: {
 
 function choosePrimaryStrategy(
   profile: UserProfileData,
-  goalType: NonNullable<GoalContractData["goalType"]>,
+  goalType: ReturnType<typeof goalTypeForPrimaryGoal>,
   history: UserProfileData["historyModifiers"],
 ): StrategyId {
   if (profile.returningStatus === "returning" || goalType === "return_to_training") return "return_to_training";
@@ -248,7 +248,7 @@ function phaseObjective(strategy: StrategyId): string {
   return objectives[strategy];
 }
 
-function legacyGoalType(goal: GoalContractData["primaryGoal"]): NonNullable<GoalContractData["goalType"]> {
+function goalTypeForPrimaryGoal(goal: GoalContractData["primaryGoal"]): "hypertrophy" | "fat_loss" | "strength" | "physique" | "maintain" | "return_to_training" {
   return goal === "fat_loss_preserve_lean_mass" ? "fat_loss" : goal;
 }
 

@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — 首次 Planner 交接与独立计划确认
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 对话捕获、表单提交、档案确认和计划确认均有稳定幂等键；断流重试不会追加重复事件或资源。
 - [ ] 新旧字段冲突并列保留来源并要求解决；解决采用 superseding event，不删除或静默覆盖原始证据。

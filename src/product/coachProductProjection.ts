@@ -2,6 +2,7 @@ import type {
   DomainProjection,
   MassQuantity,
   NutritionStrategyData,
+  PlanRevisionData,
   PlannedSessionData,
   TimelineProjectionEvent,
   WorkoutProjection,
@@ -28,14 +29,8 @@ import type {
   StrategySelection,
 } from "../planning";
 import { deriveMetricRegistry, type MetricEnvelope } from "../replanning";
-import {
-  deriveDailyIntakeBudget,
-  deriveNutritionDayPlan,
-  projectNutritionDayLedger,
-  type DailyIntakeBudget,
-  type NutritionDayLedger,
-  type NutritionDayPlan,
-} from "../nutrition";
+import type { NutritionDayLedger, NutritionDayPlan } from "../nutrition";
+import { projectHealthTrends, type DailyHealthLedger, type HealthTrendProjection } from "../health";
 
 export type CalendarPresentationMode = "week" | "month";
 
@@ -50,6 +45,7 @@ export interface CoachProductProjectionInput {
   artifacts: readonly Artifact[];
   healthImportStates: readonly HealthImportState[];
   exerciseLabel: (exerciseVariantId: string) => string;
+  healthLedgers: Readonly<Record<string, DailyHealthLedger>>;
 }
 
 export interface CoachProductProjection {
@@ -70,14 +66,14 @@ export interface CoachProductProjection {
 export interface TodayProductProjection {
   date: string;
   state:
-    | "onboarding_required"
+    | "record_first"
     | "safety_hold"
     | "planner_hold"
     | "workout"
     | "activity"
     | "rest"
     | "completed";
-  action: "start_workout" | "continue_workout" | "record_activity" | "open_onboarding" | "view_reason" | "view_summary";
+  action: "start_workout" | "continue_workout" | "record_activity" | "view_reason" | "view_summary";
   session?: ProductSession;
   activityLog: TimelineActivityLog;
   nutrition: NutritionProductProjection;
@@ -86,6 +82,8 @@ export interface TodayProductProjection {
   /** A factual outcome, kept separate from today's SessionPrescription. */
   completedWorkout?: WorkoutOutcomeProductSummary;
   reason?: string;
+  /** Latest fixed GoalPath signal delivered to the manual Home channel. */
+  goalPathSignal?: EvidenceBriefArtifact;
 }
 
 export interface RecoveryProductProjection {
@@ -98,7 +96,8 @@ export interface RecoveryProductProjection {
 export interface NutritionProductProjection {
   plan: NutritionDayPlan;
   ledger: NutritionDayLedger;
-  budget: DailyIntakeBudget;
+  /** The sole formal daily energy/nutrition result used by every product surface. */
+  healthLedger: DailyHealthLedger;
 }
 
 export interface ProductSession {
@@ -166,6 +165,8 @@ export interface CalendarDayProjection {
 export interface PlanProductProjection {
   status: "unavailable" | "stale" | "current";
   revision?: number;
+  effectiveFrom?: string;
+  lifecycleState?: NonNullable<PlanRevisionData["lifecycle"]>["state"];
   horizon?: { startDate: string; endDate: string };
   currentWeek: readonly ProductSession[];
   nextWeek: readonly ProductSession[];
@@ -180,16 +181,18 @@ export interface PlanProductProjection {
   recoveryStrategy?: import("../planning").RecoveryStrategy;
   nutritionTarget?: NutritionStrategyData;
   rollingEnergyAdjustment?: import("../planning/rollingEnergyAdjustment").RollingEnergyAdjustment;
-  intakeWeek: readonly DailyIntakeBudget[];
-  latestPlanningPreview?: EvidenceBriefArtifact;
+  intakeWeek: readonly DailyHealthLedger[];
+  latestAdaptivePlanProposal?: EvidenceBriefArtifact;
 }
 
 export interface ProgressProductProjection {
   bodyTrends: BodyTrendReport;
   strengthTrends: StrengthTrendProjection;
   completedWorkoutCount: number;
-  reportArtifacts: readonly Extract<Artifact, { kind: "weekly_coach_report" | "replan_evaluation" | "goal_forecast" | "mesocycle_review" }>[];
+  reportArtifacts: readonly Extract<Artifact, { kind: "weekly_coach_report" }>[];
   metrics: readonly MetricEnvelope[];
+  /** Plan-independent day/week/month rollups used by record-first and planned users alike. */
+  healthTrends: HealthTrendProjection;
 }
 
 export interface StrengthTrendPoint {
@@ -212,12 +215,15 @@ export interface StrengthTrendProjection {
 }
 
 export interface ProfileProductProjection {
-  onboardingComplete: boolean;
+  profileReady: boolean;
   /** Drives client-side i18n only; absent until the user has a profile. */
   locale?: string;
-  trainingExperience?: DomainProjection["profile"] extends infer T ? T extends { value: infer V } ? V extends { trainingExperience: infer E } ? E : never : never : never;
   primaryGoal?: string;
   mandateMode?: string;
+  planAuthorization?: {
+    revision: number;
+    mandate: NonNullable<DomainProjection["mandate"]>["value"];
+  };
   locations: number;
   customExercises: number;
   /** Input to local cardio estimates; this is not a second health-data record. */
@@ -245,8 +251,6 @@ export interface ProfileProductProjection {
     health: string;
     notifications: string;
     remoteLlm: string;
-    cloudSync: string;
-    mediaUpload: string;
   };
 }
 
@@ -272,6 +276,7 @@ export interface CoachStatusProjection {
     action: ActionEvent["action"];
     occurredAt: string;
   };
+  goalCompletionNext?: "record_first" | "maintenance_planning" | "goal_negotiation";
 }
 
 /**
@@ -279,16 +284,13 @@ export interface CoachStatusProjection {
  * domain values and deliberately cannot manufacture a plan or Timeline fact.
  */
 export function buildCoachProductProjection(input: CoachProductProjectionInput): CoachProductProjection {
-  const plan = input.domain.plan;
+  const plan = input.domain.plan && (!input.domain.plan.value.lifecycle || input.domain.plan.value.lifecycle.state === "active")
+    ? input.domain.plan
+    : undefined;
   const allSessions = plan?.value.sessions ?? [];
   const currentWeek = weekDates(input.date);
   const nextWeek = weekDates(addDays(currentWeek[0]!, 7));
   const currentWeekSessions = sessionsForDates(allSessions, currentWeek);
-  const weeklyTrainingDays = new Set(
-    currentWeekSessions
-      .filter(isFuelTrainingSession)
-      .map((session) => session.scheduledFor),
-  ).size;
   const nutritionTarget = [...input.domain.nutritionStrategies]
     .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
   const dateSessions = sessionsForDate(plan?.value.sessions ?? [], input.date);
@@ -317,7 +319,7 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
     safetyReason: safetyHold?.value.reasons[0],
     exerciseLabel: input.exerciseLabel,
     timezoneOffsetMinutes: input.timezoneOffsetMinutes,
-    weeklyTrainingDays,
+    healthLedger: requireHealthLedger(input.healthLedgers, input.date),
   });
   const visibleCalendarDates = calendarRangeDates(input.calendarMode, input.calendarAnchorDate);
   const calendar = {
@@ -346,39 +348,24 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       date,
       input.timezoneOffsetMinutes,
     )[0];
-    return buildNutritionProductProjection({
-      date,
-      domain: input.domain,
-      session,
-      completedWorkout,
-      activityLog: timelineActivityLog(
-        date,
-        input.timezoneOffsetMinutes,
-        input.domain.timeline.events,
-      ),
-      timezoneOffsetMinutes: input.timezoneOffsetMinutes,
-      weeklyTrainingDays,
-    });
+    return buildNutritionProductProjection({ healthLedger: requireHealthLedger(input.healthLedgers, date) });
   });
   const reports = input.artifacts.filter(
-    (artifact): artifact is Extract<Artifact, { kind: "weekly_coach_report" | "replan_evaluation" | "goal_forecast" | "mesocycle_review" }> =>
-      artifact.kind === "weekly_coach_report" ||
-      artifact.kind === "replan_evaluation" ||
-      artifact.kind === "goal_forecast" ||
-      artifact.kind === "mesocycle_review",
+    (artifact): artifact is Extract<Artifact, { kind: "weekly_coach_report" }> =>
+      artifact.kind === "weekly_coach_report",
   ).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  const supersededPlanningPreviewIds = new Set(
-    input.artifacts
-      .filter((artifact): artifact is EvidenceBriefArtifact => artifact.kind === "evidence_brief" && Boolean(artifact.planningPreview?.sourcePreviewId))
-      .map((artifact) => artifact.planningPreview!.sourcePreviewId!),
-  );
-  const latestPlanningPreview = input.artifacts
-    .filter((artifact): artifact is EvidenceBriefArtifact =>
-      artifact.kind === "evidence_brief" &&
-      Boolean(artifact.planningPreview) &&
-      artifact.planningPreview?.status !== "confirmed" &&
-      !supersededPlanningPreviewIds.has(artifact.id),
-    )
+  const resolvedAdaptiveProposalIds = new Set(input.artifacts.flatMap((artifact) => artifact.kind === "evidence_brief" && artifact.adaptivePlanProposal && artifact.adaptivePlanProposal.status !== "awaiting_confirmation" ? [artifact.id.replace(/:(?:applied:\d+|rejected)$/, "")] : []));
+  const latestAdaptivePlanProposal = input.artifacts
+    .filter((artifact): artifact is EvidenceBriefArtifact => artifact.kind === "evidence_brief" && Boolean(artifact.adaptivePlanProposal) && artifact.adaptivePlanProposal?.status === "awaiting_confirmation" && !resolvedAdaptiveProposalIds.has(artifact.id))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const latestGoalPathDecision = input.artifacts
+    .filter((artifact): artifact is EvidenceBriefArtifact => artifact.kind === "evidence_brief" && artifact.userId === input.domain.userId && Boolean(artifact.goalPathAssessment))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const latestHomeGoalPathSignal = latestGoalPathDecision?.goalPathAssessment?.channel === "manual_home" && latestGoalPathDecision.goalPathAssessment.delivery === "home"
+    ? latestGoalPathDecision
+    : undefined;
+  const latestCompletedGoal = input.artifacts
+    .filter((artifact): artifact is EvidenceBriefArtifact => artifact.kind === "evidence_brief" && artifact.userId === input.domain.userId && artifact.goalCompletionProposal?.status === "completed" && Boolean(artifact.goalCompletionProposal.next))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const pending = input.pendingHumanActions
     .filter((item) => item.status === "pending")
@@ -424,6 +411,15 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
     fallbackDate: input.date,
     exerciseLabel: input.exerciseLabel,
   });
+  const trendStartDate = addDays(input.date, -29);
+  const trendLedgers = datesBetween(trendStartDate, input.date).map((date) => requireHealthLedger(input.healthLedgers, date));
+  const healthTrends = projectHealthTrends({
+    ledgers: trendLedgers,
+    timeline: input.domain.timeline.current,
+    startDate: trendStartDate,
+    endDate: input.date,
+    timezoneOffsetMinutes: input.timezoneOffsetMinutes,
+  });
 
   return {
     source: {
@@ -432,11 +428,11 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       ...(plan ? { planRevision: plan.revision } : {}),
       timelineRevision: input.domain.timeline.revision,
     },
-    today,
+    today: { ...today, ...(latestHomeGoalPathSignal ? { goalPathSignal: latestHomeGoalPathSignal } : {}) },
     calendar,
     plan: {
-      status: !plan ? "unavailable" : input.domain.planStatus === "stale_goal_contract" ? "stale" : "current",
-      ...(plan ? { revision: plan.revision } : {}),
+      status: !plan || (plan.value.lifecycle && plan.value.lifecycle.state !== "active") ? "unavailable" : input.domain.planStatus === "stale_goal_contract" ? "stale" : "current",
+      ...(input.domain.plan ? { revision: input.domain.plan.revision, effectiveFrom: input.domain.plan.value.effectiveFrom, ...(input.domain.plan.value.lifecycle ? { lifecycleState: input.domain.plan.value.lifecycle.state } : {}) } : {}),
       ...(input.domain.goalContract?.value.horizon.endDate ? { horizon: {
         startDate: input.domain.goalContract.value.horizon.startDate,
         endDate: input.domain.goalContract.value.horizon.endDate,
@@ -452,10 +448,10 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       ...(plan?.value.recoveryStrategy ? { recoveryStrategy: plan.value.recoveryStrategy } : {}),
       ...(nutritionTarget ? { nutritionTarget } : {}),
       ...(plan?.value.rollingEnergyAdjustment ? { rollingEnergyAdjustment: plan.value.rollingEnergyAdjustment } : {}),
-      intakeWeek: intakeWeek.map((nutrition) => nutrition.budget),
+      intakeWeek: intakeWeek.map((nutrition) => nutrition.healthLedger),
       forecasts: plan?.value.adaptiveForecasts ?? [],
       ...(plan?.value.explanation ? { explanation: plan.value.explanation } : {}),
-      ...(latestPlanningPreview ? { latestPlanningPreview } : {}),
+      ...(latestAdaptivePlanProposal ? { latestAdaptivePlanProposal } : {}),
     },
     progress: {
       bodyTrends: deriveBodyTrends({
@@ -471,13 +467,14 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
         endDate: input.date,
         ruleVersion: "maxpower.metrics.v1",
       }),
+      healthTrends,
     },
     profile: {
-      onboardingComplete: Boolean(input.domain.profile && input.domain.goalContract && input.domain.mandate),
+      profileReady: Boolean(input.domain.profile && input.domain.mandate),
       ...(input.domain.profile?.value.locale ? { locale: input.domain.profile.value.locale } : {}),
-      ...(input.domain.profile ? { trainingExperience: input.domain.profile.value.trainingExperience } : {}),
       ...(input.domain.goalContract ? { primaryGoal: input.domain.goalContract.value.primaryGoal } : {}),
       ...(input.domain.mandate ? { mandateMode: input.domain.mandate.value.mode } : {}),
+      ...(input.domain.mandate ? { planAuthorization: { revision: input.domain.mandate.revision, mandate: input.domain.mandate.value } } : {}),
       locations: input.domain.profile?.value.locations?.length ?? 0,
       customExercises: input.domain.customExercises.length,
       ...(profileWeightKg(input.domain.profile?.value.demographics?.currentWeight) !== undefined ? { referenceWeightKg: profileWeightKg(input.domain.profile?.value.demographics?.currentWeight) } : {}),
@@ -495,6 +492,7 @@ export function buildCoachProductProjection(input: CoachProductProjectionInput):
       ...(latestUndoable
         ? { latestUndoableAction: { id: latestUndoable.id, action: latestUndoable.action, occurredAt: latestUndoable.occurredAt } }
         : {}),
+      ...(latestCompletedGoal?.goalCompletionProposal?.next ? { goalCompletionNext: latestCompletedGoal.goalCompletionProposal.next } : {}),
     },
   };
 }
@@ -609,7 +607,7 @@ function buildToday(input: {
   safetyReason?: string;
   exerciseLabel: (exerciseVariantId: string) => string;
   timezoneOffsetMinutes: number;
-  weeklyTrainingDays: number;
+  healthLedger: DailyHealthLedger;
 }): TodayProductProjection {
   const recoveryConstraint = [...input.domain.recoveryConstraints]
     .filter((item) => item.value.validUntil >= `${input.date}T00:00:00.000Z`)
@@ -621,11 +619,17 @@ function buildToday(input: {
     missing: recoveryConstraint?.evaluation?.missingOrStale ?? ["check_in_optional"],
   } satisfies RecoveryProductProjection;
   const nutrition = buildNutritionProductProjection(input);
-  if (!input.domain.profile || !input.domain.goalContract || !input.domain.mandate) {
-    return { date: input.date, state: "onboarding_required", action: "open_onboarding", activityLog: input.activityLog, nutrition, recovery };
+  if (!input.domain.profile || !input.domain.mandate) {
+    return { date: input.date, state: "record_first", action: "record_activity", activityLog: input.activityLog, nutrition, recovery };
   }
   if (input.safetyReason) {
     return { date: input.date, state: "safety_hold", action: "view_reason", activityLog: input.activityLog, nutrition, recovery, reason: input.safetyReason };
+  }
+  if (!input.domain.goalContract) {
+    return { date: input.date, state: "record_first", action: "record_activity", activityLog: input.activityLog, nutrition, recovery };
+  }
+  if (input.domain.plan?.value.lifecycle && input.domain.plan.value.lifecycle.state !== "active") {
+    return { date: input.date, state: "record_first", action: "record_activity", activityLog: input.activityLog, nutrition, recovery };
   }
   if (!input.domain.plan || input.domain.planStatus === "stale_goal_contract") {
     return {
@@ -686,74 +690,25 @@ function buildToday(input: {
   };
 }
 
-function buildNutritionProductProjection(input: {
-  date: string;
-  domain: DomainProjection;
-  session?: PlannedSessionData;
-  completedWorkout?: WorkoutOutcomeProductSummary;
-  activityLog: TimelineActivityLog;
-  timezoneOffsetMinutes: number;
-  weeklyTrainingDays: number;
-}): NutritionProductProjection {
-  const nutritionStrategy = [...input.domain.nutritionStrategies]
-    .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
-  const recoveryConstraint = [...input.domain.recoveryConstraints]
-    .filter((item) => item.value.validUntil >= `${input.date}T00:00:00.000Z`)
-    .sort((left, right) => right.revision - left.revision || right.value.id.localeCompare(left.value.id))[0]?.value;
-  const plannedDayKind = nutritionDayKind(
-    input.session,
-    input.completedWorkout,
-    planMaterializesDate(input.domain, input.date),
-  );
-  const plan = deriveNutritionDayPlan({
-    date: input.date,
-    timezoneOffsetMinutes: input.timezoneOffsetMinutes,
-    ...(nutritionStrategy ? { strategy: nutritionStrategy } : {}),
-    ...(plannedDayKind ? { plannedDayKind } : {}),
-    ...(recoveryConstraint ? { recoveryConstraint } : {}),
-  });
-  const ledger = projectNutritionDayLedger({ plan, events: input.domain.timeline.current });
-  const activities = input.activityLog.entries
-    .filter((entry) => entry.fact.kind === "activity")
-    .map((entry) => {
-      if (entry.fact.kind !== "activity") return {};
-      const recordedDurationMinutes = entry.fact.duration
-        ? durationMinutes(entry.fact.duration)
-        : undefined;
-      return {
-        ...(recordedDurationMinutes === undefined ? {} : { durationMinutes: recordedDurationMinutes }),
-        ...(entry.fact.intensity ? { intensity: entry.fact.intensity } : {}),
-        ...(entry.fact.energyExpenditure ? { energyExpenditureKcal: energyKcal(entry.fact.energyExpenditure) } : {}),
-      };
-    });
+function buildNutritionProductProjection(input: { healthLedger: DailyHealthLedger }): NutritionProductProjection {
+  const { healthLedger } = input;
   return {
-    plan,
-    ledger,
-    budget: deriveDailyIntakeBudget({
-      plan,
-      ledger,
-      weeklyTrainingDays: input.weeklyTrainingDays,
-      weeklyPlannedDays: 7,
-      trainingCompleted: Boolean(input.completedWorkout),
-      activities,
-    }),
+    plan: healthLedger.nutritionPlan,
+    ledger: healthLedger.nutrition,
+    healthLedger,
   };
 }
 
-function nutritionDayKind(
-  session?: PlannedSessionData,
-  completedWorkout?: WorkoutOutcomeProductSummary,
-  planCoversDate = false,
-): NutritionDayPlan["dayKind"] | undefined {
-  if (completedWorkout) return "training";
-  if (!session) return planCoversDate ? "rest" : undefined;
-  if (session.kind === "rest") return "rest";
-  if (session.kind === "recovery") return "recovery";
-  return "training";
+function requireHealthLedger(ledgers: Readonly<Record<string, DailyHealthLedger>>, date: string): DailyHealthLedger {
+  const ledger = ledgers[date];
+  if (!ledger) throw new Error(`daily_health_ledger_missing:${date}`);
+  return ledger;
 }
 
-function isFuelTrainingSession(session: PlannedSessionData): boolean {
-  return session.kind !== "rest" && session.kind !== "recovery";
+function datesBetween(startDate: string, endDate: string): string[] {
+  const dates: string[] = [];
+  for (let date = startDate; date <= endDate; date = addDays(date, 1)) dates.push(date);
+  return dates;
 }
 
 function planMaterializesDate(domain: DomainProjection, date: string): boolean {
@@ -863,12 +818,6 @@ function durationMinutes(duration: { value: number; unit: string }): number | un
   return undefined;
 }
 
-function energyKcal(energy: { value: number; unit: string }): number | undefined {
-  if (energy.unit === "kcal") return energy.value;
-  if (energy.unit === "kJ") return energy.value / 4.184;
-  return undefined;
-}
-
 function profileWeightKg(weight: MassQuantity | undefined): number | undefined {
   if (!weight || !Number.isFinite(weight.value) || weight.value <= 0) return undefined;
   return weight.unit === "kg" ? weight.value : weight.value * 0.45359237;
@@ -889,7 +838,7 @@ function workoutForSession(
 ): WorkoutProjection | undefined {
   if (!sessionId) return undefined;
   return [...workouts]
-    .filter((workout) => workout.prescriptionRef.sessionPrescriptionId === sessionId)
+    .filter((workout) => workout.source.kind === "planned" && workout.source.plannedSessionRef.sessionPrescriptionId === sessionId)
     .sort((left, right) => right.revision - left.revision)[0];
 }
 
@@ -928,6 +877,8 @@ export function timelineSummary(entry: TimelineReadEvent | TimelineProjectionEve
     case "body": return fact.measurement.metric === "body_weight" ? "体重" : fact.measurement.metric === "body_fat_percentage" ? "体脂" : fact.measurement.site;
     case "recovery": return "恢复记录";
     case "symptom": return "身体反馈";
+    case "clinical_context": return "健康边界";
+    case "subjective": return "主观反馈";
     case "schedule": return "日程变更";
     case "rest": return "休息";
   }

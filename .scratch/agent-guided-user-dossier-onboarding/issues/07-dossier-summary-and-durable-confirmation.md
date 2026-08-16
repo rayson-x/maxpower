@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — Training background 与 Coaching level assessment；06 — Readiness state 与安全能力门控
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 摘要分别展示用户事实、Goal Contract、Training background、Coaching level assessment、Readiness、授权/权限、安全限制、unknown 及受限行动，推断不伪装成事实。
 - [ ] 用户可从摘要继续对话修正或打开对应字段控件修改；修改回到同一草稿事件流并更新摘要版本。

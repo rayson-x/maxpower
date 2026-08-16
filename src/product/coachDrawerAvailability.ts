@@ -6,13 +6,7 @@ export type CoachDrawerRoute =
   | "today"
   | "calendar"
   | "plan"
-  | "progress"
   | "profile"
-  | "onboarding"
-  | "workout"
-  | "video_library"
-  | "replay";
+  | "workout";
 
-export function coachDrawerAvailableForRoute(route: CoachDrawerRoute): boolean {
-  return route !== "onboarding" && route !== "video_library" && route !== "replay";
-}
+export function coachDrawerAvailableForRoute(_route: CoachDrawerRoute): boolean { return true; }

@@ -7,6 +7,8 @@ import {
   type ProfessionalTermId,
 } from "./professionalTerms";
 import { uiColors, uiRadius, uiType } from "./tokens";
+import { mobileT } from "../../i18n";
+
 
 export function ProfessionalTermText({ text, style, prefix, numberOfLines }: {
   text: string;
@@ -24,24 +26,24 @@ export function ProfessionalTermText({ text, style, prefix, numberOfLines }: {
         : <Text
             key={`term:${index}:${part.termId}`}
             accessibilityRole="button"
-            accessibilityLabel={`解释专业名词 ${readProfessionalTerm(part.termId).label}`}
-            accessibilityHint="双击查看通俗解释"
+            accessibilityLabel={mobileT("mobile.ui.kit.professionaltermtext.c618b441f0", { value0: readProfessionalTerm(part.termId).label })}
+            accessibilityHint={mobileT("mobile.ui.kit.professionaltermtext.ae74332eb7")}
             onPress={() => setOpenTermId(part.termId)}
             style={styles.term}
           >{part.text}</Text>)}
     </Text>
     {openTerm ? <Modal animationType="fade" transparent visible onRequestClose={() => setOpenTermId(undefined)}>
       <View style={styles.scrim}>
-        <Pressable accessibilityRole="button" accessibilityLabel="关闭专业名词解释" onPress={() => setOpenTermId(undefined)} style={StyleSheet.absoluteFill} />
+        <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.professionaltermtext.608d7d5c5c")} onPress={() => setOpenTermId(undefined)} style={StyleSheet.absoluteFill} />
         <View accessibilityViewIsModal style={styles.sheet}>
-          <Text style={styles.eyebrow}>专业名词</Text>
+          <Text style={styles.eyebrow}>{mobileT("mobile.ui.kit.professionaltermtext.8ca08f6ebb")}</Text>
           <Text style={styles.title}>{openTerm.label}</Text>
           <Text style={styles.fullName}>{openTerm.fullName}</Text>
           <Text style={styles.meaning}>{openTerm.plainMeaning}</Text>
           <View style={styles.example}><Text style={styles.exampleText}>{openTerm.example}</Text></View>
           <Text style={styles.detail}>{openTerm.scaleDirection}</Text>
           <Text style={styles.boundary}>{openTerm.boundary}</Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="知道了，关闭解释" onPress={() => setOpenTermId(undefined)} style={styles.close}><Text style={styles.closeText}>知道了</Text></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.professionaltermtext.26369ba343")} onPress={() => setOpenTermId(undefined)} style={styles.close}><Text style={styles.closeText}>{mobileT("mobile.ui.kit.professionaltermtext.cb63c62e50")}</Text></Pressable>
         </View>
       </View>
     </Modal> : null}

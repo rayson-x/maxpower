@@ -6,6 +6,8 @@ import {
   recognitionAvailabilityForExercise,
   type RecognitionAvailability,
 } from "./exerciseRecognition";
+import { mobileT } from "../i18n";
+
 
 /**
  * 动作库首页的展示模型：分组 + 行数据全部为纯推导，
@@ -42,7 +44,7 @@ export function buildLibrary(): LibraryGroup[] {
   const all = EXERCISE_REGISTRY.exercises;
   const home = all.filter((exercise) => isHomeExercise(exercise.id));
   const groups: LibraryGroup[] = [
-    { id: "home", label: "居家 · 前置", rows: home.map(toRow) },
+    { id: "home", label: mobileT("mobile.librarymodel.631de0554f"), rows: home.map(toRow) },
   ];
   for (const group of MUSCLE_GROUPS) {
     const rows = all

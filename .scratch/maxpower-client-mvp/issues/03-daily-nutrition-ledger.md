@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 用户档案到长期策略、周计划与今日计划
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 **Owner:** claude-agent-b（并行开发中，认领于 2026-08-09 18:35 CST）
 

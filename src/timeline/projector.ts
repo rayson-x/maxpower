@@ -14,10 +14,10 @@ export function projectTimelineEvent(event: TimelineProjectionEvent): TimelineRe
     eventId: event.eventId,
     revision: event.revision,
     fact: event.fact,
-    ...(event.envelope ? { envelope: event.envelope } : {}),
-    occurredAt: event.envelope?.time.startedAt ?? event.occurredAt,
+    envelope: event.envelope,
+    occurredAt: event.envelope.time.startedAt,
     recordedAt: event.recordedAt,
-    timezoneOffsetMinutes: event.envelope?.time.timezoneOffsetMinutes ?? event.timezoneOffsetMinutes,
+    timezoneOffsetMinutes: event.envelope.time.timezoneOffsetMinutes,
     ...(event.correctsEventId ? { correctsEventId: event.correctsEventId } : {}),
     ...(event.sourceMutationOfEventId ? { sourceMutationOfEventId: event.sourceMutationOfEventId } : {}),
     ...(event.tombstonesEventId ? { tombstonesEventId: event.tombstonesEventId } : {}),
@@ -43,10 +43,10 @@ export function stableTimelineOrder<T extends TimelineReadEvent>(events: readonl
 export function timelineDayKey(event: Pick<TimelineReadEvent, "fact" | "envelope" | "occurredAt" | "timezoneOffsetMinutes">): string {
   const envelope = event.envelope;
   const isSleep = event.fact.kind === "sleep";
-  const instant = isSleep ? envelope?.time.endedAt ?? event.occurredAt : event.occurredAt;
+  const instant = isSleep ? envelope.time.endedAt ?? event.occurredAt : event.occurredAt;
   const offset = isSleep
-    ? envelope?.time.endedTimezoneOffsetMinutes ?? envelope?.time.timezoneOffsetMinutes ?? event.timezoneOffsetMinutes
-    : envelope?.time.timezoneOffsetMinutes ?? event.timezoneOffsetMinutes;
+    ? envelope.time.endedTimezoneOffsetMinutes ?? envelope.time.timezoneOffsetMinutes
+    : envelope.time.timezoneOffsetMinutes;
   return localDateAtOffset(instant, offset);
 }
 
@@ -87,23 +87,11 @@ export function toTimelineSyncPayload(input: {
     userId: input.userId,
     events: stableTimelineOrder(input.events.map(projectTimelineEvent)).map((event) => {
       const envelope = event.envelope;
-      const nonMediaEvidence = envelope?.evidenceRefs.filter((item) => item.kind !== "media") ?? [];
-      const localMediaAssetIds = envelope?.evidenceRefs
-        .filter((item) => item.kind === "media")
-        .map((item) => item.id) ?? [];
       return {
         eventId: event.eventId,
         revision: event.revision,
         fact: event.fact,
-        ...(envelope
-          ? {
-              envelope: {
-                ...envelope,
-                evidenceRefs: nonMediaEvidence,
-                localMediaAssetIds,
-              },
-            }
-          : {}),
+        envelope,
         ...(event.correctsEventId ? { correctsEventId: event.correctsEventId } : {}),
         ...(event.sourceMutationOfEventId ? { sourceMutationOfEventId: event.sourceMutationOfEventId } : {}),
         ...(event.tombstonesEventId ? { tombstonesEventId: event.tombstonesEventId } : {}),
@@ -157,5 +145,8 @@ function supportsMetric(event: TimelineReadEvent, metric: TimelineMetric): boole
 export function factHasNoCompletedClaim(fact: TimelineFact): boolean {
   // Plan / prediction artifacts have no TimelineFact variant. This guard is
   // intentionally explicit to make misuse visible at an API boundary.
-  return ["training", "activity", "nutrition", "sleep", "body", "recovery", "rest", "symptom", "schedule"].includes(fact.kind);
+  // clinical_context and subjective are user-reported experience facts: they
+  // carry no completion claim either, and the fixed GoalPath safety rules
+  // depend on their admission.
+  return ["training", "activity", "nutrition", "sleep", "body", "recovery", "rest", "symptom", "schedule", "clinical_context", "subjective"].includes(fact.kind);
 }

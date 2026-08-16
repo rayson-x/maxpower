@@ -6,14 +6,9 @@ export {
 export { createExpoSecureCredentialPort } from "./ExpoSecureCredentialPort";
 export { accountDatabaseName, openExpoMaxPowerPersistence } from "./ExpoMaxPowerPersistence";
 export {
-  SQLiteCloudProductDataCache,
-  type CloudProductCacheDatabase,
-} from "./SQLiteCloudProductDataCache";
-export {
   SQLiteProductShellStateStore,
   type ProductShellStateSqlDatabase,
 } from "./SQLiteProductShellStateStore";
-export { createExpoMediaBlobStore, type ExpoMediaBlobStoreOptions, type ExpoMediaReference } from "./ExpoMediaBlobStore";
 export {
   createAndroidHealthConnectPort,
   tryCreateExpoAndroidHealthConnectPort,

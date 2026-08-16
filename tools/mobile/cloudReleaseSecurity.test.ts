@@ -37,20 +37,17 @@ test("发布客户端没有 Provider 配置、直连凭据或本地模型 bootst
   assert.doesNotMatch(piProvider, /OPENAI_API_KEY|ANTHROPIC_API_KEY|openai\.com|openrouter\.ai/);
 });
 
-test("云端 LLM 只暴露固定产品 alias，并从账号内存 token source 取 JWT", () => {
+test("云端 LLM 只暴露文本 Coach alias，V1 不包含营养识别模型", () => {
   const coach = readFileSync(
-    join(root, "src/mobile/cloud/MaxPowerCloudLlmProvider.ts"),
-    "utf8",
-  );
-  const nutrition = readFileSync(
-    join(root, "src/mobile/cloud/CloudNutritionObservationProvider.ts"),
+    join(root, "src/mobile/cloud/MaxPowerPiLlmProvider.ts"),
     "utf8",
   );
   assert.match(coach, /maxpower\/coach-v1/);
-  assert.match(nutrition, /maxpower\/nutrition-vision-v1/);
-  assert.match(coach, /accessTokenFor\(accountId/);
-  assert.match(nutrition, /cloud_service_jwt_is_memory_only/);
-  assert.doesNotMatch(`${coach}\n${nutrition}`, /apiKey|credentialRef|provider\.example/);
+  assert.match(coach, /accessTokenFor\(this\.accountId/);
+  assert.equal(existsSync(join(root, "src/mobile/cloud/CloudNutritionObservationProvider.ts")), false);
+  assert.equal(existsSync(join(root, "src/mobile/cloud/MaxPowerCloudLlmProvider.ts")), false);
+  assert.doesNotMatch(coach, /nutrition-vision|Nutrition Vision|image_url|data:image/);
+  assert.doesNotMatch(coach, /OPENAI_API_KEY|ANTHROPIC_API_KEY|credentialRef|provider\.example/);
 });
 
 test("Android release harness excludes the web public corpus and scans the emitted bytecode", () => {

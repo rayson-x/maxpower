@@ -14,7 +14,7 @@ import type {
  * 清扫语义刻意保守：
  * - streaming/resuming 的 run 只在进程丢失后才会残留（正常生命周期内它们会被
  *   推进到终态），因此加载到的非终态 run 一律视为崩溃孤儿，终态化为
- *   terminated(process_lost)；suspended 是合法的 HITL 驻留态，不动。
+ *   interrupted(process_lost)；awaiting_user 是合法的 HITL 驻留态，不动。
  * - pending human action / action token 的过期判定此前是惰性的（只在
  *   resume/apply 尝试时判定），这里把过期显式化：pending → expired，
  *   token → revokedAt（不标 consumedAt，避免与真实消费混淆）。
@@ -47,7 +47,7 @@ export function planCoachStateSweep(
     )
     .map((run) => ({
       ...run,
-      status: "terminated" as const,
+      status: "interrupted" as const,
       terminalCode: "process_lost",
       updatedAt: now,
     }));

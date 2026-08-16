@@ -20,8 +20,9 @@ import { createExpoSecureCredentialPort } from "../native";
 import { createMobileAccountRuntimeFactory, type MobileAccountRuntime } from "../runtime";
 import { ProductShell } from "./ProductShell";
 import { resolveMaxPowerDeepLink } from "./productNavigation";
-import { WebInteractionPreview, shouldShowWebInteractionPreview } from "./WebInteractionPreview";
 import { colors } from "./theme";
+import { mobileT } from "../../i18n";
+
 
 type AuthComposition =
   | {
@@ -34,13 +35,12 @@ type AuthComposition =
 /** Mobile composition root: authentication owns whether an account runtime exists. */
 export function MaxPowerApp() {
   const [composition] = useState<AuthComposition>(createAuthComposition);
-  const [webInteractionPreview] = useState(shouldShowWebInteractionPreview);
 
   return (
     <SafeAreaProvider initialMetrics={initialWindowMetrics}>
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.paper }}>
         <StatusBar barStyle="dark-content" />
-        {webInteractionPreview ? <WebInteractionPreview /> : composition.status === "ready" ? (
+        {composition.status === "ready" ? (
           <AuthRoot
             controller={composition.controller}
             socialAuthorization={composition.socialAuthorization}
@@ -50,7 +50,7 @@ export function MaxPowerApp() {
           />
         ) : (
           <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 28 }}>
-            <Text style={{ color: colors.ink, fontWeight: "900", fontSize: 18 }}>无法安全连接 MaxPower</Text>
+            <Text style={{ color: colors.ink, fontWeight: "900", fontSize: 18 }}>{mobileT("mobile.ui.maxpowerapp.c4b4f9176e")}</Text>
             <Text style={{ color: colors.ink2, marginTop: 9, textAlign: "center" }}>{composition.message}</Text>
           </View>
         )}
@@ -103,21 +103,22 @@ function AuthenticatedProduct({ accountId, runtime, onOpenAccountSettings }: { a
   return (
     <ProductShell
       application={runtime.application}
+      conversation={runtime.conversation}
+      records={runtime.records}
       userId={accountId}
       incomingDeepLink={incomingDeepLink}
       productShellStateStore={runtime.productShellStateStore}
       initialProductShellRecovery={runtime.initialProductShellRecovery}
-      confirmedProduct={runtime.confirmedProduct}
-      cloudMediaLibrary={runtime.cloudMediaLibrary}
-      onTimelineChanged={runtime.settleTimelineRisk}
       onOpenAccountSettings={onOpenAccountSettings}
     />
   );
 }
 
-// MVP clients talk directly to the deployed development server. Keep one
-// explicit endpoint instead of runtime environment or protocol switches.
-const MVP_API_ENDPOINT = "http://54.151.241.139:3000";
+// The shipped MVP has one explicit endpoint.  A public build-time value is
+// intentionally allowed for local Web interaction tests; it is an endpoint,
+// never a credential, and native/release builds retain this default.
+const MVP_API_ENDPOINT = process.env.EXPO_PUBLIC_MAXPOWER_API_BASE_URL?.trim()
+  || "http://54.151.241.139:3000";
 
 function createAuthComposition(): AuthComposition {
   try {
@@ -130,7 +131,6 @@ function createAuthComposition(): AuthComposition {
     const socialExchangeBinding = new SocialExchangeBindingVault(credentials);
     const auth = new ServerAuthClient({
       baseUrl,
-      allowInsecureHttp: true,
       socialExchangeBinding: () => socialExchangeBinding.readOrCreate(),
     });
     const serviceAccessTokens = new MemoryServiceAccessTokenStore();
@@ -145,14 +145,14 @@ function createAuthComposition(): AuthComposition {
       deletionRecovery: new DeletionRecoveryVault(credentials),
       serviceAccessTokens,
       runtimes: new AccountRuntimeCoordinator({
-        create: createMobileAccountRuntimeFactory({ apiBaseUrl: baseUrl, allowInsecureHttp: true }),
+        create: createMobileAccountRuntimeFactory({ apiBaseUrl: baseUrl }),
       }),
     });
     return { status: "ready", controller, socialAuthorization };
   } catch (cause) {
     return {
       status: "invalid_configuration",
-      message: cause instanceof Error ? cause.message : "客户端服务地址无效。",
+      message: cause instanceof Error ? cause.message : mobileT("mobile.ui.maxpowerapp.517ebb9ecf"),
     };
   }
 }

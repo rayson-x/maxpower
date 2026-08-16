@@ -4,7 +4,7 @@
 
 **Blocked by:** 08 — 训练结束、确认写入与 Timeline 闭环。
 
-**Status:** needs-device-validation
+**Status:** skipped
 
 - [ ] 真机从 Today 一次点击进入训练，完成手动 set、Set Review、休息、动作路线调整和训练结束确认。
 - [ ] 至少一个 validated-analysis exact profile 动作跑通 Realtime canonical 路径，另一个 unsupported 动作证明无损手动降级。
@@ -16,4 +16,4 @@
 
 ## Comments
 
-- 2026-08-14：本轮未执行 Android 真机、录屏、TalkBack、旋转/安全区、减少动态效果和手势冲突验收；不得视为 release gate 已通过。
+- 2026-08-14：产品验收范围已收窄为交互、UI/体验、流程与数据保存/修改。Android 真机、录屏、TalkBack、旋转/安全区、视觉理解、识别准确率和相机底层验证不再作为本轮 ticket 验收或阻塞条件；本 ticket 按决策跳过。

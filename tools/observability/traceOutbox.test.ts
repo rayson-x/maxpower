@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import type { PermissionStatus } from "../../src/coach/domain";
 import { stableHash } from "../../src/coach/stable";
@@ -46,7 +46,7 @@ async function bootstrap(
   ledger: InMemoryCoachLedger,
   permissions?: { remoteLlm: PermissionStatus; observability?: PermissionStatus },
 ): Promise<void> {
-  const app = new CoachApplication(ledger, runtime());
+  const app = new LocalProductKernel(ledger, runtime());
   const meta = {
     userId: USER,
     actor: { kind: "user" as const, id: USER },
@@ -57,13 +57,13 @@ async function bootstrap(
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: { ...meta, idempotencyKey: "bootstrap" },
-    profile: { id: "profile-1", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile-1", locale: "zh-CN" },
     goalContract: {
       id: "goal-1",
       primaryGoal: "hypertrophy",
       horizon: { startDate: "2026-08-08", endDate: "2026-12-08" },
     },
-    mandate: { id: "mandate-1", mode: "collaborative" },
+    mandate: { id: "mandate-1", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
   if (!permissions) return;
   await app.executeDomainCommand({
@@ -76,8 +76,6 @@ async function bootstrap(
       camera: "not_configured",
       health: "not_configured",
       notifications: "not_configured",
-      cloudSync: "not_configured",
-      mediaUpload: "not_configured",
       remoteLlm: permissions.remoteLlm,
       ...(permissions.observability ? { observability: permissions.observability } : {}),
     },
@@ -231,7 +229,7 @@ test("授权撤销后新事件不再入队", async () => {
   await sink.write(envelope(), CONTEXT);
   await sink.flush();
 
-  const app = new CoachApplication(ledger, runtime());
+  const app = new LocalProductKernel(ledger, runtime());
   await app.executeDomainCommand({
     type: "permission_set.revise",
     meta: {
@@ -249,8 +247,6 @@ test("授权撤销后新事件不再入队", async () => {
       camera: "not_configured",
       health: "not_configured",
       notifications: "not_configured",
-      cloudSync: "not_configured",
-      mediaUpload: "not_configured",
       remoteLlm: "granted",
       observability: "denied",
     },

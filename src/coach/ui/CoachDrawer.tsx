@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   BackHandler,
+  FlatList,
   Keyboard,
   Pressable,
   ScrollView,
@@ -11,20 +12,14 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import type { CoachContextKind, CoachMessage, CoachSessionStatus, ContextRef } from "../model";
+import type { CoachMessage, CoachSessionStatus, ContextRef } from "../model";
+import type { BaselineInput, ConversationItem } from "../../agent-conversation";
+import { intakeField } from "../intakeFields";
 import { APP_DOCK_BODY_HEIGHT, type CoachComposerAnchor } from "../../mobile/ui-kit/AppDock";
 import { FocusSurface } from "../../mobile/ui-kit/FocusSurface";
 import { ProfessionalTermText } from "../../mobile/ui-kit/ProfessionalTermText";
-import type {
-  CoachArtifactPart,
-  CoachStreamSnapshot,
-  CoachToolPart,
-  CoachUiPart,
-} from "./coachStreamProjection";
 
 export interface CoachDrawerProps {
-  context: ContextRef;
-  stream: CoachStreamSnapshot;
   /** Durable task identity, supplied only by the application-facing shell. */
   session?: {
     id: string;
@@ -40,10 +35,13 @@ export interface CoachDrawerProps {
   composerAnchor?: CoachComposerAnchor;
   /** Incremented only when the dock entry was tapped, so other Coach openings do not force the keyboard. */
   focusRequest?: number;
-  /** The collapsed composer decides whether this conversation opens for typing or voice capture. */
-  entryMode?: "text" | "voice";
   dockedComposer?: boolean;
-  messages?: readonly CoachMessage[];
+  /** The local Pi module's durable ordered transcript, including cards. */
+  conversationItems?: readonly ConversationItem[];
+  onSubmitBaseline?: (baseline: Omit<BaselineInput, "userId">) => void;
+  onSaveBaselineDraft?: (draft: { ageYears?: string; heightCm?: string; weightKg?: string; goalText?: string }) => void;
+  onSubmitIntakeForm?: (item: ConversationItem, values: Readonly<Record<string, string>>) => void;
+  onConversationCardAction?: (item: ConversationItem, actionId: string) => void;
   sessions?: readonly {
     id: string;
     status: CoachSessionStatus;
@@ -52,69 +50,51 @@ export interface CoachDrawerProps {
     updatedAt: string;
   }[];
   onExpandedChange?: (expanded: boolean) => void;
-  onSend?: (message: string, context: ContextRef) => void;
+  onSend?: (message: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartNew?: () => void;
-  onCardAction?: (actionId: string, artifactId: string) => void;
-  onHumanAction?: (pendingActionId: string, optionId: string) => void;
+  onStop?: () => void;
+  running?: boolean;
+  /** Before a local profile exists, Coach is the required full-screen entry flow. */
+  onboarding?: boolean;
 }
 
 export function CoachDrawer({
-  context,
-  stream,
   session,
   expanded: controlledExpanded,
   initiallyExpanded = false,
-  messages = [],
+  conversationItems = [],
+  onSubmitBaseline,
+  onSaveBaselineDraft,
+  onSubmitIntakeForm,
+  onConversationCardAction,
   sessions = [],
   bottomInset = APP_DOCK_BODY_HEIGHT,
   horizontalInset = 8,
   composerAnchor,
   focusRequest = 0,
-  entryMode = "text",
   dockedComposer = false,
   onExpandedChange,
   onSend,
   onSelectSession,
   onStartNew,
-  onCardAction,
-  onHumanAction,
+  onStop,
+  running = false,
+  onboarding = false,
 }: CoachDrawerProps) {
   const insets = useSafeAreaInsets();
   const [internalExpanded, setInternalExpanded] = useState(initiallyExpanded);
   const expanded = controlledExpanded ?? internalExpanded;
   const [message, setMessage] = useState("");
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [retainedContext, setRetainedContext] = useState(context);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [composerMode, setComposerMode] = useState<"text" | "voice">(entryMode);
-  const [voiceRecording, setVoiceRecording] = useState(false);
-  const [attachmentTrayOpen, setAttachmentTrayOpen] = useState(false);
   const messageInputRef = useRef<TextInput>(null);
+  const conversationListRef = useRef<FlatList<ConversationItem>>(null);
   const focusRequestHandled = useRef(focusRequest);
 
   const focusTextComposer = useCallback(() => {
     messageInputRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (!expanded) setRetainedContext(context);
-  }, [context, expanded]);
-
-  useEffect(() => {
-    if (expanded && session) setRetainedContext(session.context);
-  }, [expanded, session]);
-
-  useEffect(() => {
-    if (!expanded) return;
-    setComposerMode(entryMode);
-    setVoiceRecording(false);
-    setAttachmentTrayOpen(false);
-  }, [entryMode, expanded]);
-
-  useEffect(() => {
-    if (expanded && composerMode === "voice") Keyboard.dismiss();
-  }, [composerMode, expanded]);
 
   const setExpanded = useCallback((next: boolean) => {
     if (controlledExpanded === undefined) setInternalExpanded(next);
@@ -138,15 +118,16 @@ export function CoachDrawer({
   }, []);
 
   useEffect(() => {
-    if (!expanded || composerMode !== "text" || focusRequest === focusRequestHandled.current) return;
+    if (!expanded || focusRequest === focusRequestHandled.current) return;
     focusRequestHandled.current = focusRequest;
     const frame = requestAnimationFrame(focusTextComposer);
     return () => cancelAnimationFrame(frame);
-  }, [composerMode, expanded, focusRequest, focusTextComposer]);
+  }, [expanded, focusRequest, focusTextComposer]);
 
   useEffect(() => {
     if (!dockedComposer || !expanded) return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (onboarding) return true;
       if (keyboardHeight > 0) {
         Keyboard.dismiss();
         return true;
@@ -155,28 +136,21 @@ export function CoachDrawer({
       return true;
     });
     return () => subscription.remove();
-  }, [dockedComposer, expanded, keyboardHeight, setExpanded]);
+  }, [dockedComposer, expanded, keyboardHeight, onboarding, setExpanded]);
+
+  useEffect(() => {
+    if (!expanded || historyOpen || !conversationItems.length) return;
+    const frame = requestAnimationFrame(() => conversationListRef.current?.scrollToEnd({ animated: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [conversationItems.length, expanded, historyOpen]);
 
   const submit = () => {
     const trimmed = message.trim();
     if (!trimmed) return;
-    onSend?.(trimmed, retainedContext);
+    onSend?.(trimmed);
     setMessage("");
   };
 
-  const switchToText = () => {
-    setComposerMode("text");
-    setVoiceRecording(false);
-    requestAnimationFrame(focusTextComposer);
-  };
-
-  const transcript = messages.filter((item) => item.role !== "tool");
-  const completedAssistantRuns = new Set(
-    transcript.filter((item) => item.role === "assistant" && item.runId).map((item) => item.runId),
-  );
-  const liveParts = stream.parts.filter((part) =>
-    part.type !== "text" || !completedAssistantRuns.has(part.id.replace(/^text:/, "")),
-  );
   const keyboardOffset = keyboardHeight > 0 ? Math.max(0, keyboardHeight - insets.bottom) : 0;
   const surfaceBottomInset = dockedComposer
     ? keyboardOffset > 0 ? keyboardOffset + 6 : Math.max(6, insets.bottom + 6)
@@ -189,16 +163,18 @@ export function CoachDrawer({
       bottomInset={surfaceBottomInset}
       horizontalInset={horizontalInset}
       accessibilityLabel="收起 Coach"
-      onDismiss={() => setExpanded(false)}
+      onDismiss={() => { if (!onboarding) setExpanded(false); }}
+      dismissible={!onboarding}
     >
         <View style={styles.panelContent}>
           <View style={styles.panelHeader}>
             <View style={styles.panelTitleBlock}>
               <Text style={styles.panelTitle}>Coach</Text>
-              <View style={styles.contextBadge}><Text style={styles.contextBadgeText}>{contextLabel(retainedContext)}</Text></View>
+              <View style={styles.contextBadge}><Text style={styles.contextBadgeText}>对话</Text></View>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel="查看历史对话" onPress={() => { Keyboard.dismiss(); setHistoryOpen((current) => !current); }} style={styles.historyButton}><Text style={styles.historyButtonText}>{historyOpen ? "返回" : "历史"}</Text></Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel="收起 MaxPower Coach" onPress={() => setExpanded(false)} style={styles.minimizeButton}><Text style={styles.minimizeGlyph}>×</Text></Pressable>
+            {running ? <Pressable accessibilityRole="button" accessibilityLabel="停止 Coach" onPress={onStop} style={styles.stopButton}><Text style={styles.stopButtonText}>停止</Text></Pressable> : null}
+            {!onboarding ? <Pressable accessibilityRole="button" accessibilityLabel="查看历史对话" onPress={() => { Keyboard.dismiss(); setHistoryOpen((current) => !current); }} style={styles.historyButton}><Text style={styles.historyButtonText}>{historyOpen ? "返回" : "历史"}</Text></Pressable> : null}
+            {!onboarding ? <Pressable accessibilityRole="button" accessibilityLabel="收起 MaxPower Coach" onPress={() => setExpanded(false)} style={styles.minimizeButton}><Text style={styles.minimizeGlyph}>×</Text></Pressable> : null}
           </View>
           <View style={styles.panelBody}>
             {historyOpen ? (
@@ -210,55 +186,34 @@ export function CoachDrawer({
               />
             ) : (
               <>
-                <ScrollView
+                <FlatList
+                  ref={conversationListRef}
+                  data={conversationItems}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({ item }) => <ConversationItemView item={item} onSubmitBaseline={onSubmitBaseline} onSaveBaselineDraft={onSaveBaselineDraft} onSubmitIntakeForm={onSubmitIntakeForm} onAction={onConversationCardAction} />}
                   contentContainerStyle={styles.conversationContent}
                   keyboardShouldPersistTaps="handled"
                   showsVerticalScrollIndicator={false}
                   style={styles.streamViewport}
-                >
-                  {transcript.map((item) => <ConversationMessage key={item.id} message={item} />)}
-                  {liveParts.map((part) => <StreamPart key={part.id} part={part} onCardAction={onCardAction} onHumanAction={onHumanAction} />)}
-                  {transcript.length === 0 && liveParts.length === 0 ? <EmptyState context={retainedContext.kind} message={stream.emptyMessage} onSelect={(prompt) => onSend?.(prompt, retainedContext)} /> : null}
-                </ScrollView>
+                  ListEmptyComponent={<EmptyState onSelect={(prompt) => onSend?.(prompt)} />}
+                />
 
                 <View style={styles.composerArea}>
-                  <View style={styles.contextDraft}><View style={styles.contextDraftDot} /><Text numberOfLines={1} style={styles.contextDraftText}>本页 · {contextLabel(retainedContext)}</Text></View>
-                  {attachmentTrayOpen ? <View style={styles.attachmentTray}>
-                    <Pressable accessibilityRole="button" accessibilityLabel="从相册添加附件" onPress={() => setAttachmentTrayOpen(false)} style={styles.attachmentAction}><Text style={styles.attachmentGlyph}>▧</Text><Text style={styles.attachmentLabel}>相册</Text></Pressable>
-                    <Pressable accessibilityRole="button" accessibilityLabel="拍摄并添加附件" onPress={() => setAttachmentTrayOpen(false)} style={styles.attachmentAction}><Text style={styles.attachmentGlyph}>◉</Text><Text style={styles.attachmentLabel}>相机</Text></Pressable>
-                    <Pressable accessibilityRole="button" accessibilityLabel="添加文件附件" onPress={() => setAttachmentTrayOpen(false)} style={styles.attachmentAction}><Text style={styles.attachmentGlyph}>▤</Text><Text style={styles.attachmentLabel}>文件</Text></Pressable>
-                  </View> : null}
-                  {composerMode === "text" ? <View style={styles.composer}>
-                    <Pressable accessibilityRole="button" accessibilityLabel="添加图片或文件" onPress={() => setAttachmentTrayOpen((open) => !open)} style={({ pressed }) => [styles.composerAction, pressed && styles.buttonPressed]}><Text style={styles.composerActionGlyph}>＋</Text></Pressable>
-                    <Pressable accessibilityRole="button" accessibilityLabel="拍照添加到消息" onPress={() => setAttachmentTrayOpen(true)} style={({ pressed }) => [styles.composerAction, pressed && styles.buttonPressed]}><Text style={styles.composerActionGlyph}>◉</Text></Pressable>
+                  <View style={styles.contextDraft}><View style={styles.contextDraftDot} /><Text numberOfLines={1} style={styles.contextDraftText}>当前对话</Text></View>
+                  <View style={styles.composer}>
                     <TextInput
                       ref={messageInputRef}
                       accessibilityLabel="发送给 Coach 的消息"
                       multiline
                       onChangeText={setMessage}
-                      onFocus={() => setComposerMode("text")}
                       onSubmitEditing={submit}
                       placeholder="问 Coach"
                       placeholderTextColor="#777971"
                       style={styles.input}
                       value={message}
                     />
-                    {message.trim() ? <Pressable accessibilityRole="button" accessibilityLabel="发送消息" onPress={submit} style={({ pressed }) => [styles.sendButton, pressed && styles.buttonPressed]}><Text style={styles.sendGlyph}>↑</Text></Pressable> : <Pressable accessibilityRole="button" accessibilityLabel="切换到语音输入" onPress={() => setComposerMode("voice")} style={({ pressed }) => [styles.voiceModeButton, pressed && styles.buttonPressed]}><Text style={styles.voiceModeGlyph}>◖</Text></Pressable>}
-                  </View> : <View style={[styles.voiceComposer, voiceRecording && styles.voiceComposerRecording]}>
-                    <Pressable accessibilityRole="button" accessibilityLabel="切换到文字输入" onPress={switchToText} style={({ pressed }) => [styles.composerAction, pressed && styles.buttonPressed]}><Text style={styles.composerActionGlyph}>⌨</Text></Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="按住说话"
-                      delayLongPress={180}
-                      onLongPress={() => setVoiceRecording(true)}
-                      onPressOut={() => setVoiceRecording(false)}
-                      style={({ pressed }) => [styles.holdToTalk, voiceRecording && styles.holdToTalkRecording, pressed && !voiceRecording && styles.buttonPressed]}
-                    >
-                      <View style={styles.voiceWave}><View style={styles.voiceWaveBar} /><View style={styles.voiceWaveBarTall} /><View style={styles.voiceWaveBar} /></View>
-                      <Text style={styles.holdToTalkText}>{voiceRecording ? "录音中 · 松开结束" : "按住说话"}</Text>
-                    </Pressable>
-                    <Pressable accessibilityRole="button" accessibilityLabel="关闭语音输入" onPress={switchToText} style={({ pressed }) => [styles.voiceModeButton, pressed && styles.buttonPressed]}><Text style={styles.voiceModeGlyph}>⌁</Text></Pressable>
-                  </View>}
+                    <Pressable accessibilityRole="button" accessibilityLabel="发送消息" disabled={!message.trim()} onPress={submit} style={({ pressed }) => [styles.sendButton, !message.trim() && styles.sendButtonDisabled, pressed && styles.buttonPressed]}><Text style={styles.sendGlyph}>↑</Text></Pressable>
+                  </View>
                 </View>
               </>
             )}
@@ -266,6 +221,197 @@ export function CoachDrawer({
         </View>
     </FocusSurface>
   );
+}
+
+function BaselineForm({ draft, onSubmit, onSaveDraft }: { draft?: NonNullable<ConversationItem["form"]>["draft"]; onSubmit?: CoachDrawerProps["onSubmitBaseline"]; onSaveDraft?: CoachDrawerProps["onSaveBaselineDraft"] }) {
+  const [ageYears, setAgeYears] = useState(draft?.ageYears ?? "");
+  const [heightCm, setHeightCm] = useState(draft?.heightCm ?? "");
+  const [weightKg, setWeightKg] = useState(draft?.weightKg ?? "");
+  const [goalText, setGoalText] = useState(draft?.goalText ?? "");
+  const valid = Number.isInteger(Number(ageYears)) && Number(heightCm) > 0 && Number(weightKg) > 0;
+  const saveDraft = () => onSaveDraft?.({ ...(ageYears ? { ageYears } : {}), ...(heightCm ? { heightCm } : {}), ...(weightKg ? { weightKg } : {}), ...(goalText ? { goalText } : {}) });
+  return <View style={styles.baselineForm}>
+    <Text style={styles.baselineTitle}>先建立你的基础档案</Text>
+    <Text style={styles.baselineHint}>只需要年龄、身高和当前体重。目标可以先用自己的话说。</Text>
+    <View style={styles.baselineRow}>
+      <TextInput accessibilityLabel="年龄" keyboardType="number-pad" placeholder="年龄" value={ageYears} onChangeText={setAgeYears} onEndEditing={saveDraft} style={styles.baselineInput} />
+      <TextInput accessibilityLabel="身高厘米" keyboardType="decimal-pad" placeholder="身高 cm" value={heightCm} onChangeText={setHeightCm} onEndEditing={saveDraft} style={styles.baselineInput} />
+      <TextInput accessibilityLabel="体重千克" keyboardType="decimal-pad" placeholder="体重 kg" value={weightKg} onChangeText={setWeightKg} onEndEditing={saveDraft} style={styles.baselineInput} />
+    </View>
+    <TextInput accessibilityLabel="你的目标" placeholder="例如：想增肌，但不想生活变得太极端" value={goalText} onChangeText={setGoalText} onEndEditing={saveDraft} style={styles.baselineGoal} multiline />
+    <Pressable accessibilityRole="button" disabled={!valid} onPress={() => onSubmit?.({ ageYears: Number(ageYears), heightCm: Number(heightCm), weightKg: Number(weightKg), ...(goalText.trim() ? { goalText: goalText.trim() } : {}) })} style={[styles.baselineSubmit, !valid && styles.baselineSubmitDisabled]}><Text style={styles.baselineSubmitText}>保存并继续</Text></Pressable>
+  </View>;
+}
+
+/** An Agent-composed dynamic intake form. Every field is optional: the user
+ * may answer any subset and leave the rest unknown. */
+function IntakeForm({ card, onSubmit }: {
+  card: Extract<NonNullable<ConversationItem["card"]>, { kind: "intake_form" }>;
+  onSubmit?: (values: Readonly<Record<string, string>>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  if (card.status === "submitted") {
+    return <View style={styles.receiptCard}>
+      <Text style={styles.receiptTitle}>补充信息已保存</Text>
+      {Object.entries(card.values ?? {}).map(([fieldId, value]) => {
+        const spec = intakeField(fieldId);
+        const display = spec?.kind === "single_choice" ? spec.options?.find((option) => option.id === value)?.label ?? value : spec?.unit ? `${value} ${spec.unit}` : value;
+        return <Text key={fieldId} style={styles.receiptDetail}>{spec?.label ?? fieldId}：{display}</Text>;
+      })}
+    </View>;
+  }
+  return <View style={styles.baselineForm}>
+    <Text style={styles.baselineTitle}>补充信息</Text>
+    <Text style={styles.baselineHint}>{card.reason}（都可跳过）</Text>
+    {card.fields.map((fieldId) => {
+      const spec = intakeField(fieldId);
+      if (!spec) return null;
+      if (spec.kind === "single_choice") {
+        return <View key={fieldId} style={styles.intakeField}>
+          <Text style={styles.intakeLabel}>{spec.label}</Text>
+          <View style={styles.intakeOptions}>
+            {spec.options?.map((option) => {
+              const selected = values[fieldId] === option.id;
+              return <Pressable key={option.id} accessibilityRole="button" onPress={() => setValues((current) => ({ ...current, [fieldId]: selected ? "" : option.id }))} style={[styles.intakeOption, selected && styles.intakeOptionSelected]}>
+                <Text style={[styles.intakeOptionText, selected && styles.intakeOptionTextSelected]}>{option.label}</Text>
+              </Pressable>;
+            })}
+          </View>
+        </View>;
+      }
+      return <View key={fieldId} style={styles.intakeField}>
+        <Text style={styles.intakeLabel}>{spec.label}{spec.unit ? `（${spec.unit}）` : ""}</Text>
+        <TextInput accessibilityLabel={spec.label} keyboardType={spec.kind === "number" ? "decimal-pad" : "default"} placeholder="可跳过" value={values[fieldId] ?? ""} onChangeText={(text) => setValues((current) => ({ ...current, [fieldId]: text }))} style={styles.baselineInput} />
+      </View>;
+    })}
+    <Pressable accessibilityRole="button" onPress={() => onSubmit?.(values)} style={styles.baselineSubmit}><Text style={styles.baselineSubmitText}>保存并继续</Text></Pressable>
+  </View>;
+}
+
+function ToolActivity({ item }: { item: ConversationItem }) {  return <View style={styles.toolActivity}>
+    <Text style={styles.toolActivityTitle}>{item.state === "working" ? "正在使用工具" : item.state === "failed" ? "工具未完成" : "已读取"}</Text>
+    <Text style={styles.toolActivityBody}>{toolActivityLabel(item.toolName ?? item.content)}</Text>
+  </View>;
+}
+
+function toolActivityLabel(name: string): string {
+  return ({
+    "coach.read_profile": "读取当前档案",
+    "coach.read_context": "读取当前记录与上下文",
+    "goal.propose_path": "比较目标路径",
+    "coach.choose_record_only": "设置仅记录模式",
+    "plan.read_fixed_input": "核对固定计划依据",
+    "plan.propose_current_stage": "校验当前阶段方案",
+    "timeline.record_body_weight": "记录体重",
+    "timeline.record_explicit": "记录已确认事实",
+    "timeline.correct_explicit": "更正已确认记录",
+    "knowledge.search_installed": "检索已安装知识",
+    "intake.request_form": "整理补充信息表单",
+  } as Record<string, string>)[name] ?? "执行本地操作";
+}
+
+function ConversationItemView({ item, onSubmitBaseline, onSaveBaselineDraft, onSubmitIntakeForm, onAction }: {
+  item: ConversationItem;
+  onSubmitBaseline?: CoachDrawerProps["onSubmitBaseline"];
+  onSaveBaselineDraft?: CoachDrawerProps["onSaveBaselineDraft"];
+  onSubmitIntakeForm?: CoachDrawerProps["onSubmitIntakeForm"];
+  onAction?: CoachDrawerProps["onConversationCardAction"];
+}) {
+  if (item.kind === "message") {
+    return <ConversationMessage message={{ id: item.id, sessionId: "conversation", userId: "", role: item.role ?? "assistant", content: item.content, ...(item.runId ? { runId: item.runId } : {}), createdAt: item.createdAt }} />;
+  }
+  if (item.kind === "tool_activity") return <ToolActivity item={item} />;
+  // A fixed factual correction invalidates the presentation, not the
+  // transcript. Keep the original card in place and make its non-actionable
+  // state explicit rather than silently hiding it or leaving a live button.
+  if (item.card && "status" in item.card && item.card.status === "stale") {
+    return <View style={styles.staleCard}>
+      <Text style={styles.staleCardTitle}>这张卡需要重新生成</Text>
+      <Text style={styles.staleCardDetail}>它依赖的记录、目标或安全边界已经变化。原计划没有被这张过期卡修改；请直接告诉 Coach 要继续复核。</Text>
+    </View>;
+  }
+  if (item.kind === "form" && item.form?.kind === "baseline" && item.form.status === "ready") return <BaselineForm draft={item.form.draft} onSubmit={onSubmitBaseline} onSaveDraft={onSaveBaselineDraft} />;
+  if (item.card?.kind === "intake_form") return <IntakeForm card={item.card} onSubmit={(values) => onSubmitIntakeForm?.(item, values)} />;
+  if (item.card?.kind === "baseline" && item.card.status === "submitted" && item.card.submitted) {
+    const baseline = item.card.submitted;
+    return <View style={styles.receiptCard}>
+      <Text style={styles.receiptTitle}>基础档案已保存</Text>
+      <Text style={styles.receiptDetail}>{baseline.ageYears} 岁 · {baseline.heightCm} cm · {baseline.weightKg} kg</Text>
+      {baseline.goalText ? <Text style={styles.receiptDetail}>目标原话：{baseline.goalText}</Text> : null}
+    </View>;
+  }
+  if (item.card?.kind === "goal_path") {
+    return <View style={styles.structuredCard}>
+      <Text style={styles.structuredCardTitle}>确认目标路径</Text>
+      {item.card.options.map((option) => <Pressable key={option.id} accessibilityRole="button" disabled={!option.feasible || item.card?.status !== "awaiting_confirmation"} onPress={() => onAction?.(item, option.id)} style={[styles.cardOption, (!option.feasible || item.card?.status !== "awaiting_confirmation") && styles.cardOptionDisabled]}>
+        <Text style={styles.cardOptionTitle}>{option.id === "gradual" ? "渐进" : option.id === "balanced" ? "平衡" : "更快"} · {option.targetWeeks} 周</Text>
+        <Text style={styles.cardOptionDetail}>行为负担 {option.behaviorBurden} · 训练负担 {option.trainingBurden}</Text>
+      </Pressable>)}
+      {item.card.status !== "awaiting_confirmation" ? <Text style={styles.structuredCardHint}>{item.card.status === "confirmed" ? "已确认" : "需要重新生成"}</Text> : null}
+    </View>;
+  }
+  if (item.card?.kind === "choice") {
+    return <View style={styles.structuredCard}>
+      <Text style={styles.structuredCardTitle}>{item.content}</Text><Text style={styles.structuredCardHint}>{item.card.prompt}</Text>
+      {item.card.options.map((option) => <Pressable key={option.id} accessibilityRole="button" disabled={item.card?.status !== "ready"} onPress={() => onAction?.(item, option.id)} style={[styles.cardOption, item.card?.status !== "ready" && styles.cardOptionDisabled]}><Text style={styles.cardOptionTitle}>{option.label}</Text>{option.detail ? <Text style={styles.cardOptionDetail}>{option.detail}</Text> : null}</Pressable>)}
+    </View>;
+  }
+  if (item.card?.kind === "plan_candidate") {
+    return <View style={styles.structuredCard}>
+      <Text style={styles.structuredCardTitle}>{item.card.title}</Text>
+      {item.card.summary.map((line) => <Text key={line} style={styles.structuredCardHint}>{line}</Text>)}
+      {item.card.details ? <PlanCandidateDetails details={item.card.details} /> : null}
+      {item.card.status === "awaiting_confirmation" ? <View style={styles.cardActionRow}>
+        <Pressable accessibilityRole="button" onPress={() => onAction?.(item, "confirm")} style={styles.cardConfirm}><Text style={styles.cardConfirmText}>确认当前阶段</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => onAction?.(item, "reject")} style={styles.cardReject}><Text style={styles.cardRejectText}>暂不采用</Text></Pressable>
+      </View> : <Text style={styles.structuredCardHint}>{item.card.status === "confirmed" ? "已确认" : item.card.status === "invalid" ? "未通过固定校验" : "需要重新生成"}</Text>}
+    </View>;
+  }
+  if (item.card?.kind === "record_confirmation") {
+    return <View style={styles.structuredCard}>
+      <Text style={styles.structuredCardTitle}>{item.card.label}</Text>
+      {item.card.status === "awaiting_confirmation" ? <View style={styles.cardActionRow}>
+        <Pressable accessibilityRole="button" onPress={() => onAction?.(item, "confirm")} style={styles.cardConfirm}><Text style={styles.cardConfirmText}>确认记录</Text></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => onAction?.(item, "reject")} style={styles.cardReject}><Text style={styles.cardRejectText}>不记录</Text></Pressable>
+      </View> : <Text style={styles.structuredCardHint}>{item.card.status === "confirmed" ? "已确认" : "未写入"}</Text>}
+    </View>;
+  }
+  if (item.card?.kind === "receipt") return <View style={styles.receiptCard}>
+    <Text style={styles.receiptTitle}>{item.card.label}</Text>
+    {item.card.detail ? <Text style={styles.receiptDetail}>{item.card.detail}</Text> : null}
+    {item.card.correctable && item.card.status === "recorded" ? <Pressable accessibilityRole="button" accessibilityLabel="更正这条记录" onPress={() => onAction?.(item, "correct_record")}><Text style={styles.receiptCorrection}>记错了？更正</Text></Pressable> : null}
+  </View>;
+  return null;
+}
+
+function PlanCandidateDetails({ details }: { details: NonNullable<Extract<NonNullable<ConversationItem["card"]>, { kind: "plan_candidate" }>["details"]> }) {
+  const validationLabel = details.validation.status === "valid"
+    ? `固定校验通过 · ${details.validation.impact === "low" ? "低影响" : "较大调整"}`
+    : "固定校验未通过";
+  return <View style={styles.planDetails}>
+    <PlanDetailSection title="近期安排" lines={details.sessions.map((session) => `${session.date.slice(5)} · ${session.title} · ${session.taskCount} 个动作/${session.setCount} 组${session.durationMinutes ? ` · 约 ${session.durationMinutes} 分钟` : ""}`)} />
+    {details.nutrition ? <PlanDetailSection title="营养策略" lines={[
+      ...(details.nutrition.calorieRange ? [`能量 ${details.nutrition.calorieRange.min}–${details.nutrition.calorieRange.max} ${details.nutrition.calorieRange.unit}`] : []),
+      ...(details.nutrition.macronutrients ?? []),
+      ...(details.nutrition.nutrientTargets ?? []),
+      ...(details.nutrition.reviewWindow ? [`复核：${details.nutrition.reviewWindow}`] : []),
+    ]} /> : null}
+    <PlanDetailSection title="行为与观察" lines={[
+      ...details.behaviorChanges.map((change) => `${change.instruction}（${change.burden === "low" ? "低负担" : change.burden === "moderate" ? "中等负担" : "高负担"}）`),
+      ...details.observation,
+    ]} />
+    <PlanDetailSection title="为什么这样安排" lines={details.rationale} />
+    <PlanDetailSection title="代价与变化" lines={[...details.tradeoffs, ...details.diff]} />
+    <PlanDetailSection title={validationLabel} lines={details.validation.issues.length ? details.validation.issues : [details.validation.resolution === "confirmation_required" ? "需要你的明确确认后才会写入。" : "符合你已授予的自动调整权限。"]} />
+  </View>;
+}
+
+function PlanDetailSection({ title, lines }: { title: string; lines: readonly string[] }) {
+  if (!lines.length) return null;
+  return <View style={styles.planDetailSection}>
+    <Text style={styles.planDetailTitle}>{title}</Text>
+    {lines.map((line, index) => <Text key={`${title}:${index}:${line}`} style={styles.planDetailLine}>{line}</Text>)}
+  </View>;
 }
 
 function ConversationMessage({ message }: { message: CoachMessage }) {
@@ -287,161 +433,19 @@ function SessionHistory({ sessions, activeSessionId, onSelect, onStartNew }: {
 }) {
   return <ScrollView contentContainerStyle={styles.historyList} showsVerticalScrollIndicator={false}>
     <Pressable accessibilityRole="button" onPress={onStartNew} style={styles.newConversation}>
-      <Text style={styles.newConversationGlyph}>＋</Text><View><Text style={styles.newConversationTitle}>开始新对话</Text><Text style={styles.newConversationMeta}>使用当前页面作为上下文</Text></View>
+      <Text style={styles.newConversationGlyph}>＋</Text><View><Text style={styles.newConversationTitle}>开始新对话</Text><Text style={styles.newConversationMeta}>从已确认资料和相关历史继续</Text></View>
     </Pressable>
     <Text style={styles.historySectionLabel}>最近对话</Text>
     {sessions.length ? sessions.map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityState={{ selected: item.id === activeSessionId }} onPress={() => onSelect(item.id)} style={[styles.historyRow, item.id === activeSessionId && styles.historyRowActive]}>
-      <View style={styles.historyRowBody}><Text numberOfLines={1} style={styles.historyTitle}>{item.title?.trim() || contextLabel(item.context)}</Text><Text style={styles.historyMeta}>{contextLabel(item.context)} · {item.updatedAt.slice(0, 10)}</Text></View><Text style={styles.historyArrow}>›</Text>
+      <View style={styles.historyRowBody}><Text numberOfLines={1} style={styles.historyTitle}>{item.title?.trim() || "新对话"}</Text><Text style={styles.historyMeta}>对话 · {item.updatedAt.slice(0, 10)}</Text></View><Text style={styles.historyArrow}>›</Text>
     </Pressable>) : null}
   </ScrollView>;
 }
 
-function StreamPart({
-  part,
-  onCardAction,
-  onHumanAction,
-}: {
-  part: CoachUiPart;
-  onCardAction?: CoachDrawerProps["onCardAction"];
-  onHumanAction?: CoachDrawerProps["onHumanAction"];
-}) {
-  if (part.type === "dynamic-tool") return <ToolState part={part} />;
-  if (part.type === "data-stream-error") {
-    return (
-      <View style={styles.errorNotice}>
-        <Text style={styles.errorTitle}>暂时没有完成</Text>
-        <Text style={styles.errorText}>{part.data.message}</Text>
-      </View>
-    );
-  }
-  if (part.type === "text") {
-    return (
-      <View style={[styles.messageBubble, part.state === "error" && styles.messageBubbleError]}>
-        <Text style={styles.messageText}>{part.text}</Text>
-        {part.errorText ? <Text style={styles.messageError}>{part.errorText}</Text> : null}
-      </View>
-    );
-  }
-  if (part.type === "data-live-cue") {
-    return (
-      <View style={styles.liveCue}>
-        <View style={styles.liveCueDot} />
-        <Text style={styles.liveCueText}>{part.data.message}</Text>
-      </View>
-    );
-  }
-  if (part.type === "data-human-action") {
-    return (
-      <View style={styles.humanActionNotice}>
-        <Text style={styles.humanActionTitle}>
-          {part.state === "awaiting_user" ? "等待你的确认" : "已收到你的选择"}
-        </Text>
-        <Text style={styles.humanActionText}>
-          {part.state === "awaiting_user" ? part.data.prompt ?? "请补充所需信息后继续。" : "Coach 正在继续处理。"}
-        </Text>
-        {part.state === "awaiting_user" && part.data.options?.length ? <View style={styles.humanActionOptions}>{part.data.options.map((option) => <Pressable key={option.id} accessibilityRole="button" accessibilityLabel={option.label} disabled={!onHumanAction} onPress={() => onHumanAction?.(part.data.pendingActionId, option.id)} style={[styles.humanActionOption, !onHumanAction && styles.humanActionOptionDisabled]}><Text style={styles.humanActionOptionLabel}>{option.label}</Text></Pressable>)}</View> : null}
-      </View>
-    );
-  }
-  return <ArtifactState part={part} onCardAction={onCardAction} />;
-}
-
-function ToolState({ part }: { part: CoachToolPart }) {
-  // A ready artifact card is the useful outcome. Keeping every completed tool
-  // call beside it turns one answer into a stack of redundant "已完成" rows.
-  if (part.state === "output-available") return null;
-
-  const copy =
-    part.state === "output-error" ? "未能完成" : "正在读取与整理";
-  return (
-    <View style={styles.toolState}>
-      <View style={[styles.stateDot, part.state === "output-error" && styles.stateDotError]} />
-      <Text style={styles.toolText}>{copy}</Text>
-    </View>
-  );
-}
-
-function ArtifactState({
-  part,
-  onCardAction,
-}: {
-  part: CoachArtifactPart;
-  onCardAction?: CoachDrawerProps["onCardAction"];
-}) {
-  if (part.state === "loading") {
-    return (
-      <View style={styles.loadingCard}>
-        <View style={styles.loadingLineWide} />
-        <View style={styles.loadingLine} />
-        <Text style={styles.loadingText}>{part.data.message}</Text>
-      </View>
-    );
-  }
-  const card = part.data.card;
-  if (!card) {
-    return <EmptyState message={part.data.message ?? "卡片内容暂时不可用"} />;
-  }
-  return (
-    <View style={[styles.card, card.status === "error" && styles.cardError]}>
-      <Text style={styles.cardEyebrow}>
-        {card.eyebrow}
-      </Text>
-      <ProfessionalTermText text={card.title} style={styles.cardTitle} />
-      {card.subtitle ? <ProfessionalTermText text={card.subtitle} style={styles.cardSubtitle} /> : null}
-      {card.metrics.length > 0 ? (
-        <View style={styles.metrics}>
-          {card.metrics.map((metric) => (
-            <View key={`${metric.label}:${metric.value}`} style={styles.metric}>
-              <ProfessionalTermText text={metric.value} style={styles.metricValue} />
-              <ProfessionalTermText text={metric.label} style={styles.metricLabel} />
-            </View>
-          ))}
-        </View>
-      ) : null}
-      {card.taskList.length > 0 ? (
-        <View style={styles.taskList}>
-          {card.taskList.map((task) => (
-            <View key={task.id} style={styles.taskRow}>
-              <ProfessionalTermText numberOfLines={1} text={task.name} style={styles.taskName} />
-              <ProfessionalTermText text={`${task.sets} × ${task.reps}`} style={styles.taskDose} />
-            </View>
-          ))}
-        </View>
-      ) : null}
-      {card.capabilityBoundary.map((boundary) => (
-        <ProfessionalTermText key={boundary} text={boundary} style={styles.boundary} />
-      ))}
-      {card.evidenceLabels.length > 0 ? (
-        <View style={styles.evidence}>
-          <Text style={styles.evidenceTitle}>依据</Text>
-          <ProfessionalTermText text={card.evidenceLabels.join(" · ")} style={styles.evidenceText} />
-        </View>
-      ) : null}
-      {card.actions.length > 0 ? (
-        <View style={styles.actions}>
-          {card.actions.map((action) => (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !action.enabled || !onCardAction }}
-              disabled={!action.enabled || !onCardAction}
-              key={action.id}
-              onPress={() => onCardAction?.(action.id, card.artifactId)}
-              style={[styles.cardAction, (!action.enabled || !onCardAction) && styles.cardActionDisabled]}
-            >
-              <Text style={styles.cardActionLabel}>{action.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function EmptyState({ context, message, onSelect }: { context?: CoachContextKind; message: string; onSelect?: (prompt: string) => void }) {
-  const prompts = context && onSelect ? quickPrompts[context] : [];
-  if (context && onSelect) {
+function EmptyState({ message = "开始一条新的 Coach 对话", onSelect }: { message?: string; onSelect?: (prompt: string) => void }) {
+  if (onSelect) {
     return <View style={styles.emptyConversation}>
-      <View style={styles.quickPromptList}>{prompts.map((prompt) => <Pressable accessibilityRole="button" key={prompt} onPress={() => onSelect(prompt)} style={({ pressed }) => [styles.quickPrompt, pressed && styles.quickPromptPressed]}><Text style={styles.quickPromptText}>{prompt}</Text><Text style={styles.quickPromptArrow}>→</Text></Pressable>)}</View>
+      <View style={styles.quickPromptList}>{quickPrompts.map((prompt) => <Pressable accessibilityRole="button" key={prompt} onPress={() => onSelect(prompt)} style={({ pressed }) => [styles.quickPrompt, pressed && styles.quickPromptPressed]}><Text style={styles.quickPromptText}>{prompt}</Text><Text style={styles.quickPromptArrow}>→</Text></Pressable>)}</View>
     </View>;
   }
   return (
@@ -449,29 +453,7 @@ function EmptyState({ context, message, onSelect }: { context?: CoachContextKind
   );
 }
 
-const contextCopy: Record<CoachContextKind, { label: string }> = {
-  onboarding: { label: "建档" },
-  today: { label: "今天" },
-  calendar: { label: "日历" },
-  plan: { label: "计划" },
-  progress: { label: "进展" },
-  workout: { label: "训练中" },
-  profile: { label: "我的" },
-};
-
-const quickPrompts: Record<CoachContextKind, readonly string[]> = {
-  onboarding: ["继续建立档案", "解释当前卡片", "查看建档进度"],
-  today: ["解释今天的训练", "我今天还能吃多少？", "状态不好，怎么调整？"],
-  calendar: ["总结本周安排", "帮我移动一次训练", "哪天适合恢复？"],
-  plan: ["解释训练与摄入计划", "为什么今天可以多吃？", "调整本周计划"],
-  progress: ["总结最近趋势", "下一步该推进什么？", "还缺哪些记录？"],
-  workout: ["解释下一组", "这个动作怎么调整？", "我想降低强度"],
-  profile: ["解释我的设置", "管理 Coach 记忆", "查看数据权限"],
-};
-
-function contextLabel(context: ContextRef): string {
-  return contextCopy[context.kind].label;
-}
+const quickPrompts = ["记录我刚刚做的事", "帮我梳理目标", "我想聊聊下一步"] as const;
 
 const styles = StyleSheet.create({
   panelContent: { flex: 1, minHeight: 0 },
@@ -508,6 +490,50 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#E7E5DD",
   },
+  toolActivity: { alignSelf: "flex-start", marginLeft: 38, maxWidth: "78%", paddingHorizontal: 11, paddingVertical: 8, borderRadius: 10, backgroundColor: "#ECEBE5", gap: 2 },
+  toolActivityTitle: { color: "#666960", fontSize: 10, fontWeight: "800" },
+  toolActivityBody: { color: "#30332F", fontSize: 12, fontWeight: "700" },
+  structuredCard: { gap: 9, padding: 14, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: "#D8D6CC", backgroundColor: "#F1F0EA" },
+  staleCard: { gap: 5, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: "#E4B9A9", backgroundColor: "#FFF3EE" },
+  staleCardTitle: { color: "#873D2A", fontSize: 15, fontWeight: "900" },
+  staleCardDetail: { color: "#754E42", fontSize: 13, lineHeight: 19 },
+  structuredCardTitle: { color: "#1C1F1A", fontSize: 15, fontWeight: "900" },
+  structuredCardHint: { color: "#5D6259", fontSize: 13, lineHeight: 19 },
+  planDetails: { gap: 10, marginTop: 2 },
+  planDetailSection: { gap: 3, paddingTop: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#D8D6CC" },
+  planDetailTitle: { color: "#3E443B", fontSize: 12, fontWeight: "900" },
+  planDetailLine: { color: "#5D6259", fontSize: 12, lineHeight: 18 },
+  cardOption: { gap: 3, padding: 11, borderRadius: 12, borderWidth: 1, borderColor: "#D7D8CC", backgroundColor: "#FFFFFF" },
+  cardOptionDisabled: { opacity: 0.48 },
+  cardOptionTitle: { color: "#242721", fontSize: 14, fontWeight: "800" },
+  cardOptionDetail: { color: "#666B61", fontSize: 12 },
+  cardActionRow: { flexDirection: "row", gap: 8 },
+  cardConfirm: { flex: 1, minHeight: 40, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#284A2D" },
+  cardConfirmText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900" },
+  cardReject: { minHeight: 40, paddingHorizontal: 12, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#E4E3DC" },
+  cardRejectText: { color: "#454943", fontSize: 13, fontWeight: "800" },
+  receiptCard: { gap: 3, alignSelf: "flex-start", paddingHorizontal: 13, paddingVertical: 10, borderRadius: 14, backgroundColor: "#E6F1C8" },
+  receiptTitle: { color: "#2A4211", fontSize: 13, fontWeight: "900" },
+  receiptDetail: { color: "#466225", fontSize: 12 },
+  baselineForm: { gap: 9, padding: 14, borderRadius: 16, backgroundColor: "#F1F0EA", borderWidth: StyleSheet.hairlineWidth, borderColor: "#D8D6CC" },
+  baselineTitle: { color: "#20221E", fontSize: 15, fontWeight: "900" },
+  baselineHint: { color: "#61655C", fontSize: 12, lineHeight: 17 },
+  baselineRow: { flexDirection: "row", gap: 7 },
+  baselineInput: { flex: 1, minHeight: 40, paddingHorizontal: 9, borderRadius: 10, backgroundColor: "#FFF", color: "#20221E", fontSize: 13 },
+  baselineGoal: { minHeight: 58, paddingHorizontal: 10, paddingVertical: 9, borderRadius: 10, backgroundColor: "#FFF", color: "#20221E", fontSize: 13, textAlignVertical: "top" },
+  baselineSubmit: { minHeight: 42, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: "#2B4A2F" },
+  baselineSubmitDisabled: { opacity: 0.42 },
+  baselineSubmitText: { color: "#FFF", fontSize: 13, fontWeight: "900" },
+  intakeField: { gap: 5 },
+  intakeLabel: { color: "#3B3E38", fontSize: 12, fontWeight: "700" },
+  intakeOptions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  intakeOption: { minHeight: 32, paddingHorizontal: 10, alignItems: "center", justifyContent: "center", borderRadius: 9, backgroundColor: "#FFF", borderWidth: StyleSheet.hairlineWidth, borderColor: "#D8D6CC" },
+  intakeOptionSelected: { backgroundColor: "#2B4A2F", borderColor: "#2B4A2F" },
+  intakeOptionText: { color: "#3B3E38", fontSize: 12, fontWeight: "600" },
+  intakeOptionTextSelected: { color: "#FFF" },
+  receiptCorrection: { color: "#4A5D4E", fontSize: 12, fontWeight: "700", marginTop: 4, textDecorationLine: "underline" },
+  stopButton: { minHeight: 30, paddingHorizontal: 9, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: "#F5DED8" },
+  stopButtonText: { color: "#7D3021", fontSize: 12, fontWeight: "800" },
   historyButtonText: {
     color: "#181A1D",
     fontSize: 12,
@@ -1017,31 +1043,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "800",
   },
-  attachmentTray: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  attachmentAction: {
-    flex: 1,
-    minHeight: 56,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 3,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#DFDDD4",
-    backgroundColor: "#FFFFFF",
-  },
-  attachmentGlyph: {
-    color: "#181A1D",
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  attachmentLabel: {
-    color: "#5E605C",
-    fontSize: 10,
-    fontWeight: "800",
-  },
   composer: {
     minHeight: 52,
     flexDirection: "row",
@@ -1055,90 +1056,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   composerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#9ECC19" },
-  composerAction: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 13,
-    backgroundColor: "#F0EFE9",
-  },
-  composerActionGlyph: {
-    color: "#343733",
-    fontSize: 18,
-    fontWeight: "800",
-  },
   input: {
     flex: 1,
     minWidth: 0,
     color: "#181A1D",
     fontSize: 15,
     paddingVertical: 12,
-  },
-  voiceModeButton: {
-    width: 42,
-    height: 42,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 15,
-    backgroundColor: "#181A1D",
-  },
-  voiceModeGlyph: {
-    color: "#C8FF21",
-    fontSize: 21,
-    fontWeight: "900",
-  },
-  voiceComposer: {
-    minHeight: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 5,
-    borderRadius: 19,
-    borderColor: "#D8D6CC",
-    borderWidth: 1,
-    backgroundColor: "#FFFFFF",
-  },
-  voiceComposerRecording: {
-    borderColor: "#99C60F",
-    backgroundColor: "#F7FFD9",
-  },
-  holdToTalk: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 42,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 9,
-    borderRadius: 14,
-    backgroundColor: "#181A1D",
-  },
-  holdToTalkRecording: {
-    backgroundColor: "#8DBB0B",
-  },
-  holdToTalkText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "900",
-  },
-  voiceWave: {
-    height: 16,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-  },
-  voiceWaveBar: {
-    width: 3,
-    height: 8,
-    borderRadius: 2,
-    backgroundColor: "#C8FF21",
-  },
-  voiceWaveBarTall: {
-    width: 3,
-    height: 16,
-    borderRadius: 2,
-    backgroundColor: "#C8FF21",
   },
   sendButton: {
     width: 42,

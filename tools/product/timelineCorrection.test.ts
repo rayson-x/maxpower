@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import { buildTimelineCorrectionRequest } from "../../src/product/timelineCorrection";
 import { projectTimelineEvent } from "../../src/timeline";
 
 test("Timeline 更正请求只通过 Facade 追加更正事实，保留原事实与审计链", async () => {
   let sequence = 0;
-  const application = new CoachApplication(new InMemoryCoachLedger(), {
+  const application = new LocalProductKernel(new InMemoryCoachLedger(), {
     now: () => "2026-08-09T10:30:00.000+08:00",
     nextId: (prefix) => `${prefix}-${++sequence}`,
   });
@@ -23,9 +23,9 @@ test("Timeline 更正请求只通过 Facade 追加更正事实，保留原事实
       timezoneOffsetMinutes: 480,
       idempotencyKey: "bootstrap",
     },
-    profile: { id: "profile-1", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile-1", locale: "zh-CN" },
     goalContract: { id: "goal-1", primaryGoal: "strength", horizon: { startDate: "2026-08-09" } },
-    mandate: { id: "mandate-1", mode: "manual" },
+    mandate: { id: "mandate-1", mode: "manual", planChangeAuthorization: "always_ask" },
   });
   await application.recordTimelineFact({
     userId,
@@ -132,9 +132,4 @@ test("Timeline 更正请求拒绝历史、无包络、跨类型和空原因，�
     reason: "历史记录不再可更正",
     entry: { ...entry, lifecycle: "superseded" },
   }), /timeline_correction_target_not_active/);
-  assert.throws(() => buildTimelineCorrectionRequest({
-    ...input,
-    reason: "缺少来源包络",
-    entry: { ...entry, envelope: undefined },
-  }), /timeline_correction_envelope_required/);
 });

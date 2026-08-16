@@ -1,4 +1,6 @@
-Status: ready-for-agent
+Status: wontfix
+
+Replaced by `.scratch/record-first-adaptive-coach/PRD.md`. The former horizontal ticket model is not an implementation or compatibility requirement.
 
 # 自适应教练 Agent Harness：Timeline 驱动的风险判断、动态计划与全链路行为审计
 

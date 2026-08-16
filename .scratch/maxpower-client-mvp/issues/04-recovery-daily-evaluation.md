@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 用户档案到长期策略、周计划与今日计划
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 开始实施前盘点现有 Timeline、Recovery、Replanner、Today projection 能力，只补公开产品缺口
 - [ ] Today 使用既有交互收集睡眠时长/质量、疲劳、酸痛、主观恢复、疼痛和今日可用时间

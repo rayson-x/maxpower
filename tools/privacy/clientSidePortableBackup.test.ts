@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import {
   ClientSidePortableBackupService,
@@ -19,7 +19,7 @@ function fixture() {
   const crypto = new WebCryptoBackupCryptoPort();
   return {
     ledger,
-    app: new CoachApplication({ ledger, runtime, backupCrypto: crypto }),
+    app: new LocalProductKernel({ ledger, runtime, backupCrypto: crypto }),
     backup: new ClientSidePortableBackupService(
       new PortableDataService(ledger, runtime),
       crypto,
@@ -27,7 +27,7 @@ function fixture() {
   };
 }
 
-async function bootstrap(app: CoachApplication, userId: string) {
+async function bootstrap(app: LocalProductKernel, userId: string) {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: {
@@ -38,9 +38,9 @@ async function bootstrap(app: CoachApplication, userId: string) {
       timezoneOffsetMinutes: 480,
       idempotencyKey: `bootstrap-${userId}`,
     },
-    profile: { id: `profile-${userId}`, trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: `profile-${userId}`, locale: "zh-CN" },
     goalContract: { id: `goal-${userId}`, primaryGoal: "hypertrophy", horizon: { startDate: "2026-08-09", endDate: "2026-12-09" } },
-    mandate: { id: `mandate-${userId}`, mode: "collaborative" },
+    mandate: { id: `mandate-${userId}`, mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
 }
 
@@ -75,7 +75,7 @@ test("client-side portable backup rejects a wrong passphrase and ciphertext tamp
   );
 });
 
-test("CoachApplication exposes encrypted backup lifecycle without placing key material in Action Log", async () => {
+test("LocalProductKernel exposes encrypted backup lifecycle without placing key material in Action Log", async () => {
   const { app } = fixture();
   await bootstrap(app, "u1");
   const archive = await app.createClientSidePortableBackup({
@@ -97,7 +97,7 @@ test("CoachApplication exposes encrypted backup lifecycle without placing key ma
   assert.doesNotMatch(JSON.stringify(action), /correct horse|ciphertextBase64|saltBase64|ivBase64/);
 
   let restoreSequence = 0;
-  const restored = new CoachApplication({
+  const restored = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-09T12:00:00.000+08:00",
@@ -116,5 +116,5 @@ test("CoachApplication exposes encrypted backup lifecycle without placing key ma
     passphrase: "correct horse battery staple",
     mode: "empty_profile",
   });
-  assert.equal((await restored.readDomainProjection({ userId: "u1" })).profile?.value.trainingExperience, "beginner");
+  assert.equal((await restored.readDomainProjection({ userId: "u1" })).profile?.value.id, "profile-u1");
 });

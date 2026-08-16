@@ -1,5 +1,5 @@
 import type { DomainEvent, OutboxEntry } from "../coach/domain";
-import type { AtomicCommit, DomainAtomicCommit } from "../coach/ledger";
+import type { DomainAtomicCommit } from "../coach/ledger";
 import type {
   ActionEvent,
   CoachRunRecord,
@@ -54,23 +54,7 @@ export function projectCommitTraceEnvelopes(
     }),
     ...(input.jobAttempts ?? []).map((attempt) => owned(jobAttemptEnvelope(attempt, pseudonym, context))),
     ...(input.outbox ?? []).map((entry) => owned(replicaOutboxEnvelope(entry, pseudonym, context))),
-    ...(input.updateOutbox ?? []).map((entry) => owned(replicaOutboxEnvelope(entry, pseudonym, context))),
   ];
-}
-
-/**
- * Proposal 的 apply/reject/undo 仍走旧的 AtomicCommit 通道，它没有 domainEvents，
- * 但带着同样权威的 ActionEvent——HITL 决策不能因为走了另一条落账通道就没有 trace。
- */
-export function projectLegacyCommitTraceEnvelopes(
-  input: AtomicCommit,
-  context: TraceProjectionContext,
-): readonly TraceProjectionRecord[] {
-  const pseudonym = traceUserPseudonym(input.userId, stableHash);
-  return [input.actionEvent, ...(input.updateActionEvents ?? [])].map((event) => ({
-    userId: input.userId,
-    envelope: actionEventEnvelope(event, pseudonym, context),
-  }));
 }
 
 export function projectLedgerTraceEnvelopes(
@@ -208,7 +192,7 @@ function runEnvelope(
 function runOutcome(status: CoachRunRecord["status"]): TraceOutcome {
   if (status === "completed") return "ok";
   if (status === "failed") return "failed";
-  if (status === "terminated") return "rejected";
+  if (status === "interrupted") return "rejected";
   if (status === "streaming") return "started";
   return "degraded";
 }

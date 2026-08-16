@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 每个决策边界产生带 causation、事实版本、版本钉和闭集 reason code 的行为记录，既有 trace/outbox 兼容。
 - [ ] 任何异步后续行为可关联其触发事实；新事实会使旧提案/评估可审计地变为 stale。

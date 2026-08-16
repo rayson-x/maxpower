@@ -28,34 +28,19 @@ class NodeSqliteDatabase implements ProductShellStateSqlDatabase {
   }
 }
 
-test("SQLite 壳状态按用户隔离，只恢复经过 schema 校验的展示引用", async () => {
+test("SQLite 壳状态按用户隔离，只恢复经过 schema 校验的对话引用", async () => {
   const database = new DatabaseSync(":memory:");
   const store = new SQLiteProductShellStateStore(new NodeSqliteDatabase(database));
-  const state = markProductFormOpen(
-    attachCoachToProductShell(initialProductShellState("2026-08-09"), {
-      sessionId: "coach:today-9",
-      context: { kind: "today", ref: "2026-08-09" },
-      foreground: "expanded",
-    }),
-    {
-      kind: "nutrition_draft_review",
-      artifactId: "nutrition:draft-9",
-      recovery: "reopen_persisted_reference",
-    },
-  );
+  const state = attachCoachToProductShell(initialProductShellState("2026-08-09"), {
+    sessionId: "conversation:9",
+    foreground: "expanded",
+  });
 
   await store.save({ userId: "user-a", state });
 
   assert.deepEqual(await store.restore({ userId: "user-a", fallbackDate: "2026-08-10" }), {
     state,
-    formRecovery: {
-      kind: "reopen",
-      form: {
-        kind: "nutrition_draft_review",
-        artifactId: "nutrition:draft-9",
-        recovery: "reopen_persisted_reference",
-      },
-    },
+    formRecovery: { kind: "none" },
   });
   assert.deepEqual(await store.restore({ userId: "user-b", fallbackDate: "2026-08-10" }), {
     state: initialProductShellState("2026-08-10"),

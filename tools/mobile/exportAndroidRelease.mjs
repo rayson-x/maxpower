@@ -5,8 +5,8 @@ import { spawnSync } from "node:child_process";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 const apiBaseUrl = process.env.EXPO_PUBLIC_MAXPOWER_API_BASE_URL?.trim();
-if (!apiBaseUrl || !apiBaseUrl.startsWith("https://")) {
-  throw new Error("EXPO_PUBLIC_MAXPOWER_API_BASE_URL must be an HTTPS URL");
+if (!apiBaseUrl || !/^https?:\/\/[^\s]+$/i.test(apiBaseUrl)) {
+  throw new Error("EXPO_PUBLIC_MAXPOWER_API_BASE_URL must be an HTTP or HTTPS URL");
 }
 
 const outputDir = mkdtempSync(join(tmpdir(), "maxpower-android-release-"));
@@ -30,6 +30,9 @@ for (const path of files) {
   }
 }
 
+// Scan for this product's retired client configuration. Pi ships a generic
+// provider registry internally, so third-party provider *names* alone are
+// not evidence of a reachable MaxPower transport.
 const forbiddenStrings = [
   "EXPO_PUBLIC_MAXPOWER_LLM_API_KEY",
   "EXPO_PUBLIC_MAXPOWER_LLM_ENDPOINT",
@@ -37,8 +40,6 @@ const forbiddenStrings = [
   "RemoteModelSetupSheet",
   "embeddedRemoteLlm",
   "localRemoteLlmProviderSettings",
-  "bettermeet",
-  "openrouter",
 ];
 for (const path of files) {
   const stat = statSync(path);

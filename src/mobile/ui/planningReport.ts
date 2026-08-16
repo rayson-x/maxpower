@@ -1,6 +1,4 @@
 import { getT, PLAN_REPORT_COPY } from "../../i18n";
-import type { PlannedSessionData } from "../../coach/domain";
-import type { PlanProposal } from "../../planning";
 
 /** planner token → i18n 键名。planner 只出 token，文案住在 PLAN_REPORT_COPY。 */
 const PHRASE_KEYS: Record<string, string> = {
@@ -30,7 +28,7 @@ const PHRASE_KEYS: Record<string, string> = {
   unlogged_intake_is_not_zero: "guard.unloggedIntakeNotZero",
   actual_load_rir_and_maintenance_energy_are_unknown_without_user_facts: "uncertainty.loadRirMaintenanceUnknown",
   missing_measurements_remain_unknown: "uncertainty.missingStaysUnknown",
-  single_day_change_cannot_switch_goal_cycle: "guard.singleDayCannotSwitchCycle",
+  single_day_change_cannot_replace_goal_contract: "guard.singleDayCannotReplaceGoalContract",
   pain_or_red_flag_pauses_planning: "guard.painPausesPlanning",
   professional_clearance_required: "guard.professionalClearance",
   high_adherence: "requirement.highAdherence",
@@ -81,63 +79,6 @@ const GOAL_TYPE_KEYS: Record<string, string> = {
   return_to_training: "goalType.returnToTraining",
 };
 
-export interface PlanningReportSession {
-  id: string;
-  date: string;
-  dayLabel: string;
-  title: string;
-  kind: "training" | "rest";
-  detail: string;
-  estimatedMinutes?: number;
-}
-
-export interface PlanningReportSummary {
-  trainingDays: number;
-  sessionDurationMinutes?: number;
-  totalWorkSets: number;
-  reviewAt: string;
-  phaseDuration: string;
-  confidencePercent: number;
-  weekRange?: string;
-  sessions: readonly PlanningReportSession[];
-  missingFacts: readonly string[];
-}
-
-/**
- * Builds the small, user-facing facts used by the plan report. Keeping this
- * projection outside React prevents presentation copy from leaking planner
- * tokens or recomputing domain facts differently on each screen.
- */
-export function buildPlanningReportSummary(proposal: PlanProposal, locale?: string): PlanningReportSummary {
-  const t = getT(PLAN_REPORT_COPY, locale);
-  const week = proposal.planRevision.materializedWeeks?.[0];
-  const sessions = (week?.sessions ?? proposal.planRevision.sessions.slice(0, 7)).map((session) => toReportSession(session, locale));
-  const training = sessions.filter((session) => session.kind === "training");
-  const sourceSessions = week?.sessions ?? proposal.planRevision.sessions.slice(0, 7);
-  const sessionDurationMinutes = sourceSessions.find((session) => isTrainingSession(session))?.durationBudget?.unit === "minutes"
-    ? sourceSessions.find((session) => isTrainingSession(session))?.durationBudget?.value
-    : undefined;
-  const totalWorkSets = sourceSessions
-    .filter(isResistanceSession)
-    .reduce((sum, session) => sum + session.tasks.reduce((taskSum, task) => taskSum + task.sets.length, 0), 0);
-  const phase = proposal.appliedPhaseStrategy;
-  return {
-    trainingDays: training.length,
-    ...(sessionDurationMinutes !== undefined ? { sessionDurationMinutes } : {}),
-    totalWorkSets,
-    reviewAt: phase?.reviewAt ?? proposal.expectedReviewAt,
-    phaseDuration: phase
-      ? t("summary.phaseDuration.weeks", {
-          min: phase.expectedDurationWeeks.min,
-          max: phase.expectedDurationWeeks.max,
-        })
-      : t("summary.phaseDuration.weekly"),
-    confidencePercent: Math.round(proposal.confidence * 100),
-    ...(week ? { weekRange: `${shortDate(week.startDate, locale)}—${shortDate(week.endDate, locale)}` } : {}),
-    sessions,
-    missingFacts: unique(proposal.missing.map((value) => planningPhrase(value, locale))),
-  };
-}
 
 export function planningPhrase(value: string, locale?: string): string {
   const t = getT(PLAN_REPORT_COPY, locale);
@@ -188,64 +129,6 @@ export function forecastEligibility(value: string, locale?: string): string {
   );
 }
 
-function toReportSession(session: PlannedSessionData, locale?: string): PlanningReportSession {
-  const t = getT(PLAN_REPORT_COPY, locale);
-  const training = isTrainingSession(session);
-  const setCount = session.tasks.reduce((sum, task) => sum + task.sets.length, 0);
-  const duration = session.durationBudget?.unit === "minutes" ? session.durationBudget.value : undefined;
-  const estimatedMinutes = session.estimatedDuration?.unit === "minutes"
-    ? session.estimatedDuration.value
-    : undefined;
-  return {
-    id: session.id,
-    date: session.scheduledFor,
-    dayLabel: weekdayLabel(session.scheduledFor, locale),
-    title: readableSessionTitle(session.title, locale),
-    kind: training ? "training" : "rest",
-    ...(estimatedMinutes !== undefined ? { estimatedMinutes } : {}),
-    detail: training
-      ? t("session.detail.training", {
-          exercises: session.tasks.length,
-          sets: setCount,
-          duration: estimatedMinutes
-            ? t("session.detail.estimatedMinutes", { minutes: estimatedMinutes })
-            : duration
-              ? t("session.detail.maxMinutes", { minutes: duration })
-              : "",
-        })
-      : t("session.detail.rest"),
-  };
-}
-
-function isTrainingSession(session: PlannedSessionData): boolean {
-  return session.kind !== "rest" && session.tasks.length > 0;
-}
-
-function isResistanceSession(session: PlannedSessionData): boolean {
-  return (session.kind === "weighted_reps" || session.kind === "bodyweight_reps") && session.tasks.length > 0;
-}
-
-function readableSessionTitle(title: string, locale?: string): string {
-  const t = getT(PLAN_REPORT_COPY, locale);
-  return title
-    .replace("hypertrophy", t("sessionTitle.hypertrophy"))
-    .replace("strength", t("sessionTitle.strength"))
-    .replace("fat_loss_preserve_lean_mass", t("sessionTitle.fatLossPreserveLeanMass"));
-}
-
-function weekdayLabel(date: string, locale?: string): string {
-  const day = new Date(`${date}T12:00:00.000Z`).getUTCDay();
-  const t = getT(PLAN_REPORT_COPY, locale);
-  return day >= 0 && day <= 6 ? t(`weekday.${day}`) : t("weekday.fallback");
-}
-
-function shortDate(value: string, locale?: string): string {
-  return getT(PLAN_REPORT_COPY, locale)("date.short", {
-    month: Number(value.slice(5, 7)),
-    day: Number(value.slice(8, 10)),
-  });
-}
-
 function isKnownStrategy(value: string): boolean {
   return [
     "fat_loss_recomposition",
@@ -261,8 +144,4 @@ function isKnownStrategy(value: string): boolean {
     "diet_break",
     "deload_overlay",
   ].includes(value);
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values)];
 }

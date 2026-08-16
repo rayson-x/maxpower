@@ -5,10 +5,12 @@ import type { PlannedSessionData, TimelineProjectionEvent } from "../../src/coac
 import { forecastCardioLoad } from "../../src/planning/cardioLoad";
 import { buildContinuousTrainingQueue } from "../../src/planning/continuousTrainingQueue";
 import type { SplitRotationTemplate } from "../../src/knowledge/model";
+import { confirmedTimelineEnvelope } from "../fixtures/timelineEnvelope";
 
 function activity(date: string, activityType: string, minutes: number, intensity: "easy" | "moderate" | "hard", rpe?: number): TimelineProjectionEvent {
   return {
     eventId: `activity-${date}`, revision: 1, occurredAt: `${date}T08:00:00.000Z`, recordedAt: `${date}T09:00:00.000Z`, timezoneOffsetMinutes: 480,
+    envelope: confirmedTimelineEnvelope({ id: `activity-envelope-${date}`, factType: "activity", occurredAt: `${date}T08:00:00.000Z` }),
     fact: { kind: "activity", activityType, duration: { value: minutes, unit: "minutes" }, intensity, ...(rpe === undefined ? {} : { perceivedExertion: rpe }), confidence: "confirmed" },
   };
 }

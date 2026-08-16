@@ -1,6 +1,4 @@
 import type { KnowledgeVersionPins } from "../knowledge/model";
-import type { OnboardingDraftEvent } from "../onboarding/model";
-import type { ContextManifest } from "./adapters/provider";
 import type {
   AggregateRevisionState,
   DomainEvent,
@@ -9,7 +7,11 @@ import type {
 } from "./domain";
 
 export type CoachSessionStatus = "active" | "suspended" | "completed" | "archived";
-export type CoachContextKind = "today" | "calendar" | "plan" | "progress" | "workout" | "profile" | "onboarding";
+/**
+ * A conversation is its own durable task identity. Product surfaces can be
+ * attached to an individual turn, but must never become the session key.
+ */
+export type CoachContextKind = "conversation" | "today" | "calendar" | "plan" | "workout" | "profile";
 
 export interface ContextRef {
   kind: CoachContextKind;
@@ -21,7 +23,7 @@ export interface CoachSession {
   userId: string;
   status: CoachSessionStatus;
   context: ContextRef;
-  taskKind?: "today_plan" | "workout_execution" | "plan_adjustment" | "weekly_report" | "onboarding" | "general";
+  taskKind?: "today_plan" | "workout_execution" | "plan_adjustment" | "weekly_report" | "general";
   title?: string;
   revision?: number;
   contextRefs?: readonly ContextRef[];
@@ -51,7 +53,11 @@ export interface CoachRunRecord {
   id: string;
   sessionId: string;
   userId: string;
-  status: "streaming" | "suspended" | "resuming" | "completed" | "terminated" | "failed";
+  /** Stable client command identity used to collapse retries of one turn. */
+  clientTurnId?: string;
+  status: "streaming" | "awaiting_user" | "resuming" | "completed" | "interrupted" | "failed";
+  /** Pins the local behavioral contract for this run even when one durable thread crosses stages. */
+  agentMode?: "planning";
   factFrontier: readonly FactRef[];
   contextManifestHash: string;
   /** The selected local/remote language layer for replay and disclosure only. */
@@ -60,8 +66,6 @@ export interface CoachRunRecord {
     model?: string;
     configurationFingerprint?: string;
   };
-  /** Privacy-safe disclosure metadata, intentionally never the raw ProviderContext. */
-  contextManifest?: ContextManifest;
   startedAt: string;
   updatedAt: string;
   terminalCode?: string;
@@ -87,8 +91,7 @@ export interface CoachToolCallRecord {
 }
 
 export interface UserProfile {
-  goal: "hypertrophy" | "fat_loss" | "strength" | "conditioning" | "health";
-  trainingExperience: "beginner" | "intermediate" | "advanced" | "unknown";
+  goal: "hypertrophy" | "fat_loss" | "strength" | "conditioning" | "health" | "physique" | "maintain" | "return_to_training";
   name?: string;
   address?: string;
   email?: string;
@@ -126,20 +129,6 @@ export interface TimelineEvent {
   data: Readonly<Record<string, unknown>>;
 }
 
-export interface UserState {
-  userId: string;
-  profile: UserProfile;
-  profileRevision: number;
-  plan: PlanRevision;
-  timeline: readonly TimelineEvent[];
-  timelineRevision: number;
-  mandate: {
-    mode: "manual" | "collaborative" | "managed";
-    revision: number;
-  };
-  safetyHold: boolean;
-}
-
 export interface FactRef {
   aggregate:
     | "profile"
@@ -175,25 +164,13 @@ export interface PresentationRef {
 }
 
 export type ArtifactKind =
-  | "today_plan"
-  | "plan_overview"
-  | "plan_change_proposal"
-  | "exercise_substitution"
-  | "action_receipt"
-  | "set_summary"
-  | "replan_evaluation"
-  | "goal_forecast"
   | "weekly_coach_report"
-  | "mesocycle_review"
   | "evidence_brief"
-  | "plan_trace"
   | "timeline_record_draft"
   | "nutrition_observation_draft"
-  | "nutrition_change_proposal"
-  | "timeline_risk_evaluation"
-  | "planner_progress"
   | "recovery_brief"
   | "nutrition_strategy"
+  | "daily_health_ledger"
   | "safety_hold";
 
 export interface ArtifactBase {
@@ -210,173 +187,6 @@ export interface ArtifactBase {
   knowledgePins?: KnowledgeVersionPins;
 }
 
-export interface TodayPlanArtifact extends ArtifactBase {
-  kind: "today_plan";
-  date: string;
-  title: string;
-  planRevision: number;
-  tasks: readonly PlanTask[];
-}
-
-/** Read-only, week-scoped training and intake plan shown by Coach. */
-export interface PlanOverviewArtifact extends ArtifactBase {
-  kind: "plan_overview";
-  userId: string;
-  planRevision: number;
-  strategy: string;
-  window: { start: string; end: string };
-  trainingDays: number;
-  totalWorkSets: number;
-  tasks: readonly (PlanTask & { scheduledFor: string; sessionTitle: string })[];
-  nutrition?: {
-    energyRange?: { min: number; max: number; unit: "kcal" };
-    proteinGrams?: { min: number; max: number };
-    fatEnergyFloorPercent?: number;
-    reviewAt?: string;
-    today?: {
-      date: string;
-      dayKind: import("../nutrition").DailyIntakeBudget["dayKind"];
-      recommendedKcal?: number;
-      recommendedRange?: { min: number; max: number };
-      consumedKcal?: number;
-      variancePercent?: number;
-      status: import("../nutrition").DailyIntakeStatus;
-      dayTypeAdjustmentKcal: number;
-      activityAdjustmentKcal: number;
-    };
-    week?: readonly {
-      date: string;
-      dayKind: import("../nutrition").DailyIntakeBudget["dayKind"];
-      recommendedKcal?: number;
-    }[];
-  };
-}
-
-export interface AdjustTaskChange {
-  kind: "adjust_task";
-  taskId: string;
-  scope?: PlanEditScope;
-  sets?: number;
-  reps?: string;
-  loadKg?: number;
-  targetRir?: number;
-  restSeconds?: number;
-}
-
-export type PlanEditScope = "this_session_only" | "future_preference" | "lock";
-
-export interface AddTaskChange {
-  kind: "add_task";
-  task: PlanTask;
-  index?: number;
-  scope?: PlanEditScope;
-}
-
-export interface RemoveTaskChange {
-  kind: "remove_task";
-  taskId: string;
-  scope?: PlanEditScope;
-}
-
-export interface ReplaceTaskChange {
-  kind: "replace_task";
-  taskId: string;
-  replacement: PlanTask;
-  preserveStimulusIntent: boolean;
-  scope?: PlanEditScope;
-}
-
-export interface ReorderTaskChange {
-  kind: "reorder_task";
-  taskId: string;
-  toIndex: number;
-  scope?: PlanEditScope;
-}
-
-export type PlanEditChange =
-  | AdjustTaskChange
-  | AddTaskChange
-  | RemoveTaskChange
-  | ReplaceTaskChange
-  | ReorderTaskChange;
-
-export interface PlanChangeProposalArtifact extends ArtifactBase {
-  kind: "plan_change_proposal";
-  basePlanRevision: number;
-  mandateRevision: number;
-  change: PlanEditChange;
-  before: Readonly<Record<string, unknown>>;
-  after: Readonly<Record<string, unknown>>;
-  reason: string;
-  risk: "low" | "review" | "blocked";
-  executionPolicy: "confirm" | "managed" | "advice_only";
-  supersedesArtifactId?: string;
-}
-
-/**
- * A read-only ranked substitution explanation.  It never carries a copied
- * load: the chosen alternative is a new comparable-performance context.
- */
-export interface ExerciseSubstitutionArtifact extends ArtifactBase {
-  kind: "exercise_substitution";
-  userId: string;
-  sourceExerciseVariantId: string;
-  candidates: readonly {
-    exerciseVariantId: string;
-    label: string;
-    stimulusFit: "matches" | "partial" | "unknown";
-    equipmentFit: "available" | "unavailable" | "unknown";
-    comparableLoadHistory: "available" | "cold_start" | "not_comparable";
-  }[];
-}
-
-export interface ActionReceiptArtifact extends ArtifactBase {
-  kind: "action_receipt";
-  action: "apply" | "reject" | "undo";
-  targetArtifactId: string;
-  /** Keeps a generic receipt renderable without guessing its source artifact. */
-  targetKind?: "plan" | "nutrition";
-  result: "applied" | "rejected" | "undone";
-  beforeRevision?: number;
-  afterRevision?: number;
-}
-
-export interface SetSummaryArtifact extends ArtifactBase {
-  kind: "set_summary";
-  exerciseId: string;
-  packetRef: {
-    id: string;
-    version: number;
-    hash: string;
-  };
-  profileIdentity?: string;
-  confirmedReps: number;
-  needsReviewReps: number;
-  rejectedReps: number;
-  observationFindings: readonly string[];
-  userReported?: { loadKg?: number; rir?: number };
-}
-
-/** Immutable local result of a registered deterministic replanning trigger. */
-export interface ReplanEvaluationArtifact extends ArtifactBase {
-  kind: "replan_evaluation";
-  userId: string;
-  evaluation: import("../replanning").ReplanEvaluation;
-}
-
-/**
- * Immutable presentation of the three scenarios from an already-evaluated
- * local replan. It deliberately cannot create a new forecast: the registered
- * ReplanTrigger remains the sole route that evaluates one.
- */
-export interface GoalForecastArtifact extends ArtifactBase {
-  kind: "goal_forecast";
-  userId: string;
-  sourceEvaluationId?: string;
-  evaluatedAt?: string;
-  forecasts: readonly import("../replanning").GoalForecast[];
-}
-
 /** Immutable, evidence-linked summary of an already-ended calendar week. */
 export interface WeeklyCoachReportArtifact extends ArtifactBase {
   kind: "weekly_coach_report";
@@ -386,30 +196,111 @@ export interface WeeklyCoachReportArtifact extends ArtifactBase {
   idempotencyKey: string;
 }
 
-/** A period-bound review; changing a plan still requires a linked Proposal. */
-export interface MesocycleReviewArtifact extends ArtifactBase {
-  kind: "mesocycle_review";
-  userId: string;
-  period: { start: string; end: string };
-  status: "continue" | "adjust" | "complete" | "insufficient_data";
-  summary: readonly string[];
-  linkedProposalArtifactId?: string;
-}
-
-/** 规划推理链 artifact（ticket 04）：随 PlanRevision 幂等持久化，无 trace 不提交。 */
-export interface PlanTraceArtifact extends ArtifactBase {
-  kind: "plan_trace";
-  userId: string;
-  planId: string;
-  trace: import("../planning").PlannerTrace;
-}
-
 /** Evidence-only explanation for a card or coach answer, never a fact write. */
 export interface EvidenceBriefArtifact extends ArtifactBase {
   kind: "evidence_brief";
   userId: string;
   title: string;
   summary: readonly string[];
+  /** Causal identity for a card emitted from the Pi conversation harness. */
+  conversationTrace?: { sessionId: string; runId?: string; toolCallId?: string };
+  /**
+   * A bounded, interaction-first card emitted by the local Conversation
+   * module.  It is deliberately data, not a route or a component command:
+   * the mobile client renders it in the same durable thread and never lets a
+   * model navigate the product.
+   */
+  conversationCard?:
+    | {
+        kind: "baseline";
+        status: "ready" | "submitted" | "stale";
+        /** Incomplete local form values; they become facts only when submitted. */
+        draft?: { ageYears?: string; heightCm?: string; weightKg?: string; goalText?: string; revision: number };
+        /** Confirmed values remain as a read-only card in the same thread. */
+        submitted?: { ageYears: number; heightCm: number; weightKg: number; goalText?: string };
+      }
+    | {
+        /** An Agent-composed dynamic intake form. fields come only from the
+         * closed intake field registry; every field is optional, and submitted
+         * values keep their provenance on this card. */
+        kind: "intake_form";
+        status: "ready" | "submitted" | "stale";
+        reason: string;
+        fields: readonly string[];
+        values?: Readonly<Record<string, string>>;
+      }
+    | {
+        kind: "choice";
+        status: "ready" | "resolved" | "stale";
+        prompt: string;
+        options: readonly { id: string; label: string; detail?: string }[];
+      }
+    | {
+        kind: "goal_path";
+        status: "awaiting_confirmation" | "confirmed" | "rejected" | "stale";
+        goal: import("./domain").GoalContractData;
+        options: readonly {
+          id: "gradual" | "balanced" | "faster";
+          targetWeeks: number;
+          behaviorBurden: "low" | "moderate" | "high";
+          trainingBurden: "low" | "moderate" | "high";
+          recordingBurden: "minimum_weekly" | "representative_days" | "high_coverage";
+          feasible: boolean;
+          conflictReasons: readonly string[];
+        }[];
+      }
+    | {
+        kind: "receipt";
+        status: "recorded" | "confirmed" | "rejected";
+        label: string;
+        detail?: string;
+        /** A written record offers an in-place correction entry. */
+        correctable?: boolean;
+      }
+    | {
+        kind: "record_confirmation";
+        status: "awaiting_confirmation" | "confirmed" | "rejected" | "stale";
+        record: unknown;
+        label: string;
+      }
+    | {
+        kind: "plan_candidate";
+        status: "awaiting_confirmation" | "confirmed" | "rejected" | "stale" | "invalid";
+        proposalId: string;
+        title: string;
+        summary: readonly string[];
+        /**
+         * A self-contained review payload. It deliberately contains rendered
+         * facts rather than navigation targets so a confirmed proposal remains
+         * understandable when the conversation is reopened later.
+         */
+        details?: {
+          sessions: readonly {
+            date: string;
+            title: string;
+            durationMinutes?: number;
+            taskCount: number;
+            setCount: number;
+          }[];
+          nutrition?: {
+            calorieRange?: { min: number; max: number; unit: "kcal" };
+            macronutrients?: readonly string[];
+            nutrientTargets?: readonly string[];
+            reviewWindow?: string;
+          };
+          behaviorChanges: readonly { instruction: string; burden: "low" | "moderate" | "high" }[];
+          rationale: readonly string[];
+          tradeoffs: readonly string[];
+          observation: readonly string[];
+          diff: readonly string[];
+          validation: {
+            status: "valid" | "invalid";
+            impact: "low" | "high";
+            resolution: "confirmation_required" | "auto_apply_once_eligible" | "auto_apply_eligible";
+            issues: readonly string[];
+          };
+        };
+      };
   /**
    * Durable output of the local knowledge.search tool. PassageRefs are not
    * generic citations: they may only support professional copy in this run.
@@ -422,27 +313,104 @@ export interface EvidenceBriefArtifact extends ArtifactBase {
       citationIds: readonly string[];
     }[];
   };
-  planningPreview?: {
-    status: "awaiting_confirmation" | "stale" | "confirmed" | "rejected";
-    proposal: import("../planning").PlanProposal;
-    /** Complete replayable planner inputs. Confirmation must not silently drop a scheduling constraint. */
-    request: {
-      currentDate: string;
-      trigger: import("../planning").PlannerTrigger;
-      requestedScope?: import("../planning").PlannerRequest["requestedScope"];
-      missedSessionDates?: readonly string[];
-      transientRecoveryConstraint?: import("./domain").RecoveryConstraintData;
-      transientNextSessionFocus?: import("../planning").PlannerRequest["transientNextSessionFocus"];
-    };
-    /** The durable Timeline risk evaluation that warranted this future-only preview. */
-    sourceRiskEvaluationId?: string;
-    /** Source Timeline events already represented by a user-requested future adjustment. */
-    sourceTimelineEventIds?: readonly string[];
-    sourcePreviewId?: string;
-  };
   /** Initial Planner handoff uses the exclusive Agent Knowledge backend. */
-  firstPlannerHandoff?: import("../onboarding").FirstPlannerHandoffProposal;
-  phaseTransition?: import("../replanning").PhaseTransitionProposal;
+  /**
+   * Fixed, typed input envelope for one planning run. The Agent may organize
+   * a candidate from this data, but it cannot choose a different Goal,
+   * maintenance baseline, safety state or source assessment.
+   */
+  planningInput?: {
+    mode: "first_plan" | "adjustment";
+    evaluationDate: string;
+    profileRef: { id: string; revision: number };
+    goalContract: { revision: number; value: import("./domain").GoalContractData };
+    mandate: { revision: number; planChangeAuthorization: import("./domain").CoachingMandateData["planChangeAuthorization"] };
+    knowledgePins: import("../knowledge/model").KnowledgeVersionPins;
+    planBase?: { id: string; revision: number };
+    nutritionStrategyBase?: { id: string; revision: number };
+    allowedEnergyRange?: { min: number; max: number; unit: "kcal" };
+    latestLedger?: {
+      date: string;
+      version: string;
+      coverage: import("../health").DailyHealthLedger["coverage"];
+      energyBalance: import("../health").DailyHealthLedger["energyBalance"];
+    };
+    sourceAssessment?: {
+      id: string;
+      state: import("../goal-path").GoalPathAssessment["state"];
+      diagnosis: import("../goal-path").GoalPathAssessment["diagnosis"];
+      reasonCodes: readonly string[];
+      nextValidationSignals: readonly string[];
+    };
+    safetyBlocked: boolean;
+  };
+  adaptivePlanProposal?: {
+    status: "awaiting_confirmation" | "stale" | "applied" | "rejected" | "undone";
+    candidate: import("../planning").AdaptivePlanCandidate;
+    validation: import("../planning").AdaptivePlanValidation;
+    snapshot: {
+      evaluationDate: string;
+      profileRevision: number;
+      goalRevision: number;
+      planRevision: number;
+      nutritionStrategyRevision: number;
+      timelineRevision: number;
+      mandateRevision: number;
+      readinessFingerprint: string;
+      safetyFingerprint: string;
+      knowledgeHash: string;
+    };
+    counterfactual?: import("../goal-path").GoalPathCandidateCounterfactual;
+    /** Exact aggregate revisions written by this applied proposal. */
+    appliedCommit?: {
+      plan: { id: string; revision: number };
+      nutritionStrategy?: { id: string; revision: number };
+    };
+  };
+  adaptivePlanCandidateFeedback?: {
+    runId: string;
+    attempt: 1 | 2;
+    canRetry: boolean;
+    issues: import("../planning").AdaptivePlanValidation["issues"];
+  };
+  /** Deterministic GoalPath output. Prose may explain it, but cannot replace or mutate it. */
+  goalPathAssessment?: {
+    assessment: import("../goal-path").GoalPathAssessment;
+    channel: "agent_conversation" | "manual_home" | "scheduled";
+    delivery: "same_run" | "home" | "notification" | "suppressed";
+    suppressionReason?: "no_material_signal" | "duplicate" | "cooldown" | "plan_inactive" | "stale";
+  };
+  goalPathAudit?: {
+    status: "evaluated" | "skipped" | "coalesced" | "suppressed" | "stale" | "failed";
+    trigger: import("../goal-path").GoalPathAssessment["trigger"];
+    sourceAssessmentId?: string;
+    reasonCodes: readonly string[];
+  };
+  /** Durable, user-inspectable planning evidence; never a hidden preference profile. */
+  planOutcome?: import("../planning").PlanOutcome;
+  goalCompletionProposal?: {
+    status: "awaiting_confirmation" | "rejected" | "completed" | "stale";
+    goalId: string;
+    goalRevision: number;
+    planId: string;
+    planRevision: number;
+    timelineRevision: number;
+    sourceAssessmentId: string;
+    measurementEventIds: readonly string[];
+    /** Durable post-completion route chosen by the user; survives restart. */
+    next?: "record_first" | "maintenance_planning" | "goal_negotiation";
+  };
+  planPauseProposal?: {
+    status: "awaiting_confirmation" | "confirmed" | "rejected";
+    planId: string;
+    planRevision: number;
+    timelineRevision: number;
+  };
+  goalNegotiationProposal?: {
+    status: "awaiting_confirmation" | "confirmed" | "rejected";
+    goal: import("./domain").GoalContractData;
+    options: readonly import("../goal-path").GoalPathOption[];
+  };
 }
 
 export interface NutritionObservationDraftArtifact extends ArtifactBase {
@@ -454,8 +422,8 @@ export interface NutritionObservationDraftArtifact extends ArtifactBase {
 
 /**
  * A typed record candidate assembled from a user statement when their Coach
- * mandate asks for a final tap before writing. The source statement remains
- * distinct from estimates and device-derived observations.
+ * mandate asks for a final tap before writing. Agent-created estimates are not
+ * admitted through this boundary.
  */
 export interface TimelineRecordDraftArtifact extends ArtifactBase {
   kind: "timeline_record_draft";
@@ -464,57 +432,8 @@ export interface TimelineRecordDraftArtifact extends ArtifactBase {
   draft: {
     fact: import("./domain").TimelineFact;
     occurredAt: string;
-    source: "user_statement" | "coach_estimate";
+    source: "manual_form" | "user_statement";
   };
-}
-
-/**
- * A durable admission/check record for the Timeline → risk seam. It does not
- * contain a risk score or a Plan proposal: those are supplied by the later
- * risk evaluator and PlannerHarness. Keeping the admission decision durable
- * makes an intentionally coalesced or skipped evaluation observable.
- */
-export interface TimelineRiskEvaluationArtifact extends ArtifactBase {
-  kind: "timeline_risk_evaluation";
-  userId: string;
-  phase: "timeline_changed" | "scheduled_check";
-  disposition: "material" | "coalesced" | "skipped" | "stale" | "failed";
-  outcome: "queued" | "review_due" | "no_review" | "insufficient_evidence" | "not_evaluated";
-  timelineRevision: number;
-  sourceFactRefs: readonly FactRef[];
-  reasonCodes: readonly string[];
-  causationIds: readonly string[];
-  coalescesArtifactId?: string;
-  /** Goal-aware assessment state when an evaluator has a configured Goal Contract. */
-  achievabilityState?: import("./timelineRiskEvaluation").AchievabilityState;
-}
-
-/** A user-safe projection of a PlannerHarness lifecycle boundary. */
-export interface PlannerProgressArtifact extends ArtifactBase {
-  kind: "planner_progress";
-  userId: string;
-  stage: import("./planningProgress").PlannerProgressStage;
-  factBasis: readonly string[];
-  professionalClaims: readonly import("./planningProgress").VerifiedPlannerClaim[];
-  cannotJudge: readonly string[];
-  requestedInformation?: readonly string[];
-  proposal?: import("./planningProgress").PlannerProgressProposalInput;
-  message?: string;
-}
-
-/**
- * A version-pinned, confirmation-gated adjustment to a committed nutrition
- * strategy. It is an immutable proposal, never an intake record or a direct
- * strategy write.
- */
-export interface NutritionChangeProposalArtifact extends ArtifactBase {
-  kind: "nutrition_change_proposal";
-  userId: string;
-  nutritionStrategyId: string;
-  baseStrategyRevision: number;
-  mandateRevision: number;
-  executionPolicy: "confirm" | "advice_only";
-  proposal: import("../nutrition").NutritionChangeProposal;
 }
 
 /** A deterministic, non-diagnostic presentation of the latest local recovery constraint. */
@@ -545,26 +464,22 @@ export interface NutritionStrategyArtifact extends ArtifactBase {
   strategyRevision?: number;
 }
 
+/** Immutable, versioned result of the single formal daily calculation engine. */
+export interface DailyHealthLedgerArtifact extends ArtifactBase {
+  kind: "daily_health_ledger";
+  userId: string;
+  date: string;
+  ledger: import("../health").DailyHealthLedger;
+}
+
 export type Artifact =
-  | TodayPlanArtifact
-  | PlanOverviewArtifact
-  | PlanChangeProposalArtifact
-  | ExerciseSubstitutionArtifact
-  | ActionReceiptArtifact
-  | SetSummaryArtifact
-  | ReplanEvaluationArtifact
-  | GoalForecastArtifact
   | WeeklyCoachReportArtifact
-  | MesocycleReviewArtifact
   | EvidenceBriefArtifact
-  | PlanTraceArtifact
   | TimelineRecordDraftArtifact
-  | TimelineRiskEvaluationArtifact
-  | PlannerProgressArtifact
   | NutritionObservationDraftArtifact
-  | NutritionChangeProposalArtifact
   | RecoveryBriefArtifact
   | SafetyHoldArtifact
+  | DailyHealthLedgerArtifact
   | NutritionStrategyArtifact;
 
 export type PresentationStatus =
@@ -801,13 +716,6 @@ export interface ActionEvent {
   undoneBy?: string;
 }
 
-export interface IdempotencyRecord {
-  key: string;
-  userId: string;
-  resultArtifactId: string;
-  occurredAt: string;
-}
-
 export interface HumanOption {
   id: string;
   label: string;
@@ -1003,7 +911,7 @@ export interface NotificationIntent {
   title: string;
   body: string;
   privacy: "lock_screen_safe";
-  deepLink: { kind: "today" | "progress" | "workout"; ref: string };
+  deepLink: { kind: "today" | "plan" | "workout"; ref: string };
   /** The local calendar date the user meant, independent of delivery timing. */
   localDateIntent: string;
   scheduledAt: string;
@@ -1088,29 +996,24 @@ export interface LedgerSnapshot {
   messages: readonly CoachMessage[];
   runs: readonly CoachRunRecord[];
   toolCalls: readonly CoachToolCallRecord[];
-  users: readonly UserState[];
   artifacts: readonly Artifact[];
   presentations: readonly PresentationRef[];
   runEvents: readonly CoachRunEvent[];
   actionTokens: readonly ActionTokenRecord[];
   actionEvents: readonly ActionEvent[];
   toolAudit: readonly ToolAuditRecord[];
-  idempotency: readonly IdempotencyRecord[];
   pendingHumanActions: readonly PendingHumanAction[];
   workingMemory: readonly WorkingMemoryItem[];
   domainEvents: readonly DomainEvent[];
   aggregateRevisions: readonly AggregateRevisionState[];
   domainIdempotency: readonly DomainIdempotencyRecord[];
   outbox: readonly OutboxEntry[];
-  onboardingDraftEvents: readonly OnboardingDraftEvent[];
   coachRecipes: readonly CoachRecipe[];
   scheduledJobs: readonly ScheduledJob[];
   jobAttempts: readonly JobAttempt[];
   notificationIntents: readonly NotificationIntent[];
   notificationReceipts: readonly NotificationReceipt[];
   healthImportStates: readonly HealthImportState[];
-  replicaSyncStates: readonly import("../sync").ReplicaSyncState[];
-  pendingReplicaEnvelopes: readonly import("../sync").PendingReplicaEnvelope[];
   /** 远程 trace 上报的离线 outbox；授权关闭时永远为空。 */
   traceOutbox: readonly import("../observability/model").TraceOutboxEntry[];
 }

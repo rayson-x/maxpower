@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
-import { workoutSetRealtimeGate } from "../../src/mobile/ui/workoutRealtimeGate";
-import { decodeMotionPacket, type MotionRepDisposition } from "../../src/motion/motionPacket";
-import { buildCanonicalSetObservation } from "../../src/workout/CanonicalSetObservation";
 
 function fixture() {
   let now = "2026-08-08T07:00:00.000+08:00";
@@ -15,12 +12,12 @@ function fixture() {
   const scheduled: string[] = [];
   const cancelled: string[] = [];
   const ledger = new InMemoryCoachLedger();
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger,
     runtime: { now: () => now, nextId: (prefix) => `${prefix}-${++sequence}` },
     monotonicClock: { nowMs: () => monotonic, epochId: () => clockEpoch },
     notifications: {
-      async schedule(input) { scheduled.push(input.id); },
+      async upsert(input) { scheduled.push(input.id); },
       async cancel(id) { cancelled.push(id); },
     },
   });
@@ -35,28 +32,15 @@ function fixture() {
   };
 }
 
-test("WorkoutSession Realtime 入口只在 exact view/profile/bridge/runtime 全部可用时出现", () => {
-  const exact = {
-    nativeRuntimeAvailable: true,
-    recognition: { canRunRustRecognition: true, profileIdentity: "bench/front-left-45/halpe26/v1" },
-    runtime: { localRecording: "available", repCounting: "available", profileIdentity: "bench/front-left-45/halpe26/v1" },
-  } as const;
-  assert.equal(workoutSetRealtimeGate(exact), true);
-  assert.equal(workoutSetRealtimeGate({ ...exact, recognition: { canRunRustRecognition: false, profileIdentity: null } }), false, "unsupported exercise/view");
-  assert.equal(workoutSetRealtimeGate({ ...exact, runtime: { ...exact.runtime, profileIdentity: "bench/front/halpe26/v1" } }), false, "wrong exact view/profile identity");
-  assert.equal(workoutSetRealtimeGate({ ...exact, runtime: { ...exact.runtime, repCounting: "unavailable" } }), false, "bridge cannot emit canonical reps");
-  assert.equal(workoutSetRealtimeGate({ ...exact, nativeRuntimeAvailable: false }), false, "native runtime unavailable");
-});
-
-async function bootstrapPlan(app: CoachApplication, exerciseVariantId = "dumbbell_bench_press.flat.standard") {
+async function bootstrapPlan(app: LocalProductKernel, exerciseVariantId = "dumbbell_bench_press.flat.standard") {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: {
       userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "phone", occurredAt: "2026-08-08T07:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "bootstrap",
     },
-    profile: { id: "profile", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile", locale: "zh-CN" },
     goalContract: { id: "goal", primaryGoal: "hypertrophy", horizon: { startDate: "2026-08-08" } },
-    mandate: { id: "mandate", mode: "collaborative" },
+    mandate: { id: "mandate", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
   const pins = app.getInstalledKnowledgeVersionPins();
   await app.executeDomainCommand({
@@ -66,7 +50,7 @@ async function bootstrapPlan(app: CoachApplication, exerciseVariantId = "dumbbel
     },
     planId: "plan", expectedRevision: 0,
     revision: {
-      id: "plan-r1", goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 }, effectiveFrom: "2026-08-08", knowledgePins: pins,
+      id: "plan", goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 }, effectiveFrom: "2026-08-08", knowledgePins: pins,
       sessions: [{
         id: "push", title: "Push", scheduledFor: "2026-08-08", knowledgePins: pins,
         tasks: [{
@@ -79,64 +63,6 @@ async function bootstrapPlan(app: CoachApplication, exerciseVariantId = "dumbbel
       }],
     },
   });
-}
-
-function canonicalWorkoutPacketFixture(input: {
-  repId: bigint;
-  disposition: MotionRepDisposition;
-  profileIdentity: string;
-  frameId?: bigint;
-  landmarkSource?: "measured" | "unknown";
-  canonicalConfidence?: number;
-}) {
-  const sequence = new TextEncoder().encode("fixture:workout-canonical");
-  const algorithm = new TextEncoder().encode("rust-canonical-fixture/v1");
-  const identity = new TextEncoder().encode(input.profileIdentity);
-  const length = 44 + sequence.length + algorithm.length + 26 + 4 + 30 + 84 + identity.length + 5;
-  const buffer = new ArrayBuffer(length);
-  const view = new DataView(buffer);
-  const bytes = new Uint8Array(buffer);
-  bytes.set(new TextEncoder().encode("MOTN"), 0);
-  view.setUint16(4, 1, true);
-  view.setUint16(6, 5, true);
-  view.setUint32(8, length, true);
-  view.setBigUint64(12, input.frameId ?? input.repId, true);
-  view.setBigUint64(20, 1_000n + input.repId * 100n, true);
-  view.setBigUint64(28, 1n, true);
-  view.setUint8(36, 1);
-  view.setUint8(37, 1);
-  view.setUint16(38, sequence.length, true);
-  let offset = 40;
-  bytes.set(sequence, offset); offset += sequence.length;
-  view.setUint16(offset, algorithm.length, true); offset += 2;
-  bytes.set(algorithm, offset); offset += algorithm.length;
-  view.setUint16(offset, 1, true); offset += 2;
-  view.setUint8(offset, input.landmarkSource === "unknown" ? 3 : 0);
-  view.setUint8(offset + 1, 0b111);
-  offset += 2;
-  for (const value of [0.25, 0.5, 0, 0.95, input.canonicalConfidence ?? 0.95, 0.01]) { view.setFloat32(offset, value, true); offset += 4; }
-  bytes.set(new TextEncoder().encode("RPS1"), offset); offset += 4;
-  view.setUint8(offset, 1); offset += 1;
-  view.setBigUint64(offset, 7n, true); offset += 8;
-  view.setUint8(offset, 0); offset += 1;
-  view.setBigUint64(offset, 0n, true); offset += 8;
-  view.setUint8(offset, 0); offset += 1;
-  view.setBigUint64(offset, 0n, true); offset += 8;
-  view.setUint8(offset, 0); offset += 1;
-  view.setUint16(offset, 1, true); offset += 2;
-  for (const value of [input.repId, 1n, 1_000n, 2n, 1_050n, 3n, 1_100n, 100n + input.repId, 456n]) { view.setBigUint64(offset, value, true); offset += 8; }
-  view.setUint32(offset, 0, true); offset += 4;
-  view.setUint8(offset, 0); offset += 1;
-  const dispositionCode = input.disposition === "confirmed" ? 0 : input.disposition === "needs_review" ? 1 : 2;
-  view.setUint8(offset, dispositionCode << 2); offset += 1;
-  view.setUint8(offset, 0); offset += 1;
-  view.setUint8(offset, 0); offset += 1;
-  view.setUint16(offset, identity.length, true); offset += 2;
-  bytes.set(identity, offset); offset += identity.length;
-  view.setUint16(offset, 0, true); offset += 2;
-  bytes.set(new TextEncoder().encode("SET1"), offset); offset += 4;
-  view.setUint8(offset, 2);
-  return decodeMotionPacket(buffer);
 }
 
 test("WorkoutSession 在同一执行实体中切换记录/监控、提交真实组并原子写入 Timeline", async () => {
@@ -234,155 +160,6 @@ test("WorkoutSession 在同一执行实体中切换记录/监控、提交真实�
   assert.equal(trainingFacts.length - historicalSetFacts.length, 1);
   assert.equal(historicalSetFacts.length, 2);
   assert.equal(projection.timeline.current[0]?.fact.kind, "training");
-});
-
-test("canonical observation 重启后保留且用户 performed 修正不会改写 observed evidence", async () => {
-  const { app, ledger } = fixture();
-  await bootstrapPlan(app);
-  await app.prepareWorkoutSession({
-    userId: "u1", workoutId: "workout-observation", prescriptionRef: { planId: "plan", planRevision: 1, sessionPrescriptionId: "push" }, idempotencyKey: "observation-prepare",
-  });
-  await app.activateWorkoutSession({ userId: "u1", workoutId: "workout-observation", idempotencyKey: "observation-start" });
-  const profileIdentity = "dumbbell-bench/front-left-45/v1";
-  const packets = [
-    canonicalWorkoutPacketFixture({ repId: 1n, disposition: "confirmed", profileIdentity }),
-    canonicalWorkoutPacketFixture({ repId: 2n, disposition: "needs_review", profileIdentity }),
-    canonicalWorkoutPacketFixture({ repId: 3n, disposition: "rejected", profileIdentity }),
-  ];
-  const observation = await app.saveCurrentSetObservation({
-    userId: "u1",
-    workoutId: "workout-observation",
-    context: { workoutId: "workout-observation", setId: "set-1", exerciseVariantId: "dumbbell_bench_press.flat.standard", capabilityIdentity: profileIdentity },
-    packets,
-    telemetry: { processedFrames: 3, validFrames: 3 },
-    observedAt: "2026-08-08T07:02:00.000+08:00",
-    idempotencyKey: "save-observation",
-  });
-  assert.deepEqual(observation.counts, { confirmed: 1, needsReview: 1, rejected: 1 });
-  const noValidFrames = buildCanonicalSetObservation({
-    context: { workoutId: "workout-observation", setId: "set-1", exerciseVariantId: "dumbbell_bench_press.flat.standard", capabilityIdentity: profileIdentity },
-    packets,
-    telemetry: { processedFrames: 3, validFrames: 0 },
-    observedAt: "2026-08-08T07:02:30.000+08:00",
-  });
-  assert.equal(noValidFrames.judgement, "cannot_judge");
-  assert.equal(noValidFrames.cannotJudgeReason, "no_valid_frames");
-  const lowConfidenceButCanonical = buildCanonicalSetObservation({
-    context: { workoutId: "workout-observation", setId: "set-1", exerciseVariantId: "dumbbell_bench_press.flat.standard", capabilityIdentity: profileIdentity },
-    packets: [canonicalWorkoutPacketFixture({ repId: 4n, disposition: "needs_review", profileIdentity, canonicalConfidence: 0.01 })],
-    telemetry: { processedFrames: 1, validFrames: 1 },
-    observedAt: "2026-08-08T07:02:31.000+08:00",
-  });
-  assert.equal(lowConfidenceButCanonical.judgement, "observed", "TS must not invent a confidence threshold over Rust output");
-  const producerUnknown = buildCanonicalSetObservation({
-    context: { workoutId: "workout-observation", setId: "set-1", exerciseVariantId: "dumbbell_bench_press.flat.standard", capabilityIdentity: profileIdentity },
-    packets: [canonicalWorkoutPacketFixture({ repId: 5n, disposition: "needs_review", profileIdentity, landmarkSource: "unknown" })],
-    telemetry: { processedFrames: 1, validFrames: 1 },
-    observedAt: "2026-08-08T07:02:32.000+08:00",
-  });
-  assert.equal(producerUnknown.judgement, "cannot_judge");
-  assert.equal(producerUnknown.cannotJudgeReason, "canonical_producer_unknown");
-  await assert.rejects(
-    (app.saveCurrentSetObservation as unknown as (input: unknown) => Promise<unknown>)({
-      userId: "u1", workoutId: "workout-observation", observation: { ...observation, counts: { confirmed: 99, needsReview: 0, rejected: 0 } }, idempotencyKey: "forged-observation",
-    }),
-    /prebuilt_canonical_observation_not_accepted/,
-  );
-
-  const restarted = new CoachApplication({
-    ledger,
-    runtime: { now: () => "2026-08-08T07:03:00.000+08:00", nextId: (prefix) => `restart-${prefix}` },
-  });
-  let workout = await restarted.readWorkoutSession({ userId: "u1", workoutId: "workout-observation" });
-  assert.deepEqual(workout.setObservations, [observation]);
-  const draft = await restarted.saveCurrentSetDraft({
-    userId: "u1", workoutId: "workout-observation", draft: { actualReps: 7, actualLoad: { value: 18, unit: "kg" }, actualRir: 2 }, idempotencyKey: "observed-user-draft",
-  });
-  const outcome = await restarted.confirmCurrentSet({
-    userId: "u1", workoutId: "workout-observation", draftId: draft.id, observationId: observation.id, idempotencyKey: "observed-user-confirm",
-  });
-  assert.equal(outcome.actualReps, 7);
-  assert.deepEqual(outcome.observationRef, { id: observation.id });
-  assert.deepEqual(outcome.performedRepsProvenance, { source: "user_confirmed", observedConfirmedReps: 1, userAdjusted: true });
-  workout = await restarted.readWorkoutSession({ userId: "u1", workoutId: "workout-observation" });
-  assert.deepEqual(workout.setObservations, [observation]);
-  assert.equal(workout.setObservations?.[0]?.counts.confirmed, 1);
-});
-
-test("训练中的 Coach 会话与同一 WorkoutSession 绑定，并在记录/监控切换后复用", async () => {
-  const { app } = fixture();
-  await bootstrapPlan(app);
-  await app.prepareWorkoutSession({
-    userId: "u1",
-    workoutId: "workout-coach",
-    prescriptionRef: { planId: "plan", planRevision: 1, sessionPrescriptionId: "push" },
-    idempotencyKey: "coach-prepare",
-  });
-  await app.activateWorkoutSession({
-    userId: "u1",
-    workoutId: "workout-coach",
-    mode: "record_only",
-    idempotencyKey: "coach-start",
-  });
-
-  const first = await app.ensureWorkoutCoachSession({
-    userId: "u1",
-    workoutId: "workout-coach",
-    idempotencyKey: "coach-open-first",
-  });
-  assert.equal(first.context.kind, "workout");
-  assert.equal(first.context.ref, "workout-coach");
-  assert.equal(first.taskKind, "workout_execution");
-  assert.equal(first.status, "active");
-
-  await app.setWorkoutMonitoringMode({
-    userId: "u1",
-    workoutId: "workout-coach",
-    enabled: true,
-    idempotencyKey: "coach-monitor-on",
-  });
-  await app.setWorkoutMonitoringMode({
-    userId: "u1",
-    workoutId: "workout-coach",
-    enabled: false,
-    idempotencyKey: "coach-monitor-off",
-  });
-  await app.pauseWorkoutSession({
-    userId: "u1",
-    workoutId: "workout-coach",
-    idempotencyKey: "coach-pause",
-  });
-  await app.setSessionStatus(first.id, "suspended");
-
-  const reopened = await app.ensureWorkoutCoachSession({
-    userId: "u1",
-    workoutId: "workout-coach",
-    idempotencyKey: "coach-reopen-paused-workout",
-  });
-  assert.equal(reopened.id, first.id);
-  assert.equal(reopened.context.ref, "workout-coach");
-  assert.equal(reopened.status, "active");
-  assert.equal(
-    (await app.listCoachSessions({ userId: "u1", taskKind: "workout_execution" })).filter(
-      (session) => session.context.ref === "workout-coach",
-    ).length,
-    1,
-  );
-
-  await app.completeWorkoutSession({
-    userId: "u1",
-    workoutId: "workout-coach",
-    status: "partial",
-    idempotencyKey: "coach-finish",
-  });
-  await assert.rejects(
-    app.ensureWorkoutCoachSession({
-      userId: "u1",
-      workoutId: "workout-coach",
-      idempotencyKey: "coach-open-completed",
-    }),
-    /workout_not_coachable/,
-  );
 });
 
 test("休息计时在同一进程用单调时钟，重启后使用持久化墙钟 deadline", async () => {
@@ -676,29 +453,22 @@ test("部分完成动作原地替换时保留已确认组，并把剩余组插�
   assert.equal(workout.setOutcomes[0]?.id, completed.id);
   assert.equal(workout.setOutcomes[0]?.actualLoad?.value, 20);
   assert.equal(workout.state.currentSetId, "set-2");
-  const replacementProfile = "push-up/front-left-45/v1";
-  const replacementObservation = await app.saveCurrentSetObservation({
+  const replacementDraft = await app.saveCurrentSetDraft({
     userId: "u1",
     workoutId: "workout-partial-replacement",
-    context: { workoutId: "workout-partial-replacement", setId: "set-2", exerciseVariantId: "push_up.bodyweight.floor.standard.bilateral.full_rom", capabilityIdentity: replacementProfile },
-    packets: [canonicalWorkoutPacketFixture({ repId: 11n, disposition: "confirmed", profileIdentity: replacementProfile })],
-    telemetry: { processedFrames: 1, validFrames: 1 },
-    observedAt: "2026-08-08T07:30:00.000+08:00",
-    idempotencyKey: "partial-replacement-observation",
+    draft: { actualReps: 8, actualRir: 2 },
+    idempotencyKey: "partial-replacement-draft",
   });
-  assert.equal(replacementObservation.prescriptionSetId, "set-2");
-  assert.equal(replacementObservation.exerciseVariantId, "push_up.bodyweight.floor.standard.bilateral.full_rom");
   const replacementOutcome = await app.confirmCurrentSet({
     userId: "u1",
     workoutId: "workout-partial-replacement",
-    confirmAsPlanned: true,
-    observationId: replacementObservation.id,
+    draftId: replacementDraft.id,
     idempotencyKey: "partial-replacement-confirm-replacement",
   });
   assert.equal(replacementOutcome.prescriptionSetId, "set-2");
   assert.equal(replacementOutcome.exerciseVariantId, "push_up.bodyweight.floor.standard.bilateral.full_rom");
 
-  const afterRestart = new CoachApplication({
+  const afterRestart = new LocalProductKernel({
     ledger,
     runtime: { now: () => "2026-08-08T08:00:00.000+08:00", nextId: (prefix) => `restart-${prefix}` },
   });
@@ -706,116 +476,8 @@ test("部分完成动作原地替换时保留已确认组，并把剩余组插�
   assert.deepEqual(workout.frozenPrescription.tasks.map((task) => task.id), ["press", "press:replacement:1"]);
   assert.equal(workout.setOutcomes[0]?.id, completed.id);
   assert.equal(workout.setOutcomes[1]?.id, replacementOutcome.id);
-  assert.equal(workout.setObservations?.[0]?.id, replacementObservation.id);
 });
 
-test("已确认的吃力表现只在真实器材档位和同动作下一组形成确定性建议", async () => {
-  const { app } = fixture();
-  await bootstrapPlan(app, "bench_press.dumbbell.flat.standard.bilateral.full_rom");
-  await app.executeDomainCommand({
-    type: "equipment_profile.revise",
-    equipmentProfileId: "gym",
-    expectedRevision: 0,
-    equipmentProfile: {
-      id: "gym",
-      name: "健身房",
-      equipmentIds: ["dumbbell_pair"],
-      equipment: [{ id: "dumbbell_pair", status: "available", discreteLoads: [
-        { value: 18, unit: "kg" }, { value: 20, unit: "kg" }, { value: 22, unit: "kg" },
-      ] }],
-    },
-    meta: { userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "phone", occurredAt: "2026-08-08T07:02:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "progression-equipment" },
-  });
-  await app.prepareWorkoutSession({
-    userId: "u1",
-    workoutId: "workout-progress",
-    prescriptionRef: { planId: "plan", planRevision: 1, sessionPrescriptionId: "push" },
-    idempotencyKey: "progression-prepare",
-  });
-  await app.activateWorkoutSession({ userId: "u1", workoutId: "workout-progress", idempotencyKey: "progression-start" });
-  await app.editUpcomingWorkoutPlan({
-    userId: "u1",
-    workoutId: "workout-progress",
-    change: { kind: "adjust_set", taskId: "press", setId: "set-2", patch: { targetLoad: { value: 22, unit: "kg" } } },
-    reason: "user_configured_next_set",
-    idempotencyKey: "progression-set-next-target",
-  });
-  const draft = await app.saveCurrentSetDraft({
-    userId: "u1",
-    workoutId: "workout-progress",
-    idempotencyKey: "progression-draft",
-    draft: { actualLoad: { value: 22, unit: "kg" }, actualReps: 6, actualRir: 0 },
-  });
-  const outcome = await app.confirmCurrentSet({
-    userId: "u1",
-    workoutId: "workout-progress",
-    draftId: draft.id,
-    idempotencyKey: "progression-confirm",
-  });
-  const recommendation = await app.recommendNextWorkoutSet({
-    userId: "u1",
-    workoutId: "workout-progress",
-    sourceOutcomeId: outcome.id,
-  });
-  assert.equal(recommendation.status, "proposal");
-  assert.equal(recommendation.decision.decision, "reduce_load");
-  assert.deepEqual(recommendation.change, {
-    kind: "adjust_set",
-    taskId: "press",
-    setId: "set-2",
-    patch: { targetLoad: { value: 20, unit: "kg" } },
-  });
-  const replayedRecommendation = await app.recommendNextWorkoutSet({
-    userId: "u1",
-    workoutId: "workout-progress",
-    sourceOutcomeId: outcome.id,
-  });
-  assert.deepEqual(replayedRecommendation.change, recommendation.change);
-  assert.equal((await app.listActionLog("u1")).filter((event) => event.intent === "workout.next_set_rule_assessment").length, 1);
-  await app.dismissNextWorkoutSetRecommendation({
-    recommendation,
-    disposition: "ignored",
-    idempotencyKey: "progression-ignore-once",
-  });
-  assert.ok((await app.listActionLog("u1")).some((event) =>
-    event.intent === "workout.next_set_recommendation.ignored"
-    && event.after.disposition === "ignored"
-    && event.after.prescriptionChanged === false
-  ));
-  const applied = await app.applyNextWorkoutSetRecommendation({
-    recommendation,
-    idempotencyKey: "progression-apply",
-  });
-  assert.equal(applied.frozenPrescription.tasks[0]?.sets[1]?.targetLoad?.value, 20);
-  const actionLog = await app.listActionLog("u1");
-  assert.ok(actionLog.some((event) => event.intent === "workout.revise_prescription" && event.targetId === "workout-progress"));
-
-  await assert.rejects(
-    app.applyNextWorkoutSetRecommendation({ recommendation, idempotencyKey: "progression-apply-stale" }),
-    /stale_next_set_recommendation/,
-  );
-});
-
-test("重复 partial WorkoutOutcome 才触发保守漏练重排；单次 partial 只复核当前训练", async () => {
-  const { app, setNow } = fixture();
-  await bootstrapPlan(app);
-  await app.prepareWorkoutSession({
-    userId: "u1", workoutId: "miss-1", prescriptionRef: { planId: "plan", planRevision: 1, sessionPrescriptionId: "push" }, idempotencyKey: "miss-prepare-1",
-  });
-  await app.activateWorkoutSession({ userId: "u1", workoutId: "miss-1", idempotencyKey: "miss-activate-1" });
-  await app.completeWorkoutSession({ userId: "u1", workoutId: "miss-1", status: "partial", idempotencyKey: "miss-complete-1" });
-  assert.equal((await app.readLatestReplanEvaluation("u1"))?.evaluation.trigger.kind, "session_completed");
-
-  setNow("2026-08-10T07:00:00.000+08:00");
-  await app.prepareWorkoutSession({
-    userId: "u1", workoutId: "miss-2", prescriptionRef: { planId: "plan", planRevision: 1, sessionPrescriptionId: "push" }, idempotencyKey: "miss-prepare-2",
-  });
-  await app.activateWorkoutSession({ userId: "u1", workoutId: "miss-2", idempotencyKey: "miss-activate-2" });
-  await app.completeWorkoutSession({ userId: "u1", workoutId: "miss-2", status: "partial", idempotencyKey: "miss-complete-2" });
-  const evaluation = await app.readLatestReplanEvaluation("u1");
-  assert.equal(evaluation?.evaluation.trigger.kind, "repeated_missed_sessions");
-  assert.equal(evaluation?.evaluation.trigger.causationId, "miss-2");
-});
 
 test("已提交的组和训练结果只通过追加更正链改变当前视图", async () => {
   const { app, ledger } = fixture();
@@ -858,7 +520,6 @@ test("已提交的组和训练结果只通过追加更正链改变当前视图",
   assert.equal(workout.setOutcomes[0]?.actualLoad?.value, 17.5);
   assert.equal(workout.setOutcomes[0]?.actualReps, 7);
   assert.equal(workout.setOutcomes[0]?.source, "user_confirmed");
-  assert.equal(workout.setOutcomes[0]?.packetRef, undefined);
   assert.equal(workout.setOutcomeCorrections?.length, 1);
   assert.equal(workout.setOutcomeCorrections?.[0]?.correctsOutcomeId, first.id);
   const recordedEvents = (await ledger.read()).domainEvents.filter((event) => event.aggregate.id === "workout-correction");
@@ -884,7 +545,7 @@ test("已提交的组和训练结果只通过追加更正链改变当前视图",
     (await app.listActionLog("u1", { changesOnly: true })).filter((event) => event.action === "workout.corrected").length,
     2,
   );
-  const afterRestart = new CoachApplication({
+  const afterRestart = new LocalProductKernel({
     ledger,
     runtime: { now: () => "2026-08-08T08:00:00.000+08:00", nextId: (prefix) => `restart-${prefix}` },
   });
@@ -967,7 +628,7 @@ test("跳过一组是可回放的执行事实，不伪造完成训练量", async
   assert.deepEqual(outcome.skippedPrescriptionSetIds, ["set-1"]);
   assert.equal(outcome.dataCompleteness, "partial");
 
-  const afterRestart = new CoachApplication({
+  const afterRestart = new LocalProductKernel({
     ledger,
     runtime: { now: () => "2026-08-08T08:00:00.000+08:00", nextId: (prefix) => `restart-${prefix}` },
   });

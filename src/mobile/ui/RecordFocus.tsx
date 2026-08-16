@@ -1,24 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
-import type { CoachApplication } from "../../coach";
+import type { RecordModule } from "../../records";
 import { createManualMealObservation, type FoodEntryData } from "../../nutrition";
 import {
-  FoodLibraryPicker,
+  BottomDrawer,
   MovementLibraryPicker,
-  FocusSurface,
-  RecordCaptureComposer,
   RecordConfirmationBar,
   RecordField,
-  RecordIntentGrid,
   RecordPills,
   RecordSection,
   type DailyMovementChoice,
-  type FocusSurfaceAnchor,
-  type FoodLibraryChoice,
   type RecordIntent,
 } from "../ui-kit";
 import { colors, radius } from "./theme";
+import { userFacingError } from "../userFacingError";
+import { mobileT } from "../../i18n";
+
 
 /**
  * One daily-log surface. Strength and cardio deliberately share the user
@@ -26,16 +24,7 @@ import { colors, radius } from "./theme";
  * when written to Timeline.
  */
 export type RecordFocusMode = "training" | "activity" | "nutrition" | "sleep" | "recovery" | "body";
-
-type TrainingExerciseDraft = {
-  id: string;
-  name: string;
-  conceptId?: string;
-  setCount: string;
-  reps: string;
-  loadKg: string;
-  rir: string;
-};
+export type RecordFocusInitialMode = RecordFocusMode | "picker";
 
 type CardioDraft = {
   id: string;
@@ -43,7 +32,7 @@ type CardioDraft = {
   durationMinutes: string;
   distanceKm: string;
   energyKcal: string;
-  intensity: "easy" | "moderate" | "hard";
+  intensity?: "easy" | "moderate" | "hard";
   perceivedExertion: string;
 };
 
@@ -51,96 +40,105 @@ type MealFoodDraft = {
   id: string;
   name: string;
   grams: string;
-  library?: FoodLibraryChoice;
 };
 
-const RECORD_INTENTS = [
-  { id: "training" as const, label: "运动", detail: "力量、有氧", glyph: "↗" },
-  { id: "nutrition" as const, label: "吃喝", detail: "食物与份量", glyph: "◒" },
-  { id: "check_in" as const, label: "恢复", detail: "睡眠与感受", glyph: "○" },
+const RECORD_MODES: readonly { id: RecordFocusMode; labelKey: string; detailKey: string; glyph: string }[] = [
+  { id: "training", labelKey: "mobile.record.drawer.mode.strength", detailKey: "mobile.record.drawer.mode.strengthDetail", glyph: "↗" },
+  { id: "activity", labelKey: "mobile.record.drawer.mode.cardio", detailKey: "mobile.record.drawer.mode.cardioDetail", glyph: "≈" },
+  { id: "nutrition", labelKey: "mobile.record.drawer.mode.nutrition", detailKey: "mobile.record.drawer.mode.nutritionDetail", glyph: "◇" },
+  { id: "sleep", labelKey: "mobile.record.drawer.mode.sleep", detailKey: "mobile.record.drawer.mode.sleepDetail", glyph: "☾" },
+  { id: "recovery", labelKey: "mobile.record.drawer.mode.recovery", detailKey: "mobile.record.drawer.mode.recoveryDetail", glyph: "○" },
+  { id: "body", labelKey: "mobile.record.drawer.mode.body", detailKey: "mobile.record.drawer.mode.bodyDetail", glyph: "+" },
 ] as const;
 
-/**
- * The user records what actually happened. The optional free-form path is
- * still useful for "我刚练完" / "午饭吃了…"; it goes to Coach as a source
- * labelled Capture, never as an unreviewed inference.
- */
+/** Manual entry writes the same typed facts that Coach tools can write. */
 export function RecordFocus({
-  application,
+  records,
   userId,
-  initialMode = "training",
+  initialMode = "picker",
   referenceWeightKg,
   syncedSleepMinutes,
   visible,
-  anchor,
   onDismiss,
   onSaved,
-  onAskCoach,
-  onEstimateMeal,
+  onStartFreestyleWorkout,
 }: {
-  application: CoachApplication;
+  records: RecordModule;
   userId: string;
-  initialMode?: RecordFocusMode;
+  initialMode?: RecordFocusInitialMode;
   referenceWeightKg?: number;
   /** Latest confirmed sleep imported from an authorized health source for today. */
   syncedSleepMinutes?: number;
   visible: boolean;
-  anchor?: FocusSurfaceAnchor;
   onDismiss(): void;
   onSaved(): void;
-  onAskCoach(prompt: string): void;
-  /** Creates a review-only nutrition estimate from text; it never writes a meal directly. */
-  onEstimateMeal(description: string): void;
+  onStartFreestyleWorkout(): void;
 }) {
-  const [entryMode, setEntryMode] = useState<RecordFocusMode>(initialMode);
-  const [quickCapture, setQuickCapture] = useState("");
-  const [trainingDuration, setTrainingDuration] = useState("");
-  const [trainingNote, setTrainingNote] = useState("");
-  const [trainingExercises, setTrainingExercises] = useState<TrainingExerciseDraft[]>([]);
+  const [entryMode, setEntryMode] = useState<RecordFocusMode>(initialMode === "picker" ? "training" : initialMode);
+  const [showPicker, setShowPicker] = useState(initialMode === "picker");
   const [cardioEntries, setCardioEntries] = useState<CardioDraft[]>([]);
   const [movementPickerOpen, setMovementPickerOpen] = useState(false);
-  const [mealSlot, setMealSlot] = useState<"breakfast" | "lunch" | "dinner" | "snack">("snack");
+  const [mealSlot, setMealSlot] = useState<"breakfast" | "lunch" | "dinner" | "snack">();
   const [mealFoods, setMealFoods] = useState<MealFoodDraft[]>([]);
   const [customFood, setCustomFood] = useState("");
   const [mealDescription, setMealDescription] = useState("");
+  const [dayCoverage, setDayCoverage] = useState<"partial" | "complete">("partial");
   const [showNutritionDetail, setShowNutritionDetail] = useState(false);
   const [energyKcal, setEnergyKcal] = useState("");
   const [proteinGrams, setProteinGrams] = useState("");
   const [fatGrams, setFatGrams] = useState("");
   const [carbohydrateGrams, setCarbohydrateGrams] = useState("");
+  const [fiberGrams, setFiberGrams] = useState("");
+  const [sodiumMg, setSodiumMg] = useState("");
+  const [potassiumMg, setPotassiumMg] = useState("");
+  const [calciumMg, setCalciumMg] = useState("");
+  const [ironMg, setIronMg] = useState("");
+  const [magnesiumMg, setMagnesiumMg] = useState("");
+  const [vitaminCMg, setVitaminCMg] = useState("");
   const [sleepDuration, setSleepDuration] = useState("");
-  const [sleepQuality, setSleepQuality] = useState("3");
+  const [sleepQuality, setSleepQuality] = useState("");
   const [manualSleep, setManualSleep] = useState(false);
-  const [recoveryScore, setRecoveryScore] = useState("3");
+  const [recoveryScore, setRecoveryScore] = useState("");
+  const [painSeverity, setPainSeverity] = useState("");
+  const [painArea, setPainArea] = useState("");
+  const [clinicalContext, setClinicalContext] = useState<"diagnosed_condition" | "medication" | "pregnancy_or_postpartum" | "recent_surgery_or_acute_injury" | "eating_disorder_or_low_energy_risk" | "other">();
   const [bodyValue, setBodyValue] = useState("");
-  const [bodyMetric, setBodyMetric] = useState<"body_weight" | "body_fat_percentage">("body_weight");
+  const [bodyMetric, setBodyMetric] = useState<"body_weight" | "body_fat_percentage" | "waist_circumference" | "shoulder_circumference">("body_weight");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const wasVisible = useRef(visible);
 
   useEffect(() => {
     if (visible && !wasVisible.current) {
-      setEntryMode(initialMode);
-      setQuickCapture("");
-      setTrainingDuration("");
-      setTrainingNote("");
-      setTrainingExercises([]);
+      setEntryMode(initialMode === "picker" ? "training" : initialMode);
+      setShowPicker(initialMode === "picker");
       setCardioEntries([]);
       setMovementPickerOpen(false);
-      setMealSlot("snack");
+      setMealSlot(undefined);
       setMealFoods([]);
       setCustomFood("");
       setMealDescription("");
+      setDayCoverage("partial");
       setShowNutritionDetail(false);
       setEnergyKcal("");
       setProteinGrams("");
       setFatGrams("");
       setCarbohydrateGrams("");
+      setFiberGrams("");
+      setSodiumMg("");
+      setPotassiumMg("");
+      setCalciumMg("");
+      setIronMg("");
+      setMagnesiumMg("");
+      setVitaminCMg("");
       setSleepDuration("");
-      setSleepQuality("3");
+      setSleepQuality("");
       setError(undefined);
       setManualSleep(false);
-      setRecoveryScore("3");
+      setRecoveryScore("");
+      setPainSeverity("");
+      setPainArea("");
+      setClinicalContext(undefined);
       setBodyValue("");
       setBodyMetric("body_weight");
     }
@@ -152,28 +150,10 @@ export function RecordFocus({
     : entryMode === "sleep" || entryMode === "recovery" || entryMode === "body"
       ? "check_in"
       : "training";
-  const mealPreview = useMemo(() => mealPreviewFromDraft(mealFoods), [mealFoods]);
-
-  const selectIntent = (intent: RecordIntent) => {
-    setError(undefined);
-    setEntryMode(intent === "check_in" ? "recovery" : intent === "nutrition" ? "nutrition" : "training");
-  };
-
-  const askCoach = () => {
-    const capture = quickCapture.trim();
-    if (!capture) {
-      setError("先写下今天发生了什么。");
-      return;
-    }
-    onAskCoach([
-      "用户正在报告今天真实发生的事，并希望你代为整理记录。它是用户陈述，不是传感器或规则推测。",
-      "事实清晰、字段足够且当前授权允许代办时，可使用受控记录工具写入；否则只生成可编辑的记录草稿并追问必要项。",
-      "自定义动作或有氧可以保留用户原始名称；不得把视觉识别、规则估算或缺失信息当成用户事实，也不得虚构重量、组数、热量或营养数值。",
-      "若用户要求估算有氧消耗，只能生成待确认的估算记录，不能直接写入。",
-      "\n原始记录：",
-      capture,
-    ].join("\n"));
-  };
+  const mealPreview = useMemo(
+    () => manualNutritionTotals({ energyKcal, proteinGrams, fatGrams, carbohydrateGrams, fiberGrams, sodiumMg, potassiumMg, calciumMg, ironMg, magnesiumMg, vitaminCMg }),
+    [energyKcal, proteinGrams, fatGrams, carbohydrateGrams, fiberGrams, sodiumMg, potassiumMg, calciumMg, ironMg, magnesiumMg, vitaminCMg],
+  );
 
   const addMovement = (choice: DailyMovementChoice) => {
     setError(undefined);
@@ -182,7 +162,8 @@ export function RecordFocus({
       setCardioEntries((current) => [...current, newCardio(choice.name)]);
       return;
     }
-    setTrainingExercises((current) => [...current, newTrainingExercise(choice.name, choice.id)]);
+    onDismiss();
+    onStartFreestyleWorkout();
   };
   const addCustomMovement = ({ name, kind }: { name: string; kind: "strength" | "cardio" }) => {
     setError(undefined);
@@ -191,29 +172,12 @@ export function RecordFocus({
       setCardioEntries((current) => [...current, newCardio(name)]);
       return;
     }
-    setTrainingExercises((current) => [...current, newTrainingExercise(name)]);
-  };
-  const askCoachAboutCustomMovement = ({ name, kind }: { name: string; kind: "strength" | "cardio" }) => {
-    setError(undefined);
-    setMovementPickerOpen(false);
-    onAskCoach([
-      "用户要补录一个动作库还没有收录的今日运动。名称保持为用户原话，不要擅自映射为标准动作。",
-      `类型：${kind === "cardio" ? "有氧" : "力量"}`,
-      `名称：${name}`,
-      kind === "cardio"
-        ? "请让用户补充时长、强度、距离或设备/手表实际消耗。若用户要你估算消耗，可提出 energyEstimateKcal，但它必须形成待确认草稿，不能直接写入。"
-        : "请让用户补充实际组数、次数、重量和 RIR；只有用户明确说出的数字才可写入 exercises。没有说出的字段留空或追问，不能猜。",
-    ].join("\n"));
+    onDismiss();
+    onStartFreestyleWorkout();
   };
 
-  const updateTrainingExercise = (id: string, change: Partial<TrainingExerciseDraft>) => {
-    setTrainingExercises((current) => current.map((exercise) => exercise.id === id ? { ...exercise, ...change } : exercise));
-  };
   const updateCardio = (id: string, change: Partial<CardioDraft>) => {
     setCardioEntries((current) => current.map((entry) => entry.id === id ? { ...entry, ...change } : entry));
-  };
-  const addFood = (food: FoodLibraryChoice) => {
-    setMealFoods((current) => [...current, { id: `food:${nextId()}`, name: food.name, grams: String(food.servingGrams), library: food }]);
   };
   const addCustomFood = () => {
     const name = customFood.trim();
@@ -225,158 +189,141 @@ export function RecordFocus({
     setMealFoods((current) => current.map((food) => food.id === id ? { ...food, ...change } : food));
   };
 
-  const requestMealEstimate = () => {
-    const description = [mealDescription.trim(), ...mealFoods.map((food) => `${food.name}${food.grams.trim() ? ` ${food.grams.trim()}g` : ""}`)].filter(Boolean).join("、");
-    if (!description) {
-      setError("先写下或选中这餐吃了什么。");
-      return;
-    }
-    onEstimateMeal(description);
-  };
-
   const save = async () => {
     const now = new Date();
     const recoveryScoreValue = optionalFiniteNumber(recoveryScore);
+    const painSeverityValue = optionalFiniteNumber(painSeverity);
     const sleepQualityValue = optionalFiniteNumber(sleepQuality);
     const bodyValueNumber = optionalFiniteNumber(bodyValue);
-    const training = trainingSessionFromDraft({
-      durationMinutes: optionalFiniteNumber(trainingDuration),
-      note: trainingNote,
-      exercises: trainingExercises,
-    });
+    const enteredNutrition = manualNutritionTotals({ energyKcal, proteinGrams, fatGrams, carbohydrateGrams, fiberGrams, sodiumMg, potassiumMg, calciumMg, ironMg, magnesiumMg, vitaminCMg });
+    const nutritionTotals = enteredNutrition;
     const cardio = cardioFactsFromDraft(cardioEntries, referenceWeightKg);
     const isMovement = activeIntent === "training";
-    if (isMovement && !training && !cardio.length) {
-      setError("从动作列表选择今天做过的运动，再填写实际完成情况。");
+    if (isMovement && !cardio.length) {
+      setError(mobileT("mobile.ui.recordfocus.6be3fbdc6c"));
       return;
     }
     if (isMovement && cardioEntries.length !== cardio.length) {
-      setError("每项有氧至少填写时长；距离、强度和消耗可选。");
+      setError(mobileT("mobile.ui.recordfocus.fbbf81efe5"));
       return;
     }
-    if (entryMode === "nutrition" && !mealFoods.length && !mealDescription.trim()) {
-      setError("选择食物，或写下这餐吃了什么。");
+    if (entryMode === "nutrition" && !mealFoods.length && !mealDescription.trim() && !nutritionTotals.hasAny) {
+      setError(mobileT("mobile.ui.recordfocus.7adea750f0"));
       return;
     }
-    if (entryMode === "recovery" && (recoveryScoreValue === undefined || recoveryScoreValue < 1 || recoveryScoreValue > 5)) {
-      setError("请选择 1 到 5。");
+    if (entryMode === "nutrition" && !mealSlot) {
+      setError(mobileT("mobile.ui.recordfocus.c5c31bdebe"));
+      return;
+    }
+    if (entryMode === "recovery" && recoveryScoreValue === undefined && painSeverityValue === undefined && !clinicalContext) {
+      setError(mobileT("mobile.ui.recordfocus.8ceebaa0c2"));
+      return;
+    }
+    if (entryMode === "recovery" && ((recoveryScoreValue !== undefined && (recoveryScoreValue < 1 || recoveryScoreValue > 5)) || (painSeverityValue !== undefined && (painSeverityValue < 0 || painSeverityValue > 10)))) {
+      setError(mobileT("mobile.ui.recordfocus.8ceebaa0c2"));
       return;
     }
     if (entryMode === "sleep" && syncedSleepMinutes !== undefined && !manualSleep) {
-      setError("昨晚睡眠已同步；如需修改，请选择手动补记。");
+      setError(mobileT("mobile.ui.recordfocus.b3952caba5"));
       return;
     }
     if (entryMode === "sleep" && (sleepQualityValue === undefined || sleepQualityValue < 1 || sleepQualityValue > 5 || optionalFiniteNumber(sleepDuration) === undefined || optionalFiniteNumber(sleepDuration)! <= 0)) {
-      setError("填写睡眠时长和质量。");
+      setError(mobileT("mobile.ui.recordfocus.f9ac3b5823"));
       return;
     }
     if (entryMode === "body" && (bodyValueNumber === undefined || bodyValueNumber <= 0 || (bodyMetric === "body_fat_percentage" && bodyValueNumber > 100))) {
-      setError(bodyMetric === "body_weight" ? "填写体重。" : "体脂率应在 0 到 100 之间。");
+      setError(bodyMetric === "body_weight" ? mobileT("mobile.ui.recordfocus.e700124e03") : mobileT("mobile.ui.recordfocus.a7feba185d"));
       return;
     }
 
     setSaving(true);
     setError(undefined);
     try {
+      const confirmManualFact = (fact: import("../../coach/domain").TimelineFact, idempotencyKey: string) =>
+        records.recordFact({ userId, idempotencyKey, fact, occurredAt: now.toISOString(), source: "manual_form" });
       if (entryMode === "nutrition") {
-        const manualTotals = manualNutritionTotals({ energyKcal, proteinGrams, fatGrams, carbohydrateGrams });
         const foods = foodEntriesFromDraft(mealFoods);
-        const calculated = manualTotals.hasAny ? manualTotals : mealPreview;
-        const description = mealDescription.trim() || mealFoods.map((food) => food.name).join("、");
+        const description = mealDescription.trim() || mealFoods.map((food) => food.name).join("、") || "手动营养数值";
+        const nutrients = nutrientValuesFromManualTotals(nutritionTotals, `form:mobile-meal:${now.getTime()}`);
         const observation = createManualMealObservation({
           id: `manual-meal:${now.getTime()}`,
           occurredAt: now.toISOString(),
           description,
-          mealSlot,
+          mealSlot: mealSlot!,
           foods,
-          mode: calculated.hasAny ? "precise" : "simplified",
-          provenance: "manual",
-          ...(calculated.energy !== undefined ? { energyKcal: calculated.energy } : {}),
-          ...(calculated.protein !== undefined ? { proteinGrams: calculated.protein } : {}),
-          ...(calculated.fat !== undefined ? { fatGrams: calculated.fat } : {}),
-          ...(calculated.carbohydrate !== undefined ? { carbohydrateGrams: calculated.carbohydrate } : {}),
-          ...(calculated.hasAny ? {} : { simplified: { proteinCompletion: "partial" as const, hunger: "moderate" as const, deviation: "none" as const } }),
+          mode: nutrients.length ? "structured" : "descriptive",
+          provenance: "manual_form",
+          dayCoverage,
+          ...(nutrients.length ? { nutrients } : {}),
         });
-        await application.confirmMealObservation({
-          userId,
-          idempotencyKey: `mobile-meal:${now.getTime()}`,
-          source: "manual",
-          observation,
-        });
+        await records.recordNutrition({ userId, idempotencyKey: `mobile-meal:${now.getTime()}`, observation });
         onSaved();
         return;
       }
 
       if (isMovement) {
-        if (training) {
-          await application.recordTimelineFact({
-            userId,
-            idempotencyKey: `mobile-movement:${now.getTime()}:strength`,
-            fact: { kind: "training", reportedSession: training, confidence: "confirmed" },
-            envelope: recordEnvelope(now),
-          });
-        }
         for (const [index, fact] of cardio.entries()) {
-          await application.recordTimelineFact({
-            userId,
-            idempotencyKey: `mobile-movement:${now.getTime()}:cardio:${index}`,
-            fact,
-            envelope: recordEnvelope(now),
-          });
+          await confirmManualFact(fact, `mobile-movement:${now.getTime()}:cardio:${index}`);
         }
         onSaved();
         return;
       }
 
-      await application.recordTimelineFact({
-        userId,
-        idempotencyKey: `mobile-record:${now.getTime()}`,
-        fact: entryMode === "sleep"
+      if (entryMode === "recovery") {
+        if (recoveryScoreValue !== undefined) await confirmManualFact({ kind: "recovery", perceivedRecovery: recoveryScoreValue, confidence: "confirmed" }, `mobile-recovery:${now.getTime()}`);
+        if (painSeverityValue !== undefined) await confirmManualFact({ kind: "symptom", symptom: "pain", severity: painSeverityValue, ...(painArea.trim() ? { area: painArea.trim() } : {}), confidence: "confirmed" }, `mobile-pain:${now.getTime()}`);
+        if (clinicalContext) await confirmManualFact({ kind: "clinical_context", context: clinicalContext, confidence: "confirmed" }, `mobile-clinical:${now.getTime()}`);
+        onSaved();
+        return;
+      }
+
+      await confirmManualFact(entryMode === "sleep"
           ? { kind: "sleep", duration: { value: optionalFiniteNumber(sleepDuration)!, unit: "minutes" }, quality: sleepQualityValue, confidence: "confirmed" }
-          : entryMode === "recovery"
-            ? { kind: "recovery", perceivedRecovery: recoveryScoreValue, confidence: "confirmed" }
-            : {
+          : {
                 kind: "body",
                 measurement: bodyMetric === "body_weight"
                   ? { metric: "body_weight", quantity: { value: bodyValueNumber!, unit: "kg" } }
-                  : { metric: "body_fat_percentage", quantity: { value: bodyValueNumber!, unit: "percent" } },
+                  : bodyMetric === "body_fat_percentage"
+                    ? { metric: "body_fat_percentage", quantity: { value: bodyValueNumber!, unit: "percent" } }
+                    : { metric: "circumference", site: bodyMetric === "waist_circumference" ? "waist" : "shoulder", quantity: { value: bodyValueNumber!, unit: "cm" }, condition: "manual_consistent_protocol" },
                 confidence: "confirmed",
-              },
-        envelope: recordEnvelope(now),
-      });
+              }, `mobile-record:${now.getTime()}`);
       onSaved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "暂时未能保存记录");
+      setError(userFacingError(cause, mobileT("mobile.ui.recordfocus.4feadcc4da")));
     } finally {
       setSaving(false);
     }
   };
 
-  return <FocusSurface visible={visible} anchor={anchor} accessibilityLabel="收起记录" onDismiss={onDismiss}>
-    <View style={styles.panel}>
-      <View style={styles.header}>
-        <View><Text style={styles.title}>记录今天</Text><Text style={styles.subtitle}>运动、吃喝与恢复</Text></View>
-        <Pressable accessibilityRole="button" accessibilityLabel="收起记录" onPress={onDismiss} style={styles.close}><Text style={styles.closeText}>×</Text></Pressable>
-      </View>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-        <RecordCaptureComposer value={quickCapture} onChangeText={setQuickCapture} onSubmit={askCoach} />
-        <RecordIntentGrid value={activeIntent} options={RECORD_INTENTS} onChange={selectIntent} />
-
+  const modeCopy = recordModeCopy(entryMode);
+  return <BottomDrawer
+    visible={visible}
+    tall={!showPicker}
+    title={showPicker ? mobileT("mobile.record.drawer.title") : modeCopy.label}
+    subtitle={showPicker ? mobileT("mobile.record.drawer.subtitle") : modeCopy.detail}
+    onDismiss={onDismiss}
+    leadingAction={!showPicker ? <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.record.drawer.back")} onPress={() => setShowPicker(true)} style={styles.back}><Text style={styles.backText}>‹</Text></Pressable> : undefined}
+  >
+    <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, showPicker && styles.pickerContent]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      {showPicker ? <RecordModePicker onSelect={(mode) => {
+        setError(undefined);
+        if (mode === "training") {
+          onDismiss();
+          onStartFreestyleWorkout();
+          return;
+        }
+        setEntryMode(mode);
+        setShowPicker(false);
+        if (mode === "activity") setMovementPickerOpen(true);
+      }} /> : <>
         {activeIntent === "training" ? <MovementEntry
-          duration={trainingDuration}
-          note={trainingNote}
-          exercises={trainingExercises}
           cardioEntries={cardioEntries}
           pickerOpen={movementPickerOpen}
           referenceWeightKg={referenceWeightKg}
-          onDurationChange={setTrainingDuration}
-          onNoteChange={setTrainingNote}
           onOpenPicker={() => setMovementPickerOpen((current) => !current)}
           onMovementSelected={addMovement}
           onCustomMovement={addCustomMovement}
-          onAskCoachAboutCustomMovement={askCoachAboutCustomMovement}
-          onExerciseChange={updateTrainingExercise}
-          onExerciseRemove={(id) => setTrainingExercises((current) => current.filter((exercise) => exercise.id !== id))}
           onCardioChange={updateCardio}
           onCardioRemove={(id) => setCardioEntries((current) => current.filter((entry) => entry.id !== id))}
         /> : null}
@@ -386,30 +333,47 @@ export function RecordFocus({
           foods={mealFoods}
           customFood={customFood}
           description={mealDescription}
+          dayCoverage={dayCoverage}
           showDetail={showNutritionDetail}
           energy={energyKcal}
           protein={proteinGrams}
           fat={fatGrams}
           carbohydrate={carbohydrateGrams}
+          fiber={fiberGrams}
+          sodium={sodiumMg}
+          potassium={potassiumMg}
+          calcium={calciumMg}
+          iron={ironMg}
+          magnesium={magnesiumMg}
+          vitaminC={vitaminCMg}
           preview={mealPreview}
           onSlotChange={setMealSlot}
-          onFoodSelected={addFood}
           onFoodChange={updateFood}
           onFoodRemove={(id) => setMealFoods((current) => current.filter((food) => food.id !== id))}
           onCustomFoodChange={setCustomFood}
           onAddCustomFood={addCustomFood}
           onDescriptionChange={setMealDescription}
+          onDayCoverageChange={setDayCoverage}
           onToggleDetail={() => setShowNutritionDetail((value) => !value)}
           onEnergyChange={setEnergyKcal}
           onProteinChange={setProteinGrams}
           onFatChange={setFatGrams}
           onCarbohydrateChange={setCarbohydrateGrams}
-          onEstimate={requestMealEstimate}
+          onFiberChange={setFiberGrams}
+          onSodiumChange={setSodiumMg}
+          onPotassiumChange={setPotassiumMg}
+          onCalciumChange={setCalciumMg}
+          onIronChange={setIronMg}
+          onMagnesiumChange={setMagnesiumMg}
+          onVitaminCChange={setVitaminCMg}
         /> : null}
 
         {activeIntent === "check_in" ? <CheckInEntry
           mode={entryMode === "sleep" || entryMode === "body" ? entryMode : "recovery"}
           recoveryScore={recoveryScore}
+          painSeverity={painSeverity}
+          painArea={painArea}
+          clinicalContext={clinicalContext}
           sleepQuality={sleepQuality}
           sleepDuration={sleepDuration}
           syncedSleepMinutes={syncedSleepMinutes}
@@ -418,6 +382,9 @@ export function RecordFocus({
           bodyMetric={bodyMetric}
           onModeChange={setEntryMode}
           onRecoveryScoreChange={setRecoveryScore}
+          onPainSeverityChange={setPainSeverity}
+          onPainAreaChange={setPainArea}
+          onClinicalContextChange={setClinicalContext}
           onSleepQualityChange={setSleepQuality}
           onSleepDurationChange={setSleepDuration}
           onUseManualSleep={() => setManualSleep(true)}
@@ -427,151 +394,152 @@ export function RecordFocus({
 
         {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
         {!(entryMode === "sleep" && syncedSleepMinutes !== undefined && !manualSleep) ? <RecordConfirmationBar label={confirmationLabel(activeIntent, mealPreview.energy)} busy={saving} onConfirm={() => void save()} /> : null}
-      </ScrollView>
-    </View>
-  </FocusSurface>;
+      </>}
+    </ScrollView>
+  </BottomDrawer>;
 }
 
-function MovementEntry({ duration, note, exercises, cardioEntries, pickerOpen, referenceWeightKg, onDurationChange, onNoteChange, onOpenPicker, onMovementSelected, onCustomMovement, onAskCoachAboutCustomMovement, onExerciseChange, onExerciseRemove, onCardioChange, onCardioRemove }: {
-  duration: string;
-  note: string;
-  exercises: readonly TrainingExerciseDraft[];
+function RecordModePicker({ onSelect }: { onSelect(mode: RecordFocusMode): void }) {
+  return <View style={styles.modeGrid}>{RECORD_MODES.map((mode) => <Pressable
+    key={mode.id}
+    accessibilityRole="button"
+    accessibilityLabel={mobileT(mode.labelKey)}
+    onPress={() => onSelect(mode.id)}
+    style={({ pressed }) => [styles.modeCard, pressed && styles.modeCardPressed]}
+  >
+    <View style={styles.modeGlyph}><Text style={styles.modeGlyphText}>{mode.glyph}</Text></View>
+    <Text style={styles.modeLabel}>{mobileT(mode.labelKey)}</Text>
+    <Text style={styles.modeDetail}>{mobileT(mode.detailKey)}</Text>
+  </Pressable>)}</View>;
+}
+
+function recordModeCopy(mode: RecordFocusMode): { label: string; detail: string } {
+  const item = RECORD_MODES.find((candidate) => candidate.id === mode) ?? RECORD_MODES[0];
+  return { label: mobileT(item.labelKey), detail: mobileT(item.detailKey) };
+}
+
+function MovementEntry({ cardioEntries, pickerOpen, referenceWeightKg, onOpenPicker, onMovementSelected, onCustomMovement, onCardioChange, onCardioRemove }: {
   cardioEntries: readonly CardioDraft[];
   pickerOpen: boolean;
   referenceWeightKg?: number;
-  onDurationChange(value: string): void;
-  onNoteChange(value: string): void;
   onOpenPicker(): void;
   onMovementSelected(choice: DailyMovementChoice): void;
   onCustomMovement(input: { name: string; kind: "strength" | "cardio" }): void;
-  onAskCoachAboutCustomMovement(input: { name: string; kind: "strength" | "cardio" }): void;
-  onExerciseChange(id: string, change: Partial<TrainingExerciseDraft>): void;
-  onExerciseRemove(id: string): void;
   onCardioChange(id: string, change: Partial<CardioDraft>): void;
   onCardioRemove(id: string): void;
 }) {
-  return <RecordSection title="今天的运动" action={<Pressable accessibilityRole="button" onPress={onOpenPicker} style={styles.addAction}><Text style={styles.addActionText}>{pickerOpen ? "收起" : "＋ 选择运动"}</Text></Pressable>}>
-    {pickerOpen ? <MovementLibraryPicker onSelect={onMovementSelected} onCustom={onCustomMovement} onAskCoach={onAskCoachAboutCustomMovement} /> : null}
-    {exercises.length ? <View style={styles.logGroup}><Text style={styles.groupLabel}>力量</Text>{exercises.map((exercise, index) => <TrainingExerciseCard key={exercise.id} exercise={exercise} index={index} onChange={(change) => onExerciseChange(exercise.id, change)} onRemove={() => onExerciseRemove(exercise.id)} />)}</View> : null}
-    {cardioEntries.length ? <View style={styles.logGroup}><Text style={styles.groupLabel}>有氧</Text>{cardioEntries.map((entry) => <CardioEntryCard key={entry.id} entry={entry} referenceWeightKg={referenceWeightKg} onChange={(change) => onCardioChange(entry.id, change)} onRemove={() => onCardioRemove(entry.id)} />)}</View> : null}
-    {!exercises.length && !cardioEntries.length && !pickerOpen ? <Pressable accessibilityRole="button" onPress={onOpenPicker} style={styles.emptyMovement}><Text style={styles.emptyMovementText}>选择今天做过的运动</Text><Text style={styles.emptyMovementArrow}>＋</Text></Pressable> : null}
-    {(exercises.length || cardioEntries.length) ? <><View style={styles.metricRow}><RecordField label="总时长" unit="min" value={duration} onChangeText={onDurationChange} keyboardType="decimal-pad" /></View><TextInput accessibilityLabel="运动备注" value={note} onChangeText={onNoteChange} placeholder="备注（可选）" placeholderTextColor={colors.ink3} style={styles.noteInput} /></> : null}
+  return <RecordSection title={mobileT("mobile.ui.recordfocus.6398d8919f")} action={<Pressable accessibilityRole="button" onPress={onOpenPicker} style={styles.addAction}><Text style={styles.addActionText}>{pickerOpen ? mobileT("mobile.ui.recordfocus.5d5815647c") : mobileT("mobile.ui.recordfocus.b8f9049e54")}</Text></Pressable>}>
+    {pickerOpen ? <MovementLibraryPicker onSelect={onMovementSelected} onCustom={onCustomMovement} /> : null}
+    {cardioEntries.length ? <View style={styles.logGroup}><Text style={styles.groupLabel}>{mobileT("mobile.ui.recordfocus.25b132283f")}</Text>{cardioEntries.map((entry) => <CardioEntryCard key={entry.id} entry={entry} referenceWeightKg={referenceWeightKg} onChange={(change) => onCardioChange(entry.id, change)} onRemove={() => onCardioRemove(entry.id)} />)}</View> : null}
+    {!cardioEntries.length && !pickerOpen ? <Pressable accessibilityRole="button" onPress={onOpenPicker} style={styles.emptyMovement}><Text style={styles.emptyMovementText}>{mobileT("mobile.ui.recordfocus.d73b56afe4")}</Text><Text style={styles.emptyMovementArrow}>＋</Text></Pressable> : null}
   </RecordSection>;
-}
-
-function TrainingExerciseCard({ exercise, index, onChange, onRemove }: { exercise: TrainingExerciseDraft; index: number; onChange(change: Partial<TrainingExerciseDraft>): void; onRemove(): void }) {
-  return <View style={styles.exerciseCard}>
-    <View style={styles.exerciseHeading}><Text style={styles.exerciseIndex}>{String(index + 1).padStart(2, "0")}</Text><Text style={styles.exerciseName}>{exercise.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={`删除 ${exercise.name}`} onPress={onRemove} hitSlop={8}><Text style={styles.removeAction}>×</Text></Pressable></View>
-    <View style={styles.trainingMetrics}>
-      <RecordField label="组数" value={exercise.setCount} onChangeText={(setCount) => onChange({ setCount })} keyboardType="decimal-pad" />
-      <RecordField label="每组" unit="次" value={exercise.reps} onChangeText={(reps) => onChange({ reps })} keyboardType="decimal-pad" />
-      <RecordField label="重量" unit="kg" value={exercise.loadKg} onChangeText={(loadKg) => onChange({ loadKg })} keyboardType="decimal-pad" />
-      <RecordField label="RIR" value={exercise.rir} onChangeText={(rir) => onChange({ rir })} keyboardType="decimal-pad" />
-    </View>
-  </View>;
 }
 
 function CardioEntryCard({ entry, referenceWeightKg, onChange, onRemove }: { entry: CardioDraft; referenceWeightKg?: number; onChange(change: Partial<CardioDraft>): void; onRemove(): void }) {
   const estimated = estimateCardioEnergy({ activityType: entry.activityType, minutes: optionalFiniteNumber(entry.durationMinutes), intensity: entry.intensity, referenceWeightKg });
   const shownEnergy = optionalFiniteNumber(entry.energyKcal) ?? estimated?.kcal;
   return <View style={styles.exerciseCard}>
-    <View style={styles.exerciseHeading}><Text style={styles.cardioMark}>◌</Text><Text style={styles.exerciseName}>{entry.activityType}</Text><Pressable accessibilityRole="button" accessibilityLabel={`删除 ${entry.activityType}`} onPress={onRemove} hitSlop={8}><Text style={styles.removeAction}>×</Text></Pressable></View>
-    <View style={styles.cardioMetrics}><RecordField label="时长" unit="min" value={entry.durationMinutes} onChangeText={(durationMinutes) => onChange({ durationMinutes })} keyboardType="decimal-pad" /><RecordField label="距离" unit="km" value={entry.distanceKm} onChangeText={(distanceKm) => onChange({ distanceKm })} keyboardType="decimal-pad" /><RecordField label="消耗" unit="kcal" value={entry.energyKcal} onChangeText={(energyKcal) => onChange({ energyKcal })} keyboardType="decimal-pad" /><RecordField label="RPE" unit="/10" value={entry.perceivedExertion} onChangeText={(perceivedExertion) => onChange({ perceivedExertion })} keyboardType="decimal-pad" /></View>
-    <RecordPills value={entry.intensity} options={[{ id: "easy" as const, label: "轻松" }, { id: "moderate" as const, label: "适中" }, { id: "hard" as const, label: "吃力" }]} onChange={(intensity) => onChange({ intensity })} compact />
-    {shownEnergy !== undefined ? <Text style={styles.cardioEstimate}>{entry.energyKcal.trim() ? `${Math.round(shownEnergy)} kcal · 用户填写` : `约 ${Math.round(shownEnergy)} kcal · ${estimated?.basis ?? "本地估算"}`}</Text> : null}
+    <View style={styles.exerciseHeading}><Text style={styles.cardioMark}>◌</Text><Text style={styles.exerciseName}>{entry.activityType}</Text><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.recordfocus.834f5a99f8", { value0: entry.activityType })} onPress={onRemove} hitSlop={8}><Text style={styles.removeAction}>×</Text></Pressable></View>
+    <View style={styles.cardioMetrics}><RecordField label={mobileT("mobile.ui.recordfocus.29d0552d2e")} unit="min" value={entry.durationMinutes} onChangeText={(durationMinutes) => onChange({ durationMinutes })} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.ui.recordfocus.b3480678b6")} unit="km" value={entry.distanceKm} onChangeText={(distanceKm) => onChange({ distanceKm })} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.ui.recordfocus.c77f5c7a72")} unit="kcal" value={entry.energyKcal} onChangeText={(energyKcal) => onChange({ energyKcal })} keyboardType="decimal-pad" /><RecordField label="RPE" unit="/10" value={entry.perceivedExertion} onChangeText={(perceivedExertion) => onChange({ perceivedExertion })} keyboardType="decimal-pad" /></View>
+    <RecordPills value={entry.intensity} options={[{ id: "easy" as const, label: mobileT("mobile.ui.recordfocus.c9c4a72eeb") }, { id: "moderate" as const, label: mobileT("mobile.ui.recordfocus.ff08d13e6a") }, { id: "hard" as const, label: mobileT("mobile.ui.recordfocus.6ee6e775bb") }]} onChange={(intensity) => onChange({ intensity })} compact />
+    {shownEnergy !== undefined ? <Text style={styles.cardioEstimate}>{entry.energyKcal.trim() ? mobileT("mobile.ui.recordfocus.47e85b4dcd", { value0: Math.round(shownEnergy) }) : mobileT("mobile.ui.recordfocus.80b46ef828", { value0: Math.round(shownEnergy), value1: estimated?.basis ?? mobileT("mobile.record.estimate.local") })}</Text> : null}
   </View>;
 }
 
-function NutritionEntry({ mealSlot, foods, customFood, description, showDetail, energy, protein, fat, carbohydrate, preview, onSlotChange, onFoodSelected, onFoodChange, onFoodRemove, onCustomFoodChange, onAddCustomFood, onDescriptionChange, onToggleDetail, onEnergyChange, onProteinChange, onFatChange, onCarbohydrateChange, onEstimate }: {
-  mealSlot: "breakfast" | "lunch" | "dinner" | "snack";
+function NutritionEntry({ mealSlot, foods, customFood, description, dayCoverage, showDetail, energy, protein, fat, carbohydrate, fiber, sodium, potassium, calcium, iron, magnesium, vitaminC, preview, onSlotChange, onFoodChange, onFoodRemove, onCustomFoodChange, onAddCustomFood, onDescriptionChange, onDayCoverageChange, onToggleDetail, onEnergyChange, onProteinChange, onFatChange, onCarbohydrateChange, onFiberChange, onSodiumChange, onPotassiumChange, onCalciumChange, onIronChange, onMagnesiumChange, onVitaminCChange }: {
+  mealSlot: "breakfast" | "lunch" | "dinner" | "snack" | undefined;
   foods: readonly MealFoodDraft[];
   customFood: string;
   description: string;
+  dayCoverage: "partial" | "complete";
   showDetail: boolean;
   energy: string;
   protein: string;
   fat: string;
   carbohydrate: string;
+  fiber: string;
+  sodium: string;
+  potassium: string;
+  calcium: string;
+  iron: string;
+  magnesium: string;
+  vitaminC: string;
   preview: NutritionTotals;
   onSlotChange(value: "breakfast" | "lunch" | "dinner" | "snack"): void;
-  onFoodSelected(choice: FoodLibraryChoice): void;
   onFoodChange(id: string, change: Partial<MealFoodDraft>): void;
   onFoodRemove(id: string): void;
   onCustomFoodChange(value: string): void;
   onAddCustomFood(): void;
   onDescriptionChange(value: string): void;
+  onDayCoverageChange(value: "partial" | "complete"): void;
   onToggleDetail(): void;
   onEnergyChange(value: string): void;
   onProteinChange(value: string): void;
   onFatChange(value: string): void;
   onCarbohydrateChange(value: string): void;
-  onEstimate(): void;
+  onFiberChange(value: string): void;
+  onSodiumChange(value: string): void;
+  onPotassiumChange(value: string): void;
+  onCalciumChange(value: string): void;
+  onIronChange(value: string): void;
+  onMagnesiumChange(value: string): void;
+  onVitaminCChange(value: string): void;
 }) {
-  return <RecordSection title="这餐吃了什么" action={<Pressable accessibilityRole="button" onPress={onToggleDetail} style={styles.addAction}><Text style={styles.addActionText}>{showDetail ? "收起热量" : "手填热量"}</Text></Pressable>}>
-    <RecordPills value={mealSlot} options={[{ id: "breakfast" as const, label: "早餐" }, { id: "lunch" as const, label: "午餐" }, { id: "dinner" as const, label: "晚餐" }, { id: "snack" as const, label: "加餐" }]} onChange={onSlotChange} compact />
-    <FoodLibraryPicker onSelect={onFoodSelected} />
+  return <RecordSection title={mobileT("mobile.ui.recordfocus.76f08d8c85")} action={<Pressable accessibilityRole="button" onPress={onToggleDetail} style={styles.addAction}><Text style={styles.addActionText}>{showDetail ? mobileT("mobile.ui.recordfocus.a137cbf51d") : mobileT("mobile.ui.recordfocus.3e979cf595")}</Text></Pressable>}>
+    <RecordPills value={mealSlot} options={[{ id: "breakfast" as const, label: mobileT("mobile.ui.recordfocus.cc13bb1556") }, { id: "lunch" as const, label: mobileT("mobile.ui.recordfocus.663529e2e8") }, { id: "dinner" as const, label: mobileT("mobile.ui.recordfocus.5413d30d2b") }, { id: "snack" as const, label: mobileT("mobile.ui.recordfocus.5b606147f6") }]} onChange={onSlotChange} compact />
     {foods.length ? <View style={styles.logGroup}>{foods.map((food) => <FoodEntryCard key={food.id} food={food} onChange={(change) => onFoodChange(food.id, change)} onRemove={() => onFoodRemove(food.id)} />)}</View> : null}
-    <View style={styles.customFoodRow}><TextInput accessibilityLabel="自定义食物" value={customFood} onChangeText={onCustomFoodChange} placeholder="没有找到？输入食物" placeholderTextColor={colors.ink3} style={styles.customFoodInput} /><Pressable accessibilityRole="button" onPress={onAddCustomFood} style={styles.addFoodButton}><Text style={styles.addFoodButtonText}>添加</Text></Pressable></View>
-    <TextInput accessibilityLabel="餐食补充描述" value={description} onChangeText={onDescriptionChange} placeholder="例如：外卖少油、酱汁另放" placeholderTextColor={colors.ink3} multiline style={[styles.noteInput, styles.mealInput]} />
-    <Pressable accessibilityRole="button" onPress={onEstimate} style={styles.estimateButton}><Text style={styles.estimateButtonText}>让 Coach 估算这餐</Text><Text style={styles.estimateButtonArrow}>↗</Text></Pressable>
-    {showDetail ? <View style={styles.nutritionMetrics}><RecordField label="整餐热量" unit="kcal" value={energy} onChangeText={onEnergyChange} keyboardType="decimal-pad" /><RecordField label="蛋白" unit="g" value={protein} onChangeText={onProteinChange} keyboardType="decimal-pad" /><RecordField label="脂肪" unit="g" value={fat} onChangeText={onFatChange} keyboardType="decimal-pad" /><RecordField label="碳水" unit="g" value={carbohydrate} onChangeText={onCarbohydrateChange} keyboardType="decimal-pad" /></View> : null}
-    {preview.hasAny && !showDetail ? <Text style={styles.foodPreview}>已选食物约 {Math.round(preview.energy ?? 0)} kcal · 蛋白 {Math.round(preview.protein ?? 0)} g</Text> : null}
+    <View style={styles.customFoodRow}><TextInput accessibilityLabel={mobileT("mobile.ui.recordfocus.f5634084f6")} value={customFood} onChangeText={onCustomFoodChange} placeholder={mobileT("mobile.ui.recordfocus.4c5f696269")} placeholderTextColor={colors.ink3} style={styles.customFoodInput} /><Pressable accessibilityRole="button" onPress={onAddCustomFood} style={styles.addFoodButton}><Text style={styles.addFoodButtonText}>{mobileT("mobile.ui.recordfocus.94191ce210")}</Text></Pressable></View>
+    <TextInput accessibilityLabel={mobileT("mobile.ui.recordfocus.7ebe6983e6")} value={description} onChangeText={onDescriptionChange} placeholder={mobileT("mobile.ui.recordfocus.d2209743d9")} placeholderTextColor={colors.ink3} multiline style={[styles.noteInput, styles.mealInput]} />
+    <RecordPills value={dayCoverage} options={[{ id: "partial" as const, label: mobileT("mobile.record.coverage.partial") }, { id: "complete" as const, label: mobileT("mobile.record.coverage.complete") }]} onChange={onDayCoverageChange} compact />
+    {showDetail ? <View style={styles.nutritionMetrics}><RecordField label={mobileT("mobile.ui.recordfocus.b22f3de6f1")} unit="kcal" value={energy} onChangeText={onEnergyChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.ui.recordfocus.8807d098eb")} unit="g" value={protein} onChangeText={onProteinChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.ui.recordfocus.2eef1156d9")} unit="g" value={fat} onChangeText={onFatChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.ui.recordfocus.3215da61d1")} unit="g" value={carbohydrate} onChangeText={onCarbohydrateChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.fiber")} unit="g" value={fiber} onChangeText={onFiberChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.sodium")} unit="mg" value={sodium} onChangeText={onSodiumChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.potassium")} unit="mg" value={potassium} onChangeText={onPotassiumChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.calcium")} unit="mg" value={calcium} onChangeText={onCalciumChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.iron")} unit="mg" value={iron} onChangeText={onIronChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.magnesium")} unit="mg" value={magnesium} onChangeText={onMagnesiumChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.nutrient.vitaminC")} unit="mg" value={vitaminC} onChangeText={onVitaminCChange} keyboardType="decimal-pad" /></View> : null}
+    {preview.hasAny && !showDetail ? <Text style={styles.foodPreview}>{mobileT("mobile.ui.recordfocus.6104826dd1")}{Math.round(preview.energy ?? 0)} {mobileT("mobile.ui.recordfocus.78c8694083")}{Math.round(preview.protein ?? 0)} g</Text> : null}
   </RecordSection>;
 }
 
 function FoodEntryCard({ food, onChange, onRemove }: { food: MealFoodDraft; onChange(change: Partial<MealFoodDraft>): void; onRemove(): void }) {
-  const perPortion = food.library ? nutritionForFood(food) : undefined;
-  return <View style={styles.foodCard}><View style={styles.foodHeading}><Text style={styles.foodName}>{food.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={`删除 ${food.name}`} onPress={onRemove}><Text style={styles.removeAction}>×</Text></Pressable></View><View style={styles.foodPortionRow}><TextInput accessibilityLabel={`${food.name} 克数`} value={food.grams} onChangeText={(grams) => onChange({ grams })} keyboardType="decimal-pad" placeholder="份量" placeholderTextColor={colors.ink3} style={styles.gramInput} /><Text style={styles.gramUnit}>g</Text>{perPortion ? <Text style={styles.foodNutrients}>{Math.round(perPortion.kcal)} kcal · P {Math.round(perPortion.protein)} g</Text> : <Text style={styles.foodUnknown}>待估算</Text>}</View></View>;
+  return <View style={styles.foodCard}><View style={styles.foodHeading}><Text style={styles.foodName}>{food.name}</Text><Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.recordfocus.834f5a99f8", { value0: food.name })} onPress={onRemove}><Text style={styles.removeAction}>×</Text></Pressable></View><View style={styles.foodPortionRow}><TextInput accessibilityLabel={mobileT("mobile.ui.recordfocus.2a8629d751", { value0: food.name })} value={food.grams} onChangeText={(grams) => onChange({ grams })} keyboardType="decimal-pad" placeholder={mobileT("mobile.ui.recordfocus.442704e38b")} placeholderTextColor={colors.ink3} style={styles.gramInput} /><Text style={styles.gramUnit}>g</Text><Text style={styles.foodUnknown}>{mobileT("mobile.record.nutrition.valuesUnknown")}</Text></View></View>;
 }
 
-function CheckInEntry({ mode, recoveryScore, sleepQuality, sleepDuration, syncedSleepMinutes, manualSleep, bodyValue, bodyMetric, onModeChange, onRecoveryScoreChange, onSleepQualityChange, onSleepDurationChange, onUseManualSleep, onBodyValueChange, onBodyMetricChange }: {
+function CheckInEntry({ mode, recoveryScore, painSeverity, painArea, clinicalContext, sleepQuality, sleepDuration, syncedSleepMinutes, manualSleep, bodyValue, bodyMetric, onModeChange, onRecoveryScoreChange, onPainSeverityChange, onPainAreaChange, onClinicalContextChange, onSleepQualityChange, onSleepDurationChange, onUseManualSleep, onBodyValueChange, onBodyMetricChange }: {
   mode: "sleep" | "recovery" | "body";
   recoveryScore: string;
+  painSeverity: string;
+  painArea: string;
+  clinicalContext: "diagnosed_condition" | "medication" | "pregnancy_or_postpartum" | "recent_surgery_or_acute_injury" | "eating_disorder_or_low_energy_risk" | "other" | undefined;
   sleepQuality: string;
   sleepDuration: string;
   syncedSleepMinutes?: number;
   manualSleep: boolean;
   bodyValue: string;
-  bodyMetric: "body_weight" | "body_fat_percentage";
+  bodyMetric: "body_weight" | "body_fat_percentage" | "waist_circumference" | "shoulder_circumference";
   onModeChange(value: "sleep" | "recovery" | "body"): void;
   onRecoveryScoreChange(value: string): void;
+  onPainSeverityChange(value: string): void;
+  onPainAreaChange(value: string): void;
+  onClinicalContextChange(value: "diagnosed_condition" | "medication" | "pregnancy_or_postpartum" | "recent_surgery_or_acute_injury" | "eating_disorder_or_low_energy_risk" | "other" | undefined): void;
   onSleepQualityChange(value: string): void;
   onSleepDurationChange(value: string): void;
   onUseManualSleep(): void;
   onBodyValueChange(value: string): void;
-  onBodyMetricChange(value: "body_weight" | "body_fat_percentage"): void;
+  onBodyMetricChange(value: "body_weight" | "body_fat_percentage" | "waist_circumference" | "shoulder_circumference"): void;
 }) {
-  return <RecordSection title="今天的恢复">
-    <RecordPills value={mode} options={[{ id: "recovery" as const, label: "恢复感受" }, { id: "sleep" as const, label: "昨晚睡眠" }, { id: "body" as const, label: "身体数据" }]} onChange={onModeChange} />
+  return <RecordSection title={mobileT("mobile.ui.recordfocus.101b4bf4e0")}>
+    <RecordPills value={mode} options={[{ id: "recovery" as const, label: mobileT("mobile.ui.recordfocus.8031458006") }, { id: "sleep" as const, label: mobileT("mobile.ui.recordfocus.ed5fe3562d") }, { id: "body" as const, label: mobileT("mobile.ui.recordfocus.c4f02d8543") }]} onChange={onModeChange} />
     {mode === "sleep" ? syncedSleepMinutes !== undefined && !manualSleep
-      ? <View style={styles.syncedSleep}><View><Text style={styles.syncedSleepLabel}>已同步昨晚睡眠</Text><Text style={styles.syncedSleepValue}>{formatSleepMinutes(syncedSleepMinutes)}</Text></View><Pressable accessibilityRole="button" onPress={onUseManualSleep} style={styles.addAction}><Text style={styles.addActionText}>手动补记</Text></Pressable></View>
-      : <><Text style={styles.recoveryHint}>没有同步数据时，可在这里补记。</Text><RecordField label="睡眠时长" unit="min" value={sleepDuration} onChangeText={onSleepDurationChange} keyboardType="decimal-pad" /><ScorePills value={sleepQuality} onChange={onSleepQualityChange} /></> : null}
-    {mode === "recovery" ? <><Text style={styles.recoveryHint}>今天恢复怎样？只记录你的感受，不诊断原因。</Text><ScorePills value={recoveryScore} onChange={onRecoveryScoreChange} /></> : null}
-    {mode === "body" ? <><RecordPills value={bodyMetric} options={[{ id: "body_weight" as const, label: "体重" }, { id: "body_fat_percentage" as const, label: "体脂" }]} onChange={onBodyMetricChange} compact /><RecordField label={bodyMetric === "body_weight" ? "体重" : "体脂"} unit={bodyMetric === "body_weight" ? "kg" : "%"} value={bodyValue} onChangeText={onBodyValueChange} keyboardType="decimal-pad" /></> : null}
+      ? <View style={styles.syncedSleep}><View><Text style={styles.syncedSleepLabel}>{mobileT("mobile.ui.recordfocus.91e92a82d2")}</Text><Text style={styles.syncedSleepValue}>{formatSleepMinutes(syncedSleepMinutes)}</Text></View><Pressable accessibilityRole="button" onPress={onUseManualSleep} style={styles.addAction}><Text style={styles.addActionText}>{mobileT("mobile.ui.recordfocus.560d275288")}</Text></Pressable></View>
+      : <><Text style={styles.recoveryHint}>{mobileT("mobile.ui.recordfocus.b20d4a0c01")}</Text><RecordField label={mobileT("mobile.ui.recordfocus.2e4066b90c")} unit="min" value={sleepDuration} onChangeText={onSleepDurationChange} keyboardType="decimal-pad" /><ScorePills value={sleepQuality} onChange={onSleepQualityChange} /></> : null}
+    {mode === "recovery" ? <><Text style={styles.recoveryHint}>{mobileT("mobile.ui.recordfocus.231373da56")}</Text><ScorePills value={recoveryScore} onChange={onRecoveryScoreChange} /><RecordField label={mobileT("mobile.record.painSeverity")} unit="/10" value={painSeverity} onChangeText={onPainSeverityChange} keyboardType="decimal-pad" /><RecordField label={mobileT("mobile.record.painArea")} value={painArea} onChangeText={onPainAreaChange} /><RecordPills value={clinicalContext} options={[{ id: "diagnosed_condition" as const, label: mobileT("mobile.record.clinical.diagnosed") }, { id: "medication" as const, label: mobileT("mobile.record.clinical.medication") }, { id: "pregnancy_or_postpartum" as const, label: mobileT("mobile.record.clinical.pregnancy") }, { id: "recent_surgery_or_acute_injury" as const, label: mobileT("mobile.record.clinical.injury") }, { id: "eating_disorder_or_low_energy_risk" as const, label: mobileT("mobile.record.clinical.energyRisk") }, { id: "other" as const, label: mobileT("mobile.record.clinical.other") }]} onChange={(value) => onClinicalContextChange(value === clinicalContext ? undefined : value)} compact /></> : null}
+    {mode === "body" ? <><RecordPills value={bodyMetric} options={[{ id: "body_weight" as const, label: mobileT("mobile.ui.recordfocus.3193595c29") }, { id: "body_fat_percentage" as const, label: mobileT("mobile.ui.recordfocus.338f5241cc") }, { id: "waist_circumference" as const, label: mobileT("mobile.record.waist") }, { id: "shoulder_circumference" as const, label: mobileT("mobile.record.shoulder") }]} onChange={onBodyMetricChange} compact /><RecordField label={bodyMetric === "body_weight" ? mobileT("mobile.ui.recordfocus.3193595c29") : bodyMetric === "body_fat_percentage" ? mobileT("mobile.ui.recordfocus.338f5241cc") : bodyMetric === "waist_circumference" ? mobileT("mobile.record.waist") : mobileT("mobile.record.shoulder")} unit={bodyMetric === "body_weight" ? "kg" : bodyMetric === "body_fat_percentage" ? "%" : "cm"} value={bodyValue} onChangeText={onBodyValueChange} keyboardType="decimal-pad" /></> : null}
   </RecordSection>;
 }
 
 function ScorePills({ value, onChange }: { value: string; onChange(value: string): void }) {
-  return <RecordPills value={value} options={[["1", "很差"], ["2", "偏低"], ["3", "一般"], ["4", "不错"], ["5", "很好"]].map(([id, label]) => ({ id, label }))} onChange={onChange} compact />;
+  return <RecordPills value={value} options={[["1", mobileT("mobile.ui.recordfocus.83cd7e5511")], ["2", mobileT("mobile.ui.recordfocus.9d43ae1674")], ["3", mobileT("mobile.ui.recordfocus.f0aaccbc0d")], ["4", mobileT("mobile.ui.recordfocus.56e00434ba")], ["5", mobileT("mobile.ui.recordfocus.77833b3f8c")]].map(([id, label]) => ({ id, label }))} onChange={onChange} compact />;
 }
 
 function formatSleepMinutes(minutes: number): string {
   const rounded = Math.round(minutes);
   return `${Math.floor(rounded / 60)} h ${rounded % 60} min`;
-}
-
-function trainingSessionFromDraft(input: { durationMinutes: number | undefined; note: string; exercises: readonly TrainingExerciseDraft[] }) {
-  const exercises = input.exercises.flatMap((exercise) => {
-    const setCount = optionalInteger(exercise.setCount);
-    const reps = optionalInteger(exercise.reps);
-    const load = optionalFiniteNumber(exercise.loadKg);
-    const rir = optionalFiniteNumber(exercise.rir);
-    if (setCount === undefined || setCount < 1 || setCount > 99 || reps === undefined || reps < 0 || (load !== undefined && load < 0) || (rir !== undefined && (rir < 0 || rir > 10))) return [];
-    return [{ name: exercise.name, ...(exercise.conceptId ? { exerciseConceptId: exercise.conceptId } : {}), sets: Array.from({ length: setCount }, () => ({ reps, ...(load === undefined ? {} : { load: { value: load, unit: "kg" as const } }), ...(rir === undefined ? {} : { rir }) })) }];
-  });
-  const note = input.note.trim();
-  if (!exercises.length && !note && !input.durationMinutes) return undefined;
-  return { summary: "自主训练", ...(input.durationMinutes && input.durationMinutes > 0 ? { duration: { value: input.durationMinutes, unit: "minutes" as const } } : {}), ...(note ? { note } : {}), ...(exercises.length ? { exercises } : {}) };
 }
 
 function cardioFactsFromDraft(entries: readonly CardioDraft[], referenceWeightKg?: number) {
@@ -583,67 +551,87 @@ function cardioFactsFromDraft(entries: readonly CardioDraft[], referenceWeightKg
     const distance = optionalFiniteNumber(entry.distanceKm);
     const energy = manualEnergy ?? estimated?.kcal;
     const rpe = optionalFiniteNumber(entry.perceivedExertion);
-    return [{ kind: "activity" as const, activityType: entry.activityType, duration: { value: duration, unit: "minutes" as const }, ...(distance === undefined ? {} : { distance: { value: distance, unit: "km" as const } }), intensity: entry.intensity, ...(rpe === undefined ? {} : { perceivedExertion: Math.max(0, Math.min(10, rpe)) }), ...(energy === undefined ? {} : { energyExpenditure: { value: energy, unit: "kcal" as const }, energyExpenditureSource: manualEnergy === undefined ? "rule_estimate" as const : "manual" as const }), confidence: manualEnergy === undefined ? "estimated" as const : "confirmed" as const }];
+    return [{ kind: "activity" as const, activityType: entry.activityType, duration: { value: duration, unit: "minutes" as const }, ...(distance === undefined ? {} : { distance: { value: distance, unit: "km" as const } }), intensity: entry.intensity, ...(rpe === undefined ? {} : { perceivedExertion: Math.max(0, Math.min(10, rpe)) }), ...(energy === undefined ? {} : { energyExpenditure: { value: energy, unit: "kcal" as const }, energyExpenditureSource: manualEnergy === undefined ? "rule_estimate" as const : "manual" as const }), confidence: "confirmed" as const }];
   });
 }
 
-type NutritionTotals = { energy?: number; protein?: number; fat?: number; carbohydrate?: number; hasAny: boolean };
-
-function mealPreviewFromDraft(foods: readonly MealFoodDraft[]): NutritionTotals {
-  const known = foods.map(nutritionForFood).filter((value): value is { kcal: number; protein: number; fat: number; carbohydrate: number } => value !== undefined);
-  if (!known.length) return { hasAny: false };
-  return { energy: sum(known.map((item) => item.kcal)), protein: sum(known.map((item) => item.protein)), fat: sum(known.map((item) => item.fat)), carbohydrate: sum(known.map((item) => item.carbohydrate)), hasAny: true };
-}
-
-function nutritionForFood(food: MealFoodDraft): { kcal: number; protein: number; fat: number; carbohydrate: number } | undefined {
-  const grams = optionalFiniteNumber(food.grams);
-  if (!food.library || grams === undefined || grams <= 0) return undefined;
-  const multiplier = grams / 100;
-  return { kcal: food.library.per100g.kcal * multiplier, protein: food.library.per100g.protein * multiplier, fat: food.library.per100g.fat * multiplier, carbohydrate: food.library.per100g.carbohydrate * multiplier };
-}
+type NutritionTotals = { energy?: number; protein?: number; fat?: number; carbohydrate?: number; fiber?: number; sodium?: number; potassium?: number; calcium?: number; iron?: number; magnesium?: number; vitaminC?: number; hasAny: boolean };
 
 function foodEntriesFromDraft(foods: readonly MealFoodDraft[]): readonly FoodEntryData[] {
-  return foods.map((food) => {
-    const nutrients = nutritionForFood(food);
-    return { id: food.id, name: food.name, ...(food.grams.trim() ? { portion: `${food.grams.trim()} g` } : {}), ...(nutrients ? { energy: { value: Math.round(nutrients.kcal), unit: "kcal" as const }, proteinGrams: roundOne(nutrients.protein), fatGrams: roundOne(nutrients.fat), carbohydrateGrams: roundOne(nutrients.carbohydrate) } : {}), source: "manual" as const };
-  });
+  return foods.map((food) => ({ id: food.id, name: food.name, ...(food.grams.trim() ? { portion: `${food.grams.trim()} g` } : {}) }));
 }
 
-function manualNutritionTotals(input: { energyKcal: string; proteinGrams: string; fatGrams: string; carbohydrateGrams: string }): NutritionTotals {
+function manualNutritionTotals(input: { energyKcal: string; proteinGrams: string; fatGrams: string; carbohydrateGrams: string; fiberGrams: string; sodiumMg: string; potassiumMg: string; calciumMg: string; ironMg: string; magnesiumMg: string; vitaminCMg: string }): NutritionTotals {
   const energy = optionalFiniteNumber(input.energyKcal);
   const protein = optionalFiniteNumber(input.proteinGrams);
   const fat = optionalFiniteNumber(input.fatGrams);
   const carbohydrate = optionalFiniteNumber(input.carbohydrateGrams);
-  return { ...(energy === undefined ? {} : { energy }), ...(protein === undefined ? {} : { protein }), ...(fat === undefined ? {} : { fat }), ...(carbohydrate === undefined ? {} : { carbohydrate }), hasAny: [energy, protein, fat, carbohydrate].some((value) => value !== undefined) };
+  const fiber = optionalFiniteNumber(input.fiberGrams);
+  const sodium = optionalFiniteNumber(input.sodiumMg);
+  const potassium = optionalFiniteNumber(input.potassiumMg);
+  const calcium = optionalFiniteNumber(input.calciumMg);
+  const iron = optionalFiniteNumber(input.ironMg);
+  const magnesium = optionalFiniteNumber(input.magnesiumMg);
+  const vitaminC = optionalFiniteNumber(input.vitaminCMg);
+  return { ...(energy === undefined ? {} : { energy }), ...(protein === undefined ? {} : { protein }), ...(fat === undefined ? {} : { fat }), ...(carbohydrate === undefined ? {} : { carbohydrate }), ...(fiber === undefined ? {} : { fiber }), ...(sodium === undefined ? {} : { sodium }), ...(potassium === undefined ? {} : { potassium }), ...(calcium === undefined ? {} : { calcium }), ...(iron === undefined ? {} : { iron }), ...(magnesium === undefined ? {} : { magnesium }), ...(vitaminC === undefined ? {} : { vitaminC }), hasAny: [energy, protein, fat, carbohydrate, fiber, sodium, potassium, calcium, iron, magnesium, vitaminC].some((value) => value !== undefined) };
 }
 
-function recordEnvelope(now: Date) {
-  return { time: { startedAt: now.toISOString(), timezoneOffsetMinutes: -now.getTimezoneOffset() }, provenance: { origin: "manual" as const, recordingMethod: "manual_entry" as const, dataStatus: "available" as const, confidence: "confirmed" as const }, privacyClass: "sensitive" as const, causalRefs: [], evidenceRefs: [], layer: "raw_observation" as const };
+function nutrientValuesFromManualTotals(totals: NutritionTotals, ref: string) {
+  const source = { kind: "manual_form" as const, ref };
+  return [
+    ...(totals.energy === undefined ? [] : [{ nutrientId: "energy" as const, amount: totals.energy, unit: "kcal" as const, source }]),
+    ...(totals.protein === undefined ? [] : [{ nutrientId: "protein" as const, amount: totals.protein, unit: "g" as const, source }]),
+    ...(totals.carbohydrate === undefined ? [] : [{ nutrientId: "carbohydrate" as const, amount: totals.carbohydrate, unit: "g" as const, source }]),
+    ...(totals.fat === undefined ? [] : [{ nutrientId: "fat" as const, amount: totals.fat, unit: "g" as const, source }]),
+    ...(totals.fiber === undefined ? [] : [{ nutrientId: "fiber" as const, amount: totals.fiber, unit: "g" as const, source }]),
+    ...(totals.sodium === undefined ? [] : [{ nutrientId: "sodium" as const, amount: totals.sodium, unit: "mg" as const, source }]),
+    ...(totals.potassium === undefined ? [] : [{ nutrientId: "potassium" as const, amount: totals.potassium, unit: "mg" as const, source }]),
+    ...(totals.calcium === undefined ? [] : [{ nutrientId: "calcium" as const, amount: totals.calcium, unit: "mg" as const, source }]),
+    ...(totals.iron === undefined ? [] : [{ nutrientId: "iron" as const, amount: totals.iron, unit: "mg" as const, source }]),
+    ...(totals.magnesium === undefined ? [] : [{ nutrientId: "magnesium" as const, amount: totals.magnesium, unit: "mg" as const, source }]),
+    ...(totals.vitaminC === undefined ? [] : [{ nutrientId: "vitamin_c" as const, amount: totals.vitaminC, unit: "mg" as const, source }]),
+  ];
 }
 
-function newTrainingExercise(name: string, conceptId?: string): TrainingExerciseDraft { return { id: `exercise:${nextId()}`, name, ...(conceptId ? { conceptId } : {}), setCount: "3", reps: "10", loadKg: "", rir: "" }; }
-function newCardio(activityType: string): CardioDraft { return { id: `cardio:${nextId()}`, activityType, durationMinutes: "", distanceKm: "", energyKcal: "", intensity: "moderate", perceivedExertion: "" }; }
+function newCardio(activityType: string): CardioDraft { return { id: `cardio:${nextId()}`, activityType, durationMinutes: "", distanceKm: "", energyKcal: "", perceivedExertion: "" }; }
 function nextId(): string { return Math.random().toString(36).slice(2); }
 function optionalFiniteNumber(value: string): number | undefined { const parsed = Number(value.trim()); return value.trim() && Number.isFinite(parsed) ? parsed : undefined; }
-function optionalInteger(value: string): number | undefined { const number = optionalFiniteNumber(value); return number !== undefined && Number.isInteger(number) ? number : undefined; }
-function sum(values: readonly number[]): number { return values.reduce((total, value) => total + value, 0); }
-function roundOne(value: number): number { return Math.round(value * 10) / 10; }
-function confirmationLabel(intent: RecordIntent, nutritionEnergy: number | undefined): string { return intent === "training" ? "确认今天的运动" : intent === "nutrition" ? nutritionEnergy === undefined ? "确认这餐" : `确认 ${Math.round(nutritionEnergy)} kcal` : "确认记录"; }
+function confirmationLabel(intent: RecordIntent, nutritionEnergy: number | undefined): string {
+  return intent === "training"
+    ? mobileT("mobile.record.confirm.training")
+    : intent === "nutrition"
+      ? nutritionEnergy === undefined
+        ? mobileT("mobile.record.confirm.meal")
+        : mobileT("mobile.record.confirm.mealWithEnergy", { energy: Math.round(nutritionEnergy) })
+      : mobileT("mobile.record.confirm.generic");
+}
 
-function estimateCardioEnergy(input: { activityType: string; minutes: number | undefined; intensity: "easy" | "moderate" | "hard"; referenceWeightKg: number | undefined }): { kcal: number; basis: string } | undefined {
-  if (!input.minutes || input.minutes <= 0) return undefined;
+function estimateCardioEnergy(input: { activityType: string; minutes: number | undefined; intensity: "easy" | "moderate" | "hard" | undefined; referenceWeightKg: number | undefined }): { kcal: number; basis: string } | undefined {
+  if (!input.minutes || input.minutes <= 0 || !input.intensity || !input.referenceWeightKg || input.referenceWeightKg <= 0) return undefined;
   const matched = CARDIO_RULES.find((rule) => rule.keys.some((key) => input.activityType.trim().toLowerCase().includes(key)));
   if (!matched) return undefined;
-  const weight = input.referenceWeightKg && input.referenceWeightKg > 0 ? input.referenceWeightKg : 65;
+  const weight = input.referenceWeightKg;
   const intensityMultiplier = input.intensity === "easy" ? 0.8 : input.intensity === "hard" ? 1.2 : 1;
   const kcal = Math.round(matched.kcalPerHour * (input.minutes / 60) * (weight / 65) * intensityMultiplier / 5) * 5;
   return { kcal, basis: `${matched.label} · ${Math.round(weight)} kg` };
 }
 
 const CARDIO_RULES = [
-  { label: "跑步", keys: ["跑", "jog", "run"], kcalPerHour: 560 }, { label: "步行", keys: ["走", "walk", "徒步"], kcalPerHour: 250 }, { label: "骑行", keys: ["骑", "cycle", "bike", "动感"], kcalPerHour: 430 }, { label: "游泳", keys: ["游", "swim"], kcalPerHour: 490 }, { label: "跳绳", keys: ["跳绳", "rope"], kcalPerHour: 650 }, { label: "椭圆机", keys: ["椭圆", "elliptical"], kcalPerHour: 390 }, { label: "划船机", keys: ["划船", "row"], kcalPerHour: 440 }, { label: "球类", keys: ["球", "tennis", "badminton", "basketball", "football"], kcalPerHour: 410 },
+  { label: mobileT("mobile.ui.recordfocus.8eb2fcd697"), keys: ["跑", "jog", "run"], kcalPerHour: 560 }, { label: mobileT("mobile.ui.recordfocus.191f5b40d1"), keys: ["走", "walk", "徒步"], kcalPerHour: 250 }, { label: mobileT("mobile.ui.recordfocus.596c5a92ea"), keys: ["骑", "cycle", "bike", "动感"], kcalPerHour: 430 }, { label: mobileT("mobile.ui.recordfocus.b66f447bfc"), keys: ["游", "swim"], kcalPerHour: 490 }, { label: mobileT("mobile.ui.recordfocus.8c53f94cd9"), keys: ["跳绳", "rope"], kcalPerHour: 650 }, { label: mobileT("mobile.ui.recordfocus.97cd453e1a"), keys: ["椭圆", "elliptical"], kcalPerHour: 390 }, { label: mobileT("mobile.ui.recordfocus.91f9e59013"), keys: ["划船", "row"], kcalPerHour: 440 }, { label: mobileT("mobile.ui.recordfocus.4956a3eed5"), keys: ["球", "tennis", "badminton", "basketball", "football"], kcalPerHour: 410 },
 ] as const;
 
 const styles = StyleSheet.create({
-  panel: { flex: 1, minHeight: 0 }, header: { minHeight: 67, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line }, title: { color: colors.ink, fontSize: 20, fontWeight: "900", letterSpacing: -0.35 }, subtitle: { marginTop: 1, color: colors.ink3, fontSize: 11, fontWeight: "700" }, close: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: 18, backgroundColor: colors.paper2 }, closeText: { marginTop: -4, color: colors.ink, fontSize: 26, lineHeight: 29, fontWeight: "500" }, scroll: { flex: 1, minHeight: 0 }, content: { padding: 16, paddingBottom: 28, gap: 20 }, metricRow: { flexDirection: "row", gap: 10 }, logGroup: { gap: 9 }, groupLabel: { color: colors.ink3, fontSize: 11, fontWeight: "900", letterSpacing: 0.45 }, addAction: { minHeight: 32, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", borderRadius: radius.chip, backgroundColor: colors.paper2 }, addActionText: { color: colors.ink2, fontSize: 11, fontWeight: "900" }, emptyMovement: { minHeight: 82, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 18, backgroundColor: colors.paper2 }, emptyMovementText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, emptyMovementArrow: { color: colors.limeInk, fontSize: 26, fontWeight: "900" }, exerciseCard: { gap: 11, padding: 12, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, exerciseHeading: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 9 }, exerciseIndex: { width: 23, color: colors.limeInk, fontFamily: "monospace", fontSize: 10, fontWeight: "900" }, cardioMark: { width: 23, color: colors.limeInk, fontSize: 19, fontWeight: "900", textAlign: "center" }, exerciseName: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 15, fontWeight: "900" }, removeAction: { width: 26, color: colors.ink3, fontSize: 21, textAlign: "right" }, trainingMetrics: { flexDirection: "row", gap: 7 }, cardioMetrics: { flexDirection: "row", gap: 7 }, cardioEstimate: { color: colors.ink3, fontSize: 11, fontWeight: "700" }, noteInput: { minHeight: 50, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, fontSize: 14, fontWeight: "700" }, mealInput: { minHeight: 58, paddingTop: 12, textAlignVertical: "top" }, estimateButton: { minHeight: 48, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 16, backgroundColor: colors.dark }, estimateButtonText: { color: colors.white, fontSize: 13, fontWeight: "900" }, estimateButtonArrow: { color: colors.lime, fontSize: 21, fontWeight: "900" }, nutritionMetrics: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, foodCard: { gap: 8, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, foodHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, foodName: { color: colors.ink, fontSize: 14, fontWeight: "900" }, foodPortionRow: { flexDirection: "row", alignItems: "center", gap: 5 }, gramInput: { width: 58, minHeight: 32, padding: 0, color: colors.ink, fontFamily: "monospace", fontSize: 16, fontWeight: "900" }, gramUnit: { color: colors.ink3, fontSize: 11, fontWeight: "800" }, foodNutrients: { flex: 1, minWidth: 0, color: colors.ink2, fontSize: 11, fontWeight: "700", textAlign: "right" }, foodUnknown: { flex: 1, color: colors.terra, fontSize: 11, fontWeight: "800", textAlign: "right" }, customFoodRow: { flexDirection: "row", gap: 8 }, customFoodInput: { flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 13, borderRadius: 14, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, fontSize: 13, fontWeight: "700" }, addFoodButton: { minWidth: 64, minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.paper2 }, addFoodButtonText: { color: colors.ink, fontSize: 12, fontWeight: "900" }, foodPreview: { color: colors.limeInk, fontSize: 12, fontWeight: "800" }, recoveryHint: { color: colors.ink3, fontSize: 12, lineHeight: 17 }, syncedSleep: { minHeight: 84, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 18, backgroundColor: colors.paper2 }, syncedSleepLabel: { color: colors.ink3, fontSize: 11, fontWeight: "800" }, syncedSleepValue: { marginTop: 3, color: colors.ink, fontFamily: "monospace", fontSize: 22, fontWeight: "900" }, error: { color: colors.terra, fontSize: 12, fontWeight: "800" },
+  back: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: 19, backgroundColor: colors.paper2 },
+  backText: { marginTop: -2, color: colors.ink, fontSize: 25, lineHeight: 28, fontWeight: "600" },
+  scroll: { flex: 1, minHeight: 0 },
+  content: { padding: 16, paddingBottom: 28, gap: 20 },
+  pickerContent: { paddingTop: 6 },
+  modeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  modeCard: { width: "48.5%", minHeight: 126, padding: 14, justifyContent: "flex-end", borderRadius: 19, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white },
+  modeCardPressed: { opacity: 0.72, transform: [{ scale: 0.985 }] },
+  modeGlyph: { width: 34, height: 34, marginBottom: 18, alignItems: "center", justifyContent: "center", borderRadius: 11, backgroundColor: colors.dark },
+  modeGlyphText: { color: colors.lime, fontSize: 18, fontWeight: "900" },
+  modeLabel: { color: colors.ink, fontSize: 14, fontWeight: "900" },
+  modeDetail: { marginTop: 4, color: colors.ink3, fontSize: 10, lineHeight: 15, fontWeight: "700" },
+  metricRow: { flexDirection: "row", gap: 10 }, logGroup: { gap: 9 }, groupLabel: { color: colors.ink3, fontSize: 11, fontWeight: "900", letterSpacing: 0.45 }, addAction: { minHeight: 32, paddingHorizontal: 11, alignItems: "center", justifyContent: "center", borderRadius: radius.chip, backgroundColor: colors.paper2 }, addActionText: { color: colors.ink2, fontSize: 11, fontWeight: "900" }, emptyMovement: { minHeight: 82, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 18, backgroundColor: colors.paper2 }, emptyMovementText: { color: colors.ink2, fontSize: 14, fontWeight: "800" }, emptyMovementArrow: { color: colors.limeInk, fontSize: 26, fontWeight: "900" }, exerciseCard: { gap: 11, padding: 12, borderRadius: 18, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, exerciseHeading: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 9 }, exerciseIndex: { width: 23, color: colors.limeInk, fontFamily: "monospace", fontSize: 10, fontWeight: "900" }, cardioMark: { width: 23, color: colors.limeInk, fontSize: 19, fontWeight: "900", textAlign: "center" }, exerciseName: { flex: 1, minWidth: 0, color: colors.ink, fontSize: 15, fontWeight: "900" }, removeAction: { width: 26, color: colors.ink3, fontSize: 21, textAlign: "right" }, trainingMetrics: { flexDirection: "row", gap: 7 }, cardioMetrics: { flexDirection: "row", gap: 7 }, cardioEstimate: { color: colors.ink3, fontSize: 11, fontWeight: "700" }, noteInput: { minHeight: 50, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, fontSize: 14, fontWeight: "700" }, mealInput: { minHeight: 58, paddingTop: 12, textAlignVertical: "top" }, estimateButton: { minHeight: 48, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 16, backgroundColor: colors.dark }, estimateButtonText: { color: colors.white, fontSize: 13, fontWeight: "900" }, estimateButtonArrow: { color: colors.lime, fontSize: 21, fontWeight: "900" }, nutritionMetrics: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, foodCard: { gap: 8, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white }, foodHeading: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, foodName: { color: colors.ink, fontSize: 14, fontWeight: "900" }, foodPortionRow: { flexDirection: "row", alignItems: "center", gap: 5 }, gramInput: { width: 58, minHeight: 32, padding: 0, color: colors.ink, fontFamily: "monospace", fontSize: 16, fontWeight: "900" }, gramUnit: { color: colors.ink3, fontSize: 11, fontWeight: "800" }, foodNutrients: { flex: 1, minWidth: 0, color: colors.ink2, fontSize: 11, fontWeight: "700", textAlign: "right" }, foodUnknown: { flex: 1, color: colors.terra, fontSize: 11, fontWeight: "800", textAlign: "right" }, customFoodRow: { flexDirection: "row", gap: 8 }, customFoodInput: { flex: 1, minWidth: 0, minHeight: 46, paddingHorizontal: 13, borderRadius: 14, borderWidth: 1, borderColor: colors.line, backgroundColor: colors.white, color: colors.ink, fontSize: 13, fontWeight: "700" }, addFoodButton: { minWidth: 64, minHeight: 46, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: colors.paper2 }, addFoodButtonText: { color: colors.ink, fontSize: 12, fontWeight: "900" }, foodPreview: { color: colors.limeInk, fontSize: 12, fontWeight: "800" }, recoveryHint: { color: colors.ink3, fontSize: 12, lineHeight: 17 }, syncedSleep: { minHeight: 84, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 18, backgroundColor: colors.paper2 }, syncedSleepLabel: { color: colors.ink3, fontSize: 11, fontWeight: "800" }, syncedSleepValue: { marginTop: 3, color: colors.ink, fontFamily: "monospace", fontSize: 22, fontWeight: "900" }, error: { color: colors.terra, fontSize: 12, fontWeight: "800" },
 });

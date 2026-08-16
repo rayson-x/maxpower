@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { EMPTY_LEDGER_SNAPSHOT, InMemoryCoachLedger } from "../../src/coach/ledger";
 import type {
   ActionTokenRecord,
@@ -85,13 +85,13 @@ function memoryItem(id: string, expiresAt?: string, deletedAt?: string): Working
   };
 }
 
-test("planCoachStateSweep 把 streaming/resuming 的孤儿 run 终态化为 process_lost，suspended 与终态不动", () => {
+test("planCoachStateSweep 把 streaming/resuming 的孤儿 run 终态化为 process_lost，awaiting_user 与终态不动", () => {
   const snapshot = {
     ...emptySnapshot(),
     runs: [
       runRecord("run-streaming", "streaming"),
       runRecord("run-resuming", "resuming"),
-      runRecord("run-suspended", "suspended"),
+      runRecord("run-awaiting", "awaiting_user"),
       runRecord("run-completed", "completed"),
     ],
   };
@@ -99,7 +99,7 @@ test("planCoachStateSweep 把 streaming/resuming 的孤儿 run 终态化为 proc
   const swept = plan.runs.map((run) => run.id).sort();
   assert.deepEqual(swept, ["run-resuming", "run-streaming"]);
   for (const run of plan.runs) {
-    assert.equal(run.status, "terminated");
+    assert.equal(run.status, "interrupted");
     assert.equal(run.terminalCode, "process_lost");
     assert.equal(run.updatedAt, NOW);
   }
@@ -185,7 +185,7 @@ test("facade 清扫过期状态并可幂等重复执行", async () => {
   const first = await app.sweepExpiredCoachState("user-1");
   assert.equal(first.swept, 4);
   const snapshot = await ledger.read();
-  assert.equal(snapshot.runs.find((r) => r.id === "run-orphan")?.status, "terminated");
+  assert.equal(snapshot.runs.find((r) => r.id === "run-orphan")?.status, "interrupted");
   assert.equal(snapshot.runs.find((r) => r.id === "run-orphan")?.terminalCode, "process_lost");
   assert.equal(snapshot.pendingHumanActions.find((a) => a.id === "pa-1")?.status, "expired");
   assert.equal(snapshot.actionTokens.find((t) => t.token === "tok-1")?.revokedAt, NOW);
@@ -208,7 +208,7 @@ test("catchUpRecipes 触发过期状态清扫", async () => {
   await app.catchUpRecipes("user-1");
   assert.equal(
     (await ledger.read()).runs.find((r) => r.id === "run-orphan")?.status,
-    "terminated",
+    "interrupted",
   );
 });
 
@@ -228,13 +228,13 @@ function fixture() {
       nextId: (prefix: string) => `${prefix}-${++sequence}`,
     },
   };
-  return { ledger, app: new CoachApplication(dependencies) };
+  return { ledger, app: new LocalProductKernel(dependencies) };
 }
 
-async function seed(app: CoachApplication, userId: string) {
-  await app.seedUserState({
+async function seed(app: LocalProductKernel, userId: string) {
+  await app.seedDomainStateForTest({
     userId,
-    profile: { goal: "hypertrophy", trainingExperience: "intermediate" },
+    profile: { goal: "hypertrophy" },
     plan: {
       revision: 1,
       effectiveDate: "2026-08-08",

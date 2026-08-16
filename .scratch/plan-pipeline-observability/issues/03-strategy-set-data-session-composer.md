@@ -4,7 +4,7 @@
 
 **Blocked by:** 02. 数据断桥修复与重排语义
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [x] 策略集内容（分化模板/三层架构/课表模板/组成本）进知识包 JSON 且通过签名/hash 校验，随包版本化更新
 - [x] 3 天/周 → 全身 ×3，每肌群每周 ≥2 次暴露、约 6 直接组（TP-VOL-BASE 起步区间）

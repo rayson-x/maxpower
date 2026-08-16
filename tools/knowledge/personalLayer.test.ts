@@ -128,7 +128,7 @@ test("correction 使引用被更正事实的条目失效", async () => {
 });
 
 test("引擎不直接消费个人知识层（值只经 facade 以显式入参传递）", () => {
-  // plan-pipeline-observability ticket 05 起：facade（createCoachApplication）是允许的接线点；
+  // plan-pipeline-observability ticket 05 起：本地领域内核是允许的接线点；
   // 引擎（规则包/营养/恢复/planning）仍不得直接 import，只能消费 facade 传入的显式值。
   const forbiddenConsumers = ["src/training-rules", "src/nutrition", "src/recovery", "src/planning"];
   for (const dir of forbiddenConsumers) {
@@ -141,7 +141,7 @@ test("引擎不直接消费个人知识层（值只经 facade 以显式入参传
       );
     }
   }
-  const facade = readFileSync(join(process.cwd(), "src/coach/createCoachApplication.ts"), "utf8");
+  const facade = readFileSync(join(process.cwd(), "src/coach/LocalProductKernel.ts"), "utf8");
   assert.ok(
     facade.includes("personalKnowledge"),
     "facade 应支持 personalKnowledge 依赖注入（ticket 05 接线点）",

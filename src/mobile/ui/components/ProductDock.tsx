@@ -1,11 +1,12 @@
 import React from "react";
 
 import type { CoachDrawerRoute } from "../../../product";
-import type { CoachStreamSnapshot } from "../../../coach/ui";
 import {
   AppDock,
   type CoachComposerAnchor,
 } from "../../ui-kit";
+import { mobileT } from "../../../i18n";
+
 
 /**
  * The app dock owns the stable primary navigation vocabulary.  Screens only
@@ -14,44 +15,38 @@ import {
  */
 export function ProductDock({
   route,
-  coachStatus,
+  coachBusy,
   coachExpanded,
   onChange,
   onRecord,
   onOpenCoach,
-  onOpenCoachVoice,
   onCoachAnchorChange,
-  onRecordAnchorChange,
 }: {
   route: CoachDrawerRoute;
-  coachStatus: CoachStreamSnapshot["status"];
+  coachBusy: boolean;
   coachExpanded: boolean;
   onChange(route: CoachDrawerRoute): void;
   onRecord(): void;
   onOpenCoach(): void;
-  onOpenCoachVoice(): void;
   onCoachAnchorChange(anchor: CoachComposerAnchor): void;
-  onRecordAnchorChange(anchor: CoachComposerAnchor): void;
 }) {
   const destinations: readonly { id: CoachDrawerRoute; label: string; glyph: string }[] = [
-    { id: "today", label: "今天", glyph: "⌂" },
-    { id: "calendar", label: "日历", glyph: "▦" },
-    { id: "plan", label: "计划", glyph: "↗" },
-    { id: "profile", label: "我的", glyph: "○" },
+    { id: "today", label: mobileT("mobile.ui.components.productdock.17e83cc25e"), glyph: "⌂" },
+    { id: "calendar", label: mobileT("mobile.ui.components.productdock.2ecbc11608"), glyph: "▦" },
+    { id: "plan", label: mobileT("mobile.ui.components.productdock.c17bb5de3f"), glyph: "↗" },
+    { id: "profile", label: mobileT("mobile.ui.components.productdock.a82c993d73"), glyph: "○" },
   ];
 
   return (
     <AppDock
-      current={route === "progress" ? "plan" : route}
+      current={route}
       destinations={destinations}
       onNavigate={onChange}
       onRecord={onRecord}
       onCoach={onOpenCoach}
-      onCoachVoice={onOpenCoachVoice}
       onCoachAnchorChange={onCoachAnchorChange}
-      onRecordAnchorChange={onRecordAnchorChange}
       coachExpanded={coachExpanded}
-      coachBusy={coachStatus === "streaming"}
+      coachBusy={coachBusy}
     />
   );
 }

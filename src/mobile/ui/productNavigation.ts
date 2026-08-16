@@ -1,5 +1,3 @@
-import type { CoachContextKind, ContextRef } from "../../coach/model";
-
 /**
  * The mobile shell deliberately has a very small internal-route registry.
  * Incoming URLs are presentation requests only: resolving one never starts a
@@ -10,32 +8,11 @@ export type ProductDeepLinkRoute =
   | "today"
   | "calendar"
   | "plan"
-  | "progress"
   | "profile"
   | "workout";
 
-/**
- * A route the product shell can render. `onboarding` intentionally remains
- * outside the deep-link registry: it is selected from a trusted dossier
- * projection, never requested by an external URL.
- */
-export type ProductShellEntryRoute = ProductDeepLinkRoute | "onboarding" | "video_library" | "replay";
-
-/**
- * The User dossier is a product entry gate, not an optional empty-state
- * action. This pure projection lets the mobile shell preserve its normal
- * recovered route while redirecting an incomplete account before it renders
- * any Home, plan, or media workspace.
- */
-export function resolveUserDossierEntryRoute(input: {
-  requestedRoute: ProductShellEntryRoute;
-  onboardingRequired: boolean;
-}): ProductShellEntryRoute {
-  return input.onboardingRequired ? "onboarding" : input.requestedRoute;
-}
-
 export type ProductDeepLinkIntent =
-  | { route: "today" | "calendar" | "progress"; date: string }
+  | { route: "today" | "calendar"; date: string }
   | { route: "plan" | "profile" }
   | { route: "workout"; workoutId: string };
 
@@ -67,13 +44,12 @@ export interface ProductShellState {
 
 export interface ProductCoachAttachment {
   sessionId: string;
-  context: ContextRef;
   foreground: "expanded" | "minimized";
 }
 
 export type ProductUnfinishedForm =
   | {
-      kind: "activity_log" | "exercise_editor" | "onboarding";
+      kind: "activity_log" | "exercise_editor";
       recovery: "discard_on_process_restore";
     }
   | {
@@ -81,17 +57,11 @@ export type ProductUnfinishedForm =
       workoutId: string;
       prescriptionSetId: string;
       recovery: "discard_on_process_restore";
-    }
-  | {
-      kind: "nutrition_draft_review";
-      artifactId: string;
-      recovery: "reopen_persisted_reference";
     };
 
 export type ProductShellFormRecovery =
   | { kind: "none" }
-  | { kind: "discarded"; formKind: Exclude<ProductUnfinishedForm["kind"], "nutrition_draft_review"> }
-  | { kind: "reopen"; form: Extract<ProductUnfinishedForm, { recovery: "reopen_persisted_reference" }> };
+  | { kind: "discarded"; formKind: ProductUnfinishedForm["kind"] };
 
 export interface ProductShellRecovery {
   state: ProductShellState;
@@ -230,17 +200,15 @@ export function decodeProductShellState(value: string | undefined, fallbackDate:
 
 /**
  * Resolves process restart semantics in one place. Ordinary incomplete forms
- * are visibly discarded; only a durable Artifact-backed nutrition review can
- * be reopened, and even it remains a read from CoachApplication.
+ * are visibly discarded. Structured nutrition entry uses the shared Record
+ * Module directly, so there is no second artifact-backed form workflow to
+ * recover outside the Conversation transcript.
  */
 export function resolveProductShellRecovery(value: string | undefined, fallbackDate: string): ProductShellRecovery {
   const decoded = decodeProductShellState(value, fallbackDate);
   if (!decoded) return { state: initialProductShellState(fallbackDate), formRecovery: { kind: "none" } };
   const form = decoded.unfinishedForm;
   if (!form) return { state: decoded, formRecovery: { kind: "none" } };
-  if (form.recovery === "reopen_persisted_reference") {
-    return { state: decoded, formRecovery: { kind: "reopen", form } };
-  }
   return {
     state: clearProductFormRecovery(decoded),
     formRecovery: { kind: "discarded", formKind: form.kind },
@@ -332,7 +300,7 @@ export function applyInboundNavigationIntent(
 }
 
 function isRegisteredRoute(value: string): value is ProductDeepLinkRoute {
-  return value === "today" || value === "calendar" || value === "plan" || value === "progress" || value === "profile" || value === "workout";
+  return value === "today" || value === "calendar" || value === "plan" || value === "profile" || value === "workout";
 }
 
 function decodeSinglePathSegment(pathname: string): string | undefined {
@@ -418,25 +386,15 @@ function normalizeProductNavigationState(value: unknown): ProductNavigationState
 }
 
 function normalizeCoachAttachment(value: unknown): ProductCoachAttachment | undefined {
-  if (!isPlainObject(value) || !hasOnlyKeys(value, ["sessionId", "context", "foreground"]) || typeof value.sessionId !== "string" || !isOpaqueIdentifier(value.sessionId)) return undefined;
+  if (!isPlainObject(value) || !hasOnlyKeys(value, ["sessionId", "foreground"]) || typeof value.sessionId !== "string" || !isOpaqueIdentifier(value.sessionId)) return undefined;
   if (value.foreground !== "expanded" && value.foreground !== "minimized") return undefined;
-  const context = normalizeCoachContext(value.context);
-  if (!context || !routeAllowsCoach(context.kind)) return undefined;
-  return { sessionId: value.sessionId, context, foreground: value.foreground };
-}
-
-function normalizeCoachContext(value: unknown): ContextRef | undefined {
-  if (!isPlainObject(value) || !hasOnlyKeys(value, ["kind", "ref"]) || typeof value.kind !== "string" || typeof value.ref !== "string") return undefined;
-  const kind = value.kind as CoachContextKind;
-  if (!isCoachContextKind(kind) || !isOpaqueIdentifier(value.ref)) return undefined;
-  if ((kind === "today" || kind === "calendar") && !isValidLocalDate(value.ref)) return undefined;
-  return { kind, ref: value.ref };
+  return { sessionId: value.sessionId, foreground: value.foreground };
 }
 
 function normalizeProductForm(value: unknown): ProductUnfinishedForm | undefined {
   if (!isPlainObject(value) || typeof value.kind !== "string" || typeof value.recovery !== "string") return undefined;
   if (
-    (value.kind === "activity_log" || value.kind === "exercise_editor" || value.kind === "onboarding") &&
+    (value.kind === "activity_log" || value.kind === "exercise_editor") &&
     value.recovery === "discard_on_process_restore" &&
     hasOnlyKeys(value, ["kind", "recovery"])
   ) {
@@ -456,19 +414,6 @@ function normalizeProductForm(value: unknown): ProductUnfinishedForm | undefined
       workoutId: value.workoutId,
       prescriptionSetId: value.prescriptionSetId,
       recovery: "discard_on_process_restore",
-    };
-  }
-  if (
-    value.kind === "nutrition_draft_review" &&
-    value.recovery === "reopen_persisted_reference" &&
-    hasOnlyKeys(value, ["kind", "artifactId", "recovery"]) &&
-    typeof value.artifactId === "string" &&
-    isOpaqueIdentifier(value.artifactId)
-  ) {
-    return {
-      kind: "nutrition_draft_review",
-      artifactId: value.artifactId,
-      recovery: "reopen_persisted_reference",
     };
   }
   return undefined;
@@ -493,12 +438,11 @@ function compactProductNavigationState(state: ProductNavigationState): ProductNa
 }
 
 function cloneCoachAttachment(value: ProductCoachAttachment): ProductCoachAttachment {
-  return { sessionId: value.sessionId, context: { ...value.context }, foreground: value.foreground };
+  return { sessionId: value.sessionId, foreground: value.foreground };
 }
 
 function cloneProductForm(value: ProductUnfinishedForm): ProductUnfinishedForm {
   if (value.kind === "workout_set") return { ...value };
-  if (value.kind === "nutrition_draft_review") return { ...value };
   return { kind: value.kind, recovery: value.recovery };
 }
 
@@ -514,13 +458,10 @@ function isOpaqueIdentifier(value: string): boolean {
   return opaqueIdentifierPattern.test(value);
 }
 
-function routeAllowsCoach(route: ProductDeepLinkRoute | CoachContextKind): boolean {
-  return route === "today" || route === "calendar" || route === "plan" || route === "progress" || route === "workout";
+function routeAllowsCoach(route: ProductDeepLinkRoute): boolean {
+  return route === "today" || route === "calendar" || route === "plan" || route === "workout";
 }
 
-function isCoachContextKind(value: string): value is CoachContextKind {
-  return value === "today" || value === "calendar" || value === "plan" || value === "progress" || value === "workout" || value === "profile";
-}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

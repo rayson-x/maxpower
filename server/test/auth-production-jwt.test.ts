@@ -21,7 +21,7 @@ test("service JWT verification returns a kernel Principal from bounded Better Au
     sid: "session_123",
     jti: "token_123",
     account_status: "active",
-    scope: "data:read data:write media:read media:write llm:invoke",
+    scope: "account:read account:delete llm:invoke",
     realm: "global",
   });
 
@@ -31,10 +31,8 @@ test("service JWT verification returns a kernel Principal from bounded Better Au
     sessionId: "session_123",
     status: "active",
     scopes: new Set([
-      "data:read",
-      "data:write",
-      "media:read",
-      "media:write",
+      "account:read",
+      "account:delete",
       "llm:invoke",
     ]),
   });

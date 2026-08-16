@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 本地 Agent 工具循环与能力合同; 05 — 风险触发的动态计划提案与确认.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] Planner 阶段以稳定、可渲染的 started/retrieving/evaluating/needs_input/proposal_ready/paused/failed 状态呈现。
 - [ ] 提案卡展示事实依据、取舍、执行负担、下一次验证信号和确认状态；失败不会改变现行计划。

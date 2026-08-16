@@ -16,7 +16,6 @@ import type {
   NotificationIntent,
   NotificationReceipt,
   ToolAuditRecord,
-  UserState,
   WorkingMemoryItem,
 } from "./model";
 import {
@@ -32,10 +31,6 @@ import {
 } from "./domain";
 import { TRACE_OUTBOX_RETENTION, type TraceOutboxEntry } from "../observability/model";
 import { clone, stableHash } from "./stable";
-import {
-  ONBOARDING_DRAFT_SCHEMA_VERSION,
-  type OnboardingDraftEvent,
-} from "../onboarding/model";
 
 export interface CoachLedger {
   read(): Promise<LedgerSnapshot>;
@@ -44,8 +39,9 @@ export interface CoachLedger {
   swapRestoredSnapshot(input: StagedLedgerRestore): Promise<void>;
   readDomainProjection(query: DomainProjectionQuery): Promise<DomainProjection>;
   diagnose(): Promise<CoachLedgerDiagnostics>;
-  commit(input: AtomicCommit): Promise<AtomicCommitResult>;
   commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
+  /** Apply a staged sequence atomically; either every recorded CAS succeeds or none is written. */
+  commitBatch(inputs: readonly DomainAtomicCommit[]): Promise<readonly DomainCommandResult[]>;
 }
 
 export interface StagedLedgerRestore {
@@ -59,29 +55,24 @@ export const EMPTY_LEDGER_SNAPSHOT: LedgerSnapshot = {
   messages: [],
   runs: [],
   toolCalls: [],
-  users: [],
   artifacts: [],
   presentations: [],
   runEvents: [],
   actionTokens: [],
   actionEvents: [],
   toolAudit: [],
-  idempotency: [],
   pendingHumanActions: [],
   workingMemory: [],
   domainEvents: [],
   aggregateRevisions: [],
   domainIdempotency: [],
   outbox: [],
-  onboardingDraftEvents: [],
   coachRecipes: [],
   scheduledJobs: [],
   jobAttempts: [],
   notificationIntents: [],
   notificationReceipts: [],
   healthImportStates: [],
-  replicaSyncStates: [],
-  pendingReplicaEnvelopes: [],
   traceOutbox: [],
 };
 
@@ -115,142 +106,54 @@ export class InMemoryCoachLedger implements CoachLedger {
     return diagnoseLedgerSnapshot(this.snapshot);
   }
 
-  async commit(input: AtomicCommit): Promise<AtomicCommitResult>;
-  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
-  async commit(input: AtomicCommit | DomainAtomicCommit): Promise<AtomicCommitResult | DomainCommandResult> {
-    const applied = isDomainAtomicCommit(input)
-      ? applyDomainAtomicCommitTransition(this.snapshot, input)
-      : applyAtomicCommitTransition(this.snapshot, input);
+  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult> {
+    const applied = applyDomainAtomicCommitTransition(this.snapshot, input);
     this.snapshot = applied.snapshot;
     return applied.result;
   }
+
+  async commitBatch(inputs: readonly DomainAtomicCommit[]): Promise<readonly DomainCommandResult[]> {
+    let next = this.snapshot;
+    const results: DomainCommandResult[] = [];
+    for (const input of inputs) {
+      const applied = applyDomainAtomicCommitTransition(next, input);
+      next = applied.snapshot;
+      results.push(applied.result);
+    }
+    this.snapshot = next;
+    return results;
+  }
 }
 
-export function applyCoachLedgerCommitTransition(
-  snapshot: LedgerSnapshot,
-  input: AtomicCommit,
-): { snapshot: LedgerSnapshot; result: AtomicCommitResult };
+/** Private staging Ledger that records the exact validated commit sequence for atomic replay after cloud ACK. */
+export class RecordingCoachLedger implements CoachLedger {
+  private readonly delegate: InMemoryCoachLedger;
+  private readonly recorded: DomainAtomicCommit[] = [];
+
+  constructor(seed: LedgerSnapshot) { this.delegate = new InMemoryCoachLedger(seed); }
+  read() { return this.delegate.read(); }
+  replace(snapshot: LedgerSnapshot) { return this.delegate.replace(snapshot); }
+  swapRestoredSnapshot(input: StagedLedgerRestore) { return this.delegate.swapRestoredSnapshot(input); }
+  readDomainProjection(query: DomainProjectionQuery) { return this.delegate.readDomainProjection(query); }
+  diagnose() { return this.delegate.diagnose(); }
+  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult> {
+    const result = await this.delegate.commit(input);
+    this.recorded.push(clone(input));
+    return result;
+  }
+  async commitBatch(inputs: readonly DomainAtomicCommit[]): Promise<readonly DomainCommandResult[]> {
+    const results = await this.delegate.commitBatch(inputs);
+    this.recorded.push(...inputs.map((input) => clone(input)));
+    return results;
+  }
+  recordedCommits(): readonly DomainAtomicCommit[] { return clone(this.recorded); }
+}
+
 export function applyCoachLedgerCommitTransition(
   snapshot: LedgerSnapshot,
   input: DomainAtomicCommit,
-): { snapshot: LedgerSnapshot; result: DomainCommandResult };
-export function applyCoachLedgerCommitTransition(
-  snapshot: LedgerSnapshot,
-  input: AtomicCommit | DomainAtomicCommit,
-): {
-  snapshot: LedgerSnapshot;
-  result: AtomicCommitResult | DomainCommandResult;
-} {
-  return isDomainAtomicCommit(input)
-    ? applyDomainAtomicCommitTransition(snapshot, input)
-    : applyAtomicCommitTransition(snapshot, input);
-}
-
-export function applyAtomicCommitTransition(
-  snapshot: LedgerSnapshot,
-  input: AtomicCommit,
-): { snapshot: LedgerSnapshot; result: AtomicCommitResult } {
-  const duplicate = snapshot.idempotency.find(
-    (record) => record.userId === input.userId && record.key === input.idempotencyKey,
-  );
-  if (duplicate) {
-    return {
-      snapshot,
-      result: { status: "idempotent", resultArtifactId: duplicate.resultArtifactId },
-    };
-  }
-  const user = snapshot.users.find((candidate) => candidate.userId === input.userId);
-  if (!user || user.plan.revision !== input.expectedPlanRevision) {
-    throw new LedgerConflictError("stale_plan");
-  }
-  if (user.mandate.revision !== input.expectedMandateRevision) {
-    throw new LedgerConflictError("stale_mandate");
-  }
-  if (
-    input.session &&
-    (snapshot.sessions.find((candidate) => candidate.id === input.session?.id)?.revision ?? 1) !==
-      input.expectedSessionRevision
-  ) {
-    throw new LedgerConflictError("stale_aggregate");
-  }
-  const token = snapshot.actionTokens.find((candidate) => candidate.token === input.consumeToken);
-  if (!token || token.consumedAt || token.userId !== input.userId) {
-    throw new LedgerConflictError("invalid_token");
-  }
-  const resultArtifact = input.artifacts.at(-1);
-  if (!resultArtifact) throw new Error("AtomicCommit requires a result artifact");
-  const nextUser: UserState = { ...user, plan: clone(input.plan) };
-  const tokensToClose = new Set([input.consumeToken, ...(input.invalidateTokens ?? [])]);
-  const closedTokens: ActionTokenRecord[] = snapshot.actionTokens
-    .filter((candidate) => tokensToClose.has(candidate.token))
-    .map((candidate) => ({ ...candidate, consumedAt: input.occurredAt }));
-  const next = clone({
-    ...snapshot,
-    users: [...snapshot.users.filter((candidate) => candidate.userId !== user.userId), nextUser],
-    sessions: input.session ? upsertById(snapshot.sessions, [input.session]) : snapshot.sessions,
-    artifacts: [
-      ...snapshot.artifacts.filter(
-        (existing) => !input.artifacts.some((artifact) => artifact.id === existing.id),
-      ),
-      ...input.artifacts,
-    ],
-    presentations: [
-      ...snapshot.presentations.filter(
-        (existing) => !input.presentations.some((item) => item.id === existing.id),
-      ),
-      ...input.presentations,
-    ],
-    runEvents: [...snapshot.runEvents, ...input.runEvents],
-    actionTokens: [
-      ...snapshot.actionTokens.filter((candidate) => !tokensToClose.has(candidate.token)),
-      ...closedTokens,
-      ...(input.issueTokens ?? []),
-    ],
-    actionEvents: [
-      ...snapshot.actionEvents.filter(
-        (existing) => !(input.updateActionEvents ?? []).some((event) => event.id === existing.id),
-      ),
-      ...(input.updateActionEvents ?? []),
-      input.actionEvent,
-    ],
-    idempotency: [
-      ...snapshot.idempotency,
-      {
-        key: input.idempotencyKey,
-        userId: input.userId,
-        resultArtifactId: resultArtifact.id,
-        occurredAt: input.occurredAt,
-      },
-    ],
-  });
-  return {
-    snapshot: next,
-    result: { status: "committed", resultArtifactId: resultArtifact.id },
-  };
-}
-
-export interface AtomicCommit {
-  userId: string;
-  expectedPlanRevision: number;
-  expectedMandateRevision: number;
-  plan: UserState["plan"];
-  session?: CoachSession;
-  expectedSessionRevision?: number;
-  artifacts: readonly Artifact[];
-  presentations: readonly PresentationRef[];
-  runEvents: readonly CoachRunEvent[];
-  actionEvent: ActionEvent;
-  updateActionEvents?: readonly ActionEvent[];
-  consumeToken: string;
-  invalidateTokens?: readonly string[];
-  issueTokens?: readonly ActionTokenRecord[];
-  idempotencyKey: string;
-  occurredAt: string;
-}
-
-export interface AtomicCommitResult {
-  status: "committed" | "idempotent";
-  resultArtifactId: string;
+): { snapshot: LedgerSnapshot; result: DomainCommandResult } {
+  return applyDomainAtomicCommitTransition(snapshot, input);
 }
 
 export interface DomainAtomicCommit {
@@ -266,7 +169,6 @@ export interface DomainAtomicCommit {
     status: PendingHumanAction["status"] | "missing";
   }[];
   domainEvents: readonly DomainEvent[];
-  draftEvents?: readonly OnboardingDraftEvent[];
   artifacts?: readonly Artifact[];
   sessions?: readonly CoachSession[];
   messages?: readonly CoachMessage[];
@@ -290,10 +192,6 @@ export interface DomainAtomicCommit {
   notificationReceipts?: readonly NotificationReceipt[];
   healthImportStates?: readonly import("./model").HealthImportState[];
   expectedHealthImportStateVersions?: readonly { id: string; version: number }[];
-  /** Existing outbox entries can only be advanced by the local synchronizer. */
-  updateOutbox?: readonly OutboxEntry[];
-  replicaSyncStates?: readonly import("../sync").ReplicaSyncState[];
-  pendingReplicaEnvelopes?: readonly import("../sync").PendingReplicaEnvelope[];
   /** 新入队的远程 trace 条目；已存在同 eventId 的条目会被忽略（插入即去重）。 */
   traceOutbox?: readonly TraceOutboxEntry[];
   /** 既有 trace 条目的状态推进；只有本地调度器可以写。 */
@@ -359,7 +257,7 @@ export function applyDomainAtomicCommitTransition(
   if (!input.userId || !input.actorId || !input.intent || !input.idempotencyKey) {
     throw new LedgerConflictError("invalid_domain_event");
   }
-  if (input.domainEvents.length === 0 && !(input.draftEvents?.length) && !hasRuntimeMutation(input)) {
+  if (input.domainEvents.length === 0 && !hasRuntimeMutation(input)) {
     throw new LedgerConflictError("invalid_domain_event");
   }
 
@@ -422,23 +320,6 @@ export function applyDomainAtomicCommitTransition(
     availableEvents.push(event);
     batchEventIds.add(event.id);
   }
-  const knownDraftEventIds = new Set(snapshot.onboardingDraftEvents.map((event) => event.id));
-  const batchDraftEventIds = new Set<string>();
-  for (const draftEvent of input.draftEvents ?? []) {
-    if (
-      !draftEvent.id ||
-      draftEvent.schemaVersion !== ONBOARDING_DRAFT_SCHEMA_VERSION ||
-      draftEvent.userId !== input.userId ||
-      !draftEvent.draftId ||
-      !Number.isFinite(Date.parse(draftEvent.recordedAt))
-    ) {
-      throw new LedgerConflictError("invalid_domain_event");
-    }
-    if (knownDraftEventIds.has(draftEvent.id) || batchDraftEventIds.has(draftEvent.id)) {
-      throw new LedgerConflictError("duplicate_event");
-    }
-    batchDraftEventIds.add(draftEvent.id);
-  }
 
   const consumedTokens = new Set(input.consumeTokens ?? []);
   const tokenUpdates = new Map(
@@ -479,22 +360,6 @@ export function applyDomainAtomicCommitTransition(
       throw new LedgerConflictError("invalid_reference");
     }
   }
-  for (const updated of input.updateOutbox ?? []) {
-    const current = snapshot.outbox.find((entry) => entry.id === updated.id);
-    if (
-      !current ||
-      current.userId !== input.userId ||
-      current.userId !== updated.userId ||
-      current.replicaId !== updated.replicaId ||
-      current.deviceId !== updated.deviceId ||
-      current.domainEventId !== updated.domainEventId ||
-      current.payloadHash !== updated.payloadHash ||
-      (current.status !== "pending" && current.status !== updated.status) ||
-      (updated.status === "pending" && current.status !== "pending")
-    ) {
-      throw new LedgerConflictError("invalid_reference");
-    }
-  }
   for (const entry of input.traceOutbox ?? []) {
     if (
       entry.userId !== input.userId ||
@@ -525,7 +390,7 @@ export function applyDomainAtomicCommitTransition(
     (input.sessions ?? []).some((session) => session.userId !== input.userId) ||
     (input.artifacts ?? []).some(
       (artifact) =>
-        (artifact.kind === "replan_evaluation" || artifact.kind === "goal_forecast" || artifact.kind === "weekly_coach_report" || artifact.kind === "mesocycle_review" || artifact.kind === "evidence_brief" || artifact.kind === "plan_trace" || artifact.kind === "exercise_substitution" || artifact.kind === "nutrition_observation_draft" || artifact.kind === "nutrition_change_proposal" || artifact.kind === "recovery_brief" || artifact.kind === "nutrition_strategy" || artifact.kind === "safety_hold") &&
+        (artifact.kind === "weekly_coach_report" || artifact.kind === "evidence_brief" || artifact.kind === "nutrition_observation_draft" || artifact.kind === "recovery_brief" || artifact.kind === "nutrition_strategy" || artifact.kind === "safety_hold") &&
         artifact.userId !== input.userId,
     ) ||
     (input.actionEvents ?? []).some((action) => action.userId !== input.userId) ||
@@ -536,9 +401,6 @@ export function applyDomainAtomicCommitTransition(
     (input.notificationIntents ?? []).some((item) => item.userId !== input.userId) ||
     (input.notificationReceipts ?? []).some((item) => item.userId !== input.userId) ||
     (input.healthImportStates ?? []).some((item) => item.userId !== input.userId) ||
-    (input.updateOutbox ?? []).some((item) => item.userId !== input.userId) ||
-    (input.replicaSyncStates ?? []).some((item) => item.userId !== input.userId) ||
-    (input.pendingReplicaEnvelopes ?? []).some((item) => item.userId !== input.userId) ||
     (input.pendingHumanActions ?? []).some((pending) => pending.userId !== input.userId) ||
     (input.issueTokens ?? []).some((token) => token.userId !== input.userId)
   ) {
@@ -567,8 +429,14 @@ export function applyDomainAtomicCommitTransition(
   }
 
   const resultingSessions = upsertById(snapshot.sessions, input.sessions ?? []);
+  // A user may keep several independent Conversation sessions active, just
+  // like separate Codex/ChatGPT threads.  The old page-bound sessions remain
+  // single-active while they are being migrated, but they cannot evict a
+  // conversation or vice versa.
   const activeByUser = resultingSessions.filter(
-    (session) => session.userId === input.userId && session.status === "active",
+    (session) => session.userId === input.userId
+      && session.status === "active"
+      && session.context.kind !== "conversation",
   );
   if (activeByUser.length > 1) {
     throw new LedgerConflictError("stale_aggregate", "multiple_active_sessions");
@@ -577,16 +445,11 @@ export function applyDomainAtomicCommitTransition(
   const updatedRefs = input.domainEvents.map((event) => event.aggregate);
   const committedEventIds = [
     ...input.domainEvents.map((event) => event.id),
-    ...(input.draftEvents ?? []).map((event) => event.id),
   ];
   const nextSnapshot = clone({
     ...snapshot,
     ledgerSchemaVersion: COACH_LEDGER_SNAPSHOT_SCHEMA_VERSION,
     domainEvents: [...snapshot.domainEvents, ...input.domainEvents],
-    onboardingDraftEvents: [
-      ...snapshot.onboardingDraftEvents,
-      ...(input.draftEvents ?? []),
-    ],
     aggregateRevisions: [...nextAggregateStates.values()],
     domainIdempotency: [
       ...snapshot.domainIdempotency,
@@ -600,7 +463,7 @@ export function applyDomainAtomicCommitTransition(
         recordedAt: input.recordedAt,
       },
     ],
-    outbox: upsertById([...snapshot.outbox, ...(input.outbox ?? [])], input.updateOutbox ?? []),
+    outbox: appendMissingById(snapshot.outbox, input.outbox ?? []),
     sessions: resultingSessions,
     messages: upsertById(snapshot.messages, input.messages ?? []),
     runs: upsertById(snapshot.runs, input.runs ?? []),
@@ -621,8 +484,6 @@ export function applyDomainAtomicCommitTransition(
     notificationIntents: upsertById(snapshot.notificationIntents, input.notificationIntents ?? []),
     notificationReceipts: upsertById(snapshot.notificationReceipts, input.notificationReceipts ?? []),
     healthImportStates: upsertById(snapshot.healthImportStates, input.healthImportStates ?? []),
-    replicaSyncStates: upsertById(snapshot.replicaSyncStates, input.replicaSyncStates ?? []),
-    pendingReplicaEnvelopes: upsertById(snapshot.pendingReplicaEnvelopes, input.pendingReplicaEnvelopes ?? []),
     traceOutbox: retainTraceOutbox(
       upsertById(
         appendMissingById(snapshot.traceOutbox, input.traceOutbox ?? []),
@@ -653,15 +514,12 @@ export function normalizeLedgerSnapshot(snapshot: Partial<LedgerSnapshot>): Ledg
     aggregateRevisions: snapshot.aggregateRevisions ?? [],
     domainIdempotency: snapshot.domainIdempotency ?? [],
     outbox: snapshot.outbox ?? [],
-    onboardingDraftEvents: snapshot.onboardingDraftEvents ?? [],
     coachRecipes: snapshot.coachRecipes ?? [],
     scheduledJobs: snapshot.scheduledJobs ?? [],
     jobAttempts: snapshot.jobAttempts ?? [],
     notificationIntents: snapshot.notificationIntents ?? [],
     notificationReceipts: snapshot.notificationReceipts ?? [],
     healthImportStates: snapshot.healthImportStates ?? [],
-    replicaSyncStates: snapshot.replicaSyncStates ?? [],
-    pendingReplicaEnvelopes: snapshot.pendingReplicaEnvelopes ?? [],
     traceOutbox: snapshot.traceOutbox ?? [],
   };
   return clone(normalized);
@@ -732,12 +590,6 @@ function calculateProjectionLag(snapshot: LedgerSnapshot): number {
   return lag;
 }
 
-function isDomainAtomicCommit(
-  input: AtomicCommit | DomainAtomicCommit,
-): input is DomainAtomicCommit {
-  return "kind" in input && input.kind === "domain";
-}
-
 function validateDomainEventEnvelope(
   event: DomainEvent,
   input: DomainAtomicCommit,
@@ -765,8 +617,13 @@ function validateDomainEventEnvelope(
   if (knownEventIds.has(event.id) || batchEventIds.has(event.id)) {
     throw new LedgerConflictError("duplicate_event");
   }
-  validateEventUnits(event);
   validateTimelinePayload(event);
+  try {
+    validateEventUnits(event);
+  } catch (cause) {
+    if (cause instanceof LedgerConflictError) throw cause;
+    throw new LedgerConflictError("invalid_domain_event");
+  }
 }
 
 function validateDomainEventState(
@@ -789,8 +646,8 @@ function validateDomainEventState(
     throw new LedgerConflictError("invalid_reference");
   }
   // A user may begin with a confirmed Timeline fact before completing a
-  // profile. This keeps local activity/meal logging usable during progressive
-  // onboarding while still preventing every other aggregate from appearing
+  // profile. This keeps local activity/meal logging usable before planning
+  // while still preventing every other aggregate from appearing
   // without an existing local identity or Timeline root.
   const opensTimelineBeforeProfile =
     event.aggregate.kind === "timeline" && event.name === "timeline.fact_appended";
@@ -821,12 +678,6 @@ function validateDomainEventState(
   }
   if (
     (event.name === "coaching_mandate.created" || event.name === "coaching_mandate.revised") &&
-    event.payload.id !== event.aggregate.id
-  ) {
-    throw new LedgerConflictError("invalid_reference");
-  }
-  if (
-    (event.name === "goal_cycle.created" || event.name === "goal_cycle.revised") &&
     event.payload.id !== event.aggregate.id
   ) {
     throw new LedgerConflictError("invalid_reference");
@@ -873,7 +724,6 @@ function aggregateKindForEvent(name: DomainEvent["name"]): DomainEvent["aggregat
   if (name.startsWith("user_profile.")) return "user_profile";
   if (name.startsWith("goal_contract.")) return "goal_contract";
   if (name.startsWith("coaching_mandate.")) return "coaching_mandate";
-  if (name.startsWith("goal_cycle.")) return "goal_cycle";
   if (name.startsWith("plan.")) return "plan";
   if (name.startsWith("workout.")) return "workout_session";
   if (name.startsWith("timeline.")) return "timeline";
@@ -912,9 +762,7 @@ function validateDomainEventReferences(
     );
     return start?.payload.frozenPrescription;
   };
-  if (event.name === "goal_cycle.created" || event.name === "goal_cycle.revised") {
-    assertRef(event.payload.goalContractRef);
-  } else if (event.name === "plan.revised") {
+  if (event.name === "plan.revised") {
     assertRef(event.payload.goalContractRef);
   } else if (event.name === "nutrition_strategy.created" || event.name === "nutrition_strategy.revised") {
     assertRef(event.payload.goalContractRef);
@@ -923,19 +771,26 @@ function validateDomainEventReferences(
       (candidate) => candidate.aggregate.kind === "workout_session" && candidate.aggregate.id === event.aggregate.id,
     );
     if (existing) throw new LedgerConflictError("invalid_reference");
-    const planEvents = availableEvents.filter(
-      (candidate) =>
-        candidate.name === "plan.revised" &&
-        candidate.userId === userId &&
-        candidate.aggregate.id === event.payload.prescriptionRef.planId &&
-        candidate.aggregate.revision === event.payload.prescriptionRef.planRevision,
-    );
-    const plan = planEvents.at(-1);
-    if (!plan || plan.name !== "plan.revised") throw new LedgerConflictError("invalid_reference");
-    const prescribed = plan.payload.sessions.find(
-      (session) => session.id === event.payload.prescriptionRef.sessionPrescriptionId,
-    );
-    if (!prescribed || JSON.stringify(prescribed) !== JSON.stringify(event.payload.frozenPrescription)) {
+    if (event.payload.source.kind === "planned") {
+      const ref = event.payload.source.plannedSessionRef;
+      const planEvents = availableEvents.filter(
+        (candidate) =>
+          candidate.name === "plan.revised" &&
+          candidate.userId === userId &&
+          candidate.aggregate.id === ref.planId &&
+          candidate.aggregate.revision === ref.planRevision,
+      );
+      const plan = planEvents.at(-1);
+      if (!plan || plan.name !== "plan.revised") throw new LedgerConflictError("invalid_reference");
+      const currentPlan = availableEvents
+        .filter((candidate): candidate is Extract<DomainEvent, { name: "plan.revised" }> => candidate.name === "plan.revised" && candidate.userId === userId && candidate.aggregate.id === ref.planId)
+        .sort((left, right) => right.aggregate.revision - left.aggregate.revision)[0];
+      if (!currentPlan || currentPlan.aggregate.revision !== ref.planRevision || (currentPlan.payload.lifecycle && currentPlan.payload.lifecycle.state !== "active")) throw new LedgerConflictError("invalid_reference");
+      const prescribed = plan.payload.sessions.find((session) => session.id === ref.sessionPrescriptionId);
+      if (!prescribed || JSON.stringify(prescribed) !== JSON.stringify(event.payload.frozenPrescription)) {
+        throw new LedgerConflictError("invalid_reference");
+      }
+    } else if (!event.payload.frozenPrescription.tasks.length) {
       throw new LedgerConflictError("invalid_reference");
     }
   } else if (
@@ -951,15 +806,6 @@ function validateDomainEventReferences(
         candidate.aggregate.id === event.aggregate.id,
     );
     if (!started) throw new LedgerConflictError("invalid_reference");
-  } else if (event.name === "workout.set_observation_saved") {
-    const prescription = effectiveWorkoutPrescription(event.aggregate.id);
-    if (!prescription) throw new LedgerConflictError("invalid_reference");
-    const set = prescription.tasks
-      .flatMap((task) => task.sets.map((item) => ({ task, item })))
-      .find(({ item }) => item.id === event.payload.observation.prescriptionSetId);
-    if (!set || set.task.exerciseVariantId !== event.payload.observation.exerciseVariantId) {
-      throw new LedgerConflictError("invalid_reference");
-    }
   } else if (event.name === "workout.set_recorded") {
     const prescription = effectiveWorkoutPrescription(event.aggregate.id);
     if (!prescription) throw new LedgerConflictError("invalid_reference");
@@ -967,9 +813,6 @@ function validateDomainEventReferences(
       .flatMap((task) => task.sets.map((item) => ({ task, item })))
       .find(({ item }) => item.id === event.payload.outcome.prescriptionSetId);
     if (!set || set.task.exerciseVariantId !== event.payload.outcome.exerciseVariantId) {
-      throw new LedgerConflictError("invalid_reference");
-    }
-    if (event.payload.outcome.source === "camera_confirmed" && !event.payload.outcome.packetRef) {
       throw new LedgerConflictError("invalid_reference");
     }
   } else if (event.name === "workout.completed") {
@@ -1017,35 +860,110 @@ function validateTimelinePayload(event: DomainEvent): void {
   ) {
     return;
   }
-  const entry = event.payload.entry;
-  // Legacy imports are replayable without this newer envelope. All new
-  // CoachApplication use cases write one and are validated here.
-  if (!entry) return;
+  const payload = event.payload as unknown;
+  if (!isObjectRecord(payload) || !isObjectRecord(payload.entry) || !isObjectRecord(payload.fact)) {
+    throw new LedgerConflictError("invalid_domain_event");
+  }
+  const entry = payload.entry;
+  const fact = payload.fact;
+  if (!isObjectRecord(entry.time) || !isObjectRecord(entry.actor) || !isObjectRecord(entry.provenance)) {
+    throw new LedgerConflictError("invalid_domain_event");
+  }
+  const time = entry.time;
+  const actor = entry.actor;
   const provenance = entry.provenance;
+  const actorKinds = new Set(["user", "agent", "rule_engine", "sensor", "sync", "system"]);
+  const factKinds = new Set(["training", "activity", "nutrition", "sleep", "body", "recovery", "symptom", "clinical_context", "subjective", "schedule", "rest"]);
+  const origins = new Set(["manual", "healthkit", "health_connect", "smart_scale", "wearable", "canonical_motion_packet", "import", "professional_directive", "system"]);
+  const recordingMethods = new Set(["manual_entry", "device_measurement", "platform_import", "canonical_packet", "professional_entry", "system_import"]);
+  const dataStatuses = new Set(["available", "missing", "permission_denied", "not_supported", "stale", "partial", "estimated", "conflict"]);
+  const confidences = new Set(["confirmed", "estimated", "unknown"]);
+  const privacyClasses = new Set(["private", "sensitive", "provider_authorized"]);
+  const provenanceOptionalStrings = ["sourceRecordId", "sourceRevision", "sourceAppId", "clientRecordId", "clientRecordVersion", "deviceId", "deviceManufacturer", "deviceModel", "deviceType", "sourceRecordingMethod", "measurementMethod", "algorithmVersion"];
+  const validEvidenceRefs = Array.isArray(entry.evidenceRefs) && entry.evidenceRefs.every((ref) => isObjectRecord(ref) &&
+    ref.kind === "canonical_packet" &&
+    typeof ref.id === "string" && ref.id.length > 0 &&
+    typeof ref.version === "number" && Number.isInteger(ref.version) && ref.version >= 0 &&
+    typeof ref.hash === "string" && ref.hash.length > 0,
+  );
   if (
     entry.schemaVersion !== 1 ||
-    !entry.id ||
-    entry.factType !== event.payload.fact.kind ||
-    !entry.recordedAt ||
-    !entry.actor.id ||
-    !Number.isFinite(Date.parse(entry.time.startedAt)) ||
-    (entry.time.endedAt !== undefined && !Number.isFinite(Date.parse(entry.time.endedAt))) ||
-    (entry.time.endedAt !== undefined && Date.parse(entry.time.endedAt) < Date.parse(entry.time.startedAt)) ||
-    !Number.isInteger(entry.time.timezoneOffsetMinutes) ||
-    entry.time.timezoneOffsetMinutes < -840 ||
-    entry.time.timezoneOffsetMinutes > 840 ||
-    (entry.time.endedTimezoneOffsetMinutes !== undefined &&
-      (!Number.isInteger(entry.time.endedTimezoneOffsetMinutes) ||
-        entry.time.endedTimezoneOffsetMinutes < -840 ||
-        entry.time.endedTimezoneOffsetMinutes > 840)) ||
-    !provenance.origin ||
-    !provenance.recordingMethod ||
-    !provenance.dataStatus ||
-    !provenance.confidence ||
-    !entry.privacyClass
+    typeof entry.id !== "string" || !entry.id ||
+    entry.factType !== fact.kind ||
+    typeof fact.kind !== "string" || !factKinds.has(fact.kind) ||
+    !validTimelineFactShape(fact) ||
+    typeof entry.recordedAt !== "string" || !Number.isFinite(Date.parse(entry.recordedAt)) ||
+    typeof actor.kind !== "string" || !actorKinds.has(actor.kind) ||
+    typeof actor.id !== "string" || !actor.id ||
+    !Array.isArray(entry.causalRefs) || entry.causalRefs.some((ref) => typeof ref !== "string" || !ref) ||
+    !validEvidenceRefs ||
+    (entry.layer !== "raw_observation" && entry.layer !== "canonical_projection") ||
+    typeof time.startedAt !== "string" || !Number.isFinite(Date.parse(time.startedAt)) ||
+    (time.endedAt !== undefined && (typeof time.endedAt !== "string" || !Number.isFinite(Date.parse(time.endedAt)))) ||
+    (typeof time.endedAt === "string" && Date.parse(time.endedAt) < Date.parse(time.startedAt)) ||
+    !Number.isInteger(time.timezoneOffsetMinutes) ||
+    Number(time.timezoneOffsetMinutes) < -840 ||
+    Number(time.timezoneOffsetMinutes) > 840 ||
+    (time.endedTimezoneOffsetMinutes !== undefined &&
+      (!Number.isInteger(time.endedTimezoneOffsetMinutes) ||
+        Number(time.endedTimezoneOffsetMinutes) < -840 ||
+        Number(time.endedTimezoneOffsetMinutes) > 840)) ||
+    typeof provenance.origin !== "string" || !origins.has(provenance.origin) ||
+    typeof provenance.recordingMethod !== "string" || !recordingMethods.has(provenance.recordingMethod) ||
+    typeof provenance.dataStatus !== "string" || !dataStatuses.has(provenance.dataStatus) ||
+    typeof provenance.confidence !== "string" || !confidences.has(provenance.confidence) ||
+    provenanceOptionalStrings.some((field) => provenance[field] !== undefined && typeof provenance[field] !== "string") ||
+    (provenance.lastModifiedAt !== undefined && (typeof provenance.lastModifiedAt !== "string" || !Number.isFinite(Date.parse(provenance.lastModifiedAt)))) ||
+    typeof entry.privacyClass !== "string" || !privacyClasses.has(entry.privacyClass) ||
+    (entry.valueStatus !== undefined && (typeof entry.valueStatus !== "string" || !dataStatuses.has(entry.valueStatus))) ||
+    (entry.canonicalFromEventIds !== undefined && (!Array.isArray(entry.canonicalFromEventIds) || entry.canonicalFromEventIds.some((id) => typeof id !== "string" || !id)))
   ) {
     throw new LedgerConflictError("invalid_domain_event");
   }
+}
+
+function validTimelineFactShape(fact: Record<string, unknown>): boolean {
+  const confirmedOrEstimated = fact.confidence === "confirmed" || fact.confidence === "estimated";
+  const optionalString = (value: unknown): boolean => value === undefined || typeof value === "string";
+  switch (fact.kind) {
+    case "training":
+      return confirmedOrEstimated && Boolean(fact.workoutSessionRef || fact.reportedSession || fact.historicalSet);
+    case "activity":
+      return confirmedOrEstimated && typeof fact.activityType === "string" && fact.activityType.length > 0;
+    case "nutrition":
+      return fact.confidence === "confirmed" && typeof fact.observationId === "string" && fact.observationId.length > 0 &&
+        (fact.foods === undefined || Array.isArray(fact.foods)) &&
+        (fact.nutrients === undefined || Array.isArray(fact.nutrients)) &&
+        (fact.observationMode === undefined || fact.observationMode === "structured" || fact.observationMode === "descriptive") &&
+        (fact.dayCoverage === undefined || fact.dayCoverage === "partial" || fact.dayCoverage === "complete") &&
+        optionalString(fact.mealDescription) &&
+        (fact.reportedEnergyDeviationKcal === undefined || typeof fact.reportedEnergyDeviationKcal === "number" && Number.isFinite(fact.reportedEnergyDeviationKcal));
+    case "sleep":
+      return confirmedOrEstimated && (fact.quality === undefined || typeof fact.quality === "number" && Number.isFinite(fact.quality));
+    case "body":
+      return confirmedOrEstimated && isObjectRecord(fact.measurement);
+    case "recovery":
+      return confirmedOrEstimated &&
+        (fact.hrvMetric === undefined || fact.hrvMetric === "sdnn" || fact.hrvMetric === "rmssd") &&
+        (fact.hrvUnit === undefined || fact.hrvUnit === "milliseconds") &&
+        (fact.restingHeartRateUnit === undefined || fact.restingHeartRateUnit === "beats_per_minute");
+    case "symptom":
+      return confirmedOrEstimated && (fact.symptom === "soreness" || fact.symptom === "pain") && optionalString(fact.area) && optionalString(fact.note);
+    case "clinical_context":
+      return confirmedOrEstimated && ["diagnosed_condition", "medication", "pregnancy_or_postpartum", "eating_disorder_or_low_energy_risk", "recent_surgery_or_acute_injury", "other"].includes(String(fact.context)) && optionalString(fact.note);
+    case "subjective":
+      return confirmedOrEstimated && fact.metric === "physique_satisfaction" && typeof fact.value === "number" && Number.isFinite(fact.value) && optionalString(fact.note);
+    case "schedule":
+      return confirmedOrEstimated && ["availability_changed", "travel", "work_conflict", "other"].includes(String(fact.effect)) && optionalString(fact.note);
+    case "rest":
+      return confirmedOrEstimated && optionalString(fact.note);
+    default:
+      return false;
+  }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateEventUnits(event: DomainEvent): void {
@@ -1177,7 +1095,7 @@ function validateEventUnits(event: DomainEvent): void {
     if (
       (fact.kind === "activity" && (!validDuration(fact.duration) || !validEnergy(fact.energyExpenditure))) ||
       (fact.kind === "sleep" && !validDuration(fact.duration)) ||
-      (fact.kind === "nutrition" && !validEnergy(fact.energy)) ||
+      (fact.kind === "nutrition" && !validNutrientValues(fact.nutrients)) ||
       (fact.kind === "recovery" &&
         ((fact.perceivedRecovery !== undefined &&
           (fact.perceivedRecovery < 0 || fact.perceivedRecovery > 10)) ||
@@ -1197,6 +1115,18 @@ function validateEventUnits(event: DomainEvent): void {
       throw new LedgerConflictError("invalid_unit");
     }
   }
+}
+
+function validNutrientValues(values: readonly import("../nutrition").NutrientValueData[] | undefined): boolean {
+  if (!values) return true;
+  const seen = new Set<string>();
+  return values.every((value) => {
+    const key = `${value.nutrientId}:${value.unit}`;
+    if (seen.has(key) || !Number.isFinite(value.amount) || value.amount < 0 || !value.source.ref.trim()) return false;
+    seen.add(key);
+    if (value.nutrientId === "energy") return value.unit === "kcal" || value.unit === "kJ";
+    return value.unit === "g" || value.unit === "mg" || value.unit === "mcg";
+  });
 }
 
 function aggregateKey(kind: string, id: string): string {
@@ -1222,9 +1152,6 @@ function hasRuntimeMutation(input: DomainAtomicCommit): boolean {
       input.notificationIntents?.length ||
       input.notificationReceipts?.length ||
       input.healthImportStates?.length ||
-      input.updateOutbox?.length ||
-      input.replicaSyncStates?.length ||
-      input.pendingReplicaEnvelopes?.length ||
       input.traceOutbox?.length ||
       input.updateTraceOutbox?.length ||
       input.consumeTokens?.length ||
@@ -1344,12 +1271,6 @@ export function upsertSession(snapshot: LedgerSnapshot, session: CoachSession): 
   };
 }
 
-export function upsertUser(snapshot: LedgerSnapshot, user: UserState): LedgerSnapshot {
-  return {
-    ...snapshot,
-    users: [...snapshot.users.filter((item) => item.userId !== user.userId), user],
-  };
-}
 
 export function appendRunResult(
   snapshot: LedgerSnapshot,

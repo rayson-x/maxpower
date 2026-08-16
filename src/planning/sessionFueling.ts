@@ -53,7 +53,7 @@ export interface FuelingAdvice {
   tier: SessionFuelingPolicy["tier"];
 }
 
-/** 结构化健康标记（由 onboarding 结构化筛查产生，不做文本猜测）。 */
+/** 结构化健康标记来自明确确认的健康记录，不做文本猜测。 */
 export interface StructuredHealthFlags {
   flags: readonly string[];
   professionalClearanceRequired: boolean;

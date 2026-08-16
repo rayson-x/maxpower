@@ -1,4 +1,5 @@
 import type { TranslationTable } from "./core";
+import { MOBILE_UI_COPY } from "./mobileUi";
 
 /**
  * 文案资源表（客户端唯一文案来源）。
@@ -27,8 +28,8 @@ export const PLANNING_COPY: TranslationTable = {
   },
   // 目标时间线 — 兜底说明
   "timeline.fallback.honest": {
-    en: "I won't invent a precise timeline without body-fat data. For your build, a reasonable rate is {minPercent}-{maxPercent}% of body weight per week{kgPart}. Set your goal by a state you can see yourself, and we track progress with real weekly weight trends — how far and how fast depends on execution, and we calibrate as we go.",
-    zh: "没有体脂率数据，我不给你编一个精确周数。按你的体型，合理的速度是每周掉体重的 {minPercent}-{maxPercent}%{kgPart}。目标用你能自己看到的状态来定，每周用真实体重趋势看进展——能持续多久、到什么程度，取决于执行，我们边走边校准。",
+    en: "Without body-fat data, the timeline remains an estimate. A reasonable rate is {minPercent}-{maxPercent}% of body weight per week{kgPart}. The estimated date updates with your weekly weight trend.",
+    zh: "缺少体脂率数据，完成时间只能估算。建议每周减重 {minPercent}-{maxPercent}%{kgPart}；预计日期会随每周体重趋势更新。",
   },
   "timeline.fallback.kgPart": {
     en: " (about {minKg}-{maxKg} kg)",
@@ -41,16 +42,16 @@ export const PLANNING_COPY: TranslationTable = {
 
   // 人群分层 — recomp 说明
   "tiering.recomp.leanBeginner": {
-    en: "You're lean and new to training — this is the fastest-progress window, so we use a small surplus rather than a deficit; no need to cut yet.",
-    zh: "你偏瘦且刚开始系统训练，正处于增肌的新手窗口期——这个阶段进步最快，所以用小幅热量盈余而非赤字，不用急着减脂。",
+    en: "You are relatively lean and early in training. Start with a small energy surplus to support muscle gain instead of cutting.",
+    zh: "你目前偏瘦且系统训练时间较短。建议先用小幅热量盈余支持增肌，暂不安排减脂。",
   },
   "tiering.recomp.noviceHighMass": {
-    en: "At your training stage and build, you can lose fat and build muscle at the same time — diet + resistance training + enough protein is the combination.",
-    zh: "以你的训练阶段和体型，这个阶段完全可以一边减脂一边增肌——饮食 + 抗阻 + 足量蛋白就是组合。",
+    en: "At this stage, fat loss and muscle gain may be possible together. Use consistent resistance training, adequate protein, and an appropriate energy target.",
+    zh: "以目前的训练阶段和体型，减脂与增肌可以同时推进。重点是稳定的抗阻训练、足量蛋白和合适的能量目标。",
   },
   "tiering.recomp.preserveFocus": {
-    en: "At your training age, the goal during a cut is to keep muscle and strength — gaining will be slow, so we focus on preservation.",
-    zh: "以你的训练年限，减脂期的目标是保住肌肉与力量，增肌会很慢——我们把重点放在保。",
+    en: "At your training age, the priority during a cut is to maintain muscle and strength. Muscle gain may be slower during this phase.",
+    zh: "以目前的训练年限，减脂期应优先维持肌肉和力量；这一阶段的增肌速度可能较慢。",
   },
   "tiering.recomp.postBulkCut": {
     en: "You just finished a gaining phase — start with a small deficit and keep training load; avoid adding lots of cardio while slashing carbs at the same time.",
@@ -61,8 +62,8 @@ export const PLANNING_COPY: TranslationTable = {
     zh: "以你的情况，增肌与维持体成分可以并行。",
   },
   "tiering.physique.dualTrack": {
-    en: "A physique goal (broad shoulders, narrow waist) needs both tracks: enough shoulder/back size and low enough body fat — so load and protein can't be skimped.",
-    zh: "形态目标（宽肩窄腰）需要两条腿一起走：肩背维度要够，体脂要够低。所以力量刺激和蛋白都不能省。",
+    en: "A broad-shoulder, narrow-waist goal depends on both shoulder and back development and an appropriate body-fat level. Keep resistance training and protein intake consistent.",
+    zh: "宽肩窄腰的形态目标同时取决于肩背肌肉量和体脂水平。需要保持稳定的抗阻训练和蛋白摄入。",
   },
 
   // 进食编排 — 空腹说明（通用）
@@ -125,7 +126,7 @@ export const MOTION_COPY: TranslationTable = {
   },
   "finding.equipmentPrimaryBoundary.detail": {
     en: "Rust used the observed equipment turnaround to seal this rep; pose remains separate evidence",
-    zh: "Rust 使用观测到的器械换向封装本次动作，骨架仍作为独立证据保留",
+    zh: "系统根据器械换向判断本次动作边界，身体姿态仍作为独立观察保留",
   },
   "finding.poseEquipmentTurnaroundAligned.title": {
     en: "Pose and equipment turnaround agree",
@@ -233,19 +234,19 @@ export const MOTION_COPY: TranslationTable = {
   "setReport.title": { en: "Set report", zh: "本组报告" },
   "setReport.stat.confirmedReps": { en: "Confirmed reps", zh: "确认次数" },
   "setReport.stat.validFrames": { en: "Valid frames", zh: "有效帧率" },
-  "setReport.stat.decisionFps": { en: "Decision FPS", zh: "判定帧率" },
+  "setReport.stat.decisionFps": { en: "Analysis FPS", zh: "分析帧率" },
   "setReport.recordedOnly.title": { en: "Saved as local footage", zh: "本组已作为本机素材保存" },
   "setReport.recordedOnly.detail": {
     en: "You can replay it under Progress → Local video library. No rep count or form conclusions were produced.",
     zh: "可在「进展 → 本机视频库」中再次播放；当前未生成次数或动作质量结论。",
   },
   "setReport.coachNote.title": { en: "Coach note", zh: "教练便签" },
-  "setReport.coachNote.local": { en: "On-device engine · zero upload", zh: "本地引擎 · 零上传" },
+  "setReport.coachNote.local": { en: "Processed on device · not uploaded", zh: "本机处理 · 不上传" },
   "setReport.coachNote.noProfile": {
     en: "There is no runnable recognition profile for this exercise and camera angle; the footage was still saved.",
-    zh: "当前动作与机位没有可执行识别 profile；本组素材仍已保存。",
+    zh: "当前动作与机位暂不支持自动计次，本组视频仍已保存。",
   },
-  "setReport.reps.normalized": { en: "REP 1–{count} · normalized range", zh: "REP 1–{count} · 幅度归一" },
+  "setReport.reps.normalized": { en: "REP 1–{count} · normalized range", zh: "第 1–{count} 次 · 相对幅度" },
   "setReport.reps.orangeLegend": { en: "Orange = relatively short", zh: "橙 = 相对不足" },
   "setReport.video.saved": { en: "Training video saved on this device · {duration}", zh: "训练视频已存到本机 · {duration}" },
   "setReport.video.failed": {
@@ -352,13 +353,16 @@ export const MOTION_COPY: TranslationTable = {
   "capture.unsupported.action": { en: "Keep logging", zh: "继续记录" },
 
   // 回放页
-  "replay.noProfileForAngle": { en: "No recognition profile for this angle", zh: "当前机位暂无识别 profile" },
+  "replay.noProfileForAngle": { en: "Automatic counting is unavailable from this angle", zh: "当前机位暂不支持自动计次" },
   "replay.localPlayback": { en: "Local playback", zh: "本机回放" },
   "replay.chip.analyzing": { en: "Replay analysis", zh: "回放识别" },
   "replay.chip.localOnly": { en: "Local video", zh: "本机视频" },
   "replay.playbackOnly": { en: "Playback only · no conclusions", zh: "仅播放 · 无识别结论" },
   "replay.resume": { en: "Resume", zh: "继续" },
   "replay.pause": { en: "Pause", zh: "暂停" },
+  "live.status.ready": { en: "Ready", zh: "待开始" },
+  "live.count.reps": { en: "REPS", zh: "次数" },
+  "live.count.observing": { en: "OBSERVING", zh: "观察中" },
 } as const;
 
 /**
@@ -628,6 +632,9 @@ export const PLAN_REPORT_COPY: TranslationTable = {
 
 /** Coach 流式字幕与状态（相机页 overlay / Coach 抽屉共用）。 */
 export const COACH_STREAM_COPY: TranslationTable = {
+  "caption.label.localVision": { en: "ON-DEVICE OBSERVATION · LIVE", zh: "本机观察 · 实时" },
+  "caption.label.coach": { en: "COACH", zh: "Coach" },
+  "caption.label.coachStreaming": { en: "COACH · REPLYING", zh: "Coach · 回复中" },
   "caption.label.user": { en: "USER", zh: "你" },
   "caption.label.userListening": { en: "USER · LISTENING", zh: "你 · 正在听" },
   "caption.label.streamError": { en: "COACH · CONNECTION ERROR", zh: "COACH · 连接异常" },
@@ -671,7 +678,7 @@ export const NUTRITION_COPY: TranslationTable = {
   "sheet.eyebrow": { en: "Food log", zh: "饮食记录" },
   "sheet.title": { en: "Confirm this estimate", zh: "确认这份估算" },
   "sheet.close": { en: "Close", zh: "关闭" },
-  "sheet.closeA11y": { en: "Close the meal estimate", zh: "关闭餐食估算" },
+  "sheet.closeA11y": { en: "Close the nutrition entry form", zh: "关闭营养记录表单" },
   "sheet.notice.generatedBy": { en: "Generated by {provider}", zh: "已由 {provider} 生成" },
   "sheet.notice.localOnly": { en: "Kept on this device only", zh: "只在本机保留" },
   "sheet.notice.processed": { en: "Processed this time: {inputs}", zh: "本次处理：{inputs}" },
@@ -741,4 +748,5 @@ export const TRANSLATIONS: Readonly<Record<string, TranslationTable>> = {
   planReport: PLAN_REPORT_COPY,
   coachStream: COACH_STREAM_COPY,
   nutrition: NUTRITION_COPY,
+  mobileUi: MOBILE_UI_COPY,
 } as const;

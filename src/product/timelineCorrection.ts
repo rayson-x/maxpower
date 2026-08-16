@@ -11,7 +11,7 @@ import type {
  *
  * The sheet is allowed to construct a replacement value, but it is never
  * allowed to edit a projected Timeline row in place.  This function produces
- * only the public `CoachApplication.correctTimelineFact` payload; the
+ * only the public `LocalProductKernel.correctTimelineFact` payload; the
  * application remains responsible for CAS, an append-only CorrectionEvent,
  * stale artifacts and the Action Log.
  */
@@ -22,7 +22,7 @@ export interface TimelineCorrectionRequest {
 }
 
 export function canCorrectTimelineEntry(entry: TimelineReadEvent): boolean {
-  return entry.lifecycle === "active" && entry.envelope !== undefined;
+  return entry.lifecycle === "active";
 }
 
 export function buildTimelineCorrectionRequest(input: {
@@ -35,7 +35,6 @@ export function buildTimelineCorrectionRequest(input: {
   if (!input.reason.trim()) throw new Error("correction_reason_required");
   if (input.entry.lifecycle !== "active") throw new Error("timeline_correction_target_not_active");
   const originalEnvelope = input.entry.envelope;
-  if (!originalEnvelope) throw new Error("timeline_correction_envelope_required");
   if (input.fact.kind !== input.entry.fact.kind) {
     throw new Error("timeline_correction_fact_kind_mismatch");
   }

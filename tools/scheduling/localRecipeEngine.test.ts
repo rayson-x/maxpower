@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 
 function fixture() {
@@ -9,11 +9,11 @@ function fixture() {
   const notifications: string[] = [];
   const platformJobs: string[] = [];
   const ledger = new InMemoryCoachLedger();
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger,
     runtime: { now: () => now, nextId: (prefix) => `${prefix}-${notifications.length + platformJobs.length + 1}` },
     notifications: {
-      async schedule(input) { notifications.push(input.id); },
+      async upsert(input) { notifications.push(input.id); },
       async cancel(id) { notifications.push(`cancel:${id}`); },
     },
     backgroundScheduler: {
@@ -25,21 +25,22 @@ function fixture() {
   return { app, ledger, notifications, platformJobs, setNow: (value: string) => { now = value; } };
 }
 
-test("固定提醒经本地 Ledger 持久化；到期 catch-up 只产生一个隐私安全通知", async () => {
+test("固定提醒确认时经唯一策略门直接排程；catch-up 不重复通知", async () => {
   const state = fixture();
   const { job } = await state.app.upsertFixedReminder({
     userId: "user-1", recipeId: "water-reminder", localDate: "2026-08-08", localTime: "09:00", timezoneOffsetMinutes: 480,
   });
   assert.equal(state.platformJobs[0], job.id);
   assert.equal((await state.app.catchUpRecipes("user-1")).attempted.length, 0);
-
-  state.setNow("2026-08-08T01:00:00.000Z");
-  const due = await state.app.catchUpRecipes("user-1");
-  assert.deepEqual(due.attempted, [job.id]);
-  assert.equal(due.scheduledNotificationIds.length, 1);
   assert.equal(state.notifications.length, 1);
   assert.equal((await state.app.listScheduledJobs("user-1"))[0]?.status, "notification_scheduled");
   assert.equal((await state.ledger.read()).jobAttempts[0]?.outcome, "scheduled");
+
+  state.setNow("2026-08-08T01:00:00.000Z");
+  const due = await state.app.catchUpRecipes("user-1");
+  assert.deepEqual(due.attempted, []);
+  assert.equal(due.scheduledNotificationIds.length, 0);
+  assert.equal(state.notifications.length, 1);
   const replay = await state.app.catchUpRecipes("user-1");
   assert.equal(replay.attempted.length, 0);
   assert.equal(state.notifications.length, 1);
@@ -49,11 +50,10 @@ test("支持 native upsert 的端口在确认提醒时直接排程；后台任�
   let now = "2026-08-08T00:00:00.000Z";
   const upserts: { id: string; at: string }[] = [];
   const cancellations: string[] = [];
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: { now: () => now, nextId: (prefix) => prefix },
     notifications: {
-      async schedule() { throw new Error("legacy_schedule_should_not_run"); },
       async upsert(input) { upserts.push({ id: input.id, at: input.at }); },
       async cancel(id) { cancellations.push(id); },
     },
@@ -87,10 +87,11 @@ test("过期或安静时段的任务不补发旧通知，关闭 Recipe 会取消
     userId: "user-1", recipeId: "quiet-reminder", localDate: "2026-08-08", localTime: "09:00", timezoneOffsetMinutes: 480,
     quietHours: { start: "09:00", end: "10:00" },
   });
+  assert.equal((await state.app.listScheduledJobs("user-1")).find((item) => item.id === quiet.id)?.status, "skipped");
+  assert.equal(state.notifications.length, 0);
   state.setNow("2026-08-08T01:05:00.000Z");
   const result = await state.app.catchUpRecipes("user-1");
   assert.ok(result.expiredJobIds.includes(expired.id));
-  assert.ok(result.skippedJobIds.includes(quiet.id));
   assert.equal(state.notifications.length, 0);
 
   await state.app.cancelRecipe("user-1", "quiet-reminder");
@@ -99,7 +100,7 @@ test("过期或安静时段的任务不补发旧通知，关闭 Recipe 会取消
 
 test("没有原生通知适配器时，到期任务明确跳过，不伪造已送达状态", async () => {
   let now = "2026-08-08T00:00:00.000Z";
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: { now: () => now, nextId: (prefix) => prefix },
   });

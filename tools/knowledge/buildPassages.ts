@@ -133,7 +133,7 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
 /** 整段剔除：这类段落通体是内部内容，没有对用户有价值的部分。 */
 const DROP_PASSAGE_PATTERNS: readonly { pattern: RegExp; label: string }[] = [
   { pattern: /\b(src|tools)\/[\w.-]+\.tsx?/, label: "源码引用" },
-  { pattern: /PlannerTrace|GoalCyclePlanner|ticket\s*\d|rulePack|知识包/i, label: "实现细节" },
+  { pattern: /PlannerTrace|ticket\s*\d|rulePack|知识包/i, label: "实现细节" },
   { pattern: /assert\.|E2E|最小实验|验收断言/, label: "测试与验收" },
   { pattern: /status:\s*(proposal|active|draft)/i, label: "文档元信息" },
 ];

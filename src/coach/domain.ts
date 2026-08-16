@@ -5,7 +5,6 @@ export type DomainAggregateKind =
   | "user_profile"
   | "goal_contract"
   | "coaching_mandate"
-  | "goal_cycle"
   | "plan"
   | "workout_session"
   | "timeline"
@@ -103,27 +102,25 @@ export type EquipmentRequirement =
     };
 
 export type ImmutableEvidenceRef =
-  | {
-      kind: "canonical_packet";
-      id: string;
-      version: number;
-      hash: string;
-    }
-  | {
-      kind: "media";
-      id: string;
-      version: number;
-      hash: string;
-      mediaType: "image" | "video" | "document";
-    };
+  {
+    kind: "canonical_packet";
+    id: string;
+    version: number;
+    hash: string;
+  };
 
 export interface UserProfileData {
   id: string;
-  /** `unknown` is an explicit calibration state for the new dossier path. It
-   * is never a synonym for beginner and planners must not use it as a split
-   * or volume fallback. */
-  trainingExperience: "beginner" | "intermediate" | "advanced" | "unknown";
   locale: string;
+  /** Decision-specific coaching evidence; there is deliberately no global beginner/intermediate/advanced label. */
+  trainingCapabilities?: {
+    trainingProgrammingUnderstanding: CoachingCapabilitySummary;
+    exactExerciseFamiliarity: CoachingCapabilitySummary;
+    currentComparablePerformance: CoachingCapabilitySummary;
+    trainingContinuity: CoachingCapabilitySummary;
+    selfRegulation: CoachingCapabilitySummary;
+    executionStability: CoachingCapabilitySummary;
+  };
   /** Optional intake facts stay absent when the user did not provide them. */
   demographics?: {
     ageYears?: number;
@@ -219,6 +216,13 @@ export interface UserProfileData {
   fieldProvenance?: Readonly<Record<string, FieldProvenance>>;
 }
 
+export interface CoachingCapabilitySummary {
+  status: "unknown" | "provisional" | "supported" | "contradicted";
+  unknowns: readonly string[];
+  applicableExerciseVariantIds: readonly string[];
+  reassessWhen: readonly string[];
+}
+
 export interface FieldProvenance {
   source: "form" | "conversation" | "health" | "import" | "professional";
   confidence: "confirmed" | "estimated" | "unknown";
@@ -247,12 +251,11 @@ export interface ProfessionalConstraint {
 
 export interface GoalContractData {
   id: string;
-  primaryGoal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass";
+  primaryGoal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass" | "physique" | "maintain" | "return_to_training";
   /**
-   * The goal-specific forecast mode. It is deliberately distinct from the
-   * legacy primaryGoal training-rule key: a cut can protect lean mass, a key
-   * lift, or use the larger-body-mass starting model without changing the
-   * rest of the planning vocabulary.
+   * Goal-specific forecast mode within the primary goal: a cut can protect
+   * lean mass, prioritize a key lift, or use the larger-body-mass starting
+   * model without creating a second goal identity.
    */
   targetMode?: "higher_body_mass_fat_loss" | "lean_mass_preserving_fat_loss" | "strength_priority_cut";
   /** The correction envelope; it is not permission to silently weaken a goal. */
@@ -264,7 +267,7 @@ export interface GoalContractData {
   };
   /** Comparable observations required before judging the target path. */
   measurementPlan?: {
-    requiredMeasurements: readonly ("body_weight" | "waist_circumference" | "key_lift")[];
+    requiredMeasurements: readonly ("body_weight" | "body_fat_percentage" | "waist_circumference" | "shoulder_circumference" | "key_lift")[];
   };
   /**
    * A specific, user-granted exception to protect_original_path. Absence is
@@ -321,9 +324,6 @@ export interface GoalContractData {
     nutrition?: "flexible" | "standard" | "strict";
     recovery?: "flexible" | "standard" | "strict";
   };
-  /** Structured goal intent keeps maintain/return-to-training explicit while
-   * legacy primaryGoal remains the executable training-rule key. */
-  goalType?: "hypertrophy" | "fat_loss" | "strength" | "maintain" | "return_to_training";
   targets?: {
     targetWeight?: MassQuantity;
     targetBodyFat?: PercentageQuantity;
@@ -368,11 +368,13 @@ export interface CoachingMandateData {
   locks?: readonly {
     id: string;
     field: "exercise" | "training_day" | "load" | "sets" | "week_structure" | "professional_constraint";
-    scope: "next_unstarted_set" | "current_session" | "future_sessions" | "week" | "mesocycle" | "goal" | "nutrition";
+    scope: "next_unstarted_set" | "current_session" | "future_sessions" | "week" | "current_plan_stage" | "goal" | "nutrition";
     value: unknown;
     expiresAt?: string;
   }[];
   validUntil?: string;
+  /** Codex-style durable authority selection for future Plan changes. */
+  planChangeAuthorization: "ask_this_time" | "always_ask" | "allow_once" | "allow_similar_small" | "deny";
 }
 
 export type PermissionStatus = "not_configured" | "denied" | "granted";
@@ -387,8 +389,6 @@ export interface PermissionSetData {
   health: PermissionStatus;
   notifications: PermissionStatus;
   remoteLlm: PermissionStatus;
-  cloudSync: PermissionStatus;
-  mediaUpload: PermissionStatus;
   /**
    * 诊断 trace 上报的独立授权项。缺省（未写过）即 not_configured = 关闭，
    * 且 remoteLlm 授权是它的前提——诊断数据不搭便车。
@@ -423,49 +423,6 @@ export interface SafetyConstraintData {
   professionalConstraints: readonly ProfessionalConstraint[];
   diagnosis?: never;
   validUntil?: string;
-}
-
-export interface GoalCycleData {
-  id: string;
-  goalContractRef: DomainAggregateRef<"goal_contract">;
-  intent: string;
-  allocations?: readonly GoalAllocationData[];
-  phasePath?: readonly MesocycleData[];
-  successMetrics?: readonly string[];
-  forecastAssumptions?: readonly string[];
-  reviewCadence?: {
-    weekly: true;
-    mesocycleEnd: true;
-    midCycleRequiresConsecutiveDeviation: number;
-  };
-  knowledgePins?: import("../knowledge/model").KnowledgeVersionPins;
-  createdFromFactFrontier?: readonly DomainAggregateRef[];
-  strategySelection?: import("../planning").StrategySelection;
-  appliedPhaseStrategy?: import("../planning").AppliedPhaseStrategy;
-}
-
-export interface GoalAllocationData {
-  goal: "hypertrophy" | "strength" | "fat_loss_preserve_lean_mass" | "conditioning" | "health";
-  role: "primary" | "secondary";
-  budgetShare: number;
-  maintenanceFloor?: string;
-}
-
-export interface MesocycleData {
-  id: string;
-  ordinal: number;
-  startDate: string;
-  endDate: string;
-  intent: string;
-  weeklyIntents: readonly WeeklyIntentData[];
-  stimulusBudget: readonly StimulusBudgetData[];
-  plannedRecoveryWindow?: { weekOrdinal: number; intent: string };
-  scheduleConstraints: {
-    weeklyFrequency: number;
-    sessionDurationMinutes: number;
-    allowedWeekdays: readonly number[];
-  };
-  progressionStrategy: string;
 }
 
 export interface WeeklyIntentData {
@@ -643,11 +600,6 @@ export interface ProgressionPolicyData {
   ruleVersion: string;
 }
 
-export interface PlanCustomizationRecord {
-  change: import("./model").PlanEditChange;
-  appliedAt: string;
-}
-
 /** 计划级营养指导（按目标 × 饮食意愿生成；数值规则见营养知识库）。 */
 export interface NutritionGuidanceData {
   mode: "minimal_constraint" | "standard" | "full_targets";
@@ -692,8 +644,14 @@ export interface RecoveryGuidanceData {
 export interface PlanRevisionData {
   id: string;
   goalContractRef: DomainAggregateRef<"goal_contract">;
-  goalCycleRef?: DomainAggregateRef<"goal_cycle">;
   baseRevision?: number;
+  /** Formal lifecycle. Reopening planning never reactivates an older revision. */
+  lifecycle?: {
+    state: "active" | "paused" | "completed" | "planning_required";
+    changedAt: string;
+    reason: "user_paused" | "coach_paused" | "goal_confirmed_complete" | "new_goal" | "replan_requested" | "candidate_committed" | "candidate_reverted";
+    confirmedBy: "user" | "agent_with_user_confirmation" | "system";
+  };
   effectiveFrom: string;
   knowledgePins: import("../knowledge/model").KnowledgeVersionPins;
   materializedWeeks?: readonly WeekPlanData[];
@@ -759,13 +717,23 @@ export interface PlanRevisionData {
   explanation?: import("../planning").RecommendationExplanation;
   adaptiveForecasts?: readonly import("../planning").AdaptiveForecastScenario[];
   sessions: readonly PlannedSessionData[];
-  /** 用户确认前的定制记录（ticket 04）：每处修改带 provenance。 */
-  customizations?: readonly PlanCustomizationRecord[];
   /** 营养与恢复指导（ticket：计划=训练+饮食+恢复一体）。 */
   nutritionGuidance?: NutritionGuidanceData;
   recoveryGuidance?: RecoveryGuidanceData;
   /** 校准/进阶策略（每份计划必带，防止保守起点永久化）。 */
   progressionPolicy?: ProgressionPolicyData;
+  /** Evidence contract for judging this current stage; missing never means failed. */
+  observationContract?: {
+    requiredSignals: readonly string[];
+    minimumObservationDays: number;
+    trackingSilenceReviewDays: number;
+    reviewCadenceDays: number;
+    successConditions: readonly string[];
+    progressionConditions: readonly string[];
+    holdConditions: readonly string[];
+    fallbackConditions: readonly string[];
+    stopConditions: readonly string[];
+  };
   /** 人群分层说明（recomp 可行性与阶段提示，用户可读）。 */
   personaTieringNote?: string;
   /** 目标→时间反推（体脂目标存在时）：最快天数 + 三档速度 + 所需总能量差。 */
@@ -791,6 +759,10 @@ export interface PlannedSessionRef {
   planRevision: number;
   sessionPrescriptionId: string;
 }
+
+export type WorkoutSessionSource =
+  | { kind: "planned"; plannedSessionRef: PlannedSessionRef }
+  | { kind: "freestyle"; authoredBy: "user" | "agent" };
 
 export type WorkoutSessionStatus = "planned" | "active" | "paused" | "completed" | "partial" | "abandoned";
 export type WorkoutExecutionMode = "record_only" | "coach_monitor";
@@ -852,44 +824,6 @@ export interface SetDraftData {
   updatedAt: string;
 }
 
-/**
- * Immutable local WorkoutSession resource derived only from Rust canonical
- * packets. It is observed evidence, never a performed set or a cloud-confirmed
- * Result. Load, RIR and subjective state are intentionally absent.
- */
-export interface SetObservationData {
-  id: string;
-  prescriptionSetId: string;
-  exerciseVariantId: string;
-  source: "rust_canonical_packet";
-  observedAt: string;
-  capabilityIdentity?: string;
-  judgement: "observed" | "cannot_judge";
-  cannotJudgeReason?:
-    | "no_valid_frames"
-    | "target_not_locked"
-    | "canonical_producer_unknown";
-  counts: { confirmed: number; needsReview: number; rejected: number };
-  reps: readonly {
-    id: string;
-    revision: number;
-    disposition: "confirmed" | "needs_review" | "rejected";
-    findings: readonly string[];
-    canonicalSliceHash: string;
-    profileIdentity: string;
-    profileHash: string;
-  }[];
-  lineage: {
-    sequenceIds: readonly string[];
-    contractVersions: readonly string[];
-    algorithmVersions: readonly string[];
-    configVersions: readonly string[];
-    inferenceVersions: readonly string[];
-    sourceFrameIds: readonly string[];
-    canonicalSliceHashes: readonly string[];
-  };
-}
-
 export interface SessionOutcomeData {
   status: "completed" | "partial" | "abandoned";
   completedAt: string;
@@ -899,7 +833,6 @@ export interface SessionOutcomeData {
   /** Explicitly skipped prescription sets are resolved, but never counted as performed volume. */
   skippedPrescriptionSetIds?: readonly string[];
   subjectiveFeedback?: "easy" | "appropriate" | "hard";
-  motionPacketRefs: readonly { id: string; version: number; hash: string }[];
   dataCompleteness: "complete" | "partial" | "manual_only";
 }
 
@@ -916,26 +849,14 @@ export interface SetOutcomeData {
   noviceFeedback?: "easy" | "appropriate" | "hard";
   noviceFeedbackMappingVersion?: string;
   note?: string;
-  completedAs?: "confirmed_as_planned" | "user_edited" | "imported" | "camera_confirmed";
-  source: "user_confirmed" | "imported" | "camera_confirmed";
+  completedAs?: "confirmed_as_planned" | "user_edited" | "imported";
+  source: "user_confirmed" | "imported";
   /** 组确认时间（实测休息的计算锚点）。 */
   recordedAt?: string;
   /** 实测休息秒数（休息计时器的经过时间；无计时器则不测——缺失不是零）。 */
   measuredRestSeconds?: number;
   /** 与计划休息的偏差（产品规则：<0.5×目标=过短，>1.5×=过长）。 */
   restDeviation?: "within" | "too_short" | "too_long";
-  packetRef?: {
-    id: string;
-    version: number;
-    hash: string;
-  };
-  /** Link/provenance only; observed dispositions remain immutable elsewhere. */
-  observationRef?: { id: string };
-  performedRepsProvenance?: {
-    source: "user_confirmed";
-    observedConfirmedReps: number;
-    userAdjusted: boolean;
-  };
 }
 
 /**
@@ -1057,6 +978,8 @@ export type TimelineFact =
       reportedSession?: {
         /** A confirmed miss is a Record, not an absence of logging. */
         executionStatus?: "completed" | "partial" | "missed";
+        /** Required when a manual Record claims an outcome for a planned session. */
+        plannedSessionRef?: PlannedSessionRef;
         summary?: string;
         duration?: DurationQuantity;
         note?: string;
@@ -1097,7 +1020,7 @@ export type TimelineFact =
       /** The person's reported or explicitly confirmed exercise expenditure. */
       energyExpenditure?: EnergyQuantity;
       /** Keeps a reported number distinct from a conservative local/Coach estimate. */
-      energyExpenditureSource?: "manual" | "rule_estimate" | "agent_estimate";
+      energyExpenditureSource?: "manual" | "rule_estimate";
       confidence: "confirmed" | "estimated";
     }
   | {
@@ -1105,32 +1028,23 @@ export type TimelineFact =
       observationId: string;
       /** Absent when the person only recorded a time; it is then inferred for display only. */
       mealSlot?: import("../nutrition").MealSlot;
-      /** The foods the meal was built from, kept so a total can be traced back. */
+      /** Descriptive identity only; a food name or portion never implies nutrient values. */
       foods?: readonly import("../nutrition").FoodEntryData[];
-      energy?: EnergyQuantity;
+      /** Only explicit, user-confirmed field values participate in nutrition accounting. */
+      nutrients?: readonly import("../nutrition").NutrientValueData[];
       /** 用户明确报告的「相对当天计划多出多少」，与整日摄入总热量区分保存。 */
       reportedEnergyDeviationKcal?: number;
-      proteinGrams?: number;
-      fatGrams?: number;
-      carbohydrateGrams?: number;
-      observationMode?: "precise" | "simplified" | "user_confirmed_estimate";
+      observationMode?: "structured" | "descriptive";
+      /** Only an explicit user selection may close the day's intake log. */
+      dayCoverage?: "partial" | "complete";
       mealDescription?: string;
       /** Qualitative self-report stays qualitative; it is never converted to calories. */
-      simplified?: {
+      qualitative?: {
         proteinCompletion: "none" | "partial" | "met";
         hunger: "low" | "moderate" | "high";
         deviation: "none" | "small" | "large";
       };
-      /** Confirmation preserves the original estimate range/provenance. */
-      estimate?: {
-        sourceDraftId?: string;
-        estimates: readonly import("../nutrition").NutrientEstimate[];
-        provider?: { id: string; modelVersion: string; processingScope: "text" | "photo" };
-        userEdited?: boolean;
-        /** Original Draft remains immutable; this is a user-confirmed diff. */
-        userEdits?: import("../nutrition").NutritionObservationDraftEdits;
-      };
-      confidence: "confirmed" | "estimated";
+      confidence: "confirmed";
     }
   | {
       kind: "sleep";
@@ -1181,6 +1095,26 @@ export type TimelineFact =
       symptom: "soreness" | "pain";
       area?: string;
       severity?: number;
+      note?: string;
+      confidence: "confirmed" | "estimated";
+    }
+  | {
+      /** User-confirmed context that puts general coaching outside its safe product boundary. */
+      kind: "clinical_context";
+      context:
+        | "diagnosed_condition"
+        | "medication"
+        | "pregnancy_or_postpartum"
+        | "eating_disorder_or_low_energy_risk"
+        | "recent_surgery_or_acute_injury"
+        | "other";
+      note?: string;
+      confidence: "confirmed" | "estimated";
+    }
+  | {
+      kind: "subjective";
+      metric: "physique_satisfaction";
+      value: number;
       note?: string;
       confidence: "confirmed" | "estimated";
     }
@@ -1263,7 +1197,6 @@ export interface NutritionStrategyData {
   goalContractRef: DomainAggregateRef<"goal_contract">;
   calorieRange?: { min: EnergyQuantity; max: EnergyQuantity };
   status?: "draft" | "active" | "paused" | "review_required";
-  goalCycleRef?: DomainAggregateRef<"goal_cycle">;
   phase?: "hypertrophy" | "strength_stable" | "fat_loss_preserve_lean_mass";
   reviewWindow?: { startsAt: string; endsAt: string; minimumWeightObservations: number };
   macronutrientTargets?: {
@@ -1271,6 +1204,13 @@ export interface NutritionStrategyData {
     fatEnergyFloorPercent: number;
     carbohydrateGrams?: { min: number; max: number };
   };
+  /** Optional explicit daily targets. The engine never derives these from a food name. */
+  nutrientTargets?: Readonly<Partial<Record<import("../nutrition").NutrientId, {
+    unit: "kcal" | "kJ" | "g" | "mg" | "mcg";
+    minimum?: number;
+    maximum?: number;
+    target?: number;
+  }>>>;
   dayTypes?: readonly {
     date: string;
     kind: "training" | "rest" | "deload" | "recovery";
@@ -1333,14 +1273,11 @@ export type DomainEventName =
   | "goal_contract.revised"
   | "coaching_mandate.created"
   | "coaching_mandate.revised"
-  | "goal_cycle.created"
-  | "goal_cycle.revised"
   | "plan.revised"
   | "workout.prepared"
   | "workout.started"
   | "workout.state_changed"
   | "workout.draft_set_saved"
-  | "workout.set_observation_saved"
   | "workout.draft_set_retracted"
   | "workout.prescription_revised"
   | "workout.set_recorded"
@@ -1376,13 +1313,13 @@ export type DomainEvent =
     >
   | DomainEventEnvelope<"goal_contract.created" | "goal_contract.revised", "goal_contract", GoalContractData>
   | DomainEventEnvelope<"coaching_mandate.created" | "coaching_mandate.revised", "coaching_mandate", CoachingMandateData>
-  | DomainEventEnvelope<"goal_cycle.created" | "goal_cycle.revised", "goal_cycle", GoalCycleData>
   | DomainEventEnvelope<"plan.revised", "plan", PlanRevisionData>
   | DomainEventEnvelope<
       "workout.prepared",
       "workout_session",
       {
-        prescriptionRef: PlannedSessionRef;
+        source: WorkoutSessionSource;
+        plannedSessionRef?: PlannedSessionRef;
         frozenPrescription: PlannedSessionData;
         state: WorkoutExecutionState;
       }
@@ -1391,14 +1328,14 @@ export type DomainEvent =
       "workout.started",
       "workout_session",
       {
-        prescriptionRef: PlannedSessionRef;
+        source: WorkoutSessionSource;
+        plannedSessionRef?: PlannedSessionRef;
         frozenPrescription: PlannedSessionData;
-        state?: WorkoutExecutionState;
+        state: WorkoutExecutionState;
       }
     >
   | DomainEventEnvelope<"workout.state_changed", "workout_session", { state: WorkoutExecutionState }>
   | DomainEventEnvelope<"workout.draft_set_saved", "workout_session", { draft: SetDraftData }>
-  | DomainEventEnvelope<"workout.set_observation_saved", "workout_session", { observation: SetObservationData }>
   | DomainEventEnvelope<"workout.draft_set_retracted", "workout_session", { draftId: string; reason: string }>
   | DomainEventEnvelope<
       "workout.prescription_revised",
@@ -1421,7 +1358,7 @@ export type DomainEvent =
   | DomainEventEnvelope<
       "timeline.fact_appended",
       "timeline",
-      { fact: TimelineFact; entry?: import("../timeline").TimelineFactEnvelope }
+      { fact: TimelineFact; entry: import("../timeline").TimelineFactEnvelope }
     >
   | DomainEventEnvelope<
       "timeline.fact_corrected",
@@ -1430,7 +1367,7 @@ export type DomainEvent =
         fact: TimelineFact;
         correctsEventId: string;
         reason?: string;
-        entry?: import("../timeline").TimelineFactEnvelope;
+        entry: import("../timeline").TimelineFactEnvelope;
       }
     >
   | DomainEventEnvelope<
@@ -1529,7 +1466,6 @@ export interface DataLifecycleStatus {
   };
   evidenceReferences: {
     canonicalPackets: number;
-    media: number;
     disposition: "retained" | "not_present";
   };
 }
@@ -1542,7 +1478,8 @@ interface CommandBase<Type extends string> {
 export type DomainCommand =
   | (CommandBase<"user.bootstrap"> & {
       profile: UserProfileData;
-      goalContract: GoalContractData;
+      /** Optional by design: a confirmed dossier can enter record-first without a goal. */
+      goalContract?: GoalContractData;
       mandate: CoachingMandateData;
     })
   | (CommandBase<"profile.revise"> & {
@@ -1562,22 +1499,24 @@ export type DomainCommand =
       expectedRevision: number;
       goalContract: GoalContractData;
     })
+  | (CommandBase<"goal_contract.confirm"> & {
+      expectedGoalRevision: number;
+      goalContract: GoalContractData;
+      expectedMandateRevision: number;
+      mandate: CoachingMandateData;
+      authorization: LocalSettingsAuthorization;
+    })
   | (CommandBase<"mandate.revise"> & {
       mandateId: string;
       expectedRevision: number;
       mandate: CoachingMandateData;
       authorization: LocalSettingsAuthorization;
     })
-  | (CommandBase<"goal_cycle.revise"> & {
-      goalCycleId: string;
-      expectedRevision: number;
-      goalCycle: GoalCycleData;
-    })
   | (CommandBase<"timeline.append"> & {
       timelineId: string;
       expectedRevision: number;
       fact: TimelineFact;
-      entry?: import("../timeline").TimelineFactEnvelope;
+      entry: import("../timeline").TimelineFactEnvelope;
     })
   | (CommandBase<"timeline.correct"> & {
       timelineId: string;
@@ -1585,7 +1524,7 @@ export type DomainCommand =
       correctsEventId: string;
       fact: TimelineFact;
       reason?: string;
-      entry?: import("../timeline").TimelineFactEnvelope;
+      entry: import("../timeline").TimelineFactEnvelope;
     })
   | (CommandBase<"timeline.source_mutate"> & {
       timelineId: string;
@@ -1606,6 +1545,19 @@ export type DomainCommand =
       expectedRevision: number;
       revision: PlanRevisionData;
     })
+  | (CommandBase<"plan.commit_candidate"> & {
+      planId: string;
+      expectedPlanRevision: number;
+      revision: PlanRevisionData;
+      nutrition?: { strategyId: string; expectedRevision: number; value: NutritionStrategyData };
+      /** Consumes a one-shot Plan authorization in the same atomic commit. */
+      mandate?: { mandateId: string; expectedRevision: number; value: CoachingMandateData };
+    })
+  | (CommandBase<"plan.set_lifecycle"> & {
+      planId: string;
+      expectedRevision: number;
+      lifecycle: NonNullable<PlanRevisionData["lifecycle"]>;
+    })
   | (CommandBase<"workout.start"> & {
       workoutId: string;
       expectedRevision: number;
@@ -1620,6 +1572,14 @@ export type DomainCommand =
       mode: WorkoutExecutionMode;
       policy: WorkoutSessionPolicy;
     })
+  | (CommandBase<"workout.prepare_freestyle"> & {
+      workoutId: string;
+      expectedRevision: number;
+      frozenPrescription: PlannedSessionData;
+      authoredBy: "user" | "agent";
+      mode: WorkoutExecutionMode;
+      policy: WorkoutSessionPolicy;
+    })
   | (CommandBase<"workout.transition"> & {
       workoutId: string;
       expectedRevision: number;
@@ -1629,11 +1589,6 @@ export type DomainCommand =
       workoutId: string;
       expectedRevision: number;
       draft: SetDraftData;
-    })
-  | (CommandBase<"workout.save_set_observation"> & {
-      workoutId: string;
-      expectedRevision: number;
-      observation: SetObservationData;
     })
   | (CommandBase<"workout.retract_draft_set"> & {
       workoutId: string;
@@ -1672,7 +1627,7 @@ export type DomainCommand =
         timelineId: string;
         expectedRevision: number;
         fact: TimelineFact;
-        entry?: import("../timeline").TimelineFactEnvelope;
+        entry: import("../timeline").TimelineFactEnvelope;
       };
     })
   | (CommandBase<"workout.correct_session_outcome"> & {
@@ -1715,8 +1670,19 @@ export type DomainCommand =
       expectedRevision: number;
       safetyConstraint: SafetyConstraintData;
     })
-  | (CommandBase<"aggregate.archive" | "aggregate.restore"> & {
-      aggregateRef: DomainAggregateRef;
+  | (CommandBase<"user_profile.set_archived"> & {
+      aggregateRef: DomainAggregateRef<"user_profile">;
+      archived: boolean;
+      reason?: string;
+    })
+  | (CommandBase<"custom_exercise.set_archived"> & {
+      aggregateRef: DomainAggregateRef<"custom_exercise">;
+      archived: boolean;
+      reason?: string;
+    })
+  | (CommandBase<"equipment_profile.set_archived"> & {
+      aggregateRef: DomainAggregateRef<"equipment_profile">;
+      archived: boolean;
       reason?: string;
     });
 
@@ -1738,7 +1704,7 @@ export interface TimelineProjectionEvent {
   recordedAt: string;
   timezoneOffsetMinutes: number;
   fact: TimelineFact;
-  envelope?: import("../timeline").TimelineFactEnvelope;
+  envelope: import("../timeline").TimelineFactEnvelope;
   correctsEventId?: string;
   sourceMutationOfEventId?: string;
   tombstonesEventId?: string;
@@ -1748,14 +1714,14 @@ export interface TimelineProjectionEvent {
 export interface WorkoutProjection {
   id: string;
   revision: number;
-  prescriptionRef: PlannedSessionRef;
+  source: WorkoutSessionSource;
+  plannedSessionRef?: PlannedSessionRef;
   frozenPrescription: PlannedSessionData;
   setOutcomes: readonly SetOutcomeData[];
   skippedSets?: readonly SkippedSetData[];
   /** Effective corrections; original event facts remain in the Ledger. */
   setOutcomeCorrections?: readonly SetOutcomeCorrectionData[];
   drafts: readonly SetDraftData[];
-  setObservations?: readonly SetObservationData[];
   state: WorkoutExecutionState;
   outcome?: SessionOutcomeData;
   sessionOutcomeCorrections?: readonly SessionOutcomeCorrectionData[];
@@ -1767,7 +1733,6 @@ export interface DomainProjection {
   profile?: Revisioned<UserProfileData>;
   goalContract?: Revisioned<GoalContractData>;
   mandate?: Revisioned<CoachingMandateData>;
-  goalCycles: readonly Revisioned<GoalCycleData>[];
   plan?: Revisioned<PlanRevisionData>;
   planStatus?: "current" | "stale_goal_contract";
   equipmentProfiles: readonly Revisioned<EquipmentProfileData>[];
@@ -1807,7 +1772,6 @@ export function projectDomainEvents(
   let goalContract: Revisioned<GoalContractData> | undefined;
   let mandate: Revisioned<CoachingMandateData> | undefined;
   let plan: Revisioned<PlanRevisionData> | undefined;
-  const goalCycles = new Map<string, Revisioned<GoalCycleData>>();
   const equipmentProfiles = new Map<string, Revisioned<EquipmentProfileData>>();
   const recoveryConstraints = new Map<string, Revisioned<RecoveryConstraintData>>();
   const nutritionStrategies = new Map<string, Revisioned<NutritionStrategyData>>();
@@ -1840,11 +1804,6 @@ export function projectDomainEvents(
       mandate = { revision: event.aggregate.revision, value: event.payload };
     } else if (event.name === "plan.revised") {
       plan = { revision: event.aggregate.revision, value: event.payload };
-    } else if (event.name === "goal_cycle.created" || event.name === "goal_cycle.revised") {
-      goalCycles.set(event.aggregate.id, {
-        revision: event.aggregate.revision,
-        value: event.payload,
-      });
     } else if (
       event.name === "equipment_profile.created" ||
       event.name === "equipment_profile.revised"
@@ -1901,6 +1860,15 @@ export function projectDomainEvents(
       } else if (event.aggregate.kind === "custom_exercise") {
         const current = customExercises.get(event.aggregate.id);
         if (current) customExercises.set(event.aggregate.id, { ...current, revision: event.aggregate.revision });
+      } else if (event.aggregate.kind === "safety_constraint") {
+        const current = safetyConstraints.get(event.aggregate.id);
+        if (current) safetyConstraints.set(event.aggregate.id, { ...current, revision: event.aggregate.revision });
+      } else if (event.aggregate.kind === "recovery_constraint") {
+        const current = recoveryConstraints.get(event.aggregate.id);
+        if (current) recoveryConstraints.set(event.aggregate.id, { ...current, revision: event.aggregate.revision });
+      } else if (event.aggregate.kind === "nutrition_strategy") {
+        const current = nutritionStrategies.get(event.aggregate.id);
+        if (current) nutritionStrategies.set(event.aggregate.id, { ...current, revision: event.aggregate.revision });
       }
     } else if (event.name === "aggregate.restored") {
       archivedAggregates.delete(`${event.aggregate.kind}:${event.aggregate.id}`);
@@ -1929,7 +1897,7 @@ export function projectDomainEvents(
         recordedAt: event.recordedAt,
         timezoneOffsetMinutes: event.timezoneOffsetMinutes,
         fact: event.payload.fact,
-        ...(event.payload.entry ? { envelope: event.payload.entry } : {}),
+        envelope: event.payload.entry,
         ...(event.name === "timeline.fact_corrected"
           ? { correctsEventId: event.payload.correctsEventId }
           : {}),
@@ -1947,17 +1915,17 @@ export function projectDomainEvents(
         recordedAt: event.recordedAt,
       });
     } else if (event.name === "workout.prepared" || event.name === "workout.started") {
-      const state = event.payload.state ?? legacyWorkoutState(event, "active");
+      const state = event.payload.state;
       workouts.set(event.aggregate.id, {
         id: event.aggregate.id,
         revision: event.aggregate.revision,
-        prescriptionRef: event.payload.prescriptionRef,
+        source: event.payload.source,
+        ...(event.payload.plannedSessionRef ? { plannedSessionRef: event.payload.plannedSessionRef } : {}),
         frozenPrescription: event.payload.frozenPrescription,
         setOutcomes: [],
         skippedSets: [],
         setOutcomeCorrections: [],
         drafts: [],
-        setObservations: [],
         state,
         status: state.status,
         sessionOutcomeCorrections: [],
@@ -1982,15 +1950,6 @@ export function projectDomainEvents(
             ...current.drafts.filter((draft) => draft.id !== event.payload.draft.id),
             event.payload.draft,
           ],
-        });
-      }
-    } else if (event.name === "workout.set_observation_saved") {
-      const current = workouts.get(event.aggregate.id);
-      if (current && !(current.setObservations ?? []).some((item) => item.id === event.payload.observation.id)) {
-        workouts.set(event.aggregate.id, {
-          ...current,
-          revision: event.aggregate.revision,
-          setObservations: [...(current.setObservations ?? []), event.payload.observation],
         });
       }
     } else if (event.name === "workout.draft_set_retracted") {
@@ -2184,7 +2143,6 @@ export function projectDomainEvents(
     ...(profile && !profileArchived ? { profile } : {}),
     ...(goalContract && !goalArchived ? { goalContract } : {}),
     ...(mandate ? { mandate } : {}),
-    goalCycles: [...goalCycles.values()],
     ...(visiblePlan ? { plan: visiblePlan } : {}),
     ...(visiblePlan && goalContract
       ? {
@@ -2196,11 +2154,11 @@ export function projectDomainEvents(
         }
       : {}),
     equipmentProfiles: [...equipmentProfiles.values()],
-    recoveryConstraints: [...recoveryConstraints.values()],
-    nutritionStrategies: [...nutritionStrategies.values()],
+    recoveryConstraints: [...recoveryConstraints.values()].filter((entry) => !archivedAggregates.has(`recovery_constraint:${entry.value.id}`)),
+    nutritionStrategies: [...nutritionStrategies.values()].filter((entry) => !archivedAggregates.has(`nutrition_strategy:${entry.value.id}`)),
     customExercises: [...customExercises.values()],
     ...(permissions ? { permissions } : {}),
-    safetyConstraints: [...safetyConstraints.values()],
+    safetyConstraints: [...safetyConstraints.values()].filter((entry) => !archivedAggregates.has(`safety_constraint:${entry.value.id}`)),
     timeline: {
       revision: timelineRevision,
       events: visibleTimelineEvents,
@@ -2209,27 +2167,6 @@ export function projectDomainEvents(
     },
     workouts: [...workouts.values()],
     archivedAggregates: [...archivedAggregates.values()],
-  };
-}
-
-function legacyWorkoutState(
-  event: Pick<DomainEventEnvelope<DomainEventName, DomainAggregateKind, unknown>, "actor" | "occurredAt" | "correlationId">,
-  status: "active",
-): WorkoutExecutionState {
-  return {
-    status,
-    mode: "record_only",
-    policy: { id: "legacy-session-policy", version: "1", resumeWindowHours: 24 },
-    transitions: [
-      {
-        from: "planned",
-        to: status,
-        reason: "legacy_start",
-        actor: event.actor,
-        occurredAt: event.occurredAt,
-        idempotencyKey: event.correlationId,
-      },
-    ],
   };
 }
 
@@ -2257,4 +2194,18 @@ function timelineDateKey(event: TimelineProjectionEvent): string {
   return Number.isFinite(timestamp)
     ? new Date(timestamp + offset * 60_000).toISOString().slice(0, 10)
     : instant.slice(0, 10);
+}
+
+/**
+ * Baseline intake field contract: age, height and current weight are the only
+ * universally required onboarding inputs, with these domain ranges and units
+ * (years / cm / kg). The conversation module and the domain command boundary
+ * both call this validator; neither defines its own field rules.
+ */
+export function validateBaselineIntake(input: { ageYears: number; heightCm: number; weightKg: number }): void {
+  if (!Number.isInteger(input.ageYears) || input.ageYears < 18 || input.ageYears > 120
+    || !Number.isFinite(input.heightCm) || input.heightCm < 100 || input.heightCm > 250
+    || !Number.isFinite(input.weightKg) || input.weightKg < 25 || input.weightKg > 400) {
+    throw new Error("baseline_invalid");
+  }
 }

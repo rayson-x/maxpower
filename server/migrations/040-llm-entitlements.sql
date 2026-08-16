@@ -55,7 +55,7 @@ CREATE INDEX llm_entitlement_ledger_account_sequence
 
 CREATE TABLE llm_pricing_versions (
   id text PRIMARY KEY,
-  alias text NOT NULL CHECK (alias IN ('maxpower/coach-v1', 'maxpower/nutrition-vision-v1')),
+  alias text NOT NULL CHECK (alias = 'maxpower/coach-v1'),
   provider_id text NOT NULL,
   provider_model text NOT NULL,
   input_credits_per_million_tokens bigint NOT NULL CHECK (input_credits_per_million_tokens >= 0),
@@ -70,7 +70,7 @@ CREATE TABLE llm_pricing_versions (
 CREATE TABLE llm_gateway_invocations (
   id text PRIMARY KEY,
   owner_account_id text NOT NULL,
-  alias text NOT NULL CHECK (alias IN ('maxpower/coach-v1', 'maxpower/nutrition-vision-v1')),
+  alias text NOT NULL CHECK (alias = 'maxpower/coach-v1'),
   stream boolean NOT NULL,
   idempotency_fingerprint text NOT NULL,
   request_fingerprint text NOT NULL,
@@ -93,7 +93,7 @@ CREATE TABLE llm_invocation_cancellations (
 CREATE TABLE llm_usage_events (
   invocation_id text PRIMARY KEY REFERENCES llm_gateway_invocations(id),
   owner_account_id text NOT NULL,
-  alias text NOT NULL CHECK (alias IN ('maxpower/coach-v1', 'maxpower/nutrition-vision-v1')),
+  alias text NOT NULL CHECK (alias = 'maxpower/coach-v1'),
   provider_id text NOT NULL,
   provider_model text NOT NULL,
   pricing_version_id text NOT NULL REFERENCES llm_pricing_versions(id),

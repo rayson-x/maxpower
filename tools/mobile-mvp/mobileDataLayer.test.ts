@@ -19,7 +19,6 @@ import { assessFraming, type FramingLandmark } from "../../src/mobile/frameGatin
 import { assembleSetReport } from "../../src/mobile/setReport";
 import { liveObservationLine, mapFinding, phaseLabel } from "../../src/mobile/findingsCopy";
 import type { DecodedMotionPacket } from "../../src/motion/motionPacket";
-import { resolveWorkoutSetRealtimeCapability } from "../../src/mobile/ui/workoutRealtime";
 
 test("Android 实时识别使用冻结的 YOLOX + RTMPose Halpe-26 多人候选管线", () => {
   const viewSource = fs.readFileSync(path.join(
@@ -171,17 +170,6 @@ test("杠铃坐姿推肩由动作契约开启杠轴，显式哑铃上下文不�
   };
   assert.equal(dumbbell.profileIdentity, "seated_shoulder_press");
   assert.equal(dumbbellEnvelope.equipmentVision, "off");
-
-  const workoutEntry = resolveWorkoutSetRealtimeCapability({
-    exerciseVariantId: "seated_shoulder_press",
-    selectedEquipment: "barbell",
-    capturePosition: "frontRight45",
-    lensFacing: "back",
-    platform: "android",
-    nativeRuntimeAvailable: true,
-  });
-  assert.equal(workoutEntry.available, true);
-  assert.equal(workoutEntry.profileIdentity, "seated_barbell_shoulder_press_local_front_right");
 
   const webSource = fs.readFileSync(path.join(
     process.cwd(),
@@ -409,7 +397,7 @@ test("器械融合 finding 在共享客户端上都有证据边界文案", () =>
       finding: "equipment_primary_boundary",
       level: "info",
       title: "本次阶段边界来自器械轨迹",
-      detail: "Rust 使用观测到的器械换向封装本次动作，骨架仍作为独立证据保留",
+      detail: "系统根据器械换向判断本次动作边界，身体姿态仍作为独立观察保留",
     },
   );
   assert.equal(mapFinding("pose_equipment_turnaround_conflict", "zh").level, "warn");

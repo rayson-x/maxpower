@@ -2,6 +2,8 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 
 import type { NotificationPlatformEvent, NotificationPort } from "../../coach/ports";
+import { mobileT } from "../../i18n";
+
 
 const REMINDER_CHANNEL_ID = "maxpower-reminders";
 
@@ -16,7 +18,7 @@ export function createExpoNotificationPort(): NotificationPort {
     if (configured) return;
     if (Platform.OS === "android") {
       await Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
-        name: "MaxPower 提醒",
+        name: mobileT("mobile.native.exponotificationport.cd8ed46402"),
         importance: Notifications.AndroidImportance.DEFAULT,
         vibrationPattern: [0, 180],
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
@@ -75,9 +77,6 @@ export function createExpoNotificationPort(): NotificationPort {
 
   return {
     requestAuthorization,
-    async schedule(input) {
-      await upsert(input);
-    },
     upsert,
     async cancel(id) {
       await Notifications.cancelScheduledNotificationAsync(id);

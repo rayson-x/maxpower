@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — 扩展可回放的行为决策审计.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 同一 Agent run 在工具执行后将 typed ToolResult 回灌模型，直至完成、需要用户输入、暂停或达到有界上限。
 - [ ] 工具可见性、选择、拒绝与执行均带行为审计；用户文本不会触发正则式业务直路由。

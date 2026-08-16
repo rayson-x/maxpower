@@ -18,23 +18,6 @@ const idParameter = (name: string): Parameter => ({
   schema: { type: "string", minLength: 1 },
 });
 
-const paginationParameters: readonly Parameter[] = [
-  {
-    name: "limit",
-    in: "query",
-    required: false,
-    description: "Maximum page size. Defaults to 50.",
-    schema: { type: "integer", minimum: 1, maximum: 100, default: 50 },
-  },
-  {
-    name: "cursor",
-    in: "query",
-    required: false,
-    description: "Opaque cursor returned as nextCursor by the previous page.",
-    schema: { type: "string", minLength: 1 },
-  },
-];
-
 const idempotencyHeader: Parameter = {
   name: "Idempotency-Key",
   in: "header",
@@ -50,14 +33,6 @@ const deletionIdempotencyHeader: Parameter = {
   description:
     "Random 32-byte hexadecimal recovery capability. The same value may replay a deletion request after its session is revoked.",
   schema: { type: "string", pattern: "^[a-f0-9]{64}$" },
-};
-
-const ifMatchHeader: Parameter = {
-  name: "If-Match",
-  in: "header",
-  required: true,
-  description: "Expected resource revision, accepted as an integer or quoted ETag.",
-  schema: { type: "string", minLength: 1 },
 };
 
 const clientRunHeader: Parameter = {
@@ -84,18 +59,13 @@ const lastEventIdHeader: Parameter = {
   schema: { type: "integer", minimum: 0 },
 };
 
-const etagResponseHeader = { ETag: { $ref: "#/components/headers/ETag" } };
-const locationAndEtagResponseHeaders = {
-  Location: { $ref: "#/components/headers/Location" },
-  ETag: { $ref: "#/components/headers/ETag" },
-};
 const invocationResponseHeader = {
   "X-MaxPower-Invocation-Id": { $ref: "#/components/headers/InvocationId" },
 };
 
 interface OperationOptions {
   operationId: string;
-  tag: "Operations" | "Identity" | "ProductData" | "MediaLibrary" | "LlmGateway";
+  tag: "Operations" | "Identity" | "LlmGateway";
   security?: SecurityMode;
   parameters?: readonly Parameter[];
   requestSchema?: JsonSchema;
@@ -189,25 +159,6 @@ function betterAuthOperation(options: Omit<OperationOptions, "security" | "error
   });
 }
 
-function paginatedOperation(operationId: string, itemSchema: string) {
-  return protectedOperation({
-    operationId,
-    tag: itemSchema === "MediaAsset" ? "MediaLibrary" : "ProductData",
-    parameters: paginationParameters,
-    successSchema: {
-      allOf: [
-        { $ref: "#/components/schemas/CursorPage" },
-        {
-          type: "object",
-          properties: {
-            data: { type: "array", items: { $ref: `#/components/schemas/${itemSchema}` } },
-          },
-        },
-      ],
-    },
-  });
-}
-
 const sseContent = {
   "text/event-stream": {
     schema: { $ref: "#/components/schemas/LlmEventStream" },
@@ -248,14 +199,12 @@ export const openApiDocument = {
     title: "MaxPower Cloud Service",
     version: "1.0.0",
     description:
-      "Authenticated cloud authority for confirmed product resources, optional private media, and metered LLM access. Coach conversations remain local.",
+      "Authenticated identity, metered LLM inference, and account lifecycle for the local-first MaxPower client.",
   },
   servers: [{ url: "/" }],
   tags: [
     { name: "Operations" },
     { name: "Identity" },
-    { name: "ProductData" },
-    { name: "MediaLibrary" },
     { name: "LlmGateway" },
   ],
   paths: {
@@ -495,198 +444,6 @@ export const openApiDocument = {
         requestSchema: { $ref: "#/components/schemas/RefreshSessionRequest" },
         successStatus: "204",
         successDescription: "The opaque session credential has been revoked.",
-      }),
-    },
-
-    "/v1/me": {
-      get: protectedOperation({
-        operationId: "getProfile",
-        tag: "ProductData",
-        successSchema: { $ref: "#/components/schemas/Profile" },
-        successHeaders: etagResponseHeader,
-      }),
-      patch: protectedOperation({
-        operationId: "patchProfile",
-        tag: "ProductData",
-        parameters: [idempotencyHeader, ifMatchHeader],
-        requestSchema: { $ref: "#/components/schemas/PatchProfileRequest" },
-        successSchema: { $ref: "#/components/schemas/Profile" },
-        successHeaders: etagResponseHeader,
-      }),
-    },
-    "/v1/plans": {
-      get: paginatedOperation("listPlans", "Plan"),
-      post: protectedOperation({
-        operationId: "createPlan",
-        tag: "ProductData",
-        parameters: [idempotencyHeader],
-        requestSchema: { $ref: "#/components/schemas/CreatePlanRequest" },
-        successStatus: "201",
-        successSchema: { $ref: "#/components/schemas/Plan" },
-        successHeaders: locationAndEtagResponseHeaders,
-      }),
-    },
-    "/v1/plans/{planId}": {
-      get: protectedOperation({
-        operationId: "getPlan",
-        tag: "ProductData",
-        parameters: [idParameter("planId")],
-        successSchema: { $ref: "#/components/schemas/Plan" },
-        successHeaders: etagResponseHeader,
-      }),
-      patch: protectedOperation({
-        operationId: "patchPlan",
-        tag: "ProductData",
-        parameters: [idParameter("planId"), idempotencyHeader, ifMatchHeader],
-        requestSchema: { $ref: "#/components/schemas/PatchPlanRequest" },
-        successSchema: { $ref: "#/components/schemas/Plan" },
-        successHeaders: etagResponseHeader,
-      }),
-      delete: protectedOperation({
-        operationId: "deletePlan",
-        tag: "ProductData",
-        parameters: [idParameter("planId"), idempotencyHeader, ifMatchHeader],
-        successStatus: "204",
-        successDescription: "Plan deleted; frozen workout snapshots remain.",
-      }),
-    },
-    "/v1/plans/{planId}/publish": {
-      post: protectedOperation({
-        operationId: "publishPlan",
-        tag: "ProductData",
-        parameters: [idParameter("planId"), idempotencyHeader, ifMatchHeader],
-        successSchema: { $ref: "#/components/schemas/Plan" },
-        successHeaders: etagResponseHeader,
-      }),
-    },
-    "/v1/workout-sessions": {
-      get: paginatedOperation("listWorkoutSessions", "WorkoutSession"),
-      post: protectedOperation({
-        operationId: "createWorkoutSession",
-        tag: "ProductData",
-        parameters: [idempotencyHeader],
-        requestSchema: { $ref: "#/components/schemas/CreateWorkoutSessionRequest" },
-        successStatus: "201",
-        successSchema: { $ref: "#/components/schemas/WorkoutSession" },
-        successHeaders: locationAndEtagResponseHeaders,
-      }),
-    },
-    "/v1/workout-sessions/{workoutSessionId}": {
-      get: protectedOperation({
-        operationId: "getWorkoutSession",
-        tag: "ProductData",
-        parameters: [idParameter("workoutSessionId")],
-        successSchema: { $ref: "#/components/schemas/WorkoutSession" },
-        successHeaders: etagResponseHeader,
-      }),
-      patch: protectedOperation({
-        operationId: "patchWorkoutSession",
-        tag: "ProductData",
-        parameters: [idParameter("workoutSessionId"), idempotencyHeader, ifMatchHeader],
-        requestSchema: { $ref: "#/components/schemas/PatchWorkoutSessionRequest" },
-        successSchema: { $ref: "#/components/schemas/WorkoutSession" },
-        successHeaders: etagResponseHeader,
-      }),
-      delete: protectedOperation({
-        operationId: "deleteWorkoutSession",
-        tag: "ProductData",
-        parameters: [idParameter("workoutSessionId"), idempotencyHeader, ifMatchHeader],
-        successStatus: "204",
-        successDescription: "Workout session deleted.",
-      }),
-    },
-    "/v1/workout-sessions/{workoutSessionId}/complete": {
-      post: protectedOperation({
-        operationId: "completeWorkoutSession",
-        tag: "ProductData",
-        parameters: [idParameter("workoutSessionId"), idempotencyHeader, ifMatchHeader],
-        requestSchema: { $ref: "#/components/schemas/CompleteWorkoutSessionRequest" },
-        successSchema: { $ref: "#/components/schemas/WorkoutSession" },
-        successHeaders: etagResponseHeader,
-      }),
-    },
-    "/v1/results": {
-      get: paginatedOperation("listResults", "Result"),
-      post: protectedOperation({
-        operationId: "createResult",
-        tag: "ProductData",
-        parameters: [idempotencyHeader],
-        requestSchema: { $ref: "#/components/schemas/CreateResultRequest" },
-        successStatus: "201",
-        successSchema: { $ref: "#/components/schemas/Result" },
-        successHeaders: locationAndEtagResponseHeaders,
-      }),
-    },
-    "/v1/results/{resultId}": {
-      get: protectedOperation({
-        operationId: "getResult",
-        tag: "ProductData",
-        parameters: [idParameter("resultId")],
-        successSchema: { $ref: "#/components/schemas/Result" },
-        successHeaders: etagResponseHeader,
-      }),
-      patch: protectedOperation({
-        operationId: "patchResult",
-        tag: "ProductData",
-        parameters: [idParameter("resultId"), idempotencyHeader, ifMatchHeader],
-        requestSchema: { $ref: "#/components/schemas/PatchResultRequest" },
-        successSchema: { $ref: "#/components/schemas/Result" },
-        successHeaders: etagResponseHeader,
-      }),
-      delete: protectedOperation({
-        operationId: "deleteResult",
-        tag: "ProductData",
-        parameters: [idParameter("resultId"), idempotencyHeader, ifMatchHeader],
-        successStatus: "204",
-        successDescription: "Result deleted.",
-      }),
-    },
-
-    "/v1/media/uploads": {
-      post: protectedOperation({
-        operationId: "createMediaUpload",
-        tag: "MediaLibrary",
-        parameters: [idempotencyHeader],
-        requestSchema: { $ref: "#/components/schemas/CreateMediaUploadRequest" },
-        successStatus: "201",
-        successSchema: { $ref: "#/components/schemas/CreatedMediaUpload" },
-        successHeaders: locationAndEtagResponseHeaders,
-      }),
-    },
-    "/v1/media/uploads/{uploadId}/complete": {
-      post: protectedOperation({
-        operationId: "completeMediaUpload",
-        tag: "MediaLibrary",
-        parameters: [idParameter("uploadId"), idempotencyHeader, ifMatchHeader],
-        successSchema: { $ref: "#/components/schemas/CompletedMediaUpload" },
-        successHeaders: etagResponseHeader,
-      }),
-    },
-    "/v1/media": {
-      get: paginatedOperation("listMedia", "MediaAsset"),
-    },
-    "/v1/media/{assetId}": {
-      get: protectedOperation({
-        operationId: "getMedia",
-        tag: "MediaLibrary",
-        parameters: [idParameter("assetId")],
-        successSchema: { $ref: "#/components/schemas/MediaAsset" },
-        successHeaders: etagResponseHeader,
-      }),
-      delete: protectedOperation({
-        operationId: "deleteMedia",
-        tag: "MediaLibrary",
-        parameters: [idParameter("assetId"), idempotencyHeader, ifMatchHeader],
-        successStatus: "202",
-        successSchema: { $ref: "#/components/schemas/MediaDeletionAccepted" },
-      }),
-    },
-    "/v1/media/{assetId}/download-url": {
-      post: protectedOperation({
-        operationId: "createMediaDownloadUrl",
-        tag: "MediaLibrary",
-        parameters: [idParameter("assetId")],
-        successSchema: { $ref: "#/components/schemas/MediaDownloadTarget" },
       }),
     },
 
@@ -1077,187 +834,13 @@ export const openApiDocument = {
           },
         },
       },
-      PatchProfileRequest: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          displayName: { type: ["string", "null"], minLength: 1, maxLength: 100 },
-          locale: { type: "string", minLength: 2, maxLength: 35 },
-          timeZone: { type: "string", minLength: 1, maxLength: 100 },
-          unitSystem: { type: "string", enum: ["metric", "imperial"] },
-          data: { type: "object", additionalProperties: true },
-        },
-      },
-      Profile: resourceSchema(["accountId", "data", "locale", "timeZone", "unitSystem", "revision"]),
-      CreatePlanRequest: {
-        type: "object",
-        required: ["title", "snapshot"],
-        additionalProperties: false,
-        properties: {
-          title: { type: "string", minLength: 1, maxLength: 160 },
-          snapshot: { type: "object", additionalProperties: true },
-        },
-      },
-      PatchPlanRequest: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string", minLength: 1, maxLength: 160 },
-          snapshot: { type: "object", additionalProperties: true },
-        },
-      },
-      Plan: resourceSchema(["id", "title", "status", "revision"]),
-      CursorPage: {
-        type: "object",
-        required: ["data", "nextCursor"],
-        properties: {
-          data: { type: "array", items: {} },
-          nextCursor: { type: ["string", "null"] },
-        },
-      },
-      MediaEvidenceReference: {
-        type: "object",
-        required: ["assetId", "evidenceStatus", "evidenceDeletedAt"],
-        additionalProperties: false,
-        properties: {
-          assetId: { type: "string" },
-          evidenceStatus: { type: "string", enum: ["available", "evidence_deleted"] },
-          evidenceDeletedAt: { type: ["string", "null"], format: "date-time" },
-        },
-      },
-      MediaAssetIds: {
-        type: "array",
-        maxItems: 32,
-        uniqueItems: true,
-        items: { type: "string", minLength: 1, maxLength: 500 },
-      },
-      CreateWorkoutSessionRequest: {
-        type: "object",
-        required: ["title"],
-        additionalProperties: false,
-        properties: {
-          planId: { type: "string", minLength: 1 },
-          title: { type: "string", minLength: 1, maxLength: 160 },
-          data: { type: "object", additionalProperties: true },
-          mediaAssetIds: { $ref: "#/components/schemas/MediaAssetIds" },
-          startedAt: { type: "string", format: "date-time" },
-        },
-      },
-      PatchWorkoutSessionRequest: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          title: { type: "string", minLength: 1, maxLength: 160 },
-          data: { type: "object", additionalProperties: true },
-          notes: { type: ["string", "null"], maxLength: 4_000 },
-          mediaAssetIds: { $ref: "#/components/schemas/MediaAssetIds" },
-          startedAt: { type: "string", format: "date-time" },
-        },
-      },
-      CompleteWorkoutSessionRequest: {
-        type: "object",
-        required: ["summary"],
-        additionalProperties: false,
-        properties: {
-          summary: { type: "object", additionalProperties: true },
-          completedAt: { type: "string", format: "date-time" },
-        },
-      },
-      WorkoutSession: resourceSchema(["id", "title", "status", "mediaReferences", "revision"]),
-      CreateResultRequest: {
-        type: "object",
-        required: ["kind", "payload"],
-        additionalProperties: false,
-        properties: {
-          kind: { type: "string", minLength: 1, maxLength: 100 },
-          workoutSessionId: { type: "string", minLength: 1 },
-          payload: { type: "object", additionalProperties: true },
-          provenance: { type: "object", additionalProperties: true },
-          mediaAssetIds: { $ref: "#/components/schemas/MediaAssetIds" },
-          occurredAt: { type: "string", format: "date-time" },
-        },
-      },
-      PatchResultRequest: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          kind: { type: "string", minLength: 1, maxLength: 100 },
-          payload: { type: "object", additionalProperties: true },
-          provenance: { type: "object", additionalProperties: true },
-          mediaAssetIds: { $ref: "#/components/schemas/MediaAssetIds" },
-          occurredAt: { type: "string", format: "date-time" },
-        },
-      },
-      Result: resourceSchema(["id", "kind", "payload", "provenance", "mediaReferences", "revision"]),
-      CreateMediaUploadRequest: {
-        type: "object",
-        required: ["kind", "fileName", "contentType", "byteSize", "sha256"],
-        additionalProperties: false,
-        properties: {
-          kind: {
-            type: "string",
-            enum: ["video", "canonical_packet", "keypoints", "nutrition_photo"],
-          },
-          fileName: { type: "string", minLength: 1, maxLength: 255 },
-          contentType: { type: "string", minLength: 3, maxLength: 255 },
-          byteSize: { type: "integer", minimum: 1, maximum: 5_368_709_120 },
-          sha256: { type: "string", pattern: "^[a-fA-F0-9]{64}$" },
-          parentAssetId: { type: "string", minLength: 1 },
-        },
-      },
-      MediaAsset: resourceSchema(["id", "kind", "fileName", "contentType", "byteSize", "status", "revision"]),
-      MediaUpload: resourceSchema(["id", "assetId", "status", "revision"]),
-      MediaUploadTarget: {
-        type: "object",
-        required: ["kind", "url", "headers", "expiresAt"],
-        properties: {
-          kind: { type: "string", enum: ["presigned_put"] },
-          url: { type: "string", format: "uri" },
-          headers: { type: "object", additionalProperties: { type: "string" } },
-          expiresAt: { type: "string", format: "date-time" },
-        },
-      },
-      CreatedMediaUpload: {
-        type: "object",
-        required: ["asset", "upload", "uploadTarget"],
-        properties: {
-          asset: { $ref: "#/components/schemas/MediaAsset" },
-          upload: { $ref: "#/components/schemas/MediaUpload" },
-          uploadTarget: { $ref: "#/components/schemas/MediaUploadTarget" },
-        },
-      },
-      CompletedMediaUpload: {
-        type: "object",
-        required: ["asset", "upload"],
-        properties: {
-          asset: { $ref: "#/components/schemas/MediaAsset" },
-          upload: { $ref: "#/components/schemas/MediaUpload" },
-        },
-      },
-      MediaDownloadTarget: {
-        type: "object",
-        required: ["kind", "url", "expiresAt"],
-        properties: {
-          kind: { type: "string", enum: ["presigned_get"] },
-          url: { type: "string", format: "uri" },
-          expiresAt: { type: "string", format: "date-time" },
-        },
-      },
-      MediaDeletionAccepted: {
-        type: "object",
-        required: ["status", "deletedAssetIds"],
-        properties: {
-          status: { const: "deleted" },
-          deletedAssetIds: { type: "array", items: { type: "string" } },
-        },
-      },
       OpenAiChatCompletionRequest: {
         type: "object",
         required: ["model", "messages"],
         properties: {
           model: {
             type: "string",
-            enum: ["maxpower/coach-v1", "maxpower/nutrition-vision-v1"],
+            enum: ["maxpower/coach-v1"],
           },
           messages: { type: "array", maxItems: 128, items: {} },
           stream: { type: "boolean", default: false },
@@ -1468,33 +1051,3 @@ export const openApiDocument = {
     },
   },
 } as const;
-
-function resourceSchema(required: readonly string[]): JsonSchema {
-  return {
-    type: "object",
-    required,
-    properties: {
-      accountId: { type: "string" },
-      id: { type: "string" },
-      title: { type: "string" },
-      status: { type: "string" },
-      kind: { type: "string" },
-      fileName: { type: "string" },
-      contentType: { type: "string" },
-      byteSize: { type: "integer", minimum: 0 },
-      assetId: { type: "string" },
-      locale: { type: "string" },
-      timeZone: { type: "string" },
-      unitSystem: { type: "string", enum: ["metric", "imperial"] },
-      data: { type: "object", additionalProperties: true },
-      payload: { type: "object", additionalProperties: true },
-      provenance: { type: "object", additionalProperties: true },
-      mediaReferences: {
-        type: "array",
-        items: { $ref: "#/components/schemas/MediaEvidenceReference" },
-      },
-      revision: { type: "integer", minimum: 1 },
-    },
-    additionalProperties: true,
-  };
-}

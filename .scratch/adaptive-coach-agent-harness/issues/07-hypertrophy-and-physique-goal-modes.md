@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — 减脂目标合同与基础风险状态.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] Goal contract 可表达增肌和塑形的代理指标、测量协议、偏好与保护约束。
 - [ ] 数据不足时要求最小高价值测量或输出 insufficient_evidence，不把体重上涨或一次 BIA 读数称为肌肉/腹肌结果。

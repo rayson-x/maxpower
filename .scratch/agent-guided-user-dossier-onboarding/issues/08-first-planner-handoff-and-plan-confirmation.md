@@ -4,7 +4,7 @@
 
 **Blocked by:** 07 — 组合档案摘要、修正与持久确认
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 档案完成事件向 Planner 传递确认资源引用、fact frontier、Goal Contract、assessment/readiness revision、知识版本和规则版本，不重新从聊天猜测用户事实。
 - [ ] Planner 消费多维 Coaching level assessment 和 Training background 决定分化、动作复杂度、起始训练量及校准速度，不再把旧 `trainingExperience` 作为唯一或隐式 fallback。

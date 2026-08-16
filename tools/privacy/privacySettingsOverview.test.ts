@@ -1,35 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
-import { InMemoryMediaBlobStore, WebCryptoBackupCryptoPort } from "../../src/privacy";
-import { InMemoryReplicaTransport } from "../../src/sync";
+import { WebCryptoBackupCryptoPort } from "../../src/privacy";
 
 function fixture(options: {
   authenticatedAccountId?: string;
-  media?: boolean;
-  sync?: boolean;
   backup?: boolean;
 } = {}) {
   let sequence = 0;
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-09T12:00:00.000+08:00",
       nextId: (prefix) => `${prefix}-${++sequence}`,
     },
     authenticatedAccountId: options.authenticatedAccountId ?? "u1",
-    ...(options.media ? { media: new InMemoryMediaBlobStore({ now: () => "2026-08-09T12:00:00.000+08:00" }) } : {}),
-    ...(options.sync ? { replicaTransport: new InMemoryReplicaTransport("settings-service", "settings-device") } : {}),
     ...(options.backup ? { backupCrypto: new WebCryptoBackupCryptoPort() } : {}),
   });
   return app;
 }
 
-async function bootstrapPermissions(app: CoachApplication, input: {
+async function bootstrapPermissions(app: LocalProductKernel, input: {
   remoteLlm?: "not_configured" | "denied" | "granted";
-  cloudSync?: "not_configured" | "denied" | "granted";
 }) {
   const meta = {
     userId: "u1",
@@ -41,9 +35,9 @@ async function bootstrapPermissions(app: CoachApplication, input: {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: { ...meta, idempotencyKey: "bootstrap" },
-    profile: { id: "profile-1", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile-1", locale: "zh-CN" },
     goalContract: { id: "goal-1", primaryGoal: "hypertrophy", horizon: { startDate: "2026-08-09", endDate: "2026-12-09" } },
-    mandate: { id: "mandate-1", mode: "collaborative" },
+    mandate: { id: "mandate-1", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
   await app.executeDomainCommand({
     type: "permission_set.revise",
@@ -56,41 +50,26 @@ async function bootstrapPermissions(app: CoachApplication, input: {
       health: "not_configured",
       notifications: "not_configured",
       remoteLlm: input.remoteLlm ?? "not_configured",
-      cloudSync: input.cloudSync ?? "not_configured",
-      mediaUpload: "not_configured",
     },
     authorization: { kind: "local_user_presence", verifiedAt: meta.occurredAt, nonce: "settings" },
   });
 }
 
-test("隐私设置概览反映 AuthRoot 已认证账号，不暴露媒体内容或同步 payload", async () => {
-  const app = fixture({ media: true });
-  await bootstrapPermissions(app, { remoteLlm: "denied", cloudSync: "denied" });
-  await app.putMedia({ userId: "u1", mimeType: "image/jpeg", bytes: new Uint8Array([1, 2, 3, 4]) });
+test("隐私设置概览反映 AuthRoot 已认证账号，不暴露产品内容", async () => {
+  const app = fixture();
+  await bootstrapPermissions(app, { remoteLlm: "denied" });
 
   const overview = await app.readPrivacySettingsOverview({ userId: "u1" });
 
   assert.deepEqual(overview.account, { availability: "available", state: "authenticated" });
-  assert.equal(overview.sync.authorization, "denied");
-  assert.equal(overview.sync.capability, "unavailable");
-  assert.equal(overview.sync.status, "disabled");
   assert.equal(overview.remoteModel.authorization, "denied");
   assert.equal(overview.remoteModel.consent.status, "not_active");
-  assert.deepEqual(overview.media, {
-    availability: "available",
-    replicationScope: "local_only",
-    active: { itemCount: 1, byteLength: 4 },
-    deletedItemCount: 0,
-    encryption: { platformProtected: 0, clientSideEncrypted: 0, notEncrypted: 1 },
-  });
-  assert.equal(JSON.stringify(overview).includes("media-sha256"), false);
   assert.equal(JSON.stringify(overview).includes("contentHash"), false);
-  assert.equal("payload" in overview.sync, false);
 });
 
 test("隐私设置概览仅披露已授权远程模型的语义范围，隐藏账号标识", async () => {
-  const app = fixture({ sync: true });
-  await bootstrapPermissions(app, { remoteLlm: "not_configured", cloudSync: "granted" });
+  const app = fixture();
+  await bootstrapPermissions(app, { remoteLlm: "not_configured" });
   await app.updatePermissionFromSettings({
     userId: "u1",
     expectedRevision: 1,
@@ -102,9 +81,6 @@ test("隐私设置概览仅披露已授权远程模型的语义范围，隐藏�
   const overview = await app.readPrivacySettingsOverview({ userId: "u1" });
 
   assert.deepEqual(overview.account, { availability: "available", state: "authenticated" });
-  assert.equal(overview.sync.authorization, "granted");
-  assert.equal(overview.sync.capability, "available");
-  assert.equal(overview.sync.status, "pending_upload");
   assert.deepEqual(overview.remoteModel, {
     authorization: "granted",
     configuration: { status: "managed_cloud", service: "MaxPower Cloud" },
@@ -119,21 +95,13 @@ test("隐私设置概览仅披露已授权远程模型的语义范围，隐藏�
   assert.equal(JSON.stringify(overview).includes("u1"), false);
 });
 
-test("缺少同步和媒体 Adapter 时，设置概览仍保留已认证账号上下文", async () => {
+test("设置概览仍保留已认证账号上下文", async () => {
   const app = fixture();
   await bootstrapPermissions(app, {});
 
   const overview = await app.readPrivacySettingsOverview({ userId: "u1" });
 
   assert.deepEqual(overview.account, { availability: "available", state: "authenticated" });
-  assert.deepEqual(overview.media, {
-    availability: "not_configured",
-    replicationScope: "local_only",
-    active: { itemCount: 0, byteLength: 0 },
-    deletedItemCount: 0,
-    encryption: { platformProtected: 0, clientSideEncrypted: 0, notEncrypted: 0 },
-  });
-  assert.equal(overview.sync.status, "disabled");
 });
 
 test("设置概览拒绝跨越 AuthRoot 的账号 namespace", async () => {
@@ -145,7 +113,7 @@ test("设置概览拒绝跨越 AuthRoot 的账号 namespace", async () => {
   );
 });
 
-test("隐私设置明确区分可用的本机加密结构化备份与尚未包含的媒体", async () => {
+test("隐私设置明确披露可用的本机加密结构化备份", async () => {
   const app = fixture({ backup: true });
   await bootstrapPermissions(app, {});
 
@@ -155,7 +123,6 @@ test("隐私设置明确区分可用的本机加密结构化备份与尚未包�
     capability: "available",
     encryption: "client_side",
     content: "structured_data_only",
-    media: "excluded",
   });
 });
 
@@ -169,7 +136,7 @@ test("缺少设备加密能力时，设置不会把已注入的备份 Adapter �
     async decryptAesGcm() { throw new Error("crypto unavailable"); },
     async sha256() { throw new Error("crypto unavailable"); },
   };
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-09T12:00:00.000+08:00",

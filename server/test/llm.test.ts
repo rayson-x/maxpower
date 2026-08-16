@@ -391,17 +391,7 @@ test("enforces alias request limits and reserves the configured worst-case charg
         maxInputBytes: 128,
         maxInputTokens: 256,
         maxOutputTokens: 64,
-        maxImages: 0,
-        maxImageBytes: 1,
         reservationCredits: 120,
-      },
-      "maxpower/nutrition-vision-v1": {
-        maxInputBytes: 256,
-        maxInputTokens: 512,
-        maxOutputTokens: 32,
-        maxImages: 1,
-        maxImageBytes: 128,
-        reservationCredits: 200,
       },
     },
   });
@@ -437,7 +427,7 @@ test("enforces alias request limits and reserves the configured worst-case charg
   assert.equal(provider.calls.length, 0);
 });
 
-test("normalizes the provider output cap and bounds image inputs by alias", async () => {
+test("normalizes the provider output cap and rejects non-text input", async () => {
   const requests: unknown[] = [];
   const provider = {
     invoke(input: Parameters<InMemoryLlmProviderAdapter["invoke"]>[0]) {
@@ -459,16 +449,6 @@ test("normalizes the provider output cap and bounds image inputs by alias", asyn
         maxInputBytes: 512,
         maxInputTokens: 1_024,
         maxOutputTokens: 64,
-        maxImages: 0,
-        maxImageBytes: 1,
-        reservationCredits: 100,
-      },
-      "maxpower/nutrition-vision-v1": {
-        maxInputBytes: 1_024,
-        maxInputTokens: 2_048,
-        maxOutputTokens: 32,
-        maxImages: 1,
-        maxImageBytes: 256,
         reservationCredits: 100,
       },
     },
@@ -488,7 +468,7 @@ test("normalizes the provider output cap and bounds image inputs by alias", asyn
         messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.test/a.jpg" } }] }],
       },
     }),
-    apiError(400, "image_limit_exceeded"),
+    apiError(400, "text_only"),
   );
   assert.equal(requests.length, 1);
 });
@@ -555,16 +535,6 @@ test("fails closed and audits actual provider usage when upstream exceeds its re
         maxInputBytes: 512,
         maxInputTokens: 1_024,
         maxOutputTokens: 64,
-        maxImages: 0,
-        maxImageBytes: 1,
-        reservationCredits: 100,
-      },
-      "maxpower/nutrition-vision-v1": {
-        maxInputBytes: 512,
-        maxInputTokens: 1_024,
-        maxOutputTokens: 64,
-        maxImages: 1,
-        maxImageBytes: 128,
         reservationCredits: 100,
       },
     },

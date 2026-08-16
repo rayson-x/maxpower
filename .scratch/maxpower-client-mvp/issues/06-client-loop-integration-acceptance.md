@@ -4,7 +4,7 @@
 
 **Blocked by:** 05 — 多日趋势、平台审计与长期阶段切换
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 开始实施前逐条审计现有客户端、UI Demo 和本规格，列出 reused、already-green、gap、deferred；实现只处理 gap
 - [ ] Today 保留顶部 Coach 动态、固定 Plan Summary、卡内滚动 Task List 和下方 Timeline，不因接入真实数据产生溢出或第二份页面状态

@@ -6,7 +6,7 @@ import { aerobicPlanFor } from "../../src/planning/aerobicPlan";
 
 function profile(overrides: Partial<UserProfileData> = {}): UserProfileData {
   return {
-    id: "profile", trainingExperience: "intermediate", locale: "zh-CN", adultConfirmed: true,
+    id: "profile", locale: "zh-CN", adultConfirmed: true,
     demographics: { ageYears: 30, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 75, unit: "kg" } },
     schedule: { weeklyFrequency: 4, sessionDurationMinutes: 90 },
     ...overrides,

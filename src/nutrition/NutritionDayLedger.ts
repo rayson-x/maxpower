@@ -10,13 +10,65 @@ export interface FoodEntryData {
   id: string;
   name: string;
   portion?: string;
-  energy?: EnergyQuantity;
-  proteinGrams?: number;
-  fatGrams?: number;
-  carbohydrateGrams?: number;
-  source: "manual" | "label" | "import" | "estimate";
 }
-type Nutrient = "energy" | "protein" | "carbohydrate" | "fat";
+
+export type CoreNutrientId =
+  | "energy"
+  | "protein"
+  | "carbohydrate"
+  | "fat"
+  | "fiber"
+  | "sodium"
+  | "potassium"
+  | "calcium"
+  | "iron"
+  | "magnesium";
+
+export type NutrientId = CoreNutrientId | `vitamin_${string}` | `mineral_${string}`;
+export type NutrientUnit = "kcal" | "kJ" | "g" | "mg" | "mcg";
+export type NutrientValueSourceKind =
+  | "manual_form"
+  | "current_user_statement"
+  | "manually_transcribed_label";
+
+export interface NutrientValueData {
+  nutrientId: NutrientId;
+  amount: number;
+  unit: NutrientUnit;
+  source: {
+    kind: NutrientValueSourceKind;
+    ref: string;
+  };
+}
+
+export interface NutrientLedgerValue {
+  unit: "kcal" | "g" | "mg" | "mcg";
+  target?: number;
+  minimum?: number;
+  maximum?: number;
+  consumedLogged: number;
+  remainingAgainstLogged?: number;
+  overage?: number;
+  intakeKnown: boolean;
+  reportedValueCount: number;
+  missing: readonly string[];
+}
+
+export type NutritionLedgerNutrients = Record<CoreNutrientId, NutrientLedgerValue>
+  & Partial<Record<`vitamin_${string}` | `mineral_${string}`, NutrientLedgerValue>>;
+
+const CORE_NUTRIENTS: readonly CoreNutrientId[] = [
+  "energy",
+  "protein",
+  "carbohydrate",
+  "fat",
+  "fiber",
+  "sodium",
+  "potassium",
+  "calcium",
+  "iron",
+  "magnesium",
+];
 
 export interface NutritionDayPlan {
   date: string;
@@ -28,6 +80,7 @@ export interface NutritionDayPlan {
     carbohydrate: TargetValue<number>;
     fat: TargetValue<number>;
   };
+  nutrientTargets: NonNullable<NutritionStrategyData["nutrientTargets"]>;
   recoveryLevel?: RecoveryConstraintData["level"];
   assumptions: readonly string[];
   notes: readonly string[];
@@ -53,22 +106,10 @@ export interface NutritionDayLedger {
     confirmed: boolean;
     description?: string;
     foods?: readonly FoodEntryData[];
-    nutrients?: {
-      energy?: number;
-      proteinGrams?: number;
-      carbohydrateGrams?: number;
-      fatGrams?: number;
-    };
+    nutrients?: readonly NutrientValueData[];
     correctsEventId?: string;
   }[];
-  nutrients: Record<Nutrient, {
-    target?: number;
-    consumedLogged: number;
-    remainingAgainstLogged?: number;
-    overage?: number;
-    intakeKnown: boolean;
-    missing: readonly string[];
-  }>;
+  nutrients: NutritionLedgerNutrients;
 }
 
 export function deriveNutritionDayPlan(input: {
@@ -100,6 +141,7 @@ export function deriveNutritionDayPlan(input: {
       carbohydrate: day?.carbohydrateGrams !== undefined ? { value: day.carbohydrateGrams, basis: "day_type" } : { basis: "unknown" },
       fat: fat !== undefined ? { value: fat, basis: "fat_floor" } : { basis: "unknown" },
     },
+    nutrientTargets: input.strategy?.nutrientTargets ?? {},
     ...(input.recoveryConstraint ? { recoveryLevel: input.recoveryConstraint.level } : {}),
     assumptions: [
       ...(input.strategy ? [] : ["no_active_nutrition_strategy"]),
@@ -136,56 +178,101 @@ export function projectNutritionDayLedger(input: {
       confirmed: fact.confidence === "confirmed",
       ...(fact.mealDescription ? { description: fact.mealDescription } : {}),
       ...(fact.foods ? { foods: fact.foods } : {}),
-      ...(fact.energy || fact.proteinGrams !== undefined || fact.carbohydrateGrams !== undefined || fact.fatGrams !== undefined
-        ? {
-            nutrients: {
-              ...(fact.energy ? { energy: fact.energy.unit === "kcal" ? fact.energy.value : fact.energy.value / 4.184 } : {}),
-              ...(fact.proteinGrams !== undefined ? { proteinGrams: fact.proteinGrams } : {}),
-              ...(fact.carbohydrateGrams !== undefined ? { carbohydrateGrams: fact.carbohydrateGrams } : {}),
-              ...(fact.fatGrams !== undefined ? { fatGrams: fact.fatGrams } : {}),
-            },
-          }
-        : {}),
+      ...(fact.nutrients?.length ? { nutrients: fact.nutrients } : {}),
       ...(event.correctsEventId ? { correctsEventId: event.correctsEventId } : {}),
     };
   });
   const confirmed = active.filter((event) => event.fact.kind === "nutrition" && event.fact.confidence === "confirmed");
-  const quantified = confirmed.filter((event) => event.fact.kind === "nutrition" && (event.fact.energy || event.fact.proteinGrams !== undefined || event.fact.carbohydrateGrams !== undefined || event.fact.fatGrams !== undefined));
+  const completeCoverageEvents = confirmed.filter((event) => event.fact.kind === "nutrition" && event.fact.dayCoverage === "complete");
+  const dayComplete = completeCoverageEvents.length > 0;
+  const quantified = confirmed.filter((event) => event.fact.kind === "nutrition" && Boolean(event.fact.nutrients?.length));
   const unquantifiedMealCount = confirmed.length - quantified.length;
-  const value = (nutrient: Nutrient): number => quantified.reduce((total, event) => {
-    if (event.fact.kind !== "nutrition") return total;
-    if (nutrient === "energy") return total + (event.fact.energy?.unit === "kcal" ? event.fact.energy.value : event.fact.energy ? event.fact.energy.value / 4.184 : 0);
-    return total + (event.fact[nutrient === "protein" ? "proteinGrams" : nutrient === "carbohydrate" ? "carbohydrateGrams" : "fatGrams"] ?? 0);
-  }, 0);
-  const target = (nutrient: Nutrient): number | undefined => {
-    const targetValue = input.plan.targets[nutrient].value as number | EnergyQuantity | undefined;
-    return typeof targetValue === "number" ? targetValue : targetValue?.value;
+  const allNutrientIds = [...new Set<NutrientId>([
+    ...CORE_NUTRIENTS,
+    ...confirmed.flatMap((event) => event.fact.kind === "nutrition" ? (event.fact.nutrients ?? []).map((value) => value.nutrientId) : []),
+  ])];
+  const target = (nutrient: NutrientId): { target?: number; minimum?: number; maximum?: number } => {
+    if (nutrient === "energy" || nutrient === "protein" || nutrient === "carbohydrate" || nutrient === "fat") {
+      const targetValue = input.plan.targets[nutrient].value as number | EnergyQuantity | undefined;
+      const value = typeof targetValue === "number" ? targetValue : targetValue?.value;
+      return value === undefined ? {} : { target: value };
+    }
+    const explicit = input.plan.nutrientTargets[nutrient];
+    if (!explicit) return {};
+    const normalize = (amount: number | undefined) => amount === undefined ? undefined : normalizeNutrientAmount({ nutrientId: nutrient, amount, unit: explicit.unit, source: { kind: "manual_form", ref: "nutrition_strategy_target" } });
+    return { ...(normalize(explicit.target) !== undefined ? { target: normalize(explicit.target) } : {}), ...(normalize(explicit.minimum) !== undefined ? { minimum: normalize(explicit.minimum) } : {}), ...(normalize(explicit.maximum) !== undefined ? { maximum: normalize(explicit.maximum) } : {}) };
   };
-  const nutrients = Object.fromEntries(([
-    "energy", "protein", "carbohydrate", "fat",
-  ] as const).map((nutrient) => {
-    const consumedLogged = value(nutrient);
+  const nutrients = Object.fromEntries(allNutrientIds.map((nutrient) => {
+    const reported = confirmed.flatMap((event) => event.fact.kind === "nutrition"
+      ? (event.fact.nutrients ?? []).filter((value) => value.nutrientId === nutrient)
+      : []);
+    const consumedLogged = reported.reduce((total, value) => total + normalizeNutrientAmount(value), 0);
     const targetValue = target(nutrient);
-    const remaining = targetValue === undefined || confirmed.length === 0 ? undefined : targetValue - consumedLogged;
+    const remaining = confirmed.length === 0 ? undefined : (targetValue.target ?? targetValue.minimum) === undefined ? undefined : (targetValue.target ?? targetValue.minimum)! - consumedLogged;
+    const overage = confirmed.length > 0 && targetValue.maximum !== undefined && consumedLogged > targetValue.maximum ? consumedLogged - targetValue.maximum : remaining !== undefined && targetValue.target !== undefined && remaining < 0 ? Math.abs(remaining) : undefined;
     return [nutrient, {
-      ...(targetValue !== undefined ? { target: targetValue } : {}),
+      unit: canonicalNutrientUnit(nutrient),
+      ...targetValue,
       consumedLogged,
-      ...(remaining !== undefined ? { remainingAgainstLogged: remaining, ...(remaining < 0 ? { overage: Math.abs(remaining) } : {}) } : {}),
-      intakeKnown: confirmed.length > 0 && unquantifiedMealCount === 0,
+      ...(remaining !== undefined ? { remainingAgainstLogged: remaining } : {}),
+      ...(overage !== undefined ? { overage } : {}),
+      // `complete` closes the day's log; it does not turn omitted values in
+      // earlier meals into zero. A nutrient is known only when every confirmed
+      // intake record for that day explicitly supplied it.
+      intakeKnown: dayComplete && confirmed.length > 0 && reported.length === confirmed.length,
+      reportedValueCount: reported.length,
       missing: [
         ...(confirmed.length === 0 ? ["no_confirmed_meal"] : []),
-        ...(unquantifiedMealCount > 0 ? ["unquantified_meal"] : []),
+        ...(confirmed.length > 0 && reported.length !== confirmed.length ? ["nutrient_not_provided"] : []),
+        ...(confirmed.length > 0 && !dayComplete ? ["day_intake_not_confirmed_complete"] : []),
       ],
     }];
   })) as unknown as NutritionDayLedger["nutrients"];
   return {
     date: input.plan.date,
-    coverage: confirmed.length === 0 ? "no_log" : unquantifiedMealCount > 0 ? "partial" : "logged",
+    coverage: confirmed.length === 0 ? "no_log" : !dayComplete || unquantifiedMealCount > 0 ? "partial" : "logged",
     loggedMealCount: meals.length,
     unquantifiedMealCount,
     meals,
     nutrients,
   };
+}
+
+export function assertNutrientValues(values: readonly NutrientValueData[]): void {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (!Number.isFinite(value.amount) || value.amount < 0) throw new Error("nutrition_value_invalid");
+    if (!value.source.ref.trim()) throw new Error("nutrition_value_source_ref_required");
+    const key = `${value.nutrientId}:${value.unit}`;
+    if (seen.has(key)) throw new Error("nutrition_value_duplicate");
+    seen.add(key);
+    normalizeNutrientAmount(value);
+  }
+}
+
+function canonicalNutrientUnit(nutrient: NutrientId): NutrientLedgerValue["unit"] {
+  if (nutrient === "energy") return "kcal";
+  if (nutrient === "protein" || nutrient === "carbohydrate" || nutrient === "fat" || nutrient === "fiber") return "g";
+  return "mg";
+}
+
+function normalizeNutrientAmount(value: NutrientValueData): number {
+  const canonical = canonicalNutrientUnit(value.nutrientId);
+  if (canonical === "kcal") {
+    if (value.unit === "kcal") return value.amount;
+    if (value.unit === "kJ") return value.amount / 4.184;
+    throw new Error("nutrition_unit_invalid");
+  }
+  if (canonical === "g") {
+    if (value.unit === "g") return value.amount;
+    if (value.unit === "mg") return value.amount / 1000;
+    if (value.unit === "mcg") return value.amount / 1_000_000;
+    throw new Error("nutrition_unit_invalid");
+  }
+  if (value.unit === "mg") return value.amount;
+  if (value.unit === "g") return value.amount * 1000;
+  if (value.unit === "mcg") return value.amount / 1000;
+  throw new Error("nutrition_unit_invalid");
 }
 
 function midpointEnergy(range: NonNullable<NutritionStrategyData["calorieRange"]>): EnergyQuantity {

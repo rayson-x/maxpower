@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Agent 动态表单与行动门槛
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 睡眠、疲劳、局部酸痛/疼痛、近期表现和时间可用性进入带来源、观察窗口和过期条件的 Timeline/Readiness 投影，不进入永久训练等级。
 - [ ] Readiness 到期或出现更新事实后重新评估；昨天睡差不会长期改变稳定 Profile 或 Coaching level assessment。

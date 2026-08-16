@@ -21,8 +21,6 @@ export type AuthFetch = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ServerAuthClientOptions {
   baseUrl: string;
-  /** Debug-only escape hatch supplied by the mobile composition root. */
-  allowInsecureHttp?: boolean;
   fetch?: AuthFetch;
   /** Reads the SecureStore-only install secret used by social code exchange. */
   socialExchangeBinding?: () => Promise<string>;
@@ -45,10 +43,9 @@ export class ServerAuthClient implements OnlineAuthApi, ReachabilityPort {
     } catch {
       throw new OnlineAuthError("configuration_error", "MaxPower API URL is invalid.");
     }
-    const protocolAllowed = baseUrl.protocol === "https:"
-      || (options.allowInsecureHttp === true && baseUrl.protocol === "http:");
+    const protocolAllowed = baseUrl.protocol === "https:" || baseUrl.protocol === "http:";
     if (!protocolAllowed) {
-      throw new OnlineAuthError("configuration_error", "MaxPower API URL must use HTTPS.");
+      throw new OnlineAuthError("configuration_error", "MaxPower API URL must use HTTP or HTTPS.");
     }
     if (baseUrl.username || baseUrl.password || baseUrl.search || baseUrl.hash) {
       throw new OnlineAuthError("configuration_error", "MaxPower API URL must not contain credentials, query, or fragment.");

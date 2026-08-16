@@ -6,7 +6,6 @@ export const PERSONAL_PLANNER_PROFILE: UserProfileData = {
   id: "personal-profile",
   locale: "zh-CN",
   adultConfirmed: true,
-  trainingExperience: "intermediate",
   returningStatus: "consistent",
   dailyActivityLevel: "sedentary",
   demographics: {
@@ -48,7 +47,6 @@ export const PERSONAL_PLANNER_PROFILE: UserProfileData = {
 export const PERSONAL_PLANNER_GOAL: GoalContractData = {
   id: "personal-goal",
   primaryGoal: "fat_loss_preserve_lean_mass",
-  goalType: "fat_loss",
   status: "active",
   targetMode: "lean_mass_preserving_fat_loss",
   executionTier: "balanced",
@@ -82,4 +80,5 @@ export const PERSONAL_PLANNER_GOAL: GoalContractData = {
 export const PERSONAL_PLANNER_MANDATE: CoachingMandateData = {
   id: "personal-mandate",
   mode: "collaborative",
+  planChangeAuthorization: "always_ask",
 };

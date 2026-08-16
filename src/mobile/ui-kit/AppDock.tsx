@@ -12,6 +12,8 @@ import Animated, {
 
 import type { FocusSurfaceAnchor } from "./FocusSurface";
 import { uiColors, uiType } from "./tokens";
+import { mobileT } from "../../i18n";
+
 
 export interface DockDestination<T extends string> {
   id: T;
@@ -24,13 +26,12 @@ export type CoachComposerAnchor = FocusSurfaceAnchor;
 
 export const APP_DOCK_BODY_HEIGHT = 116;
 
-export function AppDock<T extends string>({ current, destinations, onNavigate, onRecord, onCoach, onCoachVoice, onCoachAnchorChange, onRecordAnchorChange, coachExpanded = false, coachBusy = false }: {
+export function AppDock<T extends string>({ current, destinations, onNavigate, onRecord, onCoach, onCoachAnchorChange, onRecordAnchorChange, coachExpanded = false, coachBusy = false }: {
   current: T;
   destinations: readonly DockDestination<T>[];
   onNavigate(destination: T): void;
   onRecord(): void;
   onCoach(): void;
-  onCoachVoice?(): void;
   onCoachAnchorChange?(anchor: CoachComposerAnchor): void;
   /** Bounds of the plus button, used by the record Focus transition. */
   onRecordAnchorChange?(anchor: CoachComposerAnchor): void;
@@ -116,21 +117,9 @@ export function AppDock<T extends string>({ current, destinations, onNavigate, o
   return <Animated.View style={[styles.dockLayer, { pointerEvents: coachExpanded ? "none" : "auto" }, dockAnimatedStyle]}>
     <SafeAreaView edges={["bottom"]} style={styles.safe}>
       <View ref={composerRef} onLayout={reportComposerAnchor} style={styles.coachComposer}>
-        <Pressable accessibilityRole="button" accessibilityLabel="问 Coach" onPress={onCoach} style={({ pressed }) => [styles.coachEntry, pressed && styles.coachEntryPressed]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.appdock.5ea26c13e6")} onPress={onCoach} style={({ pressed }) => [styles.coachEntry, pressed && styles.coachEntryPressed]}>
           <View style={[styles.coachDot, coachBusy && styles.coachDotBusy]} />
-          <Text numberOfLines={1} style={styles.coachEntryText}>{coachBusy ? "Coach 正在回复" : "问 Coach"}</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="使用麦克风问 Coach"
-          onPress={onCoachVoice ?? onCoach}
-          style={({ pressed }) => [styles.voiceButton, pressed && styles.pressed]}
-        >
-          <View style={styles.microphone}>
-            <View style={styles.microphoneCapsule} />
-            <View style={styles.microphoneStem} />
-            <View style={styles.microphoneFoot} />
-          </View>
+          <Text numberOfLines={1} style={styles.coachEntryText}>{coachBusy ? mobileT("mobile.ui.kit.appdock.e503f5e380") : mobileT("mobile.ui.kit.appdock.5ea26c13e6")}</Text>
         </Pressable>
       </View>
       <View accessibilityRole="tablist" onLayout={(event) => setNavigationWidth(event.nativeEvent.layout.width)} style={styles.navigation}>
@@ -140,7 +129,7 @@ export function AppDock<T extends string>({ current, destinations, onNavigate, o
         </Animated.View> : null}
         {destinations.slice(0, 2).map(renderDestination)}
         <View ref={recordRef} onLayout={reportRecordAnchor} style={styles.recordSlot}>
-          <Pressable accessibilityRole="button" accessibilityLabel="记录" onPress={onRecord} style={({ pressed }) => [styles.recordButton, pressed && styles.recordSlotPressed]}>
+          <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.appdock.9058a1c2c5")} onPress={onRecord} style={({ pressed }) => [styles.recordButton, pressed && styles.recordSlotPressed]}>
             <Text style={styles.recordGlyph}>＋</Text>
           </Pressable>
         </View>
@@ -181,11 +170,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  voiceButton: { width: 39, height: 39, alignItems: "center", justifyContent: "center", borderRadius: 14, backgroundColor: uiColors.ink, outlineWidth: 0, outlineColor: "transparent" },
-  microphone: { width: 18, height: 22, alignItems: "center" },
-  microphoneCapsule: { width: 9, height: 13, borderWidth: 2, borderColor: uiColors.lime, borderRadius: 6 },
-  microphoneStem: { width: 2, height: 5, backgroundColor: uiColors.lime },
-  microphoneFoot: { width: 10, height: 2, borderRadius: 1, backgroundColor: uiColors.lime },
   navigation: { position: "relative", height: 60, flexDirection: "row", alignItems: "center" },
   destinationIndicator: { position: "absolute", top: 4, left: 0, height: 52, alignItems: "center", justifyContent: "center" },
   destinationIndicatorHalo: { position: "absolute", top: 4, width: 58, height: 48, borderRadius: 19, backgroundColor: "rgba(17,20,17,0.07)" },

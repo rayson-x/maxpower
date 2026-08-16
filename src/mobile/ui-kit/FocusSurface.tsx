@@ -13,6 +13,8 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { uiColors, uiRadius } from "./tokens";
+import { mobileT } from "../../i18n";
+
 
 /**
  * Window-relative bounds for a small control that expands into a focused task.
@@ -33,6 +35,7 @@ export function FocusSurface({
   horizontalInset = 8,
   accessibilityLabel,
   onDismiss,
+  dismissible = true,
   children,
   surfaceStyle,
 }: {
@@ -43,6 +46,8 @@ export function FocusSurface({
   horizontalInset?: number;
   accessibilityLabel: string;
   onDismiss(): void;
+  /** Onboarding is a required focused task, not a dismissible drawer. */
+  dismissible?: boolean;
   children: ReactNode;
   surfaceStyle?: StyleProp<ViewStyle>;
 }) {
@@ -137,11 +142,11 @@ export function FocusSurface({
 
   return <View accessibilityViewIsModal style={styles.layer}>
     <Animated.View style={[styles.scrim, scrimStyle]} />
-    <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={requestDismiss} style={StyleSheet.absoluteFill} />
+    {dismissible ? <Pressable accessibilityRole="button" accessibilityLabel={accessibilityLabel} onPress={requestDismiss} style={StyleSheet.absoluteFill} /> : null}
     <Animated.View style={[styles.surface, { top: frame.top, bottom: frame.bottom, left: horizontalInset, width: frame.width }, surfaceStyle, surfaceAnimatedStyle]}>
       <Animated.View style={[styles.content, contentAnimatedStyle]}>
-        <GestureDetector gesture={pan}>
-          <View accessibilityRole="adjustable" accessibilityLabel="下滑收起" style={styles.handleTarget}>
+        <GestureDetector gesture={dismissible ? pan : Gesture.Tap()}>
+          <View accessibilityRole="adjustable" accessibilityLabel={mobileT("mobile.ui.kit.focussurface.35695bfcda")} style={styles.handleTarget}>
             <View style={styles.handle} />
           </View>
         </GestureDetector>

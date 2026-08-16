@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 
-async function bootstrap(app: CoachApplication) {
+async function bootstrap(app: LocalProductKernel) {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: {
@@ -15,15 +15,15 @@ async function bootstrap(app: CoachApplication) {
       timezoneOffsetMinutes: 480,
       idempotencyKey: "bootstrap",
     },
-    profile: { id: "profile", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile", locale: "zh-CN" },
     goalContract: { id: "goal", primaryGoal: "hypertrophy", horizon: { startDate: "2026-08-08" } },
-    mandate: { id: "mandate", mode: "collaborative" },
+    mandate: { id: "mandate", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
 }
 
 test("恢复自检先保存用户事实，再生成可追溯但不直接改计划的约束", async () => {
   let sequence = 0;
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), {
     now: () => "2026-08-08T07:00:00.000+08:00",
     nextId: (prefix) => `${prefix}-${++sequence}`,
   });
@@ -57,10 +57,6 @@ test("恢复自检先保存用户事实，再生成可追溯但不直接改计�
   assert.equal(daily.evaluation.planBoundary, "current_day_only");
   assert.ok(daily.evaluation.factRefs.length > 0);
   assert.equal(domain.plan?.revision, undefined);
-  const replan = await app.readLatestReplanEvaluation("u1");
-  assert.equal(replan?.evaluation.trigger.kind, "recovery_constraint_changed");
-  assert.equal(replan?.evaluation.trigger.causationId, result.decision.constraint.id);
-
   const repeated = await app.submitRecoveryCheckIn({
     userId: "u1",
     idempotencyKey: "morning-checkin",
@@ -70,7 +66,6 @@ test("恢复自检先保存用户事实，再生成可追溯但不直接改计�
   });
   assert.deepEqual(repeated.timelineEventIds, result.timelineEventIds);
   assert.equal((await app.readDomainProjection({ userId: "u1" })).recoveryConstraints.length, 1);
-  assert.equal((await app.readLatestReplanEvaluation("u1"))?.id, replan?.id);
 
   await app.submitRecoveryCheckIn({
     userId: "u1",
@@ -79,14 +74,12 @@ test("恢复自检先保存用户事实，再生成可追溯但不直接改计�
     validUntil: "2026-08-10T07:00:00.000+08:00",
     checkIn: { perceivedRecovery: 7, fatigue: 2 },
   });
-  // A single green check-in supports the existing plan; it is not a new
-  // volume/progression trigger and must not replace the earlier evaluation.
-  assert.equal((await app.readLatestReplanEvaluation("u1"))?.id, replan?.id);
+  assert.equal((await app.readDomainProjection({ userId: "u1" })).recoveryConstraints.length, 2);
 });
 
 test("疼痛与酸痛同时存在时保留两条独立的主观症状事实", async () => {
   let sequence = 0;
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), {
     now: () => "2026-08-08T07:00:00.000+08:00",
     nextId: (prefix) => `${prefix}-${++sequence}`,
   });
@@ -116,7 +109,7 @@ test("疼痛与酸痛同时存在时保留两条独立的主观症状事实", as
 
 test("Facade 从已确认 Timeline 和用户选择的来源重建恢复上下文，不读取平台 SDK", async () => {
   let sequence = 0;
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), {
     now: () => "2026-08-08T08:00:00.000+08:00",
     nextId: (prefix) => `${prefix}-${++sequence}`,
   });
@@ -127,7 +120,7 @@ test("Facade 从已确认 Timeline 和用户选择的来源重建恢复上下文
       occurredAt: "2026-08-01T08:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "bootstrap-source",
     },
     profile: {
-      id: "profile", trainingExperience: "beginner", locale: "zh-CN",
+      id: "profile", locale: "zh-CN",
       primaryDataSources: {
         resting_heart_rate: {
           origin: "health_connect", deviceId: "watch-a", recordingMethod: "platform_import", algorithmVersion: "v1",
@@ -135,7 +128,7 @@ test("Facade 从已确认 Timeline 和用户选择的来源重建恢复上下文
       },
     },
     goalContract: { id: "goal", primaryGoal: "hypertrophy", horizon: { startDate: "2026-08-01" } },
-    mandate: { id: "mandate", mode: "collaborative" },
+    mandate: { id: "mandate", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
   for (let index = 0; index < 8; index += 1) {
     const at = index === 7
@@ -167,29 +160,10 @@ test("Facade 从已确认 Timeline 和用户选择的来源重建恢复上下文
   assert.ok(result.decision.constraint.evaluation?.contradictingFactRefs.length);
 });
 
-test("Agent 的 recovery timeline 工具只呈现 assessment 卡，不把评估结果伪装成已提交事实", async () => {
-  let sequence = 0;
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
-    now: () => "2026-08-08T08:00:00.000+08:00",
-    nextId: (prefix) => `${prefix}-${++sequence}`,
-  });
-  await bootstrap(app);
-  const session = await app.startSession({ userId: "u1", context: { kind: "today", ref: "2026-08-08" } });
-  const result = await app.evaluateRecoveryTimelineForTool(
-    { sessionId: session.id },
-    { runId: "recovery-run", toolCallId: "recovery-timeline-tool" },
-  );
-  assert.equal(result.artifact.kind, "recovery_brief");
-  assert.equal(result.artifact.status, "timeline_assessment");
-  assert.equal(result.card.renderer, "recovery_brief/1");
-  assert.equal(result.events.filter((event) => event.type === "artifact-ready").length, 1);
-  assert.equal((await app.readDomainProjection({ userId: "u1" })).recoveryConstraints.length, 0);
-});
-
 test("恢复评估只将同变式、同单位、用户确认的连续实际表现作为保守降级证据", async () => {
   let now = "2026-08-08T07:00:00.000+08:00";
   let sequence = 0;
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), {
     now: () => now,
     nextId: (prefix) => `${prefix}-${++sequence}`,
   });
@@ -203,7 +177,7 @@ test("恢复评估只将同变式、同单位、用户确认的连续实际表�
     },
     planId: "plan", expectedRevision: 0,
     revision: {
-      id: "plan-r1",
+      id: "plan",
       goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 },
       effectiveFrom: "2026-08-08",
       knowledgePins: pins,

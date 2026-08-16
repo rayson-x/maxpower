@@ -11,17 +11,14 @@ import type {
 
 import { openAiCompatibleToolName } from "../../coach/adapters/openAiToolName";
 import { CloudInvocationCancellationClient } from "./CloudInvocationCancellationClient";
-import type { CloudServiceAccessTokenSource } from "./MaxPowerCloudLlmProvider";
+import type { CloudServiceAccessTokenSource } from "./CloudServiceAccessTokenSource";
 import { maxPowerApiOrigin, requiredCloudText } from "./cloudServiceValidation";
 import { linkAbortSignals } from "./linkAbortSignals";
 
 export const MAXPOWER_PI_PROVIDER = "maxpower";
 export const MAXPOWER_PI_COACH_ALIAS = "maxpower/coach-v1";
-export const MAXPOWER_PI_NUTRITION_VISION_ALIAS = "maxpower/nutrition-vision-v1";
 
-export type MaxPowerPiModelAlias =
-  | typeof MAXPOWER_PI_COACH_ALIAS
-  | typeof MAXPOWER_PI_NUTRITION_VISION_ALIAS;
+export type MaxPowerPiModelAlias = typeof MAXPOWER_PI_COACH_ALIAS;
 
 export interface MaxPowerPiFetchResponse {
   ok: boolean;
@@ -45,7 +42,6 @@ export interface MaxPowerPiFetch {
 
 export interface MaxPowerPiLlmProviderOptions {
   apiBaseUrl: string;
-  allowInsecureHttp?: boolean;
   accountId: string;
   accessTokens: CloudServiceAccessTokenSource;
   /** Selects a managed product capability, never a physical provider model. */
@@ -109,9 +105,7 @@ export class MaxPowerPiLlmProvider {
   private readonly maxResumeAttempts: number;
 
   constructor(options: MaxPowerPiLlmProviderOptions) {
-    this.origin = maxPowerApiOrigin(options.apiBaseUrl, {
-      allowInsecureHttp: options.allowInsecureHttp,
-    });
+    this.origin = maxPowerApiOrigin(options.apiBaseUrl);
     this.accountId = requiredCloudText(options.accountId, "pi_llm_account_required");
     this.accessTokens = options.accessTokens;
     this.accountSignal = options.accountSignal;
@@ -147,9 +141,6 @@ export class MaxPowerPiLlmProvider {
     this.model = Object.freeze(model);
     this.cancellations = new CloudInvocationCancellationClient({
       apiBaseUrl: this.origin,
-      ...(options.allowInsecureHttp === undefined
-        ? {}
-        : { allowInsecureHttp: options.allowInsecureHttp }),
       accountId: this.accountId,
       accessTokens: this.accessTokens,
       fetch: (url, init) => this.fetchImpl(url, init),
@@ -189,9 +180,9 @@ export class MaxPowerPiLlmProvider {
   ): Promise<void> {
     const state = createStreamState(model);
     const linked = linkAbortSignals(options?.signal, this.accountSignal);
-    const invocationToken = safeInvocationToken(this.nextInvocationId());
-    const idempotencyKey = `pi-${invocationToken}`;
+    let invocationToken = safeInvocationToken(this.nextInvocationId());
     let requestStarted = false;
+    let emptyTurnRetries = 0;
     try {
       assertExpectedModel(model, this.model.id);
       if (linked.signal?.aborted) throw new Error("pi_llm_aborted_before_request");
@@ -199,18 +190,18 @@ export class MaxPowerPiLlmProvider {
         options?.apiKey ?? await this.accessTokens.accessTokenFor(this.accountId),
         "pi_llm_access_token_required",
       );
-      const headers = {
+      const buildHeaders = () => ({
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
-        "idempotency-key": idempotencyKey,
+        "idempotency-key": `pi-${invocationToken}`,
         "x-client-run-id": `pi-run-${invocationToken}`,
-      };
+      });
       requestStarted = true;
       let response = await this.fetchImpl(
         new URL("/v1/chat/completions", this.origin).toString(),
         {
           method: "POST",
-          headers,
+          headers: buildHeaders(),
           body: JSON.stringify(buildRequest(model, context, options, state.toolNamesByWireName)),
           ...(linked.signal ? { signal: linked.signal } : {}),
         },
@@ -231,6 +222,30 @@ export class MaxPowerPiLlmProvider {
           if (!state.finished) throw new Error("pi_llm_stream_ended_without_done");
         } catch (error) {
           if (linked.signal?.aborted) throw error;
+          // A reasoning-model turn can die after producing nothing visible —
+          // no text, no tool call — for example when the upstream drops
+          // mid-reasoning or the gateway reports provider_unavailable before
+          // any content. Retrying that turn is idempotent (nothing durable or
+          // user-visible was emitted), so do it once before the resume path.
+          // Billing/policy terminal codes (quota_exceeded, …) are never retried.
+          const transient = !(error instanceof TerminalPiStreamError) || error.message === "provider_unavailable";
+          if (transient && state.output.content.length === 0 && emptyTurnRetries < 1) {
+            emptyTurnRetries += 1;
+            resumeAttempts = 0;
+            invocationToken = safeInvocationToken(this.nextInvocationId());
+            response = await this.fetchImpl(
+              new URL("/v1/chat/completions", this.origin).toString(),
+              {
+                method: "POST",
+                headers: buildHeaders(),
+                body: JSON.stringify(buildRequest(model, context, options, state.toolNamesByWireName)),
+                ...(linked.signal ? { signal: linked.signal } : {}),
+              },
+            );
+            await assertSuccessful(response);
+            invocationId = response.headers?.get("x-maxpower-invocation-id") ?? undefined;
+            continue;
+          }
           if (error instanceof TerminalPiStreamError) throw error;
           if (!invocationId || resumeAttempts >= this.maxResumeAttempts) throw error;
           resumeAttempts += 1;
@@ -258,7 +273,7 @@ export class MaxPowerPiLlmProvider {
       let cancellationError: unknown;
       if (linked.signal?.aborted && requestStarted) {
         try {
-          await this.cancellations.cancel(idempotencyKey);
+          await this.cancellations.cancel(`pi-${invocationToken}`);
         } catch (cause) {
           cancellationError = cause;
         }
@@ -295,7 +310,7 @@ function buildRequest(
   }));
   return {
     model: model.id,
-    messages: openAiMessages(model, context, toolNamesByWireName),
+    messages: openAiMessages(context, toolNamesByWireName),
     stream: true,
     store: false,
     stream_options: { include_usage: true },
@@ -311,7 +326,6 @@ function buildRequest(
 }
 
 function openAiMessages(
-  model: Model<any>,
   context: Context,
   toolNamesByWireName: Map<string, string>,
 ): unknown[] {
@@ -321,16 +335,16 @@ function openAiMessages(
   }
   for (const message of context.messages) {
     if (message.role === "user") {
+      if (typeof message.content !== "string" && message.content.some((part) => part.type !== "text")) {
+        throw new Error("pi_llm_text_only");
+      }
       messages.push({
         role: "user",
         content: typeof message.content === "string"
           ? message.content
-          : message.content.map((part) => part.type === "text"
-            ? { type: "text", text: part.text }
-            : {
-                type: "image_url",
-                image_url: { url: `data:${part.mimeType};base64,${part.data}` },
-              }),
+          : message.content
+              .filter((part): part is TextContent => part.type === "text")
+              .map((part) => ({ type: "text", text: part.text })),
       });
       continue;
     }
@@ -361,24 +375,11 @@ function openAiMessages(
       .filter((part): part is TextContent => part.type === "text")
       .map((part) => part.text)
       .join("\n");
-    const images = message.content.filter((part) => part.type === "image");
     messages.push({
       role: "tool",
       tool_call_id: message.toolCallId,
-      content: text || "(see attached image)",
+      content: text || "(no text output)",
     });
-    if (images.length > 0 && model.input.includes("image")) {
-      messages.push({
-        role: "user",
-        content: [
-          { type: "text", text: "Attached image(s) from tool result:" },
-          ...images.map((part) => ({
-            type: "image_url",
-            image_url: { url: `data:${part.mimeType};base64,${part.data}` },
-          })),
-        ],
-      });
-    }
   }
   return messages;
 }
@@ -614,7 +615,7 @@ const PI_MODEL_CAPABILITIES: Readonly<Record<
   MaxPowerPiModelAlias,
   {
     readonly name: string;
-    readonly input: readonly ("text" | "image")[];
+    readonly input: readonly "text"[];
     readonly contextWindow: number;
     readonly maxTokens: number;
   }
@@ -623,13 +624,9 @@ const PI_MODEL_CAPABILITIES: Readonly<Record<
     name: "MaxPower Coach",
     input: ["text"] as const,
     contextWindow: 128_000,
-    maxTokens: 4_096,
-  }),
-  [MAXPOWER_PI_NUTRITION_VISION_ALIAS]: Object.freeze({
-    name: "MaxPower Nutrition Vision",
-    input: ["text", "image"] as const,
-    contextWindow: 1_048_576,
-    maxTokens: 2_048,
+    // The upstream may be a reasoning model whose reasoning_content shares the
+    // completion budget; 4k truncates visible answers mid-sentence.
+    maxTokens: 16_384,
   }),
 });
 
@@ -678,6 +675,9 @@ function openAiErrorCode(value: Record<string, unknown>): string | undefined {
 }
 
 function publicErrorMessage(error: unknown): string {
+  if (isObject(error) && typeof error.code === "string" && /^[a-z0-9_]+$/i.test(error.code)) {
+    return error.code;
+  }
   if (error instanceof Error && /^[a-z0-9_]+$/i.test(error.message)) return error.message;
   return "maxpower_pi_service_unavailable";
 }

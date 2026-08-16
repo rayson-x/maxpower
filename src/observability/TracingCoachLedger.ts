@@ -1,6 +1,4 @@
 import type {
-  AtomicCommit,
-  AtomicCommitResult,
   CoachLedger,
   CoachLedgerDiagnostics,
   DomainAtomicCommit,
@@ -11,7 +9,6 @@ import type { LedgerSnapshot } from "../coach/model";
 import { TRACE_DISPATCH_INTENT, TRACE_ENQUEUE_INTENT, type LedgerTraceUploadAuthorization } from "./TraceOutbox";
 import {
   projectCommitTraceEnvelopes,
-  projectLegacyCommitTraceEnvelopes,
   type TraceProjectionContext,
   type TraceProjectionRecord,
 } from "./traceProjection";
@@ -69,21 +66,18 @@ export class TracingCoachLedger implements CoachLedger {
     return this.inner.diagnose();
   }
 
-  async commit(input: AtomicCommit): Promise<AtomicCommitResult>;
-  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
-  async commit(
-    input: AtomicCommit | DomainAtomicCommit,
-  ): Promise<AtomicCommitResult | DomainCommandResult> {
-    if (!isDomainCommit(input)) {
-      const legacy = await this.inner.commit(input);
-      if (legacy.status === "committed") {
-        await this.record(() => projectLegacyCommitTraceEnvelopes(input, this.options.context));
-      }
-      return legacy;
-    }
+  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult> {
     const result = await this.inner.commit(input);
     if (result.status === "committed") await this.recordCommit(input);
     return result;
+  }
+
+  async commitBatch(inputs: readonly DomainAtomicCommit[]): Promise<readonly DomainCommandResult[]> {
+    const results = await this.inner.commitBatch(inputs);
+    for (let index = 0; index < inputs.length; index += 1) {
+      if (results[index]?.status === "committed") await this.recordCommit(inputs[index]!);
+    }
+    return results;
   }
 
   private async recordCommit(input: DomainAtomicCommit): Promise<void> {
@@ -106,8 +100,4 @@ export class TracingCoachLedger implements CoachLedger {
       // 可观测性不能成为故障源：事实已经落账，trace 丢了由 reconcile 补。
     }
   }
-}
-
-function isDomainCommit(input: AtomicCommit | DomainAtomicCommit): input is DomainAtomicCommit {
-  return "kind" in input && input.kind === "domain";
 }

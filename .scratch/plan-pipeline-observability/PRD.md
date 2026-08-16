@@ -1,4 +1,6 @@
-Status: ready-for-agent
+Status: wontfix
+
+Remaining unfinished work is replaced by `.scratch/record-first-adaptive-coach/PRD.md`. Tickets already marked done remain historical evidence, not compatibility requirements.
 
 # 计划流水线与全行为可观测性：planner 知识驱动改造 + trace 系统
 

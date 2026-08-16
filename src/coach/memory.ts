@@ -331,7 +331,6 @@ function validateMemoryInput(content: string, confidence: number): void {
 
 function assertUserExists(snapshot: Awaited<ReturnType<CoachLedger["read"]>>, userId: string): void {
   if (
-    !snapshot.users.some((user) => user.userId === userId) &&
     !snapshot.domainEvents.some(
       (event) => event.userId === userId && event.aggregate.kind === "user_profile",
     )

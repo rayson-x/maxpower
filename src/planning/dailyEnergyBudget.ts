@@ -60,7 +60,7 @@ export interface DayActivity {
   actualSteps?: number;
   /** 计划中的额外步数，只用于未来计划预算；不能冒充已完成的健康数据。 */
   plannedExtraSteps?: number;
-  /** 设备/用户填报的当日活动总消耗（最高优先，直接替代 NEAT+EAT 的估算）。 */
+  /** 设备/用户填报的当日活动总消耗；只作为带误差证据与模型估算稳健融合。 */
   reportedActivityKcal?: number;
 }
 
@@ -80,7 +80,7 @@ export interface DailyEnergyBudget {
   /** 不确定度（±kcal）。 */
   uncertaintyKcal: number;
   /** NEAT 的来源：实际步数 / 档案档位。 */
-  neatSource: "actual_steps" | "profile_level" | "reported";
+  neatSource: "actual_steps" | "profile_level" | "reported_evidence";
   /** 计划额外步数带来的预估消耗，与用户实际记录分开。 */
   plannedExtraActivityKcal?: number;
   /** EAT 明细（可解释）。 */
@@ -90,10 +90,18 @@ export interface DailyEnergyBudget {
 /** Mifflin-St Jeor 基础代谢。 */
 export function basalMetabolicRate(profile: UserProfileData): number | undefined {
   const demo = profile.demographics;
-  const h = demo?.height?.value;
-  const w = demo?.currentWeight?.value;
+  const h = demo?.height?.unit === "cm"
+    ? demo.height.value
+    : demo?.height?.unit === "in"
+      ? demo.height.value * 2.54
+      : undefined;
+  const w = demo?.currentWeight?.unit === "kg"
+    ? demo.currentWeight.value
+    : demo?.currentWeight?.unit === "lb"
+      ? demo.currentWeight.value * 0.45359237
+      : undefined;
   const age = demo?.ageYears;
-  if (!h || !w || age === undefined) return undefined;
+  if (!h || !w || age === undefined || (demo?.sex !== "female" && demo?.sex !== "male")) return undefined;
   const sexTerm = demo?.sex === "female" ? -161 : 5;
   return 10 * w + 6.25 * h - 5 * age + sexTerm;
 }
@@ -119,7 +127,12 @@ export function dailyEnergyBudget(input: {
   dailyDeficitKcal?: number;
 }): DailyEnergyBudget | undefined {
   const bmr = basalMetabolicRate(input.profile);
-  const weightKg = input.profile.demographics?.currentWeight?.value;
+  const rawWeight = input.profile.demographics?.currentWeight;
+  const weightKg = rawWeight?.unit === "kg"
+    ? rawWeight.value
+    : rawWeight?.unit === "lb"
+      ? rawWeight.value * 0.45359237
+      : undefined;
   if (bmr === undefined || !weightKg) return undefined;
   const level = input.profile.dailyActivityLevel ?? "sedentary";
 
@@ -150,12 +163,15 @@ export function dailyEnergyBudget(input: {
   }));
   let eatKcal = eatBreakdown.reduce((sum, item) => sum + item.kcal, 0);
 
-  // 设备填报优先：直接替代 NEAT+EAT 的估算部分
+  // 用户/设备活动值是观测证据，不是真值。限制单次观测的影响后与
+  // 结构化活动模型融合，避免穿戴设备误差直接改写整日 TDEE。
   if (input.day.reportedActivityKcal !== undefined) {
     const reported = Math.max(0, Math.round(input.day.reportedActivityKcal));
-    neatKcal = reported;
-    eatKcal = 0;
-    neatSource = "reported";
+    const modeledActivity = neatKcal + eatKcal;
+    const boundedReport = Math.max(modeledActivity * 0.5, Math.min(modeledActivity * 1.5, reported));
+    const blendedActivity = Math.round(modeledActivity * 0.5 + boundedReport * 0.5);
+    neatKcal = Math.max(0, blendedActivity - eatKcal);
+    neatSource = "reported_evidence";
   }
 
   // ── 食物热效应 TEF（约占摄入 10%；维持状态下用消耗近似） ──
@@ -172,8 +188,7 @@ export function dailyEnergyBudget(input: {
     ...(input.dailyDeficitKcal !== undefined
       ? { intakeTargetKcal: Math.round(tdeeKcal - input.dailyDeficitKcal) }
       : {}),
-    // 有设备数据时不确定度更低
-    uncertaintyKcal: Math.round(tdeeKcal * (neatSource === "reported" ? 0.07 : neatSource === "actual_steps" ? 0.08 : 0.1)),
+    uncertaintyKcal: Math.round(tdeeKcal * (neatSource === "reported_evidence" ? 0.12 : neatSource === "actual_steps" ? 0.08 : 0.1)),
     neatSource,
     ...(plannedExtraActivityKcal ? { plannedExtraActivityKcal } : {}),
     eatBreakdown,

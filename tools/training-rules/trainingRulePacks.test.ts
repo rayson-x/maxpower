@@ -96,6 +96,7 @@ function context(
     mandate: {
       id: "mandate-1",
       mode: "managed",
+      planChangeAuthorization: "always_ask",
       scopes: {
         loadReps: "managed_small_step",
         volume: "managed_small_step",

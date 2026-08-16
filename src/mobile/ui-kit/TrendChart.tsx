@@ -3,6 +3,8 @@ import { StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Line, Polyline } from "react-native-svg";
 
 import { uiColors, uiRadius, uiType } from "./tokens";
+import { mobileT } from "../../i18n";
+
 
 export interface TrendChartPoint {
   label: string;
@@ -29,11 +31,11 @@ export function TrendChart({ title, value, meta, points, color = uiColors.limeDe
   }));
   return <View style={styles.card}>
     <View style={styles.heading}><View><Text style={styles.title}>{title}</Text><Text style={styles.meta}>{meta}</Text></View><Text style={styles.value}>{value}</Text></View>
-    {points.length ? <Svg accessibilityLabel={`${title}趋势图`} height={height} viewBox={`0 0 ${width} ${height}`} width="100%">
+    {points.length ? <Svg accessibilityLabel={mobileT("mobile.ui.kit.trendchart.2de96b6d80", { value0: title })} height={height} viewBox={`0 0 ${width} ${height}`} width="100%">
       <Line x1={inset} x2={width - inset} y1={height - inset} y2={height - inset} stroke={uiColors.line} strokeWidth={1} />
       {chartPoints.length > 1 ? <Polyline fill="none" points={chartPoints.map((point) => `${point.x},${point.y}`).join(" ")} stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} /> : null}
       {chartPoints.map((point, index) => <Circle key={`${point.x}:${point.y}`} cx={point.x} cy={point.y} fill={index === chartPoints.length - 1 ? uiColors.ink : color} r={index === chartPoints.length - 1 ? 4.5 : 2.5} />)}
-    </Svg> : <View style={styles.empty}><Text style={styles.emptyText}>记录后开始形成趋势</Text></View>}
+    </Svg> : <View style={styles.empty}><Text style={styles.emptyText}>{mobileT("mobile.ui.kit.trendchart.6cbb1fa9ed")}</Text></View>}
   </View>;
 }
 

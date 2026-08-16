@@ -41,7 +41,7 @@ export const ANDROID_HEALTH_CONNECT_MVP_METRICS = [
 ] as const satisfies readonly HealthMetric[];
 
 export interface AndroidHealthConnectNativePage {
-  /** The token must only be advanced by CoachApplication after an AtomicCommit. */
+  /** The token must only be advanced by LocalProductKernel after an AtomicCommit. */
   nextCursor?: string;
   evidence: readonly AndroidHealthConnectNativeEvidence[];
   /** A changes token may have expired; native must fall back to a bounded resync. */

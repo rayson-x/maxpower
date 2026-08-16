@@ -12,7 +12,7 @@ test("矩阵覆盖声明的全部维度", () => {
   assert.ok(coverage.sexes.includes("prefer_not_to_say"), "含未填性别");
   assert.ok(coverage.ageRange[0] < 18 && coverage.ageRange[1] > 60, "含未成年与老年");
   assert.ok(coverage.bmiRange[0] < 19 && coverage.bmiRange[1] > 30, "含偏瘦与肥胖");
-  assert.deepEqual(new Set(coverage.experiences), new Set(["beginner", "intermediate", "advanced"]));
+  assert.ok(coverage.goals.includes("fat_loss_preserve_lean_mass") && coverage.goals.includes("hypertrophy") && coverage.goals.includes("strength"));
   assert.ok(coverage.weeklyDays.includes(2) && coverage.weeklyDays.includes(6), "含 2 天与 6 天");
   assert.ok(coverage.sessionMinutes.includes(20) && coverage.sessionMinutes.includes(90), "含 20 与 90 分钟");
   assert.deepEqual(new Set(coverage.trainingCommitment.filter((item) => item !== "inferred")), new Set(["minimal", "standard", "high"]));
@@ -33,7 +33,7 @@ test("每个人设字段自洽（id 唯一、自述非空、目标与档案方�
     assert.ok(persona.watchFor.length > 0, `${persona.id} 缺验证点`);
     assert.ok(persona.profile.schedule, `${persona.id} 缺排程（规划必需）`);
     assert.ok(persona.profile.locations?.length, `${persona.id} 缺训练地点`);
-    if (persona.goalContract.goalType === "fat_loss") {
+    if (persona.goalContract.primaryGoal === "fat_loss_preserve_lean_mass") {
       assert.notEqual(persona.profile.bodyDirection, "gain_mass", `${persona.id} 目标与方向矛盾`);
     }
   }

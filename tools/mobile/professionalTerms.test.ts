@@ -56,13 +56,11 @@ test("没有专业名词的普通教练表达保持单一文本片段", () => {
   ]);
 });
 
-test("同一术语组件接入 Agent 对话、建档强度选择与日常记录字段", async () => {
-  const [drawer, onboarding, recordCapture] = await Promise.all([
+test("同一术语组件接入 Agent 对话与日常记录字段", async () => {
+  const [drawer, recordCapture] = await Promise.all([
     readFile(path.resolve(process.cwd(), "src/coach/ui/CoachDrawer.tsx"), "utf8"),
-    readFile(path.resolve(process.cwd(), "src/mobile/ui/DynamicOnboardingFormCard.tsx"), "utf8"),
     readFile(path.resolve(process.cwd(), "src/mobile/ui-kit/RecordCapture.tsx"), "utf8"),
   ]);
   assert.match(drawer, /ProfessionalTermText text=\{message\.content\}/);
-  assert.match(onboarding, /ProfessionalTermText text=\{metric\.toUpperCase\(\)\}/);
   assert.match(recordCapture, /ProfessionalTermText text=\{label\}/);
 });

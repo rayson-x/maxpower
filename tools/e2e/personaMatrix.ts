@@ -77,7 +77,7 @@ function hotel(id = "hotel") {
 }
 
 function mandate(mode: CoachingMandateData["mode"] = "collaborative"): CoachingMandateData {
-  return { id: "mandate-1", mode };
+  return { id: "mandate-1", mode, planChangeAuthorization: "always_ask" };
 }
 
 function horizon() {
@@ -92,7 +92,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "我 20 岁男生，178cm 62kg，太瘦了想练壮一点。学校健身房器械挺全，一周能去三次，每次一小时左右。没什么运动基础。吃饭我可以配合，但让我一天吃六顿不太现实。",
     profile: {
       id: "profile-p01",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 20, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 62, unit: "kg" } },
       adultConfirmed: true,
@@ -102,7 +101,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "gain_mass",
     },
     goalContract: {
-      id: "goal-p01", primaryGoal: "hypertrophy", goalType: "hypertrophy",
+      id: "goal-p01", primaryGoal: "hypertrophy",
       successMetrics: ["weekly_training_adherence", "body_mass_trend"],
       horizon: horizon(), status: "active",
       commitmentPreferences: { training: "high", nutrition: "standard", recovery: "standard" },
@@ -116,7 +115,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "34 岁男，175cm 88kg，肚子太大了。天天加班，一周最多去两次健身房，每次半小时就想走。我不想吃得太克制，也不想搞得太复杂，就是别这么胖就行。",
     profile: {
       id: "profile-p02",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 34, sex: "male", height: { value: 175, unit: "cm" }, currentWeight: { value: 88, unit: "kg" } },
       adultConfirmed: true,
@@ -126,7 +124,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "decrease_body_fat",
     },
     goalContract: {
-      id: "goal-p02", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p02", primaryGoal: "fat_loss_preserve_lean_mass",
       successMetrics: ["weekly_training_adherence"],
       horizon: horizon(), status: "active",
       unacceptableCosts: ["严格控制饮食", "训练时间超过 40 分钟"],
@@ -141,7 +139,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "我 28 岁女生，163cm 58kg，想练出线条，屁股和肩膀想更明显一点，腰细一点。一周能练四次，每次一小时。饮食我愿意认真记录和控制。",
     profile: {
       id: "profile-p03",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
       demographics: { ageYears: 28, sex: "female", height: { value: 163, unit: "cm" }, currentWeight: { value: 58, unit: "kg" } },
       adultConfirmed: true,
@@ -153,7 +150,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       trainingHistorySummary: { recentSplit: ["upper", "lower"], weeklyVolume: [{ muscleGroup: "glutes", sets: 10 }] },
     },
     goalContract: {
-      id: "goal-p03", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p03", primaryGoal: "fat_loss_preserve_lean_mass",
       modifiers: ["conditioning"],
       successMetrics: ["body_composition_trend", "strength_maintenance"],
       targets: { targetBodyFat: { value: 22, unit: "percent" } },
@@ -169,7 +166,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "32 岁女，160cm 68kg，产后八个月，想恢复身材。家里有一对哑铃和瑜伽垫，一周能挤出三次，每次半小时。晚上带孩子睡不好。",
     profile: {
       id: "profile-p04",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 32, sex: "female", height: { value: 160, unit: "cm" }, currentWeight: { value: 68, unit: "kg" } },
       adultConfirmed: true,
@@ -179,7 +175,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "decrease_body_fat",
     },
     goalContract: {
-      id: "goal-p04", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p04", primaryGoal: "fat_loss_preserve_lean_mass",
       successMetrics: ["weekly_training_adherence"],
       horizon: horizon(), status: "active",
       commitmentPreferences: { training: "standard", nutrition: "standard", recovery: "flexible" },
@@ -195,7 +191,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "42 岁男，180cm 85kg，练了八年，主要练力量三大项。一周四次，每次一个半小时。三年前腰间盘突出过，现在硬拉不敢上大重量。饮食基本稳定，不想大改。",
     profile: {
       id: "profile-p05",
-      trainingExperience: "advanced",
       locale: "zh-CN",
       demographics: { ageYears: 42, sex: "male", height: { value: 180, unit: "cm" }, currentWeight: { value: 85, unit: "kg" } },
       adultConfirmed: true,
@@ -209,7 +204,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       strengthBaseline: { squat: { value: 140, unit: "kg" }, benchPress: { value: 100, unit: "kg" }, deadlift: { value: 150, unit: "kg" }, measuredAt: "2026-07-01", source: "user_confirmed" },
     },
     goalContract: {
-      id: "goal-p05", primaryGoal: "strength", goalType: "strength",
+      id: "goal-p05", primaryGoal: "strength",
       successMetrics: ["strength_progression"],
       targets: { strength: { squat: { value: 150, unit: "kg" }, benchPress: { value: 110, unit: "kg" } } },
       horizon: horizon(), status: "active",
@@ -225,7 +220,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "我 63 岁，170cm 72kg，退休了想练练身体别退化太快。有高血压，一直在吃药，血压控制得还行。社区健身房有器械，一周去三次，每次四十五分钟。",
     profile: {
       id: "profile-p06",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 63, sex: "male", height: { value: 170, unit: "cm" }, currentWeight: { value: 72, unit: "kg" } },
       adultConfirmed: true,
@@ -244,7 +238,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       ],
     },
     goalContract: {
-      id: "goal-p06", primaryGoal: "hypertrophy", goalType: "maintain",
+      id: "goal-p06", primaryGoal: "maintain",
       modifiers: ["health"],
       successMetrics: ["weekly_training_adherence", "functional_capacity"],
       horizon: horizon(), status: "active",
@@ -259,7 +253,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "25 岁女，168cm 52kg，练了两年瑜伽，柔韧性好但力气很小，想开始练力量和增点肌肉。健身房卡刚办，一周三次，每次一小时。睡眠饮食我都愿意配合调整。",
     profile: {
       id: "profile-p07",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 25, sex: "female", height: { value: 168, unit: "cm" }, currentWeight: { value: 52, unit: "kg" } },
       adultConfirmed: true,
@@ -269,7 +262,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "gain_mass",
     },
     goalContract: {
-      id: "goal-p07", primaryGoal: "hypertrophy", goalType: "hypertrophy",
+      id: "goal-p07", primaryGoal: "hypertrophy",
       successMetrics: ["strength_progression", "body_mass_trend"],
       horizon: horizon(), status: "active",
       commitmentPreferences: { training: "high", nutrition: "strict", recovery: "strict" },
@@ -283,7 +276,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "38 岁男，182cm 80kg，练了四年。一年一半时间出差住酒店，只有哑铃和跑步机。一周能练四次，每次四十分钟。出差期间吃饭没法控制，就想别掉太多。",
     profile: {
       id: "profile-p08",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
       demographics: { ageYears: 38, sex: "male", height: { value: 182, unit: "cm" }, currentWeight: { value: 80, unit: "kg" } },
       adultConfirmed: true,
@@ -293,7 +285,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "maintain",
     },
     goalContract: {
-      id: "goal-p08", primaryGoal: "hypertrophy", goalType: "maintain",
+      id: "goal-p08", primaryGoal: "maintain",
       successMetrics: ["strength_maintenance"],
       horizon: horizon(), status: "active",
       unacceptableCosts: ["出差期间强制饮食记录"],
@@ -308,7 +300,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "我 17 岁，172cm 60kg，想变强壮点，学校有器械房，一周能练四次一小时。",
     profile: {
       id: "profile-p09",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 17, sex: "male", height: { value: 172, unit: "cm" }, currentWeight: { value: 60, unit: "kg" } },
       adultConfirmed: false,
@@ -318,7 +309,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "gain_mass",
     },
     goalContract: {
-      id: "goal-p09", primaryGoal: "strength", goalType: "strength",
+      id: "goal-p09", primaryGoal: "strength",
       successMetrics: ["strength_progression"],
       horizon: horizon(), status: "active",
       commitmentPreferences: { training: "high", nutrition: "standard", recovery: "standard" },
@@ -334,7 +325,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "30 岁女，165cm 70kg，已经减了三个月，前面掉了 6 斤，最近八周体重一动不动。一周练五次，饮食一直记录着，1400 大卡左右。是不是要再少吃点？",
     profile: {
       id: "profile-p10",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
       demographics: { ageYears: 30, sex: "female", height: { value: 165, unit: "cm" }, currentWeight: { value: 70, unit: "kg" } },
       adultConfirmed: true,
@@ -348,7 +338,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       },
     },
     goalContract: {
-      id: "goal-p10", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p10", primaryGoal: "fat_loss_preserve_lean_mass",
       successMetrics: ["body_composition_trend"],
       targets: { targetWeight: { value: 62, unit: "kg" } },
       horizon: horizon(), status: "active",
@@ -363,7 +353,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "29 岁男，176cm 108kg，从来没练过。想减重，一周能去三次健身房，每次四十五分钟。跑步膝盖会疼。",
     profile: {
       id: "profile-p11",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 29, sex: "male", height: { value: 176, unit: "cm" }, currentWeight: { value: 108, unit: "kg" } },
       adultConfirmed: true,
@@ -376,7 +365,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       ],
     },
     goalContract: {
-      id: "goal-p11", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p11", primaryGoal: "fat_loss_preserve_lean_mass",
       successMetrics: ["weekly_training_adherence", "body_mass_trend"],
       horizon: horizon(), status: "active",
       commitmentPreferences: { training: "standard", nutrition: "standard", recovery: "standard" },
@@ -390,7 +379,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "23 岁男，185cm 65kg，练了两年多，力量有进步但体重几乎不涨。一周能练五次，每次一小时十五分。吃得下，愿意按量吃。",
     profile: {
       id: "profile-p12",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
       demographics: { ageYears: 23, sex: "male", height: { value: 185, unit: "cm" }, currentWeight: { value: 65, unit: "kg" } },
       adultConfirmed: true,
@@ -402,7 +390,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       historyModifiers: { plateau: { durationWeeks: 12, priorStrategies: ["加练"], executionAdherence: "high", recoveryChange: "stable", suspectedReasons: ["吃得不够"] } },
     },
     goalContract: {
-      id: "goal-p12", primaryGoal: "hypertrophy", goalType: "hypertrophy",
+      id: "goal-p12", primaryGoal: "hypertrophy",
       successMetrics: ["body_mass_trend", "strength_progression"],
       targets: { targetWeight: { value: 72, unit: "kg" } },
       horizon: horizon(), status: "active",
@@ -417,7 +405,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "36 岁女，158cm 62kg，两个孩子，只能趁孩子睡觉练二十分钟，一周大概能六天。家里什么器械都没有。想紧实一点。",
     profile: {
       id: "profile-p13",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 36, sex: "female", height: { value: 158, unit: "cm" }, currentWeight: { value: 62, unit: "kg" } },
       adultConfirmed: true,
@@ -427,7 +414,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "decrease_body_fat",
     },
     goalContract: {
-      id: "goal-p13", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p13", primaryGoal: "fat_loss_preserve_lean_mass",
       successMetrics: ["weekly_training_adherence"],
       horizon: horizon(), status: "active",
       unacceptableCosts: ["单次超过 25 分钟"],
@@ -442,7 +429,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "27 岁女，170cm 72kg，练力量举五年，蹲 130 卧 75 硬拉 150。备赛期，一周五练每次一个半小时，饮食睡眠都严格执行。",
     profile: {
       id: "profile-p14",
-      trainingExperience: "advanced",
       locale: "zh-CN",
       demographics: { ageYears: 27, sex: "female", height: { value: 170, unit: "cm" }, currentWeight: { value: 72, unit: "kg" } },
       adultConfirmed: true,
@@ -454,7 +440,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       trainingHistorySummary: { recentSplit: ["squat", "bench", "deadlift", "upper", "lower"], weeklyVolume: [{ muscleGroup: "quadriceps", sets: 16 }] },
     },
     goalContract: {
-      id: "goal-p14", primaryGoal: "strength", goalType: "strength",
+      id: "goal-p14", primaryGoal: "strength",
       successMetrics: ["strength_progression"],
       targets: { strength: { combinedTotal: { value: 375, unit: "kg" } } },
       horizon: horizon(), status: "active",
@@ -470,7 +456,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "31 岁男，178cm 76kg，练了三年，两个月前跑步伤了右膝，停训到现在。医生说可以逐步恢复力量训练，避免深蹲到底和跳跃。一周三次，每次五十分钟。",
     profile: {
       id: "profile-p15",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
       demographics: { ageYears: 31, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 76, unit: "kg" } },
       adultConfirmed: true,
@@ -492,7 +477,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       ],
     },
     goalContract: {
-      id: "goal-p15", primaryGoal: "hypertrophy", goalType: "return_to_training",
+      id: "goal-p15", primaryGoal: "return_to_training",
       successMetrics: ["weekly_training_adherence", "pain_free_sessions"],
       horizon: horizon(), status: "active",
       unacceptableCosts: ["膝关节疼痛加重"],
@@ -507,7 +492,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "45 岁男，173cm 92kg。说实话我不太想运动，但体检报告不太好。家里练，一周两次，每次二十到三十分钟，最多这样了。吃的方面别管我。",
     profile: {
       id: "profile-p16",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 45, sex: "male", height: { value: 173, unit: "cm" }, currentWeight: { value: 92, unit: "kg" } },
       adultConfirmed: true,
@@ -517,7 +501,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       bodyDirection: "decrease_body_fat",
     },
     goalContract: {
-      id: "goal-p16", primaryGoal: "fat_loss_preserve_lean_mass", goalType: "fat_loss",
+      id: "goal-p16", primaryGoal: "fat_loss_preserve_lean_mass",
       modifiers: ["health"],
       successMetrics: ["weekly_training_adherence"],
       horizon: horizon(), status: "active",
@@ -533,7 +517,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "33 岁女，165cm 70kg，怀孕五个月了，想适当运动保持健康。家里有瑜伽垫和小哑铃，一周三次半小时。",
     profile: {
       id: "profile-p17",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { ageYears: 33, sex: "female", height: { value: 165, unit: "cm" }, currentWeight: { value: 70, unit: "kg" } },
       adultConfirmed: true,
@@ -546,7 +529,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       ],
     },
     goalContract: {
-      id: "goal-p17", primaryGoal: "hypertrophy", goalType: "maintain",
+      id: "goal-p17", primaryGoal: "maintain",
       modifiers: ["health"],
       successMetrics: ["weekly_training_adherence"],
       horizon: horizon(), status: "active",
@@ -561,7 +544,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "我想练一下，不知道怎么开始。",
     profile: {
       id: "profile-p18",
-      trainingExperience: "beginner",
       locale: "zh-CN",
       demographics: { sex: "prefer_not_to_say" },
       adultConfirmed: true,
@@ -570,7 +552,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       locations: [bodyweightOnly()],
     },
     goalContract: {
-      id: "goal-p18", primaryGoal: "hypertrophy", goalType: "hypertrophy",
+      id: "goal-p18", primaryGoal: "hypertrophy",
       successMetrics: ["weekly_training_adherence"],
       horizon: { startDate: START }, status: "active",
     },
@@ -583,7 +565,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "26 岁男，175cm 70kg，练了三年，想继续增肌但也想跑步别太废，准备年底跑个十公里。一周四次力量，每次一小时十五分。",
     profile: {
       id: "profile-p19",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
       demographics: { ageYears: 26, sex: "male", height: { value: 175, unit: "cm" }, currentWeight: { value: 70, unit: "kg" } },
       adultConfirmed: true,
@@ -594,7 +575,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       strengthBaseline: { squat: { value: 110, unit: "kg" }, benchPress: { value: 80, unit: "kg" }, deadlift: { value: 130, unit: "kg" }, measuredAt: "2026-07-15", source: "user_confirmed" },
     },
     goalContract: {
-      id: "goal-p19", primaryGoal: "hypertrophy", goalType: "hypertrophy",
+      id: "goal-p19", primaryGoal: "hypertrophy",
       modifiers: ["conditioning"],
       successMetrics: ["body_mass_trend", "aerobic_capacity"],
       horizon: horizon(), status: "active",
@@ -610,7 +591,6 @@ export const PERSONA_MATRIX: readonly Persona[] = [
     selfDescription: "24 岁男，180cm 78kg，练了六年，一周六天都能来，每次一小时。想继续增肌，肩和背是弱项。",
     profile: {
       id: "profile-p20",
-      trainingExperience: "advanced",
       locale: "zh-CN",
       demographics: { ageYears: 24, sex: "male", height: { value: 180, unit: "cm" }, currentWeight: { value: 78, unit: "kg" } },
       adultConfirmed: true,
@@ -622,7 +602,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
       strengthBaseline: { squat: { value: 150, unit: "kg" }, benchPress: { value: 110, unit: "kg" }, deadlift: { value: 180, unit: "kg" }, measuredAt: "2026-07-28", source: "user_confirmed" },
     },
     goalContract: {
-      id: "goal-p20", primaryGoal: "hypertrophy", goalType: "hypertrophy",
+      id: "goal-p20", primaryGoal: "hypertrophy",
       successMetrics: ["body_mass_trend", "weak_point_volume"],
       horizon: horizon(), status: "active",
       commitmentPreferences: { training: "high", nutrition: "standard", recovery: "standard" },
@@ -636,8 +616,7 @@ export const PERSONA_MATRIX: readonly Persona[] = [
 export function matrixCoverage() {
   const sexes = new Set(PERSONA_MATRIX.map((p) => p.profile.demographics?.sex ?? "absent"));
   const ages = PERSONA_MATRIX.map((p) => p.profile.demographics?.ageYears).filter((age): age is number => age !== undefined);
-  const experiences = new Set(PERSONA_MATRIX.map((p) => p.profile.trainingExperience));
-  const goals = new Set(PERSONA_MATRIX.map((p) => p.goalContract.goalType ?? p.goalContract.primaryGoal));
+  const goals = new Set(PERSONA_MATRIX.map((p) => p.goalContract.primaryGoal));
   const days = new Set(PERSONA_MATRIX.map((p) => p.profile.schedule?.weeklyFrequency));
   const minutes = new Set(PERSONA_MATRIX.map((p) => p.profile.schedule?.sessionDurationMinutes));
   const trainingWill = new Set(PERSONA_MATRIX.map((p) => p.goalContract.commitmentPreferences?.training ?? "inferred"));
@@ -652,7 +631,6 @@ export function matrixCoverage() {
     sexes: [...sexes],
     ageRange: [Math.min(...ages), Math.max(...ages)],
     bmiRange: [Math.min(...bmis), Math.max(...bmis)],
-    experiences: [...experiences],
     goals: [...goals],
     weeklyDays: [...days].sort(),
     sessionMinutes: [...minutes].sort((a, b) => (a ?? 0) - (b ?? 0)),

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import type { HealthEvidencePage } from "../../src/coach/ports";
 
-async function bootstrap(app: CoachApplication) {
+async function bootstrap(app: LocalProductKernel) {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: {
@@ -16,13 +16,13 @@ async function bootstrap(app: CoachApplication) {
       timezoneOffsetMinutes: 480,
       idempotencyKey: "bootstrap",
     },
-    profile: { id: "profile-1", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile-1", locale: "zh-CN" },
     goalContract: {
       id: "goal-1",
       primaryGoal: "hypertrophy",
       horizon: { startDate: "2026-08-08" },
     },
-    mandate: { id: "mandate-1", mode: "collaborative" },
+    mandate: { id: "mandate-1", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
 }
 
@@ -101,7 +101,7 @@ test("Health page 在一个原子提交中写入 Timeline 与本地 cursor；重
     }),
   ];
   const requests: unknown[] = [];
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-08T08:00:00.000+08:00",
@@ -217,7 +217,7 @@ test("平台删除只提供 record ID 时，既有来源元数据不会阻止对
       }],
     }),
   ];
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-08T08:00:00.000+08:00",
@@ -244,10 +244,10 @@ test("平台删除只提供 record ID 时，既有来源元数据不会阻止对
   assert.equal(timeline.tombstones.length, 1);
 });
 
-test("Health Connect 授权只能经 CoachApplication 发起，并将真实平台结果镜像到本地 PermissionSet", async () => {
+test("Health Connect 授权只能经 LocalProductKernel 发起，并将真实平台结果镜像到本地 PermissionSet", async () => {
   let requests = 0;
   let sequence = 0;
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-08T08:00:00.000+08:00",
@@ -292,8 +292,6 @@ test("Health Connect 授权只能经 CoachApplication 发起，并将真实平�
       health: "not_configured",
       notifications: "not_configured",
       remoteLlm: "not_configured",
-      cloudSync: "not_configured",
-      mediaUpload: "not_configured",
     },
     authorization: {
       kind: "local_user_presence",
@@ -321,7 +319,7 @@ test("Health Connect 授权只能经 CoachApplication 发起，并将真实平�
 
 test("HealthKit privacy-preserving unknown read state may import returned samples but never fabricates a grant", async () => {
   let sequence = 0;
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-08T08:00:00.000+08:00",
@@ -370,7 +368,7 @@ test("Provider 缺失或查询异常只更新连接状态，不伪装为空数�
       capabilityByMetric: { sleep: "not_supported" },
     },
   ];
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-08T08:00:00.000+08:00",
@@ -429,7 +427,7 @@ test("前台和后台可共用有界 Health catch-up；每页仅在原子提交�
       }],
     }),
   ];
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: new InMemoryCoachLedger(),
     runtime: {
       now: () => "2026-08-08T08:00:00.000+08:00",

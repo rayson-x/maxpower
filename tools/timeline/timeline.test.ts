@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import { healthConnectAggregationMode } from "../../src/timeline";
 
 function createApp() {
   let sequence = 0;
   let now = "2026-08-08T00:00:00.000+08:00";
-  const app = new CoachApplication(new InMemoryCoachLedger(), {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), {
     now: () => now,
     nextId: (prefix) => `${prefix}-${++sequence}`,
   });
@@ -18,7 +18,7 @@ function createApp() {
   };
 }
 
-async function bootstrap(app: CoachApplication) {
+async function bootstrap(app: LocalProductKernel) {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: {
@@ -29,24 +29,24 @@ async function bootstrap(app: CoachApplication) {
       timezoneOffsetMinutes: 480,
       idempotencyKey: "bootstrap",
     },
-    profile: { id: "profile-1", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile-1", locale: "zh-CN" },
     goalContract: {
       id: "goal-1",
       primaryGoal: "hypertrophy",
       horizon: { startDate: "2026-08-08", endDate: "2026-12-08" },
     },
-    mandate: { id: "mandate-1", mode: "collaborative" },
+    mandate: { id: "mandate-1", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
 }
 
 function manualEnvelope(input: {
   at: string;
-  origin?: "manual" | "healthkit" | "smart_scale" | "wearable" | "llm_estimate";
+  origin?: "manual" | "healthkit" | "smart_scale" | "wearable";
   sourceRecordId?: string;
   deviceId?: string;
   lastModifiedAt?: string;
+  sourceRevision?: string;
   endedAt?: string;
-  media?: boolean;
 }) {
   return {
     time: {
@@ -59,16 +59,15 @@ function manualEnvelope(input: {
       origin: input.origin ?? "manual",
       ...(input.sourceRecordId ? { sourceRecordId: input.sourceRecordId } : {}),
       ...(input.deviceId ? { deviceId: input.deviceId } : {}),
-      recordingMethod: input.origin === "healthkit" ? "platform_import" as const : input.origin === "llm_estimate" ? "llm_estimate" as const : "manual_entry" as const,
+      recordingMethod: input.origin === "healthkit" ? "platform_import" as const : "manual_entry" as const,
       ...(input.lastModifiedAt ? { lastModifiedAt: input.lastModifiedAt } : {}),
+      ...(input.sourceRevision ? { sourceRevision: input.sourceRevision } : {}),
       dataStatus: "available" as const,
-      confidence: input.origin === "llm_estimate" ? "estimated" as const : "confirmed" as const,
+      confidence: "confirmed" as const,
     },
     privacyClass: "sensitive" as const,
     causalRefs: [],
-    evidenceRefs: input.media
-      ? [{ kind: "media" as const, id: "local-video-1", version: 1, hash: "media-hash", mediaType: "video" as const }]
-      : [],
+    evidenceRefs: [],
     layer: "raw_observation" as const,
   };
 }
@@ -97,7 +96,6 @@ test("Timeline 保留来源与修订链，外部更新/更正不覆盖原始事�
       sourceRecordId: "weight-1",
       deviceId: "scale-a",
       lastModifiedAt: "2026-08-08T07:00:30.000+08:00",
-      media: true,
     }),
   });
   setNow("2026-08-08T07:03:00.000+08:00");
@@ -115,7 +113,6 @@ test("Timeline 保留来源与修订链，外部更新/更正不覆盖原始事�
       sourceRecordId: "weight-1",
       deviceId: "scale-a",
       lastModifiedAt: "2026-08-08T07:02:30.000+08:00",
-      media: true,
     }),
   });
   assert.equal(first.status, "committed");
@@ -152,7 +149,6 @@ test("Timeline 保留来源与修订链，外部更新/更正不覆盖原始事�
 
   const sync = await app.createTimelineSyncPayload("u1");
   assert.equal(sync.events[0]?.envelope?.evidenceRefs.length, 0);
-  assert.deepEqual(sync.events[0]?.envelope?.localMediaAssetIds, ["local-video-1"]);
 
   await app.tombstoneTimelineSource({
     userId: "u1",
@@ -177,6 +173,25 @@ test("Timeline 保留来源与修订链，外部更新/更正不覆盖原始事�
   assert.equal(replayProjection.timeline.events.length, 3);
   assert.equal(replayProjection.timeline.tombstones.length, 1);
   assert.equal(replayProjection.timeline.current.length, 0);
+});
+
+test("外部来源乱序到达时保留最高 source revision，不追加旧事实", async () => {
+  const { app } = createApp();
+  await bootstrap(app);
+  const write = (revision: string, value: number, idempotencyKey: string) => app.recordTimelineFact({
+    userId: "u1",
+    idempotencyKey,
+    fact: { kind: "body" as const, measurement: { metric: "body_weight" as const, quantity: { value, unit: "kg" as const }, condition: "after_waking" }, confidence: "confirmed" as const },
+    envelope: manualEnvelope({ at: "2026-08-08T07:00:00.000+08:00", origin: "healthkit", sourceRecordId: "out-of-order", deviceId: "scale-a", sourceRevision: revision, lastModifiedAt: `2026-08-08T07:0${revision}:00.000+08:00` }),
+  });
+  await write("1", 80.2, "rev-1");
+  await write("3", 79.8, "rev-3");
+  const stale = await write("2", 80, "rev-2");
+  assert.equal(stale.status, "idempotent");
+  const current = (await app.readDomainProjection({ userId: "u1" })).timeline.current.filter((event) => event.envelope?.provenance.sourceRecordId === "out-of-order");
+  assert.equal(current.length, 1);
+  assert.equal(current[0]?.envelope?.provenance.sourceRevision, "3");
+  assert.equal(current[0]?.fact.kind === "body" ? current[0].fact.measurement.quantity.value : undefined, 79.8);
 });
 
 test("动作库选择只保存概念，不伪造为可比较的力量历史", async () => {
@@ -211,15 +226,6 @@ test("动作库选择只保存概念，不伪造为可比较的力量历史", as
 test("Timeline 按源/时区投影，并且趋势不会自动改变计划", async () => {
   const { app } = createApp();
   await bootstrap(app);
-  await assert.rejects(
-    app.recordTimelineFact({
-      userId: "u1",
-      idempotencyKey: "unconfirmed-food",
-      fact: { kind: "nutrition", observationId: "food-1", energy: { value: 500, unit: "kcal" }, confidence: "estimated" },
-      envelope: manualEnvelope({ at: "2026-08-08T12:00:00.000+08:00", origin: "llm_estimate" }),
-    }),
-    /user_confirmation_required_for_llm_estimate/,
-  );
   await assert.rejects(
     app.recordTimelineFact({
       userId: "u1",

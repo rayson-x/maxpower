@@ -1,8 +1,5 @@
 import {
-  applyAtomicCommitTransition,
   applyDomainAtomicCommitTransition,
-  type AtomicCommit,
-  type AtomicCommitResult,
   type CoachLedgerDiagnostics,
   type CoachLedger,
   type DomainAtomicCommit,
@@ -151,25 +148,34 @@ export class SQLiteCoachLedger implements CoachLedger {
     return diagnoseLedgerSnapshot(await this.read());
   }
 
-  async commit(input: AtomicCommit): Promise<AtomicCommitResult>;
-  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult>;
-  async commit(
-    input: AtomicCommit | DomainAtomicCommit,
-  ): Promise<AtomicCommitResult | DomainCommandResult> {
+  async commit(input: DomainAtomicCommit): Promise<DomainCommandResult> {
     await this.initialize();
-    let result: AtomicCommitResult | DomainCommandResult | undefined;
+    let result: DomainCommandResult | undefined;
     await this.transaction(async () => {
       const current = await this.readInitialized();
-      const applied = isDomainCommit(input)
-        ? applyDomainAtomicCommitTransition(current, input)
-        : applyAtomicCommitTransition(current, input);
+      const applied = applyDomainAtomicCommitTransition(current, input);
       result = applied.result;
       if (applied.snapshot !== current) {
         await this.writeInitialized(applied.snapshot);
       }
     });
-    if (!result) throw new Error("SQLite transaction completed without an AtomicCommit result");
+    if (!result) throw new Error("SQLite transaction completed without a commit result");
     return result;
+  }
+
+  async commitBatch(inputs: readonly DomainAtomicCommit[]): Promise<readonly DomainCommandResult[]> {
+    await this.initialize();
+    const results: DomainCommandResult[] = [];
+    await this.transaction(async () => {
+      let next = await this.readInitialized();
+      for (const input of inputs) {
+        const applied = applyDomainAtomicCommitTransition(next, input);
+        next = applied.snapshot;
+        results.push(applied.result);
+      }
+      await this.writeInitialized(next);
+    });
+    return results;
   }
 
   private async initialize(): Promise<void> {
@@ -270,11 +276,6 @@ export class SQLiteCoachLedger implements CoachLedger {
   }
 }
 
-function isDomainCommit(
-  input: AtomicCommit | DomainAtomicCommit,
-): input is DomainAtomicCommit {
-  return "kind" in input && input.kind === "domain";
-}
 
 function normalizeSnapshot(snapshot: Partial<LedgerSnapshot>): LedgerSnapshot {
   return normalizeLedgerSnapshot(snapshot);

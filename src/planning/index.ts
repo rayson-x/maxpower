@@ -1,4 +1,3 @@
-export { GoalCyclePlanner, PLANNER_CONSTRAINT_PRIORITY } from "./GoalCyclePlanner";
 export { STRATEGY_CATALOG, selectAdaptiveStrategy } from "./adaptiveStrategy";
 export type * from "./model";
 export type * from "./adaptiveStrategy";
@@ -8,3 +7,6 @@ export * from "./continuousTrainingQueue";
 export * from "./aerobicPlan";
 export * from "./cardioLoad";
 export * from "./rollingEnergyAdjustment";
+export * from "./AdaptivePlanning";
+export { CurrentStagePlanningModule } from "./CurrentStagePlanningModule";
+export * from "./PlanOutcome";

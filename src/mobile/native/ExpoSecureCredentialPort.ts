@@ -6,10 +6,7 @@ import {
   type SecureCredentialPort,
   type SecureCredentialReadResult,
 } from "../../privacy";
-import {
-  legacySecureCredentialStorageKey,
-  secureCredentialStorageKey,
-} from "../security/credentialNamespace";
+import { secureCredentialStorageKey } from "../security/credentialNamespace";
 
 /**
  * Android Keystore / iOS Keychain adapter supplied by Expo SecureStore. Values
@@ -74,15 +71,7 @@ export function createExpoSecureCredentialPort(): SecureCredentialPort {
             ? { status: "missing_or_invalidated" }
             : { status: "available", value: decoded };
         }
-        const legacy = await SecureStore.getItemAsync(legacySecureCredentialStorageKey(input.key), options);
-        if (legacy === null) return { status: "missing_or_invalidated" };
-        await SecureStore.setItemAsync(
-          secureCredentialStorageKey(input.key),
-          encodedValue(input.key, legacy),
-          options,
-        );
-        await SecureStore.deleteItemAsync(legacySecureCredentialStorageKey(input.key), options);
-        return { status: "available", value: legacy };
+        return { status: "missing_or_invalidated" };
       } catch {
         return mapReadError();
       }
@@ -91,7 +80,6 @@ export function createExpoSecureCredentialPort(): SecureCredentialPort {
       await isAvailable();
       try {
         await SecureStore.deleteItemAsync(secureCredentialStorageKey(input.key), optionsFor(input.key, input.requireUserPresence));
-        await SecureStore.deleteItemAsync(legacySecureCredentialStorageKey(input.key), optionsFor(input.key, input.requireUserPresence));
       } catch {
         throw new SecureCredentialError("delete_failed");
       }
@@ -106,7 +94,6 @@ export function createExpoSecureCredentialPort(): SecureCredentialPort {
           encodedValue(input.key, input.value),
           options,
         );
-        await SecureStore.deleteItemAsync(legacySecureCredentialStorageKey(input.key), options);
       } catch {
         throw new SecureCredentialError("write_failed");
       }

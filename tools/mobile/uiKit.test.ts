@@ -19,7 +19,6 @@ test("计划周期文案同时交代开始进度和距结束天数", () => {
 test("力量趋势把三大项档案基线作为可见起点，不伪造后续变化", () => {
   const profile: UserProfileData = {
     id: "profile-1",
-    trainingExperience: "intermediate",
     locale: "zh-CN",
     strengthBaseline: {
       squat: { value: 120, unit: "kg" },

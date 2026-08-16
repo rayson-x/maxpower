@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 开始实施前盘点现有 Onboarding、GoalCyclePlanner、RulePack、KnowledgePack、Forecast、ProductProjection 的公开行为，仅为缺口写红测，不重建已完成基础
 - [ ] 基础建档支持年龄、性别、身高、体重、主目标、训练经验、每周时间、单次时长、场地器材和饮食条件

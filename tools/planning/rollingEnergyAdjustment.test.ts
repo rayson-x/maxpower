@@ -4,9 +4,10 @@ import test from "node:test";
 import type { TimelineProjectionEvent, UserProfileData } from "../../src/coach/domain";
 import { estimateThermicEffect } from "../../src/nutrition/thermicEffect";
 import { rollingEnergyAdjustmentFor } from "../../src/planning/rollingEnergyAdjustment";
+import { confirmedTimelineEnvelope } from "../fixtures/timelineEnvelope";
 
 const profile: UserProfileData = {
-  id: "p", trainingExperience: "intermediate", locale: "zh-CN",
+  id: "p", locale: "zh-CN",
   demographics: { ageYears: 30, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 75, unit: "kg" } },
   dailyActivityLevel: "sedentary",
 };
@@ -14,7 +15,13 @@ const profile: UserProfileData = {
 function meal(energy: number, protein = 0, carbohydrate = 0, fat = 0): TimelineProjectionEvent {
   return {
     eventId: "party", revision: 1, occurredAt: "2026-08-11T12:00:00.000Z", recordedAt: "2026-08-11T12:00:00.000Z", timezoneOffsetMinutes: 480,
-    fact: { kind: "nutrition", observationId: "nutrition-party", energy: { value: energy, unit: "kcal" }, proteinGrams: protein, carbohydrateGrams: carbohydrate, fatGrams: fat, confidence: "confirmed" },
+    envelope: confirmedTimelineEnvelope({ id: "meal-envelope-party", factType: "nutrition", occurredAt: "2026-08-11T12:00:00.000Z" }),
+    fact: { kind: "nutrition", observationId: "nutrition-party", observationMode: "structured", nutrients: [
+      { nutrientId: "energy", amount: energy, unit: "kcal", source: { kind: "manual_form", ref: "party" } },
+      { nutrientId: "protein", amount: protein, unit: "g", source: { kind: "manual_form", ref: "party" } },
+      { nutrientId: "carbohydrate", amount: carbohydrate, unit: "g", source: { kind: "manual_form", ref: "party" } },
+      { nutrientId: "fat", amount: fat, unit: "g", source: { kind: "manual_form", ref: "party" } },
+    ], confidence: "confirmed" },
   };
 }
 
@@ -37,23 +44,21 @@ test("聚餐后的滚动调整只在量化摄入存在时启动，并受日额�
   assert.ok(adjustment.actions.every((action) => action.extraLowImpactCardioMinutes <= 15));
 });
 
-test("未量化但明确说吃多/聚餐时，Planner 给出低置信度差额范围与待确认的温和回调", () => {
+test("未量化但明确说吃多/聚餐时也不从描述猜测热量差", () => {
   const adjustment = rollingEnergyAdjustmentFor({
     currentDate: "2026-08-12", profile,
-    timeline: [{ ...meal(0), fact: { kind: "nutrition", observationId: "nutrition-unquantified", mealDescription: "昨晚聚餐", confidence: "confirmed" } }],
+    timeline: [{ ...meal(0), fact: { kind: "nutrition", observationId: "nutrition-unquantified", observationMode: "descriptive", mealDescription: "昨晚聚餐", confidence: "confirmed" } }],
     targetDailyDeficitKcal: 370, futureDates: ["2026-08-12"],
   });
-  assert.equal(adjustment.status, "gentle_rebalance");
-  assert.equal(adjustment.surplusSource, "description_estimate");
-  assert.deepEqual(adjustment.estimatedSurplusRangeKcal, { min: 250, max: 550 });
-  assert.ok(adjustment.actions.length > 0, "明确的吃多描述应产出待确认行动，而不是静默忽略");
-  assert.ok(adjustment.reasonCodes.includes("rolling_energy_rebalance_from_description_estimate_requires_confirmation"));
+  assert.equal(adjustment.status, "no_quantified_intake");
+  assert.equal(adjustment.surplusSource, "none");
+  assert.deepEqual(adjustment.actions, []);
 });
 
 test("普通未量化餐食不等于吃多，Planner 保持未知且不安排回调", () => {
   const adjustment = rollingEnergyAdjustmentFor({
     currentDate: "2026-08-12", profile,
-    timeline: [{ ...meal(0), fact: { kind: "nutrition", observationId: "nutrition-unquantified-normal", mealDescription: "午餐吃了盖饭", confidence: "confirmed" } }],
+    timeline: [{ ...meal(0), fact: { kind: "nutrition", observationId: "nutrition-unquantified-normal", observationMode: "descriptive", mealDescription: "午餐吃了盖饭", confidence: "confirmed" } }],
     targetDailyDeficitKcal: 370, futureDates: ["2026-08-12"],
   });
   assert.equal(adjustment.status, "no_quantified_intake");

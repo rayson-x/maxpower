@@ -167,7 +167,7 @@ test("策展：客户端知识库不含内部内容（代码路径/实现细节/
   const violations: string[] = [];
   const forbidden: readonly (readonly [RegExp, string])[] = [
     [/\b(src|tools)\/[\w.-]+\.tsx?/, "源码路径"],
-    [/PlannerTrace|GoalCyclePlanner|rulePack|ticket\s*\d/i, "实现细节"],
+    [/PlannerTrace|rulePack|ticket\s*\d/i, "实现细节"],
     [/我们的立场|我们采纳|实现清单/, "产品决策"],
     [/待核验|未核验/, "未核验标注"],
     [/assert\.|E2E|验收断言|最小实验/, "测试与验收"],

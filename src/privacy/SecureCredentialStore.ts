@@ -1,4 +1,3 @@
-import type { ReplicaAccessCredential, ReplicaCredentialSource } from "../sync";
 import {
   SecureCredentialError,
   type SecureCredentialKey,
@@ -27,45 +26,6 @@ export class InMemorySecureCredentialPort implements SecureCredentialPort {
   async rotate(input: { key: SecureCredentialKey; value: string }): Promise<void> {
     await this.put(input);
   }
-}
-
-/**
- * Keeps the sync transport's opaque bearer credential in a separate secure
- * namespace. Bad or stale JSON becomes unavailable rather than being guessed.
- */
-export class SecureReplicaCredentialSource implements ReplicaCredentialSource {
-  constructor(private readonly credentials: SecureCredentialPort) {}
-
-  async readReplicaCredential(input: { accountId: string }): Promise<ReplicaAccessCredential | null> {
-    const result = await this.credentials.get({ key: replicaCredentialKey(input.accountId) });
-    if (result.status !== "available") return null;
-    try {
-      const value = JSON.parse(result.value) as Partial<ReplicaAccessCredential>;
-      if (!value.accessToken || value.accountId !== input.accountId) return null;
-      return {
-        accessToken: value.accessToken,
-        accountId: value.accountId,
-        ...(typeof value.expiresAt === "string" ? { expiresAt: value.expiresAt } : {}),
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  async writeReplicaCredential(value: ReplicaAccessCredential): Promise<void> {
-    await this.credentials.rotate({
-      key: replicaCredentialKey(value.accountId),
-      value: JSON.stringify(value),
-    });
-  }
-
-  async deleteReplicaCredential(accountId: string): Promise<void> {
-    await this.credentials.delete({ key: replicaCredentialKey(accountId) });
-  }
-}
-
-export function replicaCredentialKey(accountId: string): SecureCredentialKey {
-  return { accountId, scope: "sync", name: "replica_access" };
 }
 
 function keyFor(key: SecureCredentialKey): string {

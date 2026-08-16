@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — TimelineChanged 风险触发与定时检查; 04 — 减脂目标合同与基础风险状态.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] Observation、LiveSessionState 和 Timeline fact 三层隔离；低置信或丢弃的提示不影响长期历史。
 - [ ] 稳定证据可产生限频的当前动作、休息、下一组或安全暂停建议，且不创建第二套 rep/phase truth。

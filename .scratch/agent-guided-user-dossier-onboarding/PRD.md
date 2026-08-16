@@ -1,4 +1,6 @@
-Status: ready-for-agent
+Status: wontfix
+
+Replaced for this product flow by `.scratch/record-first-adaptive-coach/PRD.md`. The old mandatory-goal and mandatory-first-plan flow must not be preserved as compatibility behavior.
 
 # 对话式用户档案建立、教练评估与首次计划交接
 

@@ -119,14 +119,9 @@ export function deriveSessionOutcome(workout: WorkoutProjection, completedAt: st
   const allSets = workout.frozenPrescription.tasks.flatMap((task) => task.sets);
   const incomplete = allSets.filter((set) => !resolvedIds.has(set.id)).map((set) => set.id);
   const skipped = allSets.filter((set) => skippedIds.has(set.id)).map((set) => set.id);
-  const packetRefs = workout.setOutcomes
-    .flatMap((outcome) => outcome.packetRef ? [outcome.packetRef] : [])
-    .filter((item, index, values) => values.findIndex((other) => other.id === item.id && other.hash === item.hash) === index);
   const dataCompleteness = incomplete.length || skipped.length
     ? "partial"
-    : workout.setOutcomes.some((outcome) => outcome.source === "camera_confirmed")
-      ? "complete"
-      : "manual_only";
+    : "manual_only";
   return {
     status: incomplete.length || skipped.length ? "partial" : "completed",
     completedAt,
@@ -134,7 +129,6 @@ export function deriveSessionOutcome(workout: WorkoutProjection, completedAt: st
     directSets: workout.setOutcomes.length,
     incompletePrescriptionSetIds: incomplete,
     ...(skipped.length ? { skippedPrescriptionSetIds: skipped } : {}),
-    motionPacketRefs: packetRefs,
     dataCompleteness,
   };
 }

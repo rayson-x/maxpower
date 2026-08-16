@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { HeadBucketCommand } from "@aws-sdk/client-s3";
-
 import { createInfrastructureReadiness } from "../src/runtime/production/readiness.js";
 
 test("production readiness requires PostgreSQL and both Redis roles", async () => {
@@ -26,16 +24,6 @@ test("production readiness requires PostgreSQL and both Redis roles", async () =
         return "PONG";
       },
     },
-    objectStorage: {
-      bucket: "maxpower-private-media",
-      client: {
-        async send(command: unknown) {
-          assert.ok(command instanceof HeadBucketCommand);
-          calls.push(`s3:${command.input.Bucket}`);
-          return { $metadata: { httpStatusCode: 200 } };
-        },
-      },
-    },
   });
 
   assert.equal(await readiness(), true);
@@ -43,7 +31,6 @@ test("production readiness requires PostgreSQL and both Redis roles", async () =
     "postgres:SELECT 1 AS ok",
     "rate:PING",
     "stream:PING",
-    "s3:maxpower-private-media",
   ]);
 });
 
@@ -52,10 +39,6 @@ test("production readiness returns not-ready without leaking dependency errors",
     postgres: { async query() { throw new Error("postgres://user:password@private"); } },
     rateLimitRedis: { async sendCommand() { return "PONG"; } },
     streamRedis: { async sendCommand() { return "PONG"; } },
-    objectStorage: {
-      bucket: "maxpower-private-media",
-      client: { async send() { return {}; } },
-    },
   });
 
   assert.equal(await readiness(), false);

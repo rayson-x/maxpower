@@ -146,7 +146,7 @@ export interface RuleEvaluationContext {
   plannedRecoveryWindow: boolean;
   mandate: CoachingMandateData;
   locks: readonly ("load" | "reps" | "sets" | "exercise" | "week_structure")[];
-  boundary: "current_set" | "between_sets" | "session_complete" | "weekly_review" | "mesocycle_review";
+  boundary: "current_set" | "between_sets" | "session_complete" | "weekly_review" | "goal_path_review";
   bodyweight?: BodyweightProgressionContext;
   stableHistory: boolean;
   requestedLoadingPattern?: "simple" | "light_medium_heavy";
@@ -186,7 +186,7 @@ export type RuleDecisionType =
 
 export interface RuleDecision {
   decision: RuleDecisionType;
-  scope: "next_unstarted_set" | "next_session" | "week" | "mesocycle";
+  scope: "next_unstarted_set" | "next_session" | "week" | "current_plan_stage";
   states: {
     performance: PerformanceProgressionState;
     volume: VolumeProgressionState;

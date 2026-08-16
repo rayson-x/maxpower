@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 
-import { CoachApplication } from "../../coach";
+import { LocalProductKernel } from "../../coach";
+import { PiAgentConversationModule, createLocalConversationAdapters } from "../../agent-conversation";
+import { RecordModule } from "../../records";
 import {
   BehaviorDecisionTraceRecorder,
   createTraceWriter,
@@ -11,23 +13,13 @@ import {
   PersonalKnowledgeLayer,
 } from "../../knowledge/personalLayer";
 import type { NotificationPort } from "../../coach/ports";
-import { InMemoryMediaBlobStore, InMemorySecureCredentialPort, WebCryptoBackupCryptoPort } from "../../privacy";
+import { InMemorySecureCredentialPort, WebCryptoBackupCryptoPort } from "../../privacy";
 import type { AccountRuntime, AccountRuntimeCreateInput } from "../auth/model";
-import {
-  CloudMediaLibrary,
-  XhrMediaByteTransferPort,
-  createCloudCoachServices,
-} from "../cloud";
-import {
-  LocalConfirmedProductBridge,
-  type ConfirmedProductBridge,
-  type CloudProductDataFetch,
-} from "../product-data";
+import { createCloudCoachServices } from "../cloud";
 import {
   ANDROID_HEALTH_CONNECT_MVP_METRICS,
   APPLE_HEALTHKIT_MVP_METRICS,
   createExpoBackgroundSchedulerPort,
-  createExpoMediaBlobStore,
   createExpoNotificationPort,
   createExpoSecureCredentialPort,
   openExpoMaxPowerPersistence,
@@ -39,13 +31,9 @@ import type { ProductShellRecovery } from "../ui/productNavigation";
 import { openWebMaxPowerPersistence } from "./WebLocalPersistence";
 
 export interface MobileAccountRuntime extends AccountRuntime {
-  application: CoachApplication;
-  /** Finishes a queued Timeline evaluation after any client-originated write. */
-  settleTimelineRisk(): Promise<void>;
-  /** Local-authoritative confirmation boundary for Profile/Plan/Workout data. */
-  confirmedProduct: ConfirmedProductBridge;
-  /** Optional, explicit-upload personal media library for this account. */
-  cloudMediaLibrary: CloudMediaLibrary;
+  application: LocalProductKernel;
+  conversation: PiAgentConversationModule;
+  records: RecordModule;
   productShellStateStore: ProductShellStateStore;
   initialProductShellRecovery: ProductShellRecovery;
   notifications?: NotificationPort;
@@ -55,11 +43,9 @@ export interface MobileAccountRuntime extends AccountRuntime {
 
 export interface MobileAccountRuntimeOptions {
   apiBaseUrl: string;
-  allowInsecureHttp?: boolean;
-  fetch?: CloudProductDataFetch;
 }
 
-/** Composition seam shared by AuthRoot and the cloud LLM/media tickets. */
+/** Composition seam shared by AuthRoot and the authenticated text LLM service. */
 export function createMobileAccountRuntimeFactory(options: MobileAccountRuntimeOptions) {
   return (input: AccountRuntimeCreateInput): Promise<MobileAccountRuntime> =>
     createMobileAccountRuntime(input, options);
@@ -76,7 +62,9 @@ export async function createMobileAccountRuntime(
   const persistence = Platform.OS === "web"
     ? await openWebMaxPowerPersistence(input.accountId)
     : await openExpoMaxPowerPersistence(input.accountId);
-  let application: CoachApplication | undefined;
+  let application: LocalProductKernel | undefined;
+  let conversation: PiAgentConversationModule | undefined;
+  let records: RecordModule | undefined;
   let disposed = false;
 
   try {
@@ -90,9 +78,6 @@ export async function createMobileAccountRuntime(
     const credentials = Platform.OS === "web"
       ? new InMemorySecureCredentialPort()
       : createExpoSecureCredentialPort();
-    const media = Platform.OS === "web"
-      ? new InMemoryMediaBlobStore()
-      : createExpoMediaBlobStore();
     const accessTokens = {
       accessTokenFor(accountId: string) {
         if (accountId !== input.accountId) throw new Error("cloud_account_mismatch");
@@ -101,26 +86,10 @@ export async function createMobileAccountRuntime(
     };
     const cloudCoach = createCloudCoachServices({
       apiBaseUrl,
-      ...(options?.allowInsecureHttp === undefined
-        ? {}
-        : { allowInsecureHttp: options.allowInsecureHttp }),
       accountId: input.accountId,
       accessTokens,
       accountSignal: input.signal,
-      ledger: persistence.ledger,
-      media,
     });
-    const cloudMediaLibrary = new CloudMediaLibrary({
-      apiBaseUrl,
-      ...(options?.allowInsecureHttp === undefined
-        ? {}
-        : { allowInsecureHttp: options.allowInsecureHttp }),
-      accountId: input.accountId,
-      accessTokens,
-      byteTransfer: new XhrMediaByteTransferPort(),
-      accountSignal: input.signal,
-    });
-
     // The agent and Planner both write through this decorated local Ledger.
     // Trace envelopes contain only opaque refs and closed reason codes; they
     // never retain user text or provider reasoning. The device file is for
@@ -142,34 +111,43 @@ export async function createMobileAccountRuntime(
     const appLedger = traceWriter?.ledger ?? persistence.ledger;
     await traceWriter?.reconcile();
 
-    application = new CoachApplication({
+    const runtime = {
+      now: () => new Date().toISOString(),
+      nextId: (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(++sequence).toString(36)}`,
+    };
+    const kernel = new LocalProductKernel({
       ledger: appLedger,
       authenticatedAccountId: input.accountId,
-      runtime: {
-        now: () => new Date().toISOString(),
-        nextId: (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(++sequence).toString(36)}`,
-      },
+      runtime,
       notifications,
       backgroundScheduler,
       health,
       credentials,
-      media,
-      llmProviderResolver: cloudCoach.llmProviderResolver,
-      nutritionObservationResolver: cloudCoach.nutritionObservationResolver,
-      // The shipped Coach uses the same knowledge-aware tool manifest as the
-      // headless lifecycle harness. The model still chooses when to search;
-      // the registry validates every call against the current local facts.
-      knowledgeToolsEnabled: true,
-      // MVP: a clear user-stated report may be written by Coach only through
-      // the typed, mandate-gated record tools. Estimates still use a review.
-      actionToolsEnabled: true,
       ...(traceWriter ? { behaviorDecisionRecorder: new BehaviorDecisionTraceRecorder(traceWriter.recorder) } : {}),
       backupCrypto: new WebCryptoBackupCryptoPort(),
+      afterFixedGoalPathReview: async ({ userId, causationId }) => {
+        await conversation?.execute({ kind: "reconcile", userId, causationId });
+      },
+    });
+    application = kernel;
+    records = new RecordModule({
+      createTimelineDraft: (request) => kernel.createTimelineRecordDraft(request),
+      confirmTimelineDraft: (request) => kernel.confirmTimelineRecordDraft(request),
+      createNutritionDraft: (request) => kernel.createNutritionObservationDraft(request),
+      confirmNutritionDraft: (request) => kernel.confirmNutritionObservationDraft(request),
+      correctTimelineFact: (request) => kernel.correctTimelineFact(request),
+    });
+    conversation = new PiAgentConversationModule({
+      ledger: appLedger,
+      runtime,
+      pi: cloudCoach.pi,
+      ...createLocalConversationAdapters({ kernel, records }),
     });
 
-    await application.runPendingTimelineRiskEvaluation({
+    await application.runDailyGoalPathReview({
       userId: input.accountId,
-      idempotencyKey: "foreground-timeline-risk",
+      idempotencyKey: `daily-goal-path:${localCalendarDate()}`,
+      timezoneOffsetMinutes: new Date().getTimezoneOffset() * -1,
     });
     await application.catchUpRecipes(input.accountId);
     assertActive(input.signal);
@@ -198,13 +176,6 @@ export async function createMobileAccountRuntime(
       });
       await application.catchUpRecipes(input.accountId);
     }
-    // Foreground Health import and the optional morning check-in can each add
-    // Timeline facts after the resume pass above. Settle their shared current
-    // frontier before rendering; unchanged starts remain a no-op.
-    await application.runPendingTimelineRiskEvaluation({
-      userId: input.accountId,
-      idempotencyKey: "foreground-timeline-risk",
-    });
     assertActive(input.signal);
     const initialProductShellRecovery = await persistence.productShellStateStore.restore({
       userId: input.accountId,
@@ -212,18 +183,11 @@ export async function createMobileAccountRuntime(
     });
     assertActive(input.signal);
 
-    const createdApplication = application;
     return {
       accountId: input.accountId,
-      application: createdApplication,
-      async settleTimelineRisk() {
-        await createdApplication.runPendingTimelineRiskEvaluation({
-          userId: input.accountId,
-          idempotencyKey: "client-timeline-risk",
-        });
-      },
-      confirmedProduct: new LocalConfirmedProductBridge(),
-      cloudMediaLibrary,
+      application,
+      conversation,
+      records,
       productShellStateStore: persistence.productShellStateStore,
       initialProductShellRecovery,
       notifications,
@@ -231,12 +195,7 @@ export async function createMobileAccountRuntime(
       async dispose() {
         if (disposed) return;
         disposed = true;
-        const sessions = await createdApplication
-          .listCoachSessions({ userId: input.accountId, status: "active" })
-          .catch(() => []);
-        await Promise.allSettled(sessions.map((session) =>
-          createdApplication.cancelCoachRun({ sessionId: session.id })
-        ));
+        await conversation?.dispose();
         await persistence.dispose();
       },
     };
@@ -244,12 +203,7 @@ export async function createMobileAccountRuntime(
     if (!disposed) {
       disposed = true;
       if (application) {
-        const sessions = await application
-          .listCoachSessions({ userId: input.accountId, status: "active" })
-          .catch(() => []);
-        await Promise.allSettled(sessions.map((session) =>
-          application?.cancelCoachRun({ sessionId: session.id })
-        ));
+        await conversation?.dispose();
       }
       await persistence.dispose();
     }

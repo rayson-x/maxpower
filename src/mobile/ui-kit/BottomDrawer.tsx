@@ -3,14 +3,17 @@ import { Animated, Easing, Modal, PanResponder, Pressable, StyleSheet, Text, Vie
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { uiColors, uiRadius, uiSpace, uiType } from "./tokens";
+import { mobileT } from "../../i18n";
+
 
 const AnimatedSafeAreaView = Animated.createAnimatedComponent(SafeAreaView);
 
-export function BottomDrawer({ visible, title, subtitle, onDismiss, headerAction, children, tall = false }: {
+export function BottomDrawer({ visible, title, subtitle, onDismiss, leadingAction, headerAction, children, tall = false }: {
   visible: boolean;
   title: string;
   subtitle?: string;
   onDismiss(): void;
+  leadingAction?: ReactNode;
   headerAction?: ReactNode;
   children: ReactNode;
   tall?: boolean;
@@ -137,16 +140,17 @@ export function BottomDrawer({ visible, title, subtitle, onDismiss, headerAction
           extrapolate: "clamp",
         })),
       }]} />
-      <Pressable accessibilityRole="button" accessibilityLabel="关闭抽屉" onPress={requestDismiss} style={StyleSheet.absoluteFill} />
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.bottomdrawer.4c997bfc14")} onPress={requestDismiss} style={StyleSheet.absoluteFill} />
       <AnimatedSafeAreaView edges={["bottom"]} style={[styles.drawer, tall && styles.drawerTall, { transform: [{ translateY: drawerY }] }]}>
         <View style={styles.handleTarget} {...handleResponder.panHandlers}><View style={styles.handle} /></View>
         <View style={styles.header}>
+          {leadingAction}
           <View style={styles.titleBlock}>
             <Text style={styles.title}>{title}</Text>
             {subtitle ? <Text numberOfLines={1} style={styles.subtitle}>{subtitle}</Text> : null}
           </View>
           {headerAction}
-          <Pressable accessibilityRole="button" accessibilityLabel={`关闭${title}`} onPress={requestDismiss} style={styles.close}>
+          <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.kit.bottomdrawer.f8d247efed", { value0: title })} onPress={requestDismiss} style={styles.close}>
             <Text style={styles.closeGlyph}>×</Text>
           </Pressable>
         </View>

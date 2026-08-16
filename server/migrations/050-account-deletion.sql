@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS maxpower.account_deletion_jobs (
     cleanup_stage IN (
       'requested',
       'access_blocked',
-      'media_objects_erased',
       'metadata_erased',
       'identity_erased'
     )

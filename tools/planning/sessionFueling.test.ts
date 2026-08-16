@@ -20,7 +20,6 @@ const strategies = registry.programStrategies();
 function profile(overrides: Partial<UserProfileData> = {}): UserProfileData {
   return {
     id: "profile-1",
-    trainingExperience: "intermediate",
     locale: "zh-CN",
     demographics: { ageYears: 30, sex: "male", height: { value: 178, unit: "cm" }, currentWeight: { value: 80, unit: "kg" } },
     adultConfirmed: true,

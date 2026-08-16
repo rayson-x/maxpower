@@ -19,7 +19,6 @@ export type TimelineOrigin =
   | "wearable"
   | "canonical_motion_packet"
   | "import"
-  | "llm_estimate"
   | "professional_directive"
   | "system";
 
@@ -30,7 +29,6 @@ export type TimelineRecordingMethod =
   | "device_measurement"
   | "platform_import"
   | "canonical_packet"
-  | "llm_estimate"
   | "professional_entry"
   | "system_import";
 
@@ -146,7 +144,7 @@ export interface TimelineReadEvent {
   eventId: string;
   revision: number;
   fact: TimelineFact;
-  envelope?: TimelineFactEnvelope;
+  envelope: TimelineFactEnvelope;
   occurredAt: string;
   recordedAt: string;
   timezoneOffsetMinutes: number;
@@ -180,10 +178,7 @@ export interface TimelineSyncPayload {
     eventId: string;
     revision: number;
     fact: TimelineFact;
-    envelope?: Omit<TimelineFactEnvelope, "evidenceRefs"> & {
-      evidenceRefs: readonly Exclude<ImmutableEvidenceRef, { kind: "media" }>[];
-      localMediaAssetIds: readonly string[];
-    };
+    envelope: TimelineFactEnvelope;
     correctsEventId?: string;
     sourceMutationOfEventId?: string;
     tombstonesEventId?: string;

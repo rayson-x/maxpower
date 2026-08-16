@@ -25,7 +25,7 @@ The screen must continue to distinguish: unavailable device, Health Connect abse
 
 ## Storage and transfer
 
-- The Android client maps platform records to local, provenance-bearing Timeline evidence through `CoachApplication`; the Android SDK never writes to the Ledger directly.
+- The Android client maps platform records to local, provenance-bearing Timeline evidence through the local Product Kernel; the Android SDK never writes to the Ledger directly.
 - Local records include Health Connect record ID, data-origin package, client ID/version when supplied, last-modified time, recording method, device metadata when supplied, and original timestamps/offsets.
 - A deletion has only a record ID. MaxPower records the time its adapter observed that deletion; it never fabricates the original observation time.
 - Health Connect data stays local unless the user separately enables the remote LLM provider or account synchronization. Those controls have their own disclosure and consent.

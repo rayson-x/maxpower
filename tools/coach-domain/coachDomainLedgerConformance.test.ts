@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import {
   InMemoryCoachLedger,
   LedgerConflictError,
+  RecordingCoachLedger,
   type CoachLedger,
   type DomainAtomicCommit,
 } from "../../src/coach/ledger";
 import type { DomainEvent } from "../../src/coach/domain";
+import { confirmedTimelineEnvelope } from "../fixtures/timelineEnvelope";
 import {
   SQLITE_COACH_LEDGER_SCHEMA_VERSION,
   SQLiteCoachLedger,
@@ -84,7 +86,7 @@ function runtime() {
   };
 }
 
-async function bootstrap(app: CoachApplication, userId = "user-1") {
+async function bootstrap(app: LocalProductKernel, userId = "user-1") {
   return app.executeDomainCommand({
     type: "user.bootstrap",
     meta: {
@@ -95,22 +97,53 @@ async function bootstrap(app: CoachApplication, userId = "user-1") {
       timezoneOffsetMinutes: 480,
       idempotencyKey: `bootstrap-${userId}`,
     },
-    profile: { id: `profile-${userId}`, trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: `profile-${userId}`, locale: "zh-CN" },
     goalContract: {
       id: `goal-${userId}`,
       primaryGoal: "strength",
       horizon: { startDate: "2026-08-08" },
     },
-    mandate: { id: `mandate-${userId}`, mode: "collaborative" },
+    mandate: { id: `mandate-${userId}`, mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
 }
 
 for (const [name, createFixture] of factories) {
-  test(`${name}: CoachApplication 完整事实链可重启重放`, async () => {
+  test(`${name}: staged commit batch is atomic when a later relevant revision becomes stale`, async () => {
+    const fixture = createFixture();
+    try {
+      const app = new LocalProductKernel(fixture.ledger, runtime());
+      await bootstrap(app);
+      const before = await fixture.ledger.read();
+      const staging = new RecordingCoachLedger(before);
+      const stagedApp = new LocalProductKernel(staging, runtime());
+      for (const [revision, locale] of [[1, "en-US"], [2, "zh-CN"]] as const) {
+        await stagedApp.executeDomainCommand({
+          type: "profile.revise",
+          meta: { userId: "user-1", actor: { kind: "user", id: "user-1" }, deviceId: "phone", occurredAt: "2026-08-08T08:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: `cloud-batch-${revision}` },
+          profileId: "profile-user-1",
+          expectedRevision: revision,
+          profile: { id: "profile-user-1", locale },
+        });
+      }
+      const [first, second] = staging.recordedCommits();
+      assert.ok(first && second);
+      const stale: DomainAtomicCommit = { ...second, expectedRevisions: second.expectedRevisions.map((reference) => reference.kind === "user_profile" ? { ...reference, revision: 999 } : reference) };
+
+      await assert.rejects(
+        fixture.ledger.commitBatch([first, stale]),
+        (error: unknown) => error instanceof LedgerConflictError && error.code === "stale_aggregate",
+      );
+      assert.deepEqual(await fixture.ledger.read(), before, "the acknowledged sequence must not partially advance local state");
+    } finally {
+      fixture.dispose();
+    }
+  });
+
+  test(`${name}: LocalProductKernel 完整事实链可重启重放`, async () => {
     const fixture = createFixture();
     try {
       const clock = runtime();
-      let app = new CoachApplication(fixture.ledger, clock);
+      let app = new LocalProductKernel(fixture.ledger, clock);
       const knowledgePins = app.getInstalledKnowledgeVersionPins();
       await bootstrap(app);
       const meta = (key: string, occurredAt: string) => ({
@@ -126,6 +159,7 @@ for (const [name, createFixture] of factories) {
         meta: meta("body-original", "2026-08-08T07:00:00.000+08:00"),
         timelineId: "timeline-user-1",
         expectedRevision: 0,
+        entry: confirmedTimelineEnvelope({ id: "conformance-body-original", factType: "body", occurredAt: "2026-08-08T07:00:00.000+08:00" }),
         fact: {
           kind: "body",
           measurement: { metric: "body_weight", quantity: { value: 80, unit: "kg" } },
@@ -138,7 +172,7 @@ for (const [name, createFixture] of factories) {
         planId: "plan-1",
         expectedRevision: 0,
         revision: {
-          id: "plan-revision-1",
+          id: "plan-1",
           goalContractRef: { kind: "goal_contract", id: "goal-user-1", revision: 1 },
           effectiveFrom: "2026-08-08",
           knowledgePins,
@@ -191,6 +225,7 @@ for (const [name, createFixture] of factories) {
         timelineId: "timeline-user-1",
         expectedRevision: 1,
         correctsEventId: original.eventIds[0]!,
+        entry: confirmedTimelineEnvelope({ id: "conformance-body-correction", factType: "body", occurredAt: "2026-08-08T07:00:00.000+08:00" }),
         fact: {
           kind: "body",
           measurement: { metric: "body_weight", quantity: { value: 79.8, unit: "kg" } },
@@ -199,7 +234,7 @@ for (const [name, createFixture] of factories) {
       });
 
       const beforeRestart = await app.readDomainProjection({ userId: "user-1" });
-      app = new CoachApplication(fixture.ledger, clock);
+      app = new LocalProductKernel(fixture.ledger, clock);
       assert.deepEqual(await app.readDomainProjection({ userId: "user-1" }), beforeRestart);
       assert.equal(beforeRestart.timeline.current.length, 1);
       assert.equal(beforeRestart.workouts[0]?.setOutcomes[0]?.actualLoad?.value, 60);
@@ -211,7 +246,7 @@ for (const [name, createFixture] of factories) {
   test(`${name}: command 幂等、聚合 revision 与 outbox 保持单写`, async () => {
     const fixture = createFixture();
     try {
-      const app = new CoachApplication(fixture.ledger, runtime());
+      const app = new LocalProductKernel(fixture.ledger, runtime());
       const first = await bootstrap(app);
       const retry = await bootstrap(app);
       assert.equal(first.status, "committed");
@@ -232,7 +267,7 @@ for (const [name, createFixture] of factories) {
   test(`${name}: stale revision、非法单位与跨用户引用零部分写入`, async () => {
     const fixture = createFixture();
     try {
-      const app = new CoachApplication(fixture.ledger, runtime());
+      const app = new LocalProductKernel(fixture.ledger, runtime());
       const knowledgePins = app.getInstalledKnowledgeVersionPins();
       await bootstrap(app, "user-1");
       await bootstrap(app, "user-2");
@@ -248,6 +283,7 @@ for (const [name, createFixture] of factories) {
         },
         timelineId: "timeline-user-1",
         expectedRevision: 0,
+        entry: confirmedTimelineEnvelope({ id: "conformance-weight-1", factType: "body", occurredAt: "2026-08-08T08:00:00.000+08:00" }),
         fact: {
           kind: "body",
           measurement: { metric: "body_weight", quantity: { value: 80, unit: "kg" } },
@@ -269,6 +305,7 @@ for (const [name, createFixture] of factories) {
           },
           timelineId: "timeline-user-1",
           expectedRevision: 0,
+          entry: confirmedTimelineEnvelope({ id: "conformance-stale-weight", factType: "rest", occurredAt: "2026-08-08T08:01:00.000+08:00" }),
           fact: { kind: "rest", confidence: "confirmed" },
         }),
         (error: unknown) => error instanceof LedgerConflictError && error.code === "stale_aggregate",
@@ -286,6 +323,7 @@ for (const [name, createFixture] of factories) {
           },
           timelineId: "timeline-user-1",
           expectedRevision: 1,
+          entry: confirmedTimelineEnvelope({ id: "conformance-bad-unit", factType: "body", occurredAt: "2026-08-08T08:02:00.000+08:00" }),
           fact: {
             kind: "body",
             measurement: {
@@ -311,7 +349,7 @@ for (const [name, createFixture] of factories) {
           planId: "plan-user-2",
           expectedRevision: 0,
           revision: {
-            id: "plan-revision-user-2",
+            id: "plan-user-2",
             goalContractRef: { kind: "goal_contract", id: "goal-user-1", revision: 1 },
             effectiveFrom: "2026-08-08",
             knowledgePins,
@@ -331,7 +369,7 @@ for (const [name, createFixture] of factories) {
   test(`${name}: 未知 event schema 被拒绝且 diagnostics 不泄露 payload`, async () => {
     const fixture = createFixture();
     try {
-      const app = new CoachApplication(fixture.ledger, runtime());
+      const app = new LocalProductKernel(fixture.ledger, runtime());
       await bootstrap(app);
       const before = await fixture.ledger.read();
       const source = before.domainEvents[0]!;
@@ -375,7 +413,7 @@ for (const [name, createFixture] of factories) {
     test(`${name}: storage 中断回滚整个 domain commit`, async () => {
       const fixture = createFixture();
       try {
-        const app = new CoachApplication(fixture.ledger, runtime());
+        const app = new LocalProductKernel(fixture.ledger, runtime());
         await bootstrap(app);
         const before = await fixture.ledger.read();
         fixture.interruptNextWrite?.();
@@ -392,6 +430,7 @@ for (const [name, createFixture] of factories) {
             },
             timelineId: "timeline-user-1",
             expectedRevision: 0,
+            entry: confirmedTimelineEnvelope({ id: "conformance-interrupted-write", factType: "rest", occurredAt: "2026-08-08T08:10:00.000+08:00" }),
             fact: { kind: "rest", confidence: "confirmed" },
           }),
           /simulated_storage_interruption/,
@@ -424,13 +463,11 @@ test("SQLiteCoachLedger: v1 JSON snapshot 有序迁移到当前 schema 且保留
         updatedAt: "2026-08-07T09:00:00.000Z",
       },
     ],
-    users: [],
     artifacts: [],
     presentations: [],
     runEvents: [],
     actionTokens: [],
     actionEvents: [],
-    idempotency: [],
     pendingHumanActions: [],
     workingMemory: [],
   };
@@ -451,8 +488,8 @@ test("SQLiteCoachLedger: v1 JSON snapshot 有序迁移到当前 schema 且保留
   native.close();
 });
 
-test("CoachApplication: 权威聚合独立 revision，归档/恢复只追加补偿事件", async () => {
-  const app = new CoachApplication(new InMemoryCoachLedger(), runtime());
+test("LocalProductKernel: 权威聚合独立 revision，归档/恢复只追加补偿事件", async () => {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), runtime());
   await bootstrap(app);
   const meta = (key: string) => ({
     userId: "user-1",
@@ -463,17 +500,6 @@ test("CoachApplication: 权威聚合独立 revision，归档/恢复只追加补�
     idempotencyKey: key,
   });
 
-  await app.executeDomainCommand({
-    type: "goal_cycle.revise",
-    meta: meta("goal-cycle-1"),
-    goalCycleId: "cycle-1",
-    expectedRevision: 0,
-    goalCycle: {
-      id: "cycle-1",
-      goalContractRef: { kind: "goal_contract", id: "goal-user-1", revision: 1 },
-      intent: "建立力量基础",
-    },
-  });
   await app.executeDomainCommand({
     type: "equipment_profile.revise",
     meta: meta("equipment-1"),
@@ -518,9 +544,10 @@ test("CoachApplication: 权威聚合独立 revision，归档/恢复只追加补�
     },
   });
   await app.executeDomainCommand({
-    type: "aggregate.archive",
+    type: "equipment_profile.set_archived",
     meta: meta("archive-equipment"),
     aggregateRef: { kind: "equipment_profile", id: "equipment-1", revision: 2 },
+    archived: true,
     reason: "不再使用该健身房",
   });
   const archived = await app.readDomainProjection({ userId: "user-1" });
@@ -535,21 +562,21 @@ test("CoachApplication: 权威聚合独立 revision，归档/恢复只追加补�
   assert.equal(lifecycle.replicaReferences.pending, 3);
   assert.equal(lifecycle.evidenceReferences.disposition, "not_present");
   await app.executeDomainCommand({
-    type: "aggregate.restore",
+    type: "equipment_profile.set_archived",
     meta: meta("restore-equipment"),
     aggregateRef: { kind: "equipment_profile", id: "equipment-1", revision: 3 },
+    archived: false,
   });
 
   const projection = await app.readDomainProjection({ userId: "user-1" });
-  assert.equal(projection.goalCycles[0]?.revision, 1);
   assert.equal(projection.equipmentProfiles[0]?.revision, 2);
   assert.equal(projection.recoveryConstraints[0]?.revision, 1);
   assert.equal(projection.nutritionStrategies[0]?.revision, 1);
   assert.deepEqual(projection.archivedAggregates, []);
 });
 
-test("CoachApplication: WorkoutSession 冻结启动时的训练安排，后续 PlanRevision 不回写", async () => {
-  const app = new CoachApplication(new InMemoryCoachLedger(), runtime());
+test("LocalProductKernel: WorkoutSession 冻结启动时的训练安排，后续 PlanRevision 不回写", async () => {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), runtime());
   const knowledgePins = app.getInstalledKnowledgeVersionPins();
   await bootstrap(app);
   const meta = (key: string) => ({
@@ -585,7 +612,7 @@ test("CoachApplication: WorkoutSession 冻结启动时的训练安排，后续 P
     planId: "plan-1",
     expectedRevision: 0,
     revision: {
-      id: "plan-revision-1",
+      id: "plan-1",
       goalContractRef: { kind: "goal_contract", id: "goal-user-1", revision: 1 },
       effectiveFrom: "2026-08-08",
       knowledgePins,
@@ -609,7 +636,7 @@ test("CoachApplication: WorkoutSession 冻结启动时的训练安排，后续 P
     planId: "plan-1",
     expectedRevision: 1,
     revision: {
-      id: "plan-revision-2",
+      id: "plan-1",
       goalContractRef: { kind: "goal_contract", id: "goal-user-1", revision: 1 },
       effectiveFrom: "2026-08-08",
       knowledgePins,

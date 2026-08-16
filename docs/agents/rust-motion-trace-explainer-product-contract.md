@@ -2,7 +2,7 @@
 
 Status: authoritative product direction
 
-Last aligned: 2026-08-14
+Last aligned: 2026-08-15
 
 ## Why this product exists
 
@@ -25,7 +25,7 @@ For an exact supported exercise context, the product must:
 - show the user the conclusion first and allow the derivation to be expanded; and
 - refuse claims that the available evidence cannot support.
 
-The long-term scope is every action in the active exercise catalog. Coverage may open progressively as exact contexts gain executable recognition, quality rules, trace completeness, and sufficient evidence. A visible action must never be presented as supported merely because its name exists in the catalog.
+The runtime scope is every action asset installed in the active Rust action library. Installation means the asset is structurally complete and executable; Rust does not carry a second reviewed/unreviewed, validated/unvalidated, open/closed, or accuracy-maturity state for that action. Dataset review, accuracy evaluation, staged release and asset publication happen before the library is supplied to Rust or outside the SDK. During execution Rust may still report that a particular frame, Rep or quality dimension lacks sufficient observable evidence.
 
 ## Product scope
 
@@ -47,6 +47,8 @@ Rust is the sole runtime authority for canonical motion observations, action-loc
 
 Rust produces one versioned canonical output lineage. No host or client may create a second interpretation truth for the same set.
 
+Equipment observation implementations attach through a Rust-owned Provider seam selected from the installed action contract. Clients may submit pixels and pose context, but they do not choose an equipment algorithm from action names. If the action asset makes equipment the identity-defining Rep source, the Provider is a structural plan dependency. If the asset explicitly makes skeleton motion primary because that equipment is not independently observable, an available Provider may only corroborate and its absence limits equipment dimensions without blocking or manufacturing the pose-primary Rep. Neither case is an SDK review/maturity tier.
+
 ### Web, Android, and iOS clients
 
 Clients own camera and video lifecycle, permissions, preview, user-entered context, rendering, navigation, and product presentation. They decode and project Rust output; they do not recompute normalization, Rep boundaries, features, quality conclusions, or explanations.
@@ -55,7 +57,9 @@ Client-side retention, upload consent, and media transfer are App responsibiliti
 
 ### Offline data and release workflow
 
-Profiles, rules, reference material, training data, and evaluation evidence are versioned offline assets. Ordinary user feedback is not annotation truth. Runtime behavior never silently trains, rewrites thresholds, promotes a reference, or mutates itself.
+Profiles, rules and reference material are versioned runtime assets. Training data, evaluation evidence, review status, accuracy maturity and release policy remain outside the Rust SDK. The SDK treats an installed action package as executable input, while rejecting malformed or internally contradictory data. Ordinary user feedback is not annotation truth. Runtime behavior never silently trains, rewrites thresholds, promotes a reference, or mutates itself.
+
+Offline training or calibration does not deliver an unbounded model decision directly into the runtime. It produces versioned exact-context FeatureProgram, ReferencePolicy, RulePack and SetAggregationPolicy assets with source lineage and content hashes. Rust installs the package atomically, verifies it against ActionMotionDefinition, and keeps prior runtime state unchanged if compilation fails.
 
 ## Non-negotiable principles
 
@@ -68,7 +72,7 @@ Profiles, rules, reference material, training data, and evaluation evidence are 
 7. **Trace every conclusion.** Every user-facing conclusion must be reproducible from versioned source evidence, calculation steps, rules, comparison basis, and limitations.
 8. **Immutable historical evidence.** New analysis produces a new version and never overwrites prior video, canonical packets, annotations, conclusions, or reviews.
 9. **Users are product users, not annotators.** Ordinary feedback may inform product decisions but does not become training truth without a separate governed workflow.
-10. **Progressive availability is honest.** An exercise is opened only when its exact context can produce real Rep output, an evidence-backed set report, and a complete derivation path. Unopened contexts remain visibly unavailable.
+10. **Asset installation is the capability seam.** Rust has no action-level validation or release tier. Every installed action asset enters the same recognition lifecycle; only malformed assets fail installation, and only missing/conflicting observations limit an individual runtime result.
 
 ## Specification hierarchy
 

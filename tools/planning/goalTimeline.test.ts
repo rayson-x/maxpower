@@ -9,7 +9,6 @@ import { estimateTimeToGoal, fatToLoseKg, maxDailyDeficitKcal } from "../../src/
 function profile(weightKg: number, heightCm: number): UserProfileData {
   return {
     id: "p1",
-    trainingExperience: "intermediate",
     locale: "zh-CN",
     demographics: {
       ageYears: 30,
@@ -25,7 +24,6 @@ function goal(currentBf?: number, targetBf?: number): GoalContractData {
   return {
     id: "g1",
     primaryGoal: "fat_loss_preserve_lean_mass",
-    goalType: "fat_loss",
     horizon: { startDate: "2026-08-12" },
     status: "active",
     ...(currentBf !== undefined || targetBf !== undefined

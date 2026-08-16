@@ -9,10 +9,12 @@ import {
   View,
 } from "react-native";
 
-import type { SetOutcomeData, WorkoutProjection } from "../../coach/domain";
-import type { CoachApplication } from "../../coach/createCoachApplication";
+import type { SetOutcomeCorrectionPatch, SetOutcomeData, WorkoutProjection } from "../../coach/domain";
+import type { LocalProductKernel } from "../../coach/LocalProductKernel";
 import { ProfessionalTermText } from "../ui-kit";
 import { colors, radius } from "./theme";
+import { mobileT } from "../../i18n";
+
 
 /**
  * A bounded editor for a sealed WorkoutSession.  It only calls the public
@@ -25,7 +27,7 @@ export function WorkoutOutcomeCorrectionSheet({
   onDismiss,
   onSaved,
 }: {
-  application: CoachApplication;
+  application: LocalProductKernel;
   userId: string;
   workoutId: string;
   onDismiss: () => void;
@@ -72,13 +74,9 @@ export function WorkoutOutcomeCorrectionSheet({
     setSaving(true);
     try {
       const patch = setPatch(selected, { load, reps, rir, duration, distance });
+      const key = `mobile-workout-set-correction:${workoutId}:${selected.id}:${Date.now().toString(36)}`;
       await application.correctRecordedSet({
-        userId,
-        workoutId,
-        outcomeId: selected.id,
-        patch,
-        reason,
-        idempotencyKey: `mobile-workout-set-correction:${workoutId}:${selected.id}:${Date.now().toString(36)}`,
+        userId, workoutId, outcomeId: selected.id, patch, reason, idempotencyKey: key,
       });
       onSaved();
     } catch (cause) {
@@ -92,12 +90,9 @@ export function WorkoutOutcomeCorrectionSheet({
     if (!workout?.outcome || !feedback) return;
     setSaving(true);
     try {
+      const key = `mobile-workout-outcome-correction:${workoutId}:${Date.now().toString(36)}`;
       await application.correctWorkoutSessionOutcome({
-        userId,
-        workoutId,
-        patch: { subjectiveFeedback: feedback },
-        reason,
-        idempotencyKey: `mobile-workout-outcome-correction:${workoutId}:${Date.now().toString(36)}`,
+        userId, workoutId, patch: { subjectiveFeedback: feedback }, reason, idempotencyKey: key,
       });
       onSaved();
     } catch (cause) {
@@ -109,40 +104,40 @@ export function WorkoutOutcomeCorrectionSheet({
 
   return (
     <View accessibilityViewIsModal style={styles.scrim}>
-      <Pressable accessibilityRole="button" accessibilityLabel="关闭训练记录更正" onPress={onDismiss} style={StyleSheet.absoluteFill} />
+      <Pressable accessibilityRole="button" accessibilityLabel={mobileT("mobile.ui.workoutoutcomecorrectionsheet.ae0ae4efd4")} onPress={onDismiss} style={StyleSheet.absoluteFill} />
       <View style={styles.sheet}>
         <View style={styles.handle} />
         <ScrollView bounces={false} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <Text style={styles.eyebrow}>训练记录</Text>
-          <Text style={styles.title}>更正已完成内容</Text>
-          <Text style={styles.description}>原始训练记录会保留；保存后会新增一条更正记录。</Text>
+          <Text style={styles.eyebrow}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.fd91ccd57f")}</Text>
+          <Text style={styles.title}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.06c64a3303")}</Text>
+          <Text style={styles.description}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.7870dcb91e")}</Text>
           {!workout ? <ActivityIndicator color={colors.limeInk} /> : <>
-            <Text style={styles.label}>选择工作组</Text>
+            <Text style={styles.label}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.86f961a5d7")}</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.setChooser}>
-              {workout.setOutcomes.map((outcome, index) => <Pressable key={outcome.id} accessibilityRole="button" accessibilityState={{ selected: outcome.id === selectedOutcomeId }} onPress={() => select(outcome)} style={[styles.setChip, outcome.id === selectedOutcomeId && styles.setChipSelected]}><Text style={[styles.setChipText, outcome.id === selectedOutcomeId && styles.setChipTextSelected]}>第 {index + 1} 组</Text></Pressable>)}
+              {workout.setOutcomes.map((outcome, index) => <Pressable key={outcome.id} accessibilityRole="button" accessibilityState={{ selected: outcome.id === selectedOutcomeId }} onPress={() => select(outcome)} style={[styles.setChip, outcome.id === selectedOutcomeId && styles.setChipSelected]}><Text style={[styles.setChipText, outcome.id === selectedOutcomeId && styles.setChipTextSelected]}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.dae828fe4f")}{index + 1} {mobileT("mobile.ui.workoutoutcomecorrectionsheet.726ff2fac5")}</Text></Pressable>)}
             </ScrollView>
             {selected ? <>
               <View style={styles.metrics}>
-                <Field label={`重量${selected.actualLoad ? `（${selected.actualLoad.unit}）` : ""}`} value={load} onChange={setLoad} />
-                <Field label="次数" value={reps} onChange={setReps} />
+                <Field label={mobileT("mobile.ui.workoutoutcomecorrectionsheet.86ca84840b", { value0: selected.actualLoad ? `（${selected.actualLoad.unit}）` : "" })} value={load} onChange={setLoad} />
+                <Field label={mobileT("mobile.ui.workoutoutcomecorrectionsheet.d4a97e7577")} value={reps} onChange={setReps} />
                 <Field label="RIR" value={rir} onChange={setRir} />
               </View>
-              {selected.actualDuration ? <Field label={`时长（${selected.actualDuration.unit}）`} value={duration} onChange={setDuration} /> : null}
-              {selected.actualDistance ? <Field label={`距离（${selected.actualDistance.unit}）`} value={distance} onChange={setDistance} /> : null}
-              <Pressable accessibilityRole="button" disabled={saving} onPress={() => void saveSet()} style={[styles.secondaryButton, saving && styles.disabled]}><Text style={styles.secondaryButtonText}>保存本组更正</Text></Pressable>
+              {selected.actualDuration ? <Field label={mobileT("mobile.ui.workoutoutcomecorrectionsheet.6dce422732", { value0: selected.actualDuration.unit })} value={duration} onChange={setDuration} /> : null}
+              {selected.actualDistance ? <Field label={mobileT("mobile.ui.workoutoutcomecorrectionsheet.6472ebd4ac", { value0: selected.actualDistance.unit })} value={distance} onChange={setDistance} /> : null}
+              <Pressable accessibilityRole="button" disabled={saving} onPress={() => void saveSet()} style={[styles.secondaryButton, saving && styles.disabled]}><Text style={styles.secondaryButtonText}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.45c35661da")}</Text></Pressable>
             </> : null}
-            <Text style={styles.label}>训练感受</Text>
+            <Text style={styles.label}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.e524ddf945")}</Text>
             <View style={styles.feedbackRow}>
               {(["easy", "appropriate", "hard"] as const).map((value) => <Pressable key={value} accessibilityRole="button" accessibilityState={{ selected: feedback === value }} onPress={() => setFeedback(value)} style={[styles.feedback, feedback === value && styles.feedbackSelected]}><Text style={[styles.feedbackText, feedback === value && styles.feedbackTextSelected]}>{feedbackLabel(value)}</Text></Pressable>)}
             </View>
-            <Pressable accessibilityRole="button" disabled={!feedback || saving} onPress={() => void saveFeedback()} style={[styles.secondaryButton, (!feedback || saving) && styles.disabled]}><Text style={styles.secondaryButtonText}>保存训练感受</Text></Pressable>
+            <Pressable accessibilityRole="button" disabled={!feedback || saving} onPress={() => void saveFeedback()} style={[styles.secondaryButton, (!feedback || saving) && styles.disabled]}><Text style={styles.secondaryButtonText}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.4615c9fc07")}</Text></Pressable>
             <View style={styles.field}>
-              <Text style={styles.label}>更正原因</Text>
-              <TextInput accessibilityLabel="训练记录更正原因" value={reason} onChangeText={setReason} placeholder="例如：休息后确认第一组写错了" placeholderTextColor={colors.ink3} multiline style={[styles.input, styles.reason]} />
+              <Text style={styles.label}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.3538bc24d3")}</Text>
+              <TextInput accessibilityLabel={mobileT("mobile.ui.workoutoutcomecorrectionsheet.268a468f9f")} value={reason} onChangeText={setReason} placeholder={mobileT("mobile.ui.workoutoutcomecorrectionsheet.7734e8e0c6")} placeholderTextColor={colors.ink3} multiline style={[styles.input, styles.reason]} />
             </View>
           </>}
           {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-          <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.dismiss}><Text style={styles.dismissText}>返回日报</Text></Pressable>
+          <Pressable accessibilityRole="button" onPress={onDismiss} style={styles.dismiss}><Text style={styles.dismissText}>{mobileT("mobile.ui.workoutoutcomecorrectionsheet.aa8a990bc2")}</Text></Pressable>
         </ScrollView>
       </View>
     </View>
@@ -171,20 +166,20 @@ function Field({ label, value, onChange }: { label: string; value: string; onCha
 }
 
 function setPatch(outcome: SetOutcomeData, values: { load: string; reps: string; rir: string; duration: string; distance: string }) {
-  const patch: import("../../coach/domain").SetOutcomeCorrectionPatch = {};
-  const load = optionalNumber(values.load, "重量需要是非负数字。", 0);
+  const patch: SetOutcomeCorrectionPatch = {};
+  const load = optionalNumber(values.load, mobileT("mobile.ui.workoutoutcomecorrectionsheet.eafb517630"), 0);
   if (load !== outcome.actualLoad?.value) {
     patch.actualLoad = load === undefined ? null : { value: load, unit: outcome.actualLoad?.unit ?? "kg" };
   }
-  const reps = optionalNumber(values.reps, "次数需要是非负整数。", 0, true);
+  const reps = optionalNumber(values.reps, mobileT("mobile.ui.workoutoutcomecorrectionsheet.2172794d30"), 0, true);
   if (reps !== outcome.actualReps) patch.actualReps = reps ?? null;
-  const rir = optionalNumber(values.rir, "RIR 需要在 0 到 10 之间。", 0, false, 10);
+  const rir = optionalNumber(values.rir, mobileT("mobile.ui.workoutoutcomecorrectionsheet.321399dc76"), 0, false, 10);
   if (rir !== outcome.actualRir) patch.actualRir = rir ?? null;
-  const duration = optionalNumber(values.duration, "时长需要是非负数字。", 0);
+  const duration = optionalNumber(values.duration, mobileT("mobile.ui.workoutoutcomecorrectionsheet.8aa097598d"), 0);
   if (duration !== outcome.actualDuration?.value) {
     patch.actualDuration = duration === undefined ? null : { value: duration, unit: outcome.actualDuration?.unit ?? "seconds" };
   }
-  const distance = optionalNumber(values.distance, "距离需要是非负数字。", 0);
+  const distance = optionalNumber(values.distance, mobileT("mobile.ui.workoutoutcomecorrectionsheet.b0e224ba4b"), 0);
   if (distance !== outcome.actualDistance?.value) {
     patch.actualDistance = distance === undefined ? null : { value: distance, unit: outcome.actualDistance?.unit ?? "m" };
   }
@@ -199,14 +194,14 @@ function optionalNumber(value: string, message: string, min: number, integer = f
   return parsed;
 }
 
-function feedbackLabel(value: "easy" | "appropriate" | "hard") { return value === "easy" ? "轻松" : value === "appropriate" ? "合适" : "吃力"; }
+function feedbackLabel(value: "easy" | "appropriate" | "hard") { return value === "easy" ? mobileT("mobile.ui.workoutoutcomecorrectionsheet.c9c4a72eeb") : value === "appropriate" ? mobileT("mobile.ui.workoutoutcomecorrectionsheet.e523b6ab39") : mobileT("mobile.ui.workoutoutcomecorrectionsheet.6ee6e775bb"); }
 
 function messageFor(cause: unknown): string {
   const code = cause instanceof Error ? cause.message : "";
-  if (code === "correction_reason_required") return "请说明这次更正的原因。";
-  if (code === "set_outcome_correction_no_change" || code === "workout_outcome_correction_no_change") return "请先修改一项训练记录。";
-  if (code === "workout_outcome_not_found" || code === "set_outcome_not_found") return "这条记录已不可用，请刷新后重试。";
-  return code || "暂时无法保存更正。";
+  if (code === "correction_reason_required") return mobileT("mobile.ui.workoutoutcomecorrectionsheet.3fe5545ff7");
+  if (code === "set_outcome_correction_no_change" || code === "workout_outcome_correction_no_change") return mobileT("mobile.ui.workoutoutcomecorrectionsheet.dbee701fbc");
+  if (code === "workout_outcome_not_found" || code === "set_outcome_not_found") return mobileT("mobile.ui.workoutoutcomecorrectionsheet.936c404212");
+  return code || mobileT("mobile.ui.workoutoutcomecorrectionsheet.c865c745a0");
 }
 
 const styles = StyleSheet.create({

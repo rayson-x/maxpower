@@ -95,7 +95,7 @@ test("production Better Auth configuration keeps account linking explicit and se
       createdAt: new Date("2026-08-10T00:00:00.000Z"),
       updatedAt: new Date("2026-08-10T00:00:00.000Z"),
       accountStatus: "active",
-      scopes: "data:read data:write media:read media:write llm:invoke",
+      scopes: "account:read account:delete llm:invoke",
     },
     session: {
       id: "session_123",
@@ -116,7 +116,7 @@ test("production Better Auth configuration keeps account linking explicit and se
   assert.equal(payload?.sid, "session_123");
   assert.equal(payload?.account_status, "active");
   assert.equal(payload?.realm, "global");
-  assert.equal(payload?.scope, "data:read data:write media:read media:write llm:invoke");
+  assert.equal(payload?.scope, "account:read account:delete llm:invoke");
   assert.match(String(payload?.jti), /^[0-9a-f-]{36}$/);
 
   assert.deepEqual(auth.options.socialProviders?.google, {

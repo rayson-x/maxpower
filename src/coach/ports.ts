@@ -5,14 +5,10 @@ import type {
   HealthMetric,
   RuntimeServices,
 } from "./model";
-import type { LLMProvider, LLMProviderResolver } from "./adapters/provider";
-import type { MotionRuntime } from "./adapters/motion";
 import type { CoachLedger } from "./ledger";
-import type { NutritionObservationPort, NutritionObservationProviderResolver } from "../nutrition";
-import type { ReplicaTransportPort } from "../sync";
-import type { BackupCryptoPort, MediaBlobStore, SecureCredentialPort } from "../privacy";
+import type { BackupCryptoPort, SecureCredentialPort } from "../privacy";
 
-export type { BackupCryptoPort, MediaBlobStore, SecureCredentialPort } from "../privacy";
+export type { BackupCryptoPort, SecureCredentialPort } from "../privacy";
 
 export interface HealthDataPort {
   readFacts(userId: string, since: string): Promise<readonly FactRef[]>;
@@ -100,10 +96,9 @@ export interface NotificationPort {
    * execution deliberately has no way to invoke this method.
    */
   requestAuthorization?(): Promise<"granted" | "denied">;
-  schedule(input: { id: string; at: string; title: string; body: string }): Promise<void>;
   cancel(id: string): Promise<void>;
-  /** Optional native upsert; legacy adapters may implement schedule as an idempotent replacement. */
-  upsert?(input: { id: string; at: string; title: string; body: string; deepLink?: string }): Promise<void>;
+  /** The sole write contract: the stable id makes scheduling an idempotent replacement. */
+  upsert(input: { id: string; at: string; title: string; body: string; deepLink?: string }): Promise<void>;
   deliveryStatus?(id: string): Promise<"scheduled" | "delivered" | "unknown">;
   /**
    * Minimal platform delivery/interactions only. The adapter never opens a
@@ -128,11 +123,6 @@ export interface BackgroundSchedulerPort {
   list(): Promise<readonly { id: string; earliestAt: string; latestAt: string; expiresAt: string }[]>;
 }
 
-export interface SyncPort {
-  readonly mode: "disabled" | "enabled";
-  synchronize(): Promise<{ status: "disabled" | "synchronized" | "conflict" }>;
-}
-
 export interface MonotonicClock {
   nowMs(): number;
   /**
@@ -141,16 +131,6 @@ export interface MonotonicClock {
    * to wall time instead of comparing unrelated monotonic origins.
    */
   epochId?(): string;
-}
-
-/**
- * Client-owned execution boundary for a single Provider stream. This is an
- * inactivity limit, rather than a total conversation limit: every canonical
- * Provider event renews the deadline. The Provider receives only AbortSignal;
- * it never gets a way to select or extend this policy.
- */
-export interface ProviderExecutionPolicy {
-  idleTimeoutMs?: number;
 }
 
 export type ActionTokenClaims =
@@ -188,34 +168,17 @@ export interface ActionTokenPrimitive {
   issue(claims: Readonly<ActionTokenClaims>): string;
 }
 
-export interface CoachApplicationPorts {
+/** Dependencies owned by the local product-domain kernel, never by Pi. */
+export interface LocalProductKernelPorts {
   ledger: CoachLedger;
   runtime: RuntimeServices;
-  llmProvider?: LLMProvider;
-  /** Optional user-scoped local selector; no remote Agent runtime is introduced. */
-  llmProviderResolver?: LLMProviderResolver;
-  providerExecutionPolicy?: ProviderExecutionPolicy;
-  motionRuntime?: MotionRuntime;
   health?: HealthDataPort;
   notifications?: NotificationPort;
   backgroundScheduler?: BackgroundSchedulerPort;
-  sync?: SyncPort;
-  /** Optional account transport. The client-owned ReplicaSynchronizer owns merge semantics. */
-  replicaTransport?: ReplicaTransportPort;
   /** Optional credential adapter; user facts remain in the local Ledger. */
   credentials?: SecureCredentialPort;
-  media?: MediaBlobStore;
   /** Optional local crypto primitive for client-side encrypted structured backups. */
   backupCrypto?: BackupCryptoPort;
-  nutritionObservation?: NutritionObservationPort;
-  nutritionObservationResolver?: NutritionObservationProviderResolver;
   monotonicClock?: MonotonicClock;
   actionTokens?: ActionTokenPrimitive;
 }
-
-export const disabledSyncPort: SyncPort = {
-  mode: "disabled",
-  async synchronize() {
-    return { status: "disabled" };
-  },
-};

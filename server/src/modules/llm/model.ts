@@ -2,7 +2,6 @@ import type { Principal } from "../../kernel/principal.js";
 
 export const PRODUCT_ALIASES = [
   "maxpower/coach-v1",
-  "maxpower/nutrition-vision-v1",
 ] as const;
 
 export type ProductAlias = (typeof PRODUCT_ALIASES)[number];

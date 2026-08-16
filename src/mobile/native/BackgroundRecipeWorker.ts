@@ -1,4 +1,4 @@
-import { CoachApplication } from "../../coach";
+import { LocalProductKernel } from "../../coach";
 import { SecureSessionVault } from "../auth/SecureSessionVault";
 
 import { createExpoNotificationPort } from "./ExpoNotificationPort";
@@ -23,7 +23,7 @@ export async function runNativeRecipeCatchUp(): Promise<void> {
   const persistence = await openExpoMaxPowerPersistence(session.accountId);
   let sequence = 0;
   const health = tryCreateExpoAndroidHealthConnectPort() ?? tryCreateExpoAppleHealthKitPort();
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger: persistence.ledger,
     runtime: {
       now: () => new Date().toISOString(),
@@ -49,12 +49,14 @@ export async function runNativeRecipeCatchUp(): Promise<void> {
         ? "android-health-connect-v1"
         : "ios-healthkit-v1",
     });
-    // Health imports and morning check-ins use the same local Timeline as the
-    // foreground UI. Complete only the durable, current evaluation they may
-    // have queued; this worker never starts an LLM or changes a plan itself.
-    await app.runPendingTimelineRiskEvaluation({
+    // Always run the same deterministic long-horizon review, even when no new
+    // Record was added today. This worker never starts an LLM or changes a plan.
+    const localNow = new Date();
+    const localDate = new Date(localNow.getTime() - localNow.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+    await app.runDailyGoalPathReview({
       userId: session.accountId,
-      idempotencyKey: "background-timeline-risk",
+      idempotencyKey: `daily-goal-path:${localDate}`,
+      timezoneOffsetMinutes: localNow.getTimezoneOffset() * -1,
     });
   } finally {
     await persistence.dispose();

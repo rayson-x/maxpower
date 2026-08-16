@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — 四项 Baseline intake 共享草稿闭环
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 目标原话和来源消息始终可追溯，结构化字段不能替代或重写原始叙述。
 - [ ] “想把体脂率降到12%，目前16%”产生目标体脂 12% 和当前自报体脂 16% 两个不同所有者的草稿项；当前测量进入 Timeline baseline draft，测量方法保持 unknown。

@@ -262,22 +262,35 @@ test("Pi provider does not retry a terminal server SSE error as a dropped connec
   assert.equal(final.errorMessage, "quota_exceeded");
 });
 
-test("Pi provider selects the managed multimodal product alias without exposing provider config", async () => {
-  let requestBody: Record<string, unknown> | undefined;
+test("Pi provider retries once when an upstream failure kills a turn before any visible content", async () => {
+  let calls = 0;
   const provider = new MaxPowerPiLlmProvider({
     apiBaseUrl: "https://api.maxpower.example",
     accountId: "account-a",
-    modelAlias: "maxpower/nutrition-vision-v1",
     accessTokens: { accessTokenFor: () => "service-jwt" },
-    invocationId: () => "vision-1",
-    fetch: async (_url, init) => {
-      requestBody = JSON.parse(init.body ?? "") as Record<string, unknown>;
+    invocationId: () => `empty-turn-${calls}`,
+    fetch: async () => {
+      calls += 1;
+      if (calls === 1) {
+        // Reasoning model died mid-reasoning: zero visible content, then a
+        // transient provider error frame.
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => "llmi_empty_turn_1" },
+          body: sseBody([
+            'data: {"id":"chatcmpl_1","object":"chat.completion.chunk","created":1,"model":"maxpower-cloud","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":"thinking"},"logprobs":null,"finish_reason":null}]}\nid: 1\n\n',
+            'event: error\ndata: {"error":{"message":"The cloud LLM stream failed.","type":"server_error","code":"provider_unavailable","param":null}}\n\n',
+          ]),
+        };
+      }
       return {
         ok: true,
         status: 200,
-        headers: { get: () => "llmi_vision_1" },
+        headers: { get: () => "llmi_empty_turn_2" },
         body: sseBody([
-          'data: {"id":"chatcmpl_vision","object":"chat.completion.chunk","model":"managed-cloud","choices":[{"index":0,"delta":{"content":"已识别。"},"finish_reason":"stop"}]}\n\n',
+          'data: {"id":"chatcmpl_2","object":"chat.completion.chunk","created":2,"model":"maxpower-cloud","choices":[{"index":0,"delta":{"role":"assistant","content":"重试成功。"},"logprobs":null,"finish_reason":null}]}\nid: 1\n\n',
+          'data: {"id":"chatcmpl_2","object":"chat.completion.chunk","created":2,"model":"maxpower-cloud","choices":[{"index":0,"delta":{},"logprobs":null,"finish_reason":"stop"}]}\nid: 2\n\n',
           "data: [DONE]\n\n",
         ]),
       };
@@ -285,22 +298,45 @@ test("Pi provider selects the managed multimodal product alias without exposing 
   });
 
   const stream = provider.streamFn(provider.model, {
-    messages: [{
-      role: "user",
-      content: [
-        { type: "text", text: "识别这份餐食" },
-        { type: "image", data: "AQID", mimeType: "image/jpeg" },
-      ],
-      timestamp: 1,
-    }],
+    messages: [{ role: "user", content: "继续", timestamp: 1 }],
   });
   for await (const _event of stream) { /* drain */ }
   const final = await stream.result();
 
-  assert.equal(provider.model.id, "maxpower/nutrition-vision-v1");
-  assert.deepEqual(provider.model.input, ["text", "image"]);
-  assert.equal(provider.model.maxTokens, 2_048);
-  assert.equal(requestBody?.model, "maxpower/nutrition-vision-v1");
-  assert.equal(JSON.stringify(requestBody).includes("service-jwt"), false);
-  assert.deepEqual(final.content, [{ type: "text", text: "已识别。" }]);
+  assert.equal(calls, 2);
+  assert.equal(final.stopReason, "stop");
+  assert.equal(final.content.filter((part) => part.type === "text").map((part) => part.text).join(""), "重试成功。");
+});
+
+test("Pi provider never retries a turn that already produced visible content", async () => {
+  let calls = 0;
+  const provider = new MaxPowerPiLlmProvider({
+    apiBaseUrl: "https://api.maxpower.example",
+    accountId: "account-a",
+    accessTokens: { accessTokenFor: () => "service-jwt" },
+    invocationId: () => `visible-turn-${calls}`,
+    maxResumeAttempts: 0,
+    fetch: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "llmi_visible_turn" },
+        body: sseBody([
+          'data: {"id":"chatcmpl_3","object":"chat.completion.chunk","created":3,"model":"maxpower-cloud","choices":[{"index":0,"delta":{"role":"assistant","content":"已输出"},"logprobs":null,"finish_reason":null}]}\nid: 1\n\n',
+          'event: error\ndata: {"error":{"message":"The cloud LLM stream failed.","type":"server_error","code":"provider_unavailable","param":null}}\n\n',
+        ]),
+      };
+    },
+  });
+
+  const stream = provider.streamFn(provider.model, {
+    messages: [{ role: "user", content: "继续", timestamp: 1 }],
+  });
+  for await (const _event of stream) { /* drain */ }
+  const final = await stream.result();
+
+  assert.equal(calls, 1, "已有可见内容的轮次不盲目重试，避免重复文本");
+  assert.equal(final.stopReason, "error");
+  assert.equal(final.errorMessage, "provider_unavailable");
 });

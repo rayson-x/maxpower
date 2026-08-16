@@ -4,7 +4,7 @@
 
 **Blocked by:** 02 — AI 监控训练到组间与后续训练调整; 03 — 每日营养账本与下一餐建议; 04 — 恢复状态与每日联合评估
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 开始实施前盘点现有 Replanner、Forecast、Report、Working Memory、Action Log 行为，只补历史反馈闭环
 - [ ] Timeline 同时保留当时 PlanRevision、performed Workout/Meal/Recovery facts、observed motion evidence 和 recommended Proposal，四者不互相覆盖

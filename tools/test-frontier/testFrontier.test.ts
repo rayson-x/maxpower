@@ -46,3 +46,21 @@ test("test frontier rejects a source test without a compiled test", () => {
     rmSync(projectRoot, { recursive: true, force: true });
   }
 });
+
+test("test frontier ignores compiled tests whose source was deliberately removed", () => {
+  const projectRoot = mkdtempSync(join(tmpdir(), "maxpower-test-frontier-"));
+  try {
+    mkdirSync(join(projectRoot, "tools", "current"), { recursive: true });
+    mkdirSync(join(projectRoot, ".test-build", "tools", "retired"), { recursive: true });
+    mkdirSync(join(projectRoot, ".test-build", "tools", "current"), { recursive: true });
+    writeFileSync(join(projectRoot, "tools", "current", "contract.test.ts"), "");
+    writeFileSync(join(projectRoot, ".test-build", "tools", "current", "contract.test.js"), "");
+    writeFileSync(join(projectRoot, ".test-build", "tools", "retired", "legacy.test.js"), "");
+
+    assert.deepEqual(resolveTestFrontier(projectRoot), [
+      join(projectRoot, ".test-build", "tools", "current", "contract.test.js"),
+    ]);
+  } finally {
+    rmSync(projectRoot, { recursive: true, force: true });
+  }
+});

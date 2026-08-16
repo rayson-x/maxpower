@@ -1,44 +1,21 @@
 import type { PermissionSetData, PermissionStatus } from "../coach/domain";
-import type { ReplicaSyncOverview } from "../sync";
-import type { MediaBlobReference } from "./model";
 
 /**
  * The small, safe read model used by the mobile privacy/account screen.
  *
  * This is intentionally a disclosure surface rather than a new account or
- * sync subsystem. It carries no credentials, external account identifiers,
- * remote envelopes, media ids, content hashes, or raw media metadata.
+ * product-data transport. It carries no credentials, external account identifiers,
+ * remote envelopes or raw product payloads.
  */
 export interface PrivacySettingsOverview {
   account: {
     availability: "available";
     state: "authenticated";
   };
-  sync: {
-    capability: "available" | "unavailable";
-    authorization: PermissionStatus;
-    status: ReplicaSyncOverview["status"];
-    lastSucceededAt?: string;
-    lastAttemptAt?: string;
-    pendingChanges: number;
-    needsReview: number;
-    retryAvailable: boolean;
-  };
   remoteModel: {
     authorization: PermissionStatus;
     consent: RemoteModelConsentDisclosure;
     configuration: RemoteModelConfigurationDisclosure;
-  };
-  media: {
-    availability: "available" | "not_configured" | "temporarily_unavailable";
-    replicationScope: "local_only";
-    active: { itemCount: number; byteLength: number };
-    deletedItemCount: number;
-    encryption: {
-      platformProtected: number;
-      clientSideEncrypted: number;
-      notEncrypted: number;
-    };
   };
   /**
    * 诊断 trace 上报：独立开关、默认关闭、以 remoteLlm 授权为前提。
@@ -56,7 +33,6 @@ export interface PrivacySettingsOverview {
     capability: "available" | "unavailable";
     encryption: "client_side";
     content: "structured_data_only";
-    media: "excluded";
   };
 }
 
@@ -104,16 +80,7 @@ export interface BuildPrivacySettingsOverviewInput {
   userId: string;
   /** AuthRoot-created account namespace; never serialized into the overview. */
   authenticatedAccountId: string;
-  replica: {
-    configured: boolean;
-    overview: ReplicaSyncOverview;
-  };
   permissions?: { revision: number; value: PermissionSetData };
-  media: {
-    configured: boolean;
-    unavailable?: boolean;
-    references: readonly MediaBlobReference[];
-  };
   backupCryptoAvailability: "available" | "unavailable";
 }
 
@@ -140,27 +107,14 @@ const removedFields = [
 export function buildPrivacySettingsOverview(input: BuildPrivacySettingsOverviewInput): PrivacySettingsOverview {
   const permission = input.permissions?.value;
   const remoteAuthorization = permission?.remoteLlm ?? "not_configured";
-  const syncAuthorization = permission?.cloudSync ?? "not_configured";
   assertAuthenticatedAccount(input.userId, input.authenticatedAccountId);
-  const media = mediaOverview(input.media);
   return {
     account: { availability: "available", state: "authenticated" },
-    sync: {
-      capability: input.replica.configured ? "available" : "unavailable",
-      authorization: syncAuthorization,
-      status: input.replica.overview.status,
-      ...(input.replica.overview.lastSucceededAt ? { lastSucceededAt: input.replica.overview.lastSucceededAt } : {}),
-      ...(input.replica.overview.lastAttemptAt ? { lastAttemptAt: input.replica.overview.lastAttemptAt } : {}),
-      pendingChanges: input.replica.overview.outbox.pending,
-      needsReview: input.replica.overview.conflicts.length,
-      retryAvailable: input.replica.overview.retryAvailable,
-    },
     remoteModel: {
       authorization: remoteAuthorization,
       consent: remoteModelDisclosure(permission, input.permissions?.revision),
       configuration: { status: "managed_cloud", service: "MaxPower Cloud" },
     },
-    media,
     observability: {
       authorization: permission?.observability ?? "not_configured",
       uploads: "metadata_only",
@@ -171,7 +125,6 @@ export function buildPrivacySettingsOverview(input: BuildPrivacySettingsOverview
       capability: input.backupCryptoAvailability,
       encryption: "client_side",
       content: "structured_data_only",
-      media: "excluded",
     },
   };
 }
@@ -219,23 +172,4 @@ function labelRemovedField(
     field === "address" ? "地址" :
     field === "contact_details" ? "联系方式" :
     field === "precise_location" ? "精确位置" : "外部账号标识";
-}
-
-function mediaOverview(input: BuildPrivacySettingsOverviewInput["media"]): PrivacySettingsOverview["media"] {
-  const active = input.references.filter((reference) => reference.lifecycle === "active");
-  const encryption = {
-    platformProtected: active.filter((reference) => reference.encryption === "platform_protected").length,
-    clientSideEncrypted: active.filter((reference) => reference.encryption === "client_side_encrypted").length,
-    notEncrypted: active.filter((reference) => reference.encryption === "not_encrypted").length,
-  };
-  return {
-    availability: !input.configured ? "not_configured" : input.unavailable ? "temporarily_unavailable" : "available",
-    replicationScope: "local_only",
-    active: {
-      itemCount: active.length,
-      byteLength: active.reduce((total, reference) => total + reference.byteLength, 0),
-    },
-    deletedItemCount: input.references.filter((reference) => reference.lifecycle === "deleted").length,
-    encryption,
-  };
 }

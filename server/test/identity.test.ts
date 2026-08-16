@@ -14,10 +14,6 @@ import {
 const DEFAULT_SCOPES = [
   "account:read",
   "account:delete",
-  "data:read",
-  "data:write",
-  "media:read",
-  "media:write",
   "llm:invoke",
 ] as const;
 

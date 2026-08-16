@@ -4,7 +4,7 @@
 
 **Blocked by:** 03 — TimelineChanged 风险触发与定时检查.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [ ] 风险结果只产生 on_path、at_risk、infeasible_under_guardrails 或 insufficient_evidence，不向用户展示未经校准的概率。
 - [ ] 聚餐、缺训和恢复事件根据目标模式、原截止日与护栏产生不同的可见判断和 reason code。

@@ -25,10 +25,7 @@ import {
 } from "../../src/mobile/auth/model";
 import { accountDatabaseName } from "../../src/mobile/native/accountDatabaseName";
 import { assertAccountDatabaseOwner } from "../../src/mobile/native/accountDatabaseOwner";
-import {
-  legacySecureCredentialStorageKey,
-  secureCredentialStorageKey,
-} from "../../src/mobile/security/credentialNamespace";
+import { secureCredentialStorageKey } from "../../src/mobile/security/credentialNamespace";
 import type { SecureCredentialKey, SecureCredentialPort, SecureCredentialReadResult } from "../../src/privacy/model";
 
 const ALICE: AuthenticatedIdentity = {
@@ -51,7 +48,7 @@ const BOB: AuthenticatedIdentity = {
   expiresAt: "2026-08-10T12:05:00.000Z",
 };
 
-test("custom auth client calls only stable HTTPS server routes", async () => {
+test("custom auth client calls stable server routes", async () => {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   const responses = [
     new Response(JSON.stringify({
@@ -113,17 +110,12 @@ test("custom auth client calls only stable HTTPS server routes", async () => {
     sessionToken: "opaque-session-alice",
   });
   assert.equal(new Headers(requests[4]?.init?.headers).has("authorization"), false);
-  assert.throws(
-    () => new ServerAuthClient({ baseUrl: "http://api.maxpower.example", fetch: async () => new Response() }),
-    /https/i,
-  );
 });
 
-test("custom auth client allows an HTTP origin only when debug transport is explicitly enabled", async () => {
+test("custom auth client accepts an HTTP origin", async () => {
   const requests: string[] = [];
   const client = new ServerAuthClient({
     baseUrl: "http://54.151.241.139:3000",
-    allowInsecureHttp: true,
     fetch: async (url) => {
       requests.push(url);
       return new Response(JSON.stringify({
@@ -805,15 +797,11 @@ test("account database owner sentinel fails closed on a mismatched namespace", a
   );
 });
 
-test("secure credential labels use SHA-256 and preserve the exact legacy migration key", () => {
+test("secure credential labels use the single SHA-256 namespace", () => {
   const key = { accountId: "account-alice", scope: "device" as const, name: "active-session" };
   const current = secureCredentialStorageKey(key);
   assert.match(current, /^mp\.v2\.device\.[a-f0-9]{64}$/);
   assert.doesNotMatch(current, /account-alice|active-session/);
-  assert.equal(
-    legacySecureCredentialStorageKey(key),
-    "mp.device.fnv1a-70a95fbb",
-  );
 });
 
 test("social provider buttons follow runtime capability and Apple stays iOS-only", () => {

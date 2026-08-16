@@ -648,7 +648,7 @@ Trace 不保存隐藏思考，只保存可以重放和验证的行为证据。�
 | 设计项 | 当前状态 | 需要的改变 |
 | --- | --- | --- |
 | 公共 Soul | 已由 `agentSoul.ts` 单一装配，并钉入 context manifest | 保持单一来源，禁止场景复制 |
-| 首页对话入口 | `ProductShell` 通过 `CoachApplication.sendCoachTurn` 进入本地 AgentRuntime | 保持为主要可见会话 |
+| 首页对话入口 | `ProductShell` 通过 Pi Conversation Module 进入本地 Agent loop | 保持为主要可见会话 |
 | 场景身份 | 已有 `ContextRef` 和 `taskKind`，主要跟随页面路由 | 升级为基于可信 trigger 的正式 `AgentScenarioId`；页面路由仅是一个输入 |
 | Prompt | 所有场景仍同时加载一份全局 `COACH_PLAYBOOK` | 拆成公共原则和排他的场景 Prompt |
 | 工具装配 | `resolveCoachCapabilities` 主要按事实、权限和 mandate 过滤 | 同时应用场景 capability policy，并在执行前复查同一策略 |

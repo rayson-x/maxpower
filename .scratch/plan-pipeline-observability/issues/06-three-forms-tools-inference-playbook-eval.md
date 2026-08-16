@@ -4,7 +4,7 @@
 
 **Blocked by:** 02. 数据断桥修复与重排语义; 04. PlannerTrace + 首课计划 Proposal 化
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [x] "帮我记录吃了X" → draft 卡片 → 确认 → Timeline 落账（全链路 trace）
 - [x] "把A换成B" → 先查动作库存在与刺激等价 → 替换提案 → 确认 → 新负荷不复制旧负荷

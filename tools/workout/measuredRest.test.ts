@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import {
   InMemoryPersonalKnowledgeStore,
@@ -14,11 +14,11 @@ function fixture(options: { withPersonalLayer?: boolean } = {}) {
   let monotonic = 10_000;
   const ledger = new InMemoryCoachLedger();
   const personalStore = new InMemoryPersonalKnowledgeStore();
-  const app = new CoachApplication({
+  const app = new LocalProductKernel({
     ledger,
     runtime: { now: () => now, nextId: (prefix) => `${prefix}-${++sequence}` },
     monotonicClock: { nowMs: () => monotonic, epochId: () => "process-1" },
-    notifications: { async schedule() {}, async cancel() {} },
+    notifications: { async upsert() {}, async cancel() {} },
     ...(options.withPersonalLayer
       ? {
           personalKnowledge: new PersonalKnowledgeLayer(personalStore, {
@@ -36,13 +36,13 @@ function fixture(options: { withPersonalLayer?: boolean } = {}) {
   };
 }
 
-async function bootstrapPlan(app: CoachApplication) {
+async function bootstrapPlan(app: LocalProductKernel) {
   await app.executeDomainCommand({
     type: "user.bootstrap",
     meta: { userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "phone", occurredAt: "2026-08-08T07:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "bootstrap" },
-    profile: { id: "profile", trainingExperience: "beginner", locale: "zh-CN" },
+    profile: { id: "profile", locale: "zh-CN" },
     goalContract: { id: "goal", primaryGoal: "hypertrophy", horizon: { startDate: "2026-08-08" } },
-    mandate: { id: "mandate", mode: "collaborative" },
+    mandate: { id: "mandate", mode: "collaborative", planChangeAuthorization: "always_ask" },
   });
   const pins = app.getInstalledKnowledgeVersionPins();
   await app.executeDomainCommand({
@@ -50,7 +50,7 @@ async function bootstrapPlan(app: CoachApplication) {
     meta: { userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "phone", occurredAt: "2026-08-08T07:01:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "plan" },
     planId: "plan", expectedRevision: 0,
     revision: {
-      id: "plan-r1", goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 }, effectiveFrom: "2026-08-08", knowledgePins: pins,
+      id: "plan", goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 }, effectiveFrom: "2026-08-08", knowledgePins: pins,
       sessions: [{
         id: "push", title: "Push", scheduledFor: "2026-08-08", knowledgePins: pins,
         tasks: [{
@@ -66,7 +66,7 @@ async function bootstrapPlan(app: CoachApplication) {
   });
 }
 
-async function startWorkout(app: CoachApplication) {
+async function startWorkout(app: LocalProductKernel) {
   await app.prepareWorkoutSession({
     userId: "u1", workoutId: "workout-1",
     prescriptionRef: { planId: "plan", planRevision: 1, sessionPrescriptionId: "push" },
@@ -122,21 +122,4 @@ test("完成训练后实测休息沉淀为个人节奏校准，后续计划引�
   assert.ok(tempo, "应写入个人节奏校准");
   assert.equal(tempo?.kind, "observed_calibration");
   assert.equal(tempo?.value?.medianRestSeconds, 135); // median(120, 150)
-});
-
-test("休息过短确认后产生下一组建议 artifact（主动提案，不直接改训练）", async () => {
-  const { app, advanceMonotonic } = fixture();
-  await bootstrapPlan(app);
-  await startWorkout(app);
-  await app.confirmCurrentSet({ userId: "u1", workoutId: "workout-1", confirmAsPlanned: true, idempotencyKey: "s1" });
-  await app.startRestTimer({ userId: "u1", workoutId: "workout-1", duration: { value: 90, unit: "seconds" }, idempotencyKey: "rest-1" });
-  advanceMonotonic(30_000);
-  await app.confirmCurrentSet({ userId: "u1", workoutId: "workout-1", confirmAsPlanned: true, idempotencyKey: "s2" });
-
-  const snapshot = await app.readDomainProjection({ userId: "u1" });
-  void snapshot;
-  const artifacts = (await (app as unknown as { ledger: { read(): Promise<{ artifacts: readonly import("../../src/coach/model").Artifact[] }> } }).ledger.read()).artifacts;
-  const proposal = artifacts.find((item) => item.kind === "evidence_brief" && item.title === "下一组建议");
-  assert.ok(proposal, "休息过短应产生下一组建议 artifact");
-  assert.ok(proposal?.capabilityBoundary.some((line) => line.includes("确认后才应用")));
 });

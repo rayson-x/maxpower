@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** wontfix
 
 - [x] 每组结束后按动作疲劳度给出休息目标区间提示
 - [x] 组间间隔由识别时间戳实测（fixture 时间戳可确定性测试），与实际值一致

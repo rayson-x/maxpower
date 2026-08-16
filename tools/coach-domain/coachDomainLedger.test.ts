@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoachApplication } from "../../src/coach/createCoachApplication";
+import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
+import type { DomainCommand } from "../../src/coach/domain";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
+import { confirmedTimelineEnvelope } from "../fixtures/timelineEnvelope";
 
-test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Workout，并保留更正链", async () => {
+test("LocalProductKernel 从版本化事件重放 Profile、Timeline、Plan 与 Workout，并保留更正链", async () => {
   let now = "2026-08-08T00:10:00.000+08:00";
   let sequence = 0;
   const runtime = {
@@ -12,7 +14,7 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     nextId: (prefix: string) => `${prefix}-${++sequence}`,
   };
   const ledger = new InMemoryCoachLedger();
-  let app = new CoachApplication(ledger, runtime);
+  let app = new LocalProductKernel(ledger, runtime);
   const knowledgePins = app.getInstalledKnowledgeVersionPins();
 
   const bootstrap = await app.executeDomainCommand({
@@ -27,7 +29,6 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     },
     profile: {
       id: "profile-1",
-      trainingExperience: "intermediate",
       locale: "zh-CN",
     },
     goalContract: {
@@ -38,6 +39,7 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     mandate: {
       id: "mandate-1",
       mode: "collaborative",
+      planChangeAuthorization: "always_ask",
     },
   });
   assert.deepEqual(bootstrap.aggregateRevisions, [
@@ -59,6 +61,7 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     },
     timelineId: "timeline-user-1",
     expectedRevision: 0,
+    entry: confirmedTimelineEnvelope({ id: "entry-body-1", factType: "body", occurredAt: "2026-08-08T07:00:00.000+08:00" }),
     fact: {
       kind: "body",
       measurement: {
@@ -84,9 +87,10 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     planId: "plan-1",
     expectedRevision: 0,
     revision: {
-      id: "plan-revision-1",
+      id: "plan-1",
       goalContractRef: { kind: "goal_contract", id: "goal-1", revision: 1 },
       effectiveFrom: "2026-08-08",
+      lifecycle: { state: "active", changedAt: "2026-08-08T07:05:00.000+08:00", reason: "candidate_committed", confirmedBy: "user" },
       knowledgePins,
       sessions: [
         {
@@ -171,6 +175,7 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     timelineId: "timeline-user-1",
     expectedRevision: 1,
     correctsEventId: bodyFact.eventIds[0]!,
+    entry: confirmedTimelineEnvelope({ id: "entry-body-correction-1", factType: "body", occurredAt: "2026-08-08T07:10:00.000+08:00" }),
     fact: {
       kind: "body",
       measurement: {
@@ -186,7 +191,7 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     userId: "user-1",
     date: "2026-08-08",
   });
-  app = new CoachApplication(ledger, runtime);
+  app = new LocalProductKernel(ledger, runtime);
   const afterRestart = await app.readDomainProjection({
     userId: "user-1",
     date: "2026-08-08",
@@ -212,4 +217,96 @@ test("CoachApplication 从版本化事件重放 Profile、Timeline、Plan 与 Wo
     confidence: "confirmed",
   });
   assert.equal(afterRestart.timeline.current[0]?.correctsEventId, bodyFact.eventIds[0]);
+});
+
+test("Timeline envelope runtime validation rejects structurally incomplete non-TypeScript input", async () => {
+  const app = new LocalProductKernel(new InMemoryCoachLedger(), {
+    now: () => "2026-08-08T08:00:00.000+08:00",
+    nextId: (prefix) => `${prefix}-runtime-envelope`,
+  });
+  await assert.rejects(
+    app.executeDomainCommand({
+      type: "timeline.append",
+      meta: {
+        userId: "runtime-envelope-user",
+        actor: { kind: "user", id: "runtime-envelope-user" },
+        deviceId: "device-1",
+        occurredAt: "2026-08-08T08:00:00.000+08:00",
+        timezoneOffsetMinutes: 480,
+        idempotencyKey: "runtime-envelope-invalid",
+      },
+      timelineId: "timeline.runtime-envelope-user",
+      expectedRevision: 0,
+      fact: { kind: "rest", confidence: "confirmed" },
+      entry: {
+        id: "incomplete-envelope",
+        schemaVersion: 1,
+        factType: "rest",
+        time: { startedAt: "2026-08-08T08:00:00.000+08:00", timezoneOffsetMinutes: 480 },
+        recordedAt: "2026-08-08T08:00:00.000+08:00",
+        actor: { kind: "user", id: "runtime-envelope-user" },
+        provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" },
+        privacyClass: "sensitive",
+      },
+    } as unknown as DomainCommand),
+    /invalid_domain_event/,
+  );
+  assert.equal((await app.readDomainProjection({ userId: "runtime-envelope-user" })).timeline.revision, 0);
+
+  for (const [index, entry] of [
+    undefined,
+    null,
+    { id: "missing-time", schemaVersion: 1, factType: "rest", actor: { kind: "user", id: "runtime-envelope-user" }, provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" }, privacyClass: "sensitive", causalRefs: [], evidenceRefs: [], layer: "raw_observation", recordedAt: "2026-08-08T08:00:00.000+08:00" },
+    { id: "missing-provenance", schemaVersion: 1, factType: "rest", actor: { kind: "user", id: "runtime-envelope-user" }, time: { startedAt: "2026-08-08T08:00:00.000+08:00", timezoneOffsetMinutes: 480 }, privacyClass: "sensitive", causalRefs: [], evidenceRefs: [], layer: "raw_observation", recordedAt: "2026-08-08T08:00:00.000+08:00" },
+  ].entries()) {
+    await assert.rejects(
+      app.executeDomainCommand({
+        type: "timeline.append",
+        meta: { userId: "runtime-envelope-user", actor: { kind: "user", id: "runtime-envelope-user" }, deviceId: "device-1", occurredAt: "2026-08-08T08:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: `runtime-envelope-shape-${index}` },
+        timelineId: "timeline.runtime-envelope-user",
+        expectedRevision: 0,
+        fact: { kind: "rest", confidence: "confirmed" },
+        entry,
+      } as unknown as DomainCommand),
+      /invalid_domain_event/,
+    );
+  }
+  const validEntry = {
+    id: "valid-shape",
+    schemaVersion: 1,
+    factType: "rest",
+    time: { startedAt: "2026-08-08T08:00:00.000+08:00", timezoneOffsetMinutes: 480 },
+    recordedAt: "2026-08-08T08:00:00.000+08:00",
+    actor: { kind: "user", id: "runtime-envelope-user" },
+    provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" },
+    privacyClass: "sensitive",
+    causalRefs: [],
+    evidenceRefs: [],
+    layer: "raw_observation",
+  };
+  const invalidSemanticInputs = [
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, provenance: { ...validEntry.provenance, origin: "banana" } } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, provenance: { ...validEntry.provenance, recordingMethod: "telepathy" } } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, provenance: { ...validEntry.provenance, dataStatus: "perfect" } } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, provenance: { ...validEntry.provenance, confidence: "certain" } } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, privacyClass: "public" } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, valueStatus: "perfect" } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, provenance: { ...validEntry.provenance, lastModifiedAt: "not-a-date" } } },
+    { fact: { kind: "rest", confidence: "confirmed" }, entry: { ...validEntry, evidenceRefs: [{ kind: "media", id: "image-1", version: 1, hash: "hash", mediaType: "image" }] } },
+    { fact: { kind: "invented_kind", confidence: "confirmed" }, entry: { ...validEntry, factType: "invented_kind" } },
+    { fact: { kind: "nutrition" }, entry: { ...validEntry, factType: "nutrition", provenance: { ...validEntry.provenance, sourceRecordId: 42 }, canonicalFromEventIds: "not-an-array" } },
+  ];
+  for (const [index, malformed] of invalidSemanticInputs.entries()) {
+    await assert.rejects(
+      app.executeDomainCommand({
+        type: "timeline.append",
+        meta: { userId: "runtime-envelope-user", actor: { kind: "user", id: "runtime-envelope-user" }, deviceId: "device-1", occurredAt: "2026-08-08T08:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: `runtime-envelope-semantics-${index}` },
+        timelineId: "timeline.runtime-envelope-user",
+        expectedRevision: 0,
+        ...malformed,
+      } as unknown as DomainCommand),
+      /invalid_domain_event/,
+    );
+  }
+  assert.equal((await app.readDomainProjection({ userId: "runtime-envelope-user" })).timeline.revision, 0);
 });
