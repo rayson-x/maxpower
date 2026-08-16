@@ -462,7 +462,7 @@ export function ProductShell({ application, conversation, records, userId, incom
       await refresh();
     })().catch((cause) => {
       // 卡片操作失败必须留下可诊断的痕迹：用户看到的是兜底文案，真实原因进控制台。
-      console.error("coach_card_action_failed", cause instanceof Error ? cause.message : cause);
+      console.error("coach_card_action_failed", cause instanceof Error ? (cause.stack ?? cause.message) : cause);
       setError(userFacingError(cause, mobileT("mobile.ui.productshell.be13ed1540")));
     }).finally(() => setCoachWorking(false));
   }, [coachAttachment, coachSession, conversation, hydrateCoach, refresh, userId]);
