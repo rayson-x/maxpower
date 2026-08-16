@@ -29,13 +29,7 @@ export interface OpenAiProviderRoute {
 export interface OpenAiCompatibleLlmProviderOptions {
   routes: Readonly<Record<ProductAlias, OpenAiProviderRoute>>;
   fetch?: typeof globalThis.fetch;
-  /** Time to wait for response headers. */
   timeoutMs?: number;
-  /** Abort a stream only after this much inactivity. Reasoning models can
-   * pause between bursts; an absolute whole-stream cap kills them. */
-  streamIdleTimeoutMs?: number;
-  /** Absolute ceiling for one upstream stream. */
-  streamOverallTimeoutMs?: number;
 }
 
 /**
@@ -47,19 +41,13 @@ export class OpenAiCompatibleLlmProviderAdapter implements LlmProviderAdapter {
   readonly #routes: Readonly<Record<ProductAlias, OpenAiProviderRoute>>;
   readonly #fetch: typeof globalThis.fetch;
   readonly #timeoutMs: number;
-  readonly #streamIdleTimeoutMs: number;
-  readonly #streamOverallTimeoutMs: number;
 
   constructor(options: OpenAiCompatibleLlmProviderOptions) {
     this.#routes = options.routes;
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeoutMs = options.timeoutMs ?? 45_000;
-    this.#streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? 120_000;
-    this.#streamOverallTimeoutMs = options.streamOverallTimeoutMs ?? 900_000;
-    for (const value of [this.#timeoutMs, this.#streamIdleTimeoutMs, this.#streamOverallTimeoutMs]) {
-      if (!Number.isSafeInteger(value) || value < 1) {
-        throw new Error("timeout values must be positive integers.");
-      }
+    if (!Number.isSafeInteger(this.#timeoutMs) || this.#timeoutMs < 1) {
+      throw new Error("timeoutMs must be a positive integer.");
     }
     for (const alias of PRODUCT_ALIASES) {
       const route = this.#routes[alias];
@@ -84,20 +72,10 @@ export class OpenAiCompatibleLlmProviderAdapter implements LlmProviderAdapter {
     const relayAbort = (): void => controller.abort();
     if (input.signal.aborted) controller.abort();
     else input.signal.addEventListener("abort", relayAbort, { once: true });
-    // The initial timeout covers only the wait for response headers. Streams
-    // get an overall ceiling plus an idle timeout that resets on every chunk.
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
     timeout.unref();
-    const streamTimers: { overall?: ReturnType<typeof setTimeout>; idle?: ReturnType<typeof setTimeout> } = {};
-    const armStreamIdle = (): void => {
-      clearTimeout(streamTimers.idle);
-      streamTimers.idle = setTimeout(() => controller.abort(), this.#streamIdleTimeoutMs);
-      streamTimers.idle.unref();
-    };
     const cleanup = (): void => {
       clearTimeout(timeout);
-      clearTimeout(streamTimers.overall);
-      clearTimeout(streamTimers.idle);
       input.signal.removeEventListener("abort", relayAbort);
     };
     const headers = new Headers(route.headers);
@@ -120,9 +98,6 @@ export class OpenAiCompatibleLlmProviderAdapter implements LlmProviderAdapter {
       ...(input.request.temperature === undefined
         ? {}
         : { temperature: input.request.temperature }),
-      ...(input.request.tool_choice === undefined
-        ? {}
-        : { tool_choice: input.request.tool_choice }),
       ...(input.request.response_format === undefined
         ? {}
         : { response_format: input.request.response_format }),
@@ -194,13 +169,6 @@ export class OpenAiCompatibleLlmProviderAdapter implements LlmProviderAdapter {
       throw invalidResponse();
     }
 
-    // Headers are in: the initial-response timer has done its job. Arm the
-    // stream-phase overall ceiling and per-chunk idle timeout.
-    clearTimeout(timeout);
-    streamTimers.overall = setTimeout(() => controller.abort(), this.#streamOverallTimeoutMs);
-    streamTimers.overall.unref();
-    armStreamIdle();
-
     const usage = deferred<ProviderUsage>();
     let emittedContentBytes = 0;
     // A stream can fail before Gateway awaits final usage. Register a rejection
@@ -215,7 +183,7 @@ export class OpenAiCompatibleLlmProviderAdapter implements LlmProviderAdapter {
         usage.resolve,
         usage.reject,
         cleanup,
-        (chunk) => { emittedContentBytes += generatedContentBytes(chunk); armStreamIdle(); },
+        (chunk) => { emittedContentBytes += generatedContentBytes(chunk); },
       ),
       usage: usage.promise,
       estimateCancelledUsage: () => estimateCancelledUsage(

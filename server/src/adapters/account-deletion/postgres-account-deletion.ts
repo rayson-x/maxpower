@@ -10,6 +10,11 @@ import type {
   BeginAccountDeletionInput,
 } from "../../modules/account-deletion/model.js";
 
+export interface AccountMediaEraser {
+  /** Must be safe to repeat after an ambiguous timeout or worker crash. */
+  eraseAccountMedia(accountId: string): Promise<void>;
+}
+
 export interface IdentityEraser {
   /** Must erase the Better Auth identity and be safe when it is already absent. */
   eraseIdentity(accountId: string): Promise<void>;
@@ -17,6 +22,7 @@ export interface IdentityEraser {
 
 export interface PostgresAccountDeletionDependencies {
   pool: PostgresPool;
+  media: AccountMediaEraser;
   identity: IdentityEraser;
   ids?: IdFactory;
   claimLeaseSeconds?: number;
@@ -25,6 +31,7 @@ export interface PostgresAccountDeletionDependencies {
 type CleanupStage =
   | "requested"
   | "access_blocked"
+  | "media_objects_erased"
   | "metadata_erased"
   | "identity_erased";
 
@@ -45,12 +52,14 @@ interface DeletionJobRow {
 /** Durable, staged cleanup behind the existing AccountDeletion Adapter seam. */
 export class PostgresAccountDeletionAdapter implements AccountDeletionAdapter {
   readonly #pool: PostgresPool;
+  readonly #media: AccountMediaEraser;
   readonly #identity: IdentityEraser;
   readonly #ids: IdFactory;
   readonly #claimLeaseSeconds: number;
 
   constructor(dependencies: PostgresAccountDeletionDependencies) {
     this.#pool = dependencies.pool;
+    this.#media = dependencies.media;
     this.#identity = dependencies.identity;
     this.#ids = dependencies.ids ?? randomId;
     this.#claimLeaseSeconds = dependencies.claimLeaseSeconds ?? 5 * 60;
@@ -181,6 +190,11 @@ export class PostgresAccountDeletionAdapter implements AccountDeletionAdapter {
       stage = "access_blocked";
     }
     if (stage === "access_blocked") {
+      await this.#media.eraseAccountMedia(accountId);
+      await this.#advanceStage(accountId, "access_blocked", "media_objects_erased");
+      stage = "media_objects_erased";
+    }
+    if (stage === "media_objects_erased") {
       await this.#eraseMetadata(accountId);
       stage = "metadata_erased";
     }
@@ -240,7 +254,7 @@ export class PostgresAccountDeletionAdapter implements AccountDeletionAdapter {
   async #eraseMetadata(accountId: string): Promise<void> {
     await this.#transaction(accountId, async (client) => {
       const stage = await requireStage(client, accountId);
-      if (stage !== "access_blocked") return;
+      if (stage !== "media_objects_erased") return;
       await client.query(
         `DELETE FROM llm_provider_usage_reconciliations
           WHERE invocation_id IN (
@@ -256,7 +270,25 @@ export class PostgresAccountDeletionAdapter implements AccountDeletionAdapter {
       await client.query(`DELETE FROM llm_entitlement_accounts WHERE account_id = $1`, [accountId]);
       await client.query(`DELETE FROM llm_invocation_cancellations WHERE owner_account_id = $1`, [accountId]);
       await client.query(`DELETE FROM llm_gateway_invocations WHERE owner_account_id = $1`, [accountId]);
-      await updateStage(client, accountId, "access_blocked", "metadata_erased");
+      await client.query(
+        `DELETE FROM maxpower.workout_session_media_references WHERE account_id = $1`,
+        [accountId],
+      );
+      await client.query(
+        `DELETE FROM maxpower.result_media_references WHERE account_id = $1`,
+        [accountId],
+      );
+      await client.query(`DELETE FROM maxpower.results WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.workout_sessions WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.plan_versions WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.plans WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.profiles WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.product_idempotency WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.media_asset_relations WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.media_uploads WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.media_assets WHERE account_id = $1`, [accountId]);
+      await client.query(`DELETE FROM maxpower.media_idempotency WHERE account_id = $1`, [accountId]);
+      await updateStage(client, accountId, "media_objects_erased", "metadata_erased");
     });
   }
 
@@ -438,6 +470,7 @@ function stageOrder(stage: CleanupStage): number {
   return [
     "requested",
     "access_blocked",
+    "media_objects_erased",
     "metadata_erased",
     "identity_erased",
   ].indexOf(stage);

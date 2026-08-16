@@ -12,7 +12,6 @@ import {
   LlmGateway,
   immediateProviderDispatch,
   type LlmGatewayDependencies,
-  type OpenAiChatCompletionRequest,
   type OpenAiObject,
 } from "../src/modules/llm/index.js";
 
@@ -391,7 +390,17 @@ test("enforces alias request limits and reserves the configured worst-case charg
         maxInputBytes: 128,
         maxInputTokens: 256,
         maxOutputTokens: 64,
+        maxImages: 0,
+        maxImageBytes: 1,
         reservationCredits: 120,
+      },
+      "maxpower/nutrition-vision-v1": {
+        maxInputBytes: 256,
+        maxInputTokens: 512,
+        maxOutputTokens: 32,
+        maxImages: 1,
+        maxImageBytes: 128,
+        reservationCredits: 200,
       },
     },
   });
@@ -427,7 +436,7 @@ test("enforces alias request limits and reserves the configured worst-case charg
   assert.equal(provider.calls.length, 0);
 });
 
-test("normalizes the provider output cap and rejects non-text input", async () => {
+test("normalizes the provider output cap and bounds image inputs by alias", async () => {
   const requests: unknown[] = [];
   const provider = {
     invoke(input: Parameters<InMemoryLlmProviderAdapter["invoke"]>[0]) {
@@ -449,6 +458,16 @@ test("normalizes the provider output cap and rejects non-text input", async () =
         maxInputBytes: 512,
         maxInputTokens: 1_024,
         maxOutputTokens: 64,
+        maxImages: 0,
+        maxImageBytes: 1,
+        reservationCredits: 100,
+      },
+      "maxpower/nutrition-vision-v1": {
+        maxInputBytes: 1_024,
+        maxInputTokens: 2_048,
+        maxOutputTokens: 32,
+        maxImages: 1,
+        maxImageBytes: 256,
         reservationCredits: 100,
       },
     },
@@ -468,7 +487,7 @@ test("normalizes the provider output cap and rejects non-text input", async () =
         messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://example.test/a.jpg" } }] }],
       },
     }),
-    apiError(400, "text_only"),
+    apiError(400, "image_limit_exceeded"),
   );
   assert.equal(requests.length, 1);
 });
@@ -481,19 +500,8 @@ test("rejects provider-specific request fields instead of forwarding policy over
     usage: new InMemoryLlmUsageAdapter(),
   });
 
-  await assert.rejects(
-    gateway.invoke(alice, {
-      idempotencyKey: "no-provider-store",
-      request: {
-        model: "maxpower/coach-v1",
-        messages: [],
-        store: true,
-      } as unknown as OpenAiChatCompletionRequest,
-    }),
-    apiError(400, "invalid_request"),
-  );
-
   for (const [idempotencyKey, field] of [
+    ["no-provider-store", { store: true }],
     ["no-provider-metadata", { metadata: { user: "private" } }],
     ["no-provider-audio", { modalities: ["audio"] }],
     ["no-provider-tier", { service_tier: "priority" }],
@@ -535,6 +543,16 @@ test("fails closed and audits actual provider usage when upstream exceeds its re
         maxInputBytes: 512,
         maxInputTokens: 1_024,
         maxOutputTokens: 64,
+        maxImages: 0,
+        maxImageBytes: 1,
+        reservationCredits: 100,
+      },
+      "maxpower/nutrition-vision-v1": {
+        maxInputBytes: 512,
+        maxInputTokens: 1_024,
+        maxOutputTokens: 64,
+        maxImages: 1,
+        maxImageBytes: 128,
         reservationCredits: 100,
       },
     },

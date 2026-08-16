@@ -1,3 +1,5 @@
+import { HeadBucketCommand } from "@aws-sdk/client-s3";
+
 export interface ReadinessPostgres {
   query(text: string): Promise<{ rows: unknown[] }>;
 }
@@ -10,6 +12,10 @@ export interface InfrastructureReadinessDependencies {
   postgres: ReadinessPostgres;
   rateLimitRedis: ReadinessRedis;
   streamRedis: ReadinessRedis;
+  objectStorage: {
+    bucket: string;
+    client: { send(command: unknown): Promise<unknown> };
+  };
   timeoutMs?: number;
 }
 
@@ -28,6 +34,9 @@ export function createInfrastructureReadiness(
         await dependencies.postgres.query("SELECT 1 AS ok");
         if (!isPong(await dependencies.rateLimitRedis.sendCommand(["PING"]))) return false;
         if (!isPong(await dependencies.streamRedis.sendCommand(["PING"]))) return false;
+        await dependencies.objectStorage.client.send(new HeadBucketCommand({
+          Bucket: dependencies.objectStorage.bucket,
+        }));
         return true;
       }, timeoutMs);
     } catch {

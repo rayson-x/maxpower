@@ -385,6 +385,11 @@ function usageAdapter(pool: Pool, pricingVersionId: string): PostgresLlmUsageAda
         providerModel: "model",
         pricingVersionId,
       },
+      "maxpower/nutrition-vision-v1": {
+        providerId: "provider",
+        providerModel: "vision",
+        pricingVersionId,
+      },
     },
   });
 }

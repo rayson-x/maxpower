@@ -4,6 +4,14 @@ import {
   LOCAL_TEST_ONLY_DEBUG_OTP,
 } from "../modules/identity/index.js";
 import {
+  InMemoryProductDataAdapter,
+  ProductDataModule,
+} from "../modules/product-data/index.js";
+import {
+  InMemoryMediaLibraryAdapter,
+  MediaLibraryModule,
+} from "../modules/media/index.js";
+import {
   InMemoryLlmEntitlementAdapter,
   InMemoryLlmProviderAdapter,
   InMemoryLlmUsageAdapter,
@@ -40,6 +48,8 @@ export function createMemoryRuntime(options: MemoryRuntimeOptions) {
       {
         identity,
         tokens: identity,
+        productData: new ProductDataModule({ adapter: new InMemoryProductDataAdapter() }),
+        media: new MediaLibraryModule({ adapter: new InMemoryMediaLibraryAdapter() }),
         llm,
         accountDeletion: new AccountDeletionModule({
           adapter: new InMemoryAccountDeletionAdapter(),

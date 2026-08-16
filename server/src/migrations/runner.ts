@@ -4,6 +4,8 @@ import { join } from "node:path";
 
 export const EXPECTED_MIGRATIONS = [
   "010-better-auth.sql",
+  "020-product-data.sql",
+  "030-media-library.sql",
   "040-llm-entitlements.sql",
   "050-account-deletion.sql",
 ] as const;

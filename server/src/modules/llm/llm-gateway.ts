@@ -40,6 +40,7 @@ const DEFAULT_EVENT_TTL_MS = 5 * 60 * 1_000;
 
 export const DEFAULT_RESERVATION_CREDITS: Readonly<Record<ProductAlias, number>> = {
   "maxpower/coach-v1": 100,
+  "maxpower/nutrition-vision-v1": 500,
 };
 
 export interface LlmAliasRequestPolicy {
@@ -49,6 +50,9 @@ export interface LlmAliasRequestPolicy {
   maxInputTokens: number;
   /** Server-enforced upper bound for generated tokens. */
   maxOutputTokens: number;
+  maxImages: number;
+  /** Maximum decoded bytes for each inline data URL image. */
+  maxImageBytes: number;
   /** Worst-case user charge admitted atomically before provider invocation. */
   reservationCredits: number;
 }
@@ -60,7 +64,17 @@ export const DEFAULT_LLM_REQUEST_POLICIES: Readonly<
     maxInputBytes: 64 * 1_024,
     maxInputTokens: 128 * 1_024,
     maxOutputTokens: 4_096,
+    maxImages: 4,
+    maxImageBytes: 5 * 1_024 * 1_024,
     reservationCredits: DEFAULT_RESERVATION_CREDITS["maxpower/coach-v1"],
+  },
+  "maxpower/nutrition-vision-v1": {
+    maxInputBytes: 6 * 1_024 * 1_024,
+    maxInputTokens: 8 * 1_024 * 1_024,
+    maxOutputTokens: 2_048,
+    maxImages: 4,
+    maxImageBytes: 5 * 1_024 * 1_024,
+    reservationCredits: DEFAULT_RESERVATION_CREDITS["maxpower/nutrition-vision-v1"],
   },
 };
 
@@ -899,24 +913,6 @@ function acceptRequest(
   if (request.parallel_tool_calls !== undefined && request.parallel_tool_calls !== false) {
     throw new ApiError(400, "invalid_request", "parallel_tool_calls must be false.");
   }
-  if (request.store !== undefined && request.store !== false) {
-    throw new ApiError(400, "invalid_request", "store must be false.");
-  }
-  if (
-    request.stream_options !== undefined
-    && (!isPlainObject(request.stream_options)
-      || Object.keys(request.stream_options).length !== 1
-      || request.stream_options.include_usage !== true)
-  ) {
-    throw new ApiError(
-      400,
-      "invalid_request",
-      "stream_options only supports include_usage=true.",
-    );
-  }
-  if (request.tool_choice !== undefined && !isSupportedToolChoice(request.tool_choice)) {
-    throw new ApiError(400, "invalid_request", "tool_choice is invalid.");
-  }
   if (
     request.temperature !== undefined &&
     (typeof request.temperature !== "number" ||
@@ -952,7 +948,6 @@ function acceptRequest(
       ? {}
       : { parallel_tool_calls: request.parallel_tool_calls }),
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-    ...(request.tool_choice === undefined ? {} : { tool_choice: request.tool_choice }),
     ...(request.response_format === undefined
       ? {}
       : { response_format: request.response_format }),
@@ -966,7 +961,7 @@ function acceptRequest(
       "The LLM request exceeds the product input limit.",
     );
   }
-  assertTextOnly(request.messages);
+  assertImageLimits(request.messages, policy);
   return {
     alias: request.model,
     stream: request.stream ?? false,
@@ -982,10 +977,7 @@ const ALLOWED_REQUEST_FIELDS = new Set([
   "max_tokens",
   "max_completion_tokens",
   "parallel_tool_calls",
-  "store",
-  "stream_options",
   "temperature",
-  "tool_choice",
   "response_format",
 ]);
 
@@ -998,18 +990,6 @@ function assertAllowedRequestFields(request: OpenAiChatCompletionRequest): void 
       `Unsupported LLM request field: ${unsupported.sort()[0]}.`,
     );
   }
-}
-
-function isSupportedToolChoice(value: unknown): boolean {
-  if (value === "auto" || value === "none" || value === "required") return true;
-  return isPlainObject(value)
-    && Object.keys(value).length === 2
-    && value.type === "function"
-    && isPlainObject(value.function)
-    && Object.keys(value.function).length === 1
-    && typeof value.function.name === "string"
-    && value.function.name.trim().length >= 1
-    && value.function.name.length <= 128;
 }
 
 function outputTokenLimit(
@@ -1039,27 +1019,80 @@ function optionalPositiveInteger(value: unknown, name: string): number | undefin
   return value as number;
 }
 
-function assertTextOnly(value: unknown, seen = new Set<object>()): void {
-  if (value === null || typeof value !== "object") return;
+function assertImageLimits(
+  messages: readonly unknown[],
+  policy: LlmAliasRequestPolicy,
+): void {
+  const images = collectImageUrls(messages);
+  if (images.length > policy.maxImages) {
+    throw new ApiError(
+      400,
+      "image_limit_exceeded",
+      "The request contains too many images for this product alias.",
+    );
+  }
+  for (const image of images) {
+    const bytes = decodedDataUrlBytes(image);
+    if (bytes === undefined) {
+      throw new ApiError(
+        400,
+        "remote_image_forbidden",
+        "LLM image inputs must use bounded inline data URLs.",
+      );
+    }
+    if (bytes > policy.maxImageBytes) {
+      throw new ApiError(
+        413,
+        "image_too_large",
+        "An LLM image input exceeds the product limit.",
+      );
+    }
+  }
+}
+
+function collectImageUrls(value: unknown, seen = new Set<object>()): string[] {
+  if (value === null || typeof value !== "object") return [];
   if (seen.has(value)) {
     throw new ApiError(400, "invalid_request", "The request must not contain cycles.");
   }
   seen.add(value);
   try {
     if (Array.isArray(value)) {
-      for (const item of value) assertTextOnly(item, seen);
-      return;
+      return value.flatMap((item) => collectImageUrls(item, seen));
     }
     if (!isPlainObject(value)) {
       throw new ApiError(400, "invalid_request", "The request must contain plain JSON objects.");
     }
     const type = value.type;
     if (type === "image_url" || type === "input_image") {
-      throw new ApiError(400, "text_only", "This LLM endpoint accepts text only.");
+      const candidate = value.image_url ?? value.image_url_data ?? value.url;
+      if (typeof candidate === "string") return [candidate];
+      if (isPlainObject(candidate) && typeof candidate.url === "string") {
+        return [candidate.url];
+      }
+      throw new ApiError(400, "invalid_request", "An image input is missing its URL.");
     }
-    for (const item of Object.values(value)) assertTextOnly(item, seen);
+    return Object.values(value).flatMap((item) => collectImageUrls(item, seen));
   } finally {
     seen.delete(value);
+  }
+}
+
+function decodedDataUrlBytes(value: string): number | undefined {
+  const match = /^data:image\/[a-z0-9.+-]+(;base64)?,(.*)$/is.exec(value);
+  if (match === null) return undefined;
+  const payload = match[2] ?? "";
+  if (match[1] === ";base64") {
+    if (!/^[a-z0-9+/]*={0,2}$/i.test(payload) || payload.length % 4 === 1) {
+      throw new ApiError(400, "invalid_request", "An image data URL is invalid.");
+    }
+    const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+    return Math.floor((payload.length * 3) / 4) - padding;
+  }
+  try {
+    return new TextEncoder().encode(decodeURIComponent(payload)).byteLength;
+  } catch {
+    throw new ApiError(400, "invalid_request", "An image data URL is invalid.");
   }
 }
 
@@ -1069,6 +1102,8 @@ function validateRequestPolicy(alias: ProductAlias, policy: LlmAliasRequestPolic
     ["maxInputBytes", policy.maxInputBytes, 1],
     ["maxInputTokens", policy.maxInputTokens, 1],
     ["maxOutputTokens", policy.maxOutputTokens, 1],
+    ["maxImages", policy.maxImages, 0],
+    ["maxImageBytes", policy.maxImageBytes, 1],
     ["reservationCredits", policy.reservationCredits, 1],
   ] as const) {
     if (!Number.isSafeInteger(value) || value < minimum) {

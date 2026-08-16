@@ -23,6 +23,11 @@ test("Postgres ledger grants, reserves and settles actual LLM usage through the 
         providerModel: "internal-coach-model",
         pricingVersionId: "price-coach-2026-08",
       },
+      "maxpower/nutrition-vision-v1": {
+        providerId: "global-vision",
+        providerModel: "internal-vision-model",
+        pricingVersionId: "price-vision-2026-08",
+      },
     },
   });
   await usage.upsertPricing({

@@ -128,24 +128,10 @@ function validateOptions(options: HttpSecurityOptions): void {
     throw new Error("maxRequestBytes must be a positive integer.");
   }
   for (const origin of options.allowedOrigins) {
-    if (!isAllowedCorsOrigin(origin)) {
-      throw new Error("Allowed origins must be exact HTTPS origins or loopback HTTP origins.");
+    const url = new URL(origin);
+    if (url.protocol !== "https:" || url.origin !== origin) {
+      throw new Error("Allowed origins must be exact HTTPS origins.");
     }
-  }
-}
-
-function isAllowedCorsOrigin(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.origin !== value) return false;
-    if (url.protocol === "https:") return true;
-    return url.protocol === "http:" && (
-      url.hostname === "localhost" ||
-      url.hostname === "127.0.0.1" ||
-      url.hostname === "[::1]"
-    );
-  } catch {
-    return false;
   }
 }
 

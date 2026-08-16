@@ -44,17 +44,18 @@ test("release artifact scan accepts a clean bundle", async (t) => {
   assert.deepEqual(await scanReleaseArtifacts({ roots: [bundle] }), []);
 });
 
-test("release artifact scan covers database and Redis credentials", async (t) => {
+test("release artifact scan covers database, Redis and object-storage credentials", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "maxpower-release-runtime-secrets-"));
   t.after(async () => rm(directory, { recursive: true, force: true }));
   await writeFile(
     join(directory, "unsafe.js"),
-    "export const leaked = ['database-password-123', 'redis-password-456'];\n",
+    "export const leaked = ['database-password-123', 'redis-password-456', 'S3ACCESSKEY123456789'];\n",
   );
 
   const forbiddenValues = configuredRuntimeSecrets({
     DATABASE_URL: "postgresql://service:database-password-123@db.example/maxpower?sslmode=verify-full",
     RATE_LIMIT_REDIS_URL: "rediss://service:redis-password-456@redis.example:6380/0",
+    S3_ACCESS_KEY_ID: "S3ACCESSKEY123456789",
   });
   const findings = await scanReleaseArtifacts({ roots: [directory], forbiddenValues });
 

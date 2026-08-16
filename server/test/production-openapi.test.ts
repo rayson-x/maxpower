@@ -112,9 +112,11 @@ test("OpenAPI documents reviewed Better Auth routes and account deletion receipt
 });
 
 test("OpenAPI publishes concurrency, location, invocation, SSE and error contracts", () => {
-  assert.equal(paths["/v1/me"], undefined);
-  assert.equal(paths["/v1/plans"], undefined);
-  assert.equal(paths["/v1/media"], undefined);
+  assert.ok(header(requireOperation("/v1/me", "patch"), "If-Match")?.required);
+  assert.ok(header(requireOperation("/v1/plans", "post"), "Idempotency-Key")?.required);
+  assert.ok(requireOperation("/v1/plans", "post").responses?.["201"]?.headers?.Location);
+  assert.ok(requireOperation("/v1/plans", "post").responses?.["201"]?.headers?.ETag);
+  assert.ok(requireOperation("/v1/me", "get").responses?.["200"]?.headers?.ETag);
 
   for (const [path, method] of Object.entries(paths).flatMap(([path, item]) =>
     Object.entries(item).map(([method, operation]) => [path, method, operation] as const)

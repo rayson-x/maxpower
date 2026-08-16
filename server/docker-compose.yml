@@ -9,8 +9,6 @@ x-container: &container
     - ALL
   security_opt:
     - no-new-privileges:true
-  volumes:
-    - "${MAXPOWER_CA_CERT_PATH:-../maxpower-infra/pki/ca.crt}:/etc/maxpower/pki/ca.crt:ro"
   networks:
     - private
 
@@ -22,7 +20,6 @@ x-runtime: &runtime
   environment:
     - NODE_ENV=production
     - MAXPOWER_RUNTIME=production
-    - NODE_EXTRA_CA_CERTS=/etc/maxpower/pki/ca.crt
     - STREAM_REDIS_PERSISTENCE=disabled
   restart: unless-stopped
 
@@ -31,8 +28,6 @@ services:
     <<: *runtime
     expose:
       - "8787"
-    ports:
-      - "${MAXPOWER_BIND_ADDRESS:-0.0.0.0}:${MAXPOWER_HOST_PORT:-3000}:8787"
     stop_grace_period: 30s
 
   worker:
@@ -47,7 +42,6 @@ services:
     command: ["node", "dist/migrate.js"]
     environment:
       NODE_ENV: production
-      NODE_EXTRA_CA_CERTS: /etc/maxpower/pki/ca.crt
       DATABASE_URL: ${DATABASE_URL:-}
     restart: "no"
     profiles: ["ops"]
@@ -55,6 +49,4 @@ services:
       disable: true
 
 networks:
-  private:
-    external: true
-    name: ${MAXPOWER_PRIVATE_NETWORK:-maxpower-private}
+  private: {}

@@ -51,6 +51,16 @@ test("Gateway routes a product alias upstream, normalizes usage and hides provid
         maxInputBytes: 64 * 1_024,
         maxInputTokens: 600_000,
         maxOutputTokens: 300_000,
+        maxImages: 4,
+        maxImageBytes: 5 * 1_024 * 1_024,
+        reservationCredits: 100,
+      },
+      "maxpower/nutrition-vision-v1": {
+        maxInputBytes: 6 * 1_024 * 1_024,
+        maxInputTokens: 8 * 1_024 * 1_024,
+        maxOutputTokens: 2_048,
+        maxImages: 4,
+        maxImageBytes: 5 * 1_024 * 1_024,
         reservationCredits: 100,
       },
     },
@@ -62,8 +72,6 @@ test("Gateway routes a product alias upstream, normalizes usage and hides provid
       model: "maxpower/coach-v1",
       messages: [{ role: "user", content: "hello" }],
       stream: false,
-      tools: [{ type: "function", function: { name: "read_plan", parameters: {} } }],
-      tool_choice: { type: "function", function: { name: "read_plan" } },
     },
   });
 
@@ -74,10 +82,6 @@ test("Gateway routes a product alias upstream, normalizes usage and hides provid
   assert.equal(observedBody.model, "vendor-coach-model");
   assert.equal(observedBody.stream, false);
   assert.equal(observedBody.store, false);
-  assert.deepEqual(observedBody.tool_choice, {
-    type: "function",
-    function: { name: "read_plan" },
-  });
   assert.equal(result.response.model, "maxpower-cloud");
   assert.equal(result.response.id, `chatcmpl_${result.invocationId}`);
   assert.equal("system_fingerprint" in result.response, false);
@@ -229,7 +233,7 @@ test("OpenAI transport settles conservative input usage when a non-stream reques
   const pending = gateway.invoke(principal("alice"), {
     idempotencyKey: "provider-complete-cancel-1",
     request: {
-      model: "maxpower/coach-v1",
+      model: "maxpower/nutrition-vision-v1",
       stream: false,
       messages: requestMessages,
     },
@@ -264,6 +268,16 @@ function routes() {
       inputCostMicrosPerMillionTokens: 10,
       outputCostMicrosPerMillionTokens: 20,
     },
+    "maxpower/nutrition-vision-v1": {
+      endpoint: "https://vision.example/v1/chat/completions",
+      apiKey: "vision-secret",
+      model: "vendor-vision-model",
+      maxOutputTokens: 4_096,
+      inputCreditsPerMillionTokens: 10,
+      outputCreditsPerMillionTokens: 20,
+      inputCostMicrosPerMillionTokens: 100,
+      outputCostMicrosPerMillionTokens: 200,
+    },
   } as const;
 }
 
@@ -281,82 +295,3 @@ async function collect(chunks: AsyncIterable<OpenAiObject>): Promise<readonly Op
   for await (const chunk of chunks) collected.push(chunk);
   return collected;
 }
-
-test("a slow upstream stream survives past the header timeout as long as chunks keep arriving", async () => {
-  const encoder = new TextEncoder();
-  // The first chunk arrives after the 50ms header timeout; the second after an
-  // additional 300ms idle gap that stays inside the 800ms stream idle budget.
-  const provider = new OpenAiCompatibleLlmProviderAdapter({
-    routes: routes(),
-    timeoutMs: 50,
-    streamIdleTimeoutMs: 800,
-    streamOverallTimeoutMs: 5_000,
-    fetch: async () =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          async start(controller) {
-            controller.enqueue(
-              encoder.encode('data: {"id":"vendor","model":"vendor-coach-model","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"slow"}}]}\n\n'),
-            );
-            await new Promise((resolve) => setTimeout(resolve, 300));
-            controller.enqueue(
-              encoder.encode('data: {"id":"vendor","model":"vendor-coach-model","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}\n\ndata: [DONE]\n\n'),
-            );
-            controller.close();
-          },
-        }),
-        { status: 200, headers: { "content-type": "text/event-stream" } },
-      ),
-  });
-  const gateway = new LlmGateway({
-    provider,
-    entitlements: new InMemoryLlmEntitlementAdapter({ alice: { availableCredits: 100 } }),
-    usage: new InMemoryLlmUsageAdapter(),
-    fingerprintSecret: "provider-slow-stream-fingerprint",
-  });
-  const result = await gateway.invoke(principal("alice"), {
-    idempotencyKey: "provider-slow-stream-1",
-    request: { model: "maxpower/coach-v1", stream: true, messages: [] },
-  });
-  assert.equal(result.kind, "stream");
-  if (result.kind !== "stream") return;
-  const chunks = await collect(result.chunks);
-  assert.equal(chunks.length, 2);
-});
-
-test("a stalled upstream stream is aborted after the idle timeout", async () => {
-  const encoder = new TextEncoder();
-  const provider = new OpenAiCompatibleLlmProviderAdapter({
-    routes: routes(),
-    timeoutMs: 50,
-    streamIdleTimeoutMs: 120,
-    streamOverallTimeoutMs: 5_000,
-    fetch: async () =>
-      new Response(
-        new ReadableStream<Uint8Array>({
-          async start(controller) {
-            controller.enqueue(
-              encoder.encode('data: {"id":"vendor","model":"vendor-coach-model","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"stuck"}}]}\n\n'),
-            );
-            // Never produce another chunk; the idle timeout must end this.
-            await new Promise((resolve) => setTimeout(resolve, 3_000));
-            controller.close();
-          },
-        }),
-        { status: 200, headers: { "content-type": "text/event-stream" } },
-      ),
-  });
-  const gateway = new LlmGateway({
-    provider,
-    entitlements: new InMemoryLlmEntitlementAdapter({ alice: { availableCredits: 100 } }),
-    usage: new InMemoryLlmUsageAdapter(),
-    fingerprintSecret: "provider-stalled-stream-fingerprint",
-  });
-  const result = await gateway.invoke(principal("alice"), {
-    idempotencyKey: "provider-stalled-stream-1",
-    request: { model: "maxpower/coach-v1", stream: true, messages: [] },
-  });
-  assert.equal(result.kind, "stream");
-  if (result.kind !== "stream") return;
-  await assert.rejects(collect(result.chunks));
-});

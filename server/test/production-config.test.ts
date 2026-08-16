@@ -29,11 +29,19 @@ test("deletion worker config excludes HTTP, Redis, auth, OTP and LLM provider se
     NODE_ENV: environment.NODE_ENV,
     MAXPOWER_RUNTIME: environment.MAXPOWER_RUNTIME,
     DATABASE_URL: environment.DATABASE_URL,
+    S3_ENDPOINT: environment.S3_ENDPOINT,
+    S3_REGION: environment.S3_REGION,
+    S3_BUCKET: environment.S3_BUCKET,
+    S3_ACCESS_KEY_ID: environment.S3_ACCESS_KEY_ID,
+    S3_SECRET_ACCESS_KEY: environment.S3_SECRET_ACCESS_KEY,
+    S3_FORCE_PATH_STYLE: environment.S3_FORCE_PATH_STYLE,
+    MEDIA_TRANSFER_EXPIRY_SECONDS: environment.MEDIA_TRANSFER_EXPIRY_SECONDS,
     DELETION_WORKER_POLL_MS: environment.DELETION_WORKER_POLL_MS,
   };
 
   const config = parseProductionWorkerConfig(workerEnvironment);
   assert.equal(config.database.url, environment.DATABASE_URL);
+  assert.equal(config.objectStorage.bucket, environment.S3_BUCKET);
   assert.equal("llm" in config, false);
   assert.equal("auth" in config, false);
   assert.equal("rateLimitRedis" in config, false);
@@ -50,17 +58,17 @@ test("production config accepts a complete HTTPS/TLS-only deployment", () => {
   ]);
   assert.equal(config.http.strictTransportSecurity, true);
   assert.equal(config.streamRedis.persistence, "disabled");
+  assert.equal(config.media.transferExpirySeconds, 900);
   assert.equal(config.llm.monthlyFreeCredits, 2500);
   assert.deepEqual(config.auth.nativeSchemes, ["maxpower://"]);
   assert.equal(config.llm.routes["maxpower/coach-v1"].model, "coach-model");
   assert.equal(
-    config.llm.routes["maxpower/coach-v1"].endpoint,
-    "https://coach-provider.example/v1/chat/completions",
-  );
-  assert.equal(config.llm.usageRoutes["maxpower/coach-v1"].providerId, "coach-provider");
-  assert.equal(
     config.llm.routes["maxpower/coach-v1"].inputCostMicrosPerMillionTokens,
     1500,
+  );
+  assert.equal(
+    config.llm.usageRoutes["maxpower/nutrition-vision-v1"].pricingVersionId,
+    "nutrition-pricing-v1",
   );
   assert.deepEqual(config.llm.providerCostRoutes["maxpower/coach-v1"], {
     inputMicrosPerMillionTokens: 1500,
@@ -70,25 +78,10 @@ test("production config accepts a complete HTTPS/TLS-only deployment", () => {
     maxInputBytes: 65_536,
     maxInputTokens: 131_072,
     maxOutputTokens: 4_096,
+    maxImages: 4,
+    maxImageBytes: 65_536,
     reservationCredits: 140,
   });
-});
-
-test("production config permits explicit loopback HTTP CORS origins for local web development", () => {
-  const config = parseProductionConfig(validEnvironment({
-    HTTP_ALLOWED_ORIGINS: "https://app.maxpower.example,http://localhost:8081,http://127.0.0.1:8081,http://[::1]:8081",
-  }));
-  assert.deepEqual(config.http.allowedOrigins, [
-    "https://app.maxpower.example",
-    "http://localhost:8081",
-    "http://127.0.0.1:8081",
-    "http://[::1]:8081",
-  ]);
-  assert.deepEqual(config.auth.trustedOrigins, ["https://app.maxpower.example"]);
-  assert.throws(
-    () => parseProductionConfig(validEnvironment({ HTTP_ALLOWED_ORIGINS: "http://app.maxpower.example" })),
-    /loopback HTTP origins/,
-  );
 });
 
 test("production config fails closed on insecure external URLs and weak secrets", () => {
@@ -106,6 +99,10 @@ test("production config fails closed on insecure external URLs and weak secrets"
       /AUTH_BASE_URL.*exact HTTPS origin/i,
     );
   }
+  assert.throws(
+    () => parseProductionConfig(validEnvironment({ LLM_PROVIDER_ENDPOINT: "http://llm.example/v1/chat/completions" })),
+    /LLM_PROVIDER_ENDPOINT.*HTTPS/i,
+  );
   assert.throws(
     () => parseProductionConfig(validEnvironment({ AUTH_SECRET: "short" })),
     /AUTH_SECRET.*32/i,
@@ -153,7 +150,7 @@ test("production config reports every missing variable in one startup error", ()
       assert.ok(error instanceof ProductionConfigurationError);
       assert.match(error.message, /DATABASE_URL/);
       assert.match(error.message, /AUTH_SECRET/);
-      assert.match(error.message, /LLM_COACH_PROVIDER_API_KEY/);
+      assert.match(error.message, /LLM_PROVIDER_API_KEY/);
       return true;
     },
   );
@@ -187,9 +184,16 @@ function validEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
     APPLE_BUNDLE_IDENTIFIER: "com.maxpower.ios",
     OTP_DELIVERY_ENDPOINT: "https://notify.maxpower.example/v1/otp",
     OTP_DELIVERY_BEARER_TOKEN: "otp-delivery-token",
-    LLM_COACH_PROVIDER_ENDPOINT: "https://coach-provider.example/v1/chat/completions",
-    LLM_COACH_PROVIDER_API_KEY: "coach-provider-secret",
-    LLM_COACH_PROVIDER_ID: "coach-provider",
+    S3_ENDPOINT: "https://objects.maxpower.example",
+    S3_REGION: "us-east-1",
+    S3_BUCKET: "maxpower-private-media",
+    S3_ACCESS_KEY_ID: "s3-access-key",
+    S3_SECRET_ACCESS_KEY: "s3-secret-key",
+    S3_FORCE_PATH_STYLE: "false",
+    MEDIA_TRANSFER_EXPIRY_SECONDS: "900",
+    LLM_PROVIDER_ENDPOINT: "https://llm-provider.example/v1/chat/completions",
+    LLM_PROVIDER_API_KEY: "provider-secret",
+    LLM_PROVIDER_ID: "primary-openai-compatible",
     LLM_COACH_MODEL: "coach-model",
     LLM_COACH_INPUT_CREDITS_PER_MILLION: "1000",
     LLM_COACH_OUTPUT_CREDITS_PER_MILLION: "2000",
@@ -197,10 +201,21 @@ function validEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv 
     LLM_COACH_MAX_INPUT_BYTES: "65536",
     LLM_COACH_MAX_INPUT_TOKENS: "131072",
     LLM_COACH_MAX_OUTPUT_TOKENS: "4096",
-    LLM_COACH_MAX_IMAGES: "0",
-    LLM_COACH_MAX_IMAGE_BYTES: "0",
+    LLM_COACH_MAX_IMAGES: "4",
+    LLM_COACH_MAX_IMAGE_BYTES: "65536",
     LLM_COACH_PROVIDER_INPUT_COST_MICROS_PER_MILLION: "1500",
     LLM_COACH_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION: "6000",
+    LLM_NUTRITION_MODEL: "nutrition-model",
+    LLM_NUTRITION_INPUT_CREDITS_PER_MILLION: "3000",
+    LLM_NUTRITION_OUTPUT_CREDITS_PER_MILLION: "4000",
+    LLM_NUTRITION_PRICING_VERSION_ID: "nutrition-pricing-v1",
+    LLM_NUTRITION_MAX_INPUT_BYTES: "524288",
+    LLM_NUTRITION_MAX_INPUT_TOKENS: "1048576",
+    LLM_NUTRITION_MAX_OUTPUT_TOKENS: "2048",
+    LLM_NUTRITION_MAX_IMAGES: "4",
+    LLM_NUTRITION_MAX_IMAGE_BYTES: "393216",
+    LLM_NUTRITION_PROVIDER_INPUT_COST_MICROS_PER_MILLION: "2500",
+    LLM_NUTRITION_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION: "10000",
     LLM_FINGERPRINT_SECRET: "fingerprint-secret-with-at-least-32-characters",
     LLM_MONTHLY_FREE_CREDITS: "2500",
     DELETION_WORKER_POLL_MS: "1000",

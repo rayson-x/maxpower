@@ -2,6 +2,7 @@ import type { Principal } from "../../kernel/principal.js";
 
 export const PRODUCT_ALIASES = [
   "maxpower/coach-v1",
+  "maxpower/nutrition-vision-v1",
 ] as const;
 
 export type ProductAlias = (typeof PRODUCT_ALIASES)[number];
@@ -9,15 +10,6 @@ export type ProductAlias = (typeof PRODUCT_ALIASES)[number];
 export const PUBLIC_MODEL_NAME = "maxpower-cloud";
 
 export type OpenAiObject = Readonly<Record<string, unknown>>;
-
-export type OpenAiToolChoice =
-  | "auto"
-  | "none"
-  | "required"
-  | Readonly<{
-      type: "function";
-      function: Readonly<{ name: string }>;
-    }>;
 
 /** The intentionally small OpenAI Chat Completions subset accepted by the module. */
 export interface OpenAiChatCompletionRequest {
@@ -28,12 +20,7 @@ export interface OpenAiChatCompletionRequest {
   readonly max_tokens?: number | undefined;
   readonly max_completion_tokens?: number | undefined;
   readonly parallel_tool_calls?: false | undefined;
-  /** Pi/OpenAI compatibility input. Provider retention is always disabled by policy. */
-  readonly store?: false | undefined;
-  /** Accepted for Pi compatibility; public usage remains intentionally undisclosed. */
-  readonly stream_options?: Readonly<{ include_usage: true }> | undefined;
   readonly temperature?: number | undefined;
-  readonly tool_choice?: OpenAiToolChoice | undefined;
   readonly response_format?: Readonly<{ type: "json_object" }> | undefined;
 }
 

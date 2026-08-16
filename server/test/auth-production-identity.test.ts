@@ -69,6 +69,10 @@ test("production identity completes an OTP-proven registration before issuing a 
     scopes: [
       "account:read",
       "account:delete",
+      "data:read",
+      "data:write",
+      "media:read",
+      "media:write",
       "llm:invoke",
     ],
   }]);
@@ -146,6 +150,10 @@ test("new Google or Apple accounts complete terms onboarding without a password"
     scopes: [
       "account:read",
       "account:delete",
+      "data:read",
+      "data:write",
+      "media:read",
+      "media:write",
       "llm:invoke",
     ],
   }]);

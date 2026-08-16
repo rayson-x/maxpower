@@ -12,17 +12,13 @@ test("production container is multi-stage, non-root, and health checked", async 
   assert.match(dockerfile, /CMD \["node", "dist\/index\.js"\]/);
 });
 
-test("compose publishes the reviewed API port and runs API, migrations, and deletion worker from one image", async () => {
+test("compose keeps the API private and runs API, migrations, and deletion worker from one image", async () => {
   const compose = await readFile(new URL("../docker-compose.yml", import.meta.url), "utf8");
   assert.match(compose, /api:/);
   assert.match(compose, /worker:/);
   assert.match(compose, /migrate:/);
   assert.match(compose, /expose:\s*\n\s*- "8787"/);
-  assert.match(compose, /ports:\s*\n\s*- "\$\{MAXPOWER_BIND_ADDRESS:-0\.0\.0\.0\}:\$\{MAXPOWER_HOST_PORT:-3000\}:8787"/);
-  assert.match(compose, /NODE_EXTRA_CA_CERTS=\/etc\/maxpower\/pki\/ca\.crt/);
-  assert.match(compose, /\$\{MAXPOWER_CA_CERT_PATH:-\.\.\/maxpower-infra\/pki\/ca\.crt\}:\/etc\/maxpower\/pki\/ca\.crt:ro/);
-  assert.match(compose, /external: true/);
-  assert.match(compose, /name: \$\{MAXPOWER_PRIVATE_NETWORK:-maxpower-private\}/);
+  assert.doesNotMatch(compose, /\n\s+ports:/);
   assert.match(compose, /read_only: true/);
   assert.match(compose, /no-new-privileges:true/);
   assert.match(compose, /STREAM_REDIS_PERSISTENCE=disabled/);

@@ -7,14 +7,6 @@ import type { LlmGatewayModule, OpenAiObject } from "../../modules/llm/model.js"
 import { authenticate, type AccessTokenVerifier } from "../authenticate.js";
 import { readJson, requireHeader } from "../request.js";
 
-const toolChoiceSchema = z.union([
-  z.enum(["auto", "none", "required"]),
-  z.object({
-    type: z.literal("function"),
-    function: z.object({ name: z.string().trim().min(1).max(128) }).strict(),
-  }).strict(),
-]);
-
 const chatCompletionSchema = z
   .object({
     model: z.string(),
@@ -24,10 +16,7 @@ const chatCompletionSchema = z
     max_tokens: z.number().int().positive().optional(),
     max_completion_tokens: z.number().int().positive().optional(),
     parallel_tool_calls: z.literal(false).optional(),
-    store: z.literal(false).optional(),
-    stream_options: z.object({ include_usage: z.literal(true) }).strict().optional(),
     temperature: z.number().min(0).max(2).optional(),
-    tool_choice: toolChoiceSchema.optional(),
     response_format: z.object({ type: z.literal("json_object") }).strict().optional(),
   })
   .strict();

@@ -25,7 +25,7 @@ test("live verifier validates the signature first and returns current session au
     sessionId: "session_123",
     expiresAt: new Date("2026-08-11T00:00:00.000Z"),
     accountStatus: "active",
-    scopes: new Set(["account:read", "llm:invoke"]),
+    scopes: new Set(["data:read", "llm:invoke"]),
   }, calls);
   const verifier = new LiveSessionAccessTokenVerifier({
     signedTokens: {
@@ -48,7 +48,7 @@ test("live verifier validates the signature first and returns current session au
     accountId: "account_123",
     sessionId: "session_123",
     status: "active",
-    scopes: new Set(["account:read", "llm:invoke"]),
+    scopes: new Set(["data:read", "llm:invoke"]),
   });
 });
 

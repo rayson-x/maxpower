@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { S3Client } from "@aws-sdk/client-s3";
 import { Pool } from "pg";
 
 import { parseProductionConfig } from "../src/config/production-config.js";
@@ -10,7 +11,13 @@ test("production runtime composes only durable adapters behind hardened HTTP mid
   const postgres = new Pool({
     connectionString: "postgresql://maxpower:secret@db.example/maxpower?sslmode=require",
   });
+  const objectStorage = new S3Client({
+    endpoint: "https://objects.maxpower.example",
+    region: "us-east-1",
+    credentials: { accessKeyId: "test", secretAccessKey: "test" },
+  });
   t.after(async () => {
+    objectStorage.destroy();
     await postgres.end();
   });
   const redisCommands: string[][] = [];
@@ -29,6 +36,7 @@ test("production runtime composes only durable adapters behind hardened HTTP mid
     postgres,
     rateLimitRedis: redis,
     streamRedis: redis,
+    objectStorage,
     async close() {},
   }, {
     writeLogLine(line) { logLines.push(line); },
@@ -42,6 +50,8 @@ test("production runtime composes only durable adapters behind hardened HTTP mid
   assert.equal(health.headers.get("access-control-allow-origin"), "https://app.maxpower.example");
   assert.deepEqual(runtime.adapterKinds, {
     identity: "better-auth-postgres",
+    productData: "postgres",
+    media: "s3-private",
     entitlement: "postgres-ledger",
     llmProvider: "openai-compatible",
     streamBuffer: "redis-volatile",
@@ -98,9 +108,16 @@ function validEnvironment(): NodeJS.ProcessEnv {
     APPLE_BUNDLE_IDENTIFIER: "com.maxpower.ios",
     OTP_DELIVERY_ENDPOINT: "https://notify.maxpower.example/v1/otp",
     OTP_DELIVERY_BEARER_TOKEN: "otp-delivery-token",
-    LLM_COACH_PROVIDER_ENDPOINT: "https://coach-provider.example/v1/chat/completions",
-    LLM_COACH_PROVIDER_API_KEY: "coach-provider-secret",
-    LLM_COACH_PROVIDER_ID: "coach-provider",
+    S3_ENDPOINT: "https://objects.maxpower.example",
+    S3_REGION: "us-east-1",
+    S3_BUCKET: "maxpower-private-media",
+    S3_ACCESS_KEY_ID: "s3-access-key",
+    S3_SECRET_ACCESS_KEY: "s3-secret-key",
+    S3_FORCE_PATH_STYLE: "false",
+    MEDIA_TRANSFER_EXPIRY_SECONDS: "900",
+    LLM_PROVIDER_ENDPOINT: "https://llm-provider.example/v1/chat/completions",
+    LLM_PROVIDER_API_KEY: "provider-secret",
+    LLM_PROVIDER_ID: "primary-openai-compatible",
     LLM_COACH_MODEL: "coach-model",
     LLM_COACH_INPUT_CREDITS_PER_MILLION: "1000",
     LLM_COACH_OUTPUT_CREDITS_PER_MILLION: "2000",
@@ -108,10 +125,21 @@ function validEnvironment(): NodeJS.ProcessEnv {
     LLM_COACH_MAX_INPUT_BYTES: "65536",
     LLM_COACH_MAX_INPUT_TOKENS: "131072",
     LLM_COACH_MAX_OUTPUT_TOKENS: "4096",
-    LLM_COACH_MAX_IMAGES: "0",
-    LLM_COACH_MAX_IMAGE_BYTES: "0",
+    LLM_COACH_MAX_IMAGES: "4",
+    LLM_COACH_MAX_IMAGE_BYTES: "65536",
     LLM_COACH_PROVIDER_INPUT_COST_MICROS_PER_MILLION: "1500",
     LLM_COACH_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION: "6000",
+    LLM_NUTRITION_MODEL: "nutrition-model",
+    LLM_NUTRITION_INPUT_CREDITS_PER_MILLION: "3000",
+    LLM_NUTRITION_OUTPUT_CREDITS_PER_MILLION: "4000",
+    LLM_NUTRITION_PRICING_VERSION_ID: "nutrition-pricing-v1",
+    LLM_NUTRITION_MAX_INPUT_BYTES: "524288",
+    LLM_NUTRITION_MAX_INPUT_TOKENS: "1048576",
+    LLM_NUTRITION_MAX_OUTPUT_TOKENS: "2048",
+    LLM_NUTRITION_MAX_IMAGES: "4",
+    LLM_NUTRITION_MAX_IMAGE_BYTES: "393216",
+    LLM_NUTRITION_PROVIDER_INPUT_COST_MICROS_PER_MILLION: "2500",
+    LLM_NUTRITION_PROVIDER_OUTPUT_COST_MICROS_PER_MILLION: "10000",
     LLM_FINGERPRINT_SECRET: "fingerprint-secret-with-at-least-32-characters",
     LLM_MONTHLY_FREE_CREDITS: "2500",
     DELETION_WORKER_POLL_MS: "1000",

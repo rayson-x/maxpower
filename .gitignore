@@ -90,3 +90,6 @@ tools/harness/out/
 /modules/pose-camera/ios/Frameworks/
 /modules/pose-camera/android/build/rustJni/
 /modules/pose-camera/android/src/main/jniLibs/
+
+# Local working notes / ticket-spec staging (moved to GitHub Issues flow)
+.scratch/
