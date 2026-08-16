@@ -63,6 +63,8 @@ export function validateAdaptivePlanCandidate(input: {
   recoveryContext?: import("./recoveryWindows").RecoveryContext;
   today: string;
   safetyBlocked: boolean;
+  /** 已安装目录的 variant id 全集（kernel 注入）；候选任务引用目录外 id 即拦截。 */
+  knownExerciseVariantIds?: readonly string[];
   allowedPreferenceRefs?: readonly string[];
   allowedEnergyRange?: { min: number; max: number };
 }): AdaptivePlanValidation {
@@ -90,11 +92,32 @@ export function validateAdaptivePlanCandidate(input: {
       break;
     }
   }
-  if (!candidate.planRevision.goalContractRef) {
-    issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：goalContractRef = { id: "${input.goal.value.id}", revision: ${input.goal.revision} }（原样复制，不要自行发明或省略 revision）`));
-  } else if (candidate.planRevision.goalContractRef.id !== input.goal.value.id || candidate.planRevision.goalContractRef.revision !== input.goal.revision) issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：goalContractRef = { id: "${input.goal.value.id}", revision: ${input.goal.revision} }（原样复制，不要自行发明或省略 revision）`));
+  for (const session of candidate.planRevision.sessions) {
+    // title 是 UI 的一等输入（Today/计划页直接渲染）；模型偶发给 null——拦在提交时。
+    if (typeof session.title !== "string" || !session.title.trim()) {
+      issues.push(issue("session_title_missing", `planRevision.sessions.${session.id}.title`, "每个 session 必须有非空 title（如「胸+肩推」），它会直接显示在今日与计划页"));
+    }
+  }
+  // goalContractRef 必须是完整聚合引用（含 kind）——缺 kind 的引用能过 id/revision 比对，
+  // 但会在领域事件引用校验（aggregateKey(kind,id)）处炸成提交失败。
+  const expectedGoalRef = `goalContractRef = { kind: "goal_contract", id: "${input.goal.value.id}", revision: ${input.goal.revision} }（含 kind，原样复制）`;
+  const goalRef = candidate.planRevision.goalContractRef;
+  if (!goalRef || goalRef.kind !== "goal_contract" || goalRef.id !== input.goal.value.id || goalRef.revision !== input.goal.revision) {
+    issues.push(issue("goal_ref_mismatch", "planRevision.goalContractRef", `候选必须绑定当前目标版本：${expectedGoalRef}`));
+  }
+  const nutritionGoalRef = candidate.nutritionStrategy?.goalContractRef;
+  if (candidate.nutritionStrategy && (!nutritionGoalRef || nutritionGoalRef.kind !== "goal_contract" || nutritionGoalRef.id !== input.goal.value.id || nutritionGoalRef.revision !== input.goal.revision)) {
+    issues.push(issue("goal_ref_mismatch", "nutritionStrategy.goalContractRef", `营养策略同样必须绑定当前目标版本：${expectedGoalRef}`));
+  }
   if (candidate.planRevision.sessions.some((session) => session.scheduledFor < input.today)) issues.push(issue("candidate_not_future_only", "planRevision.sessions", "候选不能修改过去"));
   if (!candidate.planRevision.sessions.length) issues.push(issue("executable_session_missing", "planRevision.sessions", "当前阶段至少需要一个可执行训练安排"));
+  if (input.knownExerciseVariantIds) {
+    const known = new Set(input.knownExerciseVariantIds);
+    const unknown = [...new Set(candidate.planRevision.sessions.flatMap((session) => session.tasks.map((task) => task.exerciseVariantId)).filter((id): id is string => typeof id === "string" && id.length > 0))].filter((id) => !known.has(id));
+    if (unknown.length) {
+      issues.push(issue("exercise_variant_unknown", "planRevision.sessions.tasks.exerciseVariantId", `任务引用了目录里不存在的动作变体：${unknown.slice(0, 6).join("、")}${unknown.length > 6 ? " 等" : ""}。用 knowledge.search_installed 查真实 variant id（目录条目有官方 id），不要自行编造`));
+    }
+  }
   const unsafeText = /(?:\b(?:starv(?:e|ing)|fast(?:ing)?|purge|vomit|laxative|dehydrat(?:e|ion))\b|禁食|绝食|不吃东西|催吐|泻药|脱水|断水)/iu;
   if ([...candidate.behaviorChanges.map((change) => change.instruction), ...candidate.rationale, ...candidate.expectedTradeoffs].some((text) => unsafeText.test(text))) {
     issues.push(issue("unsafe_behavior_instruction", "candidate", "固定安全规则拒绝极端节食、催吐、脱水或其他危险行为"));

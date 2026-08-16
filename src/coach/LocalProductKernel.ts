@@ -1776,7 +1776,7 @@ export class LocalProductKernel {
           candidateNutrition: input.candidate.nutritionStrategy,
         })
       : undefined;
-    const validation = validateAdaptivePlanCandidate({
+    const validation = validateAdaptivePlanCandidate({ knownExerciseVariantIds: this.knowledge.search({}).map((variant) => variant.id),
       candidate: input.candidate,
       goal: domain.goalContract,
       profile: domain.profile.value,
@@ -1872,7 +1872,7 @@ export class LocalProductKernel {
     const counterfactual = domain.plan && assessment && proposal.candidate.nutritionStrategy
       ? this.goalPath.compareCandidate({ snapshot: goalPathSnapshot!, assessment, goal: domain.goalContract.value, currentPlan: domain.plan.value, ...(currentNutrition ? { currentNutrition: currentNutrition.value } : {}), candidatePlan: proposal.candidate.planRevision, candidateNutrition: proposal.candidate.nutritionStrategy })
       : undefined;
-    const validation = validateAdaptivePlanCandidate({ candidate: proposal.candidate, goal: domain.goalContract, profile: domain.profile.value, mandate: domain.mandate.value, ...(domain.plan ? { currentPlan: domain.plan } : {}), ...(currentNutrition ? { currentNutrition } : {}), ...(assessment ? { assessment } : {}), ...(counterfactual ? { counterfactual } : {}), recoveryContext: this.currentRecoveryContext(domain), today: this.runtime.now().slice(0, 10), safetyBlocked: domain.safetyConstraints.some((constraint) => constraint.value.disposition !== "clear") || assessment?.materialSignal === "hard_safety", allowedEnergyRange: deriveGoalEnergyGuardrail(domain.profile.value, domain.goalContract.value, personalEnergy.calibration.maintenanceRange), allowedPreferenceRefs: [`profile:${domain.profile.value.id}`, ...planningContext.outcomes.map((outcome) => outcome.id), ...snapshot.workingMemory.filter((memory) => memory.userId === input.userId && !memory.deletedAt && !memory.supersededBy).map((memory) => memory.id)] });
+    const validation = validateAdaptivePlanCandidate({ knownExerciseVariantIds: this.knowledge.search({}).map((variant) => variant.id), candidate: proposal.candidate, goal: domain.goalContract, profile: domain.profile.value, mandate: domain.mandate.value, ...(domain.plan ? { currentPlan: domain.plan } : {}), ...(currentNutrition ? { currentNutrition } : {}), ...(assessment ? { assessment } : {}), ...(counterfactual ? { counterfactual } : {}), recoveryContext: this.currentRecoveryContext(domain), today: this.runtime.now().slice(0, 10), safetyBlocked: domain.safetyConstraints.some((constraint) => constraint.value.disposition !== "clear") || assessment?.materialSignal === "hard_safety", allowedEnergyRange: deriveGoalEnergyGuardrail(domain.profile.value, domain.goalContract.value, personalEnergy.calibration.maintenanceRange), allowedPreferenceRefs: [`profile:${domain.profile.value.id}`, ...planningContext.outcomes.map((outcome) => outcome.id), ...snapshot.workingMemory.filter((memory) => memory.userId === input.userId && !memory.deletedAt && !memory.supersededBy).map((memory) => memory.id)] });
     if (validation.status !== "valid") throw new Error(`adaptive_plan_revalidation_failed:${validation.issues.map((issue) => issue.code).join(",")}`);
     const planId = domain.plan?.value.id ?? proposal.candidate.planRevision.id;
     const nextPlanRevision = (domain.plan?.revision ?? 0) + 1;

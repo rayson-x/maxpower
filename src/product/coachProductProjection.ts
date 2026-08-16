@@ -804,7 +804,8 @@ function productSession(
   });
   return {
     id: session.id,
-    title: session.title,
+    // 已确认的候选仍可能带 null title（早期候选校验未覆盖）——渲染层兜底，永不白屏。
+    title: session.title ?? "训练",
     kind: session.kind ?? "weighted_reps",
     scheduledFor: session.scheduledFor,
     ...(session.estimatedDuration || session.durationBudget
