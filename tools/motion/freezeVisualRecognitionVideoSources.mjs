@@ -42,7 +42,7 @@ const semantic = {
   admission: 'immutable_source',
   authority: 'user_source',
   groupKey: 'sourceCaptureId',
-  allowedTask: 'failure_review',
+  allowedTask: 'known_video_runtime_evaluation',
   archiveManifestSha256: sha256(archiveManifestBytes),
   contextCount: contextRows.length,
   uniqueSourceCount: sources.length,

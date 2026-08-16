@@ -137,7 +137,9 @@ impl InferenceAdapter for Fixture {
     }
 }
 
-fn canonical_bench_packets() -> (
+fn canonical_bench_packets_with_incident(
+    include_bounded_loss: bool,
+) -> (
     Vec<maxpower_motion_sdk::MotionPacket>,
     maxpower_motion_sdk::MotionSetClosure,
 ) {
@@ -155,7 +157,7 @@ fn canonical_bench_packets() -> (
             sequence_id: "fixture:assessment-tracer".into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: 720,
@@ -174,7 +176,7 @@ fn canonical_bench_packets() -> (
                 .copied()
                 .enumerate()
                 .map(|(index, progress)| {
-                    (index == 18)
+                    (include_bounded_loss && index == 18)
                         .then(|| FrameObservations {
                             pose_candidates: Vec::new(),
                             equipment: Vec::new(),
@@ -201,7 +203,7 @@ fn canonical_bench_packets() -> (
             binding.motion_plan.expect("compiled action plan"),
         )
         .expect("plan-bound profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..progress.len() as u64 {
         session
@@ -224,6 +226,20 @@ fn canonical_bench_packets() -> (
         "the assessment engine must consume RepEngine output, not count a second time"
     );
     (packets, closure)
+}
+
+fn canonical_bench_packets() -> (
+    Vec<maxpower_motion_sdk::MotionPacket>,
+    maxpower_motion_sdk::MotionSetClosure,
+) {
+    canonical_bench_packets_with_incident(true)
+}
+
+fn canonical_bench_packets_without_incident() -> (
+    Vec<maxpower_motion_sdk::MotionPacket>,
+    maxpower_motion_sdk::MotionSetClosure,
+) {
+    canonical_bench_packets_with_incident(false)
 }
 
 fn video_context() -> VideoRecognitionContext {
@@ -364,6 +380,38 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
         }),
         "post-seal features and rules are receipted only after assessment executes them"
     );
+    for assessment in &report.rep_assessments {
+        let feature_receipt = assessment
+            .execution_receipts
+            .iter()
+            .find(|receipt| {
+                receipt.category == maxpower_motion_sdk::AlgorithmModuleCategory::PostSealFeature
+            })
+            .expect("post-seal feature receipt");
+        assert!(
+            feature_receipt
+                .input_fact_ids
+                .contains(&format!("sealed_rep:{}", assessment.rep.rep_id))
+        );
+        assert!(feature_receipt.input_fact_ids.iter().all(|fact| {
+            fact == &format!("sealed_rep:{}", assessment.rep.rep_id)
+                || fact.starts_with("canonical_pose:")
+        }));
+        let rule_receipt = assessment
+            .execution_receipts
+            .iter()
+            .find(|receipt| {
+                receipt.category == maxpower_motion_sdk::AlgorithmModuleCategory::QualityRule
+            })
+            .expect("quality rule receipt");
+        assert!(
+            rule_receipt
+                .input_fact_ids
+                .iter()
+                .all(|fact| fact.starts_with("comparison:")),
+            "quality rules consume evaluated comparison facts, not decorative feature IDs"
+        );
+    }
     assert!(!report.dimension_findings.is_empty());
     assert!(!report.set_patterns.is_empty());
 
@@ -452,8 +500,10 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
                         | TraceNodeKind::LocalCoordinate
                         | TraceNodeKind::PoseEquipmentFusion
                         | TraceNodeKind::AlgorithmExecution
+                        | TraceNodeKind::RepBoundary
+                        | TraceNodeKind::ReferenceComparison
                 )),
-                "an execution receipt must name concrete prior evidence or a prior executor"
+                "an execution receipt must name its concrete source, sealed Rep, comparison, or prior executor"
             ),
             TraceNodeKind::RepBoundary => {
                 assert!(node.input_node_ids.iter().all(|node_id| matches!(
@@ -461,11 +511,18 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
                     TraceNodeKind::AlgorithmExecution | TraceNodeKind::EvidenceIncident
                 )));
             }
-            TraceNodeKind::RuleConclusion => assert!(
-                node.input_node_ids
-                    .iter()
-                    .all(|node_id| kind_for(node_id) == TraceNodeKind::ReferenceComparison)
-            ),
+            TraceNodeKind::RuleConclusion => {
+                assert!(
+                    node.input_node_ids
+                        .iter()
+                        .any(|node_id| { kind_for(node_id) == TraceNodeKind::AlgorithmExecution })
+                );
+                assert!(
+                    node.input_node_ids
+                        .iter()
+                        .any(|node_id| { kind_for(node_id) == TraceNodeKind::ReferenceComparison })
+                );
+            }
             TraceNodeKind::SetPattern => assert!(
                 node.input_node_ids
                     .iter()
@@ -507,7 +564,12 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
         .find(|node| node.node_id == format!("rep:{first_rep_id}:rule:range_of_motion"))
         .expect("range rule node");
     assert_eq!(
-        range_rule.input_node_ids,
+        range_rule
+            .input_node_ids
+            .iter()
+            .filter(|node_id| kind_for(node_id) == TraceNodeKind::ReferenceComparison)
+            .cloned()
+            .collect::<Vec<_>>(),
         [
             format!("rep:{first_rep_id}:comparison:authorization_range_of_motion"),
             format!("rep:{first_rep_id}:comparison:motion_relation:task_primary"),
@@ -538,8 +600,18 @@ fn canonical_packet_produces_rep_set_quality_and_auditable_causal_trace() {
             .find(|node| node.node_id == format!("rep:{first_rep_id}:rule:{dimension}"))
             .expect("typed categorical rule node");
         assert_eq!(
-            rule.input_node_ids, expected_inputs,
+            rule.input_node_ids
+                .iter()
+                .filter(|node_id| kind_for(node_id) == TraceNodeKind::ReferenceComparison)
+                .cloned()
+                .collect::<Vec<_>>(),
+            expected_inputs,
             "TaskPrimary, Rep disposition and Bundle authorization must be evaluated facts, not decorative edges"
+        );
+        assert!(
+            rule.input_node_ids
+                .iter()
+                .any(|node_id| { kind_for(node_id) == TraceNodeKind::AlgorithmExecution })
         );
     }
 
@@ -578,7 +650,7 @@ fn same_workout_reference_is_read_before_the_current_set_is_published() {
                 performed_load: None,
             }))
             .expect("start set");
-        let (packets, closure) = canonical_bench_packets();
+        let (packets, closure) = canonical_bench_packets_without_incident();
         for packet in packets {
             engine
                 .advance(AssessmentEvent::CanonicalPacketObserved(Box::new(packet)))
@@ -938,7 +1010,7 @@ fn governed_real_bench_video_runs_the_same_public_tracer_seam() {
             sequence_id: CAPTURE_ID.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: raw["source"]["widthPx"].as_u64().expect("width") as u32,
@@ -966,7 +1038,7 @@ fn governed_real_bench_video_runs_the_same_public_tracer_seam() {
             binding.motion_plan.expect("compiled action plan"),
         )
         .expect("plan-bound profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for (frame_id, timestamp) in frame_ids.into_iter().zip(timestamps) {
         session

@@ -4,7 +4,8 @@
 
 **Blocked by:** 01 — 建立可复用识别算法模块库.
 
-**Status:** complete
+**Status:** complete — re-accepted after removing pose geometry fallbacks,
+hardening raw pixel geometry, and requiring sustained common motion for grip.
 
 ## Audit context and non-negotiable constraints
 
@@ -64,3 +65,9 @@ context is selected, legacy host geometry ingress is rejected. Only the
 Rust-selected Provider may create raw observations for that set, so a client
 cannot use a wrist-aligned box or arbitrary axis proposal to bypass provider,
 association, grip and fusion provenance.
+
+Re-acceptance proves that a lone scene edge is not a measured shaft, an
+equipment-primary point coordinate cannot freeze from pose before grip, and a
+single wrist-aligned frame remains `ContactCandidate`. Grip now requires
+continuous contact plus two independently observed common-motion transitions;
+all equipment fusion, local-coordinate and Rep contracts pass.

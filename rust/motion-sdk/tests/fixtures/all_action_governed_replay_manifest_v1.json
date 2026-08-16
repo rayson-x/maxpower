@@ -1,7 +1,7 @@
 {
   "schemaVersion": "maxpower-governed-replay-manifest/v1",
   "bundleId": "visual-recognition-v0.1-known-video-regression",
-  "assembledInputSha256": "c809664df9b7c0cddd71ea28e7b19bdf0d11106686c3e43a5d431ad03363289e",
+  "assembledInputSha256": "1eb9e0c04ddc4c8aaa9be8f63a0e1f91eef453d40df8b8e4984901ca0fdb7ae3",
   "assembledInput": {
     "task": "known_video_rep_counting_regression",
     "sourceAssets": [
@@ -48,16 +48,29 @@
         "authority": "user_source",
         "groupKey": "sourceCaptureId",
         "consumedForTasks": [
-          "failure_review"
+          "known_video_runtime_evaluation"
         ],
         "selectedFields": [
           "video pixels for ExecutionContract-authorized visual equipment providers"
+        ]
+      },
+      {
+        "assetId": "maxpower-motion-sdk-wasm",
+        "admission": "protected",
+        "authority": "application_runtime",
+        "groupKey": "not_applicable",
+        "consumedForTasks": [
+          "client_runtime_parity"
+        ],
+        "immutableSha256": "2687e7fc5f44e7702c6540c1ccde258b391ae65f3dc56914a210809ce83d6d74",
+        "selectedFields": [
+          "WebAssembly runtime bytes"
         ]
       }
     ],
     "equipmentVideoSourceManifest": {
       "path": "rust/motion-sdk/tests/fixtures/visual_recognition_v0_1_video_sources.json",
-      "sha256": "0ed5f59f06e1cf99aef6e84b253739738dc49c39f10cafee05e964475f5dd6b2"
+      "sha256": "da9e6e65ea4ed03f35e8b2b9173e2495cd98af40b768b03035e4a7036e3ce03b"
     },
     "exclusions": {
       "path": "catalog/exclusions.json",
@@ -76,7 +89,7 @@
       "assessmentCatalogId": "maxpower/visual-recognition-baseline/v0.1",
       "poseRuntimeId": "rtmpose-m",
       "poseSchema": "halpe26/v1",
-      "packetContract": "1.10",
+      "packetContract": "1.11",
       "equipmentProvider": "maxpower_motion_sdk::EquipmentProviderRegistry",
       "equipmentActivationAuthority": "ExecutionContract",
       "countedDispositions": [

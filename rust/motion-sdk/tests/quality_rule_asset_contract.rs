@@ -4,6 +4,50 @@ use maxpower_motion_sdk::{
 };
 
 #[test]
+fn installed_uncalibrated_quality_assets_abstain_at_rep_and_set_scope() {
+    let registry = visual_recognition_baseline_registry_v0_1().expect("installed action library");
+    for bundle in &registry.runtime_catalog().bundles {
+        let rule_pack = registry
+            .runtime_catalog()
+            .installed_assets
+            .iter()
+            .find(|asset| {
+                asset.kind == AssessmentAssetKind::RulePack
+                    && asset.id == bundle.lineage.rule_pack.id
+            })
+            .expect("exact-context RulePack");
+        let range_rule = rule_pack.content["repRules"]
+            .as_array()
+            .expect("Rep rules")
+            .iter()
+            .find(|rule| rule["dimension"] == "range_of_motion")
+            .expect("range Rep rule");
+        assert_eq!(range_rule["operator"], "abstain", "{}", bundle.bundle_id);
+
+        let aggregation = registry
+            .runtime_catalog()
+            .installed_assets
+            .iter()
+            .find(|asset| {
+                asset.kind == AssessmentAssetKind::SetAggregationPolicy
+                    && asset.id == bundle.lineage.set_aggregation_policy.id
+            })
+            .expect("exact-context SetAggregationPolicy");
+        let range_set_rule = aggregation.content["setRules"]
+            .as_array()
+            .expect("set rules")
+            .iter()
+            .find(|rule| rule["dimension"] == "range_of_motion")
+            .expect("range set rule");
+        assert_eq!(
+            range_set_rule["operator"], "rollup_rep_dimension",
+            "{} must not resurrect an uncalibrated ROM verdict at set scope",
+            bundle.bundle_id
+        );
+    }
+}
+
+#[test]
 fn offline_quality_assets_install_atomically_without_action_or_review_state() {
     let mut registry =
         visual_recognition_baseline_registry_v0_1().expect("installed action library");
@@ -22,8 +66,10 @@ fn offline_quality_assets_install_atomically_without_action_or_review_state() {
     let package = QualityRuleAssetPackage {
         schema_version: QUALITY_RULE_ASSET_PACKAGE_SCHEMA.into(),
         package_id: "bench-front-quality-rules-v2".into(),
+        asset_version: "v2".into(),
         action_id: bundle.exact_context.action_id.clone(),
         capture_view: AssessmentCaptureView::Front,
+        exact_context: bundle.exact_context.clone(),
         bundle_id: bundle.bundle_id.clone(),
         expected_bundle_hash: bundle.content_hash.clone(),
         feature_program: cloned_quality_asset(
@@ -89,8 +135,10 @@ fn stale_quality_package_rejects_without_mutating_the_registry() {
     let package = QualityRuleAssetPackage {
         schema_version: QUALITY_RULE_ASSET_PACKAGE_SCHEMA.into(),
         package_id: "stale-quality-rules".into(),
+        asset_version: "v1".into(),
         action_id: bundle.exact_context.action_id.clone(),
         capture_view: bundle.exact_context.capture_view,
+        exact_context: bundle.exact_context.clone(),
         bundle_id: bundle.bundle_id.clone(),
         expected_bundle_hash: "0000000000000000".into(),
         feature_program: cloned_quality_asset(
@@ -128,6 +176,70 @@ fn stale_quality_package_rejects_without_mutating_the_registry() {
     registry
         .install_quality_rules(package)
         .expect_err("stale Bundle hash must fail before mutation");
+    assert_eq!(registry.runtime_catalog(), &before);
+}
+
+#[test]
+fn quality_package_rejects_an_exact_context_mismatch_atomically() {
+    let mut registry =
+        visual_recognition_baseline_registry_v0_1().expect("installed action library");
+    let before = registry.runtime_catalog().clone();
+    let bundle = before
+        .bundles
+        .iter()
+        .find(|bundle| bundle.bundle_id == "flat_barbell_bench_press/front/v1")
+        .unwrap();
+    let lineage = vec![QualityRuleSourceRef {
+        asset_id: "offline:wrong-context-quality".into(),
+        version: "v1".into(),
+        content_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".into(),
+    }];
+    let mut exact_context = bundle.exact_context.clone();
+    exact_context.variation_id = "different_variation".into();
+    let package = QualityRuleAssetPackage {
+        schema_version: QUALITY_RULE_ASSET_PACKAGE_SCHEMA.into(),
+        package_id: "wrong-context-quality-rules".into(),
+        asset_version: "v1".into(),
+        action_id: bundle.exact_context.action_id.clone(),
+        capture_view: bundle.exact_context.capture_view,
+        exact_context,
+        bundle_id: bundle.bundle_id.clone(),
+        expected_bundle_hash: bundle.content_hash.clone(),
+        feature_program: cloned_quality_asset(
+            &before,
+            &bundle.lineage.feature_program.id,
+            AssessmentAssetKind::FeatureProgram,
+            "wrong-context/feature",
+            &lineage,
+        ),
+        reference_policy: cloned_quality_asset(
+            &before,
+            &bundle.lineage.reference_policy.id,
+            AssessmentAssetKind::ReferencePolicy,
+            "wrong-context/reference",
+            &lineage,
+        ),
+        rule_pack: cloned_quality_asset(
+            &before,
+            &bundle.lineage.rule_pack.id,
+            AssessmentAssetKind::RulePack,
+            "wrong-context/rules",
+            &lineage,
+        ),
+        set_aggregation_policy: cloned_quality_asset(
+            &before,
+            &bundle.lineage.set_aggregation_policy.id,
+            AssessmentAssetKind::SetAggregationPolicy,
+            "wrong-context/set",
+            &lineage,
+        ),
+        source_lineage: lineage,
+        content_hash: String::new(),
+    }
+    .with_computed_hash();
+    registry
+        .install_quality_rules(package)
+        .expect_err("a quality rule cannot cross variation/equipment/laterality/pose context");
     assert_eq!(registry.runtime_catalog(), &before);
 }
 

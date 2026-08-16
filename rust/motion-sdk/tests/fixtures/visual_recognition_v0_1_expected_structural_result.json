@@ -1,4 +1,5 @@
 {
+  "reportDigest": "8b850852fa6cdba9819349c3fd3dcb64d5401ce96e3eb3f5a96fc260e18b9e6b",
   "resolvedRecordCount": 54,
   "governanceExcludedRecordCount": 1,
   "replayedRecordCount": 53,
@@ -6,48 +7,61 @@
   "recordsWithBoundaryAlignment": 3,
   "packetCount": 15879,
   "localStates": {
-    "Uninitialized": 3494,
-    "Provisional": 475,
-    "Learning": 791,
-    "Frozen": 6558,
-    "Degraded": 4561
+    "Uninitialized": 8200,
+    "Provisional": 182,
+    "Learning": 695,
+    "Frozen": 3648,
+    "Degraded": 3154
   },
-  "poseChannelFrames": 5895,
-  "equipmentChannelFrames": 1289,
+  "poseChannelFrames": 3321,
+  "equipmentChannelFrames": 883,
   "fusionStates": {
-    "Agreement": 1085,
-    "CannotJudge": 10164,
-    "EquipmentOnly": 3,
-    "PoseOnly": 4627
+    "Agreement": 593,
+    "CannotJudge": 12716,
+    "EquipmentOnly": 1,
+    "PoseOnly": 2569
   },
   "dimensionStates": {
-    "TaskCompletion/ObservedDeviation": 12,
-    "TaskCompletion/CannotJudge": 41,
-    "RangeOfMotion/ObservedAcceptable": 4,
-    "RangeOfMotion/ObservedDeviation": 2,
-    "RangeOfMotion/CannotJudge": 47,
+    "TaskCompletion/ObservedAcceptable": 2,
+    "TaskCompletion/ObservedDeviation": 7,
+    "TaskCompletion/CannotJudge": 44,
+    "RangeOfMotion/CannotJudge": 53,
     "PhaseControl/CannotJudge": 53,
     "SupportStability/CannotJudge": 53,
     "BilateralCoordination/CannotJudge": 53,
     "TrajectoryControl/CannotJudge": 53,
     "StandardVariantCompatibility/CannotJudge": 53,
-    "ObservationConfidence/ObservedAcceptable": 13,
-    "ObservationConfidence/CannotJudge": 40
+    "ObservationConfidence/ObservedAcceptable": 15,
+    "ObservationConfidence/CannotJudge": 38
   },
   "referenceKinds": {
-    "SelfGeometry": 146,
-    "SetPrefix": 28,
-    "NoReference": 2454
+    "SelfGeometry": 51,
+    "SetPrefix": 10,
+    "NoReference": 949
   },
   "equipmentProvider": {
     "requestedRecordCount": 33,
     "availableRecordCount": 33,
     "decodedFrameCount": 30835,
-    "trackerOutputFrameCount": 30520,
-    "canonicalObservationFrameCount": 30520,
-    "measuredFrameCount": 30504,
-    "predictedFrameCount": 16,
+    "trackerOutputFrameCount": 29256,
+    "canonicalObservationFrameCount": 29256,
+    "measuredFrameCount": 29177,
+    "predictedFrameCount": 79,
     "poseFusedFrameCount": 0
+  },
+  "aggregate": {
+    "truthRepCount": 455,
+    "rawProposalCount": 51,
+    "confirmedCount": 10,
+    "confirmedPlusNeedsReviewCount": 17,
+    "matchedRepCount": 11,
+    "falsePositiveCount": 6,
+    "falseNegativeCount": 444,
+    "candidatePrecision": 0.6470588235294118,
+    "candidateRecall": 0.024175824175824177,
+    "exactSetRate": 0.0,
+    "strictBoundaryAlignedRepCount": 2,
+    "reviewedNegativeWindowFalseTriggerCount": 5
   },
   "traceCompleteReportCount": 53,
   "typedRefusalCount": 0

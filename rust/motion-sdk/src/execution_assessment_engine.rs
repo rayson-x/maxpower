@@ -386,8 +386,13 @@ pub struct QualityRuleSourceRef {
 pub struct QualityRuleAssetPackage {
     pub schema_version: String,
     pub package_id: String,
+    pub asset_version: String,
     pub action_id: String,
     pub capture_view: AssessmentCaptureView,
+    /// The complete exact context is repeated alongside the expected Bundle
+    /// hash so a quality asset cannot be relabeled across variation,
+    /// equipment, laterality or pose contracts.
+    pub exact_context: AssessmentExactContext,
     pub bundle_id: String,
     pub expected_bundle_hash: String,
     pub feature_program: AssessmentAsset,
@@ -907,6 +912,8 @@ pub struct SealedRepReference {
     pub rep_id: u64,
     pub subject_epoch: u64,
     pub disposition: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_reason: Option<crate::RepEvidenceReason>,
     pub start_timestamp_ms: u64,
     pub turnaround_timestamp_ms: u64,
     pub turnaround_source: String,
@@ -1256,7 +1263,7 @@ pub enum AssessmentRuntimeError {
     DuplicateSetId,
     InvalidRepProvenance,
     ConfirmedRepMissingActionPrimary,
-    RepAlgorithmPipelineMismatch,
+    RepAlgorithmPipelineMismatch { rep_id: u64, detail: String },
     InvalidTraceGraph,
 }
 
@@ -1266,7 +1273,7 @@ struct CompiledAssessmentProgram {
     runtime_profile_hash: u64,
     feature_ids: Vec<String>,
     range_feature_id: String,
-    phase_names: [String; 2],
+    phase_names: Vec<String>,
     task_endpoints: [String; 3],
     local_coordinate_strategy: crate::LocalMotionCoordinateStrategy,
     equipment_provider_id: Option<crate::EquipmentProviderId>,
@@ -1912,9 +1919,12 @@ impl ExecutionAssessmentEngine {
             // the actual pre-seal receipts that authored this Rep; the
             // assessment records its own receipts after those later stages
             // execute below.
-            if !rep_has_required_pre_seal_receipts(plan, &rep) {
-                return Err(AssessmentRuntimeError::RepAlgorithmPipelineMismatch);
-            }
+            validate_required_pre_seal_receipts(plan, &rep).map_err(|detail| {
+                AssessmentRuntimeError::RepAlgorithmPipelineMismatch {
+                    rep_id: rep.rep_id,
+                    detail,
+                }
+            })?;
         }
         let rep_ref = rep_reference(&rep, subject_epoch);
         let (features, range_value) = feature_facts(active, &rep, subject_epoch);
@@ -1950,14 +1960,23 @@ impl ExecutionAssessmentEngine {
         let evaluated_rules = evaluate_rep_rules(active, &comparisons);
         let mut execution_receipts = rep.execution_receipts.clone();
         if let Some(plan) = active.motion_plan.as_ref() {
+            let mut feature_inputs = vec![format!("sealed_rep:{}", rep.rep_id)];
+            feature_inputs.extend(
+                active
+                    .packets
+                    .iter()
+                    .filter(|packet| {
+                        packet.subject_epoch == subject_epoch
+                            && packet.frame_id >= rep.start_frame_id
+                            && packet.frame_id <= rep.end_frame_id
+                    })
+                    .map(|packet| format!("canonical_pose:{}", packet.frame_id)),
+            );
             if let Some(receipt) = assessment_execution_receipt(
                 plan,
                 crate::AlgorithmModuleCategory::PostSealFeature,
                 &rep,
-                features
-                    .iter()
-                    .flat_map(|feature| feature.provenance.iter().cloned())
-                    .collect(),
+                feature_inputs,
                 features
                     .iter()
                     .map(|feature| feature.feature_id.clone())
@@ -1972,6 +1991,7 @@ impl ExecutionAssessmentEngine {
                 evaluated_rules
                     .iter()
                     .flat_map(|rule| rule.feature_dependencies.iter().cloned())
+                    .map(|feature_id| format!("comparison:{feature_id}"))
                     .collect(),
                 evaluated_rules
                     .iter()
@@ -2048,70 +2068,29 @@ impl ExecutionAssessmentEngine {
             incident_node_ids.push(incident_node);
         }
         let mut produced_fact_nodes = std::collections::HashMap::<String, String>::new();
-        let mut execution_node_ids = Vec::new();
-        for (receipt_index, receipt) in rep.execution_receipts.iter().enumerate() {
-            let execution_sources = active
-                .packets
+        let mut pre_seal_execution_node_ids = Vec::new();
+        for (receipt_index, receipt) in
+            execution_receipts
                 .iter()
-                .filter(|packet| {
-                    packet.subject_epoch == subject_epoch
-                        && packet.frame_id >= receipt.start_frame_id
-                        && packet.frame_id <= receipt.end_frame_id
+                .enumerate()
+                .filter(|(_, receipt)| {
+                    !matches!(
+                        receipt.category,
+                        crate::AlgorithmModuleCategory::PostSealFeature
+                            | crate::AlgorithmModuleCategory::QualityRule
+                    )
                 })
-                .map(|packet| packet.source_id.clone())
-                .collect::<Vec<_>>();
-            let mut execution_inputs = Vec::new();
-            for fact in &receipt.input_fact_ids {
-                if active.trace_nodes.iter().any(|node| node.node_id == *fact) {
-                    execution_inputs.push(fact.clone());
-                } else if let Some(producer) = produced_fact_nodes.get(fact) {
-                    execution_inputs.push(producer.clone());
-                } else if let Some(frame_id) = fact
-                    .strip_prefix("canonical_pose:")
-                    .or_else(|| fact.strip_prefix("visual_equipment_frame:"))
-                    .or_else(|| fact.strip_prefix("rep_topology_input:"))
-                    .and_then(|value| value.parse::<u64>().ok())
-                {
-                    execution_inputs.extend(
-                        active
-                            .packets
-                            .iter()
-                            .filter(|packet| {
-                                packet.subject_epoch == subject_epoch && packet.frame_id == frame_id
-                            })
-                            .map(|packet| packet.source_id.clone()),
-                    );
-                }
-            }
-            if execution_inputs.is_empty() {
-                execution_inputs.extend(execution_sources.iter().cloned());
-            }
-            execution_inputs.sort();
-            execution_inputs.dedup();
-            let execution_node = format!("rep:{}:execution:{receipt_index}", rep.rep_id);
-            active.trace_nodes.push(EvidenceTraceNode {
-                node_id: execution_node.clone(),
-                kind: TraceNodeKind::AlgorithmExecution,
-                summary: format!(
-                    "{} ({:?}) consumed [{}] and produced [{}] from frame {} at {} ms through frame {} at {} ms.",
-                    receipt.module_id,
-                    receipt.category,
-                    receipt.input_fact_ids.join(", "),
-                    receipt.output_fact_ids.join(", "),
-                    receipt.start_frame_id,
-                    receipt.start_timestamp_ms,
-                    receipt.end_frame_id,
-                    receipt.end_timestamp_ms,
-                ),
-                source_ids: execution_sources,
-                input_node_ids: execution_inputs,
-            });
-            for output in &receipt.output_fact_ids {
-                produced_fact_nodes.insert(output.clone(), execution_node.clone());
-            }
-            execution_node_ids.push(execution_node);
+        {
+            pre_seal_execution_node_ids.push(append_execution_trace_node(
+                active,
+                &rep,
+                subject_epoch,
+                receipt_index,
+                receipt,
+                &mut produced_fact_nodes,
+            )?);
         }
-        let mut rep_inputs = execution_node_ids;
+        let mut rep_inputs = pre_seal_execution_node_ids;
         rep_inputs.extend(incident_node_ids);
         rep_inputs.sort();
         rep_inputs.dedup();
@@ -2132,14 +2111,35 @@ impl ExecutionAssessmentEngine {
             source_ids: source_ids.clone(),
             input_node_ids: rep_inputs,
         });
+        produced_fact_nodes.insert(format!("sealed_rep:{}", rep.rep_id), rep_node.clone());
+
+        let feature_receipt = execution_receipts
+            .iter()
+            .enumerate()
+            .find(|(_, receipt)| {
+                receipt.category == crate::AlgorithmModuleCategory::PostSealFeature
+            })
+            .ok_or(AssessmentRuntimeError::InvalidTraceGraph)?;
+        append_execution_trace_node(
+            active,
+            &rep,
+            subject_epoch,
+            feature_receipt.0,
+            feature_receipt.1,
+            &mut produced_fact_nodes,
+        )?;
         for feature in &features {
             let feature_node = format!("rep:{}:feature:{}", rep.rep_id, feature.feature_id);
+            let producer = produced_fact_nodes
+                .get(&feature.feature_id)
+                .cloned()
+                .ok_or(AssessmentRuntimeError::InvalidTraceGraph)?;
             active.trace_nodes.push(EvidenceTraceNode {
                 node_id: feature_node.clone(),
                 kind: TraceNodeKind::FeatureFact,
                 summary: feature_summary(feature),
                 source_ids: source_ids.clone(),
-                input_node_ids: vec![rep_node.clone()],
+                input_node_ids: vec![rep_node.clone(), producer],
             });
             let comparison = comparisons
                 .iter()
@@ -2157,12 +2157,29 @@ impl ExecutionAssessmentEngine {
                 source_ids: comparison_sources,
                 input_node_ids: vec![feature_node],
             });
+            produced_fact_nodes.insert(
+                format!("comparison:{}", feature.feature_id),
+                comparison_node,
+            );
         }
+        let rule_receipt = execution_receipts
+            .iter()
+            .enumerate()
+            .find(|(_, receipt)| receipt.category == crate::AlgorithmModuleCategory::QualityRule)
+            .ok_or(AssessmentRuntimeError::InvalidTraceGraph)?;
+        append_execution_trace_node(
+            active,
+            &rep,
+            subject_epoch,
+            rule_receipt.0,
+            rule_receipt.1,
+            &mut produced_fact_nodes,
+        )?;
         let mut rule_node_ids = Vec::new();
         for evaluated in &evaluated_rules {
             let conclusion = &evaluated.conclusion;
             let rule_node = format!("rep:{}:rule:{}", rep.rep_id, conclusion.dimension.as_str());
-            let input_node_ids = if evaluated.feature_dependencies.is_empty() {
+            let mut input_node_ids = if evaluated.feature_dependencies.is_empty() {
                 vec![rep_node.clone()]
             } else {
                 evaluated
@@ -2171,6 +2188,15 @@ impl ExecutionAssessmentEngine {
                     .map(|feature_id| format!("rep:{}:comparison:{feature_id}", rep.rep_id))
                     .collect()
             };
+            let rule_output = format!("dimension_conclusion:{}", conclusion.dimension.as_str());
+            input_node_ids.push(
+                produced_fact_nodes
+                    .get(&rule_output)
+                    .cloned()
+                    .ok_or(AssessmentRuntimeError::InvalidTraceGraph)?,
+            );
+            input_node_ids.sort();
+            input_node_ids.dedup();
             active.trace_nodes.push(EvidenceTraceNode {
                 node_id: rule_node.clone(),
                 kind: TraceNodeKind::RuleConclusion,
@@ -2557,6 +2583,87 @@ impl ExecutionAssessmentEngine {
     }
 }
 
+fn append_execution_trace_node(
+    active: &mut ActiveSet,
+    rep: &SealedRep,
+    subject_epoch: u64,
+    receipt_index: usize,
+    receipt: &crate::AlgorithmExecutionReceipt,
+    produced_fact_nodes: &mut HashMap<String, String>,
+) -> Result<String, AssessmentRuntimeError> {
+    let execution_sources = active
+        .packets
+        .iter()
+        .filter(|packet| {
+            packet.subject_epoch == subject_epoch
+                && packet.frame_id >= receipt.start_frame_id
+                && packet.frame_id <= receipt.end_frame_id
+        })
+        .map(|packet| packet.source_id.clone())
+        .collect::<Vec<_>>();
+    let mut execution_inputs = Vec::new();
+    let mut all_inputs_resolved = true;
+    for fact in &receipt.input_fact_ids {
+        if active.trace_nodes.iter().any(|node| node.node_id == *fact) {
+            execution_inputs.push(fact.clone());
+        } else if let Some(producer) = produced_fact_nodes.get(fact) {
+            execution_inputs.push(producer.clone());
+        } else if let Some(frame_id) = fact
+            .strip_prefix("canonical_pose:")
+            .or_else(|| fact.strip_prefix("visual_equipment_frame:"))
+            .or_else(|| fact.strip_prefix("equipment_provider_frame:"))
+            .or_else(|| fact.strip_prefix("equipment_absent:"))
+            .or_else(|| fact.strip_prefix("rep_topology_input:"))
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            let source_nodes = active
+                .packets
+                .iter()
+                .filter(|packet| {
+                    packet.subject_epoch == subject_epoch && packet.frame_id == frame_id
+                })
+                .map(|packet| packet.source_id.clone());
+            let before = execution_inputs.len();
+            execution_inputs.extend(source_nodes);
+            if execution_inputs.len() == before {
+                all_inputs_resolved = false;
+            }
+        } else {
+            all_inputs_resolved = false;
+        }
+    }
+    execution_inputs.sort();
+    execution_inputs.dedup();
+    // An execution claim is valid only when each concrete runtime input has
+    // an earlier producer. Missing edges are never replaced by the entire Rep
+    // window merely to make the graph connected.
+    if !all_inputs_resolved || execution_inputs.is_empty() || execution_sources.is_empty() {
+        return Err(AssessmentRuntimeError::InvalidTraceGraph);
+    }
+    let execution_node = format!("rep:{}:execution:{receipt_index}", rep.rep_id);
+    active.trace_nodes.push(EvidenceTraceNode {
+        node_id: execution_node.clone(),
+        kind: TraceNodeKind::AlgorithmExecution,
+        summary: format!(
+            "{} ({:?}) consumed [{}] and produced [{}] from frame {} at {} ms through frame {} at {} ms.",
+            receipt.module_id,
+            receipt.category,
+            receipt.input_fact_ids.join(", "),
+            receipt.output_fact_ids.join(", "),
+            receipt.start_frame_id,
+            receipt.start_timestamp_ms,
+            receipt.end_frame_id,
+            receipt.end_timestamp_ms,
+        ),
+        source_ids: execution_sources,
+        input_node_ids: execution_inputs,
+    });
+    for output in &receipt.output_fact_ids {
+        produced_fact_nodes.insert(output.clone(), execution_node.clone());
+    }
+    Ok(execution_node)
+}
+
 fn validate_catalog(
     catalog: &ExecutionAssessmentBundleCatalog,
 ) -> Result<(), AssessmentConfigurationError> {
@@ -2793,8 +2900,16 @@ fn compile_action_motion_plans(
         }
         let recognition = assets[&bundle.lineage.recognition_profile.id.as_str()];
         let execution = assets[&bundle.lineage.execution_contract.id.as_str()];
+        let local = assets[&bundle.lineage.local_coordinate_strategy.id.as_str()];
         let feature = assets[&bundle.lineage.feature_program.id.as_str()];
         let rules = assets[&bundle.lineage.rule_pack.id.as_str()];
+        let runtime_binding =
+            compile_action_plan_runtime_binding(plan.clone()).map_err(|detail| {
+                AssessmentConfigurationError::InvalidActionMotionPlan {
+                    bundle_id: binding.bundle_id.clone(),
+                    detail: detail.into(),
+                }
+            })?;
         let expected_phases = plan
             .phases
             .iter()
@@ -2820,6 +2935,29 @@ fn compile_action_motion_plans(
                 != Some(
                     &serde_json::to_value(&plan.rep_consensus).expect("serializable Rep consensus"),
                 )
+            || local
+                .content
+                .get("preparationToEffortDirection")
+                .and_then(serde_json::Value::as_str)
+                != Some(direction_id(
+                    runtime_binding
+                        .local_coordinate_strategy
+                        .preparation_to_effort,
+                ))
+            || local
+                .content
+                .get("equipmentMode")
+                .and_then(serde_json::Value::as_str)
+                != Some(local_equipment_mode_id(
+                    runtime_binding.local_coordinate_strategy.equipment_mode,
+                ))
+            || local
+                .content
+                .get("poseAnchor")
+                .and_then(serde_json::Value::as_str)
+                != Some(local_pose_anchor_id(
+                    runtime_binding.local_coordinate_strategy.pose_anchor,
+                ))
             || feature.content.get("motionRelations") != Some(&motion_relation_authority(&plan))
             || rules.content.get("semanticRuleRoles") != Some(&motion_rule_role_authority(&plan));
         if semantic_conflict {
@@ -2974,15 +3112,20 @@ fn compile_catalog_programs(
             .content
             .get("phaseOrder")
             .and_then(serde_json::Value::as_array)
-            .filter(|values| values.len() == 2)
+            .filter(|values| values.len() >= 2)
             .and_then(|values| {
-                Some([
-                    values[0].as_str()?.to_owned(),
-                    values[1].as_str()?.to_owned(),
-                ])
+                values
+                    .iter()
+                    .map(|value| value.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()
             })
-            .filter(|values| values.iter().all(|value| !value.trim().is_empty()))
-            .ok_or_else(|| invalid("ExecutionContract phaseOrder must name two phases"))?;
+            .filter(|values| {
+                values.iter().all(|value| !value.trim().is_empty())
+                    && values.iter().collect::<HashSet<_>>().len() == values.len()
+            })
+            .ok_or_else(|| {
+                invalid("ExecutionContract phaseOrder must name at least two unique phases")
+            })?;
         let task_endpoints = execution
             .content
             .get("taskEndpoints")
@@ -3029,26 +3172,46 @@ fn compile_catalog_programs(
                 ));
             }
         };
-        let expected_equipment_mode = match local
-            .content
-            .get("primaryEvidenceChannel")
-            .and_then(serde_json::Value::as_str)
-        {
-            Some("pose") => crate::LocalEquipmentMode::PoseOnly,
-            Some("equipment") | None => {
-                local_equipment_mode(bundle.exact_context.equipment_semantics)
-            }
-            _ => {
-                return Err(invalid(
-                    "LocalCoordinateStrategy primary evidence channel is unsupported",
-                ));
+        let expected_equipment_mode = if let Some(plan) = motion_plans.get(&bundle.bundle_id) {
+            compile_action_plan_runtime_binding(plan.clone())
+                .map_err(|detail| invalid(detail))?
+                .local_coordinate_strategy
+                .equipment_mode
+        } else {
+            match local
+                .content
+                .get("primaryEvidenceChannel")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("pose") => crate::LocalEquipmentMode::PoseOnly,
+                Some("equipment") | None => {
+                    local_equipment_mode(bundle.exact_context.equipment_semantics)
+                }
+                _ => {
+                    return Err(invalid(
+                        "LocalCoordinateStrategy primary evidence channel is unsupported",
+                    ));
+                }
             }
         };
         let local_coordinate_strategy = crate::LocalMotionCoordinateStrategy {
             capture_view: expected_local_view,
             preparation_to_effort,
             equipment_mode: expected_equipment_mode,
-            pose_anchor: local_pose_anchor(bundle.exact_context.equipment_semantics),
+            pose_anchor: match local
+                .content
+                .get("poseAnchor")
+                .and_then(serde_json::Value::as_str)
+            {
+                Some("wristmidpoint") => crate::LocalPoseAnchor::WristMidpoint,
+                Some("leftwrist") => crate::LocalPoseAnchor::LeftWrist,
+                Some("rightwrist") => crate::LocalPoseAnchor::RightWrist,
+                Some("shouldermidpoint") => crate::LocalPoseAnchor::ShoulderMidpoint,
+                Some("hipmidpoint") => crate::LocalPoseAnchor::HipMidpoint,
+                Some("leftankle") => crate::LocalPoseAnchor::LeftAnkle,
+                Some("rightankle") => crate::LocalPoseAnchor::RightAnkle,
+                _ => return Err(invalid("LocalCoordinateStrategy poseAnchor is unsupported")),
+            },
         };
         if local
             .content
@@ -3624,6 +3787,10 @@ fn local_equipment_mode_id(value: crate::LocalEquipmentMode) -> &'static str {
         crate::LocalEquipmentMode::RigidBarAxis => "rigidbaraxis",
         crate::LocalEquipmentMode::MovingHandle => "movinghandle",
         crate::LocalEquipmentMode::TwoIndependentDumbbells => "twoindependentdumbbells",
+        crate::LocalEquipmentMode::PosePrimaryWithMovingHandle => "poseprimarywithmovinghandle",
+        crate::LocalEquipmentMode::PosePrimaryWithIndependentDumbbells => {
+            "poseprimarywithindependentdumbbells"
+        }
         crate::LocalEquipmentMode::PoseOnly => "poseonly",
         crate::LocalEquipmentMode::FixedSupport => "fixedsupport",
     }
@@ -3635,6 +3802,9 @@ fn local_pose_anchor_id(value: crate::LocalPoseAnchor) -> &'static str {
         crate::LocalPoseAnchor::LeftWrist => "leftwrist",
         crate::LocalPoseAnchor::RightWrist => "rightwrist",
         crate::LocalPoseAnchor::ShoulderMidpoint => "shouldermidpoint",
+        crate::LocalPoseAnchor::HipMidpoint => "hipmidpoint",
+        crate::LocalPoseAnchor::LeftAnkle => "leftankle",
+        crate::LocalPoseAnchor::RightAnkle => "rightankle",
     }
 }
 
@@ -3940,6 +4110,36 @@ fn pose_relation_metrics(
                         .max(third_uncertainty),
                 ))
             }),
+            "projected_shoulder_rotation" => {
+                (relation.inputs.len() == 4).then_some(()).and_then(|_| {
+                    let (shoulder, shoulder_confidence, shoulder_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[0].source)?;
+                    let (elbow, elbow_confidence, elbow_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[1].source)?;
+                    let (wrist, wrist_confidence, wrist_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[2].source)?;
+                    let (hip, hip_confidence, hip_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[3].source)?;
+                    let value = crate::projected_shoulder_rotation_radians(
+                        (shoulder[0], shoulder[1]),
+                        (elbow[0], elbow[1]),
+                        (wrist[0], wrist[1]),
+                        (hip[0], hip[1]),
+                    )?;
+                    Some((
+                        Some(value),
+                        None,
+                        shoulder_confidence
+                            .min(elbow_confidence)
+                            .min(wrist_confidence)
+                            .min(hip_confidence),
+                        shoulder_uncertainty
+                            .max(elbow_uncertainty)
+                            .max(wrist_uncertainty)
+                            .max(hip_uncertainty),
+                    ))
+                })
+            }
             "relative_distance" => (relation.inputs.len() == 2).then_some(()).and_then(|_| {
                 let (first, first_confidence, first_uncertainty) =
                     measured_pose_point(canonical, &relation.inputs[0].source)?;
@@ -3953,6 +4153,36 @@ fn pose_relation_metrics(
                     first_uncertainty.max(second_uncertainty),
                 ))
             }),
+            "relative_vertical_offset" => {
+                (relation.inputs.len() == 2).then_some(()).and_then(|_| {
+                    let (point, point_confidence, point_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[0].source)?;
+                    let (reference, reference_confidence, reference_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[1].source)?;
+                    let scale = body_scale(canonical)?;
+                    Some((
+                        Some((reference[1] - point[1]) / scale),
+                        None,
+                        point_confidence.min(reference_confidence),
+                        point_uncertainty.max(reference_uncertainty),
+                    ))
+                })
+            }
+            "relative_horizontal_offset" => {
+                (relation.inputs.len() == 2).then_some(()).and_then(|_| {
+                    let (point, point_confidence, point_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[0].source)?;
+                    let (reference, reference_confidence, reference_uncertainty) =
+                        measured_pose_point(canonical, &relation.inputs[1].source)?;
+                    let scale = body_scale(canonical)?;
+                    Some((
+                        Some((point[0] - reference[0]) / scale),
+                        None,
+                        point_confidence.min(reference_confidence),
+                        point_uncertainty.max(reference_uncertainty),
+                    ))
+                })
+            }
             _ => None,
         };
         if let Some((scalar, point, confidence, uncertainty)) = observation {
@@ -4121,7 +4351,14 @@ fn feature_facts(
             0.0,
             vec![
                 "rep_engine_boundaries".into(),
-                format!("phase:{}", active.program.phase_names[1]),
+                format!(
+                    "phase:{}",
+                    active
+                        .program
+                        .phase_names
+                        .last()
+                        .expect("validated phase order")
+                ),
             ],
             source_range.clone(),
         ),
@@ -4135,7 +4372,14 @@ fn feature_facts(
             vec![
                 "rep_engine_boundaries".into(),
                 format!("phase:{}", active.program.phase_names[0]),
-                format!("phase:{}", active.program.phase_names[1]),
+                format!(
+                    "phase:{}",
+                    active
+                        .program
+                        .phase_names
+                        .last()
+                        .expect("validated phase order")
+                ),
             ],
             source_range.clone(),
         ),
@@ -4954,32 +5198,44 @@ fn aggregate_set_patterns(active: &ActiveSet) -> Vec<SetPatternFact> {
             confidence: u8::from(!active.packets.is_empty()) as f32,
         });
     }
-    let ranges = active
-        .rep_assessments
-        .iter()
-        .filter_map(|rep| {
-            rep.features
-                .iter()
-                .find(|feature| feature.feature_id == active.program.range_feature_id)
-                .and_then(|feature| feature.value)
-                .map(|value| (rep.rep.rep_id, value))
-        })
-        .collect::<Vec<_>>();
-    let late_window = active.program.late_set_window.min(ranges.len());
-    if ranges.len() > late_window && late_window > 0 {
-        let split = ranges.len() - late_window;
-        let earlier = ranges[..split].iter().map(|(_, value)| *value).sum::<f32>() / split as f32;
-        let late =
-            ranges[split..].iter().map(|(_, value)| *value).sum::<f32>() / late_window as f32;
-        if earlier > f32::EPSILON && late < earlier * (1.0 - active.program.range_deviation_ratio) {
-            patterns.push(SetPatternFact {
-                pattern_id: "late_set_excursion_reduction".into(),
-                summary: "The late-set local excursion was persistently lower than the earlier set prefix."
-                    .into(),
-                supporting_rep_ids: ranges[split..].iter().map(|(rep_id, _)| *rep_id).collect(),
-                evidence_dimensions: vec![AssessmentDimension::RangeOfMotion],
-                confidence: 0.75,
-            });
+    if active.program.set_rules.iter().any(|rule| {
+        matches!(
+            rule,
+            CompiledSetRule::LateSetPersistence {
+                dimension: AssessmentDimension::RangeOfMotion
+            }
+        )
+    }) {
+        let ranges = active
+            .rep_assessments
+            .iter()
+            .filter_map(|rep| {
+                rep.features
+                    .iter()
+                    .find(|feature| feature.feature_id == active.program.range_feature_id)
+                    .and_then(|feature| feature.value)
+                    .map(|value| (rep.rep.rep_id, value))
+            })
+            .collect::<Vec<_>>();
+        let late_window = active.program.late_set_window.min(ranges.len());
+        if ranges.len() > late_window && late_window > 0 {
+            let split = ranges.len() - late_window;
+            let earlier =
+                ranges[..split].iter().map(|(_, value)| *value).sum::<f32>() / split as f32;
+            let late =
+                ranges[split..].iter().map(|(_, value)| *value).sum::<f32>() / late_window as f32;
+            if earlier > f32::EPSILON
+                && late < earlier * (1.0 - active.program.range_deviation_ratio)
+            {
+                patterns.push(SetPatternFact {
+                    pattern_id: "late_set_excursion_reduction".into(),
+                    summary: "The late-set local excursion was persistently lower than the earlier set prefix."
+                        .into(),
+                    supporting_rep_ids: ranges[split..].iter().map(|(rep_id, _)| *rep_id).collect(),
+                    evidence_dimensions: vec![AssessmentDimension::RangeOfMotion],
+                    confidence: 0.75,
+                });
+            }
         }
     }
     let phase_durations = active
@@ -5492,43 +5748,76 @@ pub fn compile_action_plan_runtime_binding(
         "rear_right_45" => AssessmentCaptureView::RearObliqueRight,
         _ => return Err("compiled action plan has an unknown capture view"),
     };
-    let task_primary_is_pose = plan.relations.iter().any(|relation| {
+    let task_primary = plan.relations.iter().find(|relation| {
         relation.role == crate::MotionRole::TaskPrimary
             && relation.source_requirement == crate::OperatorSourceRequirement::CurrentMeasuredPose
     });
-    let equipment_mode = if task_primary_is_pose {
-        crate::LocalEquipmentMode::PoseOnly
-    } else {
-        match plan.exact_identity.equipment_topology.as_str() {
-            "free_rigid_barbell" | "smith_guided_bar" | "trap_bar" => {
-                crate::LocalEquipmentMode::RigidBarAxis
-            }
-            "independent_dumbbell" | "generic_single_free_load" | "kettlebell" | "weight_plate" => {
-                crate::LocalEquipmentMode::TwoIndependentDumbbells
-            }
-            "constrained_machine_handle"
-            | "cable_handle"
-            | "resistance_band"
-            | "landmine_lever" => crate::LocalEquipmentMode::MovingHandle,
-            "fixed_support" | "bodyweight_station" => crate::LocalEquipmentMode::FixedSupport,
-            "none" | "bodyweight" => crate::LocalEquipmentMode::PoseOnly,
-            _ => return Err("action plan has an unsupported equipment topology"),
+    let task_primary_is_pose = task_primary.is_some();
+    let task_primary_is_scalar = task_primary.is_some_and(|relation| {
+        matches!(
+            relation.operator_id.as_str(),
+            "joint_angle"
+                | "relative_distance"
+                | "relative_vertical_offset"
+                | "relative_horizontal_offset"
+                | "segment_angle"
+                | "projected_shoulder_rotation"
+        )
+    });
+    let declared_equipment_mode = match plan.exact_identity.equipment_topology.as_str() {
+        "free_rigid_barbell" | "smith_guided_bar" | "trap_bar" => {
+            crate::LocalEquipmentMode::RigidBarAxis
         }
+        "independent_dumbbell" | "generic_single_free_load" | "kettlebell" | "weight_plate" => {
+            crate::LocalEquipmentMode::TwoIndependentDumbbells
+        }
+        "constrained_machine_handle" | "cable_handle" | "resistance_band" | "landmine_lever" => {
+            crate::LocalEquipmentMode::MovingHandle
+        }
+        "fixed_support" | "bodyweight_station" => crate::LocalEquipmentMode::FixedSupport,
+        "none" | "bodyweight" => crate::LocalEquipmentMode::PoseOnly,
+        _ => return Err("action plan has an unsupported equipment topology"),
     };
-    let primary_signal_kind = match equipment_mode {
-        crate::LocalEquipmentMode::PoseOnly | crate::LocalEquipmentMode::FixedSupport => {
-            ExerciseSignalKind::LocalPoseAlongAxisProgress
+    let equipment_mode = if task_primary_is_pose {
+        match (plan.equipment_provider.as_ref(), declared_equipment_mode) {
+            (Some(_), crate::LocalEquipmentMode::MovingHandle) => {
+                crate::LocalEquipmentMode::PosePrimaryWithMovingHandle
+            }
+            (Some(_), crate::LocalEquipmentMode::TwoIndependentDumbbells) => {
+                crate::LocalEquipmentMode::PosePrimaryWithIndependentDumbbells
+            }
+            (_, crate::LocalEquipmentMode::FixedSupport) => crate::LocalEquipmentMode::FixedSupport,
+            _ => crate::LocalEquipmentMode::PoseOnly,
         }
-        crate::LocalEquipmentMode::MovingHandle
-        | crate::LocalEquipmentMode::TwoIndependentDumbbells
-            if plan.rep_consensus.mode == crate::RepConsensusMode::IndependentBilateral =>
-        {
-            ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
-        }
-        crate::LocalEquipmentMode::RigidBarAxis
-        | crate::LocalEquipmentMode::MovingHandle
-        | crate::LocalEquipmentMode::TwoIndependentDumbbells => {
-            ExerciseSignalKind::LocalObservedAlongAxisProgress
+    } else {
+        declared_equipment_mode
+    };
+    let primary_signal_kind = if task_primary_is_scalar {
+        ExerciseSignalKind::ActionPrimaryRelationScalar
+    } else if task_primary_is_pose {
+        ExerciseSignalKind::LocalPoseAlongAxisProgress
+    } else {
+        match equipment_mode {
+            crate::LocalEquipmentMode::MovingHandle
+            | crate::LocalEquipmentMode::TwoIndependentDumbbells
+                if plan.rep_consensus.mode == crate::RepConsensusMode::IndependentBilateral =>
+            {
+                ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
+            }
+            crate::LocalEquipmentMode::RigidBarAxis
+            | crate::LocalEquipmentMode::MovingHandle
+            | crate::LocalEquipmentMode::TwoIndependentDumbbells => {
+                // Equipment-primary plans stop when their independently measured
+                // channel is absent. A pose track may corroborate association but
+                // can never propose the equipment Rep in its place.
+                ExerciseSignalKind::LocalAlongAxisProgress
+            }
+            crate::LocalEquipmentMode::PosePrimaryWithMovingHandle
+            | crate::LocalEquipmentMode::PosePrimaryWithIndependentDumbbells
+            | crate::LocalEquipmentMode::PoseOnly
+            | crate::LocalEquipmentMode::FixedSupport => {
+                return Err("equipment TaskPrimary resolved to a pose-primary coordinate mode");
+            }
         }
     };
     let topology = &plan.rep_topology;
@@ -5550,6 +5839,7 @@ pub fn compile_action_plan_runtime_binding(
         start_amplitude: topology.start_threshold(),
         minimum_amplitude: topology.minimum_excursion(),
         return_hysteresis: topology.turnaround_hysteresis(),
+        return_tolerance: topology.return_tolerance(),
         ready_tolerance: f32::from(topology.ready_tolerance_milli) / 1_000.0,
         minimum_phase_dwell_ms: topology.minimum_phase_dwell_ms,
         max_gap_ms: topology.maximum_gap_ms,
@@ -5562,18 +5852,49 @@ pub fn compile_action_plan_runtime_binding(
         capture_view.catalog_slug(),
     );
     let mut profile = crate::ExerciseProfile::rigid_bar_provisional(&identity, initializer);
-    profile.state_machine_id = crate::action_plan_topology_state_machine_id(
+    profile.state_machine_id = crate::action_plan_topology_state_machine_id_with_phases(
         &topology.topology_id,
+        plan.phases.len(),
         topology.minimum_phase_dwell_ms,
     );
     profile.content_hash = profile.computed_content_hash();
     let profile = bind_runtime_profile_to_action_plan(profile, &plan);
-    let pose_anchor = match plan.exact_identity.equipment_topology.as_str() {
-        "none" | "bodyweight" | "fixed_support" | "bodyweight_station" => {
+    let pose_anchor = if task_primary_is_pose {
+        let primary = plan
+            .relations
+            .iter()
+            .find(|relation| {
+                relation.role == crate::MotionRole::TaskPrimary
+                    && relation.judgeability == crate::FeatureJudgeability::RequiredForRep
+            })
+            .ok_or("compiled action plan has no required TaskPrimary")?;
+        let sources = primary
+            .inputs
+            .iter()
+            .map(|input| input.source.as_str())
+            .collect::<Vec<_>>();
+        if sources.contains(&"left_wrist") {
+            crate::LocalPoseAnchor::LeftWrist
+        } else if sources.contains(&"right_wrist") {
+            crate::LocalPoseAnchor::RightWrist
+        } else if sources.contains(&"hip_midpoint") {
+            crate::LocalPoseAnchor::HipMidpoint
+        } else if sources.contains(&"left_hip") || sources.contains(&"right_hip") {
+            crate::LocalPoseAnchor::HipMidpoint
+        } else if sources.contains(&"left_ankle") {
+            crate::LocalPoseAnchor::LeftAnkle
+        } else if sources.contains(&"right_ankle") {
+            crate::LocalPoseAnchor::RightAnkle
+        } else if sources.contains(&"shoulder_midpoint") {
             crate::LocalPoseAnchor::ShoulderMidpoint
+        } else {
+            return Err("pose TaskPrimary has no supported local-coordinate anchor");
         }
-        "constrained_machine_handle" => crate::LocalPoseAnchor::RightWrist,
-        _ => crate::LocalPoseAnchor::WristMidpoint,
+    } else {
+        match plan.exact_identity.equipment_topology.as_str() {
+            "constrained_machine_handle" => crate::LocalPoseAnchor::RightWrist,
+            _ => crate::LocalPoseAnchor::WristMidpoint,
+        }
     };
     Ok(RigidBarAssessmentProfileBinding {
         action_id: plan.action_id.clone(),
@@ -5592,11 +5913,37 @@ pub fn compile_action_plan_runtime_binding(
                 AssessmentCaptureView::LeftSide => crate::LocalCoarseView::LeftSide,
                 AssessmentCaptureView::RightSide => crate::LocalCoarseView::RightSide,
             },
-            preparation_to_effort: crate::LocalActionAxisDirection::PreparationToEffortUp,
+            preparation_to_effort: plan.view_observation.preparation_to_effort_direction,
             equipment_mode,
             pose_anchor,
         },
         motion_plan: Some(plan),
+    })
+}
+
+/// Cross-platform recognition entry seam. Product callers provide only the
+/// action selected by the action card and the camera view selected before the
+/// session. Rust resolves every relation, Provider, module and threshold from
+/// the injected catalog and returns one indivisible runtime binding.
+pub fn compile_action_recognition_binding(
+    catalog: &crate::ActionMotionCatalog,
+    action_id: &str,
+    capture_view: &str,
+) -> Result<RigidBarAssessmentProfileBinding, crate::ActionMotionError> {
+    let definition =
+        catalog
+            .definition(action_id)
+            .ok_or_else(|| crate::ActionMotionError::UnknownAction {
+                action_id: action_id.to_owned(),
+            })?;
+    let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+        .compile(definition, capture_view)?;
+    compile_action_plan_runtime_binding(plan).map_err(|detail| {
+        crate::ActionMotionError::RuntimeBindingFailure {
+            action_id: action_id.to_owned(),
+            view: capture_view.to_owned(),
+            detail: detail.to_owned(),
+        }
     })
 }
 
@@ -5754,6 +6101,7 @@ fn rigid_bar_profile_initializer(
         start_amplitude,
         minimum_amplitude,
         return_hysteresis,
+        return_tolerance: ready_tolerance,
         ready_tolerance,
         minimum_phase_dwell_ms: (min_rep_duration_ms / 2_u64).max(1_u64),
         max_gap_ms,
@@ -6254,6 +6602,7 @@ fn action_family_profile_initializer(
         start_amplitude,
         minimum_amplitude,
         return_hysteresis,
+        return_tolerance: ready_tolerance,
         ready_tolerance,
         minimum_phase_dwell_ms: (min_rep_duration_ms / 2_u64).max(1_u64),
         max_gap_ms: 700,
@@ -7055,11 +7404,10 @@ pub fn compile_plan_driven_runtime_binding(
     bundle: &ExecutionAssessmentBundle,
     plan: crate::ActionObservationPlan,
 ) -> RigidBarAssessmentProfileBinding {
-    // Historical assessment Bundle IDs may be product-facing aliases of the
-    // leaf ActionMotionDefinition (for example `flat_barbell_bench_press`
-    // versus its motion definition `barbell_bench_press`).  Keep the Bundle
-    // key solely for catalog lookup; profile/topology/strategy come only from
-    // the compiled plan and are never reconstructed from this alias.
+    // An assessment Bundle ID may be a product-facing alias of its leaf
+    // definition. Keep that key solely for catalog lookup;
+    // profile/topology/strategy come only from the compiled plan and are
+    // never reconstructed from an alias.
     let mut binding = compile_action_plan_runtime_binding(plan)
         .expect("an installed action plan must materialise a runtime binding");
     binding.action_id = bundle.exact_context.action_id.clone();
@@ -7144,24 +7492,23 @@ pub fn visual_recognition_baseline_catalog_v0_1() -> ExecutionAssessmentBundleCa
     catalog
         .bundles
         .retain(|bundle| !refused_bundle_ids.contains(&bundle.bundle_id));
+    for definition in &mut catalog.action_definitions {
+        definition
+            .supported_views
+            .retain(|binding| !refused_bundle_ids.contains(&binding.bundle_id));
+        // supported_views is part of the immutable semantic payload.  Exact-view
+        // refusals therefore change the installed ActionDefinition rather than
+        // merely filtering an adjacent runtime index.
+        *definition = definition.clone().with_computed_hash();
+    }
+    catalog
+        .action_definitions
+        .retain(|definition| !definition.supported_views.is_empty());
     catalog.action_motion_bindings = executable_bindings;
     let binding_by_bundle = catalog
         .action_motion_bindings
         .iter()
         .map(|binding| (binding.bundle_id.clone(), binding.leaf_action_id.clone()))
-        .collect::<HashMap<_, _>>();
-    let runtime_profiles = visual_recognition_baseline_profiles_v0_1()
-        .into_iter()
-        .map(|binding| {
-            (
-                format!(
-                    "{}/{}/v1",
-                    binding.action_id,
-                    binding.capture_view.catalog_slug()
-                ),
-                binding,
-            )
-        })
         .collect::<HashMap<_, _>>();
     let bundle_ids = catalog
         .bundles
@@ -7187,23 +7534,19 @@ pub fn visual_recognition_baseline_catalog_v0_1() -> ExecutionAssessmentBundleCa
         let plan = compiler
             .compile(definition, action_motion_view(capture_view))
             .expect("installed v0_1 binding resolves to an observation plan");
-        if let Some(binding) = runtime_profiles.get(&bundle_id) {
-            install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
-            install_action_motion_runtime_profile(
-                &mut catalog,
-                &bundle_id,
-                &binding.profile,
-                &plan,
-            );
-            install_action_motion_local_strategy(
-                &mut catalog,
-                &bundle_id,
-                binding.local_coordinate_strategy,
-            );
-            install_action_motion_equipment_strategy(&mut catalog, &bundle_id, &plan);
-        } else {
-            install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
-        }
+        // Every installed action/view is materialised directly from its
+        // compiled ActionObservationPlan.  Historical bindings are fixtures,
+        // never an alternative runtime authority for a matching action name.
+        let binding = compile_action_plan_runtime_binding(plan.clone())
+            .expect("installed action plan must materialise a runtime binding");
+        install_compiled_action_motion_semantics(&mut catalog, &bundle_id, &plan);
+        install_action_motion_runtime_profile(&mut catalog, &bundle_id, &binding.profile, &plan);
+        install_action_motion_local_strategy(
+            &mut catalog,
+            &bundle_id,
+            binding.local_coordinate_strategy,
+        );
+        install_action_motion_equipment_strategy(&mut catalog, &bundle_id, &plan);
     }
     assert_eq!(catalog.action_motion_bindings.len(), catalog.bundles.len());
     catalog.action_motion_catalog = Some(motion_catalog);
@@ -7508,6 +7851,7 @@ fn validate_quality_rule_asset_package(
 ) -> Result<(), ActionAssetRegistryError> {
     if package.schema_version != QUALITY_RULE_ASSET_PACKAGE_SCHEMA
         || package.package_id.trim().is_empty()
+        || package.asset_version.trim().is_empty()
         || package.action_id.trim().is_empty()
         || package.bundle_id.trim().is_empty()
         || !is_fixed_hash(&package.expected_bundle_hash)
@@ -7529,6 +7873,7 @@ fn validate_quality_rule_asset_package(
     if bundle.content_hash != package.expected_bundle_hash
         || bundle.exact_context.action_id != package.action_id
         || bundle.exact_context.capture_view != package.capture_view
+        || bundle.exact_context != package.exact_context
     {
         return Err(ActionAssetRegistryError::InvalidPackage(
             "quality-rule package exact context or expected Bundle hash is stale".into(),
@@ -7723,6 +8068,7 @@ pub fn install_compiled_action_motion_semantics(
         AssessmentAssetKind::EquipmentAdapter,
         AssessmentAssetKind::FeatureProgram,
         AssessmentAssetKind::RulePack,
+        AssessmentAssetKind::SetAggregationPolicy,
     ] {
         let old_reference = match kind {
             AssessmentAssetKind::RecognitionProfile => catalog.bundles[bundle_index]
@@ -7748,6 +8094,10 @@ pub fn install_compiled_action_motion_semantics(
             AssessmentAssetKind::RulePack => {
                 catalog.bundles[bundle_index].lineage.rule_pack.clone()
             }
+            AssessmentAssetKind::SetAggregationPolicy => catalog.bundles[bundle_index]
+                .lineage
+                .set_aggregation_policy
+                .clone(),
             _ => unreachable!("only plan-owned assets are cloned"),
         };
         let mut asset = catalog
@@ -7763,6 +8113,7 @@ pub fn install_compiled_action_motion_semantics(
             AssessmentAssetKind::EquipmentAdapter => "equipment-adapter",
             AssessmentAssetKind::FeatureProgram => "feature-program",
             AssessmentAssetKind::RulePack => "rule-pack",
+            AssessmentAssetKind::SetAggregationPolicy => "set-aggregation-policy",
             _ => unreachable!("only plan-owned assets are cloned"),
         };
         asset.id = format!("{bundle_id}/action-plan/{slug}/{}", plan.plan_hash);
@@ -7790,6 +8141,9 @@ pub fn install_compiled_action_motion_semantics(
             AssessmentAssetKind::RulePack => {
                 catalog.bundles[bundle_index].lineage.rule_pack = reference
             }
+            AssessmentAssetKind::SetAggregationPolicy => {
+                catalog.bundles[bundle_index].lineage.set_aggregation_policy = reference
+            }
             _ => unreachable!("only plan-owned assets are cloned"),
         }
     }
@@ -7816,6 +8170,10 @@ pub fn install_compiled_action_motion_semantics(
             lineage.feature_program.id,
         ),
         (AssessmentAssetKind::RulePack, lineage.rule_pack.id),
+        (
+            AssessmentAssetKind::SetAggregationPolicy,
+            lineage.set_aggregation_policy.id,
+        ),
     ];
     let authority = motion_authority(plan);
     for (kind, asset_id) in targets {
@@ -7944,6 +8302,23 @@ pub fn install_compiled_action_motion_semantics(
                     "reason": "no_governed_action_view_range_quality_rule"
                 });
             }
+            AssessmentAssetKind::SetAggregationPolicy => {
+                let rules = content
+                    .get_mut("setRules")
+                    .and_then(serde_json::Value::as_array_mut)
+                    .expect("compiled SetAggregationPolicy has set rules");
+                let range_rule = rules
+                    .iter_mut()
+                    .find(|rule| {
+                        rule.get("dimension").and_then(serde_json::Value::as_str)
+                            == Some("range_of_motion")
+                    })
+                    .expect("compiled SetAggregationPolicy classifies range of motion");
+                *range_rule = serde_json::json!({
+                    "dimension": "range_of_motion",
+                    "operator": "rollup_rep_dimension"
+                });
+            }
             _ => unreachable!("only semantic execution assets are bound"),
         }
         *asset = asset.clone().with_computed_hash();
@@ -7960,6 +8335,9 @@ pub fn install_compiled_action_motion_semantics(
             AssessmentAssetKind::EquipmentAdapter => bundle.lineage.equipment_adapter = reference,
             AssessmentAssetKind::FeatureProgram => bundle.lineage.feature_program = reference,
             AssessmentAssetKind::RulePack => bundle.lineage.rule_pack = reference,
+            AssessmentAssetKind::SetAggregationPolicy => {
+                bundle.lineage.set_aggregation_policy = reference
+            }
             _ => unreachable!("only semantic execution assets are bound"),
         }
     }
@@ -8204,10 +8582,10 @@ fn assessment_execution_receipt(
     })
 }
 
-fn rep_has_required_pre_seal_receipts(
+fn validate_required_pre_seal_receipts(
     plan: &crate::ActionObservationPlan,
     rep: &SealedRep,
-) -> bool {
+) -> Result<(), String> {
     use crate::AlgorithmModuleCategory as Category;
 
     let mut required = vec![
@@ -8219,7 +8597,11 @@ fn rep_has_required_pre_seal_receipts(
     if rep.disposition == RepDisposition::Confirmed {
         required.push(Category::PoseRelation);
     }
-    if plan.equipment_provider.is_some() {
+    if plan
+        .equipment_provider
+        .as_ref()
+        .is_some_and(|provider| provider.required_for_rep)
+    {
         required.extend([Category::EquipmentObservation, Category::EquipmentFusion]);
     }
     let receipt_ids = rep
@@ -8234,27 +8616,49 @@ fn rep_has_required_pre_seal_receipts(
         .collect::<Vec<_>>()
         != receipt_ids
     {
-        return false;
+        return Err("executed module IDs do not exactly match receipt order".into());
     }
-    required.into_iter().all(|category| {
+    let mut failures = Vec::new();
+    for category in required {
         let Some(module) = plan
             .algorithm_modules
             .iter()
             .find(|module| module.category == category)
         else {
-            return false;
+            failures.push(format!("{category:?}:module_missing_from_plan"));
+            continue;
         };
-        rep.execution_receipts.iter().any(|receipt| {
-            receipt.module_id == module.module_id
-                && receipt.category == category
-                && receipt.start_frame_id >= rep.start_frame_id
-                && receipt.end_frame_id <= rep.end_frame_id
-                && receipt.start_timestamp_ms >= rep.start_timestamp_ms
-                && receipt.end_timestamp_ms <= rep.end_timestamp_ms
-                && !receipt.input_fact_ids.is_empty()
-                && !receipt.output_fact_ids.is_empty()
-        })
-    })
+        let matching = rep.execution_receipts.iter().filter(|receipt| {
+            receipt.module_id == module.module_id && receipt.category == category
+        });
+        let mut saw_matching = false;
+        let mut saw_boundary_violation = false;
+        let mut saw_empty_facts = false;
+        for receipt in matching {
+            saw_matching = true;
+            saw_boundary_violation |= receipt.start_frame_id < rep.start_frame_id
+                || receipt.end_frame_id > rep.end_frame_id
+                || receipt.start_timestamp_ms < rep.start_timestamp_ms
+                || receipt.end_timestamp_ms > rep.end_timestamp_ms;
+            saw_empty_facts |=
+                receipt.input_fact_ids.is_empty() || receipt.output_fact_ids.is_empty();
+            if !saw_boundary_violation && !saw_empty_facts {
+                break;
+            }
+        }
+        if !saw_matching {
+            failures.push(format!("{category:?}:receipt_missing"));
+        } else if saw_boundary_violation {
+            failures.push(format!("{category:?}:receipt_outside_rep_window"));
+        } else if saw_empty_facts {
+            failures.push(format!("{category:?}:receipt_facts_empty"));
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join(","))
+    }
 }
 
 fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
@@ -8267,6 +8671,7 @@ fn rep_reference(rep: &SealedRep, subject_epoch: u64) -> SealedRepReference {
             RepDisposition::Rejected => "rejected",
         }
         .into(),
+        evidence_reason: rep.evidence_reason,
         start_timestamp_ms: rep.start_timestamp_ms,
         turnaround_timestamp_ms: rep.peak_timestamp_ms,
         turnaround_source: turnaround_source(rep).into(),

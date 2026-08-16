@@ -4,11 +4,16 @@
 
 **Blocked by:** 02 — 完成通用 Rep 识别算法包; 03 — 完成通用器械观测与融合算法包.
 
-**Status:** complete
+**Status:** complete — re-accepted after Tickets 01–03 passed and the action
+card entry became a Rust-owned recommended/selectable view contract. The
+set-entry interface is frozen `action_id + capture_view`; all equipment,
+relation, module and parameter choices remain Rust-owned.
+
+Ticket 04 的“完成”只指选择与编译机制。逐叶动作的证据用途、器械/骨架策略与可查询解释由 Ticket 11 补齐并已完成；数值识别率仍不属于本票据。
 
 ## Audit context and non-negotiable constraints
 
-- The current view projection effectively treats a relation as observable when its operator is registered. That makes every catalog view installable without proving that the selected action's identity-defining relation is visible in that camera projection. This ticket must replace that behavior with real versioned action×view observation assets.
+- The earlier view projection treated a relation as observable when its operator was registered. The implemented contract replaces that shortcut with versioned action×view observation assets and refuses an exact projection whose identity relation is not visible.
 - Context refusal is allowed only for a malformed contract or an exact visual context that cannot express the identity-defining relation. It is not a persistent “unverified”, “not released” or accuracy-maturity state inside Rust.
 - Every selected action×view must choose a `RepTopologyProfile` with primary relation, direction policy, excursion, hysteresis, return tolerance, phase dwell and gap policy. It must not inherit the global candidate thresholds documented in Ticket 02.
 - Provider implementation/registry compatibility is structural. A real-time absence, occlusion or failed association after the plan starts remains dynamic evidence and must not make the action unavailable.
@@ -72,3 +77,16 @@ second action, during one causal set.
 The action-plan contract now materialises every compiled installed action×view
 through this same binding and asserts that the resulting profile contains that
 plan's immutable hash and topology state-graph identity.
+
+The installed v0.1 catalog no longer substitutes any historical action-name
+profile during this materialisation: every exact Bundle compiles its own plan
+into the runtime profile and local-coordinate strategy. A recorded set also
+freezes begin/re-entry, canonical-feed mirroring and packet lineage, so those
+changes cannot create a second interpretation under one plan hash.
+
+The action asset now explicitly declares its recommended camera view. Rust
+exposes the recommended view plus only those declared views whose identity
+relation compiles; this query does not select or run algorithms. Web, Android
+and iOS can use the same C/WASM ABI to query the view mask and then start one
+session with exactly `action_id + view`. All 248 action assets pass inventory
+validation; the action-plan, full-lifecycle and visual-entry ABI suites pass.

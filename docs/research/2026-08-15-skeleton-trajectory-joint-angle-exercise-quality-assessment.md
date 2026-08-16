@@ -1211,7 +1211,7 @@ ActionObservationPlan
 | `hack_squat_machine` | 哈克深蹲 | 肩背垫与踏板锚点、受约束机身轨迹、髋膝同步 |
 | `pendulum_squat_machine` | 钟摆深蹲 | 器械弧形轨迹、身体与背垫关系、髋膝端点 |
 | `belt_squat` | 腰带深蹲 | 骨盆附近负载轨迹、躯干相对自由、髋膝屈伸 |
-| `box_squat` | 箱式深蹲 | 箱面接触/停顿、下降端点、坐箱后重新上升 |
+| `box_squat` | 箱式深蹲 | 可见下降端停顿、下降端点、停顿后重新上升；没有箱面观测时不声称物理接触 |
 | `sumo_squat` | 相扑深蹲 | 宽站距 context、髋膝左右关系、负载中心（若有） |
 | `landmine_squat` | 地雷管深蹲 | 杆端弧形轨迹、负载相对躯干、髋膝屈伸 |
 

@@ -294,7 +294,7 @@ fn run_coordinate_sequence(
         output.clone(),
     )
     .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     for index in 0..centers.len() {
         session
             .offer(FrameLease::fixture(
@@ -313,7 +313,11 @@ fn run_coordinate_sequence(
 
 #[test]
 fn per_set_coordinate_is_causal_and_invariant_to_camera_plane_transform() {
-    let progress = vec![0.0, 0.005, 0.025, 0.050, 0.080];
+    // Grip establishment deliberately requires two independently observed
+    // common-motion transitions. Keep enough post-grip motion for the local
+    // frame to learn and freeze from equipment evidence rather than relying on
+    // the old one-delta shortcut.
+    let progress = vec![0.0, 0.005, 0.025, 0.050, 0.080, 0.110, 0.140];
     let baseline = run_coordinate_sequence(0.10, [0.0, 0.0], 1.0, progress.clone());
     let transformed = run_coordinate_sequence(0.55, [0.08, -0.05], 0.20, progress);
     assert_eq!(baseline.len(), transformed.len());
@@ -335,15 +339,44 @@ fn per_set_coordinate_is_causal_and_invariant_to_camera_plane_transform() {
 
 #[test]
 fn frozen_coordinate_fails_closed_after_a_camera_geometry_break() {
-    let frames = [
-        (0.0, 0.10),
-        (0.005, 0.10),
-        (0.025, 0.10),
-        (0.050, 0.10),
-        (0.080, 0.10),
-        (0.090, 1.45),
-        (0.100, 0.10),
+    let mut frames = [0.0, 0.005, 0.025, 0.050, 0.080, 0.110, 0.140]
+        .into_iter()
+        .map(|progress| local_bar_frame(progress, 0.10))
+        .collect::<Vec<_>>();
+    // Rotate the measured shaft around a continuously moving center. This
+    // keeps the subject/equipment association intact while presenting the
+    // frozen local frame with a genuine geometry discontinuity.
+    let mut geometry_break = local_bar_frame(0.150, 0.10);
+    let prior_axis = geometry_break.equipment[0].axis.expect("bar axis");
+    let center = [
+        (prior_axis.x1 + prior_axis.x2) * 0.5,
+        (prior_axis.y1 + prior_axis.y2) * 0.5,
     ];
+    let break_angle = 1.45_f32;
+    let cross = [break_angle.cos(), break_angle.sin()];
+    let axis = EquipmentAxis2d {
+        x1: center[0] - cross[0] * 0.25,
+        y1: center[1] - cross[1] * 0.25,
+        x2: center[0] + cross[0] * 0.25,
+        y2: center[1] + cross[1] * 0.25,
+    };
+    geometry_break.equipment[0].axis = Some(axis);
+    geometry_break.equipment[0].bbox = NormalizedRect::new(
+        axis.x1.min(axis.x2),
+        axis.y1.min(axis.y2),
+        (axis.x2 - axis.x1).abs(),
+        (axis.y2 - axis.y1).abs(),
+    );
+    for (wrist, interpolation) in [(9, 0.42_f32), (10, 0.58_f32)] {
+        geometry_break.pose_candidates[0].observations[wrist] = PoseObservation::new(
+            axis.x1 + (axis.x2 - axis.x1) * interpolation,
+            axis.y1 + (axis.y2 - axis.y1) * interpolation,
+            0.0,
+            0.95,
+        );
+    }
+    frames.push(geometry_break);
+    frames.push(local_bar_frame(0.160, 0.10));
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
         SessionConfig {
@@ -360,15 +393,12 @@ fn frozen_coordinate_fails_closed_after_a_camera_geometry_break() {
         },
         AdapterCapabilities::fixture(),
         LocalProfileFixture {
-            frames: frames
-                .iter()
-                .map(|(progress, angle)| local_bar_frame(*progress, *angle))
-                .collect(),
+            frames: frames.clone().into(),
         },
         output.clone(),
     )
     .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     for frame_id in 0..frames.len() as u64 {
         session
             .offer(FrameLease::fixture(
@@ -380,19 +410,19 @@ fn frozen_coordinate_fails_closed_after_a_camera_geometry_break() {
     }
     let packets = output.packets();
     assert_eq!(
-        packets[4].local_motion_coordinate.state,
+        packets[6].local_motion_coordinate.state,
         maxpower_motion_sdk::LocalCoordinateState::Frozen,
     );
     assert_eq!(
-        packets[5].local_motion_coordinate.state,
+        packets[7].local_motion_coordinate.state,
         maxpower_motion_sdk::LocalCoordinateState::Degraded,
     );
     assert_eq!(
-        packets[5].local_motion_coordinate.reason,
+        packets[7].local_motion_coordinate.reason,
         Some(maxpower_motion_sdk::LocalCoordinateReason::InvalidGeometry),
     );
     assert_eq!(
-        packets[6].local_motion_coordinate.state,
+        packets[8].local_motion_coordinate.state,
         maxpower_motion_sdk::LocalCoordinateState::Degraded,
         "a degraded coordinate never silently reinitializes during the same set",
     );
@@ -450,7 +480,7 @@ fn opt_in_local_bench_profile_consumes_normalized_progress_and_seals_endpoint_sn
             ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
         )
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..progress.len() as u64 {
         session
@@ -585,7 +615,7 @@ fn seated_barbell_shoulder_press_runs_its_own_causal_local_profile() {
             ExerciseProfile::seated_barbell_shoulder_press_local_front_left_provisional(),
         )
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..progress.len() as u64 {
         session
@@ -665,7 +695,7 @@ fn equipment_pixel_uncertainty_is_normalized_by_the_frozen_set_scale() {
         output.clone(),
     )
     .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     for frame_id in 0..5 {
         session
             .offer(FrameLease::fixture(
@@ -733,7 +763,7 @@ fn high_uncertainty_equipment_cannot_drive_a_local_phase_profile() {
             ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
         )
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     for frame_id in 0..progress.len() as u64 {
         session
             .offer(FrameLease::fixture(
@@ -795,7 +825,7 @@ fn conflicting_hand_and_bar_motion_cannot_establish_grip_or_seal_a_rep() {
             ExerciseProfile::barbell_bench_press_local_front_left_provisional(),
         )
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     for frame_id in 0..progress.len() as u64 {
         session
             .offer(FrameLease::fixture(
@@ -855,8 +885,10 @@ fn endpoint_mapping_for_context(
     )
     .unwrap();
     session.install_exercise_profile(profile).unwrap();
-    session.set_canonical_feed_mirroring(feed_mirrored);
-    session.begin_set();
+    session
+        .set_canonical_feed_mirroring(feed_mirrored)
+        .expect("configure canonical mirroring");
+    session.begin_set().expect("begin set");
     for frame_id in 0..progress.len() as u64 {
         session
             .offer(FrameLease::fixture(
@@ -983,7 +1015,7 @@ fn rear_coarse_view_is_available_for_current_action_family_bundles() {
 
 #[test]
 fn a_missing_shaft_clears_frame_local_trajectory_instead_of_reusing_stale_progress() {
-    let mut frames = [0.0, 0.005, 0.025, 0.050, 0.080]
+    let mut frames = [0.0, 0.005, 0.025, 0.050, 0.080, 0.110, 0.140]
         .into_iter()
         .map(|value| {
             let mut frame = local_bar_frame(value, 0.22);
@@ -1008,6 +1040,7 @@ fn a_missing_shaft_clears_frame_local_trajectory_instead_of_reusing_stale_progre
         }],
         equipment: Vec::new(),
     });
+    let frame_count = frames.len() as u64;
     let output = RecordingOutputAdapter::default();
     let mut session = MotionSession::open(
         SessionConfig {
@@ -1029,8 +1062,8 @@ fn a_missing_shaft_clears_frame_local_trajectory_instead_of_reusing_stale_progre
         output.clone(),
     )
     .unwrap();
-    session.begin_set();
-    for frame_id in 0..6 {
+    session.begin_set().expect("begin set");
+    for frame_id in 0..frame_count {
         session
             .offer(FrameLease::fixture(
                 frame_id,

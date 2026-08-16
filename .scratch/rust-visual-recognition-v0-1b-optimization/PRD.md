@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: implemented-with-explicit-data-blocked-followups
 
 # Rust 视觉识别 v0.1b：动作驱动算法组合与召回优化
 
@@ -60,7 +60,7 @@ Rust 在 set 开始前将已选择的 exact action context 编译为一份冻结
 ## Implementation Decisions
 
 - `CompiledActionAnalysisPlan` 是 set 前冻结的内部计划，至少包含完整 context key、definition/view lineage、module graph、provider requirements、local-coordinate plan、`RepTopologySpec`、admission policy、relation program、post-seal feature program、RulePack、set aggregation policy 和 plan hash。
-- exact action context 固定包括 action、variation、equipment topology、laterality、camera view 和 pose contract。上下文解析只接受调用方已选择的动作和声明的捕获信息；Rust 不做开放集动作分类，也不通过画面猜测替换该选择。
+- exact action context 固定包括 action、variation、equipment topology、laterality、camera view 和 pose contract。上下文解析只接受调用方已选择的动作和声明的捕获信息；Rust 不做开放集动作分类，也不通过画面猜测替换该选择。两个 action 可以复用同一通用 topology/operator program；`TaskCompletion` 只证明该资产声明为 required 的可观察任务关系完成，未被 relation 独立观测的握法、支撑、朝向或器械差异必须保留为受限声明，不能被解释为 Rust 已重新识别并验证动作身份。
 - Rust 的高层运行时使用一个会话生命周期：`compile` 产生计划或 typed plan refusal；`begin_set` 冻结该计划；`process` 只接受该计划下的 frame observations；`finish_set` 封存唯一的 canonical output。任何 context、Provider contract、pose contract 或 plan hash 的变化都要求新 set。
 - `ActionMotionDefinition` 是动作语义唯一权威。编译器必须把 TaskPrimary、主轨迹来源、rep boundary、phase 语义、rep consensus、topology 和方向策略物化为 RepEngine 使用的 runtime segmentation profile；仅把 plan hash 写入 profile identity，或在 SealedRep 后附加动作验证，不满足本规格。
 - `RepTopologySpec` 是动作资产选择的通用执行器配置，而不是动作名称分支。v0.1b 至少支持 bilateral synchronous、independent bilateral、unilateral、alternating、pose primary、hold interval、locomotion step 和 multi-stage topology；未选择的 topology 不运行。
@@ -68,10 +68,12 @@ Rust 在 set 开始前将已选择的 exact action context 编译为一份冻结
 - Candidate proposal 追求完整周期召回，允许保留弱但有界的候选；它不得将 predicted、Unknown、另一个人的 landmark、手腕桥接或不属于当前动作定义的 relation 作为 start、turnaround 或 end 证据。
 - Admission 明确拆分 `CoordinateNotFrozen`、`SignalTemporarilyUnavailable`、`TransitionEvidenceWeak`、`IdentityRelationMissing`、`EquipmentConsensusUnavailable`、`EquipmentConsensusConflict`、`IncompleteCycle` 和连续性原因。前 3 类只有在周期完整、缺失时长有界且没有身份冲突时才可进入 NeedsReview；Confirmed 是唯一进入正式训练量的 Rep。
 - `RequiredForPlan` 只表示结构性依赖：资产、模块、schema、事实生产者或类型不闭合。Provider 没有在当前帧产生 observation、器械被遮挡或动态关联不足属于运行时 evidence 状态，而不是 SDK 内的动作能力或发布等级。
-- `ViewObservationPlan` 是版本化资产，声明 relation visibility、禁止信号、遮挡风险、side/equipment/support observability、local axis policy 和维度可用性。无法在该 declared view 表达 identity-defining relation 时，Rust 产生语义明确的 context refusal；这不是 reviewed/unreviewed 或 accuracy-maturity 状态。
+- `ViewObservationPlan` 是版本化资产，声明 relation visibility、禁止信号、遮挡风险、side/equipment/support observability、动作主锚点、局部轴方向和维度可用性。RepEngine 必须消费资产选中的髋、踝、单侧腕或器械主轨迹，不能因为都是 pose-primary 就统一改成肩中点/腕中点。无法在该 declared view 表达 identity-defining relation 时，Rust 产生语义明确的 context refusal；这不是 reviewed/unreviewed 或 accuracy-maturity 状态。
 - `AlgorithmModuleDescriptor` 必须声明输入、输出、provenance、最大因果年龄、缺失策略、冲突策略、参数 schema、延迟预算和允许结论。每个 required fact 必须恰有一个 producer，或有显式的 typed merge/conflict rule；模块图必须无环并可由 plan hash 完整复现。
 - 真实器械 observation 保持 detector、tracker/geometry、prediction 和 display estimate 的独立 provenance。预测和 display estimate 永远不是 judgeable equipment；手腕只能约束 subject/hand/grip association，不能产生 raw geometry、track identity、视觉长度或 Rep eligibility。
-- Provider 的 Rust seam 保持一个 registry。barbell、dumbbell 和 machine-handle 的真实 detector/tracker 可以独立演进，但输出必须先进入同一 `EquipmentObservation → EquipmentFusionEngine → local coordinate → Rep topology` 链路。光流或几何 tracker 是否可作为 judgeable observation 必须由其可追溯视觉来源、TTL、uncertainty、连续性和 association 合同明确决定，不能借用 `Predicted` 以外的宽松分类。
+- Provider 的 Rust seam 保持一个 registry。barbell、dumbbell 和 machine-handle 的真实 detector/tracker 可以独立演进，但输出必须先进入同一 `EquipmentObservation → EquipmentFusionEngine → local coordinate → Rep topology` 链路。装备为 TaskPrimary 时缺失/冲突必须阻断 ConfirmedRep；装备只作佐证时，Provider 仍可由 Rust 自动选中，但不能劫持 pose-primary candidate。光流或几何 tracker 是否可作为 judgeable observation必须由其可追溯视觉来源、TTL、uncertainty、连续性和 association 合同明确决定，不能借用 `Predicted` 以外的宽松分类。
+- 肩外旋和阿诺德推举使用版本化 `projected_shoulder_rotation`：计算肩—肘—腕方向相对躯干轴的二维有符号旋转，并要求离开、反转、返回。Arnold press 还必须由 `relative_vertical_offset` 证明手腕相对肩部的可见过顶位移在旋转换向附近成立，不能把肘角变化或普通肩推当成等价身份。两项都只是二维动作阶段/Rep 证据，不是真实三维肱骨轴角、肩胛运动或伤病判断；投影塌缩的 side view 保持 exact-context refusal。
+- 史密斯动作的 `constrained_path_deviation` 必须读取独立测得的器械通道，并由 exact action×view 的 `maximumConstrainedPathDeviationMilli` 限制整次 Rep 的可见横轴跨度；它不恢复真实导轨几何，缺失或越界不能由骨架修补。
 - 方向、坐标、signal 和 equipment 的动态拒绝都必须保留事实级子原因、时间范围、source lineage 和反事实可解释信息。Trace 只能连接实际被执行和读取的输入，不能用装饰性节点补齐线性链。
 - 边界精修使用固定上限环形缓冲。turnaround 的 event timestamp 与更晚的 confirmation timestamp 分开保留；只能回看已经到达的因果缓冲。没有足够证据时不精修，质量模块也不得移动或删除 SealedRep。
 - 后续质量继续只消费 SealedRep、relation facts 和 reference policy。没有人工真值和 calibrated RulePack 的质量维度保持 `CannotJudge` 或 `NotApplicable`；本轮不得以计次优化为理由发布质量正确性声明。
@@ -105,8 +107,10 @@ Rust 在 set 开始前将已选择的 exact action context 编译为一份冻结
 
 ## Further Notes
 
-- 当前 51.61% Precision / 3.52% Recall 是 Confirmed 与 NeedsReview 合并后的 admission 指标，不是 raw proposal 指标；NeedsReview 增长不能当作正式训练量或产品计次改善。
-- 现有 194 个 raw candidate 面对 455 个人工 Rep，即使 admission 全部正确，Recall 上限也仅为 42.64%。因此 v0.1b 必须同时提升 proposal 和 admission，不能只放宽拒绝门槛。
+- 修复前的 51.61% Precision / 3.52% Recall 是旧诊断中的 Confirmed 与 NeedsReview 合并 admission 指标，不是 raw proposal 指标；NeedsReview 增长不能当作正式训练量或产品计次改善。
+- 修复前 194 个 raw candidate 面对 455 个人工 Rep，即使 admission 全部正确，Recall 上限也仅为 42.64%。最终 v0.1b 回放只形成 51 个 raw candidate，说明资产驱动语义基座已经替换旧路径，但候选恢复仍未完成，不能只放宽拒绝门槛。
+- 2026-08-16 action-driven 固定实现的受治理回放已经完成：51 个 raw candidate（23 matched，Precision 45.10%、Recall 5.05%）、10 Confirmed、7 NeedsReview、34 Rejected；Confirmed+NeedsReview Precision 64.71%、Recall 2.42%，exact-set 0%。这证明语义/Trace 基座已运行，但 candidate 恢复未完成；数值结果是 failed acceptance，不能被“248 个动作资产可安装”覆盖。
+- 同一回放中 local coordinate 只有 3,648/15,879 帧 Frozen，8,200 帧 Uninitialized；剩余识别恢复集中到 Ticket 15，依赖与最终评估隔离的 action×view calibration 数据和预先冻结的产品通过线。不得继续用当前 53 组评测视频选择阈值后再声称无偏改善。
 - 当前方向拒绝、关节丢失和器械共识分布是聚合症状，不是已证实的逐 context 根因。P0 必须先完成 action×view、candidate×truth overlap 和事实子原因归因，再按单因子实施。
 - 当前已安装动作资产都进入同一 Rust lifecycle；本规格中的 typed refusal 仅用于 malformed assets 或所选 exact visual context 无法表达 identity-defining relation，绝不能演变为 SDK 内部“未验证动作/未开放动作”的长期名单。
 - 最终验收需要在新的 participant、source、session、device 和 view 隔离的 held-out 数据上同时验证 Rep count、边界、负窗口、端上性能和已启用质量维度。known-video 回放仍是回归诊断，不是泛化率。

@@ -80,7 +80,7 @@ fn action_family_strategies_preserve_their_actual_evidence_semantics() {
 }
 
 #[test]
-fn v7_exact_context_matrix_keeps_equipment_and_view_contracts() {
+fn current_exact_context_matrix_keeps_only_geometrically_executable_view_contracts() {
     let catalog = visual_recognition_baseline_catalog_v0_1();
     let expected = [
         (

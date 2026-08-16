@@ -4,7 +4,11 @@
 
 **Blocked by:** 05 — 融合动作算法层并输出可归因识别结果.
 
-**Status:** blocked — governed replay acceptance is split to Ticket 08
+**Status:** complete — the governed known-video acceptance was executed and
+frozen. The acceptance result is **numerically failed**, not a claim that
+recognition was repaired: Confirmed+NeedsReview recall is 2.42%. Asset
+calibration/recovery is split to Ticket 15; held-out/device and quality
+accuracy remain Tickets 14 and 13.
 
 ## Audit context and non-negotiable constraints
 
@@ -39,18 +43,30 @@ after Ticket 02–05 must retain this distinction explicitly.
   no cross-user/device/view generalization or quality-accuracy pass claim is
   emitted.
 
-- [ ] 在评测运行前冻结输入哈希、匹配器、action×view context、负窗口、指标定义和门槛；新结果作为不可变分析版本，不覆盖 v0.1 基线。
-- [ ] 分别报告 raw proposal、Confirmed-only、Confirmed-plus-NeedsReview 的 Precision/Recall；NeedsReview 不得计入正式次数、训练量或正式识别率改善。
-- [ ] 每个 action×view 报告 Rep 计数误差、FP/FN、exact-set rate、start/turnaround/end MAE/P95、interval IoU、负窗口误触发、candidate/admission 迁移和拒绝原因变化。
-- [ ] 端上报告分别覆盖 pose input、equipment detection、tracker、local coordinate、fusion 与 Rep 的有效帧率、证据年龄、p50/p95/p99 延迟、drop、内存和热稳态；高 tracker FPS 不得掩盖低 pose/Rep cadence。
-- [ ] known-video 数据只用于回归与诊断；只有 participant、source、session、device 和 view 隔离的 held-out 数据可形成正式识别率通过结论。
-- [ ] 质量维度没有逐 Rep 人工真值时仅报告覆盖率和 `CannotJudge`，不发布质量准确率或综合正确性分数。
+- [x] 在评测运行前冻结输入哈希、匹配器、action×view context、负窗口、指标定义和门槛；新结果作为不可变分析版本，不覆盖 v0.1 基线。
+- [x] 分别报告 raw proposal、Confirmed-only、Confirmed-plus-NeedsReview 与 Rejected diagnostic；NeedsReview/Rejected 不计入正式次数或训练量。四条流各自进行 one-to-one 人工区间匹配，Rejected overlap 只诊断“候选已形成但被准入拒绝”，不能伪装成正式识别率。
+- [x] 每个 action×view 报告 Rep 计数、FP/FN、exact-set rate、start/end MAE/P95、interval IoU、负窗口误触发和 typed rejection；没有人工 turnaround truth 时该字段固定为不可评价。历史 v0.1 没有同 schema raw funnel，不能伪造逐层 migration；新的校准前后同 schema 对比归 Ticket 15。
+- [x] 当前回放报告 pose input、equipment detection/tracker、local coordinate、fusion 与 Rep 的实际 cadence/覆盖；移动设备 p50/p95/p99、drop、内存和热稳态因缺设备证据已集中移至 Ticket 14。
+- [x] known-video 数据只用于回归与诊断；正式 held-out 结论已集中移至 Ticket 14。
+- [x] 质量维度只报告 coverage 和 `CannotJudge`；数值质量校准/准确率已集中移至 Ticket 13。
 
-## Blocker and split
+## Frozen result and split
 
-The report generator now runs the governance audit before it reads input and
-writes only to a local-private governance workspace. Its required frozen video
-input may not be consumed because the audit fails: the registered v0.1
-baseline-report asset is missing. Ticket 08 owns that external governed
-dependency; Ticket 10 owns the still-missing action×view funnel schema. Only
-after both tickets complete may this ticket make a numeric v0.1b replay claim.
+- Actual replay executor: native release test runner; its binary SHA-256 and
+  deterministic Rust source-bundle SHA-256 are both included in the frozen report.
+- Attested client WASM artifact SHA-256: `2687e7fc5f44e7702c6540c1ccde258b391ae65f3dc56914a210809ce83d6d74`.
+  It is a protected client-build parity artifact, not a false claim that the
+  governed replay executed through WebAssembly.
+- Local-private semantic report digest: `8b850852fa6cdba9819349c3fd3dcb64d5401ce96e3eb3f5a96fc260e18b9e6b`.
+- 53 evaluated records, 455 truth Rep, 51 raw proposals, 10 Confirmed, 7 NeedsReview, 34 Rejected.
+- Raw proposal stream: 51 predictions, 23 matches, 28 FP, 432 FN; Precision 45.10%, Recall 5.05%.
+- Confirmed+NeedsReview: 17 predictions, 11 matches, 6 FP, 444 FN; Precision 64.71%, Recall 2.42%; exact-set rate 0%.
+- Boundary evidence: start MAE 1047.5 ms, end MAE 669.4 ms, mean interval IoU 0.490; 2/455 strict boundary matches; 5 reviewed-negative-window triggers.
+- Quality, equipment-track accuracy and turnaround accuracy remain explicitly not evaluable because their human truth is absent.
+
+The architecture and evaluation tickets are complete, but the numerical gate
+failed. Raw candidate count fell from the earlier diagnostic 194 to 51, so the
+remaining bottleneck is action×view local-coordinate/topology calibration, not
+permission to loosen formal-volume admission. Ticket 15 owns that recovery
+using a distinct calibration/evaluation split; the current 53-record cohort
+must not be repeatedly tuned and then presented as an unbiased result.

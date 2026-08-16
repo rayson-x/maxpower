@@ -159,6 +159,28 @@ fn installed_runtime_packet_reports_the_self_attested_profile_hash() {
 }
 
 #[test]
+fn replay_can_install_its_legacy_profile_before_the_first_observation_only() {
+    let _guard = ABI_TEST_LOCK.lock().unwrap();
+    assert_eq!(motion_sdk_close(), 0);
+    assert_eq!(motion_sdk_reset(720, 1280, 0), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    assert_eq!(motion_sdk_begin_replay_set(), 0);
+    assert_eq!(
+        motion_sdk_set_profile(109),
+        0,
+        "offline replay constructors may bind a legacy profile before frame zero",
+    );
+    assert_eq!(motion_sdk_begin_frame(100, 0, 0), 0);
+    assert_eq!(motion_sdk_process_frame(), 0);
+    assert_eq!(
+        motion_sdk_set_profile(109),
+        -5,
+        "profile semantics freeze after the first replay observation",
+    );
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
 fn native_abi_copies_the_same_versioned_profile_packet_into_host_memory() {
     let _guard = ABI_TEST_LOCK.lock().unwrap();
     assert_eq!(motion_sdk_close(), 0);

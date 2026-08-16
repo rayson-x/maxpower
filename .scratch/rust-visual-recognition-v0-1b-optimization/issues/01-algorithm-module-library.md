@@ -4,7 +4,8 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** complete
+**Status:** complete — re-accepted after the compiled module policy became an
+executable pre-Rep gate and the full 01–03 contract suite passed.
 
 ## Audit context and non-negotiable constraints
 
@@ -26,3 +27,6 @@
 missing/duplicate modules, no-producer facts, incompatible topology and cyclic
 dependencies. Equipment-primary graphs additionally require the independently
 produced `subject_equipment_association` fact before `rep_topology` can run.
+Runtime invocation tests prove required input type, age, missing and conflict
+policies change execution disposition; these fields are no longer trace-only
+metadata.

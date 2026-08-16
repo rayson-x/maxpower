@@ -304,6 +304,13 @@ pub extern "C" fn motion_sdk_commit_sequence() -> i32 {
     let Ok(mut runtime) = runtime().lock() else {
         return -1;
     };
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        // Packet lineage is frozen with the first recorded set boundary.
+        return -4;
+    }
     let Ok(sequence_id) = String::from_utf8(std::mem::take(&mut runtime.sequence_buffer)) else {
         return -2;
     };
@@ -323,6 +330,17 @@ pub extern "C" fn motion_sdk_reset(width: u32, height: u32, fusion: u32) -> i32 
     };
     if width == 0 || height == 0 {
         return -2;
+    }
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        // `reset` configures a new camera/runtime session; it is not an
+        // implicit abort-set operation. Clearing the action/view/provider
+        // binding while a set is live would splice two causal lifecycles into
+        // one apparent recording. Hosts must close the set (or the whole SDK)
+        // explicitly before resetting.
+        return -3;
     }
     runtime.pose_schema = super::PoseSchemaId::BlazePose33;
     runtime.engine = Some(ContinuityEngine::new_with_schema(
@@ -433,6 +451,12 @@ pub extern "C" fn motion_sdk_begin_set() -> i32 {
     if runtime.engine.is_none() {
         return -2;
     }
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        return -3;
+    }
     runtime.set_gate.begin();
     runtime.local_motion_coordinate.begin_set();
     if let Some(rep_engine) = runtime.rep_engine.as_mut() {
@@ -461,6 +485,12 @@ pub extern "C" fn motion_sdk_begin_replay_set() -> i32 {
     };
     if runtime.engine.is_none() {
         return -2;
+    }
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        return -3;
     }
     runtime.set_gate = super::SetGate::replay_active();
     runtime.local_motion_coordinate.begin_set();
@@ -623,7 +653,7 @@ pub extern "C" fn motion_sdk_process_frame() -> i32 {
                 equipment: &equipment_observations,
             }),
     );
-    process_rep(&mut runtime, &equipment_observations);
+    process_rep(&mut runtime, &equipment_observations, false);
     runtime.last_processed_timestamp_ms = Some(timestamp_ms);
     0
 }
@@ -832,6 +862,99 @@ pub extern "C" fn motion_sdk_detect_visual_equipment(mode: u32) -> i32 {
     0
 }
 
+fn visual_view_id(view_code: u32) -> Option<&'static str> {
+    match view_code {
+        0 => Some("front"),
+        1 => Some("rear"),
+        2 => Some("left_side"),
+        3 => Some("right_side"),
+        4 => Some("front_left_45"),
+        5 => Some("front_right_45"),
+        6 => Some("rear_left_45"),
+        7 => Some("rear_right_45"),
+        _ => None,
+    }
+}
+
+fn visual_view_code(view_id: &str) -> Option<u32> {
+    (0..=7).find(|code| visual_view_id(*code) == Some(view_id))
+}
+
+unsafe fn action_id_from_raw<'a>(
+    action_id: *const u8,
+    action_id_length: usize,
+) -> Result<&'a str, i32> {
+    if action_id.is_null() || action_id_length == 0 || action_id_length > 256 {
+        return Err(-1);
+    }
+    // SAFETY: the public FFI callers guarantee this readable range for the
+    // duration of the call using this borrowed value.
+    let bytes = unsafe { std::slice::from_raw_parts(action_id, action_id_length) };
+    match std::str::from_utf8(bytes) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => Err(-3),
+    }
+}
+
+fn visual_action_entry(action_id: &str) -> Result<super::ActionEntryOptions, i32> {
+    let catalog = super::installed_action_motion_catalog_v1().map_err(|_| -4)?;
+    catalog
+        .entry_options(action_id)
+        .map_err(|error| match error {
+            super::ActionMotionError::UnknownAction { .. } => -5,
+            _ => -6,
+        })
+}
+
+/// Returns the asset-authored recommended view code for an action card without
+/// selecting a runtime plan or mutating a recognition session.
+///
+/// # Safety
+/// `action_id` must point to `action_id_length` readable UTF-8 bytes for the
+/// duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn motion_sdk_visual_action_recommended_view(
+    action_id: *const u8,
+    action_id_length: usize,
+) -> i32 {
+    // SAFETY: this function forwards the same public pointer contract.
+    let action_id = match unsafe { action_id_from_raw(action_id, action_id_length) } {
+        Ok(value) => value,
+        Err(code) => return code,
+    };
+    let entry = match visual_action_entry(action_id) {
+        Ok(value) => value,
+        Err(code) => return code,
+    };
+    visual_view_code(&entry.recommended_view).map_or(-6, |code| code as i32)
+}
+
+/// Returns an eight-bit mask of exact camera views the Rust action asset can
+/// compile for this action. Querying does not select algorithms; the caller
+/// still starts recognition with exactly one action + view pair.
+///
+/// # Safety
+/// `action_id` must point to `action_id_length` readable UTF-8 bytes for the
+/// duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn motion_sdk_visual_action_view_mask(
+    action_id: *const u8,
+    action_id_length: usize,
+) -> i32 {
+    // SAFETY: this function forwards the same public pointer contract.
+    let action_id = match unsafe { action_id_from_raw(action_id, action_id_length) } {
+        Ok(value) => value,
+        Err(code) => return code,
+    };
+    let entry = match visual_action_entry(action_id) {
+        Ok(value) => value,
+        Err(code) => return code,
+    };
+    entry.available_views.iter().fold(0_i32, |mask, view| {
+        visual_view_code(view).map_or(mask, |code| mask | (1_i32 << code))
+    })
+}
+
 /// Compiles the caller-selected exercise context into Rust-owned visual
 /// provider selection before a set starts. `action_id` and `view_code` are
 /// context metadata, not algorithm IDs: the embedded ActionMotionDefinition
@@ -850,45 +973,29 @@ pub unsafe extern "C" fn motion_sdk_select_visual_action_context(
     action_id_length: usize,
     view_code: u32,
 ) -> i32 {
-    if action_id.is_null() || action_id_length == 0 || action_id_length > 256 {
-        return -1;
-    }
-    let view = match view_code {
-        0 => "front",
-        1 => "rear",
-        2 => "left_side",
-        3 => "right_side",
-        4 => "front_left_45",
-        5 => "front_right_45",
-        6 => "rear_left_45",
-        7 => "rear_right_45",
-        _ => return -2,
+    let view = match visual_view_id(view_code) {
+        Some(value) => value,
+        None => return -2,
     };
-    // SAFETY: the public FFI contract above guarantees a readable range.
-    let action_id = match unsafe {
-        std::str::from_utf8(std::slice::from_raw_parts(action_id, action_id_length))
-    } {
-        Ok(value) if !value.trim().is_empty() => value,
-        _ => return -3,
+    // SAFETY: this function forwards the same public pointer contract.
+    let action_id = match unsafe { action_id_from_raw(action_id, action_id_length) } {
+        Ok(value) => value,
+        Err(code) => return code,
     };
     let catalog = match super::installed_action_motion_catalog_v1() {
         Ok(catalog) => catalog,
         Err(_) => return -4,
     };
-    let Some(definition) = catalog.definition(action_id) else {
-        return -5;
-    };
-    let plan = match super::ActionMotionCompiler::new(super::OperatorRegistry::standard())
-        .compile(definition, view)
-    {
-        Ok(plan) => plan,
+    let binding = match super::compile_action_recognition_binding(&catalog, action_id, view) {
+        Ok(binding) => binding,
+        Err(super::ActionMotionError::UnknownAction { .. }) => return -5,
         Err(super::ActionMotionError::IdentityRelationNotObservable { .. }) => return -6,
         Err(_) => return -7,
     };
-    let binding = match super::compile_action_plan_runtime_binding(plan.clone()) {
-        Ok(binding) => binding,
-        Err(_) => return -7,
-    };
+    let plan = binding
+        .motion_plan
+        .clone()
+        .expect("the action recognition binding always retains its plan");
     let authority = match super::ActionRepAuthority::new(plan.clone()) {
         Ok(authority) => authority,
         Err(_) => return -7,
@@ -1184,6 +1291,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
     } else {
         vec![CanonicalLandmark::unknown(0.0, None); landmark_count]
     };
+    let mut visual_provider_invoked = false;
     if runtime.visual_equipment_processed && !runtime.visual_luma.is_empty() {
         let visual_subjects = selected.as_ref().map_or(&[][..], std::slice::from_ref);
         let Some(provider_id) = runtime.visual_equipment_provider else {
@@ -1214,6 +1322,7 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
             )) => return -4,
             Err(super::EquipmentProviderProcessError::UnknownProvider(_)) => return -5,
         };
+        visual_provider_invoked = true;
         runtime.visual_barbell_axis = frame_evidence.display_axis;
         runtime
             .equipment_observations
@@ -1244,7 +1353,11 @@ pub extern "C" fn motion_sdk_process_multi() -> i32 {
         );
     }
     runtime.target = Some(target);
-    process_rep(&mut runtime, &equipment_observations);
+    process_rep(
+        &mut runtime,
+        &equipment_observations,
+        visual_provider_invoked,
+    );
     runtime.last_processed_timestamp_ms = Some(timestamp_ms);
     0
 }
@@ -1298,7 +1411,11 @@ fn apply_action_rep_authority(runtime: &mut WebRuntime, rep: super::SealedRep) -
     }
 }
 
-fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObservation]) {
+fn process_rep(
+    runtime: &mut WebRuntime,
+    _raw_equipment: &[super::EquipmentObservation],
+    visual_provider_invoked: bool,
+) {
     runtime.completed_reps = std::mem::take(&mut runtime.pending_outcomes);
     if runtime.reference_profile.is_some() || runtime.simulated_baseline.is_some() {
         runtime.frame_history.push(super::CanonicalFrameSample {
@@ -1335,21 +1452,30 @@ fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObser
             super::EquipmentCannotJudgeReason::NoEquipmentObservation,
         )
     });
+    let local_motion = runtime.local_motion_coordinate.snapshot();
+    let action_primary = runtime.action_rep_authority.as_ref().and_then(|authority| {
+        runtime.rep_engine.as_ref().and_then(|engine| {
+            authority.task_primary_signal(engine.profile.schema, &runtime.output)
+        })
+    });
     if let (Some(authority), Some(rep_engine)) = (
         runtime.action_rep_authority.as_mut(),
         runtime.rep_engine.as_ref(),
     ) {
-        let equipment_pipeline_executed = authority.has_equipment_provider()
-            && authority.runs(super::AlgorithmModuleCategory::EquipmentObservation)
+        let equipment_observation_executed = visual_provider_invoked
+            && authority.has_equipment_provider()
+            && authority.runs(super::AlgorithmModuleCategory::EquipmentObservation);
+        let equipment_fusion_executed = authority.has_equipment_provider()
             && authority.runs(super::AlgorithmModuleCategory::EquipmentFusion);
         authority.observe(
             runtime.frame_id,
             runtime.timestamp_ms,
             &runtime.output,
             &equipment,
-            &runtime.local_motion_coordinate.snapshot(),
+            &local_motion,
             rep_engine.profile.max_rep_duration_ms + rep_engine.profile.max_gap_ms,
-            equipment_pipeline_executed,
+            equipment_observation_executed,
+            equipment_fusion_executed,
         );
     }
     let may_process_rep = runtime.set_gate.advance(
@@ -1357,29 +1483,66 @@ fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObser
         target.state,
         &runtime.output,
         Some(&equipment),
-        Some(&runtime.local_motion_coordinate.snapshot()),
+        Some(&local_motion),
+        action_primary,
         runtime.timestamp_ms,
         rep_phase,
     );
-    if may_process_rep {
-        if let Some(authority) = runtime.action_rep_authority.as_mut() {
-            authority.record_rep_topology(runtime.frame_id, runtime.timestamp_ms);
-        }
-        let proposed = if let Some(rep_engine) = runtime.rep_engine.as_mut() {
-            let proposed = rep_engine.process_with_equipment(
-                runtime.frame_id,
-                runtime.timestamp_ms,
-                target.state,
-                &runtime.output,
+    let active_rep_requires_observation = matches!(
+        rep_phase,
+        super::RepPhase::Effort | super::RepPhase::Peak | super::RepPhase::Return
+    );
+    let action_rep_gate = runtime.action_rep_authority.as_ref().map_or(
+        super::ActionRepFrameGate::Execute,
+        |authority| {
+            authority.rep_topology_gate(
+                runtime
+                    .rep_engine
+                    .as_ref()
+                    .map_or(super::PoseSchemaId::Halpe26, |engine| engine.profile.schema),
                 &equipment,
-                Some(&runtime.local_motion_coordinate.snapshot()),
-            );
-            runtime.rep_state = rep_engine.state.clone();
-            proposed
-        } else {
-            runtime.rep_state = super::RepStateSnapshot::default();
-            Vec::new()
+                &local_motion,
+            )
+        },
+    );
+    if may_process_rep || active_rep_requires_observation {
+        let proposed = match action_rep_gate {
+            super::ActionRepFrameGate::Reject(reason) => runtime
+                .rep_engine
+                .as_mut()
+                .and_then(|engine| {
+                    let previous = engine.previous;
+                    engine.reject_active(reason, previous)
+                })
+                .into_iter()
+                .collect(),
+            super::ActionRepFrameGate::Execute | super::ActionRepFrameGate::Hold => {
+                if action_rep_gate == super::ActionRepFrameGate::Execute
+                    && let Some(authority) = runtime.action_rep_authority.as_mut()
+                {
+                    authority.record_rep_topology(runtime.frame_id, runtime.timestamp_ms);
+                }
+                if let Some(rep_engine) = runtime.rep_engine.as_mut() {
+                    rep_engine.process_with_equipment(
+                        runtime.frame_id,
+                        runtime.timestamp_ms,
+                        target.state,
+                        &runtime.output,
+                        &equipment,
+                        Some(&local_motion),
+                        action_primary,
+                    )
+                } else {
+                    Vec::new()
+                }
+            }
         };
+        runtime.rep_state = runtime
+            .rep_engine
+            .as_ref()
+            .map_or_else(super::RepStateSnapshot::default, |engine| {
+                engine.state.clone()
+            });
         let admitted = proposed
             .into_iter()
             .map(|rep| apply_action_rep_authority(runtime, rep))
@@ -1393,7 +1556,7 @@ fn process_rep(runtime: &mut WebRuntime, _raw_equipment: &[super::EquipmentObser
                 target.state,
                 &runtime.output,
                 &equipment,
-                Some(&runtime.local_motion_coordinate.snapshot()),
+                Some(&local_motion),
             );
         }
         runtime.rep_state = runtime
@@ -1501,10 +1664,7 @@ fn encode_current_packet(runtime: &mut WebRuntime) {
     let packet = super::MotionPacket {
         lineage: super::PacketLineage {
             sequence_id: runtime.sequence_id.clone(),
-            contract: super::ContractVersion {
-                major: 1,
-                minor: 10,
-            },
+            contract: super::CURRENT_MOTION_PACKET_CONTRACT,
             algorithm_version: "rust-canonical-wasm/v1".into(),
             config_version: "web-motion-config/v1".into(),
             inference_version: match runtime.pose_schema {
@@ -1579,12 +1739,12 @@ pub unsafe extern "C" fn motion_sdk_copy_packet(output: *mut u8, capacity: usize
 
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_contract_major() -> u32 {
-    1
+    u32::from(super::CURRENT_MOTION_PACKET_CONTRACT.major)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn motion_sdk_contract_minor() -> u32 {
-    10
+    u32::from(super::CURRENT_MOTION_PACKET_CONTRACT.minor)
 }
 
 fn builtin_profile(profile_code: u32) -> Result<Option<super::ExerciseProfile>, ()> {
@@ -1704,7 +1864,11 @@ pub extern "C" fn motion_sdk_set_profile(profile_code: u32) -> i32 {
     if matches!(
         runtime.set_gate.state.lifecycle,
         super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
-    ) {
+    ) && !(runtime
+        .set_gate
+        .allows_pre_observation_legacy_profile_install()
+        && runtime.last_processed_timestamp_ms.is_none())
+    {
         return -5;
     }
     let profile = match builtin_profile(profile_code) {
@@ -1746,6 +1910,12 @@ pub extern "C" fn motion_sdk_set_canonical_feed_mirroring(value: u32) -> i32 {
         2 => None,
         _ => return -2,
     };
+    if matches!(
+        runtime.set_gate.state.lifecycle,
+        super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
+    ) {
+        return -3;
+    }
     runtime
         .local_motion_coordinate
         .set_canonical_feed_mirroring(mirrored);
@@ -1816,7 +1986,11 @@ pub extern "C" fn motion_sdk_install_profile(
     if matches!(
         runtime.set_gate.state.lifecycle,
         super::SetLifecycle::Arming | super::SetLifecycle::Active | super::SetLifecycle::Paused
-    ) {
+    ) && !(runtime
+        .set_gate
+        .allows_pre_observation_legacy_profile_install()
+        && runtime.last_processed_timestamp_ms.is_none())
+    {
         return -9;
     }
     let Ok(identity) = String::from_utf8(std::mem::take(&mut runtime.profile_identity_buffer))
@@ -1913,6 +2087,10 @@ pub extern "C" fn motion_sdk_install_profile(
         min_primary_amplitude,
         min_secondary_amplitude,
         return_hysteresis,
+        // Legacy profile ingress predates a distinct endpoint-return gate.
+        // Preserve its historical meaning; action-plan ingress binds the
+        // exact RepTopologyProfile return tolerance separately.
+        return_tolerance: ready_tolerance,
         ready_tolerance,
         max_gap_ms: u64::from(max_gap_ms),
         min_rep_duration_ms: u64::from(min_rep_duration_ms),

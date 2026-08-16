@@ -1084,7 +1084,7 @@ fn canonical_packets_from_frames(
             sequence_id: sequence_id.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: width,
@@ -1106,7 +1106,7 @@ fn canonical_packets_from_frames(
             binding.motion_plan.clone().expect("plan-bound binding"),
         )
         .expect("plan-driven profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..frame_count {
         session
@@ -1205,7 +1205,10 @@ fn canonical_packets_for_supported_binding(
                 .collect();
             canonical_packets_from_frames(binding, sequence_id, frames, 320, 240)
         }
-        LocalEquipmentMode::PoseOnly | LocalEquipmentMode::FixedSupport => {
+        LocalEquipmentMode::PosePrimaryWithMovingHandle
+        | LocalEquipmentMode::PosePrimaryWithIndependentDumbbells
+        | LocalEquipmentMode::PoseOnly
+        | LocalEquipmentMode::FixedSupport => {
             let angles = [160.0; 10]
                 .into_iter()
                 .chain([150.0, 135.0, 115.0, 95.0, 80.0, 82.0])
@@ -1304,7 +1307,7 @@ fn canonical_packets_for_source(
             sequence_id: sequence_id.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: 720,
@@ -1352,7 +1355,7 @@ fn canonical_packets_for_source(
             )
             .expect("legacy exact-context profile");
     }
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..angles.len() as u64 {
         session
@@ -1400,7 +1403,7 @@ fn canonical_packets_with_visible_return_error(
             sequence_id: sequence_id.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: 720,
@@ -1420,7 +1423,7 @@ fn canonical_packets_with_visible_return_error(
             binding.motion_plan.clone().expect("plan-bound binding"),
         )
         .expect("plan-bound exact-context profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..angles.len() as u64 {
         session
@@ -1466,6 +1469,131 @@ fn sha256_bytes(bytes: &[u8]) -> String {
         .next()
         .expect("hash digest")
         .to_owned()
+}
+
+fn governed_evaluation_output_path(
+    governance_root: &Path,
+    requested_output: &str,
+) -> Result<PathBuf, String> {
+    let workspace_root = governance_root.join("workspace/visual-recognition-v0.1");
+    let canonical_workspace = workspace_root.canonicalize().map_err(|error| {
+        format!(
+            "governed evaluation workspace {} is unavailable: {error}",
+            workspace_root.display()
+        )
+    })?;
+    let requested_path = PathBuf::from(requested_output);
+    let requested_path = if requested_path.is_absolute() {
+        requested_path
+    } else {
+        canonical_workspace.join(requested_path)
+    };
+    if requested_path.extension().and_then(|value| value.to_str()) != Some("json") {
+        return Err("governed evaluation output must be a JSON file".into());
+    }
+    if requested_path
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err("governed evaluation output cannot replace a symbolic link".into());
+    }
+    let file_name = requested_path
+        .file_name()
+        .ok_or_else(|| "governed evaluation output is missing a file name".to_owned())?;
+    let parent = requested_path
+        .parent()
+        .ok_or_else(|| "governed evaluation output is missing a parent directory".to_owned())?;
+    let canonical_parent = parent.canonicalize().map_err(|error| {
+        format!(
+            "governed evaluation output parent {} must already exist: {error}",
+            parent.display()
+        )
+    })?;
+    if !canonical_parent.starts_with(&canonical_workspace) {
+        return Err(format!(
+            "governed evaluation output must stay under {}",
+            canonical_workspace.display()
+        ));
+    }
+    Ok(canonical_parent.join(file_name))
+}
+
+#[test]
+#[cfg(unix)]
+fn governed_evaluation_output_is_confined_and_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock")
+        .as_nanos();
+    let fixture_root = std::env::temp_dir().join(format!(
+        "maxpower-governed-output-boundary-{}-{nonce}",
+        std::process::id()
+    ));
+    let governance_root = fixture_root.join("governance");
+    let workspace_root = governance_root.join("workspace/visual-recognition-v0.1");
+    let outside_root = fixture_root.join("outside");
+    std::fs::create_dir_all(&workspace_root).expect("fixture governed workspace");
+    std::fs::create_dir_all(&outside_root).expect("fixture outside directory");
+
+    let valid = governed_evaluation_output_path(&governance_root, "accepted.json")
+        .expect("workspace-relative output");
+    assert!(valid.starts_with(workspace_root.canonicalize().expect("workspace")));
+    assert!(
+        governed_evaluation_output_path(
+            &governance_root,
+            outside_root
+                .join("escaped.json")
+                .to_str()
+                .expect("UTF-8 path")
+        )
+        .is_err()
+    );
+
+    symlink(&outside_root, workspace_root.join("escape")).expect("directory symlink fixture");
+    assert!(governed_evaluation_output_path(&governance_root, "escape/escaped.json").is_err());
+    let outside_file = outside_root.join("outside.json");
+    std::fs::write(&outside_file, b"{}").expect("outside fixture file");
+    symlink(&outside_file, workspace_root.join("linked.json")).expect("file symlink fixture");
+    assert!(governed_evaluation_output_path(&governance_root, "linked.json").is_err());
+
+    std::fs::remove_dir_all(&fixture_root).expect("remove isolated output-boundary fixture");
+}
+
+fn governed_replay_source_bundle_sha256(root: &Path) -> String {
+    fn collect_rust_sources(directory: &Path, files: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(directory).expect("read Rust source directory") {
+            let path = entry.expect("Rust source entry").path();
+            if path.is_dir() {
+                collect_rust_sources(&path, files);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path);
+            }
+        }
+    }
+
+    let mut files = vec![
+        root.join("Cargo.lock"),
+        root.join("rust/motion-sdk/Cargo.toml"),
+        root.join("rust/motion-sdk/assets/action-motion-catalog-v1.json"),
+        root.join("rust/motion-sdk/tests/execution_assessment_rigid_bar_family_contract.rs"),
+    ];
+    collect_rust_sources(&root.join("rust/motion-sdk/src"), &mut files);
+    files.sort();
+    files.dedup();
+    let mut bytes = Vec::new();
+    for path in files {
+        let relative = path
+            .strip_prefix(root)
+            .expect("source belongs to MaxPower root");
+        bytes.extend_from_slice(relative.to_string_lossy().as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&std::fs::read(&path).expect("governed replay source bytes"));
+        bytes.push(0xff);
+    }
+    sha256_bytes(&bytes)
 }
 
 fn stable_fnv_hash<T: serde::Serialize>(value: &T) -> String {
@@ -1725,6 +1853,7 @@ struct EvaluationRange {
 struct EvaluationPredictionRep {
     rep_id: u64,
     disposition: String,
+    evidence_reason: Option<String>,
     start_ms: u64,
     turnaround_ms: u64,
     turnaround_source: String,
@@ -1746,6 +1875,7 @@ struct GovernedPredictionRow {
     equipment_provider: EquipmentProviderEvaluation,
     reps: Vec<EvaluationPredictionRep>,
     quality_finding_states: Vec<String>,
+    typed_refusal_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1779,7 +1909,16 @@ struct EvaluatedReplayRow {
     trace_root_count: usize,
     equipment_provider: EquipmentProviderEvaluation,
     truth_ranges: Vec<EvaluationRange>,
+    raw_proposals: Vec<EvaluationPredictionRep>,
+    raw_proposal_matches: Vec<EvaluationMatch>,
+    raw_proposal_negative_window_false_trigger_count: usize,
+    confirmed_only_reps: Vec<EvaluationPredictionRep>,
+    confirmed_only_matches: Vec<EvaluationMatch>,
+    confirmed_only_negative_window_false_trigger_count: usize,
     predicted_reps: Vec<EvaluationPredictionRep>,
+    rejected_proposals: Vec<EvaluationPredictionRep>,
+    rejected_truth_overlaps: Vec<EvaluationMatch>,
+    rejected_negative_window_false_trigger_count: usize,
     truth_count: usize,
     predicted_count: usize,
     matched_count: usize,
@@ -2231,6 +2370,137 @@ fn monotonic_evaluation_matches(
     solve(truth, predicted, 0, 0, &mut BTreeMap::new()).matches
 }
 
+#[derive(Clone, Copy)]
+enum EvaluationStreamKind {
+    RawProposal,
+    ConfirmedOnly,
+    ConfirmedPlusNeedsReview,
+    RejectedDiagnostic,
+}
+
+fn evaluation_stream_summary(
+    rows: &[EvaluatedReplayRow],
+    kind: EvaluationStreamKind,
+) -> serde_json::Value {
+    let truth_count = rows.iter().map(|row| row.truth_count).sum::<usize>();
+    let predicted_count = rows
+        .iter()
+        .map(|row| match kind {
+            EvaluationStreamKind::RawProposal => row.raw_proposals.len(),
+            EvaluationStreamKind::ConfirmedOnly => row.confirmed_only_reps.len(),
+            EvaluationStreamKind::ConfirmedPlusNeedsReview => row.predicted_reps.len(),
+            EvaluationStreamKind::RejectedDiagnostic => row.rejected_proposals.len(),
+        })
+        .sum::<usize>();
+    let matches = rows
+        .iter()
+        .flat_map(|row| match kind {
+            EvaluationStreamKind::RawProposal => row.raw_proposal_matches.iter(),
+            EvaluationStreamKind::ConfirmedOnly => row.confirmed_only_matches.iter(),
+            EvaluationStreamKind::ConfirmedPlusNeedsReview => row.matches.iter(),
+            EvaluationStreamKind::RejectedDiagnostic => row.rejected_truth_overlaps.iter(),
+        })
+        .collect::<Vec<_>>();
+    let negative_false_triggers = rows
+        .iter()
+        .map(|row| match kind {
+            EvaluationStreamKind::RawProposal => {
+                row.raw_proposal_negative_window_false_trigger_count
+            }
+            EvaluationStreamKind::ConfirmedOnly => {
+                row.confirmed_only_negative_window_false_trigger_count
+            }
+            EvaluationStreamKind::ConfirmedPlusNeedsReview => {
+                row.reviewed_negative_window_false_trigger_count
+            }
+            EvaluationStreamKind::RejectedDiagnostic => {
+                row.rejected_negative_window_false_trigger_count
+            }
+        })
+        .sum::<usize>();
+    let mean = |values: Vec<f64>| {
+        if values.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(values.iter().sum::<f64>() / values.len() as f64)
+        }
+    };
+    let percentile_95 = |mut values: Vec<f64>| {
+        if values.is_empty() {
+            serde_json::Value::Null
+        } else {
+            values.sort_by(f64::total_cmp);
+            let index = ((values.len() as f64 * 0.95).ceil() as usize)
+                .saturating_sub(1)
+                .min(values.len() - 1);
+            serde_json::json!(values[index])
+        }
+    };
+    let ratio = |numerator: usize, denominator: usize| {
+        if denominator == 0 {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(numerator as f64 / denominator as f64)
+        }
+    };
+    let candidate_truth_matches = rows
+        .iter()
+        .flat_map(|row| {
+            let matches = match kind {
+                EvaluationStreamKind::RawProposal => &row.raw_proposal_matches,
+                EvaluationStreamKind::ConfirmedOnly => &row.confirmed_only_matches,
+                EvaluationStreamKind::ConfirmedPlusNeedsReview => &row.matches,
+                EvaluationStreamKind::RejectedDiagnostic => &row.rejected_truth_overlaps,
+            };
+            matches.iter().map(|matched| {
+                serde_json::json!({
+                    "contextId": row.context_id,
+                    "truthIndex": matched.truth_index,
+                    "predictedIndex": matched.predicted_index,
+                    "startErrorMs": matched.start_error_ms,
+                    "endErrorMs": matched.end_error_ms,
+                    "intervalIoU": matched.interval_iou,
+                    "strictBoundaryAligned": matched.strict_boundary_aligned,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let start_errors = matches
+        .iter()
+        .map(|entry| entry.start_error_ms.unsigned_abs() as f64)
+        .collect::<Vec<_>>();
+    let end_errors = matches
+        .iter()
+        .map(|entry| entry.end_error_ms.unsigned_abs() as f64)
+        .collect::<Vec<_>>();
+    let interval_ious = matches
+        .iter()
+        .map(|entry| entry.interval_iou)
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "predicted": predicted_count,
+        "matched": matches.len(),
+        "falsePositive": predicted_count.saturating_sub(matches.len()),
+        "falseNegative": truth_count.saturating_sub(matches.len()),
+        "precision": ratio(matches.len(), predicted_count),
+        "recall": ratio(matches.len(), truth_count),
+        "candidateTruthMatches": candidate_truth_matches,
+        "boundaryMetrics": {
+            "startMaeMs": mean(start_errors.clone()),
+            "startP95Ms": percentile_95(start_errors),
+            "turnaroundMaeMs": serde_json::Value::Null,
+            "turnaroundP95Ms": serde_json::Value::Null,
+            "turnaroundStatus": "not_evaluable_no_human_turnaround_truth",
+            "endMaeMs": mean(end_errors.clone()),
+            "endP95Ms": percentile_95(end_errors),
+            "meanIntervalIoU": mean(interval_ious.clone()),
+            "intervalIoUP95": percentile_95(interval_ious),
+        },
+        "negativeWindowFalseTriggers": negative_false_triggers,
+        "diagnosticOnly": matches!(kind, EvaluationStreamKind::RejectedDiagnostic),
+    })
+}
+
 fn evaluation_summary(rows: &[EvaluatedReplayRow]) -> serde_json::Value {
     let truth_count = rows.iter().map(|row| row.truth_count).sum::<usize>();
     let predicted_count = rows.iter().map(|row| row.predicted_count).sum::<usize>();
@@ -2261,6 +2531,111 @@ fn evaluation_summary(rows: &[EvaluatedReplayRow]) -> serde_json::Value {
             serde_json::json!(numerator as f64 / denominator as f64)
         }
     };
+    let percentile_95 = |mut values: Vec<f64>| {
+        if values.is_empty() {
+            serde_json::Value::Null
+        } else {
+            values.sort_by(f64::total_cmp);
+            let index = ((values.len() as f64 * 0.95).ceil() as usize)
+                .saturating_sub(1)
+                .min(values.len() - 1);
+            serde_json::json!(values[index])
+        }
+    };
+    let raw_proposal_count = rows
+        .iter()
+        .map(|row| row.raw_proposals.len())
+        .sum::<usize>();
+    let confirmed_count = rows
+        .iter()
+        .flat_map(|row| &row.raw_proposals)
+        .filter(|rep| rep.disposition == "confirmed")
+        .count();
+    let needs_review_count = rows
+        .iter()
+        .flat_map(|row| &row.raw_proposals)
+        .filter(|rep| rep.disposition == "needs_review")
+        .count();
+    let rejected_count = rows
+        .iter()
+        .flat_map(|row| &row.raw_proposals)
+        .filter(|rep| rep.disposition == "rejected")
+        .count();
+    let mut rejection_reasons = BTreeMap::<String, usize>::new();
+    for reason in rows
+        .iter()
+        .flat_map(|row| &row.raw_proposals)
+        .filter(|rep| rep.disposition == "rejected")
+        .map(|rep| {
+            rep.evidence_reason
+                .clone()
+                .unwrap_or_else(|| "unclassified_rejection".into())
+        })
+    {
+        *rejection_reasons.entry(reason).or_default() += 1;
+    }
+    let candidate_truth_matches = rows
+        .iter()
+        .flat_map(|row| {
+            row.matches.iter().map(|matched| {
+                serde_json::json!({
+                    "contextId": row.context_id,
+                    "truthIndex": matched.truth_index,
+                    "predictedIndex": matched.predicted_index,
+                    "startErrorMs": matched.start_error_ms,
+                    "endErrorMs": matched.end_error_ms,
+                    "intervalIoU": matched.interval_iou,
+                    "strictBoundaryAligned": matched.strict_boundary_aligned,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let start_errors = matches
+        .iter()
+        .map(|entry| entry.start_error_ms.unsigned_abs() as f64)
+        .collect::<Vec<_>>();
+    let end_errors = matches
+        .iter()
+        .map(|entry| entry.end_error_ms.unsigned_abs() as f64)
+        .collect::<Vec<_>>();
+    let interval_ious = matches
+        .iter()
+        .map(|entry| entry.interval_iou)
+        .collect::<Vec<_>>();
+    let raw_stream = evaluation_stream_summary(rows, EvaluationStreamKind::RawProposal);
+    let confirmed_stream = evaluation_stream_summary(rows, EvaluationStreamKind::ConfirmedOnly);
+    let formal_stream =
+        evaluation_stream_summary(rows, EvaluationStreamKind::ConfirmedPlusNeedsReview);
+    let rejected_stream = evaluation_stream_summary(rows, EvaluationStreamKind::RejectedDiagnostic);
+    let recognition_funnel = serde_json::json!({
+        "schemaVersion": "maxpower.visual-recognition-funnel/v2",
+        "rawProposal": raw_proposal_count,
+        "confirmedOnly": confirmed_count,
+        "confirmedPlusNeedsReview": confirmed_count + needs_review_count,
+        "rejected": rejected_count,
+        "rejectionReasons": rejection_reasons,
+        "candidateTruthMatches": candidate_truth_matches,
+        "falsePositive": predicted_count.saturating_sub(matched_count),
+        "falseNegative": truth_count.saturating_sub(matched_count),
+        "boundaryMetrics": {
+            "startMaeMs": mean(start_errors.clone()),
+            "startP95Ms": percentile_95(start_errors),
+            "turnaroundMaeMs": serde_json::Value::Null,
+            "turnaroundP95Ms": serde_json::Value::Null,
+            "turnaroundStatus": "not_evaluable_no_human_turnaround_truth",
+            "endMaeMs": mean(end_errors.clone()),
+            "endP95Ms": percentile_95(end_errors),
+            "meanIntervalIoU": mean(interval_ious.clone()),
+            "intervalIoUP95": percentile_95(interval_ious),
+        },
+        "negativeWindowFalseTriggers": negative_false_triggers,
+        "streams": {
+            "rawProposal": raw_stream,
+            "confirmedOnly": confirmed_stream,
+            "confirmedPlusNeedsReview": formal_stream,
+            "rejectedDiagnostic": rejected_stream,
+        },
+    });
     serde_json::json!({
         "recordCount": rows.len(),
         "truthRepCount": truth_count,
@@ -2280,6 +2655,7 @@ fn evaluation_summary(rows: &[EvaluatedReplayRow]) -> serde_json::Value {
         "matchedEndMaeMs": mean(matches.iter().map(|entry| entry.end_error_ms.unsigned_abs() as f64).collect()),
         "matchedMeanIntervalIoU": mean(matches.iter().map(|entry| entry.interval_iou).collect()),
         "reviewedNegativeWindowFalseTriggerCount": negative_false_triggers,
+        "recognitionFunnel": recognition_funnel,
     })
 }
 
@@ -2320,6 +2696,178 @@ fn known_video_alignment_keeps_candidate_and_strict_boundary_metrics_distinct() 
     let matches = monotonic_evaluation_matches(&truth, &strictly_aligned);
     assert_eq!(matches.len(), 1);
     assert!(matches[0].strict_boundary_aligned);
+}
+
+#[test]
+fn action_view_evaluation_summary_always_exports_the_versioned_recognition_funnel() {
+    let summary = evaluation_summary(&[]);
+    let funnel = summary
+        .get("recognitionFunnel")
+        .expect("every action×view bucket needs a recognition funnel");
+    assert_eq!(
+        funnel["schemaVersion"],
+        "maxpower.visual-recognition-funnel/v2"
+    );
+    for key in [
+        "rawProposal",
+        "confirmedOnly",
+        "confirmedPlusNeedsReview",
+        "rejected",
+        "rejectionReasons",
+        "candidateTruthMatches",
+        "falsePositive",
+        "falseNegative",
+        "boundaryMetrics",
+        "negativeWindowFalseTriggers",
+        "streams",
+    ] {
+        assert!(funnel.get(key).is_some(), "missing funnel field {key}");
+    }
+    for stream in [
+        "rawProposal",
+        "confirmedOnly",
+        "confirmedPlusNeedsReview",
+        "rejectedDiagnostic",
+    ] {
+        for field in [
+            "predicted",
+            "matched",
+            "falsePositive",
+            "falseNegative",
+            "precision",
+            "recall",
+            "candidateTruthMatches",
+            "boundaryMetrics",
+            "negativeWindowFalseTriggers",
+        ] {
+            assert!(
+                funnel["streams"][stream].get(field).is_some(),
+                "missing {stream}.{field}"
+            );
+        }
+    }
+    assert!(funnel["boundaryMetrics"]["turnaroundMaeMs"].is_null());
+    assert_eq!(
+        funnel["boundaryMetrics"]["turnaroundStatus"],
+        "not_evaluable_no_human_turnaround_truth"
+    );
+}
+
+#[test]
+#[ignore = "requires the governed local-private Halpe26 observation asset"]
+fn governed_lat_pulldown_rear_closure_keeps_a_valid_causal_trace() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("MaxPower root")
+        .to_path_buf();
+    let governance_root = root
+        .parent()
+        .expect("power workspace")
+        .join("maxpower-training-data-governance");
+    let governance: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(governance_root.join("catalog/assets.json")).expect("governance catalog"),
+    )
+    .expect("governance JSON");
+    let pose_asset = governance["assets"]
+        .as_array()
+        .expect("assets")
+        .iter()
+        .find(|asset| asset["id"] == "personal-native-rtmpose-halpe26-observations")
+        .expect("governed pose asset");
+    assert_eq!(pose_asset["admission"], "feature_only");
+    assert!(
+        pose_asset["allowedTasks"]
+            .as_array()
+            .is_some_and(|tasks| tasks.iter().any(|task| task == "runtime_parity"))
+    );
+
+    let capture_id = "field-capture-2026-08-02T18-41-05-284Z";
+    let raw = read_governed_gzip_json(
+        &root
+            .join(
+                pose_asset["location"]["path"]
+                    .as_str()
+                    .expect("pose asset location"),
+            )
+            .join(format!("{capture_id}.halpe26.json.gz")),
+    );
+    let (frames, frame_ids, timestamps, _) =
+        governed_frames_with_equipment_provider(&raw, None, None);
+    let binding = visual_recognition_baseline_profiles_v0_1()
+        .into_iter()
+        .find(|binding| {
+            binding.action_id == "lat_pulldown"
+                && binding.capture_view == AssessmentCaptureView::Rear
+        })
+        .expect("lat pulldown rear binding");
+    let output = RecordingOutputAdapter::default();
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: capture_id.into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 11,
+            },
+            diagnostics: DiagnosticLevel::Full,
+            image_width_px: raw["source"]["widthPx"].as_u64().expect("width") as u32,
+            image_height_px: raw["source"]["heightPx"].as_u64().expect("height") as u32,
+            continuity: maxpower_motion_sdk::ContinuityMode::Fusion,
+            subject_policy: SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        RigidBarFixture { frames },
+        output.clone(),
+    )
+    .expect("real replay session");
+    session
+        .install_exercise_profile_with_action_plan(
+            binding.profile,
+            binding.local_coordinate_strategy,
+            binding.motion_plan.expect("plan-bound profile"),
+        )
+        .expect("install exact action plan");
+    session.begin_set().expect("begin set");
+    let releases = Arc::new(AtomicUsize::new(0));
+    for (frame_id, timestamp_ms) in frame_ids.into_iter().zip(timestamps) {
+        session
+            .offer(FrameLease::fixture(
+                frame_id,
+                timestamp_ms,
+                Arc::clone(&releases),
+            ))
+            .expect("real frame");
+    }
+    let closure = session.finish_set_for_assessment();
+    let mut engine = ExecutionAssessmentEngine::configure(
+        visual_recognition_baseline_catalog_v0_1(),
+        WorkoutAssessmentContext {
+            workout_session_id: "lat-pulldown-rear-trace-regression".into(),
+        },
+    )
+    .expect("assessment catalog");
+    let mut context = video_context("lat_pulldown", "rear");
+    context.source_capture_id = capture_id.into();
+    engine
+        .advance(AssessmentEvent::SetStarted(SetExecutionContext {
+            set_id: "lat-pulldown-rear-trace-regression".into(),
+            set_ordinal: 1,
+            video_context: context,
+            intent: SetIntent::Working,
+            planned_load: None,
+            performed_load: None,
+        }))
+        .expect("start assessment");
+    for packet in output.packets() {
+        engine
+            .advance(AssessmentEvent::CanonicalPacketObserved(Box::new(packet)))
+            .expect("packet");
+    }
+    engine
+        .advance(AssessmentEvent::CanonicalSetClosureObserved(Box::new(
+            closure,
+        )))
+        .expect("closure must preserve a valid trace");
 }
 
 #[test]
@@ -2538,6 +3086,73 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
         manifest_raw_video_asset["consumedForTasks"],
         serde_json::json!([video_manifest["allowedTask"]])
     );
+    let client_runtime_asset = governed_asset("maxpower-motion-sdk-wasm");
+    let manifest_client_runtime_asset = assembled_input["sourceAssets"]
+        .as_array()
+        .expect("manifest assets")
+        .iter()
+        .find(|asset| asset["assetId"] == "maxpower-motion-sdk-wasm")
+        .expect("manifest client runtime parity asset");
+    assert_eq!(client_runtime_asset["admission"], "protected");
+    assert_eq!(client_runtime_asset["authority"], "application_runtime");
+    assert_eq!(client_runtime_asset["groupKey"], "not_applicable");
+    let allowed_client_runtime_tasks = client_runtime_asset["allowedTasks"]
+        .as_array()
+        .expect("allowed client runtime tasks");
+    assert!(
+        manifest_client_runtime_asset["consumedForTasks"]
+            .as_array()
+            .expect("consumed client runtime tasks")
+            .iter()
+            .all(|task| allowed_client_runtime_tasks.contains(task)),
+        "the client runtime parity purpose must be admitted by the governance catalog"
+    );
+    assert_eq!(
+        manifest_client_runtime_asset["consumedForTasks"],
+        serde_json::json!(["client_runtime_parity"])
+    );
+    assert_eq!(
+        manifest_client_runtime_asset["immutableSha256"],
+        client_runtime_asset["location"]["sha256"]
+    );
+    let client_runtime_path = root.join(
+        client_runtime_asset["location"]["path"]
+            .as_str()
+            .expect("client runtime asset path"),
+    );
+    let client_runtime_bytes =
+        std::fs::read(client_runtime_path).expect("protected client runtime bytes");
+    assert_eq!(
+        sha256_bytes(&client_runtime_bytes),
+        client_runtime_asset["location"]["sha256"]
+            .as_str()
+            .expect("protected client runtime hash")
+    );
+    assert!(
+        !cfg!(debug_assertions),
+        "the frozen governed replay must execute the release runner"
+    );
+    let execution_runner_path = std::env::current_exe().expect("native replay runner path");
+    let execution_runner_bytes =
+        std::fs::read(&execution_runner_path).expect("native replay runner bytes");
+    let execution_runner_sha256 = sha256_bytes(&execution_runner_bytes);
+    let execution_runtime = serde_json::json!({
+        "runnerId": "maxpower-motion-sdk-native-release-governed-replay/v1",
+        "kind": "native_release_test_binary",
+        "buildProfile": "release",
+        "runnerBinarySha256": &execution_runner_sha256,
+        "sourceBundleSha256": governed_replay_source_bundle_sha256(&root),
+        "crateName": env!("CARGO_PKG_NAME"),
+        "crateVersion": env!("CARGO_PKG_VERSION"),
+        "packetContract": assembled_input["modelConfiguration"]["packetContract"],
+    });
+    let client_runtime_parity_artifact = serde_json::json!({
+        "assetId": manifest_client_runtime_asset["assetId"],
+        "admission": manifest_client_runtime_asset["admission"],
+        "authority": manifest_client_runtime_asset["authority"],
+        "sha256": manifest_client_runtime_asset["immutableSha256"],
+        "claim": "attested_client_build_from_the_reviewed_source_not_the_governed_replay_executor",
+    });
 
     let label_path = root.join(
         label_asset["location"]["path"]
@@ -2682,6 +3297,7 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
     let mut dimension_states = BTreeMap::<String, usize>::new();
     let mut reference_kinds = BTreeMap::<String, usize>::new();
     let mut trace_complete_reports = 0_usize;
+    let mut typed_refusal_count = 0_usize;
     let mut equipment_provider_requested_records = 0_usize;
     let mut equipment_provider_available_records = 0_usize;
     let mut equipment_provider_duration_ms = 0_f64;
@@ -2746,7 +3362,7 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
         .expect("v7 catalog");
         let mut context = video_context(action_id, capture_position);
         context.source_capture_id = capture_id.into();
-        let AssessmentEmission::LiveMotionFacts(start_facts) = engine
+        let start_emission = engine
             .advance(AssessmentEvent::SetStarted(SetExecutionContext {
                 set_id: format!("governed-set-{ordinal}"),
                 set_ordinal: 1,
@@ -2755,9 +3371,37 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 planned_load: None,
                 performed_load: None,
             }))
-            .expect("start replay")
-        else {
-            panic!("set start must publish the resolved provider context")
+            .expect("start replay");
+        let start_facts = match start_emission {
+            AssessmentEmission::LiveMotionFacts(facts) => facts,
+            AssessmentEmission::TypedRefusal(refusal) => {
+                typed_refusal_count += 1;
+                structural_gaps.push(format!(
+                    "{capture_id}:{action_id}/{capture_position}: exact-context refusal {:?}",
+                    refusal.reason
+                ));
+                frozen_prediction_rows.push(GovernedPredictionRow {
+                    source_capture_id: capture_id.into(),
+                    context_id: format!("{capture_id}:{action_id}:{capture_position}"),
+                    exercise_id: action_id.into(),
+                    capture_position: capture_position.into(),
+                    bundle_id: "typed_exact_context_refusal".into(),
+                    bundle_hash: String::new(),
+                    trace_content_hash: String::new(),
+                    trace_root_count: 0,
+                    equipment_provider: EquipmentProviderEvaluation {
+                        recognition_mode: "not_started_exact_context_refusal".into(),
+                        ..EquipmentProviderEvaluation::default()
+                    },
+                    reps: Vec::new(),
+                    quality_finding_states: Vec::new(),
+                    typed_refusal_reason: Some(format!("{:?}", refusal.reason)),
+                });
+                continue;
+            }
+            AssessmentEmission::SealedSetAssessment(_) => {
+                panic!("set start cannot seal an assessment")
+            }
         };
         let provider_id = start_facts
             .resolved_context
@@ -2819,7 +3463,7 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 sequence_id: capture_id.into(),
                 contract: ContractVersion {
                     major: 1,
-                    minor: 10,
+                    minor: 11,
                 },
                 diagnostics: DiagnosticLevel::Full,
                 image_width_px: raw["source"]["widthPx"].as_u64().expect("width") as u32,
@@ -2839,7 +3483,7 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 motion_plan,
             )
             .unwrap_or_else(|error| panic!("profile {action_id}/{capture_position}: {error:?}"));
-        session.begin_set();
+        session.begin_set().expect("begin set");
         let releases = Arc::new(AtomicUsize::new(0));
         for (frame_id, timestamp_ms) in frame_ids.into_iter().zip(timestamps) {
             session
@@ -3026,6 +3670,13 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 .map(|rep| EvaluationPredictionRep {
                     rep_id: rep.rep_id,
                     disposition: rep.disposition.clone(),
+                    evidence_reason: rep.evidence_reason.map(|reason| {
+                        serde_json::to_value(reason)
+                            .expect("Rep evidence reason serializes")
+                            .as_str()
+                            .expect("Rep evidence reason is a string")
+                            .to_owned()
+                    }),
                     start_ms: rep.start_timestamp_ms,
                     turnaround_ms: rep.turnaround_timestamp_ms,
                     turnaround_source: rep.turnaround_source.clone(),
@@ -3038,6 +3689,7 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 .iter()
                 .map(|finding| format!("{:?}/{:?}", finding.dimension, finding.state))
                 .collect(),
+            typed_refusal_reason: None,
         });
     }
 
@@ -3049,6 +3701,8 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
         "state": "frozen_before_truth",
         "evaluationId": evaluation_protocol["evaluationId"],
         "protocolSha256": evaluation_protocol["protocolSha256"],
+        "executionRuntime": &execution_runtime,
+        "clientRuntimeParityArtifact": &client_runtime_parity_artifact,
         "rows": &frozen_prediction_rows,
     });
     let prediction_sha256 = sha256_bytes(
@@ -3116,6 +3770,29 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
             .filter(|rep| rep.disposition != "rejected")
             .cloned()
             .collect::<Vec<_>>();
+        let confirmed_only_reps = prediction
+            .reps
+            .iter()
+            .filter(|rep| rep.disposition == "confirmed")
+            .cloned()
+            .collect::<Vec<_>>();
+        let rejected_proposals = prediction
+            .reps
+            .iter()
+            .filter(|rep| rep.disposition == "rejected")
+            .cloned()
+            .collect::<Vec<_>>();
+        let ranges_for = |reps: &[EvaluationPredictionRep]| {
+            reps.iter()
+                .map(|rep| EvaluationRange {
+                    start_ms: rep.start_ms,
+                    end_ms: rep.end_ms,
+                })
+                .collect::<Vec<_>>()
+        };
+        let raw_proposal_ranges = ranges_for(&prediction.reps);
+        let confirmed_only_ranges = ranges_for(&confirmed_only_reps);
+        let rejected_ranges = ranges_for(&rejected_proposals);
         let predicted_ranges = counted_reps
             .iter()
             .map(|rep| EvaluationRange {
@@ -3123,7 +3800,12 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 end_ms: rep.end_ms,
             })
             .collect::<Vec<_>>();
+        let raw_proposal_matches =
+            monotonic_evaluation_matches(&truth_ranges, &raw_proposal_ranges);
+        let confirmed_only_matches =
+            monotonic_evaluation_matches(&truth_ranges, &confirmed_only_ranges);
         let matches = monotonic_evaluation_matches(&truth_ranges, &predicted_ranges);
+        let rejected_truth_overlaps = monotonic_evaluation_matches(&truth_ranges, &rejected_ranges);
         let strict_boundary_aligned_count = matches
             .iter()
             .filter(|entry| entry.strict_boundary_aligned)
@@ -3132,18 +3814,27 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
             .as_array()
             .expect("reviewed negative windows");
         reviewed_negative_window_count += negative_windows.len();
-        let negative_false_triggers = predicted_ranges
-            .iter()
-            .filter(|range| {
-                let midpoint = range.start_ms + (range.end_ms - range.start_ms) / 2;
-                negative_windows.iter().any(|window| {
-                    let start = window["startMs"].as_u64().expect("negative start");
-                    let end = window["endMs"].as_u64().expect("negative end");
-                    assert!(start < end, "invalid reviewed negative window");
-                    midpoint >= start && midpoint < end
+        let negative_false_triggers_for = |ranges: &[EvaluationRange]| {
+            ranges
+                .iter()
+                .filter(|range| {
+                    let midpoint = range.start_ms + (range.end_ms - range.start_ms) / 2;
+                    negative_windows.iter().any(|window| {
+                        let start = window["startMs"].as_u64().expect("negative start");
+                        let end = window["endMs"].as_u64().expect("negative end");
+                        assert!(start < end, "invalid reviewed negative window");
+                        midpoint >= start && midpoint < end
+                    })
                 })
-            })
-            .count();
+                .count()
+        };
+        let raw_proposal_negative_window_false_trigger_count =
+            negative_false_triggers_for(&raw_proposal_ranges);
+        let confirmed_only_negative_window_false_trigger_count =
+            negative_false_triggers_for(&confirmed_only_ranges);
+        let negative_false_triggers = negative_false_triggers_for(&predicted_ranges);
+        let rejected_negative_window_false_trigger_count =
+            negative_false_triggers_for(&rejected_ranges);
 
         let mut used_predictions = HashSet::new();
         let broad_boundary_aligned = truth_ranges
@@ -3200,7 +3891,16 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
                 && strict_boundary_aligned_count == truth_ranges.len(),
             reviewed_negative_window_false_trigger_count: negative_false_triggers,
             truth_ranges,
+            raw_proposals: prediction.reps.clone(),
+            raw_proposal_matches,
+            raw_proposal_negative_window_false_trigger_count,
+            confirmed_only_reps,
+            confirmed_only_matches,
+            confirmed_only_negative_window_false_trigger_count,
             predicted_reps: counted_reps,
+            rejected_proposals,
+            rejected_truth_overlaps,
+            rejected_negative_window_false_trigger_count,
             matches,
             quality_finding_states: prediction.quality_finding_states.clone(),
         });
@@ -3255,12 +3955,14 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
         .collect::<BTreeMap<_, _>>();
     let report_semantic = serde_json::json!({
         "schemaVersion": evaluation_rules["output"]["schemaVersion"],
-        "generatedOn": "2026-08-15",
+        "generatedOn": "2026-08-16",
         "evaluationId": evaluation_protocol["evaluationId"],
         "evaluationStatus": "known_participant_known_video_regression",
         "generalizationClaimAllowed": false,
         "protocolSha256": evaluation_protocol["protocolSha256"],
         "predictionSha256": prediction_sha256,
+        "executionRuntime": &execution_runtime,
+        "clientRuntimeParityArtifact": &client_runtime_parity_artifact,
         "protocol": evaluation_rules,
         "dataQuality": {
             "assetContractChecks": "passed",
@@ -3292,6 +3994,7 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
             "dimensionStates": dimension_states,
             "referenceKinds": reference_kinds,
             "traceCompleteReportCount": trace_complete_reports,
+            "typedRefusalCount": typed_refusal_count,
         },
         "equipmentProvider": {
             "decisionAuthority": "ExecutionContract",
@@ -3335,23 +4038,30 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
     report_output
         .as_object_mut()
         .expect("evaluation report object")
-        .insert("reportDigest".into(), serde_json::json!(report_digest));
-    if let Ok(output_path) = std::env::var("MAXPOWER_GOVERNED_EVALUATION_OUTPUT") {
-        let output_path = PathBuf::from(output_path);
-        let output_path = if output_path.is_absolute() {
-            output_path
-        } else {
-            root.join(output_path)
-        };
-        if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent).expect("create governed evaluation output directory");
-        }
-        std::fs::write(
-            &output_path,
-            serde_json::to_vec_pretty(&report_output).expect("pretty evaluation JSON"),
-        )
-        .expect("write governed evaluation output");
+        .insert("reportDigest".into(), serde_json::json!(&report_digest));
+    let requested_output = std::env::var("MAXPOWER_GOVERNED_EVALUATION_OUTPUT").ok();
+    let run_id = std::env::var("MAXPOWER_GOVERNED_EVALUATION_RUN_ID")
+        .unwrap_or_else(|_| "contract-test-unpublished".into());
+    if requested_output.is_some() {
+        assert!(
+            !run_id.trim().is_empty() && run_id != "contract-test-unpublished",
+            "a published governed replay requires an explicit immutable run ID"
+        );
     }
+    report_output
+        .as_object_mut()
+        .expect("evaluation report object")
+        .insert("runId".into(), serde_json::json!(run_id));
+    report_output
+        .as_object_mut()
+        .expect("evaluation report object")
+        .insert(
+            "executionInvocation".into(),
+            serde_json::json!({
+                "processId": std::process::id(),
+            }),
+        );
+    eprintln!("governed semantic report digest: {report_digest}");
     eprintln!(
         "known-video alignment: {}",
         serde_json::to_string(&report_output["aggregate"]).expect("aggregate JSON")
@@ -3361,12 +4071,64 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
         records_with_non_rejected_rep, records_with_boundary_alignment, structural_gaps
     );
     eprintln!(
-        "structural metrics: packets={packet_count} local_states={local_states:?} pose_channel_frames={pose_channel_frames} equipment_channel_frames={equipment_channel_frames} fusion_states={fusion_states:?} rep_dispositions={rep_disposition_counts:?} rep_evidence_reasons={rep_evidence_reason_counts:?} dimension_states={dimension_states:?} reference_kinds={reference_kinds:?} trace_complete_reports={trace_complete_reports} typed_refusals=0"
+        "structural metrics: packets={packet_count} local_states={local_states:?} pose_channel_frames={pose_channel_frames} equipment_channel_frames={equipment_channel_frames} fusion_states={fusion_states:?} rep_dispositions={rep_disposition_counts:?} rep_evidence_reasons={rep_evidence_reason_counts:?} dimension_states={dimension_states:?} reference_kinds={reference_kinds:?} trace_complete_reports={trace_complete_reports} typed_refusals={typed_refusal_count}"
     );
-    let expected: serde_json::Value = serde_json::from_slice(include_bytes!(
-        "fixtures/visual_recognition_v0_1_expected_structural_result.json"
-    ))
-    .expect("frozen wrist-constrained v9 structural result");
+    let expected: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(root.join(
+            "rust/motion-sdk/tests/fixtures/visual_recognition_v0_1_expected_structural_result.json",
+        ))
+        .expect("frozen v0.1b action-driven regression fixture"),
+    )
+    .expect("frozen v0.1b action-driven regression result");
+    assert_eq!(report_output["reportDigest"], expected["reportDigest"]);
+    assert_eq!(
+        report_output["aggregate"]["truthRepCount"],
+        expected["aggregate"]["truthRepCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["recognitionFunnel"]["rawProposal"],
+        expected["aggregate"]["rawProposalCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["recognitionFunnel"]["confirmedOnly"],
+        expected["aggregate"]["confirmedCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["recognitionFunnel"]["confirmedPlusNeedsReview"],
+        expected["aggregate"]["confirmedPlusNeedsReviewCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["matchedRepCount"],
+        expected["aggregate"]["matchedRepCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["falsePositiveCount"],
+        expected["aggregate"]["falsePositiveCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["missedCount"],
+        expected["aggregate"]["falseNegativeCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["candidatePrecision"],
+        expected["aggregate"]["candidatePrecision"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["candidateRecall"],
+        expected["aggregate"]["candidateRecall"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["exactSetRate"],
+        expected["aggregate"]["exactSetRate"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["strictBoundaryAlignedRepCount"],
+        expected["aggregate"]["strictBoundaryAlignedRepCount"]
+    );
+    assert_eq!(
+        report_output["aggregate"]["reviewedNegativeWindowFalseTriggerCount"],
+        expected["aggregate"]["reviewedNegativeWindowFalseTriggerCount"]
+    );
     assert_eq!(replays.len() as u64, expected["resolvedRecordCount"]);
     assert_eq!(
         declared_excluded_groups.len() as u64,
@@ -3440,7 +4202,35 @@ fn governed_v0_1_visual_recognition_baseline_replays_current_action_views() {
         equipment_provider_pose_fused_frames as u64,
         expected_equipment["poseFusedFrameCount"]
     );
-    assert_eq!(expected["typedRefusalCount"], 0);
+    assert_eq!(typed_refusal_count as u64, expected["typedRefusalCount"]);
+
+    // Publication happens only after every frozen expectation has passed.
+    // The rename is atomic inside one directory, so an interrupted or failed
+    // replay cannot replace the last accepted artifact with partial output.
+    if let Some(output_path) = requested_output {
+        let output_path = governed_evaluation_output_path(&governance_root, &output_path)
+            .expect("governed evaluation output boundary");
+        let file_name = output_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("UTF-8 governed evaluation file name");
+        let temporary_path =
+            output_path.with_file_name(format!(".{file_name}.tmp-{}", std::process::id()));
+        let mut temporary_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+            .expect("create unique governed evaluation temporary output");
+        temporary_file
+            .write_all(&serde_json::to_vec_pretty(&report_output).expect("pretty evaluation JSON"))
+            .expect("write governed evaluation temporary output");
+        temporary_file
+            .sync_all()
+            .expect("durably flush governed evaluation temporary output");
+        drop(temporary_file);
+        std::fs::rename(&temporary_path, &output_path)
+            .expect("atomically publish accepted governed evaluation output");
+    }
 }
 
 #[test]
@@ -3601,7 +4391,12 @@ fn every_current_rigid_bar_context_produces_rep_quality_and_a_causal_trace() {
             .expect("canonical closure");
         let AssessmentEmission::SealedSetAssessment(report) = engine
             .advance(AssessmentEvent::SetFinished)
-            .expect("sealed report")
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{}/{:?} must seal a causal report: {error:?}",
+                    binding.action_id, binding.capture_view
+                )
+            })
         else {
             panic!("expected sealed report")
         };
@@ -3748,20 +4543,33 @@ fn v0_1_report_executes_the_bound_motion_plan_instead_of_wrist_proxy_semantics()
 #[test]
 fn every_v0_1_executable_profile_uses_the_plan_driven_local_cycle() {
     let bindings = visual_recognition_baseline_profiles_v0_1();
-    assert_eq!(bindings.len(), 24, "current installed exact contexts");
+    assert_eq!(bindings.len(), 24, "current executable exact contexts");
     for binding in bindings {
         let plan = binding.motion_plan.as_ref().expect("compiled motion plan");
-        let expected_signal = match binding.local_coordinate_strategy.equipment_mode {
-            LocalEquipmentMode::PoseOnly | LocalEquipmentMode::FixedSupport => {
-                ExerciseSignalKind::LocalPoseAlongAxisProgress
+        let expected_signal = if plan.relations.iter().any(|relation| {
+            relation.role == maxpower_motion_sdk::MotionRole::TaskPrimary
+                && matches!(
+                    relation.operator_id.as_str(),
+                    "joint_angle"
+                        | "relative_distance"
+                        | "segment_angle"
+                        | "projected_shoulder_rotation"
+                )
+        }) {
+            ExerciseSignalKind::ActionPrimaryRelationScalar
+        } else {
+            match binding.local_coordinate_strategy.equipment_mode {
+                LocalEquipmentMode::PoseOnly | LocalEquipmentMode::FixedSupport => {
+                    ExerciseSignalKind::LocalPoseAlongAxisProgress
+                }
+                LocalEquipmentMode::MovingHandle | LocalEquipmentMode::TwoIndependentDumbbells
+                    if plan.rep_consensus.mode
+                        == maxpower_motion_sdk::RepConsensusMode::IndependentBilateral =>
+                {
+                    ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
+                }
+                _ => ExerciseSignalKind::LocalAlongAxisProgress,
             }
-            LocalEquipmentMode::MovingHandle | LocalEquipmentMode::TwoIndependentDumbbells
-                if plan.rep_consensus.mode
-                    == maxpower_motion_sdk::RepConsensusMode::IndependentBilateral =>
-            {
-                ExerciseSignalKind::LocalIndependentBilateralAlongAxisProgress
-            }
-            _ => ExerciseSignalKind::LocalObservedAlongAxisProgress,
         };
         assert_eq!(binding.profile.primary_signal.kind, expected_signal);
         assert_eq!(binding.profile.secondary_signal.kind, expected_signal);
@@ -3769,8 +4577,10 @@ fn every_v0_1_executable_profile_uses_the_plan_driven_local_cycle() {
         assert_eq!(
             binding.profile.state_machine_id,
             format!(
-                "action-plan-topology/{}/dwell-{}ms/v1",
-                plan.rep_topology.topology_id, plan.rep_topology.minimum_phase_dwell_ms
+                "action-plan-topology/{}/phases-{}/dwell-{}ms/v1",
+                plan.rep_topology.topology_id,
+                plan.phases.len(),
+                plan.rep_topology.minimum_phase_dwell_ms
             )
         );
         assert!(binding.profile.identity.contains(&plan.plan_hash));
@@ -3812,6 +4622,7 @@ fn every_v0_1_executable_context_runs_rep_quality_set_and_trace_lifecycle() {
     let catalog = visual_recognition_baseline_catalog_v0_1();
     let bindings = visual_recognition_baseline_profiles_v0_1();
     assert_eq!(bindings.len(), 24);
+    assert_eq!(bindings.len(), catalog.bundles.len());
     for (ordinal, binding) in bindings.iter().enumerate() {
         let source_capture_id = format!("fixture:v0_1-all-contexts:{ordinal}");
         let (packets, closure) =
@@ -3894,7 +4705,12 @@ fn every_v0_1_executable_context_runs_rep_quality_set_and_trace_lifecycle() {
             .expect("canonical closure");
         let AssessmentEmission::SealedSetAssessment(report) = engine
             .advance(AssessmentEvent::SetFinished)
-            .expect("sealed report")
+            .unwrap_or_else(|error| {
+                panic!(
+                    "{}/{:?} must seal a causal report: {error:?}",
+                    binding.action_id, binding.capture_view
+                )
+            })
         else {
             panic!("sealed report")
         };
@@ -3938,7 +4754,7 @@ fn a_v0_1_profile_cannot_enter_motion_session_without_its_action_plan() {
             sequence_id: "plan-required".into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: 720,
@@ -4292,7 +5108,7 @@ fn rust_dumbbell_pixels_run_provider_fusion_rep_assessment_and_trace() {
             sequence_id: source_capture_id.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: WIDTH as u32,
@@ -4312,7 +5128,7 @@ fn rust_dumbbell_pixels_run_provider_fusion_rep_assessment_and_trace() {
             plan,
         )
         .expect("plan-bound dumbbell profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..angles.len() as u64 {
         session
@@ -4448,7 +5264,7 @@ fn rust_machine_handle_pixels_run_provider_fusion_rep_assessment_and_trace() {
             sequence_id: source_capture_id.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: WIDTH as u32,
@@ -4468,7 +5284,7 @@ fn rust_machine_handle_pixels_run_provider_fusion_rep_assessment_and_trace() {
             plan,
         )
         .expect("plan-bound machine profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..angles.len() as u64 {
         session
@@ -4591,7 +5407,7 @@ fn independent_machine_handles_keep_two_tracks_through_rep_and_assessment() {
             sequence_id: source_capture_id.into(),
             contract: ContractVersion {
                 major: 1,
-                minor: 10,
+                minor: 11,
             },
             diagnostics: DiagnosticLevel::Full,
             image_width_px: WIDTH as u32,
@@ -4611,7 +5427,7 @@ fn independent_machine_handles_keep_two_tracks_through_rep_and_assessment() {
             plan,
         )
         .expect("independent-machine plan-bound profile");
-    session.begin_set();
+    session.begin_set().expect("begin set");
     let releases = Arc::new(AtomicUsize::new(0));
     for frame_id in 0..angles.len() as u64 {
         session

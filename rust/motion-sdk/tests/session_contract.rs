@@ -4,9 +4,10 @@ use std::sync::{
 };
 
 use maxpower_motion_sdk::{
-    AdapterCapabilities, CanonicalLandmark, ContractVersion, DiagnosticLevel,
-    FixtureInferenceAdapter, FrameLease, InferenceAdapter, InferenceResult, MotionError,
-    MotionSession, RecordingOutputAdapter, SessionConfig, TargetState, encode_motion_packet,
+    AdapterCapabilities, CURRENT_MOTION_PACKET_CONTRACT, CanonicalLandmark, ContractVersion,
+    DiagnosticLevel, FixtureInferenceAdapter, FrameLease, InferenceAdapter, InferenceResult,
+    MotionError, MotionSession, OpenError, RecordingOutputAdapter, SessionConfig, TargetState,
+    encode_motion_packet, visual_recognition_baseline_profiles_v0_1,
 };
 
 #[test]
@@ -109,6 +110,105 @@ fn incompatible_contract_major_is_refused_at_open() {
     );
 
     assert!(result.is_err());
+}
+
+#[test]
+fn future_contract_minor_is_refused_at_open() {
+    let result = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:future-minor".into(),
+            contract: ContractVersion {
+                major: CURRENT_MOTION_PACKET_CONTRACT.major,
+                minor: CURRENT_MOTION_PACKET_CONTRACT.minor + 1,
+            },
+            diagnostics: DiagnosticLevel::Off,
+            image_width_px: 1_000,
+            image_height_px: 1_000,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::single_pose(Vec::new()),
+        RecordingOutputAdapter::default(),
+    );
+
+    assert!(matches!(
+        result,
+        Err(OpenError::UnsupportedContractMinor {
+            requested: 12,
+            supported: 11,
+        })
+    ));
+}
+
+#[test]
+fn action_plan_requires_the_minor_that_defines_its_typed_reasons() {
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:old-action-plan-minor".into(),
+            contract: ContractVersion {
+                major: 1,
+                minor: 10,
+            },
+            diagnostics: DiagnosticLevel::Off,
+            image_width_px: 1_000,
+            image_height_px: 1_000,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::single_pose(Vec::new()),
+        RecordingOutputAdapter::default(),
+    )
+    .expect("a legacy session without an action plan remains supported");
+    let binding = visual_recognition_baseline_profiles_v0_1()
+        .into_iter()
+        .find(|binding| binding.motion_plan.is_some())
+        .expect("installed action binding");
+
+    assert_eq!(
+        session.install_exercise_profile_with_action_plan(
+            binding.profile,
+            binding.local_coordinate_strategy,
+            binding.motion_plan.expect("action plan"),
+        ),
+        Err(MotionError::InvalidActionPlan(
+            "action plans require packet contract 1.11 or newer",
+        )),
+    );
+}
+
+#[test]
+fn explicit_set_lifecycle_cannot_reset_or_reinterpret_an_active_session() {
+    let mut session = MotionSession::open(
+        SessionConfig {
+            sequence_id: "fixture:set-freeze".into(),
+            contract: ContractVersion { major: 1, minor: 0 },
+            diagnostics: DiagnosticLevel::Off,
+            image_width_px: 1_000,
+            image_height_px: 1_000,
+            continuity: maxpower_motion_sdk::ContinuityMode::Raw,
+            subject_policy: maxpower_motion_sdk::SubjectPolicy::AssumeSingle,
+        },
+        AdapterCapabilities::fixture(),
+        FixtureInferenceAdapter::single_pose(vec![CanonicalLandmark::measured(
+            0.25, 0.5, 0.0, 0.9,
+        )]),
+        RecordingOutputAdapter::default(),
+    )
+    .expect("fixture session");
+
+    session.begin_set().expect("start explicit set");
+    assert_eq!(
+        session.begin_set(),
+        Err(MotionError::SetLifecycleFrozen),
+        "a second begin must not clear the active Rep/trace history"
+    );
+    assert_eq!(
+        session.set_canonical_feed_mirroring(Some(true)),
+        Err(MotionError::SetLifecycleFrozen),
+        "mirroring changes coordinate/laterality meaning and is frozen with the set"
+    );
 }
 
 #[test]

@@ -141,6 +141,26 @@ fn shared_rust_tracker_never_invents_a_shaft_from_uncalibrated_wrists() {
 }
 
 #[test]
+fn a_single_long_scene_edge_is_not_a_measured_barbell_shaft() {
+    let mut tracker = BarbellAxisVisualTracker::default();
+    let subject = subject_with_wrists(1, 0.34, 0.42);
+    let mut frame = blank_frame();
+    let boundary_y = (0.42 * HEIGHT as f32).round() as usize;
+    for y in boundary_y..HEIGHT {
+        for x in 0..WIDTH {
+            frame[y * WIDTH + x] = 224;
+        }
+    }
+
+    let evidence = process_frame_halpe26(&mut tracker, &frame, 1_000, &[subject]);
+    assert!(
+        evidence.raw_observations.is_empty(),
+        "a wall/rack boundary has one image edge; a shaft requires two bounded parallel edges",
+    );
+    assert!(evidence.display_axis.is_none());
+}
+
+#[test]
 fn visual_loss_uses_prediction_not_a_wrist_generated_bar() {
     let mut tracker = BarbellAxisVisualTracker::default();
     let ready = subject_with_wrists(1, 0.34, 0.38);

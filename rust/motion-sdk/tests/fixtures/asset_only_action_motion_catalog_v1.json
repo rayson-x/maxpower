@@ -6,18 +6,23 @@
     "definitionId": "asset-only/floor-press/v1",
     "actionId": "asset_only_floor_press",
     "exactIdentity": {"movementFamily":"horizontal_press","posture":"supine_floor","support":"floor","equipmentTopology":"free_rigid_barbell","laterality":"bilateral_rigid","setup":"floor_press"},
+    "variantStatement": "the floor support limits the lower load endpoint and hip bridging is substitution evidence",
     "executableLeaf": true,
     "relations": [
-      {"relationId":"load_press","role":"task_primary","operatorId":"equipment_axis_displacement","inputs":[{"source":"equipment_axis_center","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":true,"identityDefining":true,"semanticStatement":"the measured bar axis completes the press path"},
-      {"relationId":"torso_stability","role":"stability_relation","operatorId":"segment_angle","inputs":[{"source":"shoulder_hip_axis","valueType":"segment2d","unit":"normalized_image"}],"outputType":"scalar","unit":"radians","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"torso angle remains observable"},
-      {"relationId":"press_coordination","role":"coordinated_motion","operatorId":"point_displacement","inputs":[{"source":"shoulder_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"shoulder motion corroborates the load path"},
-      {"relationId":"hip_substitution","role":"substitution_guard","operatorId":"point_displacement","inputs":[{"source":"hip_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"large hip motion is retained as substitution evidence"}
+      {"relationId":"load_press","role":"task_primary","operatorId":"equipment_axis_displacement","inputs":[{"source":"equipment_axis_center","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":true,"identityDefining":true,"semanticStatement":"the measured bar axis completes the press path","evidenceRationale":"the measured bar is the identity-defining load path and wrists cannot replace it","expectedPattern":"the bar leaves the ready endpoint, reverses at the lower endpoint, and returns"},
+      {"relationId":"torso_stability","role":"stability_relation","operatorId":"segment_angle","inputs":[{"source":"shoulder_hip_axis","valueType":"segment2d","unit":"normalized_image"}],"outputType":"scalar","unit":"radians","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"torso angle remains observable","evidenceRationale":"the torso relation separates pressing motion from support drift","expectedPattern":"the torso remains inside the declared local-coordinate corridor"},
+      {"relationId":"press_coordination","role":"coordinated_motion","operatorId":"point_displacement","inputs":[{"source":"shoulder_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"shoulder motion corroborates the load path","evidenceRationale":"the body relation independently corroborates the measured load phase","expectedPattern":"the shoulder relation follows the declared press phase order"},
+      {"relationId":"hip_substitution","role":"substitution_guard","operatorId":"point_displacement","inputs":[{"source":"hip_midpoint","valueType":"point2d","unit":"normalized_image"}],"outputType":"scalar","unit":"local_scale_ratio","scope":"rep","required":false,"identityDefining":false,"semanticStatement":"large hip motion is retained as substitution evidence","evidenceRationale":"hip motion can distinguish the selected floor press from a bridging substitution","expectedPattern":"only persistent hip motion aligned with the load phase supports a substitution fact"}
     ],
-    "tracks": [{"trackId":"bar_axis","source":"equipment_axis","role":"primary","required":true,"identityDefining":true,"sideScope":"bilateral_rigid"}],
+    "tracks": [
+      {"trackId":"bar_axis","source":"equipment_axis","role":"primary","required":true,"identityDefining":true,"sideScope":"bilateral_rigid","supportsRelationIds":["load_press"],"evidenceRationale":"the independently measured bar axis defines Rep direction and endpoints"},
+      {"trackId":"pose_corroboration","source":"pose","role":"corroborating","required":false,"identityDefining":false,"sideScope":"bilateral_rigid","supportsRelationIds":["torso_stability","press_coordination","hip_substitution"],"evidenceRationale":"pose supplies body coordination and stability without becoming bar geometry"}
+    ],
     "repConsensus": {"mode":"shared_rigid","requiredPrimaryTracks":["bar_axis"],"requiredSides":["shared"],"minimumObservedFrames":3,"conflictPolicy":"reject_confirmed_rep"},
     "repBoundary": {"activation":"grip_established","start":"load_lowered_from_ready","turnaround":"lowest_load_reversal","return":"load_returns_ready","release":"grip_released"},
     "phases": [{"phaseId":"eccentric","from":"start","to":"turnaround"},{"phaseId":"concentric","from":"turnaround","to":"return"}],
     "allowedClaims": ["task_completion","range_of_motion","phase_control","support_stability"],
+    "recommendedView": "front_right_45",
     "supportedViews": ["front_right_45"],
     "viewObservationPlans": [{
       "viewId": "front_right_45",
@@ -30,6 +35,7 @@
       "equipmentObservability": "independent_visual_observation_required",
       "supportObservability": "projected",
       "localAxisPolicy": "action_local_sign_invariant_round_trip",
+      "preparationToEffortDirection": "preparation_to_effort_down",
       "dimensionAvailability": ["load_press", "torso_stability", "press_coordination", "hip_substitution"],
       "repTopology": {
         "topologyId": "bilateral_synchronous_cycle/v1",
@@ -50,6 +56,7 @@
         "minimumExcursionMilli": 140,
         "turnaroundHysteresisMilli": 50,
         "returnToleranceMilli": 80,
+        "maximumConstrainedPathDeviationMilli": 1000,
         "readyToleranceMilli": 35,
         "minimumPhaseDwellMs": 300,
         "maximumGapMs": 750,

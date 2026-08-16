@@ -1,14 +1,17 @@
-# 09 — 交付 action×view 质量规则资产与质量准确率验收
+# 09 — 建立 action×view 质量规则资产安装合同
 
-**What to build:** 将人工质量真值训练/标注产出的 versioned `FeatureProgram`、`ReferencePolicy`、`RulePack` 和 `SetAggregationPolicy` 作为 Rust SDK 资产安装；SDK 只执行并解释，不在客户端或动作名称分支里生成质量规则。
+**What to build:** 让人工质量真值训练/标注未来产出的 versioned `FeatureProgram`、`ReferencePolicy`、`RulePack` 和 `SetAggregationPolicy` 可以作为 exact-context Rust SDK 资产原子安装；SDK 只执行并解释，不在客户端或动作名称分支里生成规则。
 
-**Blocked by:** 每 Rep、每质量维度、按 action×view 的人工质量真值和 source lineage 尚未交付。当前规则没有这些真值，因此 v0.1b 只发布事实、TaskCompletion、ObservationConfidence 与 `CannotJudge`。
+**Blocked by:** None for SDK implementation. 数值校准与质量准确率依赖的人工真值拆到 Ticket 13。
 
-**Status:** blocked
+**Status:** complete — Rust 安装/校验/执行 seam 已完成；未校准维度继续 fail closed。
 
 ## Acceptance
 
-- [ ] 质量资产携带 action、variation、equipment、laterality、view、pose contract、版本、source lineage 与内容哈希，并由 Rust 原子校验安装。
-- [ ] 每个规则的 feature、比较、阈值和 set pattern 可在因果 Trace 中还原；规则不能反向改变已封存 Rep。
-- [ ] 冻结验证集含 per-Rep/per-dimension 人工真值，单独报告质量 coverage、abstention、precision/recall 和错误归因。
-- [ ] 任何缺少 exact asset 或 truth 的质量维度保持 `CannotJudge`/`NotApplicable`，不得回落到全目录通用 0.20/0.15 阈值。
+- [x] 质量包携带 asset version、exact action/variation/equipment/laterality/view/pose contract、source lineage 与内容哈希；任一 exact-context 不一致时整包原子回滚。
+- [x] 每个已执行规则保留 Feature→Comparison→Rule→SetPattern→Conclusion Trace，不能反向改变已封存 Rep。
+- [x] 任何缺少 calibrated exact asset 的维度保持 `CannotJudge`/`NotApplicable`；全目录安装不会把 prototype 0.20/0.15 阈值发布为质量合格/偏差。
+
+## Completion evidence
+
+`QualityRuleAssetPackage` 现在绑定完整 `AssessmentExactContext` 与 `assetVersion`；合同测试覆盖跨变式、器械、侧别、机位或 pose contract 重贴标签的失败与原子回滚。运行时只在包被正确安装且证据可判时执行规则。人工 truth、阈值拟合和质量 precision/recall 不属于 SDK 实现完成度，统一由 Ticket 13 验收。

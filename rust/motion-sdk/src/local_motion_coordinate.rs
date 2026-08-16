@@ -96,6 +96,12 @@ pub enum LocalEquipmentMode {
     RigidBarAxis,
     MovingHandle,
     TwoIndependentDumbbells,
+    /// Pose owns candidate motion while a measured handle is retained as an
+    /// optional corroborating channel for feature/trace output.
+    PosePrimaryWithMovingHandle,
+    /// Pose owns candidate motion while independently measured dumbbells are
+    /// retained as optional corroborating channels.
+    PosePrimaryWithIndependentDumbbells,
     PoseOnly,
     FixedSupport,
 }
@@ -108,6 +114,9 @@ pub enum LocalPoseAnchor {
     LeftWrist,
     RightWrist,
     ShoulderMidpoint,
+    HipMidpoint,
+    LeftAnkle,
+    RightAnkle,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -710,8 +719,13 @@ impl LocalMotionCoordinateEstimator {
         };
         let body_scale = measured_shoulder_scale(independent_pose);
         let expected_kind = match self.equipment_mode {
-            LocalEquipmentMode::MovingHandle => Some(EquipmentKind::MachineHandle),
-            LocalEquipmentMode::TwoIndependentDumbbells => Some(EquipmentKind::Dumbbell),
+            LocalEquipmentMode::MovingHandle | LocalEquipmentMode::PosePrimaryWithMovingHandle => {
+                Some(EquipmentKind::MachineHandle)
+            }
+            LocalEquipmentMode::TwoIndependentDumbbells
+            | LocalEquipmentMode::PosePrimaryWithIndependentDumbbells => {
+                Some(EquipmentKind::Dumbbell)
+            }
             LocalEquipmentMode::PoseOnly | LocalEquipmentMode::FixedSupport => None,
             LocalEquipmentMode::RigidBarAxis => unreachable!("rigid bar uses the axis strategy"),
         };
@@ -732,7 +746,11 @@ impl LocalMotionCoordinateEstimator {
             LocalPoseAnchor::RightWrist => tracks
                 .iter()
                 .find(|track| track.held_by == EquipmentHand::Right),
-            LocalPoseAnchor::WristMidpoint | LocalPoseAnchor::ShoulderMidpoint => None,
+            LocalPoseAnchor::WristMidpoint
+            | LocalPoseAnchor::ShoulderMidpoint
+            | LocalPoseAnchor::HipMidpoint
+            | LocalPoseAnchor::LeftAnkle
+            | LocalPoseAnchor::RightAnkle => None,
         };
         let anatomical_left_equipment_point = tracks
             .iter()
@@ -765,7 +783,19 @@ impl LocalMotionCoordinateEstimator {
             self.pose_samples = self.pose_samples.saturating_add(1);
         }
 
-        let driving_point = equipment_point.or(pose_point);
+        let driving_point = match self.equipment_mode {
+            LocalEquipmentMode::MovingHandle | LocalEquipmentMode::TwoIndependentDumbbells => {
+                // Equipment-primary coordinates may use pose to define body
+                // scale and later test channel agreement, but the primary
+                // origin/path cannot be initialized from a wrist substitute.
+                equipment_point
+            }
+            LocalEquipmentMode::PosePrimaryWithMovingHandle
+            | LocalEquipmentMode::PosePrimaryWithIndependentDumbbells
+            | LocalEquipmentMode::PoseOnly
+            | LocalEquipmentMode::FixedSupport => pose_point,
+            LocalEquipmentMode::RigidBarAxis => unreachable!("rigid bar uses the axis strategy"),
+        };
         let Some(driving_point) = driving_point else {
             self.clear_frame_observations(LocalCoordinateReason::InsufficientPreparation);
             return self.latest.clone();
@@ -1194,6 +1224,9 @@ fn measured_pose_anchor(
         LocalPoseAnchor::LeftWrist => measured_single_point(canonical, 9),
         LocalPoseAnchor::RightWrist => measured_single_point(canonical, 10),
         LocalPoseAnchor::ShoulderMidpoint => measured_pair_midpoint(canonical, 5, 6),
+        LocalPoseAnchor::HipMidpoint => measured_pair_midpoint(canonical, 11, 12),
+        LocalPoseAnchor::LeftAnkle => measured_single_point(canonical, 15),
+        LocalPoseAnchor::RightAnkle => measured_single_point(canonical, 16),
     }
 }
 
@@ -1224,6 +1257,9 @@ fn measured_pose_anchor_confidence(
         LocalPoseAnchor::LeftWrist => (9, 9),
         LocalPoseAnchor::RightWrist => (10, 10),
         LocalPoseAnchor::ShoulderMidpoint => (5, 6),
+        LocalPoseAnchor::HipMidpoint => (11, 12),
+        LocalPoseAnchor::LeftAnkle => (15, 15),
+        LocalPoseAnchor::RightAnkle => (16, 16),
     };
     canonical
         .get(left)
@@ -1636,6 +1672,32 @@ mod tests {
         let effort = estimator.observe(600, Some(7), &pose(0.52), &no_equipment(600));
         assert_eq!(effort.state, super::LocalCoordinateState::Frozen);
         assert!(effort.pose.unwrap().along_axis_progress > 0.0);
+    }
+
+    #[test]
+    fn equipment_point_strategy_cannot_freeze_from_pose_before_grip() {
+        let mut estimator = LocalMotionCoordinateEstimator::new(720, 1280);
+        estimator.set_strategy(Some(LocalMotionCoordinateStrategy {
+            capture_view: LocalCoarseView::Front,
+            preparation_to_effort: LocalActionAxisDirection::PreparationToEffortUp,
+            equipment_mode: LocalEquipmentMode::TwoIndependentDumbbells,
+            pose_anchor: LocalPoseAnchor::WristMidpoint,
+        }));
+        estimator.begin_set();
+        for (index, shoulder_y) in [0.50, 0.50, 0.50, 0.50, 0.35].into_iter().enumerate() {
+            let evidence = estimator.observe(
+                index as u64 * 100,
+                Some(7),
+                &pose(shoulder_y),
+                &no_equipment(index as u64 * 100),
+            );
+            assert_ne!(
+                evidence.state,
+                super::LocalCoordinateState::Frozen,
+                "pose motion may corroborate a dumbbell but cannot initialize its primary track",
+            );
+            assert!(evidence.equipment.is_none());
+        }
     }
 
     #[test]

@@ -4,7 +4,7 @@
   "admission": "immutable_source",
   "authority": "user_source",
   "groupKey": "sourceCaptureId",
-  "allowedTask": "failure_review",
+  "allowedTask": "known_video_runtime_evaluation",
   "archiveManifestSha256": "490d40753da9e09fc90d04aef78cf4ddb48695e365c4d63ff34fd7dbc84cb6b6",
   "contextCount": 54,
   "uniqueSourceCount": 50,
@@ -260,5 +260,5 @@
       "sha256": "93f5f2020ac3d7fd6a657eecef6d02d5a04a8163565aaeac15d39fd85a28852e"
     }
   ],
-  "manifestSha256": "36f6a3b69ea2d7dc7e9d88d95fb4c73734b11993944960b82ad8d74a2fc2d7f6"
+  "manifestSha256": "27effc75bc3d4303b2a9aa2c06402620458f251888bdae3c99752b91c4ccce7b"
 }

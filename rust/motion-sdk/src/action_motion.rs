@@ -15,6 +15,61 @@ pub struct ActionMotionCatalog {
     pub definitions: Vec<ActionMotionDefinition>,
 }
 
+/// Product-entry contract for one action card.  It contains semantic camera
+/// choices only; equipment providers, algorithms and thresholds remain hidden
+/// inside the plan compiled after the caller chooses a view.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ActionEntryOptions {
+    pub action_id: String,
+    pub recommended_view: String,
+    pub available_views: Vec<String>,
+}
+
+/// One relation from the action's semantic authority, rendered as a stable
+/// explanation rather than reinterpreted by a client or language model.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionEvidenceItem {
+    pub relation_id: String,
+    pub role: MotionRole,
+    pub operator_id: String,
+    pub input_sources: Vec<String>,
+    pub supporting_track_ids: Vec<String>,
+    pub required_for_rep: bool,
+    pub identity_defining: bool,
+    pub semantic_statement: String,
+    pub evidence_rationale: String,
+    pub expected_pattern: String,
+    pub missing_consequence: EvidenceMissingConsequence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceMissingConsequence {
+    RepRefusal,
+    DimensionCannotJudge,
+}
+
+/// A client-readable explanation derived entirely from one registered action
+/// definition.  Categories may overlap (the primary relation is also an
+/// equipment or skeleton trajectory), but no second movement truth is stored.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionEvidenceExplanation {
+    pub action_id: String,
+    pub definition_id: String,
+    pub definition_hash: String,
+    pub exact_identity: ExactActionIdentity,
+    pub variant_statement: String,
+    pub primary_relation: ActionEvidenceItem,
+    pub equipment_trajectories: Vec<ActionEvidenceItem>,
+    pub skeleton_trajectories: Vec<ActionEvidenceItem>,
+    pub joint_angles: Vec<ActionEvidenceItem>,
+    pub rep_boundary: RepBoundarySemantics,
+    pub allowed_claims: Vec<String>,
+    pub limited_claims: Vec<String>,
+}
+
 impl ActionMotionCatalog {
     pub fn from_json(json: &str) -> Result<Self, ActionMotionError> {
         let mut value: Self = serde_json::from_str(json)
@@ -50,6 +105,134 @@ impl ActionMotionCatalog {
         self.definitions
             .iter()
             .find(|definition| definition.action_id == action_id)
+    }
+
+    /// Resolves the action-card camera choices that may safely start a
+    /// recognition session. A declared but geometrically unobservable exact
+    /// view remains in the asset for typed refusal/audit, but is not offered as
+    /// a selectable product entry.
+    pub fn entry_options(&self, action_id: &str) -> Result<ActionEntryOptions, ActionMotionError> {
+        let definition =
+            self.definition(action_id)
+                .ok_or_else(|| ActionMotionError::UnknownAction {
+                    action_id: action_id.to_owned(),
+                })?;
+        let compiler = ActionMotionCompiler::new(OperatorRegistry::standard());
+        let mut available_views = Vec::new();
+        for view in &definition.supported_views {
+            match compiler.compile(definition, view) {
+                Ok(_) => available_views.push(view.clone()),
+                Err(ActionMotionError::IdentityRelationNotObservable { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        if available_views.is_empty()
+            || !available_views
+                .iter()
+                .any(|view| view == &definition.recommended_view)
+        {
+            return Err(ActionMotionError::RecommendedViewNotExecutable {
+                action_id: definition.action_id.clone(),
+                view: definition.recommended_view.clone(),
+            });
+        }
+        Ok(ActionEntryOptions {
+            action_id: definition.action_id.clone(),
+            recommended_view: definition.recommended_view.clone(),
+            available_views,
+        })
+    }
+
+    pub fn explain_action(
+        &self,
+        action_id: &str,
+    ) -> Result<ActionEvidenceExplanation, ActionMotionError> {
+        let definition =
+            self.definition(action_id)
+                .ok_or_else(|| ActionMotionError::UnknownAction {
+                    action_id: action_id.to_owned(),
+                })?;
+        let explain_relation = |relation: &MotionRelationDefinition| {
+            let supporting_track_ids = definition
+                .tracks
+                .iter()
+                .filter(|track| track.supports_relation_ids.contains(&relation.relation_id))
+                .map(|track| track.track_id.clone())
+                .collect::<Vec<_>>();
+            ActionEvidenceItem {
+                relation_id: relation.relation_id.clone(),
+                role: relation.role,
+                operator_id: relation.operator_id.clone(),
+                input_sources: relation
+                    .inputs
+                    .iter()
+                    .map(|input| input.source.clone())
+                    .collect(),
+                supporting_track_ids,
+                required_for_rep: relation.required && relation.identity_defining,
+                identity_defining: relation.identity_defining,
+                semantic_statement: relation.semantic_statement.clone(),
+                evidence_rationale: relation.evidence_rationale.clone(),
+                expected_pattern: relation.expected_pattern.clone(),
+                missing_consequence: if relation.required && relation.identity_defining {
+                    EvidenceMissingConsequence::RepRefusal
+                } else {
+                    EvidenceMissingConsequence::DimensionCannotJudge
+                },
+            }
+        };
+        let primary = definition
+            .relations
+            .iter()
+            .find(|relation| {
+                relation.role == MotionRole::TaskPrimary
+                    && relation.required
+                    && relation.identity_defining
+            })
+            .expect("validated action definition has one identity primary");
+        let equipment_trajectories = definition
+            .relations
+            .iter()
+            .filter(|relation| {
+                relation
+                    .inputs
+                    .iter()
+                    .any(|input| equipment_source(&input.source))
+            })
+            .map(explain_relation)
+            .collect();
+        let skeleton_trajectories = definition
+            .relations
+            .iter()
+            .filter(|relation| {
+                relation.operator_id != "joint_angle"
+                    && relation
+                        .inputs
+                        .iter()
+                        .any(|input| !equipment_source(&input.source))
+            })
+            .map(explain_relation)
+            .collect();
+        let joint_angles = definition
+            .relations
+            .iter()
+            .filter(|relation| relation.operator_id == "joint_angle")
+            .map(explain_relation)
+            .collect();
+        Ok(ActionEvidenceExplanation {
+            action_id: definition.action_id.clone(),
+            definition_id: definition.definition_id.clone(),
+            definition_hash: definition.computed_hash(),
+            exact_identity: definition.exact_identity.clone(),
+            variant_statement: definition.variant_statement.clone(),
+            primary_relation: explain_relation(primary),
+            equipment_trajectories,
+            skeleton_trajectories,
+            joint_angles,
+            rep_boundary: definition.rep_boundary.clone(),
+            allowed_claims: definition.allowed_claims.clone(),
+            limited_claims: definition.limited_claims.clone(),
+        })
     }
 }
 
@@ -92,6 +275,7 @@ pub fn validate_action_asset_inventory(
     let mut expected_rows = 0_usize;
     let mut identity_unobservable_view_count = 0_usize;
     for definition in &catalog.definitions {
+        catalog.entry_options(&definition.action_id)?;
         for view in &definition.supported_views {
             expected_rows += 1;
             match compiler.compile(definition, view) {
@@ -119,6 +303,10 @@ pub struct ActionMotionDefinition {
     pub definition_id: String,
     pub action_id: String,
     pub exact_identity: ExactActionIdentity,
+    /// Leaf-specific distinction from other actions in the same movement
+    /// family.  It is kept separate from TaskPrimary so a setup/stability
+    /// constraint cannot be mislabeled as the movement that creates a Rep.
+    pub variant_statement: String,
     pub executable_leaf: bool,
     pub relations: Vec<MotionRelationDefinition>,
     pub tracks: Vec<MotionTrackDefinition>,
@@ -126,6 +314,12 @@ pub struct ActionMotionDefinition {
     pub rep_boundary: RepBoundarySemantics,
     pub phases: Vec<PhaseSemantics>,
     pub allowed_claims: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limited_claims: Vec<String>,
+    /// Asset-authored default shown before recognition starts. It is not
+    /// inferred from pixels and must itself compile as an observable exact
+    /// context.
+    pub recommended_view: String,
     pub supported_views: Vec<String>,
     /// Exact action × view evidence authority.  This is deliberately asset
     /// data, rather than an inference from an operator being compiled: an
@@ -155,17 +349,31 @@ impl ActionMotionDefinition {
             &self.exact_identity.equipment_topology,
             &self.exact_identity.laterality,
             &self.exact_identity.setup,
+            &self.variant_statement,
         ]
         .into_iter()
         .all(|value| !value.trim().is_empty());
-        let has_primary_relation = self.relations.iter().any(|relation| {
-            relation.role == MotionRole::TaskPrimary
-                && relation.required
-                && relation.identity_defining
-        });
-        let has_primary_track = self.tracks.iter().any(|track| {
-            track.role == TrackRole::Primary && track.required && track.identity_defining
-        });
+        let primary_relations = self
+            .relations
+            .iter()
+            .filter(|relation| {
+                relation.role == MotionRole::TaskPrimary
+                    && relation.required
+                    && relation.identity_defining
+            })
+            .collect::<Vec<_>>();
+        let primary_tracks = self
+            .tracks
+            .iter()
+            .filter(|track| {
+                track.role == TrackRole::Primary && track.required && track.identity_defining
+            })
+            .collect::<Vec<_>>();
+        let has_one_bound_primary = primary_relations.len() == 1
+            && primary_tracks.len() == 1
+            && primary_tracks[0]
+                .supports_relation_ids
+                .contains(&primary_relations[0].relation_id);
         let complete_boundary = [
             &self.rep_boundary.activation,
             &self.rep_boundary.start,
@@ -185,22 +393,57 @@ impl ActionMotionDefinition {
             .iter()
             .map(|track| track.track_id.as_str())
             .collect::<HashSet<_>>();
+        let phase_ids = self
+            .phases
+            .iter()
+            .map(|phase| phase.phase_id.as_str())
+            .collect::<HashSet<_>>();
         let complete_relations = self.relations.iter().all(|relation| {
             !relation.relation_id.trim().is_empty()
                 && !relation.operator_id.trim().is_empty()
                 && !relation.unit.trim().is_empty()
                 && !relation.scope.trim().is_empty()
                 && !relation.semantic_statement.trim().is_empty()
+                && !relation.evidence_rationale.trim().is_empty()
+                && !relation.expected_pattern.trim().is_empty()
                 && !relation.inputs.is_empty()
                 && relation
                     .inputs
                     .iter()
                     .all(|input| !input.source.trim().is_empty() && !input.unit.trim().is_empty())
+                && relation.required_phase_id.as_ref().is_none_or(|phase_id| {
+                    !phase_id.trim().is_empty() && phase_ids.contains(phase_id.as_str())
+                })
+                && (relation.phase_alignment == RelationPhaseAlignment::Unconstrained
+                    || relation.required_phase_id.is_some())
+                && (relation.side_policy == RelationSidePolicy::Declared
+                    || relation.inputs.iter().any(|input| {
+                        input.source.starts_with("left_") || input.source.starts_with("right_")
+                    }))
+                && (relation.temporal_pattern != RelationTemporalPattern::SustainedMagnitude
+                    || relation.minimum_magnitude_milli > 0)
         });
-        let complete_tracks = self
-            .tracks
-            .iter()
-            .all(|track| !track.track_id.trim().is_empty() && !track.source.trim().is_empty());
+        let complete_tracks = self.tracks.iter().all(|track| {
+            !track.track_id.trim().is_empty()
+                && !track.source.trim().is_empty()
+                && !track.evidence_rationale.trim().is_empty()
+                && !track.supports_relation_ids.is_empty()
+                && track
+                    .supports_relation_ids
+                    .iter()
+                    .collect::<HashSet<_>>()
+                    .len()
+                    == track.supports_relation_ids.len()
+                && track
+                    .supports_relation_ids
+                    .iter()
+                    .all(|relation_id| relation_ids.contains(relation_id.as_str()))
+        });
+        let relations_have_tracks = self.relations.iter().all(|relation| {
+            self.tracks
+                .iter()
+                .any(|track| track.supports_relation_ids.contains(&relation.relation_id))
+        });
         let complete_consensus = self.rep_consensus.minimum_observed_frames > 0
             && !self.rep_consensus.required_primary_tracks.is_empty()
             && self
@@ -223,9 +466,15 @@ impl ActionMotionDefinition {
                 .iter()
                 .all(|claim| !claim.trim().is_empty())
             && self
+                .limited_claims
+                .iter()
+                .all(|claim| !claim.trim().is_empty())
+            && self
                 .supported_views
                 .iter()
                 .all(|view| !view.trim().is_empty())
+            && !self.recommended_view.trim().is_empty()
+            && self.supported_views.contains(&self.recommended_view)
             && self.phases.iter().all(|phase| {
                 !phase.phase_id.trim().is_empty()
                     && !phase.from.trim().is_empty()
@@ -247,11 +496,11 @@ impl ActionMotionDefinition {
         if self.schema_version != "maxpower.action-motion-definition/v1"
             || !self.executable_leaf
             || !complete_identity
-            || !has_primary_relation
-            || !has_primary_track
+            || !has_one_bound_primary
             || !complete_boundary
             || !complete_relations
             || !complete_tracks
+            || !relations_have_tracks
             || !complete_consensus
             || !required_roles
             || !unique_nonempty_lists
@@ -286,6 +535,11 @@ pub struct RepTopologyProfile {
     pub minimum_excursion_milli: u16,
     pub turnaround_hysteresis_milli: u16,
     pub return_tolerance_milli: u16,
+    /// Maximum visible cross-axis span for an identity-defining constrained
+    /// path. It is consumed only when the action declares a
+    /// `constrained_path_deviation` relation; keeping it in the exact
+    /// action×view topology makes the admission corridor data-driven.
+    pub maximum_constrained_path_deviation_milli: u16,
     pub ready_tolerance_milli: u16,
     pub minimum_phase_dwell_ms: u64,
     pub maximum_gap_ms: u64,
@@ -306,6 +560,9 @@ impl RepTopologyProfile {
     pub fn return_tolerance(&self) -> f32 {
         f32::from(self.return_tolerance_milli) / 1_000.0
     }
+    pub fn maximum_constrained_path_deviation(&self) -> f32 {
+        f32::from(self.maximum_constrained_path_deviation_milli) / 1_000.0
+    }
 
     fn is_complete(&self) -> bool {
         !self.topology_id.trim().is_empty()
@@ -325,6 +582,7 @@ impl RepTopologyProfile {
             && self.minimum_excursion_milli >= self.start_threshold_milli
             && self.turnaround_hysteresis_milli > 0
             && self.return_tolerance_milli > 0
+            && self.maximum_constrained_path_deviation_milli > 0
             && self.ready_tolerance_milli > 0
             && self.minimum_phase_dwell_ms > 0
             && self.maximum_gap_ms > 0
@@ -364,6 +622,11 @@ pub struct ViewObservationPlan {
     pub equipment_observability: String,
     pub support_observability: String,
     pub local_axis_policy: String,
+    /// The action-local image-plane axis selected before the set starts.
+    /// Its sign never defines action identity; it only chooses which measured
+    /// component the plan-authorized primary anchor contributes to candidate
+    /// segmentation.
+    pub preparation_to_effort_direction: crate::LocalActionAxisDirection,
     #[serde(default)]
     pub dimension_availability: Vec<String>,
     pub rep_topology: RepTopologyProfile,
@@ -477,6 +740,38 @@ pub enum FactConflictPolicy {
     CannotJudge,
 }
 
+/// Frame-local availability of one typed module input.  This is deliberately
+/// smaller than a motion fact value: the reusable algorithm layer only needs
+/// to decide whether the fact is causally admissible before an implementation
+/// reads its payload.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlgorithmFactState {
+    Observed,
+    Missing,
+    Conflict,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AlgorithmFactObservation {
+    pub fact_id: String,
+    pub value_type: MotionValueType,
+    pub state: AlgorithmFactState,
+    pub age_ms: u64,
+}
+
+/// Executable result of a module's evidence policy.  A descriptor is not
+/// considered an algorithm contract until runtime invocations pass through
+/// this decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AlgorithmInvocationDisposition {
+    Execute,
+    RefusePlan,
+    CannotJudge,
+    NeedsReview,
+    RejectCandidate,
+    PreserveConflict,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AlgorithmFactContract {
@@ -537,6 +832,68 @@ pub struct AlgorithmModuleDescriptor {
     pub parameter_schema: String,
     pub latency_budget_ms: u64,
     pub allowed_conclusions: Vec<String>,
+}
+
+impl AlgorithmModuleDescriptor {
+    /// Applies this module's declared age, missing and conflict policies to a
+    /// concrete invocation. Unknown or mistyped facts are structural input
+    /// errors; stale facts follow the declared missing-evidence policy.
+    pub fn evaluate_invocation(
+        &self,
+        observations: &[AlgorithmFactObservation],
+    ) -> AlgorithmInvocationDisposition {
+        let mut missing = false;
+        let mut conflict = false;
+        for required in self.required_inputs.iter().filter(|input| input.required) {
+            let Some(observed) = observations
+                .iter()
+                .find(|observed| observed.fact_id == required.fact_id)
+            else {
+                missing = true;
+                continue;
+            };
+            if observed.value_type != required.value_type {
+                return AlgorithmInvocationDisposition::RefusePlan;
+            }
+            match observed.state {
+                AlgorithmFactState::Conflict => conflict = true,
+                AlgorithmFactState::Missing => missing = true,
+                AlgorithmFactState::Observed if observed.age_ms > self.maximum_causal_age_ms => {
+                    missing = true;
+                }
+                AlgorithmFactState::Observed => {}
+            }
+        }
+        if conflict {
+            return match self.conflict_policy {
+                FactConflictPolicy::RefusePlan => AlgorithmInvocationDisposition::RefusePlan,
+                FactConflictPolicy::PreserveChannels => {
+                    AlgorithmInvocationDisposition::PreserveConflict
+                }
+                FactConflictPolicy::RejectCandidate => {
+                    AlgorithmInvocationDisposition::RejectCandidate
+                }
+                FactConflictPolicy::CannotJudge => AlgorithmInvocationDisposition::CannotJudge,
+            };
+        }
+        if missing {
+            return match self.missing_policy {
+                FactMissingPolicy::RefusePlan => AlgorithmInvocationDisposition::RefusePlan,
+                FactMissingPolicy::CannotJudge => AlgorithmInvocationDisposition::CannotJudge,
+                FactMissingPolicy::NeedsReview => AlgorithmInvocationDisposition::NeedsReview,
+                FactMissingPolicy::RejectCandidate => {
+                    AlgorithmInvocationDisposition::RejectCandidate
+                }
+            };
+        }
+        AlgorithmInvocationDisposition::Execute
+    }
+
+    pub fn allows_conclusion(&self, conclusion: &str) -> bool {
+        self.allowed_conclusions
+            .iter()
+            .any(|allowed| allowed == conclusion)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -827,7 +1184,11 @@ impl AlgorithmModuleRegistry {
                     topology_id: topology.topology_id.clone(),
                 });
             }
-            if descriptor.module_id == "rep_topology" && needs_equipment {
+            if matches!(
+                descriptor.module_id.as_str(),
+                "local_coordinate" | "rep_topology"
+            ) && needs_equipment
+            {
                 descriptor.required_inputs.push(AlgorithmFactContract {
                     fact_id: "subject_equipment_association".into(),
                     value_type: MotionValueType::Category,
@@ -936,8 +1297,50 @@ pub struct MotionRelationDefinition {
     pub scope: String,
     pub required: bool,
     pub identity_defining: bool,
+    /// Optional declared action phase whose timing constrains this relation.
+    /// The compiler verifies that the phase exists in the same definition.
+    #[serde(default)]
+    pub required_phase_id: Option<String>,
+    #[serde(default)]
+    pub phase_alignment: RelationPhaseAlignment,
+    #[serde(default)]
+    pub side_policy: RelationSidePolicy,
+    #[serde(default)]
+    pub temporal_pattern: RelationTemporalPattern,
+    #[serde(default)]
+    pub minimum_magnitude_milli: u16,
     #[serde(default)]
     pub semantic_statement: String,
+    #[serde(default)]
+    pub evidence_rationale: String,
+    #[serde(default)]
+    pub expected_pattern: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationPhaseAlignment {
+    #[default]
+    Unconstrained,
+    AtPrimaryTurnaround,
+    AfterPrimaryTurnaround,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationSidePolicy {
+    #[default]
+    Declared,
+    ActiveLeadSide,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationTemporalPattern {
+    #[default]
+    RoundTrip,
+    CrossZeroRoundTrip,
+    SustainedMagnitude,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -958,6 +1361,10 @@ pub struct MotionTrackDefinition {
     pub required: bool,
     pub identity_defining: bool,
     pub side_scope: String,
+    #[serde(default)]
+    pub supports_relation_ids: Vec<String>,
+    #[serde(default)]
+    pub evidence_rationale: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1054,6 +1461,14 @@ impl OperatorRegistry {
                     "equipment_axis_center",
                     "machine_handle_center",
                     "dumbbell_center",
+                    "cable_handle_center",
+                    "landmine_load_point",
+                    "trap_bar_center",
+                    "kettlebell_center",
+                    "band_attachment_point",
+                    "weight_plate_center",
+                    "single_load_center",
+                    "fixed_support_anchor",
                 ],
             ),
             operator(
@@ -1089,11 +1504,37 @@ impl OperatorRegistry {
                 POSE_POINTS,
             ),
             operator(
+                "projected_shoulder_rotation",
+                &[
+                    MotionValueType::Point2d,
+                    MotionValueType::Point2d,
+                    MotionValueType::Point2d,
+                    MotionValueType::Point2d,
+                ],
+                MotionValueType::Scalar,
+                &["radians"],
+                POSE_POINTS,
+            ),
+            operator(
                 "relative_distance",
                 &[MotionValueType::Point2d, MotionValueType::Point2d],
                 MotionValueType::Scalar,
                 &["local_scale_ratio"],
                 ALL_POINTS,
+            ),
+            operator(
+                "relative_vertical_offset",
+                &[MotionValueType::Point2d, MotionValueType::Point2d],
+                MotionValueType::Scalar,
+                &["local_scale_ratio"],
+                POSE_POINTS,
+            ),
+            operator(
+                "relative_horizontal_offset",
+                &[MotionValueType::Point2d, MotionValueType::Point2d],
+                MotionValueType::Scalar,
+                &["local_scale_ratio"],
+                POSE_POINTS,
             ),
             operator(
                 "constrained_path_deviation",
@@ -1146,6 +1587,14 @@ const ALL_POINTS: &[&str] = &[
     "right_wrist",
     "left_elbow",
     "right_elbow",
+    "left_shoulder",
+    "right_shoulder",
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
     "shoulder_midpoint",
     "hip_midpoint",
 ];
@@ -1221,6 +1670,11 @@ pub struct CompiledMotionRelation {
     pub coverage_policy: FeatureCoveragePolicy,
     pub confidence_policy: FeatureConfidencePolicy,
     pub judgeability: FeatureJudgeability,
+    pub required_phase_id: Option<String>,
+    pub phase_alignment: RelationPhaseAlignment,
+    pub side_policy: RelationSidePolicy,
+    pub temporal_pattern: RelationTemporalPattern,
+    pub minimum_magnitude_milli: u16,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActionObservationPlan {
@@ -1260,6 +1714,10 @@ pub struct ActionObservationPlan {
 pub struct EquipmentProviderRequirement {
     pub topology: EquipmentProviderTopology,
     pub provider_id: EquipmentProviderId,
+    /// `false` means the provider is still Rust-selected and observable, but
+    /// its facts only corroborate a pose-primary Rep. Missing optional
+    /// equipment must never block or manufacture that Rep.
+    pub required_for_rep: bool,
 }
 
 pub struct ActionMotionCompiler {
@@ -1395,7 +1853,11 @@ impl ActionMotionCompiler {
                 output_type: relation.output_type,
                 unit: relation.unit.clone(),
                 scope: relation.scope.clone(),
-                source_requirement: contract.source_requirement,
+                // Mixed-capability operators such as relative_distance can
+                // accept either pose or equipment points. The concrete
+                // relation inputs—not the operator's full permitted-source
+                // catalog—own runtime source authority.
+                source_requirement: source_requirement_for_inputs(&relation.inputs),
                 coverage_policy: contract.coverage_policy,
                 confidence_policy: contract.confidence_policy,
                 judgeability: if relation.required && relation.identity_defining && is_visible {
@@ -1403,6 +1865,11 @@ impl ActionMotionCompiler {
                 } else {
                     FeatureJudgeability::DimensionScopedCannotJudge
                 },
+                required_phase_id: relation.required_phase_id.clone(),
+                phase_alignment: relation.phase_alignment,
+                side_policy: relation.side_policy,
+                temporal_pattern: relation.temporal_pattern,
+                minimum_magnitude_milli: relation.minimum_magnitude_milli,
             });
         }
         let missing_required = definition.relations.iter().any(|source| {
@@ -1444,14 +1911,24 @@ impl ActionMotionCompiler {
             &view_observation.rep_topology,
             primary_relation.source_requirement,
         )?;
-        let equipment_provider = requires_measured_equipment(primary_relation)
-            .then(|| {
-                let topology =
-                    equipment_provider_topology(&definition.exact_identity.equipment_topology)
-                        .ok_or_else(|| ActionMotionError::MissingEquipmentProvider {
-                            action_id: definition.action_id.clone(),
-                            topology: definition.exact_identity.equipment_topology.clone(),
-                        })?;
+        let equipment_required_for_rep = requires_measured_equipment(primary_relation);
+        let provider_topology =
+            equipment_provider_topology(&definition.exact_identity.equipment_topology);
+        let optional_visible_equipment = relations.iter().any(|relation| {
+            relation.judgeability == FeatureJudgeability::DimensionScopedCannotJudge
+                && relation
+                    .inputs
+                    .iter()
+                    .any(|input| equipment_source(&input.source))
+        });
+        let equipment_provider = if equipment_required_for_rep {
+            Some({
+                let topology = provider_topology.ok_or_else(|| {
+                    ActionMotionError::MissingEquipmentProvider {
+                        action_id: definition.action_id.clone(),
+                        topology: definition.exact_identity.equipment_topology.clone(),
+                    }
+                })?;
                 let provider_id = self.equipment_providers.resolve(topology).ok_or_else(|| {
                     ActionMotionError::MissingEquipmentProvider {
                         action_id: definition.action_id.clone(),
@@ -1461,9 +1938,25 @@ impl ActionMotionCompiler {
                 Ok(EquipmentProviderRequirement {
                     topology,
                     provider_id,
+                    required_for_rep: true,
                 })
             })
-            .transpose()?;
+        } else if optional_visible_equipment {
+            provider_topology
+                .and_then(|topology| {
+                    self.equipment_providers
+                        .resolve(topology)
+                        .map(|provider_id| EquipmentProviderRequirement {
+                            topology,
+                            provider_id,
+                            required_for_rep: false,
+                        })
+                })
+                .map(Ok)
+        } else {
+            None
+        }
+        .transpose()?;
         let provider_tracks_equipment = matches!(
             definition.exact_identity.equipment_topology.as_str(),
             "free_rigid_barbell"
@@ -1631,6 +2124,17 @@ fn requires_measured_equipment(relation: &CompiledMotionRelation) -> bool {
     )
 }
 
+fn source_requirement_for_inputs(inputs: &[MotionInput]) -> OperatorSourceRequirement {
+    let has_equipment = inputs.iter().any(|input| equipment_source(&input.source));
+    let has_pose = inputs.iter().any(|input| !equipment_source(&input.source));
+    match (has_equipment, has_pose) {
+        (true, true) => OperatorSourceRequirement::CurrentMeasuredMixed,
+        (true, false) => OperatorSourceRequirement::CurrentMeasuredEquipment,
+        (false, true) => OperatorSourceRequirement::CurrentMeasuredPose,
+        (false, false) => OperatorSourceRequirement::CurrentMeasuredPose,
+    }
+}
+
 fn equipment_provider_topology(topology: &str) -> Option<EquipmentProviderTopology> {
     match topology {
         "free_rigid_barbell" | "smith_guided_bar" => Some(EquipmentProviderTopology::RigidBarAxis),
@@ -1654,6 +2158,14 @@ fn equipment_source(source: &str) -> bool {
         || source.contains("dumbbell")
         || source.contains("machine_handle")
         || source.contains("bar_axis")
+        || source.contains("cable_handle")
+        || source.contains("landmine")
+        || source.contains("trap_bar")
+        || source.contains("kettlebell")
+        || source.contains("band_attachment")
+        || source.contains("weight_plate")
+        || source.contains("single_load")
+        || source.contains("fixed_support")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1662,6 +2174,9 @@ pub enum ActionMotionError {
     UnsupportedCatalog,
     DuplicateLeaf(String),
     DuplicateOperator,
+    UnknownAction {
+        action_id: String,
+    },
     InvalidDefinitionHash {
         definition_id: String,
     },
@@ -1672,6 +2187,15 @@ pub enum ActionMotionError {
     UnsupportedView {
         action_id: String,
         view: String,
+    },
+    RecommendedViewNotExecutable {
+        action_id: String,
+        view: String,
+    },
+    RuntimeBindingFailure {
+        action_id: String,
+        view: String,
+        detail: String,
     },
     MissingViewObservationPlan {
         action_id: String,

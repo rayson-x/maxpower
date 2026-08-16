@@ -295,7 +295,7 @@
 - `substitution_relations`：躯干后仰、髋膝借力或左右阶段分离。
 - `primary_tracks`：身份主关系是肩轴向旋转；左右哑铃、腕、肘、肩、躯干和髋膝只作为协同/稳定证据。
 - `rep_boundary`：必须同时包含旋转起点、过顶伸展端、反向旋转和返回起点，不能只由哑铃上下周期封存。
-- `limited_claims`：当前普通单目 Feature operators 不能表达身份定义的肩轴向旋转，因此本合同完整但当前能力为 `PlanRefusal`；仍可保留可见观察事实，但不得输出 Arnold press ConfirmedRep。
+- `limited_claims`：使用肩—肘—腕相对躯干的二维投影旋转序列识别动作阶段；不得把它解释为真实三维肱骨轴角、肩胛运动或关节安全结论。
 
 ### M22 侧平举、前平举与 Y 举
 
@@ -326,7 +326,7 @@
 - `substitution_relations`：肘部漂移、躯干旋转或肩整体平移替代前臂旋转。
 - `primary_tracks`：身份主关系是肩轴向外旋；真实手柄/哑铃、腕绕肘轨迹、肘、肩、躯干和骨盆均为协同或稳定证据，不能替代主关系。
 - `rep_boundary`：必须由可表达的外旋 TaskPrimary 定义外旋起点、终点和返回；不能只用腕绕肘周期封存。
-- `limited_claims`：当前普通单目 Feature operators 不能表达身份定义的肩轴向外旋，因此本合同完整但当前能力为 `PlanRefusal`；可见腕肘/器械事实不得产生 external-rotation ConfirmedRep。
+- `limited_claims`：使用肩—肘—腕相对躯干的二维投影旋转序列识别动作阶段；不得把它解释为真实三维肱骨轴角、肩胛运动或关节安全结论。
 
 ### M25 肘屈曲
 
@@ -458,7 +458,7 @@
 | `high_bar_back_squat` 高杠后蹲 | M08 + rigid_bar | 高杠位 context；杠铃、髋膝踝与躯干独立走廊 |
 | `low_bar_back_squat` 低杠后蹲 | M08 + rigid_bar | 低杠位 context；允许不同髋/躯干协同，不能套高杠阈值 |
 | `front_barbell_squat` 杠铃前蹲 | M08 + rigid_bar | 前置杠铃和肘部支撑代理；独立躯干参考 |
-| `box_squat` 箱式深蹲 | M08 + rigid_bar | 箱面接触/停顿和重新上升是阶段事实 |
+| `box_squat` 箱式深蹲 | M08 + rigid_bar | 可见下降端停顿和重新上升是阶段事实；未观测箱面时不声称物理接触 |
 | `bodyweight_sumo_squat` 徒手相扑深蹲 | M08 + bodyweight + standing_free | 宽站距来自 context；左右髋膝关系独立 |
 | `loaded_sumo_squat` 单负载相扑深蹲 | M08 + single_free_load | 胸前或垂直负载 setup 必须精确；追踪负载中心 |
 | `goblet_dumbbell_squat` 哑铃高脚杯深蹲 | M08 + single_free_load | 胸前负载—躯干距离 |
@@ -565,8 +565,8 @@
 | `standing_dumbbell_shoulder_press` 站姿哑铃推肩 | M20 + dual_free_load + standing_free | 双负载与髋膝稳定 |
 | `seated_smith_shoulder_press` 坐姿史密斯推肩 | M19 + smith_guided_bar | 导轨与靠背 context |
 | `standing_smith_shoulder_press` 站姿史密斯推肩 | M20 + smith_guided_bar | 身体相对导轨及髋膝稳定 |
-| `seated_arnold_press` 坐姿阿诺德推举 | M21 + dual_free_load + seated_backrest | 定义完整；当前缺少轴向旋转 operator，计划能力拒绝 |
-| `standing_arnold_press` 站姿阿诺德推举 | M21 + dual_free_load + standing_free | 同上；可见髋膝/躯干事实不能恢复动作 Rep |
+| `seated_arnold_press` 坐姿阿诺德推举 | M21 + dual_free_load + seated_backrest | 投影肩旋转与过顶位移共同成立；不声称真实三维轴角 |
+| `standing_arnold_press` 站姿阿诺德推举 | M21 + dual_free_load + standing_free | 投影肩旋转、过顶位移及髋膝/躯干稳定分别保留 |
 | `single_arm_landmine_press` 单臂地雷管推举 | M20 + landmine_lever + unilateral | 杆端斜向弧线；躯干旋转/侧倾稳定 |
 | `bilateral_landmine_press` 双手地雷管推举 | M20 + landmine_lever + bilateral_rigid | 双手关联同一杆端 |
 
@@ -605,11 +605,11 @@
 | `smith_upright_row` 史密斯直立划船 | M23 + smith_guided_bar | 导轨路径 |
 | `cable_upright_row` 绳索直立划船 | M23 + cable_handle | 手柄连续性 |
 | `double_dumbbell_upright_row` 双哑铃直立划船 | M23 + dual_free_load | 左右端点独立 |
-| `standing_elbow_tucked_cable_external_rotation` 站姿肘贴身绳索外旋 | M24 + cable_handle + unilateral | 定义完整；当前缺少轴向外旋 operator，计划能力拒绝 |
-| `standing_abducted_cable_external_rotation` 站姿肩外展位绳索外旋 | M24 + cable_handle + unilateral | 同上；肘高位锚点仅为稳定证据 |
-| `side_lying_dumbbell_external_rotation` 侧卧哑铃外旋 | M24 + single_free_load + side_lying | 同上；腕/哑铃弧线仅为佐证 |
-| `seated_supported_dumbbell_external_rotation` 坐姿肘部支撑外旋 | M24 + single_free_load + seated_supported | 同上；肘部支撑为稳定锚点 |
-| `linked_machine_external_rotation` 固定器械肩外旋 | M24 + linked_machine | 同上；摆臂轨迹不能替代身份定义旋转 |
+| `standing_elbow_tucked_cable_external_rotation` 站姿肘贴身绳索外旋 | M24 + cable_handle + unilateral | 投影肩旋转为主关系；肘贴身为稳定证据 |
+| `standing_abducted_cable_external_rotation` 站姿肩外展位绳索外旋 | M24 + cable_handle + unilateral | 投影肩旋转为主关系；肘高位锚点为稳定证据 |
+| `side_lying_dumbbell_external_rotation` 侧卧哑铃外旋 | M24 + single_free_load + side_lying | 投影肩旋转为主关系；腕/哑铃弧线为独立佐证 |
+| `seated_supported_dumbbell_external_rotation` 坐姿肘部支撑外旋 | M24 + single_free_load + seated_supported | 投影肩旋转为主关系；肘部支撑为稳定锚点 |
+| `linked_machine_external_rotation` 固定器械肩外旋 | M24 + linked_machine | 投影肩旋转为主关系；真实摆臂轨迹为独立佐证 |
 
 ### 5.8 肘屈曲与肘伸展
 
@@ -686,12 +686,12 @@
 | `single_load_weighted_march_in_place` 单负载原地踏步 | M30 + single_free_load + standing_free | 负载与躯干稳定，不能代替膝轨迹 |
 | `double_dumbbell_weighted_march_in_place` 双哑铃原地踏步 | M30 + dual_free_load + standing_free | 左右负载分别追踪并相对躯干稳定 |
 | `alternating_knee_raise` 慢速交替提膝 | M30 + standing_free | 膝抬高与踝同步，躯干后仰稳定 |
-| `high_knees` 快速高抬腿 | M30 + standing_free | 更短周期与腾空/冲击合同，不能套慢速阈值 |
+| `high_knees` 快速高抬腿 | M30 + standing_free | 更短的活动侧髋屈曲周期，不能套慢速踏步阈值；单目骨架不声称腾空或冲击 |
 | `side_step_touch` 侧步并步 | M30 + standing_free | 踝横向分离—合拢 |
 | `resistance_band_lateral_walk` 弹力带侧步 | M30 + standing_free | 弹力带只作 context；髋膝与步幅独立规则 |
 | `crossover_side_step` 交叉侧步 | M30 + standing_free | 脚部交叉顺序为主任务 |
 | `step_jack` 低冲击开合 | M30 + standing_free | 不腾空、左右踏出返回 |
-| `jumping_jack` 开合跳 | M30 + standing_free | 双脚腾空与身体中心纵向周期 |
+| `jumping_jack` 开合跳 | M30 + standing_free | 双脚与双腕同步开合；与交替单侧踏出的 step jack 分离，单目骨架不声称腾空或冲击 |
 
 ## 6. 杠铃划船完整示例
 

@@ -16,6 +16,7 @@ const MAXIMUM_TRACK_CENTER_DISTANCE: f32 = 0.18;
 const MAXIMUM_HAND_DISTANCE: f32 = 0.22;
 const MAXIMUM_RIGID_BAR_HAND_DISTANCE: f32 = 0.10;
 const MINIMUM_CONTACT_FRAMES: u8 = 3;
+const MINIMUM_COMMON_MOTION_FRAMES: u8 = 2;
 const MINIMUM_COMMON_MOTION_SCALE_RATIO: f32 = 0.01;
 const MAXIMUM_RELATIVE_MOTION_ERROR_SCALE_RATIO: f32 = 0.05;
 const MAXIMUM_ESTABLISHED_HAND_GAP_FRAMES: u8 = 2;
@@ -577,12 +578,13 @@ fn update_association_stage(
             track.common_motion_frames = track.common_motion_frames.saturating_add(1);
         }
     }
-    track.association_stage =
-        if track.contact_frames >= MINIMUM_CONTACT_FRAMES && track.common_motion_frames > 0 {
-            EquipmentAssociationStage::GripEstablished
-        } else {
-            EquipmentAssociationStage::ContactCandidate
-        };
+    track.association_stage = if track.contact_frames >= MINIMUM_CONTACT_FRAMES
+        && track.common_motion_frames >= MINIMUM_COMMON_MOTION_FRAMES
+    {
+        EquipmentAssociationStage::GripEstablished
+    } else {
+        EquipmentAssociationStage::ContactCandidate
+    };
     track.association_stage
 }
 

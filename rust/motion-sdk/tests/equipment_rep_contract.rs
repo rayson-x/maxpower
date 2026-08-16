@@ -119,6 +119,7 @@ fn front_bench_equipment_profile() -> ExerciseProfile {
         min_primary_amplitude: 30.0,
         min_secondary_amplitude: 30.0,
         return_hysteresis: 15.0,
+        return_tolerance: 8.0,
         ready_tolerance: 8.0,
         max_gap_ms: 500,
         min_rep_duration_ms: 450,

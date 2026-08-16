@@ -101,6 +101,13 @@ fn grip_requires_temporal_proximity_and_common_motion() {
             canonical: &canonical,
             equipment: &[shaft],
         }));
+        if step == 2 {
+            assert_eq!(
+                last.as_ref().unwrap().tracks[0].association_stage,
+                EquipmentAssociationStage::ContactCandidate,
+                "one coincident hand/object delta is not enough to establish grip",
+            );
+        }
     }
     let track = last.unwrap().tracks[0];
     assert_eq!(

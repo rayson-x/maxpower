@@ -4,7 +4,9 @@
 
 **Blocked by:** 04 — 以动作上下文约束并选中算法组合.
 
-**Status:** complete — the Rust-owned action lifecycle and causal trace are implemented; governed evaluator-output acceptance is split to Ticket 10.
+**Status:** complete — re-accepted after Ticket 04's action+view entry selected
+one indivisible runtime binding and the selected modules drove the complete
+Rust-owned lifecycle. Governed numerical acceptance remains split to Ticket 10.
 
 ## Audit context and non-negotiable constraints
 
@@ -58,6 +60,23 @@ copied as an execution claim. Post-seal feature and quality rule receipts are
 appended only after this assessment lifecycle runs. Bounded weak-evidence
 incidents are independent Trace nodes connected to the exact source packet
 plus local-coordinate/fusion facts before they reach the Rep.
+
+Post-seal feature execution consumes actual pre-seal outputs rather than
+static plan vocabulary, and each rule conclusion records both its evaluated
+comparisons and its concrete rule execution. A missing source fact or producer
+invalidates the trace instead of being replaced by the whole Rep time window.
+Equipment observation receipts appear only when the selected visual Provider
+was actually invoked; a provider frame with no measurement is explicit absence
+for fusion, never a wrist-derived observation. Turnaround refinement requires
+an observed later reversal before moving its event boundary; an incompatible
+local endpoint remains a `NeedsReview` conflict rather than a confirmed Rep.
 The governed report generator now rejects missing action×view funnel fields and
 writes only local-private derived artifacts, but Ticket 10 must supply the
 missing evaluator schema before a numeric funnel is claimed.
+
+The cross-platform `compile_action_recognition_binding` seam now accepts only
+an injected action catalog, `action_id` and `capture_view`; it returns the
+plan-owned profile, local coordinate strategy and selected Provider as one
+binding. The Web/native entry delegates to this same seam. All visual-entry
+and trace contracts pass; all 24 historical exact contexts complete
+Rep→quality→set→conclusion without an action-name runtime branch.

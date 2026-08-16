@@ -3,7 +3,7 @@
 > 日期：2026-08-16  
 > 状态：算法/资产基座已实现；2026-08-16 数值验收失败，待独立校准数据恢复召回  
 > 运行目标：Web、Android、iOS 纯本地实时  
-> 最新评测证据：受治理 local-private output digest `40716392ff2421c8e7695ba059bc8c75a9e4300eabb22c193907902499edd903`；逐 capture 内容不提交产品仓库  
+> 最新评测证据：受治理 local-private semantic output digest `8b850852fa6cdba9819349c3fd3dcb64d5401ce96e3eb3f5a96fc260e18b9e6b`；逐 capture 内容不提交产品仓库
 > 产品约束：[Rust motion understanding product contract](../agents/rust-motion-trace-explainer-product-contract.md)
 
 ## 1. 决策

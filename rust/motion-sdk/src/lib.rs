@@ -51,6 +51,14 @@ pub struct ContractVersion {
     pub minor: u16,
 }
 
+/// Latest Rust-authored packet contract. Minor 1.11 adds the typed
+/// action-identity admission reasons 19–24; the binary layout remains
+/// additive, but consumers must explicitly accept those enum values.
+pub const CURRENT_MOTION_PACKET_CONTRACT: ContractVersion = ContractVersion {
+    major: 1,
+    minor: 11,
+};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiagnosticLevel {
     Off,
@@ -245,6 +253,7 @@ impl AdapterCapabilities {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OpenError {
     UnsupportedContractMajor { requested: u16, supported: u16 },
+    UnsupportedContractMinor { requested: u16, supported: u16 },
     MissingMonotonicTimestamps,
     MissingMultiPoseCapability,
     InvalidConcurrencyLimit,
@@ -271,6 +280,7 @@ pub enum MotionError {
     InvalidExerciseProfile(&'static str),
     ActionPlanRequired,
     InvalidActionPlan(&'static str),
+    SetLifecycleFrozen,
     InvalidRepRevision(&'static str),
     RepProfileMismatch,
 }
@@ -499,15 +509,20 @@ pub enum ExerciseSignalKind {
     LandmarkHorizontalDistance,
     LandmarkVerticalDistance,
     PairedLandmarkDistanceSum,
+    /// Scalar produced by the exact action plan's required TaskPrimary
+    /// relation (for example a joint angle, relative distance or projected
+    /// shoulder rotation). The plan evaluates this value from current
+    /// measured pose evidence before candidate segmentation; an
+    /// `ExerciseProfile` cannot reconstruct or replace it from landmarks.
+    ActionPrimaryRelationScalar,
     /// Pose-anchor progress in the learned action-local coordinate frame.
     /// This is deliberately distinct from equipment progress so pose-only
     /// actions cannot be armed by an absent or synthetic equipment channel.
     LocalPoseAlongAxisProgress,
-    /// Candidate-segmentation signal that prefers a current measured
-    /// equipment channel and otherwise uses an independently measured pose
-    /// channel in the same frozen local frame. Final action admission still
-    /// validates the ActionObservationPlan's required source; this signal can
-    /// propose a cycle but can never turn pose into equipment evidence.
+    /// Legacy mixed observation signal. New action plans never select it:
+    /// equipment-primary plans use `LocalAlongAxisProgress` and pose-primary
+    /// plans use `LocalPoseAlongAxisProgress`, so source authority is decided
+    /// before candidate segmentation rather than repaired after sealing.
     LocalObservedAlongAxisProgress,
     LocalAlongAxisProgress,
     /// Mean progress of two independently tracked, anatomically associated
@@ -573,6 +588,10 @@ pub struct ExerciseProfile {
     pub min_primary_amplitude: f32,
     pub min_secondary_amplitude: f32,
     pub return_hysteresis: f32,
+    /// Maximum action-local distance from the preparation anchor at which a
+    /// completed return may be sealed. This is distinct from reversal
+    /// hysteresis and from the ready-pose arming corridor.
+    pub return_tolerance: f32,
     pub ready_tolerance: f32,
     pub max_gap_ms: u64,
     pub min_rep_duration_ms: u64,
@@ -586,6 +605,7 @@ pub(crate) struct RigidBarProfileInitializer {
     pub start_amplitude: f32,
     pub minimum_amplitude: f32,
     pub return_hysteresis: f32,
+    pub return_tolerance: f32,
     pub ready_tolerance: f32,
     pub minimum_phase_dwell_ms: u64,
     pub max_gap_ms: u64,
@@ -661,6 +681,7 @@ impl ExerciseProfile {
             min_primary_amplitude: 0.80,
             min_secondary_amplitude: 0.80,
             return_hysteresis: 0.18,
+            return_tolerance: 0.22,
             ready_tolerance: 0.22,
             max_gap_ms: 700,
             min_rep_duration_ms: 500,
@@ -700,6 +721,7 @@ impl ExerciseProfile {
             min_primary_amplitude: 0.80,
             min_secondary_amplitude: 0.80,
             return_hysteresis: 0.18,
+            return_tolerance: 0.22,
             ready_tolerance: 0.22,
             max_gap_ms: 700,
             min_rep_duration_ms: 500,
@@ -728,6 +750,7 @@ impl ExerciseProfile {
             min_primary_amplitude: 1.20,
             min_secondary_amplitude: 1.20,
             return_hysteresis: 0.22,
+            return_tolerance: 0.25,
             ready_tolerance: 0.25,
             max_gap_ms: 700,
             min_rep_duration_ms: 500,
@@ -756,6 +779,7 @@ impl ExerciseProfile {
             min_primary_amplitude: 0.22,
             min_secondary_amplitude: 0.18,
             return_hysteresis: 0.05,
+            return_tolerance: 0.06,
             ready_tolerance: 0.06,
             max_gap_ms: 700,
             min_rep_duration_ms: 450,
@@ -791,6 +815,7 @@ impl ExerciseProfile {
             min_primary_amplitude: 0.14,
             min_secondary_amplitude: 0.12,
             return_hysteresis: 0.04,
+            return_tolerance: 0.06,
             ready_tolerance: 0.06,
             max_gap_ms: 700,
             min_rep_duration_ms: 450,
@@ -857,6 +882,7 @@ impl ExerciseProfile {
             min_primary_amplitude: 30.0,
             min_secondary_amplitude: 30.0,
             return_hysteresis: 15.0,
+            return_tolerance: 8.0,
             ready_tolerance: 8.0,
             max_gap_ms: 1_000,
             min_rep_duration_ms: 350,
@@ -893,6 +919,7 @@ impl ExerciseProfile {
             min_primary_amplitude: initializer.minimum_amplitude,
             min_secondary_amplitude: initializer.minimum_amplitude,
             return_hysteresis: initializer.return_hysteresis,
+            return_tolerance: initializer.return_tolerance,
             ready_tolerance: initializer.ready_tolerance,
             max_gap_ms: initializer.max_gap_ms,
             min_rep_duration_ms: initializer.min_rep_duration_ms,
@@ -962,6 +989,7 @@ impl ExerciseProfile {
             min_primary_amplitude: minimum_amplitude,
             min_secondary_amplitude: 0.10,
             return_hysteresis,
+            return_tolerance: ready_tolerance,
             ready_tolerance,
             max_gap_ms: 700,
             min_rep_duration_ms,
@@ -1011,6 +1039,7 @@ impl ExerciseProfile {
             self.min_primary_amplitude,
             self.min_secondary_amplitude,
             self.return_hysteresis,
+            self.return_tolerance,
             self.ready_tolerance,
         ] {
             hash = fnv_bytes(hash, gate.to_bits().to_le_bytes());
@@ -1091,6 +1120,7 @@ impl ExerciseProfile {
             self.min_primary_amplitude,
             self.min_secondary_amplitude,
             self.return_hysteresis,
+            self.return_tolerance,
             self.ready_tolerance,
         ];
         if gates
@@ -1111,7 +1141,18 @@ impl ExerciseProfile {
 
     fn uses_alternating_state_graph(&self) -> bool {
         self.state_machine_id == "alternating-ready-effort-return/v1"
-            || action_plan_topology_id(&self.state_machine_id) == Some("alternating_cycle/v1")
+            || matches!(
+                action_plan_topology_id(&self.state_machine_id),
+                Some("alternating_cycle/v1")
+            )
+    }
+
+    fn uses_locomotion_step_state_graph(&self) -> bool {
+        action_plan_topology_id(&self.state_machine_id) == Some("locomotion_step_cycle/v1")
+    }
+
+    fn uses_multi_stage_state_graph(&self) -> bool {
+        action_plan_topology_id(&self.state_machine_id) == Some("multi_stage_cycle/v1")
     }
 
     fn uses_barbell_axis_state_graph(&self) -> bool {
@@ -1159,6 +1200,9 @@ impl ExerciseProfile {
     }
 
     fn stable_phase_dwell_ms(&self) -> Option<u64> {
+        if action_plan_topology_id(&self.state_machine_id) == Some("multi_stage_cycle/v1") {
+            return action_plan_topology_dwell_ms(&self.state_machine_id);
+        }
         match self.state_machine_id.as_str() {
             "stable-cycle-200ms-ready-effort-peak-return/v1" => Some(200),
             _ => None,
@@ -1169,6 +1213,20 @@ impl ExerciseProfile {
         parse_cycle_aligned_dwell_ms(&self.state_machine_id)
             .or_else(|| action_plan_topology_dwell_ms(&self.state_machine_id))
             .unwrap_or(CYCLE_ALIGNED_READY_DWELL_MS)
+    }
+
+    fn terminal_phase_dwell_ms(&self) -> u64 {
+        let base = self.minimum_phase_dwell_ms();
+        if !self.uses_locomotion_step_state_graph() {
+            return base;
+        }
+        // Three-phase steps end after foot recovery; the four-phase walking
+        // lunge must additionally establish the next-step-ready continuation
+        // declared by its asset before the candidate can seal.
+        let continuation_phases = action_plan_topology_phase_count(&self.state_machine_id)
+            .unwrap_or(3)
+            .saturating_sub(3) as u64;
+        base.saturating_mul(1 + continuation_phases)
     }
 
     fn signal_smoothing_ms(&self) -> Option<u64> {
@@ -1206,6 +1264,7 @@ impl ExerciseSignalKind {
             Self::LocalPoseAlongAxisProgress => 12,
             Self::LocalIndependentBilateralAlongAxisProgress => 13,
             Self::LocalObservedAlongAxisProgress => 14,
+            Self::ActionPrimaryRelationScalar => 15,
         }
     }
 }
@@ -1219,6 +1278,7 @@ impl ExerciseSignal {
             ExerciseSignalKind::LandmarkHorizontalDistance => 2..=2,
             ExerciseSignalKind::LandmarkVerticalDistance => 2..=2,
             ExerciseSignalKind::PairedLandmarkDistanceSum => 4..=4,
+            ExerciseSignalKind::ActionPrimaryRelationScalar => 0..=0,
             ExerciseSignalKind::LocalPoseAlongAxisProgress
             | ExerciseSignalKind::LocalObservedAlongAxisProgress
             | ExerciseSignalKind::LocalAlongAxisProgress
@@ -1245,6 +1305,10 @@ fn expected_coordinate_unit(
     match (primary, secondary) {
         (ExerciseSignalKind::LandmarkY, ExerciseSignalKind::LandmarkY) => "image-normalized-y",
         (ExerciseSignalKind::JointAngle, ExerciseSignalKind::JointAngle) => "image-angle-deg",
+        (
+            ExerciseSignalKind::ActionPrimaryRelationScalar,
+            ExerciseSignalKind::ActionPrimaryRelationScalar,
+        ) => "action-primary-scalar",
         (ExerciseSignalKind::LandmarkDistance, ExerciseSignalKind::LandmarkDistance)
         | (
             ExerciseSignalKind::LandmarkHorizontalDistance,
@@ -1327,6 +1391,7 @@ const CYCLE_ALIGNED_READY_DWELL_MS: u64 = 500;
 const CYCLE_ALIGNED_DWELL_PREFIX: &str = "cycle-aligned-ready-effort-peak-return/dwell-";
 const CYCLE_ALIGNED_DWELL_SUFFIX: &str = "ms/v1";
 const ACTION_PLAN_TOPOLOGY_PREFIX: &str = "action-plan-topology/";
+const ACTION_PLAN_TOPOLOGY_PHASE_MARKER: &str = "/phases-";
 const ACTION_PLAN_TOPOLOGY_DWELL_MARKER: &str = "/dwell-";
 
 fn parse_cycle_aligned_dwell_ms(state_machine_id: &str) -> Option<u64> {
@@ -1345,21 +1410,48 @@ fn valid_cycle_aligned_dwell_state_machine(state_machine_id: &str) -> bool {
 /// Builds the state-graph identity selected by an action asset.  The string is
 /// part of the frozen runtime profile hash, so a topology cannot silently
 /// collapse into the generic bilateral executor after plan compilation.
+#[cfg(test)]
 pub(crate) fn action_plan_topology_state_machine_id(topology_id: &str, dwell_ms: u64) -> String {
-    format!("{ACTION_PLAN_TOPOLOGY_PREFIX}{topology_id}/dwell-{dwell_ms}ms/v1")
+    let phase_count = match topology_id {
+        "locomotion_step_cycle/v1" | "multi_stage_cycle/v1" => 3,
+        _ => 2,
+    };
+    action_plan_topology_state_machine_id_with_phases(topology_id, phase_count, dwell_ms)
+}
+
+pub(crate) fn action_plan_topology_state_machine_id_with_phases(
+    topology_id: &str,
+    phase_count: usize,
+    dwell_ms: u64,
+) -> String {
+    format!(
+        "{ACTION_PLAN_TOPOLOGY_PREFIX}{topology_id}{ACTION_PLAN_TOPOLOGY_PHASE_MARKER}{phase_count}{ACTION_PLAN_TOPOLOGY_DWELL_MARKER}{dwell_ms}ms/v1"
+    )
 }
 
 fn action_plan_topology_id(state_machine_id: &str) -> Option<&str> {
     let value = state_machine_id.strip_prefix(ACTION_PLAN_TOPOLOGY_PREFIX)?;
-    let (topology_id, _dwell) = value.rsplit_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
+    let (topology_id, phases_and_dwell) = value.split_once(ACTION_PLAN_TOPOLOGY_PHASE_MARKER)?;
+    let (_phases, _dwell) = phases_and_dwell.split_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
     topology_id.ends_with("/v1").then_some(topology_id)
 }
 
 fn action_plan_topology_dwell_ms(state_machine_id: &str) -> Option<u64> {
     let value = state_machine_id.strip_prefix(ACTION_PLAN_TOPOLOGY_PREFIX)?;
-    let (_topology_id, dwell) = value.rsplit_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
+    let (_topology_id, phases_and_dwell) = value.split_once(ACTION_PLAN_TOPOLOGY_PHASE_MARKER)?;
+    let (_phases, dwell) = phases_and_dwell.split_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
     let value = dwell.strip_suffix("ms/v1")?.parse::<u64>().ok()?;
     (value > 0 && value <= 5_000).then_some(value)
+}
+
+fn action_plan_topology_phase_count(state_machine_id: &str) -> Option<usize> {
+    let value = state_machine_id.strip_prefix(ACTION_PLAN_TOPOLOGY_PREFIX)?;
+    let (_topology_id, phases_and_dwell) = value.split_once(ACTION_PLAN_TOPOLOGY_PHASE_MARKER)?;
+    let (phases, _dwell) = phases_and_dwell.split_once(ACTION_PLAN_TOPOLOGY_DWELL_MARKER)?;
+    phases
+        .parse::<usize>()
+        .ok()
+        .filter(|count| *count >= 2 && *count <= 8)
 }
 
 fn valid_action_plan_topology_state_machine(state_machine_id: &str) -> bool {
@@ -1371,8 +1463,17 @@ fn valid_action_plan_topology_state_machine(state_machine_id: &str) -> bool {
                 | "unilateral_cycle/v1"
                 | "alternating_cycle/v1"
                 | "pose_primary_cycle/v1"
+                | "locomotion_step_cycle/v1"
+                | "multi_stage_cycle/v1"
         )
     ) && action_plan_topology_dwell_ms(state_machine_id).is_some()
+        && action_plan_topology_phase_count(state_machine_id).is_some_and(|phase_count| {
+            match action_plan_topology_id(state_machine_id) {
+                Some("locomotion_step_cycle/v1") => matches!(phase_count, 3 | 4),
+                Some("multi_stage_cycle/v1") => phase_count >= 3,
+                _ => phase_count == 2,
+            }
+        })
 }
 
 fn evidence_reason_source_lineage(reason: RepEvidenceReason) -> &'static str {
@@ -1383,6 +1484,11 @@ fn evidence_reason_source_lineage(reason: RepEvidenceReason) -> &'static str {
         RepEvidenceReason::SignalTemporarilyUnavailable
         | RepEvidenceReason::TransitionEvidenceWeak => "measured_pose_or_local_signal",
         RepEvidenceReason::IdentityRelationMissing
+        | RepEvidenceReason::IdentityRelationPhaseMismatch
+        | RepEvidenceReason::ConstrainedPathDeviationExceeded
+        | RepEvidenceReason::AlternatingSideMismatch
+        | RepEvidenceReason::IdentityRelationMagnitudeMismatch
+        | RepEvidenceReason::IdentityRelationCrossingMissing
         | RepEvidenceReason::ActionPrimaryUnavailable => "action_primary_relation",
         RepEvidenceReason::EquipmentConsensusUnavailable
         | RepEvidenceReason::EquipmentConsensusConflict => "subject_equipment_association",
@@ -1401,6 +1507,7 @@ struct SetGate {
     idle_since_ms: Option<u64>,
     previous_primary: Option<f32>,
     manually_paused: bool,
+    replay_mode: bool,
 }
 
 impl Default for SetGate {
@@ -1412,6 +1519,7 @@ impl Default for SetGate {
             idle_since_ms: None,
             previous_primary: None,
             manually_paused: false,
+            replay_mode: false,
         }
     }
 }
@@ -1427,10 +1535,12 @@ impl SetGate {
             idle_since_ms: None,
             previous_primary: None,
             manually_paused: false,
+            replay_mode: true,
         }
     }
 
     fn begin(&mut self) {
+        self.replay_mode = false;
         self.state.lifecycle = SetLifecycle::Arming;
         self.arming_since_ms = None;
         self.stable_since_ms = None;
@@ -1446,6 +1556,11 @@ impl SetGate {
         self.idle_since_ms = None;
         self.previous_primary = None;
         self.manually_paused = false;
+        self.replay_mode = false;
+    }
+
+    pub(crate) fn allows_pre_observation_legacy_profile_install(&self) -> bool {
+        self.replay_mode && self.state.lifecycle == SetLifecycle::Active
     }
 
     fn pause(&mut self) {
@@ -1477,11 +1592,14 @@ impl SetGate {
         canonical: &[CanonicalLandmark],
         equipment: Option<&EquipmentFrameEvidence>,
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+        action_primary: Option<ActionPrimarySignal>,
         timestamp_ms: u64,
         rep_phase: RepPhase,
     ) -> bool {
         let primary = profile.and_then(|profile| {
-            if profile.uses_local_signals() {
+            if profile.primary_signal.kind == ExerciseSignalKind::ActionPrimaryRelationScalar {
+                action_primary.map(|signal| signal.primary.value)
+            } else if profile.uses_local_signals() {
                 resolved_profile_primary(profile, canonical, local_coordinate)
                     .map(|measurement| measurement.value)
             } else if profile.uses_barbell_axis_state_graph() {
@@ -1738,6 +1856,12 @@ pub enum RepEvidenceReason {
     SignalTemporarilyUnavailable,
     TransitionEvidenceWeak,
     IdentityRelationMissing,
+    IdentityRelationPhaseMismatch,
+    DeclaredPhaseMissing,
+    ConstrainedPathDeviationExceeded,
+    AlternatingSideMismatch,
+    IdentityRelationMagnitudeMismatch,
+    IdentityRelationCrossingMissing,
     LocalTrajectoryChannelConflict,
     ActionPrimaryUnavailable,
     ActionPrimaryDirectionMismatch,
@@ -1859,10 +1983,19 @@ impl MotionSetClosure {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PacketEncodeError {
+    UnsupportedContract(ContractVersion),
+    EvidenceReasonRequiresContractMinor {
+        reason: RepEvidenceReason,
+        required_minor: u16,
+    },
     FieldTooLong(&'static str),
     TooManyLandmarks,
-    NonFiniteLandmark { index: usize },
-    NonFiniteEquipment { track_id: u64 },
+    NonFiniteLandmark {
+        index: usize,
+    },
+    NonFiniteEquipment {
+        track_id: u64,
+    },
     NonFiniteLocalCoordinate,
     QualityPayloadTooLarge,
     PacketTooLarge,
@@ -1880,6 +2013,25 @@ impl std::error::Error for PacketEncodeError {}
 /// Optional numeric fields use presence bits and zero payloads; NaN is never a
 /// missing-value sentinel.
 pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEncodeError> {
+    if packet.lineage.contract.major != CURRENT_MOTION_PACKET_CONTRACT.major
+        || packet.lineage.contract.minor > CURRENT_MOTION_PACKET_CONTRACT.minor
+    {
+        return Err(PacketEncodeError::UnsupportedContract(
+            packet.lineage.contract,
+        ));
+    }
+    if packet.lineage.contract.minor < 11
+        && let Some(reason) = packet
+            .completed_reps
+            .iter()
+            .filter_map(|rep| rep.evidence_reason)
+            .find(|reason| rep_evidence_reason_wire_code(*reason) >= 19)
+    {
+        return Err(PacketEncodeError::EvidenceReasonRequiresContractMinor {
+            reason,
+            required_minor: 11,
+        });
+    }
     let sequence = packet.lineage.sequence_id.as_bytes();
     let algorithm = packet.lineage.algorithm_version.as_bytes();
     let config_version = packet.lineage.config_version.as_bytes();
@@ -2023,7 +2175,7 @@ pub fn encode_motion_packet(packet: &MotionPacket) -> Result<Vec<u8>, PacketEnco
         }
         flags |= rep_disposition_code(rep.disposition) << 2;
         bytes.push(flags);
-        bytes.push(rep.evidence_reason.map_or(0, rep_evidence_reason_code));
+        bytes.push(rep.evidence_reason.map_or(0, rep_evidence_reason_wire_code));
         bytes.push(rep_observation_findings_flags(&rep.observation_findings));
         bytes.extend_from_slice(&identity_len.to_le_bytes());
         bytes.extend_from_slice(identity);
@@ -2331,7 +2483,10 @@ fn rep_disposition_code(disposition: RepDisposition) -> u8 {
     }
 }
 
-fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
+/// Stable cross-language code for every Rust-authored Rep evidence reason.
+/// Hosts must key decoding by `PacketLineage.contract` and preserve unknown
+/// future values instead of treating them as an impossible packet.
+pub fn rep_evidence_reason_wire_code(reason: RepEvidenceReason) -> u8 {
     match reason {
         RepEvidenceReason::ShortContinuityRecovery => 1,
         RepEvidenceReason::LongContinuityLoss => 2,
@@ -2345,6 +2500,12 @@ fn rep_evidence_reason_code(reason: RepEvidenceReason) -> u8 {
         RepEvidenceReason::SignalTemporarilyUnavailable => 16,
         RepEvidenceReason::TransitionEvidenceWeak => 17,
         RepEvidenceReason::IdentityRelationMissing => 18,
+        RepEvidenceReason::IdentityRelationPhaseMismatch => 19,
+        RepEvidenceReason::DeclaredPhaseMissing => 20,
+        RepEvidenceReason::ConstrainedPathDeviationExceeded => 21,
+        RepEvidenceReason::AlternatingSideMismatch => 22,
+        RepEvidenceReason::IdentityRelationMagnitudeMismatch => 23,
+        RepEvidenceReason::IdentityRelationCrossingMissing => 24,
         RepEvidenceReason::LocalTrajectoryChannelConflict => 9,
         RepEvidenceReason::ActionPrimaryUnavailable => 10,
         RepEvidenceReason::ActionPrimaryDirectionMismatch => 11,
@@ -2919,10 +3080,22 @@ struct RepEngine {
     ready_history: VecDeque<RepSample>,
     pending_activation: Option<PendingActivation>,
     pending_return_since_ms: Option<u64>,
+    pending_turnaround_dwell_since_ms: Option<u64>,
+    turnaround_dwell_observed: bool,
     pending_ready: Option<PendingReady>,
     local_evidence_history: VecDeque<(u64, u64, LocalMotionCoordinateEvidence)>,
     equipment_turnaround_history: VecDeque<EquipmentTurnaroundSample>,
     finalized_outcomes: Option<Vec<SealedRep>>,
+}
+
+/// Frame-local scalar authored by the exact action plan. Both channels are
+/// retained because alternating and independent-bilateral topologies need to
+/// distinguish anatomical sides; bilateral/unilateral plans may carry the
+/// same scalar in both fields.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ActionPrimarySignal {
+    primary: SignalMeasurement,
+    secondary: SignalMeasurement,
 }
 
 #[derive(Clone)]
@@ -2932,6 +3105,52 @@ struct ActionRepFrame {
     canonical: Vec<CanonicalLandmark>,
     equipment: EquipmentFrameEvidence,
     local_coordinate: LocalMotionCoordinateEvidence,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RelationEvaluationOutcome {
+    Satisfied,
+    Deviation(RepEvidenceReason),
+    Unavailable(RepEvidenceReason),
+}
+
+impl RelationEvaluationOutcome {
+    fn from_result(result: Result<(), RepEvidenceReason>) -> Self {
+        match result {
+            Ok(()) => Self::Satisfied,
+            Err(
+                reason @ (RepEvidenceReason::RequiredJointLoss
+                | RepEvidenceReason::CoordinateProvisional
+                | RepEvidenceReason::CoordinateNotFrozen
+                | RepEvidenceReason::SignalTemporarilyUnavailable
+                | RepEvidenceReason::IdentityRelationMissing
+                | RepEvidenceReason::LocalTrajectoryChannelConflict
+                | RepEvidenceReason::ActionPrimaryUnavailable
+                | RepEvidenceReason::EquipmentConsensusUnavailable),
+            ) => Self::Unavailable(reason),
+            Err(reason) => Self::Deviation(reason),
+        }
+    }
+
+    fn fact_suffix(self) -> String {
+        match self {
+            Self::Satisfied => "satisfied".into(),
+            Self::Deviation(reason) => {
+                format!("deviation:{}", rep_evidence_reason_fact_name(reason))
+            }
+            Self::Unavailable(reason) => {
+                format!("cannot_judge:{}", rep_evidence_reason_fact_name(reason))
+            }
+        }
+    }
+}
+
+fn rep_evidence_reason_fact_name(reason: RepEvidenceReason) -> String {
+    serde_json::to_value(reason)
+        .expect("RepEvidenceReason serialization is infallible")
+        .as_str()
+        .expect("RepEvidenceReason serializes as a string")
+        .to_owned()
 }
 
 /// Runtime dispatcher for the graph compiled from an exact action×view plan.
@@ -2993,6 +3212,19 @@ impl ActionExecutionPipeline {
         self.categories.contains(&category)
     }
 
+    fn evaluate(
+        &self,
+        category: AlgorithmModuleCategory,
+        facts: &[AlgorithmFactObservation],
+    ) -> AlgorithmInvocationDisposition {
+        self.modules
+            .iter()
+            .find(|module| module.category == category)
+            .map_or(AlgorithmInvocationDisposition::RefusePlan, |module| {
+                module.evaluate_invocation(facts)
+            })
+    }
+
     fn receipt_with_facts(
         &self,
         category: AlgorithmModuleCategory,
@@ -3023,6 +3255,13 @@ impl ActionExecutionPipeline {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ActionRepFrameGate {
+    Execute,
+    Hold,
+    Reject(RepEvidenceReason),
+}
+
 /// Final Rep admission owned by the compiled action plan. `RepEngine` may
 /// propose a temporally coherent candidate, but a plan-bound session emits a
 /// ConfirmedRep only when every identity-defining TaskPrimary relation has a
@@ -3034,6 +3273,7 @@ pub(crate) struct ActionRepAuthority {
     pipeline: ActionExecutionPipeline,
     history: VecDeque<ActionRepFrame>,
     stage_receipts: Vec<AlgorithmExecutionReceipt>,
+    last_admitted_active_side: Option<BodySide>,
 }
 
 const ACTION_ENDPOINT_EVIDENCE_WINDOW_MS: u64 = 250;
@@ -3056,12 +3296,50 @@ impl ActionRepAuthority {
             pipeline,
             history: VecDeque::new(),
             stage_receipts: Vec::new(),
+            last_admitted_active_side: None,
         })
     }
 
     pub(crate) fn begin_set(&mut self) {
         self.history.clear();
         self.stage_receipts.clear();
+        self.last_admitted_active_side = None;
+    }
+
+    /// Evaluates the required pose TaskPrimary relation before RepEngine
+    /// segmentation. Point-displacement primaries continue to use the
+    /// plan-selected local coordinate channel; scalar kinematic operators use
+    /// their own values and can no longer be replaced by anchor motion.
+    fn task_primary_signal(
+        &self,
+        schema: PoseSchemaId,
+        canonical: &[CanonicalLandmark],
+    ) -> Option<ActionPrimarySignal> {
+        let relation = self.plan.relations.iter().find(|relation| {
+            relation.role == MotionRole::TaskPrimary
+                && relation.judgeability == FeatureJudgeability::RequiredForRep
+                && relation.source_requirement == OperatorSourceRequirement::CurrentMeasuredPose
+        })?;
+        if !relation_operator_produces_action_primary_scalar(relation) {
+            return None;
+        }
+        let primary = measured_relation_signal(schema, relation, canonical)?;
+        let mirrored = mirrored_relation(relation);
+        let secondary = if mirrored.inputs == relation.inputs {
+            primary
+        } else {
+            measured_relation_signal(schema, &mirrored, canonical).unwrap_or(primary)
+        };
+        Some(ActionPrimarySignal { primary, secondary })
+    }
+
+    fn uses_scalar_pose_task_primary(&self) -> bool {
+        self.plan.relations.iter().any(|relation| {
+            relation.role == MotionRole::TaskPrimary
+                && relation.judgeability == FeatureJudgeability::RequiredForRep
+                && relation.source_requirement == OperatorSourceRequirement::CurrentMeasuredPose
+                && relation_operator_produces_action_primary_scalar(relation)
+        })
     }
 
     pub(crate) fn observe(
@@ -3072,30 +3350,47 @@ impl ActionRepAuthority {
         equipment: &EquipmentFrameEvidence,
         local_coordinate: &LocalMotionCoordinateEvidence,
         retention_ms: u64,
-        equipment_pipeline_executed: bool,
+        equipment_observation_executed: bool,
+        equipment_fusion_executed: bool,
     ) {
-        self.record_stage_with_facts(
-            AlgorithmModuleCategory::LocalCoordinate,
-            frame_id,
-            frame_id,
-            timestamp_ms,
-            timestamp_ms,
-            vec![format!("canonical_pose:{frame_id}")],
-            vec![format!(
-                "coordinate:{}:{frame_id}",
-                local_coordinate.coordinate_frame_id
-            )],
-        );
-        if equipment_pipeline_executed {
+        // Observation, fusion and local coordinates are three separate
+        // calculations.  Keep their receipts in that causal order: a plan
+        // can use a wrist to test a measured equipment observation, but a
+        // wrist must never stand in for the observation itself.
+        let pose_relation_executed = canonical.iter().any(|landmark| {
+            matches!(
+                landmark.source,
+                LandmarkSource::Measured | LandmarkSource::Fused
+            ) && landmark.x.is_some()
+                && landmark.y.is_some()
+        });
+        if pose_relation_executed {
+            self.record_stage_with_facts(
+                AlgorithmModuleCategory::PoseRelation,
+                frame_id,
+                frame_id,
+                timestamp_ms,
+                timestamp_ms,
+                vec![format!("canonical_pose:{frame_id}")],
+                vec![format!("pose_relation:{frame_id}")],
+            );
+        }
+        let equipment_observation_executed = equipment_observation_executed
+            && matches!(equipment.status, EquipmentFrameStatus::Observed);
+        if equipment_observation_executed {
             self.record_stage_with_facts(
                 AlgorithmModuleCategory::EquipmentObservation,
                 frame_id,
                 frame_id,
                 timestamp_ms,
                 timestamp_ms,
-                vec![format!("visual_equipment_frame:{frame_id}")],
+                vec![format!("equipment_provider_frame:{frame_id}")],
                 vec![format!("equipment_observation:{frame_id}")],
             );
+        }
+        let equipment_fusion_executed =
+            equipment_fusion_executed && equipment_observation_executed && pose_relation_executed;
+        if equipment_fusion_executed {
             self.record_stage_with_facts(
                 AlgorithmModuleCategory::EquipmentFusion,
                 frame_id,
@@ -3103,10 +3398,35 @@ impl ActionRepAuthority {
                 timestamp_ms,
                 timestamp_ms,
                 vec![
-                    format!("canonical_pose:{frame_id}"),
+                    format!("pose_relation:{frame_id}"),
                     format!("equipment_observation:{frame_id}"),
                 ],
                 vec![format!("fusion:{frame_id}")],
+            );
+        }
+        let local_coordinate_executed = pose_relation_executed
+            && local_coordinate.state == LocalCoordinateState::Frozen
+            && if self.equipment_is_required_for_rep() {
+                equipment_fusion_executed && local_coordinate.equipment.is_some()
+            } else {
+                local_coordinate.pose.is_some()
+            };
+        if local_coordinate_executed {
+            let mut inputs = vec![format!("pose_relation:{frame_id}")];
+            if self.equipment_is_required_for_rep() {
+                inputs.push(format!("fusion:{frame_id}"));
+            }
+            self.record_stage_with_facts(
+                AlgorithmModuleCategory::LocalCoordinate,
+                frame_id,
+                frame_id,
+                timestamp_ms,
+                timestamp_ms,
+                inputs,
+                vec![format!(
+                    "coordinate:{}:{frame_id}",
+                    local_coordinate.coordinate_frame_id
+                )],
             );
         }
         self.history.push_back(ActionRepFrame {
@@ -3134,8 +3454,16 @@ impl ActionRepAuthority {
     }
 
     pub(crate) fn admit(&mut self, mut rep: SealedRep, profile: &ExerciseProfile) -> SealedRep {
+        let (refinement_inputs, refinement_output, refinement_reason) =
+            self.refine_candidate_turnaround(&mut rep);
+        if let Some(reason) = refinement_reason {
+            // A plan-primary endpoint conflict is not a benign adjustment:
+            // retain it as a non-volume outcome instead of hiding it behind
+            // the original topology peak.
+            rep.disposition = RepDisposition::NeedsReview;
+            rep.evidence_reason = Some(reason);
+        }
         let initial_disposition = rep.disposition;
-        let (refinement_inputs, refinement_output) = self.refine_candidate_turnaround(&mut rep);
         self.record_stage_with_facts(
             AlgorithmModuleCategory::BoundaryRefinement,
             rep.start_frame_id,
@@ -3145,32 +3473,66 @@ impl ActionRepAuthority {
             refinement_inputs,
             vec![refinement_output.clone()],
         );
-        let result = if initial_disposition == RepDisposition::Confirmed {
-            self.validate_rep_consensus(&rep).and_then(|_| {
-                // Rep admission is intentionally limited to action identity.
-                // Coordinated-motion, stability and substitution relations
-                // remain dimension-scoped evidence for assessment; missing or
-                // deviating auxiliary evidence must not erase a completed
-                // identity-defining primary cycle.
-                self.plan
-                    .relations
-                    .iter()
-                    .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .try_for_each(|relation| {
-                        let validation = self.validate_primary_relation(&rep, profile, relation);
-                        self.record_primary_relation_execution(&rep, relation, validation.is_ok());
-                        validation
-                    })
-            })
+        let active_side = if initial_disposition == RepDisposition::Confirmed {
+            self.required_active_lead_side(&rep, profile)
+        } else {
+            Ok(None)
+        };
+        let consensus = if initial_disposition == RepDisposition::Confirmed {
+            self.validate_rep_consensus(&rep)
         } else {
             Ok(())
         };
+        if initial_disposition == RepDisposition::Confirmed && self.equipment_is_required_for_rep()
+        {
+            self.record_equipment_consensus_execution(&rep, consensus);
+        }
+        let result = if initial_disposition == RepDisposition::Confirmed {
+            consensus
+                .and_then(|_| active_side)
+                .and_then(|active_side| {
+                    if active_side.is_some() && active_side == self.last_admitted_active_side {
+                        return Err(RepEvidenceReason::AlternatingSideMismatch);
+                    }
+                    Ok(active_side)
+                })
+                .and_then(|active_side| {
+                    // Rep admission is intentionally limited to action identity.
+                    // Coordinated-motion, stability and substitution relations
+                    // remain dimension-scoped evidence for assessment; missing or
+                    // deviating auxiliary evidence must not erase a completed
+                    // identity-defining primary cycle.
+                    self.plan
+                        .relations
+                        .iter()
+                        .filter(|relation| {
+                            relation.judgeability == FeatureJudgeability::RequiredForRep
+                        })
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .iter()
+                        .try_for_each(|relation| {
+                            let validation =
+                                self.validate_primary_relation(&rep, profile, relation);
+                            self.record_primary_relation_execution(
+                                &rep,
+                                profile,
+                                relation,
+                                RelationEvaluationOutcome::from_result(validation),
+                            );
+                            validation
+                        })?;
+                    Ok(active_side)
+                })
+        } else {
+            Ok(None)
+        };
         if initial_disposition == RepDisposition::Confirmed {
             match result {
-                Ok(()) => {
+                Ok(active_side) => {
+                    if active_side.is_some() {
+                        self.last_admitted_active_side = active_side;
+                    }
                     rep.observation_findings
                         .push(RepObservationFinding::ActionPrimaryRelationSatisfied);
                 }
@@ -3186,7 +3548,7 @@ impl ActionRepAuthority {
             rep.end_frame_id,
             rep.start_timestamp_ms,
             rep.end_timestamp_ms,
-            vec![format!("rep_candidate:{}", rep.rep_id), refinement_output],
+            self.candidate_admission_inputs(&rep, &refinement_output),
             vec![format!(
                 "rep_admission:{}:{}",
                 rep.rep_id,
@@ -3207,7 +3569,7 @@ impl ActionRepAuthority {
     }
 
     fn validate_rep_consensus(&self, rep: &SealedRep) -> Result<(), RepEvidenceReason> {
-        if !self.pipeline.runs(AlgorithmModuleCategory::EquipmentFusion) {
+        if !self.equipment_is_required_for_rep() {
             return Ok(());
         }
         let equipment_kind = self
@@ -3313,17 +3675,132 @@ impl ActionRepAuthority {
         self.plan.equipment_provider.is_some()
     }
 
+    pub(crate) fn equipment_is_required_for_rep(&self) -> bool {
+        self.plan
+            .equipment_provider
+            .as_ref()
+            .is_some_and(|provider| provider.required_for_rep)
+    }
+
+    /// Applies the compiled module contracts before the RepEngine sees this
+    /// frame. This is the executable seam for the registry's age/missing/
+    /// conflict policies; descriptors are not copied into Trace as a proxy
+    /// for runtime behaviour.
+    fn rep_topology_gate(
+        &self,
+        schema: PoseSchemaId,
+        equipment: &EquipmentFrameEvidence,
+        local: &LocalMotionCoordinateEvidence,
+    ) -> ActionRepFrameGate {
+        let equipment_primary = self.equipment_is_required_for_rep();
+        let scalar_pose_primary_observed = self.uses_scalar_pose_task_primary()
+            && self
+                .history
+                .back()
+                .is_some_and(|frame| self.task_primary_signal(schema, &frame.canonical).is_some());
+        let local_state = if local.channel_agreement == LocalChannelAgreement::Conflict
+            && !scalar_pose_primary_observed
+        {
+            AlgorithmFactState::Conflict
+        } else if scalar_pose_primary_observed
+            || (local.state == LocalCoordinateState::Frozen
+                && if equipment_primary {
+                    match self.plan.rep_consensus.mode {
+                        RepConsensusMode::IndependentBilateral => {
+                            local.anatomical_left_equipment.is_some()
+                                && local.anatomical_right_equipment.is_some()
+                        }
+                        _ => local.equipment.is_some(),
+                    }
+                } else {
+                    local.pose.is_some()
+                })
+        {
+            AlgorithmFactState::Observed
+        } else {
+            AlgorithmFactState::Missing
+        };
+        let mut facts = vec![AlgorithmFactObservation {
+            fact_id: "local_coordinate".into(),
+            value_type: MotionValueType::Scalar,
+            state: local_state,
+            age_ms: 0,
+        }];
+        if equipment_primary {
+            let association_state = if equipment
+                .tracks
+                .iter()
+                .any(|track| track.association_stage == EquipmentAssociationStage::Conflict)
+            {
+                AlgorithmFactState::Conflict
+            } else if equipment.tracks.iter().any(|track| {
+                track.judgeable_path
+                    && track.source != EquipmentSource::Predicted
+                    && track.association_stage == EquipmentAssociationStage::GripEstablished
+            }) {
+                AlgorithmFactState::Observed
+            } else {
+                AlgorithmFactState::Missing
+            };
+            facts.push(AlgorithmFactObservation {
+                fact_id: "subject_equipment_association".into(),
+                value_type: MotionValueType::Category,
+                state: association_state,
+                age_ms: 0,
+            });
+        }
+        match self
+            .pipeline
+            .evaluate(AlgorithmModuleCategory::RepTopology, &facts)
+        {
+            AlgorithmInvocationDisposition::Execute => ActionRepFrameGate::Execute,
+            AlgorithmInvocationDisposition::RejectCandidate => {
+                ActionRepFrameGate::Reject(if local_state == AlgorithmFactState::Conflict {
+                    RepEvidenceReason::LocalTrajectoryChannelConflict
+                } else {
+                    RepEvidenceReason::EquipmentConsensusConflict
+                })
+            }
+            AlgorithmInvocationDisposition::RefusePlan => {
+                ActionRepFrameGate::Reject(RepEvidenceReason::IdentityRelationMissing)
+            }
+            AlgorithmInvocationDisposition::CannotJudge
+            | AlgorithmInvocationDisposition::NeedsReview
+            | AlgorithmInvocationDisposition::PreserveConflict => ActionRepFrameGate::Hold,
+        }
+    }
+
     /// Marks the topology executor only when the RepEngine is actually asked
     /// to advance a candidate. Priming/idle frames deliberately do not claim
     /// this receipt.
     pub(crate) fn record_rep_topology(&mut self, frame_id: u64, timestamp_ms: u64) {
+        let preferred_category = if self.uses_scalar_pose_task_primary() {
+            AlgorithmModuleCategory::PoseRelation
+        } else {
+            AlgorithmModuleCategory::LocalCoordinate
+        };
+        let mut inputs = self
+            .stage_receipts
+            .iter()
+            .rev()
+            .find(|receipt| {
+                receipt.category == preferred_category && receipt.end_frame_id == frame_id
+            })
+            .map(|receipt| receipt.output_fact_ids.clone())
+            .unwrap_or_default();
+        // Every canonical packet publishes an explicit fusion-state fact.
+        // For pose-only plans this means "no equipment required", not a
+        // fabricated equipment observation.  Keeping that typed state as an
+        // input makes the fixed public derivation route complete without
+        // letting pose stand in for equipment geometry.
+        inputs.push(format!("fusion:{frame_id}"));
         self.record_stage_with_facts(
             AlgorithmModuleCategory::RepTopology,
             frame_id,
             frame_id,
             timestamp_ms,
             timestamp_ms,
-            vec![format!("rep_topology_input:{frame_id}")],
+            inputs,
             vec![format!("rep_topology_step:{frame_id}")],
         );
     }
@@ -3369,9 +3846,18 @@ impl ActionRepAuthority {
         // category before another category it only permits; it cannot rewrite
         // the causal order in which this Rep actually ran.
         let mut aggregated = Vec::<AlgorithmExecutionReceipt>::new();
-        for receipt in self.stage_receipts.iter().filter(|receipt| {
-            receipt.end_frame_id >= rep.start_frame_id && receipt.start_frame_id <= rep.end_frame_id
-        }) {
+        for receipt in self
+            .stage_receipts
+            .iter()
+            .filter(|receipt| Self::receipt_is_contained_in_rep(receipt, rep))
+        {
+            // A boundary frame may be shared by two adjacent candidates. An
+            // overlapping post-candidate receipt belongs to the candidate
+            // whose complete immutable window it spans; importing it into the
+            // neighbour would falsely claim that the neighbour executed that
+            // stage. Frame-local receipts naturally satisfy this containment
+            // rule for either candidate when the shared frame was genuinely
+            // observed by both.
             if let Some(existing) = aggregated
                 .iter_mut()
                 .find(|existing| existing.module_id == receipt.module_id)
@@ -3400,18 +3886,21 @@ impl ActionRepAuthority {
         aggregated
     }
 
+    fn receipt_is_contained_in_rep(receipt: &AlgorithmExecutionReceipt, rep: &SealedRep) -> bool {
+        receipt.start_frame_id >= rep.start_frame_id
+            && receipt.end_frame_id <= rep.end_frame_id
+            && receipt.start_timestamp_ms >= rep.start_timestamp_ms
+            && receipt.end_timestamp_ms <= rep.end_timestamp_ms
+    }
+
     fn record_primary_relation_execution(
         &mut self,
         rep: &SealedRep,
+        profile: &ExerciseProfile,
         relation: &CompiledMotionRelation,
-        observed: bool,
+        outcome: RelationEvaluationOutcome,
     ) {
-        let mut inputs = relation
-            .inputs
-            .iter()
-            .map(|input| format!("motion_input:{}", input.source))
-            .collect::<Vec<_>>();
-        inputs.extend(self.boundary_refinement_inputs(rep));
+        let mut inputs = self.primary_relation_fact_inputs(rep, profile, relation);
         inputs.sort();
         inputs.dedup();
         self.record_stage_with_facts(
@@ -3424,7 +3913,7 @@ impl ActionRepAuthority {
             vec![format!(
                 "motion_relation:{}:{}",
                 relation.relation_id,
-                if observed { "observed" } else { "cannot_judge" }
+                outcome.fact_suffix(),
             )],
         );
     }
@@ -3434,7 +3923,10 @@ impl ActionRepAuthority {
     /// RepEngine's causal seal; only the extremum can move, and only to an
     /// actual observed frame. This prevents an invented post-hoc boundary
     /// while allowing action-local evidence to correct a coarse topology peak.
-    fn refine_candidate_turnaround(&self, rep: &mut SealedRep) -> (Vec<String>, String) {
+    fn refine_candidate_turnaround(
+        &self,
+        rep: &mut SealedRep,
+    ) -> (Vec<String>, String, Option<RepEvidenceReason>) {
         let requirement = self
             .plan
             .relations
@@ -3445,6 +3937,7 @@ impl ActionRepAuthority {
             return (
                 Vec::new(),
                 format!("boundary_refinement:{}:no_required_relation", rep.rep_id),
+                None,
             );
         };
         let Some(start) = self
@@ -3461,6 +3954,7 @@ impl ActionRepAuthority {
                     "boundary_refinement:{}:start_signal_unavailable",
                     rep.rep_id
                 ),
+                None,
             );
         };
         let candidate =
@@ -3486,6 +3980,7 @@ impl ActionRepAuthority {
                     "boundary_refinement:{}:turnaround_signal_unavailable",
                     rep.rep_id
                 ),
+                None,
             );
         };
         let expected_peak = rep.normalized_endpoints.as_ref().and_then(|endpoints| {
@@ -3496,7 +3991,9 @@ impl ActionRepAuthority {
                 .expect("candidate was selected from a measured local channel");
         if expected_peak.is_some_and(|expected| {
             (expected.along_axis_progress - selected_peak.along_axis_progress).abs()
-                > (expected.uncertainty + selected_peak.uncertainty).max(0.05)
+                > expected.uncertainty
+                    + selected_peak.uncertainty
+                    + self.plan.rep_topology.return_tolerance()
         }) {
             return (
                 self.boundary_refinement_inputs(rep),
@@ -3504,29 +4001,212 @@ impl ActionRepAuthority {
                     "boundary_refinement:{}:endpoint_evidence_conflict",
                     rep.rep_id
                 ),
+                Some(RepEvidenceReason::LocalTrajectoryChannelConflict),
             );
         }
+        let departure = selected_peak.along_axis_progress - start.along_axis_progress;
+        let required_reversal = self.plan.rep_topology.turnaround_hysteresis();
+        let confirmation = self
+            .history
+            .iter()
+            .filter(|frame| {
+                frame.frame_id > selected.frame_id && frame.frame_id <= rep.end_frame_id
+            })
+            .filter_map(|frame| {
+                measured_local_channel_for_requirement(&frame.local_coordinate, requirement)
+                    .map(|channel| (frame, channel))
+            })
+            .find(|(_, channel)| {
+                let return_displacement =
+                    channel.along_axis_progress - selected_peak.along_axis_progress;
+                departure * return_displacement < 0.0
+                    && return_displacement.abs() >= required_reversal
+            })
+            .map(|(frame, _)| frame);
+        let Some(confirmation) = confirmation else {
+            return (
+                self.boundary_refinement_inputs(rep),
+                format!("boundary_refinement:{}:turnaround_unconfirmed", rep.rep_id),
+                None,
+            );
+        };
         let prior_frame_id = rep.peak_frame_id;
         let prior_timestamp_ms = rep.peak_timestamp_ms;
         rep.peak_frame_id = selected.frame_id;
         rep.peak_timestamp_ms = selected.timestamp_ms;
-        rep.turnaround_confirmed_timestamp_ms = rep
-            .turnaround_confirmed_timestamp_ms
-            .max(selected.timestamp_ms);
+        rep.turnaround_confirmed_timestamp_ms = confirmation.timestamp_ms;
         if let Some(endpoints) = rep.normalized_endpoints.as_mut() {
             endpoints.primary_turnaround = selected.local_coordinate.clone();
         }
         (
             self.boundary_refinement_inputs(rep),
             format!(
-                "boundary_refinement:{}:turnaround:{}@{}->{}@{}",
+                "boundary_refinement:{}:turnaround:{}@{}->{}@{}:confirmed:{}@{}",
                 rep.rep_id,
                 prior_frame_id,
                 prior_timestamp_ms,
                 selected.frame_id,
-                selected.timestamp_ms
+                selected.timestamp_ms,
+                confirmation.frame_id,
+                confirmation.timestamp_ms,
             ),
+            None,
         )
+    }
+
+    fn primary_relation_fact_inputs(
+        &self,
+        rep: &SealedRep,
+        profile: &ExerciseProfile,
+        relation: &CompiledMotionRelation,
+    ) -> Vec<String> {
+        let mut inputs = match relation.operator_id.as_str() {
+            "joint_angle"
+            | "segment_angle"
+            | "relative_distance"
+            | "relative_vertical_offset"
+            | "relative_horizontal_offset"
+            | "projected_shoulder_rotation" => {
+                let effective_relation = if relation.side_policy
+                    == crate::action_motion::RelationSidePolicy::ActiveLeadSide
+                    && self.required_active_lead_side(rep, profile).ok().flatten()
+                        == Some(BodySide::Right)
+                {
+                    mirrored_relation(relation)
+                } else {
+                    relation.clone()
+                };
+                if relation.role == MotionRole::TaskPrimary {
+                    [rep.start_frame_id, rep.peak_frame_id, rep.end_frame_id]
+                        .into_iter()
+                        .map(|frame_id| format!("canonical_pose:{frame_id}"))
+                        .collect()
+                } else {
+                    self.history
+                        .iter()
+                        .filter(|frame| {
+                            frame.frame_id >= rep.start_frame_id
+                                && frame.frame_id <= rep.end_frame_id
+                                && relation_scalar(
+                                    profile.schema,
+                                    &effective_relation,
+                                    &frame.canonical,
+                                )
+                                .is_some()
+                        })
+                        .map(|frame| format!("canonical_pose:{}", frame.frame_id))
+                        .collect()
+                }
+            }
+            "constrained_path_deviation" => self
+                .history
+                .iter()
+                .filter(|frame| {
+                    frame.frame_id >= rep.start_frame_id
+                        && frame.frame_id <= rep.end_frame_id
+                        && frame.local_coordinate.equipment.is_some_and(|channel| {
+                            channel.provenance == LocalChannelProvenance::EquipmentMeasured
+                                && channel.confidence >= 0.5
+                                && channel.coverage > 0.0
+                                && channel.cross_axis_displacement.is_finite()
+                        })
+                })
+                .map(|frame| {
+                    format!(
+                        "coordinate:{}:{}",
+                        frame.local_coordinate.coordinate_frame_id, frame.frame_id
+                    )
+                })
+                .collect(),
+            "equipment_axis_displacement" | "point_displacement" => {
+                self.boundary_refinement_inputs(rep)
+            }
+            _ => Vec::new(),
+        };
+        inputs.sort();
+        inputs.dedup();
+        inputs
+    }
+
+    fn candidate_admission_inputs(&self, rep: &SealedRep, refinement_output: &str) -> Vec<String> {
+        // `RepEngine` candidates do not have an independent source node.
+        // The admission decision is therefore rooted in the recorded
+        // topology steps which actually proposed it, plus the concrete
+        // refinement, relation and fusion facts it consumes.
+        let mut inputs = vec![refinement_output.into()];
+        inputs.extend(
+            self.stage_receipts
+                .iter()
+                .filter(|receipt| {
+                    receipt.category == AlgorithmModuleCategory::RepTopology
+                        && Self::receipt_is_contained_in_rep(receipt, rep)
+                })
+                .flat_map(|receipt| receipt.output_fact_ids.iter().cloned()),
+        );
+        inputs.extend(
+            self.stage_receipts
+                .iter()
+                .filter(|receipt| {
+                    receipt.category == AlgorithmModuleCategory::PoseRelation
+                        && Self::receipt_is_contained_in_rep(receipt, rep)
+                })
+                .flat_map(|receipt| receipt.output_fact_ids.iter())
+                .filter(|fact_id| fact_id.starts_with("motion_relation:"))
+                .cloned(),
+        );
+        if self.equipment_is_required_for_rep() {
+            inputs.extend(
+                self.stage_receipts
+                    .iter()
+                    .filter(|receipt| {
+                        receipt.category == AlgorithmModuleCategory::EquipmentFusion
+                            && Self::receipt_is_contained_in_rep(receipt, rep)
+                    })
+                    .flat_map(|receipt| receipt.output_fact_ids.iter())
+                    .filter(|fact_id| fact_id.starts_with("equipment_consensus:"))
+                    .cloned(),
+            );
+        }
+        inputs.sort();
+        inputs.dedup();
+        inputs
+    }
+
+    fn record_equipment_consensus_execution(
+        &mut self,
+        rep: &SealedRep,
+        result: Result<(), RepEvidenceReason>,
+    ) {
+        let mut inputs = self
+            .stage_receipts
+            .iter()
+            .filter(|receipt| {
+                receipt.category == AlgorithmModuleCategory::EquipmentFusion
+                    && Self::receipt_is_contained_in_rep(receipt, rep)
+            })
+            .flat_map(|receipt| receipt.output_fact_ids.iter())
+            .filter(|fact_id| fact_id.starts_with("fusion:"))
+            .cloned()
+            .collect::<Vec<_>>();
+        inputs.sort();
+        inputs.dedup();
+        self.record_stage_with_facts(
+            AlgorithmModuleCategory::EquipmentFusion,
+            rep.start_frame_id,
+            rep.end_frame_id,
+            rep.start_timestamp_ms,
+            rep.end_timestamp_ms,
+            inputs,
+            vec![format!(
+                "equipment_consensus:{}:{}",
+                rep.rep_id,
+                match result {
+                    Ok(()) => "satisfied",
+                    Err(RepEvidenceReason::EquipmentConsensusConflict) => "conflict",
+                    Err(_) => "unavailable",
+                }
+            )],
+        );
     }
 
     fn boundary_refinement_inputs(&self, rep: &SealedRep) -> Vec<String> {
@@ -3567,31 +4247,41 @@ impl ActionRepAuthority {
                 self.validate_local_cycle(rep, relation.source_requirement)
             }
             "constrained_path_deviation" => self.validate_constrained_path(rep),
-            "joint_angle" | "segment_angle" | "relative_distance" => {
-                self.validate_scalar_cycle(rep, profile, relation)
-            }
+            "joint_angle"
+            | "segment_angle"
+            | "relative_distance"
+            | "relative_vertical_offset"
+            | "relative_horizontal_offset"
+            | "projected_shoulder_rotation" => self.validate_scalar_cycle(rep, profile, relation),
             _ => Err(RepEvidenceReason::IdentityRelationMissing),
         }
     }
 
     fn validate_constrained_path(&self, rep: &SealedRep) -> Result<(), RepEvidenceReason> {
-        let endpoints = rep
-            .normalized_endpoints
-            .as_ref()
-            .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
-        for endpoint in [
-            &endpoints.start_anchor,
-            &endpoints.primary_turnaround,
-            &endpoints.end_return,
-        ] {
-            let channel = endpoint
-                .equipment
-                .filter(|channel| {
+        let channels = self
+            .history
+            .iter()
+            .filter(|frame| {
+                frame.timestamp_ms >= rep.start_timestamp_ms
+                    && frame.timestamp_ms <= rep.end_timestamp_ms
+            })
+            .filter_map(|frame| {
+                frame.local_coordinate.equipment.filter(|channel| {
                     channel.provenance == LocalChannelProvenance::EquipmentMeasured
+                        && channel.confidence >= 0.5
+                        && channel.coverage > 0.0
                         && channel.cross_axis_displacement.is_finite()
                 })
-                .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
-            let _observed_deviation = channel.cross_axis_displacement;
+            })
+            .map(|channel| channel.cross_axis_displacement)
+            .collect::<Vec<_>>();
+        if channels.len() < 3 {
+            return Err(RepEvidenceReason::IdentityRelationMissing);
+        }
+        let minimum = channels.iter().copied().reduce(f32::min).unwrap();
+        let maximum = channels.iter().copied().reduce(f32::max).unwrap();
+        if maximum - minimum > self.plan.rep_topology.maximum_constrained_path_deviation() {
+            return Err(RepEvidenceReason::ConstrainedPathDeviationExceeded);
         }
         Ok(())
     }
@@ -3755,6 +4445,35 @@ impl ActionRepAuthority {
         profile: &ExerciseProfile,
         relation: &CompiledMotionRelation,
     ) -> Result<(), RepEvidenceReason> {
+        let effective_relation = if relation.side_policy
+            == crate::action_motion::RelationSidePolicy::ActiveLeadSide
+            && self.required_active_lead_side(rep, profile)? == Some(BodySide::Right)
+        {
+            mirrored_relation(relation)
+        } else {
+            relation.clone()
+        };
+        let relation = &effective_relation;
+        if relation.temporal_pattern
+            == crate::action_motion::RelationTemporalPattern::SustainedMagnitude
+        {
+            let threshold = f32::from(relation.minimum_magnitude_milli) / 1_000.0;
+            let observed = self
+                .history
+                .iter()
+                .filter(|frame| {
+                    frame.frame_id >= rep.start_frame_id && frame.frame_id <= rep.end_frame_id
+                })
+                .filter_map(|frame| relation_scalar(profile.schema, relation, &frame.canonical))
+                .collect::<Vec<_>>();
+            if observed.len() < 3 {
+                return Err(RepEvidenceReason::IdentityRelationMissing);
+            }
+            if observed.iter().any(|value| value.abs() < threshold) {
+                return Err(RepEvidenceReason::IdentityRelationMagnitudeMismatch);
+            }
+            return Ok(());
+        }
         let value = |frame_id| {
             self.history
                 .iter()
@@ -3762,17 +4481,150 @@ impl ActionRepAuthority {
                 .and_then(|frame| relation_scalar(profile.schema, relation, &frame.canonical))
         };
         let start = value(rep.start_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?;
-        let turn = value(rep.peak_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?;
         let end = value(rep.end_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?;
-        let effort = turn - start;
-        let returning = end - turn;
+        let delta = |from: f32, to: f32| {
+            let raw = to - from;
+            if relation.unit == "radians" {
+                raw.sin().atan2(raw.cos())
+            } else {
+                raw
+            }
+        };
+        // A compound identity relation has its own measured extremum, but the
+        // action topology still owns when that extremum is allowed to occur.
+        // This prevents two unrelated cycles inside one broad Rep window from
+        // being presented as one compound action.
+        let (turn_timestamp_ms, turn) = if relation.role == MotionRole::TaskPrimary {
+            (
+                rep.peak_timestamp_ms,
+                value(rep.peak_frame_id).ok_or(RepEvidenceReason::IdentityRelationMissing)?,
+            )
+        } else {
+            self.history
+                .iter()
+                .filter(|frame| {
+                    frame.frame_id >= rep.start_frame_id && frame.frame_id <= rep.end_frame_id
+                })
+                .filter_map(|frame| {
+                    relation_scalar(profile.schema, relation, &frame.canonical)
+                        .map(|value| (delta(start, value).abs(), frame.timestamp_ms, value))
+                })
+                .max_by(|left, right| left.0.total_cmp(&right.0))
+                .map(|(_, timestamp_ms, value)| (timestamp_ms, value))
+                .ok_or(RepEvidenceReason::IdentityRelationMissing)?
+        };
+        if relation.role != MotionRole::TaskPrimary
+            && relation.judgeability == FeatureJudgeability::RequiredForRep
+        {
+            let margin_ms = self.plan.rep_topology.minimum_phase_dwell_ms;
+            let phase_aligned = match relation.phase_alignment {
+                crate::action_motion::RelationPhaseAlignment::Unconstrained => true,
+                crate::action_motion::RelationPhaseAlignment::AtPrimaryTurnaround => {
+                    let tolerance_ms = ACTION_ENDPOINT_EVIDENCE_WINDOW_MS.max(margin_ms);
+                    turn_timestamp_ms.abs_diff(rep.peak_timestamp_ms) <= tolerance_ms
+                }
+                crate::action_motion::RelationPhaseAlignment::AfterPrimaryTurnaround => {
+                    turn_timestamp_ms > rep.peak_timestamp_ms
+                        && turn_timestamp_ms.saturating_add(margin_ms) <= rep.end_timestamp_ms
+                }
+            };
+            if !phase_aligned {
+                return Err(RepEvidenceReason::IdentityRelationPhaseMismatch);
+            }
+        }
+        let effort = delta(start, turn);
+        let returning = delta(turn, end);
+        if relation.temporal_pattern
+            == crate::action_motion::RelationTemporalPattern::CrossZeroRoundTrip
+            && start * turn >= 0.0
+        {
+            return Err(RepEvidenceReason::IdentityRelationCrossingMissing);
+        }
         if effort.abs() <= f32::EPSILON {
             return Err(RepEvidenceReason::ActionPrimaryDirectionMismatch);
         }
-        if effort * returning >= 0.0 || (end - start).abs() >= effort.abs() {
+        if effort * returning >= 0.0 || delta(start, end).abs() >= effort.abs() {
             return Err(RepEvidenceReason::ActionPrimaryIncompleteReturn);
         }
         Ok(())
+    }
+
+    fn required_active_lead_side(
+        &self,
+        rep: &SealedRep,
+        profile: &ExerciseProfile,
+    ) -> Result<Option<BodySide>, RepEvidenceReason> {
+        let requires_active_side = self.plan.relations.iter().any(|relation| {
+            relation.judgeability == FeatureJudgeability::RequiredForRep
+                && relation.side_policy == crate::action_motion::RelationSidePolicy::ActiveLeadSide
+        });
+        if !requires_active_side {
+            return Ok(None);
+        }
+        let primary = self
+            .plan
+            .relations
+            .iter()
+            .find(|relation| relation.role == MotionRole::TaskPrimary)
+            .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+        let left_source = primary
+            .inputs
+            .iter()
+            .map(|input| input.source.as_str())
+            .find(|source| source.starts_with("left_"));
+        let right_source = primary
+            .inputs
+            .iter()
+            .map(|input| input.source.as_str())
+            .find(|source| source.starts_with("right_"));
+        let frame = |frame_id| {
+            self.history
+                .iter()
+                .find(|frame| frame.frame_id == frame_id)
+                .map(|frame| frame.canonical.as_slice())
+                .ok_or(RepEvidenceReason::IdentityRelationMissing)
+        };
+        let start = frame(rep.start_frame_id)?;
+        let turn = frame(rep.peak_frame_id)?;
+        let (left, right) =
+            if let (Some(left_source), Some(right_source)) = (left_source, right_source) {
+                let displacement = |source| {
+                    let start_point = named_landmark_xy(profile.schema, source, start)
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+                    let turn_point = named_landmark_xy(profile.schema, source, turn)
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+                    Ok::<_, RepEvidenceReason>(
+                        (turn_point.0 - start_point.0).hypot(turn_point.1 - start_point.1),
+                    )
+                };
+                (displacement(left_source)?, displacement(right_source)?)
+            } else {
+                let mirrored = mirrored_relation(primary);
+                if mirrored.inputs == primary.inputs {
+                    return Err(RepEvidenceReason::IdentityRelationMissing);
+                }
+                let excursion = |relation: &CompiledMotionRelation| {
+                    let start_value = relation_scalar(profile.schema, relation, start)
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+                    let turn_value = relation_scalar(profile.schema, relation, turn)
+                        .ok_or(RepEvidenceReason::IdentityRelationMissing)?;
+                    let raw = turn_value - start_value;
+                    Ok::<_, RepEvidenceReason>(if relation.unit == "radians" {
+                        raw.sin().atan2(raw.cos()).abs()
+                    } else {
+                        raw.abs()
+                    })
+                };
+                (excursion(primary)?, excursion(&mirrored)?)
+            };
+        if (left - right).abs() <= f32::EPSILON {
+            return Err(RepEvidenceReason::IdentityRelationMissing);
+        }
+        Ok(Some(if left > right {
+            BodySide::Left
+        } else {
+            BodySide::Right
+        }))
     }
 }
 
@@ -3867,11 +4719,22 @@ fn relation_scalar(
             named_landmark_xy(schema, &relation.inputs[0].source, canonical)?,
             named_landmark_xy(schema, &relation.inputs[1].source, canonical)?,
             named_landmark_xy(schema, &relation.inputs[2].source, canonical)?,
-        ),
+        )
+        .map(f32::to_radians),
         "relative_distance" if relation.inputs.len() == 2 => {
             let first = named_landmark_xy(schema, &relation.inputs[0].source, canonical)?;
             let second = named_landmark_xy(schema, &relation.inputs[1].source, canonical)?;
-            Some((first.0 - second.0).hypot(first.1 - second.1))
+            Some((first.0 - second.0).hypot(first.1 - second.1) / torso_scale(schema, canonical)?)
+        }
+        "relative_vertical_offset" if relation.inputs.len() == 2 => {
+            let point = named_landmark_xy(schema, &relation.inputs[0].source, canonical)?;
+            let reference = named_landmark_xy(schema, &relation.inputs[1].source, canonical)?;
+            Some((reference.1 - point.1) / torso_scale(schema, canonical)?)
+        }
+        "relative_horizontal_offset" if relation.inputs.len() == 2 => {
+            let point = named_landmark_xy(schema, &relation.inputs[0].source, canonical)?;
+            let reference = named_landmark_xy(schema, &relation.inputs[1].source, canonical)?;
+            Some((point.0 - reference.0) / torso_scale(schema, canonical)?)
         }
         "segment_angle" if relation.inputs.len() == 1 => {
             let (from, to) = match relation.inputs[0].source.as_str() {
@@ -3885,10 +4748,130 @@ fn relation_scalar(
             };
             let from = named_landmark_xy(schema, from, canonical)?;
             let to = named_landmark_xy(schema, to, canonical)?;
-            Some((to.1 - from.1).atan2(to.0 - from.0).to_degrees())
+            Some((to.1 - from.1).atan2(to.0 - from.0))
+        }
+        "projected_shoulder_rotation" if relation.inputs.len() == 4 => {
+            projected_shoulder_rotation_radians(
+                named_landmark_xy(schema, &relation.inputs[0].source, canonical)?,
+                named_landmark_xy(schema, &relation.inputs[1].source, canonical)?,
+                named_landmark_xy(schema, &relation.inputs[2].source, canonical)?,
+                named_landmark_xy(schema, &relation.inputs[3].source, canonical)?,
+            )
         }
         _ => None,
     }
+}
+
+fn relation_operator_produces_action_primary_scalar(relation: &CompiledMotionRelation) -> bool {
+    matches!(
+        relation.operator_id.as_str(),
+        "joint_angle"
+            | "relative_distance"
+            | "relative_vertical_offset"
+            | "relative_horizontal_offset"
+            | "segment_angle"
+            | "projected_shoulder_rotation"
+    )
+}
+
+fn mirrored_relation(relation: &CompiledMotionRelation) -> CompiledMotionRelation {
+    let mut mirrored = relation.clone();
+    for input in &mut mirrored.inputs {
+        input.source = if let Some(rest) = input.source.strip_prefix("left_") {
+            format!("right_{rest}")
+        } else if let Some(rest) = input.source.strip_prefix("right_") {
+            format!("left_{rest}")
+        } else {
+            input.source.clone()
+        };
+    }
+    mirrored
+}
+
+fn relation_landmark_indices(schema: PoseSchemaId, source: &str) -> Option<Vec<usize>> {
+    let pair = |left, right| {
+        Some(vec![
+            named_landmark_index(schema, left)?,
+            named_landmark_index(schema, right)?,
+        ])
+    };
+    match source {
+        "shoulder_midpoint" | "shoulder_axis" => pair("left_shoulder", "right_shoulder"),
+        "hip_midpoint" | "hip_axis" => pair("left_hip", "right_hip"),
+        "upper_arm" => pair("left_shoulder", "left_elbow"),
+        "thigh" => pair("left_hip", "left_knee"),
+        "shin" => pair("left_knee", "left_ankle"),
+        "shoulder_hip_axis" => Some(vec![
+            named_landmark_index(schema, "left_shoulder")?,
+            named_landmark_index(schema, "right_shoulder")?,
+            named_landmark_index(schema, "left_hip")?,
+            named_landmark_index(schema, "right_hip")?,
+        ]),
+        _ => Some(vec![named_landmark_index(schema, source)?]),
+    }
+}
+
+fn measured_relation_signal(
+    schema: PoseSchemaId,
+    relation: &CompiledMotionRelation,
+    canonical: &[CanonicalLandmark],
+) -> Option<SignalMeasurement> {
+    let indices = relation
+        .inputs
+        .iter()
+        .flat_map(|input| relation_landmark_indices(schema, &input.source))
+        .flatten()
+        .collect::<Vec<_>>();
+    if indices.is_empty() {
+        return None;
+    }
+    let landmarks = indices
+        .iter()
+        .map(|index| canonical.get(*index))
+        .collect::<Option<Vec<_>>>()?;
+    if landmarks.iter().any(|landmark| {
+        !(matches!(
+            landmark.source,
+            LandmarkSource::Measured | LandmarkSource::Fused
+        ) && landmark.renderable
+            && landmark.x.is_some_and(f32::is_finite)
+            && landmark.y.is_some_and(f32::is_finite)
+            && landmark.canonical_confidence.is_finite())
+    }) {
+        return None;
+    }
+    let confidence = landmarks
+        .into_iter()
+        .map(|landmark| landmark.canonical_confidence)
+        .reduce(f32::min)?;
+    if confidence < PHASE_SIGNAL_MIN_CONFIDENCE {
+        return None;
+    }
+    SignalMeasurement::new(relation_scalar(schema, relation, canonical)?, confidence)
+}
+
+/// Observable 2-D proxy for shoulder rotation. The forearm's signed direction
+/// is expressed relative to the torso axis while the shoulder→elbow segment
+/// proves the arm chain itself is non-degenerate. This is deliberately not a
+/// recovered 3-D humeral axial angle; action assets bound that claim and exact
+/// side projections refuse the operator.
+pub(crate) fn projected_shoulder_rotation_radians(
+    shoulder: (f32, f32),
+    elbow: (f32, f32),
+    wrist: (f32, f32),
+    hip: (f32, f32),
+) -> Option<f32> {
+    let upper = (elbow.0 - shoulder.0, elbow.1 - shoulder.1);
+    let forearm = (wrist.0 - elbow.0, wrist.1 - elbow.1);
+    let torso = (hip.0 - shoulder.0, hip.1 - shoulder.1);
+    if upper.0.hypot(upper.1) <= f32::EPSILON
+        || forearm.0.hypot(forearm.1) <= f32::EPSILON
+        || torso.0.hypot(torso.1) <= f32::EPSILON
+    {
+        return None;
+    }
+    let delta = forearm.1.atan2(forearm.0) - torso.1.atan2(torso.0);
+    Some(delta.sin().atan2(delta.cos()))
 }
 
 #[cfg(test)]
@@ -3911,13 +4894,147 @@ mod action_rep_authority_tests {
         pose
     }
 
+    fn pose_with_projected_left_shoulder_rotation(wrist_x: f32) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        pose[5] = CanonicalLandmark::measured(0.40, 0.30, 0.0, 0.99);
+        pose[7] = CanonicalLandmark::measured(0.40, 0.48, 0.0, 0.99);
+        pose[9] = CanonicalLandmark::measured(wrist_x, 0.48, 0.0, 0.99);
+        pose[11] = CanonicalLandmark::measured(0.40, 0.78, 0.0, 0.99);
+        pose
+    }
+
+    fn pose_with_projected_left_shoulder_rotation_angle(
+        angle_degrees: f32,
+    ) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        let angle = angle_degrees.to_radians();
+        pose[5] = CanonicalLandmark::measured(0.40, 0.30, 0.0, 0.99);
+        pose[7] = CanonicalLandmark::measured(0.40, 0.48, 0.0, 0.99);
+        pose[9] = CanonicalLandmark::measured(
+            0.40 + angle.cos() * 0.16,
+            0.48 + angle.sin() * 0.16,
+            0.0,
+            0.99,
+        );
+        pose[11] = CanonicalLandmark::measured(0.40, 0.78, 0.0, 0.99);
+        pose
+    }
+
+    fn pose_with_constant_elbow_and_torso_angle(
+        torso_angle_degrees: f32,
+    ) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        let torso_angle = torso_angle_degrees.to_radians();
+        pose[5] = CanonicalLandmark::measured(0.40, 0.30, 0.0, 0.99);
+        pose[7] = CanonicalLandmark::measured(0.40, 0.48, 0.0, 0.99);
+        pose[9] = CanonicalLandmark::measured(0.56, 0.48, 0.0, 0.99);
+        pose[11] = CanonicalLandmark::measured(
+            0.40 + torso_angle.cos() * 0.30,
+            0.30 + torso_angle.sin() * 0.30,
+            0.0,
+            0.99,
+        );
+        pose
+    }
+
+    fn pose_with_rotation_and_overhead_offset(
+        rotation_degrees: f32,
+        wrist_over_shoulder: f32,
+    ) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        let shoulder = (0.40_f32, 0.40_f32);
+        let torso_direction = std::f32::consts::FRAC_PI_2;
+        let forearm_direction = torso_direction + rotation_degrees.to_radians();
+        let wrist = (0.40, shoulder.1 - wrist_over_shoulder * 0.40);
+        let elbow = (
+            wrist.0 - forearm_direction.cos() * 0.16,
+            wrist.1 - forearm_direction.sin() * 0.16,
+        );
+        pose[5] = CanonicalLandmark::measured(shoulder.0, shoulder.1, 0.0, 0.99);
+        pose[6] = CanonicalLandmark::measured(0.60, shoulder.1, 0.0, 0.99);
+        pose[7] = CanonicalLandmark::measured(elbow.0, elbow.1, 0.0, 0.99);
+        pose[9] = CanonicalLandmark::measured(wrist.0, wrist.1, 0.0, 0.99);
+        pose[11] = CanonicalLandmark::measured(0.40, 0.80, 0.0, 0.99);
+        pose[12] = CanonicalLandmark::measured(0.60, 0.80, 0.0, 0.99);
+        pose
+    }
+
+    fn pose_with_left_leg_fixed_and_right_ankle_x(right_ankle_x: f32) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        pose[5] = CanonicalLandmark::measured(0.35, 0.25, 0.0, 0.99);
+        pose[6] = CanonicalLandmark::measured(0.65, 0.25, 0.0, 0.99);
+        pose[11] = CanonicalLandmark::measured(0.40, 0.45, 0.0, 0.99);
+        pose[12] = CanonicalLandmark::measured(0.60, 0.45, 0.0, 0.99);
+        pose[13] = CanonicalLandmark::measured(0.40, 0.65, 0.0, 0.99);
+        pose[14] = CanonicalLandmark::measured(0.60, 0.65, 0.0, 0.99);
+        pose[15] = CanonicalLandmark::measured(0.40, 0.85, 0.0, 0.99);
+        pose[16] = CanonicalLandmark::measured(right_ankle_x, 0.85, 0.0, 0.99);
+        pose
+    }
+
+    fn pose_with_right_lead_lunge(
+        right_ankle_x: f32,
+        right_knee_angle_degrees: f32,
+    ) -> Vec<CanonicalLandmark> {
+        let mut pose = pose_with_left_leg_fixed_and_right_ankle_x(right_ankle_x);
+        let knee = (0.65_f32, 0.65_f32);
+        let ankle = (right_ankle_x, 0.85_f32);
+        let ankle_direction = (ankle.1 - knee.1).atan2(ankle.0 - knee.0);
+        let hip_direction = ankle_direction + right_knee_angle_degrees.to_radians();
+        pose[12] = CanonicalLandmark::measured(
+            knee.0 + hip_direction.cos() * 0.20,
+            knee.1 + hip_direction.sin() * 0.20,
+            0.0,
+            0.99,
+        );
+        pose[14] = CanonicalLandmark::measured(knee.0, knee.1, 0.0, 0.99);
+        pose[16] = CanonicalLandmark::measured(ankle.0, ankle.1, 0.0, 0.99);
+        pose
+    }
+
+    fn pose_with_ankle_positions(
+        left_ankle_x: f32,
+        left_ankle_y: f32,
+        right_ankle_x: f32,
+        right_ankle_y: f32,
+    ) -> Vec<CanonicalLandmark> {
+        let mut pose = pose_with_left_leg_fixed_and_right_ankle_x(right_ankle_x);
+        pose[15] = CanonicalLandmark::measured(left_ankle_x, left_ankle_y, 0.0, 0.99);
+        pose[16] = CanonicalLandmark::measured(right_ankle_x, right_ankle_y, 0.0, 0.99);
+        pose
+    }
+
+    fn pose_with_hip_angles(left_degrees: f32, right_degrees: f32) -> Vec<CanonicalLandmark> {
+        let mut pose = vec![CanonicalLandmark::measured(0.5, 0.5, 0.0, 0.99); 26];
+        for (shoulder, hip, knee, ankle, x, degrees) in [
+            (5, 11, 13, 15, 0.40_f32, left_degrees),
+            (6, 12, 14, 16, 0.60_f32, right_degrees),
+        ] {
+            pose[shoulder] = CanonicalLandmark::measured(x, 0.25, 0.0, 0.99);
+            pose[hip] = CanonicalLandmark::measured(x, 0.50, 0.0, 0.99);
+            let knee_direction = -std::f32::consts::FRAC_PI_2 + degrees.to_radians();
+            let knee_x = x + knee_direction.cos() * 0.20;
+            let knee_y = 0.50 + knee_direction.sin() * 0.20;
+            pose[knee] = CanonicalLandmark::measured(knee_x, knee_y, 0.0, 0.99);
+            pose[ankle] = CanonicalLandmark::measured(knee_x, knee_y + 0.20, 0.0, 0.99);
+        }
+        pose
+    }
+
     fn local_endpoint(progress: f32) -> LocalMotionCoordinateEvidence {
+        local_endpoint_with_cross(progress, 0.0)
+    }
+
+    fn local_endpoint_with_cross(
+        progress: f32,
+        cross_axis_displacement: f32,
+    ) -> LocalMotionCoordinateEvidence {
         LocalMotionCoordinateEvidence {
             state: LocalCoordinateState::Frozen,
             confidence: 0.95,
             equipment: Some(LocalTrajectoryChannel {
                 along_axis_progress: progress,
-                cross_axis_displacement: 0.0,
+                cross_axis_displacement,
                 confidence: 0.95,
                 coverage: 1.0,
                 uncertainty: 0.01,
@@ -3943,6 +5060,13 @@ mod action_rep_authority_tests {
             channel_agreement: LocalChannelAgreement::PoseOnly,
             ..LocalMotionCoordinateEvidence::default()
         }
+    }
+
+    fn agreeing_endpoint(progress: f32) -> LocalMotionCoordinateEvidence {
+        let mut evidence = local_endpoint(progress);
+        evidence.pose = pose_only_endpoint(progress).pose;
+        evidence.channel_agreement = LocalChannelAgreement::Agreement;
+        evidence
     }
 
     fn rep(profile: &ExerciseProfile, turn: f32, end: f32) -> SealedRep {
@@ -3976,6 +5100,61 @@ mod action_rep_authority_tests {
                 anatomical_right_turnaround_timestamp_ms: None,
             }),
         }
+    }
+
+    #[test]
+    fn encoder_refuses_a_v1_11_reason_in_a_v1_10_packet() {
+        let binding = crate::visual_recognition_baseline_profiles_v0_1()
+            .into_iter()
+            .find(|binding| binding.motion_plan.is_some())
+            .expect("installed action binding");
+        let mut sealed = rep(&binding.profile, 0.8, 0.05);
+        sealed.disposition = RepDisposition::Rejected;
+        sealed.evidence_reason = Some(RepEvidenceReason::IdentityRelationPhaseMismatch);
+        let packet = MotionPacket {
+            lineage: PacketLineage {
+                sequence_id: "fixture:old-minor-reason".into(),
+                contract: ContractVersion {
+                    major: 1,
+                    minor: 10,
+                },
+                algorithm_version: "fixture".into(),
+                config_version: "fixture".into(),
+                inference_version: "fixture".into(),
+                diagnostic_version: "fixture".into(),
+                active_profile_identity: Some(binding.profile.identity.clone()),
+                active_profile_hash: Some(binding.profile.content_hash),
+            },
+            frame_id: 3,
+            source_timestamp_ms: 300,
+            subject_epoch: 0,
+            target: TargetSnapshot {
+                state: TargetState::Locked,
+                candidate_count: 1,
+                selected_candidate_id: Some(1),
+            },
+            canonical: Vec::new(),
+            joint_angles: Vec::new(),
+            equipment: EquipmentFrameEvidence::cannot_judge(
+                300,
+                Some(1),
+                EquipmentCannotJudgeReason::NoEquipmentObservation,
+            ),
+            local_motion_coordinate: LocalMotionCoordinateEvidence::default(),
+            set_state: SetStateSnapshot::default(),
+            rep_state: RepStateSnapshot::default(),
+            completed_reps: vec![sealed],
+            completed_rep_subject_epochs: vec![0],
+            quality_proposals: Vec::new(),
+        };
+
+        assert_eq!(
+            encode_motion_packet(&packet),
+            Err(PacketEncodeError::EvidenceReasonRequiresContractMinor {
+                reason: RepEvidenceReason::IdentityRelationPhaseMismatch,
+                required_minor: 11,
+            })
+        );
     }
 
     fn gripped_bar(frame_id: u64) -> EquipmentFrameEvidence {
@@ -4044,19 +5223,34 @@ mod action_rep_authority_tests {
                 .observation_findings
                 .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
         );
-        assert_eq!(accepted.execution_receipts.len(), 3);
+        assert_eq!(accepted.execution_receipts.len(), 4);
         assert!(accepted.execution_receipts.iter().all(|receipt| matches!(
             receipt.category,
             AlgorithmModuleCategory::PoseRelation
+                | AlgorithmModuleCategory::EquipmentFusion
                 | AlgorithmModuleCategory::CandidateAdmission
                 | AlgorithmModuleCategory::BoundaryRefinement
         )));
+        assert!(accepted.execution_receipts.iter().any(|receipt| {
+            receipt.category == AlgorithmModuleCategory::EquipmentFusion
+                && receipt
+                    .output_fact_ids
+                    .iter()
+                    .any(|fact| fact == "equipment_consensus:1:satisfied")
+        }));
+        assert!(accepted.execution_receipts.iter().any(|receipt| {
+            receipt.category == AlgorithmModuleCategory::CandidateAdmission
+                && receipt
+                    .input_fact_ids
+                    .iter()
+                    .any(|fact| fact == "equipment_consensus:1:satisfied")
+        }));
         assert!(accepted.execution_receipts.iter().any(|receipt| {
             receipt.category == AlgorithmModuleCategory::PoseRelation
                 && receipt
                     .output_fact_ids
                     .iter()
-                    .any(|fact| fact == "motion_relation:task_primary:observed")
+                    .any(|fact| fact == "motion_relation:task_primary:satisfied")
         }));
         assert_eq!(
             accepted.executed_algorithm_module_ids,
@@ -4068,7 +5262,23 @@ mod action_rep_authority_tests {
             "manual fixture history cannot claim frame stages it did not execute"
         );
 
-        let reversed = authority.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
+        let mut mirrored_authority =
+            ActionRepAuthority::new(binding.motion_plan.clone().unwrap()).expect("plan authority");
+        for (frame_id, angle) in [(1, 160.0), (2, 80.0), (3, 158.0)] {
+            mirrored_authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_elbow_angle(angle),
+                equipment: gripped_bar(frame_id),
+                local_coordinate: local_endpoint(match frame_id {
+                    1 => 0.0,
+                    2 => -0.8,
+                    _ => -0.05,
+                }),
+            });
+        }
+        let reversed =
+            mirrored_authority.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
         assert_eq!(reversed.disposition, RepDisposition::Confirmed);
         assert!(
             reversed
@@ -4082,13 +5292,20 @@ mod action_rep_authority_tests {
             LocalDirectionPolicy::PreparationToEffortPositive;
         let mut fixed_direction =
             ActionRepAuthority::new(fixed_direction_plan).expect("fixed direction plan");
-        fixed_direction.history = authority.history.clone();
+        fixed_direction.history = mirrored_authority.history.clone();
         let rejected = fixed_direction.admit(rep(&binding.profile, -0.8, -0.05), &binding.profile);
         assert_eq!(rejected.disposition, RepDisposition::Rejected);
         assert_eq!(
             rejected.evidence_reason,
             Some(RepEvidenceReason::ActionPrimaryDirectionMismatch)
         );
+        assert!(rejected.execution_receipts.iter().any(|receipt| {
+            receipt.category == AlgorithmModuleCategory::PoseRelation
+                && receipt.output_fact_ids.iter().any(|fact| {
+                    fact
+                        == "motion_relation:task_primary:deviation:action_primary_direction_mismatch"
+                })
+        }));
 
         let incomplete = authority.admit(rep(&binding.profile, 0.8, 0.9), &binding.profile);
         assert_eq!(incomplete.disposition, RepDisposition::Rejected);
@@ -4096,6 +5313,13 @@ mod action_rep_authority_tests {
             incomplete.evidence_reason,
             Some(RepEvidenceReason::ActionPrimaryIncompleteReturn)
         );
+        assert!(incomplete.execution_receipts.iter().any(|receipt| {
+            receipt.category == AlgorithmModuleCategory::PoseRelation
+                && receipt.output_fact_ids.iter().any(|fact| {
+                    fact
+                        == "motion_relation:task_primary:deviation:action_primary_incomplete_return"
+                })
+        }));
 
         let mut pending_review = rep(&binding.profile, 0.8, 0.05);
         pending_review.disposition = RepDisposition::NeedsReview;
@@ -4137,6 +5361,680 @@ mod action_rep_authority_tests {
         assert_eq!(
             wrists_only.evidence_reason,
             Some(RepEvidenceReason::EquipmentConsensusUnavailable)
+        );
+    }
+
+    #[test]
+    fn rep_receipts_do_not_import_an_adjacent_candidates_spanning_stage() {
+        let binding = crate::visual_recognition_baseline_profiles_v0_1()
+            .into_iter()
+            .find(|binding| {
+                binding.action_id == "barbell_bench_press"
+                    && binding.capture_view == crate::AssessmentCaptureView::Front
+            })
+            .expect("v0.1 bench binding");
+        let mut authority = ActionRepAuthority::new(binding.motion_plan.expect("compiled plan"))
+            .expect("plan authority");
+        authority.record_stage_with_facts(
+            AlgorithmModuleCategory::CandidateAdmission,
+            1,
+            3,
+            100,
+            300,
+            vec!["prior_candidate".into()],
+            vec!["prior_admission".into()],
+        );
+        authority.record_stage_with_facts(
+            AlgorithmModuleCategory::CandidateAdmission,
+            3,
+            5,
+            300,
+            500,
+            vec!["current_candidate".into()],
+            vec!["current_admission".into()],
+        );
+        let mut current = rep(&binding.profile, 0.8, 0.05);
+        current.start_frame_id = 3;
+        current.start_timestamp_ms = 300;
+        current.peak_frame_id = 4;
+        current.peak_timestamp_ms = 400;
+        current.end_frame_id = 5;
+        current.end_timestamp_ms = 500;
+
+        let receipts = authority.receipts_for_rep(&current);
+        let admission = receipts
+            .iter()
+            .find(|receipt| receipt.category == AlgorithmModuleCategory::CandidateAdmission)
+            .expect("current candidate receipt");
+        assert_eq!(admission.start_frame_id, 3);
+        assert_eq!(admission.end_frame_id, 5);
+        assert_eq!(admission.input_fact_ids, vec!["current_candidate"]);
+        assert_eq!(admission.output_fact_ids, vec!["current_admission"]);
+    }
+
+    #[test]
+    fn candidate_admission_does_not_import_an_adjacent_rep_relation_at_a_shared_boundary() {
+        let binding = crate::visual_recognition_baseline_profiles_v0_1()
+            .into_iter()
+            .find(|binding| {
+                binding.action_id == "barbell_bench_press"
+                    && binding.capture_view == crate::AssessmentCaptureView::Front
+            })
+            .expect("v0.1 bench binding");
+        let mut authority = ActionRepAuthority::new(binding.motion_plan.expect("compiled plan"))
+            .expect("plan authority");
+        authority.record_stage_with_facts(
+            AlgorithmModuleCategory::PoseRelation,
+            1,
+            3,
+            100,
+            300,
+            vec!["canonical_pose:1".into(), "canonical_pose:3".into()],
+            vec!["motion_relation:task_primary:satisfied".into()],
+        );
+        authority.record_stage_with_facts(
+            AlgorithmModuleCategory::PoseRelation,
+            3,
+            3,
+            300,
+            300,
+            vec!["canonical_pose:3".into()],
+            vec!["pose_relation:3".into()],
+        );
+        let mut current = rep(&binding.profile, 0.8, 0.05);
+        current.start_frame_id = 3;
+        current.start_timestamp_ms = 300;
+        current.peak_frame_id = 4;
+        current.peak_timestamp_ms = 400;
+        current.end_frame_id = 5;
+        current.end_timestamp_ms = 500;
+
+        let inputs = authority.candidate_admission_inputs(&current, "current_refinement");
+        assert!(
+            !inputs.iter().any(|fact| fact == "pose_relation:3"),
+            "per-frame pose observation is not a candidate-admission result"
+        );
+        assert!(
+            !inputs
+                .iter()
+                .any(|fact| fact == "motion_relation:task_primary:satisfied"),
+            "a previous Rep relation ending on the shared boundary is not a current-Rep fact"
+        );
+    }
+
+    #[test]
+    fn projected_shoulder_rotation_is_the_admission_relation_not_wrist_displacement() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("standing_elbow_tucked_cable_external_rotation")
+            .expect("external rotation definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front")
+            .expect("front projected rotation plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("runtime binding from projected relation");
+        let relation = plan
+            .relations
+            .iter()
+            .find(|relation| relation.role == MotionRole::TaskPrimary)
+            .expect("TaskPrimary")
+            .clone();
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        for (frame_id, wrist_x, progress) in [(1, 0.28, 0.0), (2, 0.56, 0.8), (3, 0.29, 0.03)] {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_projected_left_shoulder_rotation(wrist_x),
+                equipment: EquipmentFrameEvidence::cannot_judge(
+                    frame_id * 100,
+                    Some(1),
+                    EquipmentCannotJudgeReason::NoEquipmentObservation,
+                ),
+                local_coordinate: pose_only_endpoint(progress),
+            });
+        }
+        let start = relation_scalar(
+            binding.profile.schema,
+            &relation,
+            &authority.history[0].canonical,
+        )
+        .expect("start rotation");
+        let turn = relation_scalar(
+            binding.profile.schema,
+            &relation,
+            &authority.history[1].canonical,
+        )
+        .expect("turn rotation");
+        assert!((turn - start).abs() > 1.0);
+
+        let admitted = authority.admit(rep(&binding.profile, 0.8, 0.03), &binding.profile);
+        assert_eq!(admitted.disposition, RepDisposition::Confirmed);
+        assert!(
+            admitted
+                .observation_findings
+                .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
+        );
+    }
+
+    #[test]
+    fn projected_shoulder_rotation_drives_preseal_candidate_generation() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("standing_elbow_tucked_cable_external_rotation")
+            .expect("external rotation definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front")
+            .expect("front projected rotation plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("runtime binding from projected relation");
+        assert_eq!(
+            binding.profile.primary_signal.kind,
+            ExerciseSignalKind::ActionPrimaryRelationScalar,
+            "a scalar TaskPrimary must not be downgraded to anchor displacement"
+        );
+        let authority = ActionRepAuthority::new(plan).expect("plan authority");
+        let mut engine = RepEngine::new(binding.profile);
+        engine.begin_set();
+        let equipment = EquipmentFrameEvidence::cannot_judge(
+            0,
+            Some(1),
+            EquipmentCannotJudgeReason::NoEquipmentObservation,
+        );
+        let projected_angle = [170.0; 6]
+            .into_iter()
+            .chain([150.0, 125.0, 100.0, 75.0, 50.0, 30.0, 30.0, 30.0])
+            .chain([
+                50.0, 75.0, 100.0, 125.0, 150.0, 168.0, 168.0, 168.0, 168.0, 168.0,
+            ]);
+        let mut sealed = Vec::new();
+        for (frame_id, projected_angle) in projected_angle.enumerate() {
+            let pose = pose_with_projected_left_shoulder_rotation_angle(projected_angle);
+            let signal = authority
+                .task_primary_signal(PoseSchemaId::Halpe26, &pose)
+                .expect("measured projected rotation");
+            sealed.extend(engine.process_with_equipment(
+                frame_id as u64,
+                frame_id as u64 * 100,
+                TargetState::Locked,
+                &pose,
+                &equipment,
+                None,
+                Some(signal),
+            ));
+        }
+        sealed.extend(engine.finish_set());
+        assert!(
+            sealed
+                .iter()
+                .any(|rep| rep.disposition != RepDisposition::Rejected),
+            "the TaskPrimary scalar must be capable of producing a reviewable candidate: {sealed:?}"
+        );
+    }
+
+    #[test]
+    fn arnold_press_requires_rotation_and_overhead_elbow_coordination() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("seated_arnold_press")
+            .expect("Arnold press definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front")
+            .expect("front Arnold press plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("runtime binding from Arnold press plan");
+        assert_eq!(
+            plan.relations
+                .iter()
+                .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
+                .count(),
+            2,
+            "Arnold identity is a compound rotation plus overhead cycle"
+        );
+
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        for (frame_id, torso_angle, progress) in [(1, 90.0, 0.0), (2, 0.0, 0.8), (3, 88.0, 0.03)] {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_constant_elbow_and_torso_angle(torso_angle),
+                equipment: EquipmentFrameEvidence::cannot_judge(
+                    frame_id * 100,
+                    Some(1),
+                    EquipmentCannotJudgeReason::NoEquipmentObservation,
+                ),
+                local_coordinate: pose_only_endpoint(progress),
+            });
+        }
+
+        let rejected = authority.admit(rep(&binding.profile, 0.8, 0.03), &binding.profile);
+        assert_eq!(rejected.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            rejected.evidence_reason,
+            Some(RepEvidenceReason::ActionPrimaryDirectionMismatch),
+            "rotation alone must not be promoted to an Arnold press Rep"
+        );
+    }
+
+    #[test]
+    fn arnold_press_requires_the_overhead_cycle_at_the_rotation_turnaround() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("seated_arnold_press")
+            .expect("Arnold press definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front")
+            .expect("front Arnold press plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("runtime binding from Arnold press plan");
+
+        let candidate = || {
+            let mut value = rep(&binding.profile, 0.8, 0.03);
+            value.peak_frame_id = 3;
+            value.peak_timestamp_ms = 600;
+            value.end_frame_id = 5;
+            value.end_timestamp_ms = 1_100;
+            value
+        };
+        let build_authority = |overhead_offsets: [f32; 5]| {
+            let mut authority = ActionRepAuthority::new(plan.clone()).expect("plan authority");
+            for (((frame_id, timestamp_ms), rotation), overhead_offset) in
+                [(1, 100), (2, 200), (3, 600), (4, 1_000), (5, 1_100)]
+                    .into_iter()
+                    .zip([-60.0, -30.0, 60.0, -30.0, -58.0])
+                    .zip(overhead_offsets)
+            {
+                authority.history.push_back(ActionRepFrame {
+                    frame_id,
+                    timestamp_ms,
+                    canonical: pose_with_rotation_and_overhead_offset(rotation, overhead_offset),
+                    equipment: EquipmentFrameEvidence::cannot_judge(
+                        timestamp_ms,
+                        Some(1),
+                        EquipmentCannotJudgeReason::NoEquipmentObservation,
+                    ),
+                    local_coordinate: pose_only_endpoint(match frame_id {
+                        1 => 0.0,
+                        3 => 0.8,
+                        5 => 0.03,
+                        _ => 0.4,
+                    }),
+                });
+            }
+            authority
+        };
+
+        let aligned =
+            build_authority([0.0, 0.3, 0.8, 0.3, 0.02]).admit(candidate(), &binding.profile);
+        assert_eq!(aligned.disposition, RepDisposition::Confirmed);
+
+        let misaligned =
+            build_authority([0.0, 0.8, 0.3, 0.1, 0.02]).admit(candidate(), &binding.profile);
+        assert_eq!(misaligned.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            misaligned.evidence_reason,
+            Some(RepEvidenceReason::IdentityRelationPhaseMismatch),
+            "an overhead cycle completed before the rotation turnaround is not an Arnold press"
+        );
+    }
+
+    #[test]
+    fn smith_guide_path_rejects_a_measured_bar_outside_the_action_view_corridor() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("smith_flat_bench_press")
+            .expect("Smith press definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front")
+            .expect("front Smith plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("Smith runtime binding");
+        assert_eq!(plan.rep_topology.maximum_constrained_path_deviation(), 0.12);
+
+        let assess = |cross_axis: [f32; 3]| {
+            let mut authority = ActionRepAuthority::new(plan.clone()).expect("plan authority");
+            for ((frame_id, progress), cross) in
+                [(1, 0.0), (2, 0.8), (3, 0.03)].into_iter().zip(cross_axis)
+            {
+                authority.history.push_back(ActionRepFrame {
+                    frame_id,
+                    timestamp_ms: frame_id * 100,
+                    canonical: pose_with_elbow_angle(90.0),
+                    equipment: gripped_bar(frame_id),
+                    local_coordinate: local_endpoint_with_cross(progress, cross),
+                });
+            }
+            authority.admit(rep(&binding.profile, 0.8, 0.03), &binding.profile)
+        };
+
+        let accepted = assess([0.0, 0.04, 0.02]);
+        assert_eq!(
+            accepted.disposition,
+            RepDisposition::Confirmed,
+            "in-corridor Smith path should be admitted: {accepted:?}"
+        );
+        let rejected = assess([0.0, 0.20, 0.01]);
+        assert_eq!(rejected.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            rejected.evidence_reason,
+            Some(RepEvidenceReason::ConstrainedPathDeviationExceeded)
+        );
+    }
+
+    #[test]
+    fn walking_lunge_requires_a_knee_cycle_after_step_segmentation() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("walking_lunge")
+            .expect("walking lunge definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front_left_45")
+            .expect("walking lunge observation plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("walking lunge runtime binding");
+        assert_eq!(plan.phases.len(), 4);
+        assert_eq!(
+            plan.relations
+                .iter()
+                .filter(|relation| relation.judgeability == FeatureJudgeability::RequiredForRep)
+                .count(),
+            2,
+            "step placement and knee flexion/extension jointly identify a walking lunge"
+        );
+
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        for (frame_id, right_ankle_x, progress) in [(1, 0.45, 0.0), (2, 0.80, 0.8), (3, 0.46, 0.03)]
+        {
+            authority.history.push_back(ActionRepFrame {
+                frame_id,
+                timestamp_ms: frame_id * 100,
+                canonical: pose_with_left_leg_fixed_and_right_ankle_x(right_ankle_x),
+                equipment: EquipmentFrameEvidence::cannot_judge(
+                    frame_id * 100,
+                    Some(1),
+                    EquipmentCannotJudgeReason::NoEquipmentObservation,
+                ),
+                local_coordinate: pose_only_endpoint(progress),
+            });
+        }
+        let rejected = authority.admit(rep(&binding.profile, 0.8, 0.03), &binding.profile);
+        assert_eq!(rejected.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            rejected.evidence_reason,
+            Some(RepEvidenceReason::IdentityRelationPhaseMismatch),
+            "an ankle-separation cycle without phase-aligned knee flexion is a step candidate, not a lunge Rep"
+        );
+    }
+
+    #[test]
+    fn walking_lunge_uses_the_active_lead_knee_after_foot_placement_and_alternates() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("walking_lunge")
+            .expect("walking lunge definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front_left_45")
+            .expect("walking lunge plan");
+        assert_eq!(plan.rep_consensus.mode, RepConsensusMode::Alternating);
+        let knee_relation = plan
+            .relations
+            .iter()
+            .find(|relation| relation.relation_id == "knee_flexion_extension_coordination")
+            .expect("required knee relation");
+        assert_eq!(
+            knee_relation.phase_alignment,
+            crate::action_motion::RelationPhaseAlignment::AfterPrimaryTurnaround
+        );
+        assert_eq!(
+            knee_relation.side_policy,
+            crate::action_motion::RelationSidePolicy::ActiveLeadSide
+        );
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("walking lunge runtime binding");
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        let samples = [
+            (0_u64, 0_u64, 0.46_f32, 170.0_f32),
+            (1, 300, 0.85, 170.0),
+            (2, 700, 0.80, 90.0),
+            (3, 1_100, 0.60, 130.0),
+            (4, 1_400, 0.47, 168.0),
+        ];
+        for repetition in 0..2_u64 {
+            for (offset, elapsed, ankle_x, knee_angle) in samples {
+                let frame_id = repetition * 5 + offset + 1;
+                let timestamp_ms = repetition * 1_500 + elapsed + 100;
+                authority.history.push_back(ActionRepFrame {
+                    frame_id,
+                    timestamp_ms,
+                    canonical: pose_with_right_lead_lunge(ankle_x, knee_angle),
+                    equipment: EquipmentFrameEvidence::cannot_judge(
+                        timestamp_ms,
+                        Some(1),
+                        EquipmentCannotJudgeReason::NoEquipmentObservation,
+                    ),
+                    local_coordinate: pose_only_endpoint(match offset {
+                        0 => 0.0,
+                        1 => 0.8,
+                        4 => 0.03,
+                        _ => 0.4,
+                    }),
+                });
+            }
+        }
+        let candidate = |repetition: u64| {
+            let mut value = rep(&binding.profile, 0.8, 0.03);
+            value.start_frame_id = repetition * 5 + 1;
+            value.peak_frame_id = repetition * 5 + 2;
+            value.end_frame_id = repetition * 5 + 5;
+            value.start_timestamp_ms = repetition * 1_500 + 100;
+            value.peak_timestamp_ms = repetition * 1_500 + 400;
+            value.turnaround_confirmed_timestamp_ms = repetition * 1_500 + 500;
+            value.end_timestamp_ms = repetition * 1_500 + 1_500;
+            value
+        };
+
+        let first = authority.admit(candidate(0), &binding.profile);
+        assert_eq!(first.disposition, RepDisposition::Confirmed, "{first:?}");
+        let repeated_side = authority.admit(candidate(1), &binding.profile);
+        assert_eq!(repeated_side.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            repeated_side.evidence_reason,
+            Some(RepEvidenceReason::AlternatingSideMismatch)
+        );
+    }
+
+    #[test]
+    fn crossover_step_requires_the_declared_signed_ankle_order_to_cross_zero() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("crossover_side_step")
+            .expect("crossover definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front_left_45")
+            .expect("crossover plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("crossover runtime binding");
+        assert_eq!(
+            plan.relations
+                .iter()
+                .find(|relation| relation.role == MotionRole::TaskPrimary)
+                .expect("TaskPrimary")
+                .temporal_pattern,
+            crate::action_motion::RelationTemporalPattern::CrossZeroRoundTrip
+        );
+
+        let assess = |right_ankle_x: [f32; 3]| {
+            let mut authority = ActionRepAuthority::new(plan.clone()).expect("plan authority");
+            for (index, x) in right_ankle_x.into_iter().enumerate() {
+                let frame_id = index as u64 + 1;
+                authority.history.push_back(ActionRepFrame {
+                    frame_id,
+                    timestamp_ms: frame_id * 100,
+                    canonical: pose_with_ankle_positions(0.40, 0.85, x, 0.85),
+                    equipment: EquipmentFrameEvidence::cannot_judge(
+                        frame_id * 100,
+                        Some(1),
+                        EquipmentCannotJudgeReason::NoEquipmentObservation,
+                    ),
+                    local_coordinate: pose_only_endpoint(match frame_id {
+                        1 => 0.0,
+                        2 => 0.8,
+                        _ => 0.03,
+                    }),
+                });
+            }
+            let mut candidate = rep(&binding.profile, 0.8, 0.03);
+            candidate.normalized_endpoints = Some(NormalizedRepEndpointEvidence {
+                coordinate_frame_id: 1,
+                start_anchor: pose_only_endpoint(0.0),
+                primary_turnaround: pose_only_endpoint(0.8),
+                end_return: pose_only_endpoint(0.03),
+                anatomical_left_turnaround_timestamp_ms: None,
+                anatomical_right_turnaround_timestamp_ms: None,
+            });
+            authority.admit(candidate, &binding.profile)
+        };
+
+        let no_cross = assess([0.20, 0.30, 0.21]);
+        assert_eq!(no_cross.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            no_cross.evidence_reason,
+            Some(RepEvidenceReason::IdentityRelationCrossingMissing)
+        );
+        let crossed = assess([0.20, 0.65, 0.21]);
+        assert_eq!(
+            crossed.disposition,
+            RepDisposition::Confirmed,
+            "{crossed:?}"
+        );
+    }
+
+    #[test]
+    fn march_uses_the_active_hip_cycle_and_rejects_repeating_the_same_side() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("march_in_place")
+            .expect("march definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front")
+            .expect("march plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("march runtime binding");
+        let primary = plan
+            .relations
+            .iter()
+            .find(|relation| relation.role == MotionRole::TaskPrimary)
+            .expect("TaskPrimary");
+        assert_eq!(primary.operator_id, "joint_angle");
+        assert_eq!(
+            primary.side_policy,
+            crate::action_motion::RelationSidePolicy::ActiveLeadSide
+        );
+        let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
+        for repetition in 0..2_u64 {
+            for (offset, left_angle) in [(0_u64, 165.0), (1, 85.0), (2, 163.0)] {
+                let frame_id = repetition * 3 + offset + 1;
+                authority.history.push_back(ActionRepFrame {
+                    frame_id,
+                    timestamp_ms: frame_id * 300,
+                    canonical: pose_with_hip_angles(left_angle, 165.0),
+                    equipment: EquipmentFrameEvidence::cannot_judge(
+                        frame_id * 300,
+                        Some(1),
+                        EquipmentCannotJudgeReason::NoEquipmentObservation,
+                    ),
+                    local_coordinate: pose_only_endpoint(match offset {
+                        0 => 0.0,
+                        1 => 0.8,
+                        _ => 0.03,
+                    }),
+                });
+            }
+        }
+        let candidate = |repetition: u64| {
+            let mut value = rep(&binding.profile, 0.8, 0.03);
+            value.start_frame_id = repetition * 3 + 1;
+            value.peak_frame_id = repetition * 3 + 2;
+            value.end_frame_id = repetition * 3 + 3;
+            value.start_timestamp_ms = value.start_frame_id * 300;
+            value.peak_timestamp_ms = value.peak_frame_id * 300;
+            value.turnaround_confirmed_timestamp_ms = value.peak_timestamp_ms + 100;
+            value.end_timestamp_ms = value.end_frame_id * 300;
+            value.normalized_endpoints = Some(NormalizedRepEndpointEvidence {
+                coordinate_frame_id: repetition + 1,
+                start_anchor: pose_only_endpoint(0.0),
+                primary_turnaround: pose_only_endpoint(0.8),
+                end_return: pose_only_endpoint(0.03),
+                anatomical_left_turnaround_timestamp_ms: None,
+                anatomical_right_turnaround_timestamp_ms: None,
+            });
+            value
+        };
+
+        let first = authority.admit(candidate(0), &binding.profile);
+        assert_eq!(first.disposition, RepDisposition::Confirmed, "{first:?}");
+        let repeated_side = authority.admit(candidate(1), &binding.profile);
+        assert_eq!(repeated_side.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            repeated_side.evidence_reason,
+            Some(RepEvidenceReason::AlternatingSideMismatch)
+        );
+    }
+
+    #[test]
+    fn single_leg_bridge_requires_visible_leg_height_asymmetry_for_the_whole_rep() {
+        let catalog = crate::installed_action_motion_catalog_v1().expect("installed catalog");
+        let definition = catalog
+            .definition("single_leg_glute_bridge")
+            .expect("single-leg bridge definition");
+        let plan = crate::ActionMotionCompiler::new(crate::OperatorRegistry::standard())
+            .compile(definition, "front_left_45")
+            .expect("single-leg bridge plan");
+        let binding = crate::compile_action_plan_runtime_binding(plan.clone())
+            .expect("single-leg bridge runtime binding");
+
+        let assess = |right_ankle_y: [f32; 3]| {
+            let mut authority = ActionRepAuthority::new(plan.clone()).expect("plan authority");
+            for (index, y) in right_ankle_y.into_iter().enumerate() {
+                let frame_id = index as u64 + 1;
+                authority.history.push_back(ActionRepFrame {
+                    frame_id,
+                    timestamp_ms: frame_id * 100,
+                    canonical: pose_with_ankle_positions(0.40, 0.85, 0.60, y),
+                    equipment: EquipmentFrameEvidence::cannot_judge(
+                        frame_id * 100,
+                        Some(1),
+                        EquipmentCannotJudgeReason::NoEquipmentObservation,
+                    ),
+                    local_coordinate: pose_only_endpoint(match frame_id {
+                        1 => 0.0,
+                        2 => 0.8,
+                        _ => 0.03,
+                    }),
+                });
+            }
+            let mut candidate = rep(&binding.profile, 0.8, 0.03);
+            candidate.normalized_endpoints = Some(NormalizedRepEndpointEvidence {
+                coordinate_frame_id: 1,
+                start_anchor: pose_only_endpoint(0.0),
+                primary_turnaround: pose_only_endpoint(0.8),
+                end_return: pose_only_endpoint(0.03),
+                anatomical_left_turnaround_timestamp_ms: None,
+                anatomical_right_turnaround_timestamp_ms: None,
+            });
+            authority.admit(candidate, &binding.profile)
+        };
+
+        let bilateral = assess([0.85, 0.85, 0.85]);
+        assert_eq!(bilateral.disposition, RepDisposition::Rejected);
+        assert_eq!(
+            bilateral.evidence_reason,
+            Some(RepEvidenceReason::IdentityRelationMagnitudeMismatch)
+        );
+        let single_leg = assess([0.60, 0.60, 0.60]);
+        assert_eq!(
+            single_leg.disposition,
+            RepDisposition::Confirmed,
+            "{single_leg:?}"
         );
     }
 
@@ -4194,7 +6092,12 @@ mod action_rep_authority_tests {
                     && binding.capture_view == crate::AssessmentCaptureView::Front
             })
             .expect("v0.1 bench binding");
-        let plan = binding.motion_plan.clone().expect("compiled plan");
+        let mut plan = binding.motion_plan.clone().expect("compiled plan");
+        for relation in &mut plan.relations {
+            if relation.judgeability == FeatureJudgeability::RequiredForRep {
+                relation.source_requirement = OperatorSourceRequirement::CurrentMeasuredPose;
+            }
+        }
         let mut authority = ActionRepAuthority::new(plan).expect("plan authority");
 
         for (frame_id, timestamp_ms, angle, progress, measured_equipment) in [
@@ -4219,7 +6122,9 @@ mod action_rep_authority_tests {
                         EquipmentCannotJudgeReason::NoEquipmentObservation,
                     )
                 },
-                local_coordinate: if measured_equipment {
+                local_coordinate: if frame_id == 29 {
+                    agreeing_endpoint(progress)
+                } else if measured_equipment {
                     local_endpoint(progress)
                 } else {
                     pose_only_endpoint(progress)
@@ -4245,10 +6150,31 @@ mod action_rep_authority_tests {
 
         let accepted = authority.admit(candidate, &binding.profile);
         assert_eq!(accepted.disposition, RepDisposition::Confirmed);
+        assert_eq!(accepted.peak_frame_id, 20);
+        assert_eq!(accepted.peak_timestamp_ms, 200);
+        assert_eq!(accepted.turnaround_confirmed_timestamp_ms, 290);
         assert!(
             accepted
                 .observation_findings
                 .contains(&RepObservationFinding::ActionPrimaryRelationSatisfied)
+        );
+
+        let mut no_reversal_confirmation = rep(&binding.profile, 0.80, 0.05);
+        no_reversal_confirmation.start_frame_id = 10;
+        no_reversal_confirmation.start_timestamp_ms = 100;
+        no_reversal_confirmation.peak_frame_id = 20;
+        no_reversal_confirmation.peak_timestamp_ms = 200;
+        no_reversal_confirmation.end_frame_id = 21;
+        no_reversal_confirmation.end_timestamp_ms = 210;
+        let (_, refinement, reason) =
+            authority.refine_candidate_turnaround(&mut no_reversal_confirmation);
+        assert_eq!(reason, None);
+        assert!(refinement.ends_with("turnaround_unconfirmed"));
+        assert_eq!(no_reversal_confirmation.peak_frame_id, 20);
+        assert_eq!(no_reversal_confirmation.peak_timestamp_ms, 200);
+        assert_eq!(
+            no_reversal_confirmation.turnaround_confirmed_timestamp_ms,
+            250
         );
     }
 }
@@ -4296,6 +6222,8 @@ impl RepEngine {
             ready_history: VecDeque::new(),
             pending_activation: None,
             pending_return_since_ms: None,
+            pending_turnaround_dwell_since_ms: None,
+            turnaround_dwell_observed: false,
             pending_ready: None,
             local_evidence_history: VecDeque::new(),
             equipment_turnaround_history: VecDeque::new(),
@@ -4318,6 +6246,8 @@ impl RepEngine {
         self.gap_since_ms = None;
         self.pending_activation = None;
         self.pending_return_since_ms = None;
+        self.pending_turnaround_dwell_since_ms = None;
+        self.turnaround_dwell_observed = false;
         self.pending_ready = None;
     }
 
@@ -4373,6 +6303,7 @@ impl RepEngine {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+        action_primary: Option<ActionPrimarySignal>,
     ) {
         if self.barbell_phase.is_some() {
             return;
@@ -4380,12 +6311,23 @@ impl RepEngine {
         if target_state != TargetState::Locked || self.state.phase != RepPhase::Ready {
             return;
         }
-        if !profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
-            return;
-        }
-        let Some((primary, secondary, torso, _repaired)) =
+        let profile_uses_action_primary = self.profile.primary_signal.kind
+            == ExerciseSignalKind::ActionPrimaryRelationScalar
+            && self.profile.secondary_signal.kind
+                == ExerciseSignalKind::ActionPrimaryRelationScalar;
+        let signal = if profile_uses_action_primary {
+            action_primary
+                .filter(|signal| {
+                    signal.primary.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+                        && signal.secondary.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+                })
+                .map(|signal| (signal.primary.value, signal.secondary.value, 0.0, false))
+        } else if profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
             profile_signal_with_local(&self.profile, canonical, local_coordinate)
-        else {
+        } else {
+            None
+        };
+        let Some((primary, secondary, torso, _repaired)) = signal else {
             return;
         };
         let sample = self.signal_sample(frame_id, timestamp_ms, primary, secondary, torso);
@@ -4538,6 +6480,8 @@ impl RepEngine {
         self.gap_since_ms = None;
         self.pending_activation = None;
         self.pending_return_since_ms = None;
+        self.pending_turnaround_dwell_since_ms = None;
+        self.turnaround_dwell_observed = false;
         self.pending_ready = None;
         let pose_turnaround_ms = active.peak.timestamp_ms;
         if let Some(equipment_turnaround) = self.fused_equipment_turnaround(
@@ -4656,7 +6600,7 @@ impl RepEngine {
                 .saturating_sub(active.start.timestamp_ms)
                 >= self.profile.minimum_phase_dwell_ms()
                 && end.timestamp_ms.saturating_sub(active.peak.timestamp_ms)
-                    >= self.profile.minimum_phase_dwell_ms());
+                    >= self.profile.terminal_phase_dwell_ms());
         let minimum_evidence = active.peak_amplitude >= self.minimum_observable_primary()
             && active.peak_secondary_amplitude >= self.minimum_observable_secondary()
             && duration_ms >= self.minimum_observable_duration_ms()
@@ -4707,7 +6651,7 @@ impl RepEngine {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
     ) -> Vec<SealedRep> {
-        self.process_pose(frame_id, timestamp_ms, target_state, canonical, None)
+        self.process_pose(frame_id, timestamp_ms, target_state, canonical, None, None)
     }
 
     fn process_with_equipment(
@@ -4718,6 +6662,7 @@ impl RepEngine {
         canonical: &[CanonicalLandmark],
         equipment: &EquipmentFrameEvidence,
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+        action_primary: Option<ActionPrimarySignal>,
     ) -> Vec<SealedRep> {
         self.observe_equipment_turnaround(frame_id, timestamp_ms, equipment);
         if self.barbell_phase.is_none() {
@@ -4727,6 +6672,7 @@ impl RepEngine {
                 target_state,
                 canonical,
                 local_coordinate,
+                action_primary,
             );
         }
         let active_barbell_rep = self
@@ -4842,6 +6788,7 @@ impl RepEngine {
         target_state: TargetState,
         canonical: &[CanonicalLandmark],
         local_coordinate: Option<&LocalMotionCoordinateEvidence>,
+        action_primary: Option<ActionPrimarySignal>,
     ) -> Vec<SealedRep> {
         if let Some(evidence) = local_coordinate {
             self.local_evidence_history
@@ -4872,9 +6819,16 @@ impl RepEngine {
                 RepEvidenceReason::CoordinateNotFrozen,
             );
         }
-        let Some((primary, secondary, torso, _repaired)) =
+        let profile_uses_action_primary = self.profile.primary_signal.kind
+            == ExerciseSignalKind::ActionPrimaryRelationScalar
+            && self.profile.secondary_signal.kind
+                == ExerciseSignalKind::ActionPrimaryRelationScalar;
+        let signal = if profile_uses_action_primary {
+            action_primary.map(|signal| (signal.primary.value, signal.secondary.value, 0.0, false))
+        } else {
             profile_signal_with_local(&self.profile, canonical, local_coordinate)
-        else {
+        };
+        let Some((primary, secondary, torso, _repaired)) = signal else {
             return self.handle_gap(
                 frame_id,
                 timestamp_ms,
@@ -4887,7 +6841,15 @@ impl RepEngine {
         // an anatomically impossible joint-angle extremum. Freeze the rep
         // engine until measured or topology-fused signal evidence returns;
         // predicted/weak samples must never create start/peak/end events.
-        if !profile_signal_transition_eligible(&self.profile, canonical, local_coordinate) {
+        let transition_eligible = if profile_uses_action_primary {
+            action_primary.is_some_and(|signal| {
+                signal.primary.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+                    && signal.secondary.confidence >= PHASE_SIGNAL_MIN_CONFIDENCE
+            })
+        } else {
+            profile_signal_transition_eligible(&self.profile, canonical, local_coordinate)
+        };
+        if !transition_eligible {
             return self.handle_gap(
                 frame_id,
                 timestamp_ms,
@@ -5080,7 +7042,12 @@ impl RepEngine {
                             .min(self.profile.return_hysteresis)
                     };
                 let returned = active.peak_amplitude - amplitude >= return_hysteresis;
-                let directly_ready = amplitude <= self.profile.ready_tolerance;
+                let directly_ready =
+                    if action_plan_topology_id(&self.profile.state_machine_id).is_some() {
+                        active_ready_distance(active, sample) <= self.profile.return_tolerance
+                    } else {
+                        amplitude <= self.profile.ready_tolerance
+                    };
                 if returned {
                     self.state.phase = RepPhase::Return;
                 } else if directly_ready {
@@ -5095,7 +7062,11 @@ impl RepEngine {
                     active.peak_amplitude = amplitude;
                     self.state.phase = RepPhase::Peak;
                     self.pending_ready = None;
-                } else if amplitude <= seal_ready_threshold(&self.profile, active.peak_amplitude) {
+                } else if if action_plan_topology_id(&self.profile.state_machine_id).is_some() {
+                    active_ready_distance(active, sample) <= self.profile.return_tolerance
+                } else {
+                    amplitude <= seal_ready_threshold(&self.profile, active.peak_amplitude)
+                } {
                     if self.profile.uses_cycle_aligned_boundaries() {
                         let ready_distance = active_ready_distance(active, sample);
                         match self.pending_ready.as_mut() {
@@ -5115,7 +7086,7 @@ impl RepEngine {
                         }
                         let pending = self.pending_ready.expect("pending cycle ready");
                         if sample.timestamp_ms.saturating_sub(pending.since_ms)
-                            < self.profile.minimum_phase_dwell_ms()
+                            < self.profile.terminal_phase_dwell_ms()
                         {
                             self.previous = Some(sample);
                             return sealed;
@@ -5337,6 +7308,8 @@ impl RepEngine {
 
                 let pending = self.pending_activation.take().expect("pending activation");
                 let rep_id = self.next_rep_id;
+                self.pending_turnaround_dwell_since_ms = None;
+                self.turnaround_dwell_observed = false;
                 self.active = Some(ActiveRep {
                     rep_id,
                     direction: pending.direction,
@@ -5356,28 +7329,74 @@ impl RepEngine {
                 Vec::new()
             }
             RepPhase::Effort | RepPhase::Peak => {
-                let active = self.active.as_mut().expect("active stable effort rep");
-                if sample
-                    .timestamp_ms
-                    .saturating_sub(active.start.timestamp_ms)
-                    > self.profile.max_rep_duration_ms
-                {
+                let requires_turnaround_dwell = self.profile.uses_multi_stage_state_graph();
+                let duration_exceeded = self.active.as_ref().is_some_and(|active| {
+                    sample
+                        .timestamp_ms
+                        .saturating_sub(active.start.timestamp_ms)
+                        > self.profile.max_rep_duration_ms
+                });
+                if duration_exceeded {
                     return self
                         .reject_active(RepEvidenceReason::DurationExceeded, Some(sample))
                         .into_iter()
                         .collect();
                 }
-                active.hash = hash_sample(active.hash, sample);
-                if amplitude >= active.peak_amplitude {
-                    active.peak = sample;
-                    active.peak_amplitude = amplitude;
-                    self.pending_return_since_ms = None;
+                let (reversal, peak_sufficient) = {
+                    let active = self.active.as_mut().expect("active stable effort rep");
+                    active.hash = hash_sample(active.hash, sample);
+                    if amplitude >= active.peak_amplitude {
+                        let meaningful_advance = amplitude
+                            > active.peak_amplitude + self.profile.return_hysteresis * 0.25;
+                        active.peak = sample;
+                        active.peak_amplitude = amplitude;
+                        self.pending_return_since_ms = None;
+                        if requires_turnaround_dwell && meaningful_advance {
+                            self.pending_turnaround_dwell_since_ms = Some(sample.timestamp_ms);
+                            self.turnaround_dwell_observed = false;
+                        }
+                    }
+                    active.peak_secondary_amplitude =
+                        active.peak_secondary_amplitude.max(secondary_amplitude);
+                    (
+                        active.peak_amplitude - amplitude >= self.profile.return_hysteresis,
+                        active.peak_amplitude >= self.profile.min_primary_amplitude,
+                    )
+                };
+                if requires_turnaround_dwell && peak_sufficient {
+                    let peak_amplitude = self
+                        .active
+                        .as_ref()
+                        .expect("active stable effort rep")
+                        .peak_amplitude;
+                    let near_turnaround =
+                        peak_amplitude - amplitude <= self.profile.return_hysteresis * 0.50;
+                    if near_turnaround {
+                        let since = *self
+                            .pending_turnaround_dwell_since_ms
+                            .get_or_insert(sample.timestamp_ms);
+                        if sample.timestamp_ms.saturating_sub(since) >= dwell_ms {
+                            self.turnaround_dwell_observed = true;
+                        }
+                    } else if !reversal {
+                        self.pending_turnaround_dwell_since_ms = None;
+                        self.turnaround_dwell_observed = false;
+                    }
                 }
-                active.peak_secondary_amplitude =
-                    active.peak_secondary_amplitude.max(secondary_amplitude);
-                let reversal = active.peak_amplitude - amplitude >= self.profile.return_hysteresis;
                 if !reversal {
                     self.pending_return_since_ms = None;
+                    return Vec::new();
+                }
+                if requires_turnaround_dwell {
+                    if !self.turnaround_dwell_observed {
+                        return self
+                            .reject_active(RepEvidenceReason::DeclaredPhaseMissing, Some(sample))
+                            .into_iter()
+                            .collect();
+                    }
+                    self.state.phase = RepPhase::Return;
+                    self.pending_return_since_ms = None;
+                    self.pending_ready = None;
                     return Vec::new();
                 }
                 let since = *self
@@ -5397,6 +7416,8 @@ impl RepEngine {
                     active.peak_amplitude = amplitude;
                     self.state.phase = RepPhase::Effort;
                     self.pending_return_since_ms = None;
+                    self.pending_turnaround_dwell_since_ms = None;
+                    self.turnaround_dwell_observed = false;
                     self.pending_ready = None;
                     return Vec::new();
                 }
@@ -5509,8 +7530,15 @@ impl RepEngine {
         if self.active.is_none() {
             self.pending_activation = None;
             self.pending_return_since_ms = None;
+            self.pending_turnaround_dwell_since_ms = None;
+            self.turnaround_dwell_observed = false;
             self.pending_ready = None;
             return Vec::new();
+        }
+        if !self.turnaround_dwell_observed {
+            // Missing evidence cannot contribute elapsed time to a declared
+            // visible pause phase.
+            self.pending_turnaround_dwell_since_ms = None;
         }
         if let Some(active) = self.active.as_mut() {
             active
@@ -5881,6 +7909,7 @@ mod rep_signal_observation_trust_tests {
             min_primary_amplitude: 30.0,
             min_secondary_amplitude: 30.0,
             return_hysteresis: 15.0,
+            return_tolerance: 8.0,
             ready_tolerance: 8.0,
             max_gap_ms: 400,
             min_rep_duration_ms: 300,
@@ -5990,6 +8019,10 @@ fn measure_signal(
             };
             Some((distance(first, second)? + distance(third, fourth)?) / scale)
         }
+        // The exact action-plan relation owns this signal. It is supplied to
+        // RepEngine through `ActionPrimarySignal`; falling back to a generic
+        // landmark calculation here would recreate the legacy semantic gap.
+        ExerciseSignalKind::ActionPrimaryRelationScalar => None,
         ExerciseSignalKind::LocalPoseAlongAxisProgress
         | ExerciseSignalKind::LocalObservedAlongAxisProgress
         | ExerciseSignalKind::LocalAlongAxisProgress
@@ -6018,13 +8051,10 @@ fn measure_local_signal(
             let channel = local.pose?;
             local_channel_measurement(channel, channel.along_axis_progress)
         }
-        ExerciseSignalKind::LocalObservedAlongAxisProgress => local
-            .equipment
-            .and_then(|channel| local_channel_measurement(channel, channel.along_axis_progress))
-            .or_else(|| {
-                let channel = local.pose?;
-                local_channel_measurement(channel, channel.along_axis_progress)
-            }),
+        ExerciseSignalKind::LocalObservedAlongAxisProgress => {
+            let channel = local.equipment?;
+            local_channel_measurement(channel, channel.along_axis_progress)
+        }
         ExerciseSignalKind::LocalAlongAxisProgress => {
             let channel = local.equipment?;
             local_channel_measurement(channel, channel.along_axis_progress)
@@ -6254,6 +8284,7 @@ mod local_profile_signal_consumption_tests {
                 &canonical,
                 &equipment,
                 provide_local_evidence.then_some(&evidence),
+                None,
             ));
         }
         sealed.extend(engine.finish_set());
@@ -6286,6 +8317,174 @@ mod local_profile_signal_consumption_tests {
         assert!(
             run_local_profile(ExerciseSignalKind::LocalAlongAxisProgress, false).is_empty(),
             "a local Profile must not fall back to the available screen-space bar center",
+        );
+    }
+
+    #[test]
+    fn action_plan_return_tolerance_controls_preseal_endpoint() {
+        let mut profile = local_profile(ExerciseSignalKind::LocalAlongAxisProgress);
+        profile.state_machine_id =
+            action_plan_topology_state_machine_id("bilateral_synchronous_cycle/v1", 100);
+        profile.direction = MovementDirection::Auto;
+        profile.start_amplitude = 0.10;
+        profile.min_primary_amplitude = 0.30;
+        profile.min_secondary_amplitude = 0.30;
+        profile.return_hysteresis = 0.08;
+        profile.return_tolerance = 0.05;
+        profile.ready_tolerance = 0.12;
+        profile.min_rep_duration_ms = 400;
+        profile.content_hash = profile.computed_content_hash();
+        assert_eq!(seal_ready_threshold(&profile, 0.42), 0.05);
+        let mut engine = RepEngine::new(profile);
+        engine.begin_set();
+        let canonical = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        let progress = [
+            0.0, 0.0, 0.12, 0.25, 0.42, 0.30, 0.16, 0.08, 0.08, 0.04, 0.04,
+        ];
+        let mut sealed = Vec::new();
+        for (frame_id, progress) in progress.into_iter().enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            let evidence = local_evidence(
+                ExerciseSignalKind::LocalAlongAxisProgress,
+                progress,
+                timestamp_ms,
+            );
+            sealed.extend(engine.process_with_equipment(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+                &observed_barbell_frame(timestamp_ms),
+                Some(&evidence),
+                None,
+            ));
+            if progress >= 0.08 {
+                assert!(
+                    sealed.is_empty(),
+                    "readyTolerance must not override the exact returnTolerance at {progress}: {sealed:?}",
+                );
+            }
+        }
+        assert_eq!(sealed.len(), 1);
+        assert!(sealed[0].end_timestamp_ms >= 900);
+    }
+
+    #[test]
+    fn locomotion_and_multi_stage_topologies_dispatch_distinct_executors() {
+        let mut locomotion = local_profile(ExerciseSignalKind::LocalAlongAxisProgress);
+        locomotion.state_machine_id =
+            action_plan_topology_state_machine_id_with_phases("locomotion_step_cycle/v1", 4, 100);
+        locomotion.content_hash = locomotion.computed_content_hash();
+        assert!(!locomotion.uses_alternating_state_graph());
+        assert!(locomotion.uses_locomotion_step_state_graph());
+        assert_eq!(locomotion.stable_phase_dwell_ms(), None);
+        assert_eq!(locomotion.terminal_phase_dwell_ms(), 200);
+
+        let mut multi_stage = local_profile(ExerciseSignalKind::LocalAlongAxisProgress);
+        multi_stage.state_machine_id =
+            action_plan_topology_state_machine_id("multi_stage_cycle/v1", 180);
+        multi_stage.content_hash = multi_stage.computed_content_hash();
+        assert!(!multi_stage.uses_alternating_state_graph());
+        assert_eq!(multi_stage.stable_phase_dwell_ms(), Some(180));
+        assert!(locomotion.validate().is_ok());
+        assert!(multi_stage.validate().is_ok());
+
+        let canonical = vec![CanonicalLandmark::unknown(0.0, None); 26];
+        let mut locomotion_engine = RepEngine::new(locomotion);
+        locomotion_engine.begin_set();
+        let locomotion_progress = [0.0; 5]
+            .into_iter()
+            .chain([0.12, 0.28, 0.55, 0.82, 0.55, 0.28, 0.02, 0.02, 0.02]);
+        let mut locomotion_sealed = Vec::new();
+        for (frame_id, progress) in locomotion_progress.enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            let evidence = local_evidence(
+                ExerciseSignalKind::LocalAlongAxisProgress,
+                progress,
+                timestamp_ms,
+            );
+            locomotion_sealed.extend(locomotion_engine.process_with_equipment(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+                &observed_barbell_frame(timestamp_ms),
+                Some(&evidence),
+                None,
+            ));
+            if frame_id < 13 {
+                assert!(
+                    locomotion_sealed.is_empty(),
+                    "four-phase locomotion must establish next-step-ready before sealing"
+                );
+            }
+        }
+        assert_eq!(locomotion_sealed.len(), 1);
+
+        let mut multi_stage_engine = RepEngine::new(multi_stage);
+        multi_stage_engine.begin_set();
+        let multi_stage_progress = [0.0; 5]
+            .into_iter()
+            .chain([0.12, 0.28, 0.55, 0.82, 0.82, 0.82, 0.82])
+            .chain([0.55, 0.28, 0.10, 0.02, 0.02, 0.02, 0.02]);
+        let mut multi_stage_sealed = Vec::new();
+        for (frame_id, progress) in multi_stage_progress.enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            let evidence = local_evidence(
+                ExerciseSignalKind::LocalAlongAxisProgress,
+                progress,
+                timestamp_ms,
+            );
+            multi_stage_sealed.extend(multi_stage_engine.process_with_equipment(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+                &observed_barbell_frame(timestamp_ms),
+                Some(&evidence),
+                None,
+            ));
+        }
+        assert!(
+            multi_stage_sealed
+                .iter()
+                .any(|rep| rep.disposition == RepDisposition::Confirmed),
+            "multi-stage topology must require the declared contact dwell before ascent"
+        );
+
+        let mut no_pause_profile = local_profile(ExerciseSignalKind::LocalAlongAxisProgress);
+        no_pause_profile.state_machine_id =
+            action_plan_topology_state_machine_id("multi_stage_cycle/v1", 180);
+        no_pause_profile.content_hash = no_pause_profile.computed_content_hash();
+        let mut no_pause_engine = RepEngine::new(no_pause_profile);
+        no_pause_engine.begin_set();
+        let no_pause_progress = [0.0; 5]
+            .into_iter()
+            .chain([0.12, 0.28, 0.55, 0.82, 0.55, 0.28, 0.10, 0.02, 0.02, 0.02]);
+        let mut no_pause_outcomes = Vec::new();
+        for (frame_id, progress) in no_pause_progress.enumerate() {
+            let timestamp_ms = frame_id as u64 * 100;
+            let evidence = local_evidence(
+                ExerciseSignalKind::LocalAlongAxisProgress,
+                progress,
+                timestamp_ms,
+            );
+            no_pause_outcomes.extend(no_pause_engine.process_with_equipment(
+                frame_id as u64,
+                timestamp_ms,
+                TargetState::Locked,
+                &canonical,
+                &observed_barbell_frame(timestamp_ms),
+                Some(&evidence),
+                None,
+            ));
+        }
+        no_pause_outcomes.extend(no_pause_engine.finish_set());
+        assert!(
+            no_pause_outcomes
+                .iter()
+                .all(|rep| rep.disposition == RepDisposition::Rejected),
+            "a continuous round trip without the declared turnaround dwell is not multi-stage"
         );
     }
 
@@ -6574,6 +8773,12 @@ fn activation_direction(
 /// retain the original ready anchor when sealing (see above), which prevents a
 /// mid-return close from becoming a second, opposite-direction action.
 fn seal_ready_threshold(profile: &ExerciseProfile, peak_amplitude: f32) -> f32 {
+    if action_plan_topology_id(&profile.state_machine_id).is_some() {
+        // Exact action×view assets own the completed-return corridor. Do not
+        // replace it with the historical global fraction of observed range;
+        // that changes action identity before the candidate is sealed.
+        return profile.return_tolerance;
+    }
     if profile.uses_cycle_aligned_boundaries() {
         // A camera-space baseline drifts slightly across otherwise valid
         // repetitions (especially for a supine subject). Waiting for an exact
@@ -6715,6 +8920,12 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 supported: SUPPORTED_CONTRACT_MAJOR,
             });
         }
+        if config.contract.minor > CURRENT_MOTION_PACKET_CONTRACT.minor {
+            return Err(OpenError::UnsupportedContractMinor {
+                requested: config.contract.minor,
+                supported: CURRENT_MOTION_PACKET_CONTRACT.minor,
+            });
+        }
         if config.sequence_id.trim().is_empty() {
             return Err(OpenError::InvalidSequenceId);
         }
@@ -6770,7 +8981,19 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     /// Begins one explicitly recorded training set. Live adapters call this at
     /// the same boundary as their recorder; offline replay retains its active
     /// default until it opts into the set lifecycle.
-    pub fn begin_set(&mut self) {
+    pub fn begin_set(&mut self) -> Result<(), MotionError> {
+        // A newly opened replay session starts in Active for backwards
+        // compatibility, but it has not consumed a frame yet. That one
+        // pre-frame transition may enter the explicit recorded lifecycle.
+        // Once a real set is arming, active, or paused, resetting its Rep
+        // engine/history would create a second truth under the same session.
+        if matches!(
+            self.set_gate.state.lifecycle,
+            SetLifecycle::Arming | SetLifecycle::Paused
+        ) || (self.set_gate.state.lifecycle == SetLifecycle::Active && self.accepted_frames > 0)
+        {
+            return Err(MotionError::SetLifecycleFrozen);
+        }
         self.pending_outcomes.clear();
         self.assessment_outcomes.clear();
         self.set_gate.begin();
@@ -6781,6 +9004,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         if let Some(authority) = self.action_rep_authority.as_mut() {
             authority.begin_set();
         }
+        Ok(())
     }
 
     /// Seals the lifecycle without synthesising a rep from an incomplete
@@ -6907,6 +9131,11 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
         strategy: LocalMotionCoordinateStrategy,
         plan: ActionObservationPlan,
     ) -> Result<(), MotionError> {
+        if self.config.contract.minor < CURRENT_MOTION_PACKET_CONTRACT.minor {
+            return Err(MotionError::InvalidActionPlan(
+                "action plans require packet contract 1.11 or newer",
+            ));
+        }
         let suffix = format!("/action-plan-{}", plan.plan_hash);
         if !profile.identity.ends_with(&suffix) {
             return Err(MotionError::InvalidActionPlan(
@@ -6948,9 +9177,20 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
     /// Declares whether submitted canonical coordinates themselves have been
     /// horizontally mirrored. Preview mirroring is a renderer concern and
     /// must not call this method.
-    pub fn set_canonical_feed_mirroring(&mut self, mirrored: Option<bool>) {
+    pub fn set_canonical_feed_mirroring(
+        &mut self,
+        mirrored: Option<bool>,
+    ) -> Result<(), MotionError> {
+        if matches!(
+            self.set_gate.state.lifecycle,
+            SetLifecycle::Arming | SetLifecycle::Paused
+        ) || (self.set_gate.state.lifecycle == SetLifecycle::Active && self.accepted_frames > 0)
+        {
+            return Err(MotionError::SetLifecycleFrozen);
+        }
         self.local_motion_coordinate
             .set_canonical_feed_mirroring(mirrored);
+        Ok(())
     }
 
     pub fn revise_sealed_rep(
@@ -7103,6 +9343,11 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     && authority.runs(AlgorithmModuleCategory::EquipmentObservation)
                     && authority.runs(AlgorithmModuleCategory::EquipmentFusion)
             });
+        // The adapter may run on a frame without finding an object. That is
+        // an explicit absence for fusion, not an equipment-observation fact
+        // and never a wrist-derived substitute.
+        let equipment_observation_executed =
+            action_runs_equipment_fusion && !raw_equipment.is_empty();
         let equipment = if action_runs_equipment_fusion {
             self.equipment_fusion.process(EquipmentFrameInput {
                 timestamp_ms: source_timestamp_ms,
@@ -7127,6 +9372,11 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             &phase_pose_canonical,
             &equipment,
         );
+        let action_primary = self.action_rep_authority.as_ref().and_then(|authority| {
+            self.rep_engine.as_ref().and_then(|engine| {
+                authority.task_primary_signal(engine.profile.schema, &phase_pose_canonical)
+            })
+        });
         if let (Some(authority), Some(rep_engine)) =
             (self.action_rep_authority.as_mut(), self.rep_engine.as_ref())
         {
@@ -7137,6 +9387,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                 &equipment,
                 &local_motion_coordinate,
                 rep_engine.profile.max_rep_duration_ms + rep_engine.profile.max_gap_ms,
+                equipment_observation_executed,
                 action_runs_equipment_fusion,
             );
         }
@@ -7168,6 +9419,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
                     target.state,
                     &phase_pose_canonical,
                     Some(&local_motion_coordinate),
+                    action_primary,
                 );
             }
         }
@@ -7177,6 +9429,7 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             &canonical,
             Some(&equipment),
             Some(&local_motion_coordinate),
+            action_primary,
             source_timestamp_ms,
             rep_phase,
         );
@@ -7187,38 +9440,61 @@ impl<I: InferenceAdapter, O: OutputAdapter> MotionSession<I, O> {
             rep_phase,
             RepPhase::Effort | RepPhase::Peak | RepPhase::Return
         );
-        let action_runs_rep_topology = self
-            .action_rep_authority
-            .as_ref()
-            .is_none_or(|authority| authority.runs(AlgorithmModuleCategory::RepTopology));
-        let proposed_reps =
-            if action_runs_rep_topology && (may_process_rep || active_rep_requires_observation) {
-                if let Some(authority) = self.action_rep_authority.as_mut() {
-                    authority.record_rep_topology(frame_id, source_timestamp_ms);
-                }
-                self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
-                    engine.process_with_equipment(
-                        frame_id,
-                        source_timestamp_ms,
-                        target.state,
-                        &phase_pose_canonical,
+        let action_rep_gate =
+            self.action_rep_authority
+                .as_ref()
+                .map_or(ActionRepFrameGate::Execute, |authority| {
+                    authority.rep_topology_gate(
+                        self.rep_engine
+                            .as_ref()
+                            .map_or(PoseSchemaId::Halpe26, |engine| engine.profile.schema),
                         &equipment,
-                        Some(&local_motion_coordinate),
+                        &local_motion_coordinate,
                     )
-                })
-            } else {
-                if let Some(rep_engine) = self.rep_engine.as_mut() {
-                    rep_engine.prime_barbell_ready(
-                        frame_id,
-                        source_timestamp_ms,
-                        target.state,
-                        &phase_pose_canonical,
-                        &equipment,
-                        Some(&local_motion_coordinate),
-                    );
+                });
+        let proposed_reps = if may_process_rep || active_rep_requires_observation {
+            match action_rep_gate {
+                ActionRepFrameGate::Reject(reason) => self
+                    .rep_engine
+                    .as_mut()
+                    .and_then(|engine| {
+                        let previous = engine.previous;
+                        engine.reject_active(reason, previous)
+                    })
+                    .into_iter()
+                    .collect(),
+                ActionRepFrameGate::Execute | ActionRepFrameGate::Hold => {
+                    if action_rep_gate == ActionRepFrameGate::Execute
+                        && let Some(authority) = self.action_rep_authority.as_mut()
+                    {
+                        authority.record_rep_topology(frame_id, source_timestamp_ms);
+                    }
+                    self.rep_engine.as_mut().map_or_else(Vec::new, |engine| {
+                        engine.process_with_equipment(
+                            frame_id,
+                            source_timestamp_ms,
+                            target.state,
+                            &phase_pose_canonical,
+                            &equipment,
+                            Some(&local_motion_coordinate),
+                            action_primary,
+                        )
+                    })
                 }
-                Vec::new()
-            };
+            }
+        } else {
+            if let Some(rep_engine) = self.rep_engine.as_mut() {
+                rep_engine.prime_barbell_ready(
+                    frame_id,
+                    source_timestamp_ms,
+                    target.state,
+                    &phase_pose_canonical,
+                    &equipment,
+                    Some(&local_motion_coordinate),
+                );
+            }
+            Vec::new()
+        };
         let profile = self
             .rep_engine
             .as_ref()

@@ -4,7 +4,8 @@
 
 **Blocked by:** 01 — 建立可复用识别算法模块库.
 
-**Status:** complete for the installed action library; deferred topology executors are tracked in Ticket 07
+**Status:** complete — re-accepted after exact topology thresholds and module
+policies governed the pre-seal path with no equipment-primary pose fallback.
 
 ## Audit context and non-negotiable constraints
 
@@ -67,3 +68,9 @@ longer fall back to one global initializer. A dynamic dwell state graph proves
 a rapid round trip is not formal volume, while a sign-invariant contract accepts
 the mirrored equivalent cycle. Ticket 10 separately verifies the numerical
 action×view replay outcome against governed human truth.
+
+Re-acceptance additionally binds the plan's return tolerance to the actual
+pre-seal state graph, requires the measured local equipment channel for an
+equipment-primary plan, and keeps bounded missing evidence in the typed
+gap/NeedsReview path. The complete 24-context lifecycle contract passes. The
+numeric recognition-rate acceptance remains exclusively in Ticket 10.

@@ -451,7 +451,9 @@ fn detect_shaft_candidates(
     let maximum_gap = ((width as f32 * 0.012).round() as usize).max(6);
     let mut candidates = Vec::new();
     for slope in SEARCH_SLOPES {
-        for center_y in (search_top..=search_bottom).step_by(2) {
+        // Test every possible band centre. Sampling every other row can miss
+        // a thin shaft solely because its two edges have the opposite parity.
+        for center_y in search_top..=search_bottom {
             let mut intervals = Vec::new();
             let mut interval_start = None;
             let mut last_supported_x = None;
@@ -461,14 +463,15 @@ fn detect_shaft_candidates(
             for x in (2..width.saturating_sub(2)).step_by(x_step) {
                 let y =
                     (center_y as f32 + slope * (x as f32 - width as f32 * 0.5)).round() as isize;
-                if y < 3 || y >= height as isize - 3 {
+                if y < 10 || y >= height as isize - 10 {
                     continue;
                 }
                 let y = y as usize;
-                let edge = (i16::from(luma[(y - 2) * width + x])
-                    - i16::from(luma[(y + 2) * width + x]))
-                .abs();
-                if edge >= EDGE_THRESHOLD {
+                // A rigid shaft is a bounded band with two approximately
+                // parallel, opposite-polarity edges. A single long scene
+                // boundary (rack, mirror seam, bench edge) is not equipment
+                // geometry even when it is close to both wrists.
+                if let Some(edge) = paired_shaft_edge_strength(luma, width, height, x, y) {
                     interval_start.get_or_insert(x);
                     last_supported_x = Some(x);
                     support_count += 1;
@@ -548,6 +551,33 @@ fn detect_shaft_candidates(
         }
     }
     kept
+}
+
+fn paired_shaft_edge_strength(
+    luma: &[u8],
+    width: usize,
+    height: usize,
+    x: usize,
+    center_y: usize,
+) -> Option<i16> {
+    for half_thickness in 2..=8 {
+        if center_y <= half_thickness + 1 || center_y + half_thickness + 1 >= height {
+            continue;
+        }
+        let upper_outer = i16::from(luma[(center_y - half_thickness - 1) * width + x]);
+        let upper_inner = i16::from(luma[(center_y - half_thickness + 1) * width + x]);
+        let lower_inner = i16::from(luma[(center_y + half_thickness - 1) * width + x]);
+        let lower_outer = i16::from(luma[(center_y + half_thickness + 1) * width + x]);
+        let upper = upper_outer - upper_inner;
+        let lower = lower_inner - lower_outer;
+        if upper.abs() >= EDGE_THRESHOLD
+            && lower.abs() >= EDGE_THRESHOLD
+            && upper.signum() != lower.signum()
+        {
+            return Some((upper.abs() + lower.abs()) / 2);
+        }
+    }
+    None
 }
 
 fn pose_search_context(subjects: &[PoseCandidate], height: usize) -> (usize, usize) {

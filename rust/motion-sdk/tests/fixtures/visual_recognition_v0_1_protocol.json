@@ -1,26 +1,26 @@
 {
   "schemaVersion": "maxpower.visual-recognition-evaluation-protocol/v0.1",
-  "evaluationId": "visual-recognition-v0.1-known-video-baseline-2026-08-15",
-  "protocolSha256": "6deb6e3b8b0b782adf73ce49cb0484c66912abb041961b25b101378949195457",
+  "evaluationId": "visual-recognition-v0.1b-action-driven-2026-08-16",
+  "protocolSha256": "d66750afa18e103a427ef15df86d30fda16bd3f3af7a083cb83ad1f1232266b8",
   "protocol": {
     "evaluationScope": "known_participant_known_video_regression",
     "generalizationClaimAllowed": false,
     "replayManifest": {
       "path": "rust/motion-sdk/tests/fixtures/all_action_governed_replay_manifest_v1.json",
-      "sha256": "e8dd9405900b110d25f029591f73058aecd8a1fa68fdb91d436bfdd4dc2c69be",
-      "assembledInputSha256": "c809664df9b7c0cddd71ea28e7b19bdf0d11106686c3e43a5d431ad03363289e"
+      "sha256": "c466991825037460753975be7b5b18a6806fa64581a6e2248d710b8d0357b7d2",
+      "assembledInputSha256": "1eb9e0c04ddc4c8aaa9be8f63a0e1f91eef453d40df8b8e4984901ca0fdb7ae3"
     },
     "videoSourceManifest": {
       "path": "rust/motion-sdk/tests/fixtures/visual_recognition_v0_1_video_sources.json",
-      "sha256": "0ed5f59f06e1cf99aef6e84b253739738dc49c39f10cafee05e964475f5dd6b2",
-      "semanticSha256": "36f6a3b69ea2d7dc7e9d88d95fb4c73734b11993944960b82ad8d74a2fc2d7f6"
+      "sha256": "da9e6e65ea4ed03f35e8b2b9173e2495cd98af40b768b03035e4a7036e3ce03b",
+      "semanticSha256": "27effc75bc3d4303b2a9aa2c06402620458f251888bdae3c99752b91c4ccce7b"
     },
     "modelConfiguration": {
       "sdkVersion": "0.1.0",
       "assessmentCatalogId": "maxpower/visual-recognition-baseline/v0.1",
       "poseRuntimeId": "rtmpose-m",
       "poseSchema": "halpe26/v1",
-      "packetContract": "1.10",
+      "packetContract": "1.11",
       "equipmentProvider": "maxpower_motion_sdk::EquipmentProviderRegistry",
       "equipmentActivationAuthority": "ExecutionContract",
       "repBoundaryAuthority": "action_observation_plan_task_primary_and_required_relations",
@@ -66,7 +66,7 @@
       "production_promotion"
     ],
     "output": {
-      "path": "workspace/visual-recognition-v0.1/full-known-video-evaluation.json",
+      "path": "workspace/visual-recognition-v0.1/v0.1b-action-driven-evaluation-2026-08-16.json",
       "schemaVersion": "maxpower.visual-recognition-known-video-evaluation/v0.1"
     }
   }

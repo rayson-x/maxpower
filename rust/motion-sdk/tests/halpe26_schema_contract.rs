@@ -30,6 +30,7 @@ fn profile_with_joints(joints: [usize; 2]) -> ExerciseProfile {
         min_primary_amplitude: 0.20,
         min_secondary_amplitude: 0.18,
         return_hysteresis: 0.05,
+        return_tolerance: 0.06,
         ready_tolerance: 0.06,
         max_gap_ms: 700,
         min_rep_duration_ms: 450,

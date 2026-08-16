@@ -39,6 +39,25 @@ fn beginning_a_live_set_before_the_next_camera_frame_still_publishes_a_packet() 
 }
 
 #[test]
+fn reset_cannot_destroy_a_live_sets_frozen_context() {
+    let _guard = ABI_TEST_LOCK.lock().unwrap();
+    assert_eq!(motion_sdk_close(), 0);
+    assert_eq!(motion_sdk_reset(640, 480, 1), 0);
+    assert_eq!(motion_sdk_set_profile(5), 0);
+    assert_eq!(motion_sdk_begin_set(), 0);
+
+    assert_eq!(
+        motion_sdk_reset(320, 240, 0),
+        -3,
+        "reset is session configuration, not an undocumented abort-set escape hatch",
+    );
+
+    assert_eq!(motion_sdk_close(), 0);
+    assert_eq!(motion_sdk_reset(320, 240, 0), 0);
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
 fn candidate_debug_abi_keeps_named_field_slots_in_sync() {
     let _guard = ABI_TEST_LOCK.lock().unwrap();
     assert_eq!(motion_sdk_close(), 0);
@@ -81,7 +100,7 @@ fn candidate_debug_abi_keeps_named_field_slots_in_sync() {
 }
 
 #[test]
-fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_10() {
+fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_11() {
     let _guard = ABI_TEST_LOCK.lock().unwrap();
     assert_eq!(motion_sdk_close(), 0);
     assert_eq!(motion_sdk_reset(640, 480, 1), 0);
@@ -106,7 +125,7 @@ fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_10() {
     // SAFETY: `packet` is writable for exactly the capacity passed to the ABI.
     let copied = unsafe { motion_sdk_copy_packet(packet.as_mut_ptr(), packet.len()) };
     assert_eq!(copied, packet.len() as isize);
-    assert_eq!(u16::from_le_bytes([packet[6], packet[7]]), 10);
+    assert_eq!(u16::from_le_bytes([packet[6], packet[7]]), 11);
     let equipment_offset = packet
         .windows(4)
         .position(|window| window == b"EQP1")
@@ -133,7 +152,7 @@ fn web_abi_associates_equipment_with_the_locked_subject_and_publishes_v1_10() {
     );
     assert!(
         packet.windows(4).any(|window| window == b"QLT1"),
-        "v1.10 packet must preserve the additive Rust quality extension"
+        "v1.11 packet must preserve the additive Rust quality extension"
     );
     assert_eq!(motion_sdk_close(), 0);
 }

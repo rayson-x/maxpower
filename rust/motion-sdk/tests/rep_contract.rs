@@ -1,12 +1,56 @@
 use std::sync::{Arc, atomic::AtomicUsize};
 
 use maxpower_motion_sdk::{
-    AdapterCapabilities, ContinuityMode, ContractVersion, DiagnosticLevel, ExerciseProfile,
-    ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter, FrameLease, MotionSession,
-    MovementDirection, PoseObservation, PoseSchemaId, RecordingOutputAdapter, RepBoundaryRevision,
-    RepDisposition, RepEvidenceReason, RepObservationFinding, RepPhase, SessionConfig,
-    SetLifecycle, SubjectPolicy,
+    AdapterCapabilities, CURRENT_MOTION_PACKET_CONTRACT, ContinuityMode, ContractVersion,
+    DiagnosticLevel, ExerciseProfile, ExerciseSignal, ExerciseSignalKind, FixtureInferenceAdapter,
+    FrameLease, MotionSession, MovementDirection, PoseObservation, PoseSchemaId,
+    RecordingOutputAdapter, RepBoundaryRevision, RepDisposition, RepEvidenceReason,
+    RepObservationFinding, RepPhase, SessionConfig, SetLifecycle, SubjectPolicy,
+    rep_evidence_reason_wire_code,
 };
+
+#[test]
+fn packet_v1_11_enumerates_every_typed_rep_evidence_reason_without_collisions() {
+    assert_eq!(
+        CURRENT_MOTION_PACKET_CONTRACT,
+        ContractVersion {
+            major: 1,
+            minor: 11
+        }
+    );
+    let reasons = [
+        RepEvidenceReason::ShortContinuityRecovery,
+        RepEvidenceReason::LongContinuityLoss,
+        RepEvidenceReason::SubjectChanged,
+        RepEvidenceReason::IncompleteCycle,
+        RepEvidenceReason::AntiInterferenceFilter,
+        RepEvidenceReason::DurationExceeded,
+        RepEvidenceReason::RequiredJointLoss,
+        RepEvidenceReason::CoordinateProvisional,
+        RepEvidenceReason::LocalTrajectoryChannelConflict,
+        RepEvidenceReason::ActionPrimaryUnavailable,
+        RepEvidenceReason::ActionPrimaryDirectionMismatch,
+        RepEvidenceReason::ActionPrimaryIncompleteReturn,
+        RepEvidenceReason::EquipmentConsensusUnavailable,
+        RepEvidenceReason::EquipmentConsensusConflict,
+        RepEvidenceReason::CoordinateNotFrozen,
+        RepEvidenceReason::SignalTemporarilyUnavailable,
+        RepEvidenceReason::TransitionEvidenceWeak,
+        RepEvidenceReason::IdentityRelationMissing,
+        RepEvidenceReason::IdentityRelationPhaseMismatch,
+        RepEvidenceReason::DeclaredPhaseMissing,
+        RepEvidenceReason::ConstrainedPathDeviationExceeded,
+        RepEvidenceReason::AlternatingSideMismatch,
+        RepEvidenceReason::IdentityRelationMagnitudeMismatch,
+        RepEvidenceReason::IdentityRelationCrossingMissing,
+    ];
+    let mut codes = reasons
+        .into_iter()
+        .map(rep_evidence_reason_wire_code)
+        .collect::<Vec<_>>();
+    codes.sort_unstable();
+    assert_eq!(codes, (1_u8..=24).collect::<Vec<_>>());
+}
 
 fn config() -> SessionConfig {
     SessionConfig {
@@ -111,7 +155,7 @@ fn explicit_set_arming_excludes_setup_motion_and_finish_never_seals_a_partial_re
     session
         .install_exercise_profile(ExerciseProfile::lat_pulldown_provisional())
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
     assert_eq!(session.set_state().lifecycle, SetLifecycle::Arming);
 
     let releases = Arc::new(AtomicUsize::new(0));
@@ -156,7 +200,7 @@ fn stable_arming_pose_primes_the_first_rep_baseline() {
     session
         .install_exercise_profile(ExerciseProfile::lat_pulldown_provisional())
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
 
     let releases = Arc::new(AtomicUsize::new(0));
     for frame in 0..wrist_y.len() as u64 {
@@ -205,7 +249,7 @@ fn noisy_setup_pose_cannot_keep_an_explicit_set_arming_forever() {
     session
         .install_exercise_profile(ExerciseProfile::lat_pulldown_provisional())
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
 
     let releases = Arc::new(AtomicUsize::new(0));
     for frame in 0..wrist_y.len() as u64 {
@@ -246,7 +290,7 @@ fn an_idle_recorded_set_pauses_then_resumes_on_a_real_excursion() {
     session
         .install_exercise_profile(ExerciseProfile::lat_pulldown_provisional())
         .unwrap();
-    session.begin_set();
+    session.begin_set().expect("begin set");
 
     let releases = Arc::new(AtomicUsize::new(0));
     for frame in 0..wrist_y.len() as u64 {
@@ -365,6 +409,7 @@ fn a_joint_angle_profile_seals_a_rep_without_vertical_motion() {
         min_primary_amplitude: 20.0,
         min_secondary_amplitude: 20.0,
         return_hysteresis: 5.0,
+        return_tolerance: 6.0,
         ready_tolerance: 6.0,
         max_gap_ms: 700,
         min_rep_duration_ms: 450,

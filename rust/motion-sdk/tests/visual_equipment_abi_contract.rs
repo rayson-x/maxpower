@@ -1,10 +1,13 @@
 use maxpower_motion_sdk::web_abi::{
     motion_sdk_add_equipment_observation, motion_sdk_begin_candidate, motion_sdk_begin_multi,
-    motion_sdk_begin_set, motion_sdk_begin_visual_equipment_frame, motion_sdk_close,
-    motion_sdk_commit_candidate, motion_sdk_copy_packet, motion_sdk_copy_visual_equipment_luma,
-    motion_sdk_detect_barbell_axis, motion_sdk_detect_visual_equipment, motion_sdk_packet_len,
-    motion_sdk_process_multi, motion_sdk_reset, motion_sdk_select_visual_action_context,
-    motion_sdk_set_landmark, motion_sdk_set_pose_schema, motion_sdk_set_profile,
+    motion_sdk_begin_sequence, motion_sdk_begin_set, motion_sdk_begin_visual_equipment_frame,
+    motion_sdk_close, motion_sdk_commit_candidate, motion_sdk_commit_sequence,
+    motion_sdk_copy_packet, motion_sdk_copy_visual_equipment_luma, motion_sdk_detect_barbell_axis,
+    motion_sdk_detect_visual_equipment, motion_sdk_packet_len, motion_sdk_process_multi,
+    motion_sdk_reset, motion_sdk_select_visual_action_context,
+    motion_sdk_set_canonical_feed_mirroring, motion_sdk_set_landmark, motion_sdk_set_pose_schema,
+    motion_sdk_set_profile, motion_sdk_set_sequence_byte,
+    motion_sdk_visual_action_recommended_view, motion_sdk_visual_action_view_mask,
     motion_sdk_visual_barbell_axis_number, motion_sdk_visual_barbell_axis_source,
 };
 use std::sync::Mutex;
@@ -12,6 +15,52 @@ use std::sync::Mutex;
 const WIDTH: usize = 640;
 const HEIGHT: usize = 360;
 static ABI_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+#[test]
+fn action_card_can_query_rust_owned_view_options_without_selecting_algorithms() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(WIDTH as u32, HEIGHT as u32, 1), 0);
+    let action = b"flat_barbell_bench_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for these calls.
+    let recommended =
+        unsafe { motion_sdk_visual_action_recommended_view(action.as_ptr(), action.len()) };
+    let mask = unsafe { motion_sdk_visual_action_view_mask(action.as_ptr(), action.len()) };
+    assert_eq!(recommended, 0, "bench press explicitly recommends front");
+    assert_ne!(mask & (1 << recommended), 0);
+    assert_ne!(mask & (1 << 0), 0, "front is selectable");
+    assert_eq!(
+        mask & (1 << 2),
+        0,
+        "geometrically invalid left side is hidden"
+    );
+    assert_eq!(motion_sdk_close(), 0);
+}
+
+#[test]
+fn action_card_and_runtime_share_the_installed_arnold_press_view_contract() {
+    let _guard = ABI_TEST_LOCK.lock().expect("ABI test lock poisoned");
+    assert_eq!(motion_sdk_reset(WIDTH as u32, HEIGHT as u32, 1), 0);
+    assert_eq!(motion_sdk_set_pose_schema(1), 0);
+    let action = b"seated_arnold_press";
+    // SAFETY: `action` is a stable UTF-8 byte slice for these calls.
+    assert_eq!(
+        unsafe { motion_sdk_visual_action_recommended_view(action.as_ptr(), action.len()) },
+        0,
+        "Arnold press is installed and recommends the front view"
+    );
+    let mask = unsafe { motion_sdk_visual_action_view_mask(action.as_ptr(), action.len()) };
+    assert_ne!(mask & 1, 0, "the recommended front view is selectable");
+    assert_eq!(
+        mask & (1 << 2),
+        0,
+        "a side projection cannot judge projected shoulder rotation"
+    );
+    assert_eq!(
+        unsafe { motion_sdk_select_visual_action_context(action.as_ptr(), action.len(), 0) },
+        0
+    );
+    assert_eq!(motion_sdk_close(), 0);
+}
 
 #[test]
 fn visual_equipment_abi_rejects_blazepose_before_allocating_a_coco_indexed_frame() {
@@ -264,6 +313,23 @@ fn active_set_cannot_clear_or_replace_an_installed_action_plan() {
         unsafe { motion_sdk_select_visual_action_context(press.as_ptr(), press.len(), 0) },
         -12,
         "a second action context must start a new Rust set lifecycle"
+    );
+    assert_eq!(
+        motion_sdk_set_canonical_feed_mirroring(1),
+        -3,
+        "mirroring changes local-coordinate/laterality meaning and is frozen with the action plan"
+    );
+    assert_eq!(motion_sdk_begin_sequence(1), 0);
+    assert_eq!(motion_sdk_set_sequence_byte(0, b'x'.into()), 0);
+    assert_eq!(
+        motion_sdk_commit_sequence(),
+        -4,
+        "packet lineage may not change inside a recorded set"
+    );
+    assert_eq!(
+        motion_sdk_begin_set(),
+        -3,
+        "a second begin call must not erase the active Rep engine/history"
     );
     assert_eq!(motion_sdk_close(), 0);
 }

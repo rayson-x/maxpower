@@ -1,5 +1,11 @@
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,21 +16,14 @@ const workspaceRoot = resolve(
   governanceRoot,
   'workspace/visual-recognition-v0.1',
 );
-const baselinePath = resolve(workspaceRoot, 'full-known-video-evaluation.json');
-const firstPostPath = resolve(
-  workspaceRoot,
-  'post-threshold-layering-2026-08-15-evaluation.json',
-);
-const diagnosticPostPath = resolve(
-  workspaceRoot,
-  'post-threshold-layering-diagnostic-2026-08-15.json',
-);
+const rawArguments = process.argv.slice(2);
+if (rawArguments.length !== 1 || rawArguments[0] !== '--execute-repeat') {
+  throw new Error(
+    'this governed report accepts no external JSON; invoke it only with --execute-repeat',
+  );
+}
 const outputRelative = 'workspace/visual-recognition-v0.1/derived-reports';
 const outputRoot = resolve(governanceRoot, outputRelative);
-const aggregateRelative = `${outputRelative}/visual-recognition-v0.1-threshold-layering-diagnostic-2026-08-15.json`;
-const artifactRelative = `${outputRelative}/visual-recognition-v0.1-threshold-layering-report-artifact-2026-08-15.json`;
-const aggregatePath = resolve(governanceRoot, aggregateRelative);
-const artifactPath = resolve(governanceRoot, artifactRelative);
 
 // Never read a governed replay input merely because this script was invoked.
 // The catalog audit resolves asset IDs/admission before a local-only report
@@ -38,6 +37,58 @@ if (governanceAudit.status !== 0) {
   throw new Error(`governance audit failed; replay input was not consumed:\n${governanceAudit.stderr || governanceAudit.stdout}`);
 }
 mkdirSync(outputRoot, { recursive: true });
+
+const runGroupId = `v0.1b-repeat-${Date.now()}-${randomUUID()}`;
+const repeatRunsRoot = resolve(workspaceRoot, 'repeat-runs');
+mkdirSync(repeatRunsRoot, { recursive: true });
+const repeatRoot = resolve(repeatRunsRoot, runGroupId);
+mkdirSync(repeatRoot, { recursive: false });
+const runReplay = (suffix) => {
+  const runId = `${runGroupId}-${suffix}`;
+  const outputPath = resolve(repeatRoot, `${suffix}.json`);
+  const result = spawnSync(
+    'cargo',
+    [
+      'test',
+      '--release',
+      '--manifest-path',
+      'rust/motion-sdk/Cargo.toml',
+      '--test',
+      'execution_assessment_rigid_bar_family_contract',
+      'governed_v0_1_visual_recognition_baseline_replays_current_action_views',
+      '--',
+      '--ignored',
+      '--exact',
+      '--nocapture',
+    ],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        MAXPOWER_GOVERNED_EVALUATION_OUTPUT: outputPath,
+        MAXPOWER_GOVERNED_EVALUATION_RUN_ID: runId,
+      },
+      stdio: 'inherit',
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(`independent governed release replay ${suffix} failed`);
+  }
+  return { runId, outputPath };
+};
+const first = runReplay('a');
+const repeated = runReplay('b');
+const controlledRepeat = {
+  method: 'report_generator_spawned_release_replays',
+  controllerProcessId: process.pid,
+  runGroupId,
+  firstRunId: first.runId,
+  repeatedRunId: repeated.runId,
+};
+const baselinePath = first.outputPath;
+const firstPostPath = first.outputPath;
+const diagnosticPostPath = repeated.outputPath;
+const repeatRequested = true;
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const readEvaluation = (path) => {
@@ -57,26 +108,84 @@ const baseline = readEvaluation(baselinePath);
 const firstPost = readEvaluation(firstPostPath);
 const diagnosticPost = readEvaluation(diagnosticPostPath);
 const before = baseline.value;
-const after = diagnosticPost.value;
+const after = firstPost.value;
 
-const stableCore = (evaluation) => ({
-  aggregate: evaluation.aggregate,
-  buckets: evaluation.buckets,
-  dataQuality: evaluation.dataQuality,
-  equipmentProvider: evaluation.equipmentProvider,
-  turnaroundEvaluation: evaluation.turnaroundEvaluation,
-  localStates: evaluation.structuralRuntime.localStates,
-  fusionStates: evaluation.structuralRuntime.fusionStates,
-  dimensionStates: evaluation.structuralRuntime.dimensionStates,
-});
-if (
-  JSON.stringify(stableCore(firstPost.value)) !==
-  JSON.stringify(stableCore(diagnosticPost.value))
-) {
-  throw new Error('the two post-fix runs did not reproduce the same core result');
+const replaySemantic = (evaluation) => {
+  const {
+    runId: _runId,
+    executionInvocation: _executionInvocation,
+    ...semantic
+  } = evaluation;
+  return semantic;
+};
+let repeatVerified = false;
+if (repeatRequested) {
+  if (diagnosticPostPath === firstPostPath) {
+    throw new Error('repeat evidence requires two distinct artifact paths');
+  }
+  const firstRunId = firstPost.value.runId;
+  const repeatedRunId = diagnosticPost.value.runId;
+  if (
+    typeof firstRunId !== 'string' || firstRunId.length === 0 ||
+    typeof repeatedRunId !== 'string' || repeatedRunId.length === 0 ||
+    firstRunId === repeatedRunId
+  ) {
+    throw new Error('repeat evidence requires two distinct immutable run IDs');
+  }
+  for (const field of ['evaluationId', 'protocolSha256', 'predictionSha256', 'reportDigest']) {
+    if (firstPost.value[field] !== diagnosticPost.value[field]) {
+      throw new Error(`repeat evidence changed ${field}`);
+    }
+  }
+  for (const field of ['executionRuntime', 'clientRuntimeParityArtifact']) {
+    if (
+      JSON.stringify(firstPost.value[field]) !==
+      JSON.stringify(diagnosticPost.value[field])
+    ) {
+      throw new Error(`repeat evidence changed ${field}`);
+    }
+  }
+  if (
+    !Number.isInteger(firstPost.value.executionInvocation?.processId) ||
+    !Number.isInteger(diagnosticPost.value.executionInvocation?.processId) ||
+    firstPost.value.executionInvocation.processId ===
+      diagnosticPost.value.executionInvocation.processId
+  ) {
+    throw new Error('repeat evidence requires separate processes running the same native binary');
+  }
+  if (
+    JSON.stringify(replaySemantic(firstPost.value)) !==
+    JSON.stringify(replaySemantic(diagnosticPost.value))
+  ) {
+    throw new Error('the two independently identified runs did not reproduce the same result');
+  }
+  if (
+    firstPost.value.runId !== controlledRepeat.firstRunId ||
+    diagnosticPost.value.runId !== controlledRepeat.repeatedRunId
+  ) {
+    throw new Error('spawned replay output did not preserve the controller-issued run IDs');
+  }
+  repeatVerified = true;
 }
 
-const metricDelta = (field) => after.aggregate[field] - before.aggregate[field];
+const pairId = sha256(Buffer.from(JSON.stringify({
+  schemaVersion: 'maxpower.visual-recognition-derived-report-pair/v1',
+  baselineEvaluationSha256: sha256(baseline.bytes),
+  postFixEvaluationSha256: sha256(firstPost.bytes),
+  diagnosticEvaluationSha256: sha256(diagnosticPost.bytes),
+  repeatExecution: controlledRepeat,
+})));
+const versionRelative = `${outputRelative}/versions/${pairId}`;
+const aggregateRelative = `${versionRelative}/aggregate.json`;
+const artifactRelative = `${versionRelative}/artifact.json`;
+const manifestRelative = `${versionRelative}/manifest.json`;
+const aggregatePath = resolve(governanceRoot, aggregateRelative);
+const artifactPath = resolve(governanceRoot, artifactRelative);
+const manifestPath = resolve(governanceRoot, manifestRelative);
+
+const finiteDelta = (current, prior) =>
+  Number.isFinite(current) && Number.isFinite(prior) ? current - prior : null;
+const metricDelta = (field) => finiteDelta(after.aggregate[field], before.aggregate[field]);
 const dispositions = after.structuralRuntime.repDispositionCounts;
 const reasons = after.structuralRuntime.repEvidenceReasonCounts;
 const candidateCount = Object.values(dispositions).reduce(
@@ -89,8 +198,8 @@ const rejectionReasonRows = Object.entries(reasons)
   .map(([reason, count]) => ({
     reason,
     count,
-    shareOfCandidates: count / candidateCount,
-    shareOfRejected: count / rejectedCount,
+    shareOfCandidates: candidateCount === 0 ? null : count / candidateCount,
+    shareOfRejected: rejectedCount === 0 ? null : count / rejectedCount,
   }))
   .sort((left, right) => right.count - left.count);
 
@@ -127,9 +236,39 @@ function actionViewFunnel(metrics, actionView) {
     'rejectionReasons',
     'candidateTruthMatches',
     'negativeWindowFalseTriggers',
+    'streams',
   ]) {
     if (!(key in funnel)) {
       throw new Error(`${actionView} recognitionFunnel is missing ${key}`);
+    }
+  }
+  if (funnel.schemaVersion !== 'maxpower.visual-recognition-funnel/v2') {
+    throw new Error(`${actionView} must use the v2 multi-stream recognition funnel`);
+  }
+  for (const streamId of [
+    'rawProposal',
+    'confirmedOnly',
+    'confirmedPlusNeedsReview',
+    'rejectedDiagnostic',
+  ]) {
+    const stream = funnel.streams[streamId];
+    if (!stream || typeof stream !== 'object') {
+      throw new Error(`${actionView} is missing stream ${streamId}`);
+    }
+    for (const field of [
+      'predicted',
+      'matched',
+      'falsePositive',
+      'falseNegative',
+      'precision',
+      'recall',
+      'candidateTruthMatches',
+      'boundaryMetrics',
+      'negativeWindowFalseTriggers',
+    ]) {
+      if (!(field in stream)) {
+        throw new Error(`${actionView} ${streamId} is missing ${field}`);
+      }
     }
   }
   return funnel;
@@ -173,6 +312,7 @@ const actionViewRows = Object.entries(after.buckets.byActionView)
       rejectionReasonsAfter: funnel.rejectionReasons,
       candidateTruthMatchesAfter: funnel.candidateTruthMatches,
       negativeWindowFalseTriggersAfter: funnel.negativeWindowFalseTriggers,
+      streamsAfter: funnel.streams,
     };
   })
   .sort(
@@ -180,6 +320,27 @@ const actionViewRows = Object.entries(after.buckets.byActionView)
       (left.recallAfter ?? -1) - (right.recallAfter ?? -1) ||
       left.actionView.localeCompare(right.actionView),
   );
+
+const beforeAggregateFunnel = actionViewFunnel(
+  before.aggregate,
+  'aggregate (baseline)',
+);
+const afterAggregateFunnel = actionViewFunnel(
+  after.aggregate,
+  'aggregate (current)',
+);
+const streamOrder = [
+  'rawProposal',
+  'confirmedOnly',
+  'confirmedPlusNeedsReview',
+  'rejectedDiagnostic',
+];
+const streamLabels = {
+  rawProposal: 'Raw proposal（候选诊断）',
+  confirmedOnly: 'Confirmed-only（正式计次）',
+  confirmedPlusNeedsReview: 'Confirmed+NeedsReview（人工复核诊断）',
+  rejectedDiagnostic: 'Rejected overlap（拒绝诊断）',
+};
 
 for (const action of actionRows) {
   const actionViews = actionViewRows.filter((row) => row.action === action.action);
@@ -192,16 +353,17 @@ for (const action of actionRows) {
 const aggregate = {
   schemaVersion:
     'maxpower.visual-recognition-threshold-layering-diagnostic/v0.1',
-  generatedOn: '2026-08-15',
+  generatedOn: '2026-08-16',
   evaluationClass: after.evaluationStatus,
   generalizationClaimAllowed: false,
-  decision: 'recall_blocked_by_rep_admission_semantics',
+  decision: 'current_known_video_regression_only',
   source: {
     baselineEvaluationSha256: sha256(baseline.bytes),
     postFixEvaluationSha256: sha256(firstPost.bytes),
     diagnosticEvaluationSha256: sha256(diagnosticPost.bytes),
     protocolSha256: after.protocolSha256,
-    repeatRunCoreResultMatched: true,
+    repeatRunCoreResultMatched: repeatVerified ? true : null,
+    repeatExecution: controlledRepeat,
   },
   dataQuality: after.dataQuality,
   before: before.aggregate,
@@ -222,7 +384,7 @@ const aggregate = {
     confirmedCount: dispositions.Confirmed,
     needsReviewCount: dispositions.NeedsReview,
     rejectedCount,
-    rejectionRate: rejectedCount / candidateCount,
+    rejectionRate: candidateCount === 0 ? null : rejectedCount / candidateCount,
     rejectionReasons: rejectionReasonRows,
   },
   byAction: actionRows,
@@ -250,53 +412,54 @@ const aggregate = {
   diagnosis: [
     {
       priority: 1,
-      finding:
-        'ActionPrimaryDirectionMismatch rejects half of all sealed Rep candidates and 59.5% of rejected candidates.',
+      finding: rejectionReasonRows[0]
+        ? `${rejectionReasonRows[0].reason} is the largest typed rejection reason: ${rejectionReasonRows[0].count}/${rejectedCount} rejected candidates.`
+        : 'No typed rejected candidate was emitted in this run.',
       interpretation:
-        'The local-coordinate validator requires a positive endpoint delta after Rep segmentation. That duplicates direction judgement and conflates real wrong-way motion with axis-sign or sampled-boundary disagreement.',
+        'Use the action×view stream metrics and candidate-to-truth overlaps to decide whether this reason is suppressing true Reps; a count alone is not an accuracy claim.',
     },
     {
       priority: 2,
       finding:
-        'RequiredJointLoss accounts for 34 rejected candidates even though the reason also covers coordinates that are not Frozen or signals that are temporarily ineligible.',
+        `The formal Confirmed-only stream matched ${afterAggregateFunnel.streams.confirmedOnly.matched}/${after.aggregate.truthRepCount} truth Reps with ${afterAggregateFunnel.streams.confirmedOnly.falsePositive} false positives.`,
       interpretation:
-        'The current reason is overloaded; it does not prove an anatomical joint was actually lost and prevents calibrated NeedsReview handling.',
+        'Compare raw, Confirmed-only, Confirmed+NeedsReview and Rejected diagnostic streams before changing admission. Only Confirmed-only is formal volume; the other streams diagnose where evidence was lost.',
     },
     {
       priority: 3,
       finding:
-        'The equipment provider emits 30,520 track frames, but only 1,289 frames enter the local equipment channel and no rigid-bar Rep is produced.',
+        `Equipment tracking emitted ${after.equipmentProvider.trackerOutputFrameCount} frames; ${after.structuralRuntime.equipmentChannelFrames} entered the local equipment channel.`,
       interpretation:
-        'Throughput is adequate. The bottleneck is subject/grip association, canonical local evidence and consensus admission—not FPS.',
+        'Frame throughput and evidence admission are separate metrics. Only measured, subject-associated equipment may corroborate or drive a Rep according to the frozen action plan.',
     },
   ],
   recommendedSequence: [
-    'Make TaskPrimary cycle validation sign-stable: validate departure-turnaround-return topology in the action-local frame, or bind an explicit expected sign from the action definition; do not require an arbitrary positive endpoint delta after segmentation.',
-    'Split RequiredJointLoss into typed CoordinateNotFrozen, SignalUnavailable and TransitionEvidenceWeak outcomes; bounded uncertainty becomes NeedsReview while true identity-relation loss remains Rejected.',
-    'Keep equipment observations independent from wrists, but improve continuous subject/grip association so measured tracks can enter the canonical local channel and Rep consensus.',
+    'Inspect raw-proposal recall first, then Confirmed-only precision, then Confirmed+NeedsReview and Rejected diagnostic streams; do not collapse these gates into one rate.',
+    'Prioritize action×view contexts with high rejected-to-truth overlap and keep every threshold change inside that action plan.',
+    'Keep equipment observations independent from wrists; improve measured subject/grip association only where the selected action plan requests an equipment provider.',
     'Re-run this exact governed benchmark after each isolated change. Protect precision and reviewed-negative-window triggers while first recovering candidate retention, then boundary accuracy, then quality calibration.',
   ],
   limitations: [
     'This is a known-participant, known-video regression set and cannot support a generalization claim.',
     'There is no admitted human truth for equipment tracks, turnaround points or technique-quality conclusions, so their accuracy remains not evaluable.',
-    'The baseline fixture intentionally remains immutable; the ignored replay test reports a baseline-delta assertion after producing the complete post-fix output.',
+    'A comparison is meaningful only when both inputs use the v2 four-stream schema; with one explicit current path used on both sides every delta is correctly zero.',
   ],
 };
-writeFileSync(aggregatePath, `${JSON.stringify(aggregate, null, 2)}\n`);
 
-const percent = (value) => `${(value * 100).toFixed(2)}%`;
+const percent = (value) => Number.isFinite(value) ? `${(value * 100).toFixed(2)}%` : '—';
 const signedPercentPoints = (value) =>
-  `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)} pp`;
+  Number.isFinite(value) ? `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)} pp` : '—';
+const signedInteger = (value) => `${value >= 0 ? '+' : ''}${value}`;
 const metricTable = [
-  '| 指标 | 修复前 | 修复后 | 变化 |',
-  '| --- | ---: | ---: | ---: |',
-  `| Precision | ${percent(before.aggregate.candidatePrecision)} | ${percent(after.aggregate.candidatePrecision)} | ${signedPercentPoints(aggregate.delta.candidatePrecision)} |`,
-  `| Recall | ${percent(before.aggregate.candidateRecall)} | ${percent(after.aggregate.candidateRecall)} | ${signedPercentPoints(aggregate.delta.candidateRecall)} |`,
-  `| 匹配 Rep | ${before.aggregate.matchedRepCount} | ${after.aggregate.matchedRepCount} | +${aggregate.delta.matchedRepCount} |`,
-  `| 误报 Rep | ${before.aggregate.falsePositiveCount} | ${after.aggregate.falsePositiveCount} | ${aggregate.delta.falsePositiveCount} |`,
-  `| 漏检 Rep | ${before.aggregate.missedCount} | ${after.aggregate.missedCount} | ${aggregate.delta.missedCount} |`,
-  `| 严格边界对齐 | ${percent(before.aggregate.strictBoundaryAlignedRate)} | ${percent(after.aggregate.strictBoundaryAlignedRate)} | 0.00 pp |`,
-  `| 整组完全正确 | ${percent(before.aggregate.exactSetRate)} | ${percent(after.aggregate.exactSetRate)} | 0.00 pp |`,
+  '| 流 | 基线 P/M/FP/FN | 当前 P/M/FP/FN | 当前 Precision | 当前 Recall | Recall 变化 |',
+  '| --- | ---: | ---: | ---: | ---: | ---: |',
+  ...streamOrder.map((streamId) => {
+    const prior = beforeAggregateFunnel.streams[streamId];
+    const current = afterAggregateFunnel.streams[streamId];
+    return `| ${streamLabels[streamId]} | ${prior.predicted}/${prior.matched}/${prior.falsePositive}/${prior.falseNegative} | ${current.predicted}/${current.matched}/${current.falsePositive}/${current.falseNegative} | ${percent(current.precision)} | ${percent(current.recall)} | ${signedPercentPoints(finiteDelta(current.recall, prior.recall))} |`;
+  }),
+  `| Confirmed+NeedsReview 严格边界对齐 | ${percent(before.aggregate.strictBoundaryAlignedRate)} | ${percent(after.aggregate.strictBoundaryAlignedRate)} | — | — | ${signedPercentPoints(finiteDelta(after.aggregate.strictBoundaryAlignedRate, before.aggregate.strictBoundaryAlignedRate))} |`,
+  `| Confirmed+NeedsReview 整组完全正确 | ${percent(before.aggregate.exactSetRate)} | ${percent(after.aggregate.exactSetRate)} | — | — | ${signedPercentPoints(finiteDelta(after.aggregate.exactSetRate, before.aggregate.exactSetRate))} |`,
 ].join('\n');
 const reasonTable = [
   '| 拒绝原因 | 数量 | 占全部候选 | 占拒绝候选 |',
@@ -315,13 +478,28 @@ const actionTable = [
   ),
 ].join('\n');
 const actionViewTable = [
-  '| 动作 | 机位 | 人工 Rep | 修复后预测/匹配 | FP/FN | Recall | Start / Turnaround / End MAE | IoU |',
+  '| 动作 | 机位 | 人工 Rep | Raw P/M | Confirmed P/M（正式） | +NeedsReview P/M | Rejected P/M（诊断） | 正式 P/R |',
   '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
-  ...actionViewRows.map(
-    (row) =>
-      `| ${row.action} | ${row.view} | ${row.truthReps} | ${row.predictedAfter}/${row.matchedAfter} | ${row.falsePositiveAfter}/${row.missedAfter} | ${percent(row.recallAfter)} | ${row.startMaeMsAfter ?? '—'} / ${row.turnaroundMaeMsAfter ?? '—'} / ${row.endMaeMsAfter ?? '—'} | ${row.meanIntervalIoUAfter ?? '—'} |`,
-  ),
+  ...actionViewRows.map((row) => {
+    const raw = row.streamsAfter.rawProposal;
+    const confirmed = row.streamsAfter.confirmedOnly;
+    const review = row.streamsAfter.confirmedPlusNeedsReview;
+    const rejected = row.streamsAfter.rejectedDiagnostic;
+    return `| ${row.action} | ${row.view} | ${row.truthReps} | ${raw.predicted}/${raw.matched} | ${confirmed.predicted}/${confirmed.matched} | ${review.predicted}/${review.matched} | ${rejected.predicted}/${rejected.matched} | ${percent(confirmed.precision)} / ${percent(confirmed.recall)} |`;
+  }),
 ].join('\n');
+const changedActions = actionRows.filter(
+  (row) =>
+    row.predictedBefore !== row.predictedAfter ||
+    row.matchedBefore !== row.matchedAfter,
+);
+const repeatEvidenceText = repeatVerified
+  ? `已验收两个独立回放（runId ${firstPost.value.runId} / ${diagnosticPost.value.runId}）；协议、实际 native runner、预测摘要与完整语义结果一致。`
+  : '本次未显式提供独立重复回放 artifact；可复现性状态为未评估。';
+const actionChangeSummary = changedActions.length === 0
+  ? '本次输入未包含产生动作级差异的兼容基线，因此动作级变化全部为 0；不能从零变化报告推导旧版本修复收益。'
+  : `发生变化的动作共 ${changedActions.length} 个：${changedActions.map((row) => `${row.action}（预测 ${signedInteger(row.predictedAfter - row.predictedBefore)}，匹配 ${signedInteger(row.matchedAfter - row.matchedBefore)}）`).join('；')}。`;
+const rootCauseSummary = `## 当前召回瓶颈（仅由本次数据支持）\n\nRaw proposal 匹配 ${afterAggregateFunnel.streams.rawProposal.matched}/${after.aggregate.truthRepCount} 个真值（Recall ${percent(afterAggregateFunnel.streams.rawProposal.recall)}），说明主要损失在候选生成/局部坐标之前或之中；Confirmed-only 又降至 ${afterAggregateFunnel.streams.confirmedOnly.matched} 个匹配（Recall ${percent(afterAggregateFunnel.streams.confirmedOnly.recall)}），说明 admission 还有第二层损失。Rejected 诊断流与 ${afterAggregateFunnel.streams.rejectedDiagnostic.matched} 个真值重叠，可用于定位 action×view 参数或证据门槛，但本报告不把任何历史假说（固定正号、某个旧 reason 或单一动作收益）写成已证明根因。`;
 const reasonSql = [
   'WITH rejection_reasons(reason, rejected_count, share_of_rejected) AS (',
   '  VALUES',
@@ -347,17 +525,16 @@ const artifact = {
   manifest: {
     version: 1,
     surface: 'report',
-    title: '视觉识别 v0.1 门槛分层修复诊断',
+    title: '视觉识别 v0.1b 当前四流诊断',
     description:
-      '同一治理基准上的修复前后 Precision/Recall 对比与 Rep 准入拒绝原因诊断。',
-    generatedAt: '2026-08-15T22:00:00+08:00',
+      '治理回放上的 raw、Confirmed、NeedsReview 与 Rejected 分流及 Rep 准入诊断；可选传入同 schema 基线进行对比。',
+    generatedAt: '2026-08-16T12:00:00+08:00',
     cards: [],
     charts: [
       {
         id: 'rejection_reasons',
         title: 'Rep 候选被拒绝的主要原因',
-        subtitle:
-          '194 个封存的 Rep 候选中 163 个被拒绝；方向不匹配占拒绝候选的 59.5%。',
+        subtitle: `${candidateCount} 个原始候选中 ${rejectedCount} 个被拒绝；柱状图严格来自当前冻结回放。`,
         type: 'bar',
         dataset: 'rejectionReasons',
         sourceId,
@@ -384,14 +561,14 @@ const artifact = {
     sources: [
       {
         id: sourceId,
-        label: 'Rust v0.1 同协议重复回放聚合诊断',
+        label: 'Rust v0.1 同协议四流聚合诊断',
         path: aggregateRelative,
         query: {
           engine: 'sqlite',
           sql: reasonSql,
           description:
             'Reproduces the rejection-reason chart from the aggregate diagnostic report.',
-          executed_at: '2026-08-15T22:00:00+08:00',
+          executed_at: '2026-08-16T12:00:00+08:00',
           language: 'sql',
           tables_used: ['rejection_reasons'],
         },
@@ -401,26 +578,25 @@ const artifact = {
       {
         id: 'title',
         type: 'markdown',
-        body: '# 视觉识别 v0.1 门槛分层修复诊断',
+        body: '# 视觉识别 v0.1b 当前四流诊断',
       },
       {
         id: 'executive_summary',
         type: 'markdown',
         sourceId,
-        body:
-          '## Executive Summary\n\n- **修复方向正确，但提升很小。** Precision 从 50.00% 升至 51.61%，Recall 从 3.30% 升至 3.52%；多匹配 1 个 Rep，误报没有增加。\n- **召回率低的主因不是没形成动作候选。** 运行时封存了 194 个 Rep 候选，但拒绝 163 个，拒绝率为 84.02%。\n- **最严重的问题是方向准入语义。** `ActionPrimaryDirectionMismatch` 拒绝 97 个候选，占全部拒绝的 59.51%；它混合了真实反向运动与局部坐标符号/端点取样不一致。\n- **FPS 不是主瓶颈。** 器械视觉与轨迹输出约 29.7/29.4 Hz，但进入局部器械通道的证据很少，刚性杠铃仍为 0 Rep。\n- **质量分析没有拖低 Recall。** 质量结论位于 Rep 之后，目前多数是 `CannotJudge`；低召回发生在 Rep admission，质量准确率仍因没有人工真值而不可评价。',
+        body: `## Executive Summary\n\n- **正式计次流（Confirmed-only）：** Precision ${percent(afterAggregateFunnel.streams.confirmedOnly.precision)}，Recall ${percent(afterAggregateFunnel.streams.confirmedOnly.recall)}，匹配 ${afterAggregateFunnel.streams.confirmedOnly.matched}/${after.aggregate.truthRepCount}。\n- **人工复核诊断流（Confirmed+NeedsReview）：** Precision ${percent(afterAggregateFunnel.streams.confirmedPlusNeedsReview.precision)}，Recall ${percent(afterAggregateFunnel.streams.confirmedPlusNeedsReview.recall)}；不能计入正式训练量。\n- **门槛分层可审计：** 当前有 ${candidateCount} 个 raw proposal、${dispositions.Confirmed ?? 0} 个 Confirmed、${dispositions.NeedsReview ?? 0} 个 NeedsReview、${rejectedCount} 个 Rejected；四条流都独立计算匹配、FP/FN 与边界。\n- **最大拒绝原因：** ${rejectionReasonRows[0]?.reason ?? '无'}（${rejectionReasonRows[0]?.count ?? 0} 个）；是否属于过严拒绝要以 rejected-to-truth overlap 判断，不能仅看原因计数。\n- **器械链路：** Provider 输出 ${after.equipmentProvider.trackerOutputFrameCount} 帧，其中 ${after.structuralRuntime.equipmentChannelFrames} 帧进入局部器械通道；手腕不得替代器械。\n- **质量边界：** 没有治理后的质量人工真值时，只发布事实、TaskCompletion 与 CannotJudge，不发布通用“合格/偏差”。`,
       },
       {
         id: 'metric_comparison',
         type: 'markdown',
         sourceId,
-        body: `## 修复前后识别结果\n\n${metricTable}\n\n两次修复后全量回放的核心结果完全一致，说明这不是随机波动。`,
+        body: `## 基线与当前四流结果\n\n${metricTable}\n\n${repeatEvidenceText} 只传一个 current artifact 时按 current=current 计算，因此所有变化为 0；只有显式传入兼容 v2 基线时才解释差值。`,
       },
       {
         id: 'admission_diagnosis',
         type: 'markdown',
         sourceId,
-        body: `## 召回率在哪里丢失\n\n候选总数 194：Confirmed 26、NeedsReview 5、Rejected 163。也就是说，算法已经看到并分段出运动周期，主要损失发生在随后叠加的动作权威准入门槛。\n\n${reasonTable}`,
+        body: `## 召回率在哪里丢失\n\n候选总数 ${candidateCount}：Confirmed ${dispositions.Confirmed ?? 0}、NeedsReview ${dispositions.NeedsReview ?? 0}、Rejected ${rejectedCount}。请同时查看 raw、Confirmed-only、Confirmed+NeedsReview 与 Rejected-overlap 四条流，不能从总候选数直接推断损失都发生在准入。\n\n${reasonTable}`,
       },
       {
         id: 'reason_chart',
@@ -432,21 +608,19 @@ const artifact = {
         id: 'root_cause',
         type: 'markdown',
         sourceId,
-        body:
-          '## 为什么新算法反而漏检更多\n\n新算法正确地移除了“手腕就是器械”和固定屏幕方向等捷径，因此不会轻易把噪声发布成正式 Rep；但随后又把**局部坐标必须冻结、主方向端点必须为正、必要关节必须持续可用、器械必须形成正式共识**同时作为硬拒绝条件。方向判断还在 RepEngine 已完成周期分段后再次检查固定正号，造成重复且不稳定的否决。结果是 Precision 只略升，Recall 被多重 fail-closed 门槛压垮。',
+        body: rootCauseSummary,
       },
       {
         id: 'equipment_path',
         type: 'markdown',
         sourceId,
-        body:
-          '## 器械链路不是帧率问题\n\n器械 Provider 处理 30,793 帧（29.67 Hz），输出 30,520 帧轨迹（29.40 Hz），但只有 1,289 帧进入局部器械通道；融合状态中 `CannotJudge` 为 10,164 帧，最终刚性杠铃 Rep 和 equipment-fused 换向点都为 0。应继续保持器械独立观测、禁止手腕替代器械，但需要修复连续主体/握持关联和 canonical local evidence 的进入条件。',
+        body: `## 器械观测与证据准入\n\n器械 Provider 处理 ${after.equipmentProvider.visualProcessedFrameCount} 帧（${after.equipmentProvider.visualProcessingRateHz.toFixed(2)} Hz），输出 ${after.equipmentProvider.trackerOutputFrameCount} 帧轨迹（${after.equipmentProvider.trackerOutputRateHz.toFixed(2)} Hz），其中 ${after.structuralRuntime.equipmentChannelFrames} 帧进入局部器械通道。吞吐、独立器械测量、主体/握持关联和 Rep 准入必须分别报告；任何一层都不能用手腕轨迹补成器械。`,
       },
       {
         id: 'action_results',
         type: 'markdown',
         sourceId,
-        body: `## 动作级结果\n\n${actionTable}\n\n这次唯一新增的正确识别来自 rear_delt_fly（+1 matched Rep）；其余动作没有变化。因此刚修复的“可选协调关节不应阻断 Rep”确实有效，但不是主要召回瓶颈。`,
+        body: `## 动作级结果\n\n${actionTable}\n\n${actionChangeSummary}`,
       },
       {
         id: 'action_view_results',
@@ -459,20 +633,20 @@ const artifact = {
         type: 'markdown',
         sourceId,
         body:
-          '## 建议的修复顺序\n\n1. **先修 TaskPrimary 方向语义。** 在动作局部坐标中验证“离开起点—换向—返回”的拓扑，或由动作定义明确绑定期望符号；不要在已完成周期后再要求任意正号。\n2. **拆分 `RequiredJointLoss`。** 区分坐标未冻结、信号暂时缺失、转换证据弱和真正必要关系丢失；前三者在有完整候选时优先进入 NeedsReview，而不是统一 Rejected。\n3. **再修器械 canonical association。** 保持手腕与器械相互约束但不互相替代，让真实 measured track 连续进入局部器械通道与 Rep consensus。\n4. **最后优化边界和质量规则。** 先恢复 Recall 且不增加负窗口误触发，再优化换向 MAE/IoU，最后用人工质量标注校准 RulePack。每一步都使用同一冻结协议单独回放，避免多个门槛同时变化。',
+          '## 建议的修复顺序\n\n1. **先校准 action×view candidate。** 以隔离校准集调整主关系、局部坐标、幅度、滞回、返回容忍与 gap；不修改全局阈值。\n2. **再审查 admission 损失。** 优先检查 rejected-to-truth overlap 高的 exact context，并保持 Confirmed-only 为唯一正式计次流。\n3. **按动作计划改进器械证据。** 只增强真实 measured track 的主体/握持关联，手腕与器械相互约束但不互相替代。\n4. **最后优化边界和质量规则。** 先恢复 raw/Confirmed Recall 且不增加负窗口误触发，再优化边界 MAE/IoU，最后用人工质量真值校准 RulePack。',
       },
       {
         id: 'caveats',
         type: 'markdown',
         sourceId,
         body:
-          '## 限制与口径\n\n本报告覆盖 53 组已知个人视频、455 个人工 Rep 和 237 个已复核负窗口；Pose sidecar 连接覆盖率为 100%。它是回归测试，不是新用户/新机位泛化率。器械轨迹、换向点和动作质量没有合格人工真值，所以只报告运行覆盖和拒绝原因，不声称准确率。旧 v0.1 基线保持不可变；回放测试在写完新结果后因检测到结构基线从 6 组变为 7 组而按预期报出版本差异。',
+          `## 限制与口径\n\n本报告覆盖 53 组已知个人视频、455 个人工 Rep 和 237 个已复核负窗口；Pose sidecar 连接覆盖率为 100%。它是回归测试，不是新用户/新机位泛化率。器械轨迹、换向点和动作质量没有合格人工真值，所以只报告运行覆盖和拒绝原因，不声称准确率。${repeatEvidenceText} 旧 v0.1 输出没有 v2 四流 schema，不能伪造为可比较基线。`,
       },
     ],
   },
   snapshot: {
     version: 1,
-    generatedAt: '2026-08-15T22:00:00+08:00',
+    generatedAt: '2026-08-16T12:00:00+08:00',
     status: 'ready',
     datasets: {
       rejectionReasons: rejectionReasonRows,
@@ -481,10 +655,15 @@ const artifact = {
       summary: [
         {
           cohort: 'known personal videos',
-          precisionBefore: before.aggregate.candidatePrecision,
-          precisionAfter: after.aggregate.candidatePrecision,
-          recallBefore: before.aggregate.candidateRecall,
-          recallAfter: after.aggregate.candidateRecall,
+          confirmedOnlyPrecisionBefore:
+            beforeAggregateFunnel.streams.confirmedOnly.precision,
+          confirmedOnlyPrecisionAfter:
+            afterAggregateFunnel.streams.confirmedOnly.precision,
+          confirmedOnlyRecallBefore:
+            beforeAggregateFunnel.streams.confirmedOnly.recall,
+          confirmedOnlyRecallAfter:
+            afterAggregateFunnel.streams.confirmedOnly.recall,
+          streams: afterAggregateFunnel.streams,
           candidateCount,
           rejectedCount,
         },
@@ -492,7 +671,66 @@ const artifact = {
     },
   },
 };
-writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
+
+// The two report payloads are published as one immutable version directory.
+// Readers follow only the atomic current pointer, so they can never observe a
+// new aggregate paired with an older report artifact.
+const aggregateBytes = Buffer.from(`${JSON.stringify(aggregate, null, 2)}\n`);
+const artifactBytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`);
+const pairManifest = {
+  schemaVersion: 'maxpower.visual-recognition-derived-report-pair/v1',
+  pairId,
+  versionDirectory: versionRelative,
+  aggregate: {
+    path: aggregateRelative,
+    sha256: sha256(aggregateBytes),
+  },
+  artifact: {
+    path: artifactRelative,
+    sha256: sha256(artifactBytes),
+  },
+  repeatExecution: controlledRepeat,
+};
+const manifestBytes = Buffer.from(`${JSON.stringify(pairManifest, null, 2)}\n`);
+const finalVersionPath = resolve(governanceRoot, versionRelative);
+if (existsSync(finalVersionPath)) {
+  for (const [path, expected] of [
+    [aggregatePath, aggregateBytes],
+    [artifactPath, artifactBytes],
+    [manifestPath, manifestBytes],
+  ]) {
+    if (!readFileSync(path).equals(expected)) {
+      throw new Error(`immutable derived-report version collision at ${path}`);
+    }
+  }
+} else {
+  const temporaryVersionPath = resolve(
+    outputRoot,
+    `.tmp-${pairId}-${process.pid}-${randomUUID()}`,
+  );
+  mkdirSync(temporaryVersionPath, { recursive: false });
+  writeFileSync(resolve(temporaryVersionPath, 'aggregate.json'), aggregateBytes, { flag: 'wx' });
+  writeFileSync(resolve(temporaryVersionPath, 'artifact.json'), artifactBytes, { flag: 'wx' });
+  writeFileSync(resolve(temporaryVersionPath, 'manifest.json'), manifestBytes, { flag: 'wx' });
+  mkdirSync(resolve(outputRoot, 'versions'), { recursive: true });
+  renameSync(temporaryVersionPath, finalVersionPath);
+}
+
+const pointerPath = resolve(outputRoot, 'visual-recognition-v0.1b-current.json');
+const pointerBytes = Buffer.from(`${JSON.stringify({
+  schemaVersion: 'maxpower.visual-recognition-derived-report-pointer/v1',
+  pairId,
+  manifest: {
+    path: manifestRelative,
+    sha256: sha256(manifestBytes),
+  },
+}, null, 2)}\n`);
+const temporaryPointerPath = resolve(
+  outputRoot,
+  `.visual-recognition-v0.1b-current.json.tmp-${process.pid}-${randomUUID()}`,
+);
+writeFileSync(temporaryPointerPath, pointerBytes, { flag: 'wx' });
+renameSync(temporaryPointerPath, pointerPath);
 process.stdout.write(
-  `${JSON.stringify({ aggregatePath, artifactPath, repeatRunCoreResultMatched: true, candidateCount, rejectedCount })}\n`,
+  `${JSON.stringify({ aggregatePath, artifactPath, manifestPath, pointerPath, pairId, repeatRunCoreResultMatched: repeatVerified ? true : null, candidateCount, rejectedCount })}\n`,
 );

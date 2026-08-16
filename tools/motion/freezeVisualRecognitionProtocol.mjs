@@ -47,7 +47,7 @@ const protocol = {
     assessmentCatalogId: 'maxpower/visual-recognition-baseline/v0.1',
     poseRuntimeId: 'rtmpose-m',
     poseSchema: 'halpe26/v1',
-    packetContract: '1.10',
+    packetContract: '1.11',
     equipmentProvider: 'maxpower_motion_sdk::EquipmentProviderRegistry',
     equipmentActivationAuthority: 'ExecutionContract',
     repBoundaryAuthority:
@@ -94,14 +94,14 @@ const protocol = {
     'production_promotion',
   ],
   output: {
-    path: 'workspace/visual-recognition-v0.1/full-known-video-evaluation.json',
+    path: 'workspace/visual-recognition-v0.1/v0.1b-action-driven-evaluation-2026-08-16.json',
     schemaVersion: 'maxpower.visual-recognition-known-video-evaluation/v0.1',
   },
 };
 
 const frozen = {
   schemaVersion: 'maxpower.visual-recognition-evaluation-protocol/v0.1',
-  evaluationId: 'visual-recognition-v0.1-known-video-baseline-2026-08-15',
+  evaluationId: 'visual-recognition-v0.1b-action-driven-2026-08-16',
   protocolSha256: sha256(Buffer.from(JSON.stringify(canonicalize(protocol)))),
   protocol,
 };
