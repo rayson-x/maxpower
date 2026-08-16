@@ -78,6 +78,8 @@ maxpower/
 - **运动数据流**：`Client CameraInputStream → Rust Motion SDK → CanonicalMotionOutput → client projection/Coach tools`。任何端不得拥有第二套骨架/计数/相位事实。
 - **决策权分层**：本地 Coach 拥有决策与事实（ADR-0001）；云端拥有已确认产品资源（ADR-0002）。LLM 文本/提案不经 mandate 授权不成事实。
 - **wiki 是独立本地仓**（`../wiki`，位置不可移动，外部引用依赖路径）：概念/证据/决策史。市场类调研不进 wiki，留在 `docs/research/`。
+  - **读**：回答训练/营养/恢复/动作识别等知识问题前，先读 `../wiki/index.md`（索引），再按链进 `knowledge/*.md`；引用时带页面 slug。
+  - **写**：维护 wiki 前必读 `../wiki/WIKI.md`（schema 层：两层知识、编译 seam、收录边界——工程 spec/ticket 永不进 wiki）。
 - **当前实现（2026-08）**：Android 实时识别已走 canonical 边界（front 识别 / back 观察双机位）；iOS 完整客户端待做；server 侧 media library / entitlements 进行中；当前开发分支 `agent-knowledge-runtime`。
 
 ## 6. 协作规则
