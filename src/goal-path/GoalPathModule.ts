@@ -5,6 +5,7 @@ import type { HealthTrendProjection } from "../health/HealthTrends";
 import { estimateBodyFat } from "../planning/bodyComposition";
 import { strengthTargetProgress } from "./StrengthGoalEvidence";
 import { strengthProgressFraction } from "./GoalNegotiation";
+import { assessPlateau, weeklyMeanWeights } from "./plateauPolicy";
 
 export type GoalPathState = "on_path" | "at_risk" | "infeasible_under_guardrails" | "insufficient_evidence";
 export type GoalPathDiagnosis =
@@ -238,8 +239,28 @@ function evaluateGoalPredicate(snapshot: GoalPathSnapshot, ledgers: readonly Dai
     const weightDirection = weights.length >= 2 ? weights.at(-1)!.valueKg - weights[0]!.valueKg : undefined;
     if (meanBalance === undefined && weightDirection === undefined) return insufficient("tracking_silence", ["fat_loss_confirmed_energy_and_comparable_weight_path_unknown"], ["record_representative_numeric_intake", "record_comparable_body_weight"]);
     if (completeBalance.length < 3 && weightDirection === undefined) return insufficient("tracking_silence", ["fat_loss_representative_energy_coverage_insufficient"], ["record_representative_numeric_intake", "record_comparable_body_weight"]);
-    if (meanBalance === undefined && weightDirection !== undefined && weightDirection >= 0) return risk("plan_response_review", ["fat_loss_observed_weight_path_not_declining"], ["record_representative_numeric_intake", "review_current_stage_response"], "review_recommended");
-    if ((meanBalance !== undefined && meanBalance > -100) && (weightDirection === undefined || weightDirection >= -0.1)) return risk("plan_response_review", ["fat_loss_current_path_not_in_deficit"], ["observe_weight_and_waist_under_confirmed_execution"], "review_recommended");
+    // 平台判定走版本化政策：单日读数/首末差值永不当证据；周均 + 判定窗 + 多信号。
+    const plateau = assessPlateau({
+      weeklyMeans: weeklyMeanWeights(weights),
+      circumferenceTrend: targetMusclesCircumferenceTrend(snapshot.domain, ["waist"]),
+      performanceTrend: comparablePerformanceTrend(snapshot.domain, snapshot.plan!.value.effectiveFrom),
+      evaluatedAt: snapshot.evaluatedAt,
+    });
+    if (plateau.verdict === "performance_decline_material") {
+      return risk("plan_response_review", ["fat_loss_performance_decline_is_material"], ["protect_key_lift_dose_or_reduce_deficit", "review_recovery_before_more_deficit"], "review_recommended");
+    }
+    if (meanBalance === undefined && weightDirection !== undefined && weightDirection >= 0) {
+      if (plateau.verdict !== "plateau_suspected") return insufficient("measurement_not_comparable", [plateau.reasonCode], ["record_comparable_body_weight_weekly", "record_comparable_waist"], "monitor");
+      return risk("plan_response_review", ["fat_loss_observed_weight_path_not_declining", plateau.reasonCode], ["record_representative_numeric_intake", "review_current_stage_response"], "review_recommended");
+    }
+    if ((meanBalance !== undefined && meanBalance > -100) && (weightDirection === undefined || weightDirection >= -0.1)) {
+      // 无体重数据时这不是平台判定问题：完整能量记录显示无缺口即可判。
+      if (weightDirection === undefined) return risk("plan_response_review", ["fat_loss_current_path_not_in_deficit"], ["observe_weight_and_waist_under_confirmed_execution"], "review_recommended");
+      if (plateau.verdict === "plateau_suspected") return risk("plan_response_review", ["fat_loss_current_path_not_in_deficit", plateau.reasonCode], ["observe_weight_and_waist_under_confirmed_execution"], "review_recommended");
+      // 缺口不足 + 体重未降但判定窗不足：监控而非判负。
+      if (plateau.verdict === "window_too_short") return insufficient("measurement_not_comparable", [plateau.reasonCode], ["continue_confirmed_records"], "monitor");
+      return risk("plan_response_review", ["fat_loss_current_path_not_in_deficit"], ["observe_weight_and_waist_under_confirmed_execution"], "review_recommended");
+    }
     const mode = goal.targetMode ?? "lean_mass_preserving_fat_loss";
     if (mode === "higher_body_mass_fat_loss" && weightDirection !== undefined && weightDirection >= 0) return risk("plan_response_review", ["higher_body_mass_cut_weight_path_not_declining"], ["use_small_confirmed_behavior_reduction_and_reobserve"], "review_recommended");
     if (mode === "lean_mass_preserving_fat_loss") {
@@ -405,15 +426,24 @@ function evaluateRemainingTrajectory(snapshot: GoalPathSnapshot): Decision | und
   const targetKg = targetWeight?.unit === "kg" ? targetWeight.value : targetWeight?.unit === "lb" ? targetWeight.value * 0.45359237 : undefined;
   if (targetKg !== undefined) {
     if (weights.length < 2) return insufficient("measurement_not_comparable", ["goal_weight_trajectory_insufficient"], ["record_comparable_body_weight"]);
-    const first = weights[0]!;
-    const latest = weights.at(-1)!;
-    const observedDays = daysBetween(first.occurredAt.slice(0, 10), latest.occurredAt.slice(0, 10));
-    if (observedDays < 7) return insufficient("observation_too_early", ["weight_trajectory_window_too_short"], ["continue_comparable_weight_measurements"]);
-    const observedPerDay = (latest.valueKg - first.valueKg) / observedDays;
-    const requiredPerDay = (targetKg - latest.valueKg) / remainingDays;
+    // 判据体系：轨迹用周均而不是首末单日读数；判定窗遵循版本化平台政策。
+    const weeklyMeans = weeklyMeanWeights(weights);
+    const plateau = assessPlateau({
+      weeklyMeans,
+      circumferenceTrend: targetMusclesCircumferenceTrend(snapshot.domain, ["waist"]),
+      performanceTrend: comparablePerformanceTrend(snapshot.domain, snapshot.plan!.value.effectiveFrom),
+      wellnessNotesInWindow: snapshot.domain.timeline.current.filter((event) => event.fact.kind === "wellness_note" && event.occurredAt.slice(0, 10) >= snapshot.plan!.value.effectiveFrom).length,
+      evaluatedAt: snapshot.evaluatedAt,
+    });
+    if (plateau.verdict === "window_too_short") return insufficient("observation_too_early", [plateau.reasonCode], ["continue_comparable_weight_measurements"], "monitor");
+    const first = weeklyMeans[0]!;
+    const latest = weeklyMeans.at(-1)!;
+    const observedDays = Math.max(7, daysBetween(first.weekStart, latest.weekStart) + 7);
+    const observedPerDay = (latest.meanKg - first.meanKg) / observedDays;
+    const requiredPerDay = (targetKg - latest.meanKg) / remainingDays;
     const directionMatches = requiredPerDay < 0 ? observedPerDay < 0 : requiredPerDay > 0 ? observedPerDay > 0 : true;
     const paceRatio = Math.abs(requiredPerDay) <= 0.001 ? 1 : Math.abs(observedPerDay) / Math.abs(requiredPerDay);
-    if (!directionMatches || paceRatio < 0.75) return risk("plan_response_review", ["observed_weight_trend_below_required_goal_path"], ["review_execution_plan_response_and_goal_tradeoffs"], "review_recommended");
+    if (!directionMatches || paceRatio < 0.75) return risk("plan_response_review", ["observed_weight_trend_below_required_goal_path", plateau.reasonCode], ["review_execution_plan_response_and_goal_tradeoffs"], "review_recommended");
   }
   if (goal.targets?.targetBodyFat) {
     const bodyFat = comparableBodyFatSeries(snapshot.domain, snapshot.plan!.value.effectiveFrom);

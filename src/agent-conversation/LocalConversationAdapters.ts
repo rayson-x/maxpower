@@ -113,7 +113,8 @@ export function createLocalConversationAdapters(input: {
               : record.kind === "activity" ? "活动"
                 : record.kind === "training" ? "训练记录"
                   : record.kind === "sleep" ? "睡眠"
-                    : record.kind === "clinical" ? "健康情况" : "恢复反馈";
+                    : record.kind === "clinical" ? "健康情况"
+                      : record.kind === "wellness_note" ? "好变化" : "恢复反馈";
         return {
           label,
           ...(record.kind === "nutrition"
@@ -301,6 +302,9 @@ async function explicitConversationFact(
   }
   if (record.kind === "clinical") {
     return { kind: "clinical_context", context: record.context, ...(record.note ? { note: record.note } : {}), confidence: "confirmed" };
+  }
+  if (record.kind === "wellness_note") {
+    return { kind: "wellness_note", note: record.note, ...(record.dimension ? { dimension: record.dimension } : {}), confidence: "confirmed" };
   }
   return {
     kind: "nutrition",

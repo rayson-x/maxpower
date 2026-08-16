@@ -873,7 +873,7 @@ function validateTimelinePayload(event: DomainEvent): void {
   const actor = entry.actor;
   const provenance = entry.provenance;
   const actorKinds = new Set(["user", "agent", "rule_engine", "sensor", "sync", "system"]);
-  const factKinds = new Set(["training", "activity", "nutrition", "sleep", "body", "recovery", "symptom", "clinical_context", "subjective", "schedule", "rest"]);
+  const factKinds = new Set(["training", "activity", "nutrition", "sleep", "body", "recovery", "symptom", "clinical_context", "subjective", "schedule", "rest", "wellness_note"]);
   const origins = new Set(["manual", "healthkit", "health_connect", "smart_scale", "wearable", "canonical_motion_packet", "import", "professional_directive", "system"]);
   const recordingMethods = new Set(["manual_entry", "device_measurement", "platform_import", "canonical_packet", "professional_entry", "system_import"]);
   const dataStatuses = new Set(["available", "missing", "permission_denied", "not_supported", "stale", "partial", "estimated", "conflict"]);
@@ -953,6 +953,9 @@ function validTimelineFactShape(fact: Record<string, unknown>): boolean {
       return confirmedOrEstimated && ["diagnosed_condition", "medication", "pregnancy_or_postpartum", "eating_disorder_or_low_energy_risk", "recent_surgery_or_acute_injury", "other"].includes(String(fact.context)) && optionalString(fact.note);
     case "subjective":
       return confirmedOrEstimated && fact.metric === "physique_satisfaction" && typeof fact.value === "number" && Number.isFinite(fact.value) && optionalString(fact.note);
+    case "wellness_note":
+      return fact.confidence === "confirmed" && typeof fact.note === "string" && fact.note.length > 0 && fact.note.length <= 500 &&
+        (fact.dimension === undefined || ["energy", "sleep", "function", "mood", "other"].includes(String(fact.dimension)));
     case "schedule":
       return confirmedOrEstimated && ["availability_changed", "travel", "work_conflict", "other"].includes(String(fact.effect)) && optionalString(fact.note);
     case "rest":

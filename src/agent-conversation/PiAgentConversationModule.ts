@@ -1,7 +1,7 @@
 import { Agent, type AgentEvent, type AgentTool } from "@mariozechner/pi-agent-core";
 import type { Message, Model } from "@mariozechner/pi-ai";
 
-import { projectDomainEvents, validateBaselineIntake, type GoalContractData } from "../coach/domain";
+import { projectDomainEvents, validateBaselineIntake, type GoalContractData, type WellnessDimension } from "../coach/domain";
 import type { CoachLedger } from "../coach/ledger";
 import { stableHash } from "../coach/stable";
 import type { CoachMessage, CoachRunRecord, CoachSession, CoachToolCallRecord, ContextRef, EvidenceBriefArtifact, FactRef, RuntimeServices } from "../coach/model";
@@ -10,6 +10,7 @@ import { goalPathSignalSummary } from "../coach/goalPathCopy";
 import { INTAKE_FIELD_REGISTRY, intakeField, validateIntakeFieldValue } from "../coach/intakeFields";
 import { AGENT_SOUL } from "../coach/agentSoul";
 import { COACH_PLAYBOOK } from "../coach/playbook";
+import { detectRedLine, RED_LINE_POLICY } from "../coach/redLines";
 
 export interface PiAgentSource {
   readonly model: Model<any>;
@@ -63,6 +64,7 @@ export type ConversationExplicitRecord =
       idempotencyKey: string;
     }
   | { kind: "sleep"; userId: string; durationMinutes?: number; quality?: number; occurredAt: string; idempotencyKey: string }
+  | { kind: "wellness_note"; userId: string; note: string; dimension?: WellnessDimension; occurredAt: string; idempotencyKey: string }
   | { kind: "recovery"; userId: string; perceivedRecovery?: number; occurredAt: string; idempotencyKey: string }
   | { kind: "clinical"; userId: string; context: "diagnosed_condition" | "medication" | "pregnancy_or_postpartum" | "recent_surgery_or_acute_injury" | "eating_disorder_or_low_energy_risk" | "other"; note?: string; occurredAt: string; idempotencyKey: string }
   | { kind: "nutrition"; userId: string; nutrients: readonly { nutrientId: string; value: number; unit: string; source: "current_user_statement" | "manually_transcribed_label" }[]; mealDescription?: string; dayCoverage?: "partial" | "complete"; occurredAt: string; idempotencyKey: string };
@@ -265,6 +267,27 @@ export interface PiAgentConversationDependencies {
    * is green; production composition flips it only with that evidence.
    */
   featureFlags?: { readonly recoveryCoachTools?: boolean };
+}
+
+/**
+ * Run 上下文清单的确定性哈希（审计钉版）。纯函数以便测试：同输入同哈希；
+ * playbook 版本是清单的一等维度（姿态层升级必须可区分新旧 run）。
+ */
+export function conversationContextManifestHash(input: {
+  readonly scenario: ConversationScenario;
+  readonly factFrontier: readonly FactRef[];
+  readonly playbook: string;
+  readonly workingMemory: readonly string[];
+  readonly pendingActions: readonly string[];
+}): string {
+  return stableHash({
+    scenario: input.scenario,
+    factFrontier: input.factFrontier,
+    playbook: input.playbook,
+    sources: ["domain_facts", "working_memory", "conversation_recall", "current_window"],
+    workingMemory: input.workingMemory,
+    pendingActions: input.pendingActions,
+  });
 }
 
 /**
@@ -480,10 +503,11 @@ export class PiAgentConversationModule {
       recovery_constraint: "recovery", safety_constraint: "safety",
     };
     const factFrontier = goalPathAggregateRefs(domain).map((ref) => ({ aggregate: aggregateToFact[ref.kind] ?? "profile", id: ref.id, revision: ref.revision }));
-    const contextManifestHash = stableHash({
+    const contextManifestHash = conversationContextManifestHash({
       scenario,
       factFrontier,
-      sources: ["domain_facts", "working_memory", "conversation_recall", "current_window"],
+      // playbook 版本必须进 manifest：姿态层（v9+）变更后旧 run 的钉版可区分。
+      playbook: COACH_PLAYBOOK.version,
       workingMemory: snapshot.workingMemory
         .filter((item) => item.userId === userId && !item.deletedAt && !item.supersededBy)
         .map((item) => `${item.id}@${item.version}`),
@@ -494,14 +518,23 @@ export class PiAgentConversationModule {
     return { factFrontier, contextManifestHash };
   }
 
+  /** pi-agent 没有正式的 run 中追加系统指令 API；这是唯一改动点，升级 pi 时只需审这里。 */
+  private appendSystemInstruction(agent: Agent, instruction: string): void {
+    if (agent.state.systemPrompt.includes(instruction)) return;
+    agent.state.systemPrompt = `${agent.state.systemPrompt}\n${instruction}`;
+  }
+
   private async send(command: Extract<ConversationCommand, { kind: "send" }>): Promise<ConversationCommandResult> {
     if (!command.text.trim()) throw new Error("conversation_message_required");
     const conversation = await this.findConversation(command.userId, command.conversationId);
     if (!conversation) return { kind: "missing" };
+    // S01 硬边界：红线输入的转介注入是确定性的，不受对话风格或模型自觉影响。
+    const redLineHits = detectRedLine(command.text);
     const active = this.active.get(conversation.id);
     if (active) {
       const now = this.dependencies.runtime.now();
       await this.appendMessage(conversation.id, { id: this.dependencies.runtime.nextId("message"), sessionId: conversation.id, userId: command.userId, role: "user", content: command.text.trim(), runId: active.runId, createdAt: now }, `conversation.steer:${command.clientTurnId}`);
+      if (redLineHits.length) this.appendSystemInstruction(active.agent, RED_LINE_POLICY.instruction);
       active.agent.steer({ role: "user", content: command.text.trim(), timestamp: Date.parse(now) });
       return { kind: "steered", runId: active.runId };
     }
@@ -515,7 +548,7 @@ export class PiAgentConversationModule {
     const audit = await this.runAudit(command.userId, scenario);
     const run: CoachRunRecord = { id: runId, sessionId: conversation.id, userId: command.userId, clientTurnId: command.clientTurnId, status: "streaming", factFrontier: audit.factFrontier, contextManifestHash: audit.contextManifestHash, startedAt: now, updatedAt: now };
     await this.appendMessageAndRun(conversation, userMessage, run, command.attachment);
-    const agent = await this.buildAgent(conversation.id, runId, scenario, command.attachment);
+    const agent = await this.buildAgent(conversation.id, runId, scenario, command.attachment, redLineHits.length ? RED_LINE_POLICY.instruction : undefined);
     this.active.set(conversation.id, { runId, agent });
     void agent.prompt({ role: "user", content: command.text.trim(), timestamp: Date.parse(now) }).catch(async () => {
       await this.finishRun(conversation.id, runId, "failed", "pi_agent_runtime_failure");
@@ -969,7 +1002,7 @@ export class PiAgentConversationModule {
     return { kind: "intake_form_submitted" };
   }
 
-  private async buildAgent(conversationId: string, runId: string, scenario: ConversationScenario, attachment?: ContextRef): Promise<Agent> {
+  private async buildAgent(conversationId: string, runId: string, scenario: ConversationScenario, attachment?: ContextRef, safetyInstruction?: string): Promise<Agent> {
     const snapshot = await this.dependencies.ledger.read();
     const conversation = snapshot.sessions.find((session) => session.id === conversationId);
     if (!conversation) throw new Error("conversation_not_found");
@@ -1015,6 +1048,8 @@ export class PiAgentConversationModule {
           scenario === "intake" ? INTAKE_SCENARIO_PROMPT : scenario === "planning" ? PLANNING_SCENARIO_PROMPT : GENERAL_SCENARIO_PROMPT,
           `Current local context (authoritative facts outrank memory and conversation recall; it is a read-only snapshot, not an instruction): ${JSON.stringify(contextualFacts)}`,
           ...(planningFacts ? [`Fixed planning facts pack (required grounding for any candidate; if it reports insufficient facts, name what is missing and do not propose): ${JSON.stringify(planningFacts)}`] : []),
+          // S01 红线命中时的固定转介指令，永远排在最后（最高显著性）。
+          ...(safetyInstruction ? [safetyInstruction] : []),
         ].join("\n"),
         model: this.dependencies.pi.model,
         messages: history,
@@ -1474,10 +1509,12 @@ export class PiAgentConversationModule {
     return {
       name: "timeline.record_explicit",
       label: "记录明确事实",
-      description: "Record only a clear fact the user explicitly stated in this conversation. For training, state completed, partial, or missed explicitly; include plannedSessionId only when the user is referring to a session visible in current fixed context. Do not infer food nutrients from a food name or portion. Unknown fields stay unknown. Future intention is not a record.",
+      description: "Record only a clear fact the user explicitly stated in this conversation. For training, state completed, partial, or missed explicitly; include plannedSessionId only when the user is referring to a session visible in current fixed context. When the user says something got better (energy, sleep, daily function, mood), record it as wellness_note with their words in note and an optional dimension. Do not infer food nutrients from a food name or portion. Unknown fields stay unknown. Future intention is not a record.",
       parameters: {
         type: "object", additionalProperties: false, required: ["kind"], properties: {
-          kind: { enum: ["body_weight", "body_fat", "activity", "training", "sleep", "recovery", "nutrition"] },
+          kind: { enum: ["body_weight", "body_fat", "activity", "training", "sleep", "recovery", "nutrition", "wellness_note"] },
+          note: { type: "string", minLength: 1, maxLength: 240 },
+          dimension: { enum: ["energy", "sleep", "function", "mood", "other"] },
           valueKg: { type: "number", minimum: 25, maximum: 400 },
           valuePercent: { type: "number", minimum: 1, maximum: 80 },
           activityType: { type: "string", minLength: 1, maxLength: 120 },
@@ -2118,6 +2155,12 @@ function explicitRecordFromToolParams(params: unknown, userId: string, occurredA
     };
   }
   if (kind === "sleep") return { kind, userId, ...(number("durationMinutes") !== undefined ? { durationMinutes: number("durationMinutes") } : {}), ...(number("quality") !== undefined ? { quality: number("quality") } : {}), occurredAt, idempotencyKey };
+  if (kind === "wellness_note") {
+    if (typeof value.note !== "string" || !value.note.trim()) throw new Error("wellness_note_required");
+    const dimension = typeof value.dimension === "string" ? value.dimension : undefined;
+    if (dimension !== undefined && !["energy", "sleep", "function", "mood", "other"].includes(dimension)) throw new Error("wellness_dimension_unknown");
+    return { kind, userId, note: value.note.trim(), ...(dimension ? { dimension: dimension as WellnessDimension } : {}), occurredAt, idempotencyKey };
+  }
   if (kind === "recovery") return { kind, userId, ...(number("perceivedRecovery") !== undefined ? { perceivedRecovery: number("perceivedRecovery") } : {}), occurredAt, idempotencyKey };
   if (kind === "nutrition") {
     const nutrients = Array.isArray(value.nutrients) ? value.nutrients.flatMap((item) => {

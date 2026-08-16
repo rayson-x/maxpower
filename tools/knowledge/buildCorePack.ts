@@ -62,6 +62,41 @@ const SOURCES: readonly SourceRef[] = [
     reviewedAt: "2026-08-08T00:00:00.000Z",
   },
   {
+    id: "maxpower.coaching-diagnostic-patterns.v1",
+    title: "Coaching Analysis Patterns Corpus (P01-P08, S01, G01)",
+    uri: "docs/research/coaching-diagnostic-patterns-2026-08-16.md",
+    classification: "ProductPolicy",
+    reviewedAt: "2026-08-16T00:00:00.000Z",
+  },
+  {
+    id: "maxpower.fat-loss-plateau-evidence.v1",
+    title: "Fat-loss Plateau Evidence Review",
+    uri: "docs/research/fat-loss-plateau-2026-08-16.md",
+    classification: "EvidenceFact",
+    reviewedAt: "2026-08-16T00:00:00.000Z",
+  },
+  {
+    id: "maxpower.body-recomposition-evidence.v1",
+    title: "Body Recomposition Evidence Review",
+    uri: "docs/research/body-recomposition-2026-08-16.md",
+    classification: "EvidenceFact",
+    reviewedAt: "2026-08-16T00:00:00.000Z",
+  },
+  {
+    id: "maxpower.detraining-retraining-evidence.v1",
+    title: "Detraining and Retraining Evidence Review",
+    uri: "docs/research/detraining-retraining-2026-08-16.md",
+    classification: "EvidenceFact",
+    reviewedAt: "2026-08-16T00:00:00.000Z",
+  },
+  {
+    id: "maxpower.muscle-recovery-windows-evidence.v1",
+    title: "Muscle Recovery Windows Evidence Review",
+    uri: "docs/research/muscle-recovery-windows-2026-08-16.md",
+    classification: "EvidenceFact",
+    reviewedAt: "2026-08-16T00:00:00.000Z",
+  },
+  {
     id: "maxpower.competitor-research.v1",
     title: "Fitness Coach Competitor Precedent Research",
     uri: "docs/research/2026-08-08-adaptive-fitness-coach-deep-dive.md",
@@ -1511,7 +1546,7 @@ const FASTED_TRAINING_RULES: readonly FastedTrainingRule[] = [
 ];
 
 const PROGRAM_STRATEGIES: ProgramStrategies = {
-  semanticVersion: "1.1.0",
+  semanticVersion: "1.2.0",
   dietStrategies: DIET_STRATEGIES,
   citations: EVIDENCE_CITATIONS,
   sessionFuelingPolicies: SESSION_FUELING_POLICIES,
@@ -1754,6 +1789,7 @@ export function buildCoreKnowledgePack(): KnowledgePack {
     "docs/wiki/training-programming.md",
     "docs/wiki/recovery-and-health-signals.md",
     "docs/wiki/nutrition-strategy.md",
+    "docs/wiki/judgment-criteria.md",
   ].map((path) => ({ path, semanticVersion: "1.0.0", executable: false as const }));
   const classifications = CLASSIFICATIONS;
   const manifestContent = {

@@ -31,6 +31,14 @@ interface SourceDocPolicy {
   excludeSections?: readonly RegExp[];
   /** 不发布的原因（publish=false 时必填，便于审计）。 */
   reason?: string;
+  /** 覆盖 tier 推断（如方法论语料固定 tier D——作者经验，非文献证据）。 */
+  defaultTier?: KnowledgePassage["tier"];
+  /** 整篇标 experimental（dogfood 期内容，转正前话术可演进）。 */
+  experimental?: true;
+  /** 手工策展文档：跳过全局内容剔除（DROP 模式面向工程噪声，语料的「知识包」指产品概念）。 */
+  skipContentDrop?: true;
+  /** 措辞纪律清洗（构建期、确定性、可审计）：医学措辞（诊断/处方）替换为产品语言。 */
+  contentReplacements?: readonly (readonly [RegExp, string])[];
 }
 
 const SOURCE_DOCS: readonly SourceDocPolicy[] = [
@@ -40,6 +48,68 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
   { path: "docs/wiki/recovery-and-health-signals.md", title: "恢复与健康信号", publish: true },
   { path: "docs/wiki/exercise-and-stimulus-knowledge.md", title: "动作与刺激知识", publish: true },
   { path: "docs/wiki/program-strategy-set.md", title: "训练编排策略集", publish: true },
+  { path: "docs/wiki/judgment-criteria.md", title: "判据体系", publish: true, experimental: true },
+
+  // ── 教练方法论语料（作者经验，tier D；dogfood 期标 experimental）──
+  {
+    path: "docs/research/coaching-diagnostic-patterns-2026-08-16.md",
+    title: "教练分析模式语料",
+    publish: true,
+    defaultTier: "D",
+    experimental: true,
+    skipContentDrop: true,
+    excludeSections: [/元模式/],
+  },
+
+  // ── 核验调研（平台/recomp/停训/恢复窗）：发布结论与落地建议；剔除内部裁决与引用清单 ──
+  {
+    path: "docs/research/fat-loss-plateau-2026-08-16.md",
+    title: "减脂平台期证据",
+    publish: true,
+    experimental: true,
+    contentReplacements: [
+      [/诊断与处理/g, "判定与处理"],
+      [/诊断流程/g, "判定流程"],
+      [/诊断清单/g, "判定清单"],
+      [/诊断动作/g, "判定动作"],
+      [/诊断\/处理/g, "判定/处理"],
+    ],
+    excludeSections: [/对作者直觉的裁决/, /引用清单/, /怎么读/],
+  },
+  {
+    path: "docs/research/body-recomposition-2026-08-16.md",
+    title: "身体重组证据",
+    publish: true,
+    experimental: true,
+    contentReplacements: [
+      [/实践处方/g, "实践方案"],
+      [/处方参数/g, "方案参数"],
+      [/处方证据/g, "方案证据"],
+      [/处方与/g, "方案与"],
+      [/处方因此/g, "方案因此"],
+      [/处方/g, "方案"],
+    ],
+    excludeSections: [/对作者主张的分层裁决/, /引用清单/, /核验统计/, /怎么读/],
+  },
+  {
+    path: "docs/research/detraining-retraining-2026-08-16.md",
+    title: "停训与复练证据",
+    publish: true,
+    experimental: true,
+    contentReplacements: [
+      [/实践处方/g, "实践方案"],
+      [/处方证据/g, "方案证据"],
+      [/处方/g, "方案"],
+    ],
+    excludeSections: [/对作者主张的裁决/, /引用清单/, /怎么读/],
+  },
+  {
+    path: "docs/research/muscle-recovery-windows-2026-08-16.md",
+    title: "肌群恢复时间窗证据",
+    publish: true,
+    experimental: true,
+    excludeSections: [/引用清单/, /怎么读/],
+  },
 
   // ── 调研报告：只发布"事实与证据"部分，剔除产品决策与工程内容 ──
   {
@@ -361,6 +431,16 @@ function extractKeywords(text: string, sectionPath: readonly string[]): string[]
     "深蹲", "卧推", "硬拉", "引体", "划船", "推举", "臀桥", "弓步", "平板",
     "安全", "禁忌", "疼痛", "受伤", "转介", "孕期", "未成年", "老年",
   ];
+  // 教练语料的场景词（用户原话用语——「表面信号」检索词）：语料更新时随之补充。
+  const coachingScenarioTerms = [
+    "夜宵", "瘦肚子", "局部减脂", "判据", "期望", "复练", "中断", "瓶颈", "平台",
+    "爬楼", "外卖", "应酬", "大基数", "戒不掉", "嘴馋", "偷懒", "坚持", "放弃",
+    "羞耻", "说教", "体重没变", "体重不动", "停训", "节食", "暴食", "情绪化进食",
+    "改善", "感觉", "精力", "气色", "上楼", "久坐",
+  ];
+  for (const term of coachingScenarioTerms) {
+    if (text.includes(term)) keywords.add(term);
+  }
   for (const term of domainTerms) {
     if (text.includes(term)) keywords.add(term);
   }
@@ -543,6 +623,7 @@ export function buildDistilledLayers(passages: readonly KnowledgePassage[]): {
       citationRefs,
       tier,
       passageIds: group.map((passage) => passage.id),
+      ...(group.some((passage) => passage.experimental) ? { experimental: true as const } : {}),
     });
   }
   return { keypoints, gists };
@@ -578,7 +659,10 @@ export function buildKnowledgePassages(repoRoot = process.cwd()): PassageBuildRe
       missing.push(doc.path);
       continue;
     }
-    const candidates = splitDocument(readFileSync(absolute, "utf8"), doc.title, doc.path);
+    const raw = readFileSync(absolute, "utf8");
+    // 措辞纪律清洗在切分前应用（小节标题同步生效），替换可数、可审计。
+    const markdown = (doc.contentReplacements ?? []).reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), raw);
+    const candidates = splitDocument(markdown, doc.title, doc.path);
     for (const passage of candidates) {
       // 小节政策
       const sectionExcluded = (doc.excludeSections ?? []).some((pattern) =>
@@ -589,7 +673,7 @@ export function buildKnowledgePassages(repoRoot = process.cwd()): PassageBuildRe
         continue;
       }
       // 整段剔除（通体内部内容）
-      const drop = DROP_PASSAGE_PATTERNS.find((entry) => entry.pattern.test(passage.text));
+      const drop = doc.skipContentDrop ? undefined : DROP_PASSAGE_PATTERNS.find((entry) => entry.pattern.test(passage.text));
       if (drop) {
         excludedByContent.push({
           sourcePath: doc.path,
@@ -608,19 +692,24 @@ export function buildKnowledgePassages(repoRoot = process.cwd()): PassageBuildRe
         });
         continue;
       }
-      passages.push(
-        cleaned === passage.text
-          ? passage
-          : {
-              ...passage,
-              text: cleaned,
-              // 清洗改变了内容 → 证据等级与关键词都要按清洗后的文本重算
-              tier: inferTier(cleaned),
-              keywords: extractKeywords(cleaned, passage.sectionPath),
-              citationRefs: citationsFor(cleaned),
-              contentHash: stableHash(cleaned),
-            },
-      );
+      const finalized = cleaned === passage.text
+        ? passage
+        : {
+            ...passage,
+            text: cleaned,
+            // 清洗改变了内容 → 证据等级与关键词都要按清洗后的文本重算
+            tier: inferTier(cleaned),
+            keywords: extractKeywords(cleaned, passage.sectionPath),
+            citationRefs: citationsFor(cleaned),
+            contentHash: stableHash(cleaned),
+          };
+      passages.push({
+        ...finalized,
+        // doc 级政策覆盖：方法论语料固定 tier D（作者经验而非文献证据）；
+        // dogfood 期内容标 experimental。
+        ...(doc.defaultTier ? { tier: doc.defaultTier } : {}),
+        ...(doc.experimental ? { experimental: true as const } : {}),
+      });
     }
   }
   return { passages, missing, unpublished, excludedBySection, excludedByContent };

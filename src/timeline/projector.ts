@@ -148,5 +148,5 @@ export function factHasNoCompletedClaim(fact: TimelineFact): boolean {
   // clinical_context and subjective are user-reported experience facts: they
   // carry no completion claim either, and the fixed GoalPath safety rules
   // depend on their admission.
-  return ["training", "activity", "nutrition", "sleep", "body", "recovery", "rest", "symptom", "schedule", "clinical_context", "subjective"].includes(fact.kind);
+  return ["training", "activity", "nutrition", "sleep", "body", "recovery", "rest", "symptom", "schedule", "clinical_context", "subjective", "wellness_note"].includes(fact.kind);
 }

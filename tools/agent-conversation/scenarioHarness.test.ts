@@ -289,3 +289,38 @@ test("an auto-written record receipt offers a correction entry that starts an Ag
   if (after.kind !== "conversation") return;
   assert.ok(after.items.some((item) => item.role === "assistant" && item.content === "哪里记错了？告诉我正确的数值。"));
 });
+
+test("playbook version is pinned into the run context manifest", async () => {
+  const { conversationContextManifestHash } = await import("../../src/agent-conversation/PiAgentConversationModule");
+  const { COACH_PLAYBOOK } = await import("../../src/coach/playbook");
+  const base = {
+    scenario: "general" as const,
+    factFrontier: [{ aggregate: "profile" as const, id: "profile:u1", revision: 1 }],
+    workingMemory: [],
+    pendingActions: [],
+  };
+  const pinned = conversationContextManifestHash({ ...base, playbook: COACH_PLAYBOOK.version });
+  assert.equal(pinned, conversationContextManifestHash({ ...base, playbook: COACH_PLAYBOOK.version }), "同输入同哈希（可回放）");
+  assert.notEqual(pinned, conversationContextManifestHash({ ...base, playbook: "playbook-2026-08-16/v8" }), "playbook 版本变更必须改变钉版");
+  // 当前默认姿态层是 v9（引导能力改造）
+  assert.match(COACH_PLAYBOOK.version, /v9/);
+});
+
+test("the system prompt carries the playbook text (guidance posture layer present)", async () => {
+  const final = assistant([{ type: "text", text: "收到。" }], "stop");
+  const { kernel, conversation, requests } = composition([() => textStream(final, "收到。")]);
+  await kernel.executeDomainCommand({
+    type: "user.bootstrap",
+    meta: { userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "scenario-test", occurredAt: "2026-08-16T08:00:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "bootstrap:u1" },
+    profile: { id: "profile:u1", locale: "zh-CN", adultConfirmed: true, dailyActivityLevel: "lightly_active", demographics: { ageYears: 30, sex: "male", height: { value: 175, unit: "cm" }, currentWeight: { value: 75, unit: "kg" } } },
+    mandate: { id: "mandate:u1", mode: "collaborative", planChangeAuthorization: "always_ask" },
+  });
+  const opened = await conversation.execute({ kind: "new", userId: "u1" });
+  if (opened.kind !== "opened") return;
+  await conversation.execute({ kind: "send", userId: "u1", conversationId: opened.conversation.id, text: "你好", clientTurnId: "turn-playbook" });
+  await conversation.whenIdle(opened.conversation.id);
+  const prompt = String((requests[0] as { systemPrompt?: string })?.systemPrompt ?? "");
+  const { COACH_PLAYBOOK } = await import("../../src/coach/playbook");
+  assert.ok(prompt.includes(COACH_PLAYBOOK.text.slice(0, 120)), "系统提示必须携带 playbook 全文");
+  assert.match(prompt, /wellness_note|三层|转介/, "v9 姿态层（主观信号/分层诚实/转介纪律）必须在场");
+});

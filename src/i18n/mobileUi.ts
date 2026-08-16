@@ -784,6 +784,7 @@ export const MOBILE_UI_COPY: TranslationTable = {
   "mobile.nutrient.vitaminC": { en: "Vitamin C", zh: "维生素 C" },
   "mobile.trends.energyNutrition": { en: "Energy and nutrition", zh: "能量与营养" },
   "mobile.muscleweek.title": { en: "This week's muscle load", zh: "本周肌群复盘" },
+  "mobile.muscleweek.wellnessTitle": { en: "Wins you mentioned", zh: "你说过的好变化" },
   "mobile.muscleweek.disclaimer": { en: "Relative training load from confirmed sets — not actual strength or muscle activation.", zh: "这是由已确认训练组算出的相对负荷，不是你肌肉的实际力量或激活。" },
   "mobile.muscleweek.directSets": { en: "direct sets", zh: "直接组" },
   "mobile.muscleweek.synergistLoad": { en: "synergist load", zh: "协同负荷" },

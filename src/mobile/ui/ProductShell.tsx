@@ -1119,6 +1119,10 @@ function MuscleWeekCard({ report }: { report: NonNullable<CoachProductProjection
     })}
     {report.unknownExercises.map((entry) => <Text key={entry.exerciseVariantId} style={styles.quickChoiceHint}>{entry.exerciseName} · {entry.sets} {mobileT("mobile.muscleweek.sets")} · {mobileT("mobile.muscleweek.unknownNotCounted")}</Text>)}
     {report.limitations.map((line) => <Text key={line} style={styles.muscleRowLimit}>{line}</Text>)}
+    {report.wellnessNotes.length ? <>
+      <Text style={styles.quickChoiceTitle}>{mobileT("mobile.muscleweek.wellnessTitle")}</Text>
+      {report.wellnessNotes.map((note) => <Text key={`${note.occurredAt}:${note.note}`} style={styles.muscleRowDetailText}>{note.occurredAt.slice(5, 10)} · 「{note.note}」</Text>)}
+    </> : null}
   </View>;
 }
 

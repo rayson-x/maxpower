@@ -885,6 +885,7 @@ export function timelineSummary(entry: TimelineReadEvent | TimelineProjectionEve
     case "symptom": return "身体反馈";
     case "clinical_context": return "健康边界";
     case "subjective": return "主观反馈";
+    case "wellness_note": return "好变化";
     case "schedule": return "日程变更";
     case "rest": return "休息";
   }

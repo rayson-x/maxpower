@@ -257,7 +257,7 @@ if (require.main === module) {
   const records = parseDatasetRecords(readFileSync("data/external/exercises-dataset/data/exercises.json", "utf8"));
   const muscleMap = loadMuscleMap("tools/knowledge/candidate-adjudications/muscle-map.v1.json");
   const adjudications = loadAdjudications("tools/knowledge/candidate-adjudications/identity-adjudications.v1.json");
-  const pack = buildCandidatePack({ basePack, datasetRecords: records, muscleMap, adjudications, semanticVersion: "1.1.0" });
+  const pack = buildCandidatePack({ basePack, datasetRecords: records, muscleMap, adjudications, semanticVersion: "1.2.0" });
   validateKnowledgePack(pack);
   const dir = join(process.cwd(), "src/knowledge/packs");
   mkdirSync(dir, { recursive: true });

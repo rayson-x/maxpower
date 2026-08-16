@@ -132,6 +132,7 @@ import {
 } from "../nutrition";
 import { projectDailyHealthLedger, projectHealthTrends } from "../health";
 import { GoalPathModule, goalDeadlineForWeeks, goalPathAggregateRefs, negotiateGoalPaths, projectPlanExecutionEvidence, strengthTargetProgress, type GoalPathAssessment, type GoalPathOption } from "../goal-path";
+import { defaultSuccessMetrics } from "../goal-path/plateauPolicy";
 import {
   deriveMetricRegistry,
   weeklyCoachReport,
@@ -1068,12 +1069,22 @@ export class LocalProductKernel {
         completedAt: workout.outcome!.completedAt,
         outcomes: workout.setOutcomes,
       }));
+    const wellnessNotes = domain.timeline.current
+      .filter((event) => event.fact.kind === "wellness_note"
+        && event.occurredAt.slice(0, 10) >= input.weekStartDate
+        && event.occurredAt.slice(0, 10) <= input.weekEndDate)
+      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
+      .map((event) => {
+        const fact = event.fact as Extract<typeof event.fact, { kind: "wellness_note" }>;
+        return { occurredAt: event.occurredAt, note: fact.note, ...(fact.dimension ? { dimension: fact.dimension } : {}) };
+      });
     return assessMuscleWeek({
       week: { startDate: input.weekStartDate, endDate: input.weekEndDate },
       completedSets,
       ...(domain.goalContract ? { goalContract: domain.goalContract.value } : {}),
       knowledgeVersion: this.knowledge.versionPins().exerciseCatalog.contentHash,
       exerciseById: (id) => this.knowledge.exerciseVariant(id),
+      wellnessNotes,
     });
   }
 
@@ -1731,6 +1742,9 @@ export class LocalProductKernel {
       executionTier: selected.executionTier,
       targetWeeks: selected.targetWeeks,
       horizon: { ...input.goal.horizon, endDate: goalDeadlineForWeeks(today, selected.targetWeeks) },
+      // 判据体系默认值：围度/表现/训练执行优先，体重降级为周均趋势。
+      // 模型没给 successMetrics 时按此生成，而不是裸体重目标。
+      successMetrics: input.goal.successMetrics?.length ? input.goal.successMetrics : defaultSuccessMetrics(input.goal),
       status: "active" as const,
     };
     const result = await this.executeDomainCommand({

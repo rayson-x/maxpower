@@ -1,4 +1,4 @@
-import type { GoalContractData, SetOutcomeData } from "../coach/domain";
+import type { GoalContractData, SetOutcomeData, WellnessDimension } from "../coach/domain";
 import type { ExerciseVariant } from "../knowledge/model";
 import { fatigueContributionsForExercise, MUSCLE_FATIGUE_POLICY } from "./muscleFatigue";
 
@@ -65,6 +65,8 @@ export interface MuscleWeekReport {
   readonly unknownExercises: readonly { readonly exerciseVariantId: string; readonly exerciseName: string; readonly sets: number }[];
   readonly confidence: "high" | "partial" | "low";
   readonly limitations: readonly string[];
+  /** 「你说过的好变化」回放：本周窗内用户自述的 wellness_note（原话，不改写）。 */
+  readonly wellnessNotes: readonly { readonly occurredAt: string; readonly note: string; readonly dimension?: WellnessDimension }[];
   readonly disclaimer: "relative_load_not_strength_or_activation";
 }
 
@@ -84,6 +86,8 @@ export function assessMuscleWeek(input: {
   readonly knowledgeVersion: string;
   readonly trainingLevel?: MuscleWeekTrainingLevel;
   readonly exerciseById: (id: string) => ExerciseVariant | undefined;
+  /** 本周窗内的主观好变化记录（wellness_note）；回放用，原话呈现。 */
+  readonly wellnessNotes?: readonly { readonly occurredAt: string; readonly note: string; readonly dimension?: WellnessDimension }[];
 }): MuscleWeekReport {
   const perMuscleSets = new Map<string, number>();
   const perMuscleLoad = new Map<string, number>();
@@ -177,6 +181,7 @@ export function assessMuscleWeek(input: {
     unknownExercises,
     confidence: totalSets === 0 ? "low" : rirShare > 0.5 || unknownExercises.length > 0 ? "partial" : "high",
     limitations,
+    wellnessNotes: input.wellnessNotes ?? [],
     disclaimer: "relative_load_not_strength_or_activation",
   };
 }

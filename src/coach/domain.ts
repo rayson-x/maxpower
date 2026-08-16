@@ -964,6 +964,9 @@ export type UpcomingWorkoutPlanChange =
       toIndex: number;
     };
 
+/** wellness_note 的维度标签（闭环词表）。 */
+export type WellnessDimension = "energy" | "sleep" | "function" | "mood" | "other";
+
 export type TimelineFact =
   | {
       kind: "training";
@@ -1117,6 +1120,17 @@ export type TimelineFact =
       value: number;
       note?: string;
       confidence: "confirmed" | "estimated";
+    }
+  | {
+      /**
+       * 用户自述的主观好变化（「最近爬楼不喘了」「睡眠变好了」）。
+       * 一等 Timeline 公民：复盘回放「你说过的好变化」。v1 只记录与回放，
+       * 不进风险评估引擎（维度标签可选，未知即 unknown 不猜）。
+       */
+      kind: "wellness_note";
+      dimension?: WellnessDimension;
+      note: string;
+      confidence: "confirmed";
     }
   | {
       kind: "schedule";

@@ -15,6 +15,7 @@
   "include": [
     "tools/**/*.test.ts",
     "tools/runTests.ts",
+    "tools/eval/coachingGuidanceSample.ts",
     "tools/testFrontier.ts"
   ]
 }

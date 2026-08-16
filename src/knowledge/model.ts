@@ -360,6 +360,8 @@ export interface KnowledgeGist {
   tier: KnowledgePassage["tier"];
   /** 下钻：该要点对应的 L0 段落 id。 */
   passageIds: readonly string[];
+  /** 任一路径段落为实验性内容时继承该标记。 */
+  experimental?: true;
 }
 
 /** L1：一个完整结论（含边界），下钻时的中间层。 */
@@ -391,6 +393,8 @@ export interface KnowledgePassage {
   citationRefs: readonly string[];
   /** 证据等级：段落里的声称属于哪一档。 */
   tier: "A" | "B" | "C" | "D" | "U";
+  /** 实验性内容（dogfood 期）：话术可用但呈现须带标记，转正前不算定稿。 */
+  experimental?: true;
   /** 内容哈希，用于增量更新与审计。 */
   contentHash: string;
 }
