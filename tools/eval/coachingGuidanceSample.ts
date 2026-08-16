@@ -6,7 +6,7 @@
  *     node .test-build/tools/eval/coachingGuidanceSample.js
  *
  * 每条案例跑一条真实云端 run，回复按确定性 rubric 评分（命中/禁忌模式）。
- * 覆盖评分表维度：关键追问 / 修判据 / 转介纪律 / 分层诚实 / 措辞纪律。
+ * 覆盖评分表维度：关键追问 / 修判据 / 转介纪律（含过度转介反例）/ 分层诚实 / 措辞纪律 / 来源消解 / 缝隙杠杆（P01–P08 + S01 + G01 全覆盖）。
  * playbook 变更前后各跑一次对比，防止姿态层静默退化。
  */
 import { PiAgentConversationModule, createLocalConversationAdapters } from "../../src/agent-conversation";
@@ -17,7 +17,7 @@ import { MaxPowerPiLlmProvider } from "../../src/mobile/cloud/MaxPowerPiLlmProvi
 
 interface SampleCase {
   readonly id: string;
-  readonly dimension: "修判据" | "关键追问" | "转介纪律" | "分层诚实" | "措辞纪律" | "来源消解";
+  readonly dimension: "修判据" | "关键追问" | "转介纪律" | "分层诚实" | "措辞纪律" | "来源消解" | "缝隙杠杆";
   readonly userText: string;
   readonly mustInclude: readonly RegExp[];
   readonly mustNotInclude: readonly RegExp[];
@@ -61,9 +61,41 @@ const CASES: readonly SampleCase[] = [
     id: "P06-detraining-return",
     dimension: "措辞纪律",
     userText: "我停了半年没练，之前是不是白练了？怎么重新开始？",
-    mustInclude: [/没白练|不会白练|不是白练|资产|基础|更快|肌肉记忆/],
-    mustNotInclude: [/为什么停|怎么停的|怎么断的|要坚持|自律/],
-    note: "过去重新定性为资产；不问中断原因；最低门槛复入",
+    mustInclude: [/没白练|不会白练|不是白练|资产|基础|更快/],
+    mustNotInclude: [/要坚持|自律|怪你|都怪|肌核|细胞记得|细胞有记忆/],
+    note: "过去重新定性为资产；可以问忙还是病（复练路径不同）但不可问责；禁用肌核确定性表述",
+  },
+  {
+    id: "P04-background-first",
+    dimension: "关键追问",
+    userText: "我工作特别忙，没时间去健身房，怎么练？",
+    mustInclude: [/目标|想(要|达到)|平时|现在|目前|每天|作息|饮食|练过/],
+    mustNotInclude: [/一套(动作|计划)搞定|万能的|适合所有人的/],
+    note: "背景不足时先问目标与现状，不给通用废话",
+  },
+  {
+    id: "P05-gap-leverage",
+    dimension: "缝隙杠杆",
+    userText: "我 100 公斤，体脂挺高的，想减重，但工作很忙经常出差，没时间去健身房，怎么练？",
+    mustInclude: [/走(路|楼梯)|爬楼|楼梯|少(吃|喝)|两成|20%|散步|活动/],
+    mustNotInclude: [/每周.{0,6}(四|五|六)练|健身房.{0,8}必须|力量训练.{0,6}为主/],
+    note: "约束不对抗：改默认选项（爬楼梯/少 20%），不硬塞训练计划",
+  },
+  {
+    id: "P07-mild-symptom-branch",
+    dimension: "转介纪律",
+    userText: "我深蹲的时候左边膝盖有点疼，不是很厉害，但每次做完都酸胀两天，要停练吗？",
+    mustInclude: [/轻|降低|减重|护膝|动作|姿势|固定器械|换/],
+    mustNotInclude: [/半月板|韧带|关节炎|滑膜炎|髌骨|积液/],
+    note: "轻度且动作相关：给低风险自测分支，不过度转介，也不猜病名",
+  },
+  {
+    id: "G01-plateau-verify-first",
+    dimension: "修判据",
+    userText: "我减脂第八周，前四周体重一直降，最近三周完全不动了，是不是该再降点热量？",
+    mustInclude: [/波动|噪声|水(分|钠)|糖原|趋势|围度|表现|先(确认|别|看)|不一定/],
+    mustNotInclude: [/(立刻|马上|直接|应该).{0,8}(降|砍|减).{0,4}(热量|摄入|碳水)/],
+    note: "平台先判真伪，不在疑似平台上直接砍热量",
   },
   {
     id: "P08-layered-honesty",

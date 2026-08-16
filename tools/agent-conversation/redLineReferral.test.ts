@@ -74,11 +74,11 @@ test("红线词表逐条正反（S01 语料六类全覆盖）", () => {
     ["swelling", "脚踝明显肿胀"],
     ["neurological", "腿麻，刺痛放射到小腿"],
     ["pain_at_rest", "不训练的时候也持续疼"],
-    ["trauma_history", "我去年韧带撕裂过"],
+    ["trauma_history", "我去年韧带撕裂过，现在又开始疼了"],
   ];
   for (const [id, text] of hits) assert.ok(detectRedLine(text).includes(id), `未命中 ${id}: ${text}`);
   // 非红线：正常训练酸痛/疲劳表述不误伤
-  for (const safe of ["练完胸有点酸", "今天感觉疲劳", "深蹲后大腿酸了两天", "我睡眠不太好"]) {
+  for (const safe of ["练完胸有点酸", "今天感觉疲劳", "深蹲后大腿酸了两天", "我睡眠不太好", "我去年韧带撕裂过", "今天走神了差点摔倒"]) {
     assert.deepEqual(detectRedLine(safe), [], `误伤: ${safe}`);
   }
 });

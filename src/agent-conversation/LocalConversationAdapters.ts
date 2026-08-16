@@ -160,13 +160,18 @@ export function createLocalConversationAdapters(input: {
       read: async ({ userId }) => {
         const now = new Date();
         const date = localCalendarDate(now);
-        const [dailyLedger, trends] = await Promise.all([
+        const [dailyLedger, trends, recentWellnessNotes] = await Promise.all([
           kernel.readDailyHealthLedger({ userId, date, timezoneOffsetMinutes: now.getTimezoneOffset() * -1 }),
           kernel.readHealthTrends({
             userId,
             startDate: new Date(now.getTime() - 28 * 86_400_000).toISOString().slice(0, 10),
             endDate: date,
             timezoneOffsetMinutes: now.getTimezoneOffset() * -1,
+          }),
+          kernel.readRecentWellnessNotes({
+            userId,
+            sinceDate: new Date(now.getTime() - 28 * 86_400_000).toISOString().slice(0, 10),
+            limit: 8,
           }),
         ]);
         // The Agent receives a decision summary, never the complete 28-day
@@ -185,6 +190,11 @@ export function createLocalConversationAdapters(input: {
             },
             recentWeeks: trends.weekly.slice(-4).map(compactHealthTrendBucket),
           },
+          recentWellnessNotes: recentWellnessNotes.map((entry) => ({
+            date: entry.occurredAt.slice(0, 10),
+            note: entry.note,
+            ...(entry.dimension ? { dimension: entry.dimension } : {}),
+          })),
         };
       },
     },

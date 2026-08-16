@@ -4,7 +4,8 @@ import test from "node:test";
 import { LocalProductKernel } from "../../src/coach/LocalProductKernel";
 import { InMemoryCoachLedger } from "../../src/coach/ledger";
 import type { GoalContractData } from "../../src/coach/domain";
-import { assessPlateau, defaultSuccessMetrics, weeklyMeanWeights, PLATEAU_POLICY } from "../../src/goal-path/plateauPolicy";
+import { assessPlateau, weeklyMeanWeights, PLATEAU_POLICY } from "../../src/goal-path/plateauPolicy";
+import { defaultSuccessMetrics } from "../../src/goal-path/successMetrics";
 
 /** S4 固定引擎缝：平台判定决策树 + success measures 默认值。 */
 
@@ -12,7 +13,9 @@ test("平台判定单元：窗口/信号/真伪四分支", () => {
   const weeks = (start: string, means: number[]) => means.map((meanKg, i) => ({ weekStart: addDays(start, i * 7), meanKg }));
   // 仅体重、窗太短 → 不判
   assert.equal(assessPlateau({ weeklyMeans: weeks("2026-07-20", [75.0, 75.05]), circumferenceTrend: "unknown", performanceTrend: "unknown", evaluatedAt: "2026-08-02" }).verdict, "window_too_short");
-  // 仅体重、3 周+走平 → 判平台
+  // 仅体重、恰好 3 个周均点（21 天窗）走平 → 不判平台（≈自然波动 1 个 SD，issue #5 验收）
+  assert.equal(assessPlateau({ weeklyMeans: weeks("2026-07-20", [75.0, 75.05, 74.98]), circumferenceTrend: "unknown", performanceTrend: "unknown", evaluatedAt: "2026-08-05" }).verdict, "window_too_short");
+  // 仅体重、4 个周均点（28 天窗）走平 → 判平台
   const flat = assessPlateau({ weeklyMeans: weeks("2026-07-06", [75.0, 75.05, 74.98, 75.02]), circumferenceTrend: "unknown", performanceTrend: "unknown", evaluatedAt: "2026-08-05" });
   assert.equal(flat.verdict, "plateau_suspected");
   assert.equal(flat.reasonCode, "plateau_check_multi_week_flat");
@@ -87,7 +90,7 @@ test("仅体重 10 天不动 → 不判平台（窗太短，监控而非改方�
   assert.equal(assessment.materialSignal, "monitor");
 });
 
-test("仅体重 3 周以上周均走平 → 判平台（进响应复核）", async () => {
+test("仅体重 4 个周均点（28 天窗）走平 → 判平台（进响应复核）", async () => {
   const app = await fatLossFixture({
     planFrom: "2026-07-10",
     now: "2026-08-15",

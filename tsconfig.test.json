@@ -16,6 +16,7 @@
     "tools/**/*.test.ts",
     "tools/runTests.ts",
     "tools/eval/coachingGuidanceSample.ts",
+    "tools/eval/dogfoodGuidance.ts",
     "tools/testFrontier.ts"
   ]
 }

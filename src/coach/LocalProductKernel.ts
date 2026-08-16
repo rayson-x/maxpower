@@ -84,6 +84,7 @@ import {
   assessRecoveryContext,
   fatigueContributionsForExercise,
   type MuscleWeekReport,
+  type WellnessNoteReplay,
   type AdaptivePlanCandidate,
   type PlanOutcome,
 } from "../planning";
@@ -132,7 +133,7 @@ import {
 } from "../nutrition";
 import { projectDailyHealthLedger, projectHealthTrends } from "../health";
 import { GoalPathModule, goalDeadlineForWeeks, goalPathAggregateRefs, negotiateGoalPaths, projectPlanExecutionEvidence, strengthTargetProgress, type GoalPathAssessment, type GoalPathOption } from "../goal-path";
-import { defaultSuccessMetrics } from "../goal-path/plateauPolicy";
+import { defaultSuccessMetrics } from "../goal-path/successMetrics";
 import {
   deriveMetricRegistry,
   weeklyCoachReport,
@@ -1069,15 +1070,10 @@ export class LocalProductKernel {
         completedAt: workout.outcome!.completedAt,
         outcomes: workout.setOutcomes,
       }));
-    const wellnessNotes = domain.timeline.current
-      .filter((event) => event.fact.kind === "wellness_note"
-        && event.occurredAt.slice(0, 10) >= input.weekStartDate
-        && event.occurredAt.slice(0, 10) <= input.weekEndDate)
-      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
-      .map((event) => {
-        const fact = event.fact as Extract<typeof event.fact, { kind: "wellness_note" }>;
-        return { occurredAt: event.occurredAt, note: fact.note, ...(fact.dimension ? { dimension: fact.dimension } : {}) };
-      });
+    const wellnessNotes = this.wellnessNotesForWeek(domain, {
+      startDate: input.weekStartDate,
+      endDate: input.weekEndDate,
+    });
     return assessMuscleWeek({
       week: { startDate: input.weekStartDate, endDate: input.weekEndDate },
       completedSets,
@@ -1086,6 +1082,40 @@ export class LocalProductKernel {
       exerciseById: (id) => this.knowledge.exerciseVariant(id),
       wellnessNotes,
     });
+  }
+
+  /** 近期主观好变化记录（对话上下文摘要用；完整报告走 readMuscleWeekReview）。 */
+  async readRecentWellnessNotes(input: {
+    userId: string;
+    sinceDate: string;
+    limit?: number;
+  }): Promise<WellnessNoteReplay[]> {
+    const snapshot = await this.ledger.read();
+    const domain = projectDomainEvents(snapshot.domainEvents, { userId: input.userId });
+    return domain.timeline.current
+      .filter((event) => event.fact.kind === "wellness_note" && event.occurredAt.slice(0, 10) >= input.sinceDate)
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+      .slice(0, input.limit ?? 10)
+      .map((event) => {
+        const fact = event.fact as Extract<typeof event.fact, { kind: "wellness_note" }>;
+        return { occurredAt: event.occurredAt, note: fact.note, ...(fact.dimension ? { dimension: fact.dimension } : {}) };
+      });
+  }
+
+  /** 「你说过的好变化」回放提取：本周窗内的 wellness_note 原话，按时间排序。 */
+  private wellnessNotesForWeek(
+    domain: DomainProjection,
+    week: { readonly startDate: string; readonly endDate: string },
+  ): WellnessNoteReplay[] {
+    return domain.timeline.current
+      .filter((event) => event.fact.kind === "wellness_note"
+        && event.occurredAt.slice(0, 10) >= week.startDate
+        && event.occurredAt.slice(0, 10) <= week.endDate)
+      .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt))
+      .map((event) => {
+        const fact = event.fact as Extract<typeof event.fact, { kind: "wellness_note" }>;
+        return { occurredAt: event.occurredAt, note: fact.note, ...(fact.dimension ? { dimension: fact.dimension } : {}) };
+      });
   }
 
   private async assembleGoalPathSnapshot(input: {
@@ -3339,6 +3369,7 @@ export class LocalProductKernel {
     );
     const productDates = datesBetween(offsetDate(input.date, -45), offsetDate(input.date, 45));
     const healthLedgers = await this.materializeDailyHealthLedgers(input.userId, domain, productDates, input.timezoneOffsetMinutes);
+    const muscleWeekBounds = weekBoundsFor(input.date);
     return buildCoachProductProjection({
       domain,
       date: input.date,
@@ -3361,7 +3392,8 @@ export class LocalProductKernel {
         exerciseVariantId,
       healthLedgers,
       muscleWeek: assessMuscleWeek({
-        week: weekBoundsFor(input.date),
+        week: muscleWeekBounds,
+        wellnessNotes: this.wellnessNotesForWeek(domain, muscleWeekBounds),
         completedSets: domain.workouts
           .filter((workout) => workout.outcome?.completedAt)
           .map((workout) => ({ completedAt: workout.outcome!.completedAt, outcomes: workout.setOutcomes })),

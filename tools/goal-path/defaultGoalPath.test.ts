@@ -318,8 +318,13 @@ test("当前趋势低于剩余期限所需速度时判为风险，而不是只�
     goalContractId: "goal", expectedRevision: 1,
     goalContract: { ...before.goalContract!.value, horizon: { startDate: "2026-08-01", endDate: "2026-10-01" }, targets: { targetWeight: { value: 70, unit: "kg" } } },
   });
-  await app.executeDomainCommand({ type: "plan.revise", meta: { userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "phone", occurredAt: "2026-08-15T08:01:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "pace-plan" }, planId: "plan", expectedRevision: 1, revision: { ...before.plan!.value, goalContractRef: { kind: "goal_contract", id: "goal", revision: 2 } } });
-  for (const [day, kg] of [[1, 75], [14, 74.8]] as const) await app.recordTimelineFact({ userId: "u1", idempotencyKey: `pace-weight-${day}`, fact: { kind: "body", confidence: "confirmed", measurement: { metric: "body_weight", quantity: { value: kg, unit: "kg" }, condition: "morning" } }, envelope: { time: { startedAt: `2026-08-${String(day).padStart(2, "0")}T07:00:00.000+08:00`, timezoneOffsetMinutes: 480 }, provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" }, privacyClass: "sensitive", causalRefs: [], evidenceRefs: [], layer: "raw_observation" } });
+  await app.executeDomainCommand({ type: "plan.revise", meta: { userId: "u1", actor: { kind: "user", id: "u1" }, deviceId: "phone", occurredAt: "2026-08-15T08:01:00.000+08:00", timezoneOffsetMinutes: 480, idempotencyKey: "pace-plan" }, planId: "plan", expectedRevision: 1, revision: { ...before.plan!.value, effectiveFrom: "2026-07-20", goalContractRef: { kind: "goal_contract", id: "goal", revision: 2 } } });
+  // 平台窗政策（plateau.v1）：仅体重信号不足 4 个周均点不出判定——
+  // 夹具给 5 周缓慢降重，证明「速度慢于期限所需」在窗口满足后仍判风险。
+  for (const [day, kg] of [[8, 75], [15, 74.9], [22, 74.85], [29, 74.8], [36, 74.75]] as const) {
+    const date = new Date(Date.parse("2026-07-10T00:00:00.000Z") + day * 86_400_000).toISOString().slice(0, 10);
+    await app.recordTimelineFact({ userId: "u1", idempotencyKey: `pace-weight-${day}`, fact: { kind: "body", confidence: "confirmed", measurement: { metric: "body_weight", quantity: { value: kg, unit: "kg" }, condition: "morning" } }, envelope: { time: { startedAt: `${date}T07:00:00.000+08:00`, timezoneOffsetMinutes: 480 }, provenance: { origin: "manual", recordingMethod: "manual_entry", dataStatus: "available", confidence: "confirmed" }, privacyClass: "sensitive", causalRefs: [], evidenceRefs: [], layer: "raw_observation" } });
+  }
   const decision = await app.reviewGoalPath({ userId: "u1", evaluatedAt: "2026-08-15T20:00:00.000+08:00", timezoneOffsetMinutes: 480 });
   assert.equal(decision.state, "at_risk");
   assert.ok(decision.reasonCodes.includes("observed_weight_trend_below_required_goal_path"));

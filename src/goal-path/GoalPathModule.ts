@@ -435,15 +435,22 @@ function evaluateRemainingTrajectory(snapshot: GoalPathSnapshot): Decision | und
       wellnessNotesInWindow: snapshot.domain.timeline.current.filter((event) => event.fact.kind === "wellness_note" && event.occurredAt.slice(0, 10) >= snapshot.plan!.value.effectiveFrom).length,
       evaluatedAt: snapshot.evaluatedAt,
     });
-    if (plateau.verdict === "window_too_short") return insufficient("observation_too_early", [plateau.reasonCode], ["continue_comparable_weight_measurements"], "monitor");
     const first = weeklyMeans[0]!;
     const latest = weeklyMeans.at(-1)!;
     const observedDays = Math.max(7, daysBetween(first.weekStart, latest.weekStart) + 7);
     const observedPerDay = (latest.meanKg - first.meanKg) / observedDays;
     const requiredPerDay = (targetKg - latest.meanKg) / remainingDays;
-    const directionMatches = requiredPerDay < 0 ? observedPerDay < 0 : requiredPerDay > 0 ? observedPerDay > 0 : true;
-    const paceRatio = Math.abs(requiredPerDay) <= 0.001 ? 1 : Math.abs(observedPerDay) / Math.abs(requiredPerDay);
-    if (!directionMatches || paceRatio < 0.75) return risk("plan_response_review", ["observed_weight_trend_below_required_goal_path", plateau.reasonCode], ["review_execution_plan_response_and_goal_tradeoffs"], "review_recommended");
+    // 已达/越过目标不需要任何轨迹判定（窗口政策不得阻断完成）。
+    const goalMet = requiredPerDay < 0 ? latest.meanKg <= targetKg : requiredPerDay > 0 ? latest.meanKg >= targetKg : true;
+    if (!goalMet) {
+      const directionMatches = requiredPerDay < 0 ? observedPerDay < 0 : requiredPerDay > 0 ? observedPerDay > 0 : true;
+      const paceRatio = Math.abs(requiredPerDay) <= 0.001 ? 1 : Math.abs(observedPerDay) / Math.abs(requiredPerDay);
+      if (!directionMatches || paceRatio < 0.75) {
+        // 窗口不足时不判负，只监控（单日/短窗读数不构成进度证据）。
+        if (plateau.verdict === "window_too_short") return insufficient("observation_too_early", [plateau.reasonCode], ["continue_comparable_weight_measurements"], "monitor");
+        return risk("plan_response_review", ["observed_weight_trend_below_required_goal_path", plateau.reasonCode], ["review_execution_plan_response_and_goal_tradeoffs"], "review_recommended");
+      }
+    }
   }
   if (goal.targets?.targetBodyFat) {
     const bodyFat = comparableBodyFatSeries(snapshot.domain, snapshot.plan!.value.effectiveFrom);

@@ -13,8 +13,8 @@ import type { GoalContractData } from "../coach/domain";
 export const PLATEAU_POLICY = {
   id: "maxpower.plateau-verification",
   version: "plateau.v1 (2026-08-16 adjudicated)",
-  /** 仅体重信号：至少需要 3 周（周均比较）才可判平台。 */
-  weightOnlyMinDays: 21,
+  /** 仅体重信号：至少需要 4 个周均点（28 天窗）才可判平台——3 周不动 ≈ 自然波动 1 个 SD，不构成平台（issue #5 / 语料 G01 裁决）。 */
+  weightOnlyMinDays: 28,
   /** 多信号齐备（体重 + 围度/表现/主观任一）时的最短判定窗（spec 区间 1–2 周取中）。 */
   multiSignalMinDays: 10,
   /** 周均变化低于该比例（相对体重/周）视为「不动」。 */
@@ -89,24 +89,4 @@ export function assessPlateau(input: {
     return { verdict: "not_a_plateau", windowDays, requiredDays, signals: [subjectivePresent ? "subjective_improving" : "other_signals_improving"], reasonCode: "plateau_check_other_signals_progressing" };
   }
   return { verdict: "plateau_suspected", windowDays, requiredDays, signals: ["weight_flat", ...(input.circumferenceTrend !== "unknown" ? [`circumference_${input.circumferenceTrend}`] : []), ...(input.performanceTrend !== "unknown" ? [`performance_${input.performanceTrend}`] : [])], reasonCode: "plateau_check_multi_week_flat" };
-}
-
-/**
- * Goal contract successMetrics 默认值（判据体系 2026-08-16）：
- * 围度 / 训练表现 / 执行率是一等指标；体重只以周均趋势出现，永不以「减到 X 斤」
- * 或单日读数出现。模型给出的 successMetrics 优先；缺省时按主目标生成。
- */
-export function defaultSuccessMetrics(goal: Pick<GoalContractData, "primaryGoal">): readonly string[] {
-  switch (goal.primaryGoal) {
-    case "fat_loss_preserve_lean_mass":
-      return ["waist_circumference_trend", "key_lift_performance_maintenance", "weekly_weight_trend", "training_adherence"];
-    case "hypertrophy":
-      return ["target_muscle_circumference_trend", "key_lift_performance_progression", "training_adherence"];
-    case "strength":
-      return ["key_lift_performance_progression", "training_adherence", "weekly_weight_trend"];
-    case "physique":
-      return ["waist_shoulder_circumference_trend", "physique_satisfaction_trend", "training_adherence"];
-    default:
-      return ["training_adherence", "weekly_weight_trend", "subjective_wellbeing_notes"];
-  }
 }
