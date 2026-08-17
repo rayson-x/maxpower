@@ -92,7 +92,7 @@ export function createLocalConversationAdapters(input: {
               id: `conversation-nutrition:${record.idempotencyKey}`,
               occurredAt: record.occurredAt,
               description: record.mealDescription ?? "用户确认的营养数值",
-              mode: "structured",
+              mode: record.nutrients.length ? "structured" : "descriptive",
               provenance,
               nutrients,
               ...(record.dayCoverage ? { dayCoverage: record.dayCoverage } : {}),

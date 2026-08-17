@@ -257,7 +257,8 @@ test("confirmed facts outrank working memory in the assembled agent context", as
 });
 
 test("a nutrition record without explicit structured values is rejected before any card or write", async () => {
-  const { streamFn } = scriptedToolThenText("timeline.record_explicit", { kind: "nutrition", mealDescription: "一碗牛肉面" }, "我需要你确认具体数值。");
+  // 行为级精度：纯描述（无数值）是合法的「描述性观察」——入确认卡、确认后落账、永远零数值。
+  const { streamFn } = scriptedToolThenText("timeline.record_explicit", { kind: "nutrition", mealDescription: "一碗牛肉面" }, "已记下这餐。");
   const { kernel, records, conversation } = createProductionComposition(streamFn);
   await bootstrapUser(kernel, "u1");
   const opened = await conversation.execute({ kind: "new", userId: "u1" });
@@ -265,12 +266,29 @@ test("a nutrition record without explicit structured values is rejected before a
   if (opened.kind !== "opened") return;
   await conversation.execute({ kind: "send", userId: "u1", conversationId: opened.conversation.id, text: "中午吃了一碗牛肉面", clientTurnId: "turn-food-name" });
   await conversation.whenIdle(opened.conversation.id);
-  const domain = await kernel.readDomainProjection({ userId: "u1" });
-  assert.equal(domain.timeline.current.length, 0, "食物名称或份量永远不能推断营养数值");
-  const projection = await conversation.read({ kind: "conversation", userId: "u1", conversationId: opened.conversation.id });
-  assert.equal(projection.kind, "conversation");
+  let projection = await conversation.read({ kind: "conversation", userId: "u1", conversationId: opened.conversation.id });
   if (projection.kind !== "conversation") return;
-  assert.equal(projection.items.some((item) => item.card?.kind === "record_confirmation"), false);
+  const card = projection.items.find((item) => item.card?.kind === "record_confirmation" && item.card.status === "awaiting_confirmation");
+  assert.ok(card, "描述性记录应进确认卡");
+  await conversation.execute({ kind: "resolve_record", userId: "u1", conversationId: opened.conversation.id, cardId: card!.id, decision: "confirm" });
+  const domain = await kernel.readDomainProjection({ userId: "u1" });
+  const meal = domain.timeline.current.find((event) => event.fact.kind === "nutrition");
+  assert.ok(meal, "确认后描述性观察落 Timeline");
+  if (meal?.fact.kind === "nutrition") {
+    assert.equal(meal.fact.observationMode, "descriptive");
+    assert.equal((meal.fact.nutrients ?? []).length, 0, "描述性观察永不含数值——食物名称不推断营养");
+  }
+  // 完全没有内容（无数值且无描述）在模块参数层拒绝，不落卡
+  const emptyStream = scriptedToolThenText("timeline.record_explicit", { kind: "nutrition" }, "没有可记录的内容。");
+  const emptyComp = createProductionComposition(emptyStream.streamFn);
+  await bootstrapUser(emptyComp.kernel, "u2");
+  const opened2 = await emptyComp.conversation.execute({ kind: "new", userId: "u2" });
+  if (opened2.kind !== "opened") return;
+  await emptyComp.conversation.execute({ kind: "send", userId: "u2", conversationId: opened2.conversation.id, text: "记一下", clientTurnId: "turn-empty" });
+  await emptyComp.conversation.whenIdle(opened2.conversation.id);
+  const projection2 = await emptyComp.conversation.read({ kind: "conversation", userId: "u2", conversationId: opened2.conversation.id });
+  if (projection2.kind !== "conversation") return;
+  assert.equal(projection2.items.some((item) => item.card?.kind === "record_confirmation"), false, "空内容不得产生确认卡");
   // Mixed nutrient provenance is rejected at the production adapter boundary.
   const mixedSource = createLocalConversationAdapters({ kernel, records }).records?.recordExplicit?.({
     kind: "nutrition", userId: "u1", occurredAt: "2026-08-16T12:00:00.000+08:00", idempotencyKey: "mixed-source",

@@ -28,7 +28,7 @@ function candidate(app: LocalProductKernel): AdaptivePlanCandidate {
       sessions: [{ id: "session-1", title: "当前阶段全身训练", scheduledFor: "2026-08-16", knowledgePins: pins, tasks: [{ id: "task-1", exerciseVariantId: "bench_press.dumbbell.flat.standard.bilateral.full_rom", sets: [{ id: "set-1", targetReps: { min: 8, max: 12 }, targetRir: 3 }] }] }],
       observationContract: { requiredSignals: ["weekly_body_data", "planned_training_outcome", "representative_numeric_intake"], minimumObservationDays: 14, trackingSilenceReviewDays: 7, reviewCadenceDays: 7, successConditions: ["small_surplus_and_training_completed"], progressionConditions: ["reps_progress_with_recovery"], holdConditions: ["window_incomplete"], fallbackConditions: ["execution_friction"], stopConditions: ["safety_hold_or_recovery_decline"] },
     },
-    nutritionStrategy: { id: "nutrition", goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 }, status: "active", phase: "hypertrophy", calorieRange: { min: { value: 2450, unit: "kcal" }, max: { value: 2650, unit: "kcal" } }, reviewWindow: { startsAt: "2026-08-16T00:00:00.000+08:00", endsAt: "2026-08-30T00:00:00.000+08:00", minimumWeightObservations: 3 } },
+    nutritionStrategy: { id: "nutrition", goalContractRef: { kind: "goal_contract", id: "goal", revision: 1 }, status: "active", phase: "hypertrophy", trackingPrecision: "magnitude", calorieRange: { min: { value: 2450, unit: "kcal" }, max: { value: 2650, unit: "kcal" } }, reviewWindow: { startsAt: "2026-08-16T00:00:00.000+08:00", endsAt: "2026-08-30T00:00:00.000+08:00", minimumWeightObservations: 3 } },
     behaviorChanges: [{ id: "step-1", instruction: "先把当前常见进食量减少或增加一个可执行的小步骤，而不是一次替换全部习惯", burden: "low", preferenceRefs: [] }],
     rationale: ["根据已确认目标组织当前两周"],
     expectedTradeoffs: ["更低负担意味着需要用真实趋势再推进"],
@@ -368,4 +368,27 @@ test("a candidate missing knowledgePins or goalContractRef is blocked with instr
   assert.equal(codes.filter((code) => code === "knowledge_pins_missing").length, 2, "revision 级与 session 级各一条");
   assert.ok(codes.includes("goal_ref_mismatch"));
   assert.match(validation.issues.find((issue) => issue.code === "knowledge_pins_missing")?.message ?? "", /knowledgePins/);
+});
+
+test("trackingPrecision：缺失 blocking、非法值 blocking、三档合法值通过且由 agent 判断", async () => {
+  const app = await setup();
+  const domain = await app.readDomainProjection({ userId: "u1" });
+  const base = candidate(app);
+  delete (base.nutritionStrategy as { trackingPrecision?: string }).trackingPrecision;
+  // 缺失 → blocking
+  const missing = validateAdaptivePlanCandidate({ candidate: base, goal: domain.goalContract!, profile: domain.profile!.value, mandate: domain.mandate!.value, today: "2026-08-15", safetyBlocked: false });
+  assert.ok(missing.issues.some((issue) => issue.code === "tracking_precision_missing" && issue.severity === "blocking"));
+  assert.equal(missing.status, "invalid");
+  // 非法值 → blocking
+  const bad = candidate(app);
+  (bad.nutritionStrategy as { trackingPrecision?: string }).trackingPrecision = "exact";
+  const invalidTier = validateAdaptivePlanCandidate({ candidate: bad, goal: domain.goalContract!, profile: domain.profile!.value, mandate: domain.mandate!.value, today: "2026-08-15", safetyBlocked: false });
+  assert.ok(invalidTier.issues.some((issue) => issue.code === "tracking_precision_invalid"));
+  // 三档合法值均可（由 agent 判断，无固定阈值规则）
+  for (const tier of ["behavioral", "magnitude", "precise"] as const) {
+    const good = candidate(app);
+    good.nutritionStrategy = { ...good.nutritionStrategy!, trackingPrecision: tier };
+    const validation = validateAdaptivePlanCandidate({ candidate: good, goal: domain.goalContract!, profile: domain.profile!.value, mandate: domain.mandate!.value, today: "2026-08-15", safetyBlocked: false });
+    assert.ok(!validation.issues.some((issue) => issue.code.startsWith("tracking_precision")), `${tier} 不应被拦`);
+  }
 });

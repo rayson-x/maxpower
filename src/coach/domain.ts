@@ -1209,6 +1209,11 @@ export interface RecoveryConstraintData {
 export interface NutritionStrategyData {
   id: string;
   goalContractRef: DomainAggregateRef<"goal_contract">;
+  /**
+   * 饮食记录精度档位（AGENTS.md §2：max(计划强度, 个人基线)）。
+   * behavioral 行为级（一句话描述）/ magnitude 量级级（估算）/ precise 精确级（结构化数值）。
+   */
+  trackingPrecision?: import("../planning/trackingPrecisionPolicy").TrackingPrecision;
   calorieRange?: { min: EnergyQuantity; max: EnergyQuantity };
   status?: "draft" | "active" | "paused" | "review_required";
   phase?: "hypertrophy" | "strength_stable" | "fat_loss_preserve_lean_mass";

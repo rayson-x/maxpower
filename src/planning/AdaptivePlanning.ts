@@ -168,6 +168,14 @@ export function validateAdaptivePlanCandidate(input: {
   }
   const nutrition = candidate.nutritionStrategy;
   if (!nutrition) issues.push(issue("nutrition_strategy_missing", "nutritionStrategy", "正式阶段候选必须同时定义协调后的营养策略；未知目标保持 unknown，不能省略正式领域对象"));
+  // 饮食精度档位（tracking-precision.v1）：由 agent 依目标精度需求与个人状态判断，
+  // 固定侧只强制「必须有、值域封闭、偏离要在 rationale 说明」。
+  const tier = nutrition?.trackingPrecision;
+  if (nutrition && (tier === undefined || tier === null)) {
+    issues.push(issue("tracking_precision_missing", "nutritionStrategy.trackingPrecision", "候选必须显式给出饮食记录精度档位 trackingPrecision（behavioral 行为级 / magnitude 量级级 / precise 精确级），由你根据目标的精度需求与这个人的执行基线判断，并在 rationale 里说明"));
+  } else if (nutrition && tier !== undefined && !["behavioral", "magnitude", "precise"].includes(tier)) {
+    issues.push(issue("tracking_precision_invalid", "nutritionStrategy.trackingPrecision", `trackingPrecision 只接受 behavioral/magnitude/precise，收到 ${JSON.stringify(tier)}`));
+  }
   if (nutrition?.calorieRange) {
     const min = nutrition.calorieRange.min?.value;
     const max = nutrition.calorieRange.max?.value;
