@@ -48,15 +48,14 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
   { path: "docs/wiki/recovery-and-health-signals.md", title: "恢复与健康信号", publish: true },
   { path: "docs/wiki/exercise-and-stimulus-knowledge.md", title: "动作与刺激知识", publish: true },
   { path: "docs/wiki/program-strategy-set.md", title: "训练编排策略集", publish: true },
-  { path: "docs/wiki/judgment-criteria.md", title: "判据体系", publish: true, experimental: true },
+  { path: "docs/wiki/judgment-criteria.md", title: "判据体系", publish: true },
 
-  // ── 教练方法论语料（作者经验，tier D；dogfood 期标 experimental）──
+  // ── 教练方法论语料（作者经验，tier D；2026-08-17 转正）──
   {
     path: "docs/research/coaching-diagnostic-patterns-2026-08-16.md",
     title: "教练分析模式语料",
     publish: true,
     defaultTier: "D",
-    experimental: true,
     skipContentDrop: true,
     excludeSections: [/元模式/],
   },
@@ -66,7 +65,6 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
     path: "docs/research/fat-loss-plateau-2026-08-16.md",
     title: "减脂平台期证据",
     publish: true,
-    experimental: true,
     contentReplacements: [
       [/诊断与处理/g, "判定与处理"],
       [/诊断流程/g, "判定流程"],
@@ -80,7 +78,6 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
     path: "docs/research/body-recomposition-2026-08-16.md",
     title: "身体重组证据",
     publish: true,
-    experimental: true,
     contentReplacements: [
       [/实践处方/g, "实践方案"],
       [/处方参数/g, "方案参数"],
@@ -95,7 +92,6 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
     path: "docs/research/detraining-retraining-2026-08-16.md",
     title: "停训与复练证据",
     publish: true,
-    experimental: true,
     contentReplacements: [
       [/实践处方/g, "实践方案"],
       [/处方证据/g, "方案证据"],
@@ -107,7 +103,6 @@ const SOURCE_DOCS: readonly SourceDocPolicy[] = [
     path: "docs/research/muscle-recovery-windows-2026-08-16.md",
     title: "肌群恢复时间窗证据",
     publish: true,
-    experimental: true,
     excludeSections: [/引用清单/, /怎么读/],
   },
 

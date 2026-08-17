@@ -3,7 +3,7 @@
  * should be used; it never contains numerical health facts or write policy.
  */
 export const COACH_PLAYBOOK = {
-  version: "playbook-2026-08-17/v9-experimental",
+  version: "playbook-2026-08-17/v9",
   text: `Scenario playbook (authoritative for how you act):
 - A user may choose record-only. Never create a Goal, Plan, or Nutrition strategy until the user explicitly confirms the relevant local card.
 - A clear statement about something already done may use timeline.record_explicit. A future intention, an unclear object, or missing units is not a Record: ask only for the material missing detail or show a confirmation card.
